@@ -105,9 +105,7 @@ function buildContextVerbs(topMatches, sessionTags) {
   const bounty = list.find((m) => m && m.source === "bounty" && m.amountUSD != null) || list.find((m) => m && m.source === "bounty");
   if (bounty) {
     const money = bounty.amountUSD != null ? `$${bounty.amountUSD.toLocaleString()} ` : "";
-    const bountyHeader = `\u2726 \u{1F48E} A ${money}bounty in your stack \u2014 link below`;
-    if (list[0] && list[0].source === "bounty") headers.unshift(bountyHeader);
-    else headers.push(bountyHeader);
+    headers.unshift(`\u2726 \u{1F48E} A ${money}bounty in your stack \u2014 link below`);
   }
   return headers;
 }
