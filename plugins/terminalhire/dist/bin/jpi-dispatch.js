@@ -3177,16 +3177,26 @@ function buildContextVerbs(topMatches, sessionTags) {
   for (const t of sess) {
     if (roleTags.has(t) && !overlap.includes(t)) overlap.push(t);
   }
+  let headers;
   if (overlap.length >= 2) {
     const a = titleCase(overlap[0]);
     const b = titleCase(overlap[1]);
-    return [`\u2726 Fits your ${a} + ${b} work`, `\u2726 A role matching what you're building`];
-  }
-  if (overlap.length === 1) {
+    headers = [`\u2726 Fits your ${a} + ${b} work`, `\u2726 A role matching what you're building`];
+  } else if (overlap.length === 1) {
     const a = titleCase(overlap[0]);
-    return [`\u2726 A role matching your ${a} work`, `\u2726 Your ${a} work \u2014 link in the tip below`];
+    headers = [`\u2726 A role matching your ${a} work`, `\u2726 Your ${a} work \u2014 link in the tip below`];
+  } else {
+    headers = [`\u2726 A role that fits your work`, `\u2726 Job match for you \u2014 link in the tip below`];
   }
-  return [`\u2726 A role that fits your work`, `\u2726 Job match for you \u2014 link in the tip below`];
+  const list = Array.isArray(topMatches) ? topMatches : [];
+  const bounty = list.find((m) => m && m.source === "bounty" && m.amountUSD != null) || list.find((m) => m && m.source === "bounty");
+  if (bounty) {
+    const money = bounty.amountUSD != null ? `$${bounty.amountUSD.toLocaleString()} ` : "";
+    const bountyHeader = `\u2726 \u{1F48E} A ${money}bounty in your stack \u2014 link below`;
+    if (list[0] && list[0].source === "bounty") headers.unshift(bountyHeader);
+    else headers.push(bountyHeader);
+  }
+  return headers;
 }
 function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   const { sessionTags, frequency = "always" } = opts;
@@ -3291,7 +3301,13 @@ function buildTips(topMatches, baseUrl, max = 8) {
     const pct = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
     const token = Buffer.from(String(m.id)).toString("base64url");
     const url = `${base}/j/${token}`;
-    out.push(`\u2197 ${title} @ ${company} \xB7 ${pct}% \u2014 ${url}`);
+    if (source === "bounty") {
+      const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
+      const repo = m.repo || companyRaw;
+      out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct}% \u2014 ${url}`);
+    } else {
+      out.push(`\u2197 ${title} @ ${company} \xB7 ${pct}% \u2014 ${url}`);
+    }
     if (out.length >= max) break;
   }
   return out;
@@ -4096,7 +4112,12 @@ async function run10() {
           company: r.job.company,
           score: r.score,
           remote: r.job.remote,
-          matchedTags: r.matchedTags
+          matchedTags: r.matchedTags,
+          // Bounty fields so the spinner can render bounty framing ($ + 💎).
+          // Public job text, stays LOCAL (same as the rest of topMatches).
+          source: r.job.source,
+          amountUSD: r.job.bounty?.amountUSD,
+          repo: r.job.bounty?.repoFullName
         }));
       }
     } catch {

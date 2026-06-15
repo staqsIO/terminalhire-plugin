@@ -90,16 +90,26 @@ function buildContextVerbs(topMatches, sessionTags) {
   for (const t of sess) {
     if (roleTags.has(t) && !overlap.includes(t)) overlap.push(t);
   }
+  let headers;
   if (overlap.length >= 2) {
     const a = titleCase(overlap[0]);
     const b = titleCase(overlap[1]);
-    return [`\u2726 Fits your ${a} + ${b} work`, `\u2726 A role matching what you're building`];
-  }
-  if (overlap.length === 1) {
+    headers = [`\u2726 Fits your ${a} + ${b} work`, `\u2726 A role matching what you're building`];
+  } else if (overlap.length === 1) {
     const a = titleCase(overlap[0]);
-    return [`\u2726 A role matching your ${a} work`, `\u2726 Your ${a} work \u2014 link in the tip below`];
+    headers = [`\u2726 A role matching your ${a} work`, `\u2726 Your ${a} work \u2014 link in the tip below`];
+  } else {
+    headers = [`\u2726 A role that fits your work`, `\u2726 Job match for you \u2014 link in the tip below`];
   }
-  return [`\u2726 A role that fits your work`, `\u2726 Job match for you \u2014 link in the tip below`];
+  const list = Array.isArray(topMatches) ? topMatches : [];
+  const bounty = list.find((m) => m && m.source === "bounty" && m.amountUSD != null) || list.find((m) => m && m.source === "bounty");
+  if (bounty) {
+    const money = bounty.amountUSD != null ? `$${bounty.amountUSD.toLocaleString()} ` : "";
+    const bountyHeader = `\u2726 \u{1F48E} A ${money}bounty in your stack \u2014 link below`;
+    if (list[0] && list[0].source === "bounty") headers.unshift(bountyHeader);
+    else headers.push(bountyHeader);
+  }
+  return headers;
 }
 function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   const { sessionTags, frequency = "always" } = opts;
