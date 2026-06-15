@@ -1119,10 +1119,13 @@ function parseRss(xml) {
       return decodeEntities(plainMatch?.[1].trim() ?? "");
     };
     const rawTitle = get("title");
-    const colonIdx = rawTitle.indexOf(":");
-    const company = colonIdx !== -1 ? rawTitle.slice(0, colonIdx).trim() : "Unknown";
-    const titleAfterColon = colonIdx !== -1 ? rawTitle.slice(colonIdx + 1).trim() : rawTitle;
+    const m = rawTitle.match(/^(.*?):\s+(.*)$/);
+    let company = m ? m[1].trim() : "Unknown";
+    const titleAfterColon = m ? m[2].trim() : rawTitle;
     const title = titleAfterColon.replace(/\s*\([^)]*\)\s*$/, "").trim();
+    if (/^https?:\/\//i.test(company)) {
+      company = company.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").trim() || "Unknown";
+    }
     items.push({
       title,
       link: get("link") || get("guid"),

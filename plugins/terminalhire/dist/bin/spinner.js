@@ -101,19 +101,16 @@ function buildContextVerbs(topMatches, sessionTags) {
   if (overlap.length >= 2) {
     const a = titleCase(overlap[0]);
     const b = titleCase(overlap[1]);
-    headers = [`\u2726 Fits your ${a} + ${b} work`, `\u2726 A role matching what you're building`];
+    headers = [`\u2726 Fits your ${a} + ${b} work`, `\u2726 A match for what you're building \u2014 link below`];
   } else if (overlap.length === 1) {
     const a = titleCase(overlap[0]);
-    headers = [`\u2726 A role matching your ${a} work`, `\u2726 Your ${a} work \u2014 link in the tip below`];
+    headers = [`\u2726 Work in your ${a} stack \u2014 link below`, `\u2726 Your ${a} work \u2014 link in the tip below`];
   } else {
-    headers = [`\u2726 A role that fits your work`, `\u2726 Job match for you \u2014 link in the tip below`];
+    headers = [`\u2726 Work that fits your stack`, `\u2726 A match for you \u2014 link in the tip below`];
   }
   const list = Array.isArray(topMatches) ? topMatches : [];
-  const bounty = list.find((m) => m && m.source === "bounty" && m.amountUSD != null) || list.find((m) => m && m.source === "bounty");
-  if (bounty) {
-    const money = bounty.amountUSD != null ? `$${bounty.amountUSD.toLocaleString()} ` : "";
-    headers.unshift(`\u2726 \u{1F48E} A ${money}bounty in your stack \u2014 link below`);
-  }
+  const hasBounty = list.some((m) => m && m.source === "bounty");
+  if (hasBounty) headers.unshift(`\u2726 Roles + \u{1F48E} paid bounties in your stack \u2014 link below`);
   return headers;
 }
 function buildSpinnerPool(topMatches, max = 6, opts = {}) {
@@ -199,8 +196,15 @@ function buildTips(topMatches, baseUrl, max = 8) {
   const perCompany = /* @__PURE__ */ new Map();
   const COMPANY_CAP = 2;
   const all = Array.isArray(topMatches) ? topMatches : [];
-  const leadBounty = all.find((m) => m && m.source === "bounty");
-  const ordered = leadBounty ? [leadBounty, ...interleaveBySource(all.filter((m) => m !== leadBounty))] : interleaveBySource(all);
+  const bountyQ = all.filter((m) => m && m.source === "bounty");
+  const roleQ = interleaveBySource(all.filter((m) => m && m.source !== "bounty"));
+  const ordered = [];
+  let bi = 0;
+  let ri = 0;
+  while (bi < bountyQ.length || ri < roleQ.length) {
+    if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
+    if (ri < roleQ.length) ordered.push(roleQ[ri++]);
+  }
   for (const m of ordered) {
     if (!m || !m.title || !m.company || !m.id) continue;
     const idx = String(m.id).indexOf(":");
