@@ -1,0 +1,48 @@
+#!/usr/bin/env node
+/**
+ * bin/terminalhire — plugin launcher
+ *
+ * This thin launcher resolves the bundled CLI dist and delegates to it.
+ * When the plugin is installed, this file is on PATH (Claude Code adds plugin/bin to PATH).
+ *
+ * Resolution order:
+ *   1. ${CLAUDE_PLUGIN_ROOT}/../../apps/cli/dist/bin/jpi-dispatch.js  (monorepo dev)
+ *   2. ${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js                  (self-contained copy)
+ */
+
+import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
+const pluginRoot = resolve(join(__dirname, '..'));
+
+const candidates = [
+  // Monorepo layout: plugin/bin → plugin → plugins → repo → apps/cli/dist
+  join(pluginRoot, '..', '..', 'apps', 'cli', 'dist', 'bin', 'jpi-dispatch.js'),
+  // Self-contained copy (future: when dist is copied into the plugin)
+  join(pluginRoot, 'dist', 'bin', 'jpi-dispatch.js'),
+];
+
+let target = null;
+for (const c of candidates) {
+  if (existsSync(c)) {
+    target = c;
+    break;
+  }
+}
+
+if (!target) {
+  process.stderr.write(
+    'terminalhire: CLI bundle not found. Run `npm run build` in apps/cli first.\n'
+  );
+  process.exit(1);
+}
+
+const result = spawnSync(process.execPath, [target, ...process.argv.slice(2)], {
+  stdio: 'inherit',
+  env: process.env,
+});
+
+process.exit(result.status ?? 0);

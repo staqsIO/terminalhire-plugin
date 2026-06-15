@@ -1,0 +1,21 @@
+{
+  "name": "terminalhire",
+  "version": "0.2.5",
+  "description": "Local-first job matching for developers. Two-line ambient surface in the Claude Code spinner (adaptive context header + a ⌘-clickable, tracked job link), kept fresh in the background. Matching runs 100% on your machine; your profile never leaves it.",
+  "author": {
+    "name": "staqs",
+    "email": "eric@staqs.io",
+    "url": "https://terminalhire.com"
+  },
+  "homepage": "https://terminalhire.com",
+  "experimental": {
+    "monitors": [
+      {
+        "name": "terminalhire-refresh",
+        "description": "Refreshing your job matches",
+        "when": "always",
+        "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/refresh-loop.sh"
+      }
+    ]
+  }
+}
