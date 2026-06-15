@@ -4106,7 +4106,10 @@ async function run10() {
         const fp = profileToFingerprint2(profile);
         const results = match2(fp, jobs, jobs.length);
         matchCount = results.length;
-        topMatches = results.slice(0, 25).map((r) => ({
+        const BOUNTY_SLOTS = 5;
+        const bountyTop = results.filter((r) => r.job.source === "bounty").slice(0, BOUNTY_SLOTS);
+        const roleTop = results.filter((r) => r.job.source !== "bounty").slice(0, 25 - bountyTop.length);
+        topMatches = [...roleTop, ...bountyTop].map((r) => ({
           id: r.job.id,
           title: r.job.title,
           company: r.job.company,
