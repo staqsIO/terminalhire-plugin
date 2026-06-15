@@ -9,220 +9,6 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// src/github-auth.ts
-var github_auth_exports = {};
-__export(github_auth_exports, {
-  GITHUB_SCOPE: () => GITHUB_SCOPE,
-  deleteGitHubToken: () => deleteGitHubToken,
-  hasGitHubToken: () => hasGitHubToken,
-  readGitHubToken: () => readGitHubToken,
-  resolveStoredLogin: () => resolveStoredLogin,
-  runDeviceFlow: () => runDeviceFlow,
-  writeGitHubToken: () => writeGitHubToken
-});
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes
-} from "crypto";
-import {
-  readFileSync,
-  writeFileSync,
-  mkdirSync,
-  existsSync,
-  rmSync
-} from "fs";
-import { join } from "path";
-import { homedir } from "os";
-async function loadKey() {
-  try {
-    const kt = await import("keytar");
-    const stored = await kt.getPassword("terminalhire", "profile-key");
-    if (stored) return Buffer.from(stored, "hex");
-    const key2 = randomBytes(KEY_BYTES);
-    await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
-    return key2;
-  } catch {
-  }
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
-  if (existsSync(KEY_FILE)) {
-    return Buffer.from(readFileSync(KEY_FILE, "utf8").trim(), "hex");
-  }
-  const key = randomBytes(KEY_BYTES);
-  writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
-  return key;
-}
-function encrypt(plaintext, key) {
-  const iv = randomBytes(IV_BYTES);
-  const cipher = createCipheriv(ALGO, key, iv);
-  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return { iv: iv.toString("hex"), tag: tag.toString("hex"), ciphertext: ct.toString("hex") };
-}
-function decrypt(blob, key) {
-  const decipher = createDecipheriv(ALGO, key, Buffer.from(blob.iv, "hex"));
-  decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
-  const plain = Buffer.concat([
-    decipher.update(Buffer.from(blob.ciphertext, "hex")),
-    decipher.final()
-  ]);
-  return plain.toString("utf8");
-}
-async function readGitHubToken() {
-  if (!existsSync(TOKEN_FILE)) return void 0;
-  try {
-    const key = await loadKey();
-    const raw = readFileSync(TOKEN_FILE, "utf8");
-    const blob = JSON.parse(raw);
-    return decrypt(blob, key);
-  } catch {
-    return void 0;
-  }
-}
-async function writeGitHubToken(token) {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
-  const key = await loadKey();
-  const blob = encrypt(token, key);
-  writeFileSync(TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
-}
-async function deleteGitHubToken() {
-  try {
-    rmSync(TOKEN_FILE);
-  } catch {
-  }
-}
-async function hasGitHubToken() {
-  return existsSync(TOKEN_FILE);
-}
-async function runDeviceFlow() {
-  if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
-    console.log("\n[mock] GitHub OAuth skipped (JPI_GITHUB_MOCK=1)");
-    console.log(`[mock] Using fixture profile: ${MOCK_LOGIN}`);
-    await writeGitHubToken(MOCK_TOKEN);
-    return MOCK_LOGIN;
-  }
-  const clientId = process.env["GITHUB_DEVICE_CLIENT_ID"] ?? process.env["GITHUB_CLIENT_ID"] ?? BAKED_IN_CLIENT_ID;
-  if (clientId === "Iv1.PLACEHOLDER_REGISTER_YOUR_APP") {
-    console.warn("\nWarning: GITHUB_CLIENT_ID env var looks like a placeholder.");
-    console.warn("Remove it to use the baked-in client ID, or set it to your own OAuth App Client ID.\n");
-  }
-  const deviceRes = await fetch(DEVICE_CODE_URL, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: new URLSearchParams({ client_id: clientId, scope: GITHUB_SCOPE }).toString(),
-    signal: AbortSignal.timeout(15e3)
-  });
-  if (!deviceRes.ok) {
-    throw new Error(`GitHub device code request failed: HTTP ${deviceRes.status}`);
-  }
-  const deviceData = await deviceRes.json();
-  console.log("");
-  console.log("  GitHub sign-in (device flow)");
-  console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
-  console.log(`  1. Open: ${deviceData.verification_uri}`);
-  console.log(`  2. Enter code: ${deviceData.user_code}`);
-  console.log('  3. Authorize "Terminalhire" (scope: read:user \u2014 public data only)');
-  console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
-  console.log("  Waiting for authorization...");
-  console.log("");
-  let intervalSecs = deviceData.interval ?? 5;
-  const expiresAt = Date.now() + (deviceData.expires_in ?? 900) * 1e3;
-  const clientSecret = process.env["GITHUB_CLIENT_SECRET"];
-  while (Date.now() < expiresAt) {
-    await sleep(intervalSecs * 1e3);
-    const body = new URLSearchParams({
-      client_id: clientId,
-      device_code: deviceData.device_code,
-      grant_type: "urn:ietf:params:oauth:grant-type:device_code"
-    });
-    if (clientSecret) body.set("client_secret", clientSecret);
-    const tokenRes = await fetch(ACCESS_TOKEN_URL, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body: body.toString(),
-      signal: AbortSignal.timeout(15e3)
-    });
-    if (!tokenRes.ok) {
-      throw new Error(`GitHub token poll failed: HTTP ${tokenRes.status}`);
-    }
-    const tokenData = await tokenRes.json();
-    if (tokenData.access_token) {
-      await writeGitHubToken(tokenData.access_token);
-      const login = await fetchAuthedLogin(tokenData.access_token);
-      console.log(`  Authorized as: ${login}`);
-      return login;
-    }
-    if (tokenData.error === "authorization_pending") {
-      continue;
-    }
-    if (tokenData.error === "slow_down") {
-      intervalSecs = (tokenData.interval ?? intervalSecs) + 5;
-      continue;
-    }
-    if (tokenData.error === "expired_token") {
-      throw new Error("GitHub device code expired. Please run `terminalhire login` again.");
-    }
-    if (tokenData.error === "access_denied") {
-      throw new Error("GitHub authorization was denied by the user.");
-    }
-    throw new Error(
-      `GitHub device flow error: ${tokenData.error ?? "unknown"} \u2014 ${tokenData.error_description ?? ""}`
-    );
-  }
-  throw new Error("GitHub device code expired before authorization. Please run `terminalhire login` again.");
-}
-async function fetchAuthedLogin(token) {
-  if (token === MOCK_TOKEN) return MOCK_LOGIN;
-  const res = await fetch("https://api.github.com/user", {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28"
-    },
-    signal: AbortSignal.timeout(1e4)
-  });
-  if (!res.ok) throw new Error(`GitHub /user: HTTP ${res.status}`);
-  const data = await res.json();
-  return data.login;
-}
-async function resolveStoredLogin() {
-  if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") return MOCK_LOGIN;
-  const token = await readGitHubToken();
-  if (!token) return void 0;
-  try {
-    return await fetchAuthedLogin(token);
-  } catch {
-    return void 0;
-  }
-}
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-var TERMINALHIRE_DIR, TOKEN_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, GITHUB_SCOPE, DEVICE_CODE_URL, ACCESS_TOKEN_URL, BAKED_IN_CLIENT_ID, MOCK_TOKEN, MOCK_LOGIN;
-var init_github_auth = __esm({
-  "src/github-auth.ts"() {
-    "use strict";
-    TERMINALHIRE_DIR = join(homedir(), ".terminalhire");
-    TOKEN_FILE = join(TERMINALHIRE_DIR, "github-token.enc");
-    KEY_FILE = join(TERMINALHIRE_DIR, "key");
-    ALGO = "aes-256-gcm";
-    KEY_BYTES = 32;
-    IV_BYTES = 12;
-    GITHUB_SCOPE = "read:user";
-    DEVICE_CODE_URL = "https://github.com/login/device/code";
-    ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
-    BAKED_IN_CLIENT_ID = "Ov23lignE2ZSBe0J3a6B";
-    MOCK_TOKEN = "mock-github-token-jpi-dev";
-    MOCK_LOGIN = "janedev";
-  }
-});
-
 // ../../packages/core/src/types.ts
 function isBounty(job) {
   return job.source === "bounty" && job.bounty != null;
@@ -1634,21 +1420,21 @@ var init_feeds = __esm({
 });
 
 // ../../packages/core/src/partners.ts
-import { readFileSync as readFileSync2 } from "fs";
-import { join as join2 } from "path";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { fileURLToPath } from "url";
 function resolveDataPath() {
   try {
     const dir = fileURLToPath(new URL("../../../data", import.meta.url));
-    return join2(dir, "partner-roles.json");
+    return join(dir, "partner-roles.json");
   } catch {
-    return join2(process.cwd(), "data", "partner-roles.json");
+    return join(process.cwd(), "data", "partner-roles.json");
   }
 }
 function loadPartnerRoles() {
   const filePath = resolveDataPath();
   try {
-    const raw = readFileSync2(filePath, "utf-8");
+    const raw = readFileSync(filePath, "utf-8");
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
       console.warn("[partners] partner-roles.json is not an array \u2014 skipping");
@@ -1888,41 +1674,41 @@ __export(profile_exports, {
   writeProfile: () => writeProfile
 });
 import {
-  createCipheriv as createCipheriv2,
-  createDecipheriv as createDecipheriv2,
-  randomBytes as randomBytes2
+  createCipheriv,
+  createDecipheriv,
+  randomBytes
 } from "crypto";
 import {
-  readFileSync as readFileSync3,
-  writeFileSync as writeFileSync2,
-  mkdirSync as mkdirSync2,
-  existsSync as existsSync2
+  readFileSync as readFileSync2,
+  writeFileSync,
+  mkdirSync,
+  existsSync
 } from "fs";
-import { join as join3 } from "path";
-import { homedir as homedir2 } from "os";
-async function loadKey2() {
+import { join as join2 } from "path";
+import { homedir } from "os";
+async function loadKey() {
   try {
     const kt = await import("keytar");
     const stored = await kt.getPassword("terminalhire", "profile-key");
     if (stored) {
       return Buffer.from(stored, "hex");
     }
-    const key2 = randomBytes2(KEY_BYTES2);
+    const key2 = randomBytes(KEY_BYTES);
     await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
     return key2;
   } catch {
   }
-  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
-  if (existsSync2(KEY_FILE2)) {
-    return Buffer.from(readFileSync3(KEY_FILE2, "utf8").trim(), "hex");
+  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  if (existsSync(KEY_FILE)) {
+    return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");
   }
-  const key = randomBytes2(KEY_BYTES2);
-  writeFileSync2(KEY_FILE2, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  const key = randomBytes(KEY_BYTES);
+  writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
   return key;
 }
-function encrypt2(plaintext, key) {
-  const iv = randomBytes2(IV_BYTES2);
-  const cipher = createCipheriv2(ALGO2, key, iv);
+function encrypt(plaintext, key) {
+  const iv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv(ALGO, key, iv);
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return {
@@ -1931,9 +1717,9 @@ function encrypt2(plaintext, key) {
     ciphertext: ct.toString("hex")
   };
 }
-function decrypt2(blob, key) {
-  const decipher = createDecipheriv2(
-    ALGO2,
+function decrypt(blob, key) {
+  const decipher = createDecipheriv(
+    ALGO,
     key,
     Buffer.from(blob.iv, "hex")
   );
@@ -1975,12 +1761,12 @@ function migrateTagWeights(profile) {
   }
 }
 async function readProfile() {
-  if (!existsSync2(PROFILE_FILE)) return blankProfile();
+  if (!existsSync(PROFILE_FILE)) return blankProfile();
   try {
-    const key = await loadKey2();
-    const raw = readFileSync3(PROFILE_FILE, "utf8");
+    const key = await loadKey();
+    const raw = readFileSync2(PROFILE_FILE, "utf8");
     const blob = JSON.parse(raw);
-    const plaintext = decrypt2(blob, key);
+    const plaintext = decrypt(blob, key);
     const parsed = JSON.parse(plaintext);
     migrateTagWeights(parsed);
     return parsed;
@@ -1989,12 +1775,12 @@ async function readProfile() {
   }
 }
 async function writeProfile(profile) {
-  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
-  const key = await loadKey2();
+  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  const key = await loadKey();
   profile.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
   profile.skillTags = deriveSkillTags(profile.tagWeights);
-  const blob = encrypt2(JSON.stringify(profile), key);
-  writeFileSync2(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+  const blob = encrypt(JSON.stringify(profile), key);
+  writeFileSync(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 function accumulateSession(profile, tags, isEmployerContext, inferredSeniority, seniorityIsAuthoritative = false) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -2055,13 +1841,13 @@ async function removeSavedJob(id) {
   return true;
 }
 async function deleteProfile() {
-  const { rmSync: rmSync2 } = await import("fs");
+  const { rmSync } = await import("fs");
   try {
-    rmSync2(PROFILE_FILE);
+    rmSync(PROFILE_FILE);
   } catch {
   }
   try {
-    rmSync2(KEY_FILE2);
+    rmSync(KEY_FILE);
   } catch {
   }
 }
@@ -2078,17 +1864,17 @@ function profileToFingerprint(profile) {
     }
   };
 }
-var TERMINALHIRE_DIR2, PROFILE_FILE, KEY_FILE2, ALGO2, KEY_BYTES2, IV_BYTES2, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var TERMINALHIRE_DIR, PROFILE_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
 var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
     init_src();
-    TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
-    PROFILE_FILE = join3(TERMINALHIRE_DIR2, "profile.enc");
-    KEY_FILE2 = join3(TERMINALHIRE_DIR2, "key");
-    ALGO2 = "aes-256-gcm";
-    KEY_BYTES2 = 32;
-    IV_BYTES2 = 12;
+    TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");
+    PROFILE_FILE = join2(TERMINALHIRE_DIR, "profile.enc");
+    KEY_FILE = join2(TERMINALHIRE_DIR, "key");
+    ALGO = "aes-256-gcm";
+    KEY_BYTES = 32;
+    IV_BYTES = 12;
     DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
     LANGUAGE_TAGS = /* @__PURE__ */ new Set([
       "typescript",
@@ -2113,104 +1899,132 @@ var init_profile = __esm({
   }
 });
 
-// bin/jpi-login.js
-async function run() {
-  const subcommand = process.argv[2];
-  if (subcommand === "logout") {
-    await runLogout();
-  } else {
-    await runLogin();
+// bin/jpi-bounties.js
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2 } from "fs";
+import { join as join3 } from "path";
+import { homedir as homedir2 } from "os";
+import { createInterface } from "readline";
+var TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
+var INDEX_CACHE_FILE = join3(TERMINALHIRE_DIR2, "index-cache.json");
+var INDEX_TTL_MS = 15 * 60 * 1e3;
+var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+var DEFAULT_LIMIT = 15;
+var args = process.argv.slice(2);
+var limitArg = args.indexOf("--limit");
+var LIMIT = limitArg !== -1 ? parseInt(args[limitArg + 1] ?? "15", 10) : DEFAULT_LIMIT;
+var PRICED_ONLY = args.includes("--priced");
+var SHOW_ALL = args.includes("--all");
+function readIndexCache() {
+  try {
+    const entry = JSON.parse(readFileSync3(INDEX_CACHE_FILE, "utf8"));
+    if (Date.now() - entry.ts < INDEX_TTL_MS) return entry.index;
+    return null;
+  } catch {
+    return null;
   }
 }
-async function runLogin() {
-  const { runDeviceFlow: runDeviceFlow2, readGitHubToken: readGitHubToken2 } = await Promise.resolve().then(() => (init_github_auth(), github_auth_exports));
-  const { fetchGitHubProfile: fetchGitHubProfile2, githubToFingerprint: githubToFingerprint2 } = await Promise.resolve().then(() => (init_src(), src_exports));
-  const { readProfile: readProfile2, writeProfile: writeProfile2, accumulateGitHubTags: accumulateGitHubTags2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-  console.log("");
-  console.log("  terminalhire \u2014 Sign in with GitHub");
-  console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
-  console.log("  Scope: read:user  (public profile + public repos only)");
-  console.log("  Your token is encrypted and stored at ~/.terminalhire/github-token.enc");
-  console.log("  GitHub data enriches your LOCAL profile \u2014 no data leaves your machine.");
-  console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+function writeIndexCache(index) {
+  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
+  writeFileSync2(INDEX_CACHE_FILE, JSON.stringify({ ts: Date.now(), index }), "utf8");
+}
+async function fetchIndex() {
+  const cached = readIndexCache();
+  if (cached) return cached;
+  const res = await fetch(`${API_URL}/api/index`, { signal: AbortSignal.timeout(1e4) });
+  if (!res.ok) throw new Error(`/api/index returned ${res.status}`);
+  const index = await res.json();
+  writeIndexCache(index);
+  return index;
+}
+function prompt(question) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim().toLowerCase());
+    });
+  });
+}
+function formatAmount(b) {
+  return b.amountUSD != null ? "$" + b.amountUSD.toLocaleString() : "$\u2014";
+}
+var EFFORT_LABEL = { small: "small (~\xBD day)", medium: "medium (~1 day)", large: "large (multi-day)" };
+function linkTitle(title, url) {
+  const isTTY = process.stdout.isTTY;
+  const noColor = process.env["NO_COLOR"] !== void 0;
+  if (isTTY && !noColor && url) return `\x1B]8;;${url}\x1B\\${title}\x1B]8;;\x1B\\`;
+  return url ? `${title} (${url})` : title;
+}
+function printBounty(i, job, score, reason, matchedTags) {
+  const b = job.bounty ?? {};
+  const stars = b.repoStars != null ? ` \xB7 ${b.repoStars}\u2605` : "";
+  const effort = b.estimatedEffort ? ` \xB7 ${EFFORT_LABEL[b.estimatedEffort]}` : "";
+  const scoreStr = score > 0 ? ` \xB7 match ${Math.round(score * 100)}%` : "";
+  console.log(`
+${i + 1}. ${linkTitle(job.title, job.url)}`);
+  console.log(`   ${formatAmount(b)}${effort} \xB7 ${b.repoFullName ?? job.company}${stars}${scoreStr}`);
+  if (reason) console.log(`   ${reason}`);
+  if (matchedTags && matchedTags.length) console.log(`   Tags matched: ${matchedTags.slice(0, 5).join(", ")}`);
+  console.log(`   id: ${job.id}`);
+  console.log(`   Claim: ${b.claimUrl ?? job.url}`);
+}
+async function run() {
   try {
-    const login = await runDeviceFlow2();
-    const token = await readGitHubToken2();
-    if (!token) throw new Error("Token was not stored after device flow \u2014 unexpected.");
-    console.log(`
-  Fetching public profile for @${login}...`);
-    let ghProfile;
-    if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
-      const { createRequire } = await import("module");
-      const { fileURLToPath: fileURLToPath2 } = await import("url");
-      const { join: join4, dirname } = await import("path");
-      const __dirname = fileURLToPath2(new URL(".", import.meta.url));
-      const fixturePath = join4(__dirname, "../../fixtures/github-sample.json");
-      const { readFileSync: readFileSync4 } = await import("fs");
-      ghProfile = JSON.parse(readFileSync4(fixturePath, "utf8"));
-    } else {
-      ghProfile = await fetchGitHubProfile2(login, token);
+    console.log(`Fetching bounty index from ${API_URL}/api/index...`);
+    const index = await fetchIndex();
+    let bounties = (index.jobs ?? []).filter((j) => j.source === "bounty");
+    if (PRICED_ONLY) bounties = bounties.filter((j) => j.bounty?.amountUSD != null);
+    if (bounties.length === 0) {
+      console.log("\nNo bounties available right now. Try again later \u2014 supply refreshes through the day.");
+      return;
     }
-    const fragment = githubToFingerprint2(ghProfile);
-    const profile = await readProfile2();
-    accumulateGitHubTags2(profile, fragment.skillTags, fragment.seniorityBand);
-    if (!profile.displayName && ghProfile.name) {
-      profile.displayName = ghProfile.name;
+    const ranked = /* @__PURE__ */ new Map();
+    try {
+      const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+      const { match: match2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+      const profile = await readProfile2();
+      if (profile.skillTags.length > 0) {
+        const fp = profileToFingerprint2(profile);
+        for (const r of match2(fp, bounties, bounties.length)) {
+          ranked.set(r.job.id, { score: r.score, reason: r.reason, matchedTags: r.matchedTags });
+        }
+      }
+    } catch {
     }
-    if (!profile.contactEmail && ghProfile.publicEmail) {
-      profile.contactEmail = ghProfile.publicEmail;
+    const score = (j) => ranked.get(j.id)?.score ?? 0;
+    const amt = (j) => j.bounty?.amountUSD ?? -1;
+    bounties.sort((a, b) => score(b) - score(a) || amt(b) - amt(a));
+    const shown = SHOW_ALL ? bounties : bounties.slice(0, LIMIT);
+    const matchedCount = bounties.filter((j) => score(j) > 0).length;
+    console.log(
+      `
+\u26A1 ${bounties.length} bount${bounties.length === 1 ? "y" : "ies"} you could knock out` + (matchedCount ? ` \u2014 ${matchedCount} matched to your profile` : "") + ` (local rank \u2014 no data sent)
+`
+    );
+    for (let i = 0; i < shown.length; i++) {
+      const r = ranked.get(shown[i].id);
+      printBounty(i, shown[i], r?.score ?? 0, r?.reason, r?.matchedTags);
     }
-    profile.github = {
-      login: ghProfile.login,
-      profileUrl: `https://github.com/${ghProfile.login}`,
-      topLanguages: ghProfile.topLanguages.slice(0, 5),
-      publicRepos: ghProfile.publicRepos
-    };
-    await writeProfile2(profile);
-    console.log("");
-    console.log("  GitHub profile merged into local encrypted profile:");
-    console.log(`    Login:         @${ghProfile.login}`);
-    if (ghProfile.name) {
-      console.log(`    Name:          ${ghProfile.name}`);
+    if (!SHOW_ALL && bounties.length > shown.length) {
+      console.log(`
+\u2026and ${bounties.length - shown.length} more \u2014 run with --all to see every bounty.`);
     }
-    console.log(`    Public repos:  ${ghProfile.publicRepos}`);
-    console.log(`    Top languages: ${ghProfile.topLanguages.slice(0, 5).join(", ")}`);
-    if (fragment.seniorityBand) {
-      console.log(`    Seniority est: ${fragment.seniorityBand}`);
-    }
-    console.log(`    Skill tags:    ${fragment.skillTags.join(", ")}`);
-    if (fragment.skillTags.length === 0) {
-      console.log("    (No matching vocabulary tags found in public repos/topics)");
-    }
-    console.log("");
-    console.log("  Profile updated at ~/.terminalhire/profile.enc (encrypted at rest)");
-    console.log("  GitHub data stays on your machine unless you consent to share it in a lead.");
-    console.log("");
-    console.log("  Run `terminalhire jobs` to see matching roles using your enriched profile.");
-    console.log("");
+    if (!process.stdin.isTTY) return;
+    console.log("\n" + "\u2500".repeat(70));
+    const pick = await prompt(`
+Enter a number to open a bounty's claim page, or press Enter to exit: `);
+    const idx = parseInt(pick, 10) - 1;
+    if (Number.isNaN(idx) || idx < 0 || idx >= shown.length) return;
+    const chosen = shown[idx];
+    console.log(
+      `
+Open this to claim/work the bounty (you go straight to the source \u2014 we never touch payment):
+  ${chosen.bounty?.claimUrl ?? chosen.url}`
+    );
   } catch (err) {
-    console.error("\n  Login error:", err instanceof Error ? err.message : String(err));
+    console.error("terminalhire bounties error:", err.message ?? err);
     process.exit(1);
   }
-}
-async function runLogout() {
-  const { deleteGitHubToken: deleteGitHubToken2, hasGitHubToken: hasGitHubToken2 } = await Promise.resolve().then(() => (init_github_auth(), github_auth_exports));
-  const { readProfile: readProfile2, writeProfile: writeProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-  const hasToken = await hasGitHubToken2();
-  if (!hasToken) {
-    console.log("\n  No GitHub token stored \u2014 nothing to remove.\n");
-    process.exit(0);
-  }
-  await deleteGitHubToken2();
-  const profile = await readProfile2();
-  if (profile.github) {
-    delete profile.github;
-    await writeProfile2(profile);
-    console.log("\n  GitHub identity cleared from local profile.");
-  }
-  console.log("  GitHub token deleted from ~/.terminalhire/github-token.enc");
-  console.log("  Skill tags accumulated from GitHub remain in your profile.");
-  console.log("  To also delete those: terminalhire profile --delete\n");
 }
 export {
   run

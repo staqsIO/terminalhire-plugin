@@ -10,6 +10,9 @@ var __export = (target, all) => {
 };
 
 // ../../packages/core/src/types.ts
+function isBounty(job) {
+  return job.source === "bounty" && job.bounty != null;
+}
 var init_types = __esm({
   "../../packages/core/src/types.ts"() {
     "use strict";
@@ -409,10 +412,10 @@ function seniorityScore(fp, job) {
 }
 function recencyScore(postedAt, now) {
   if (!postedAt) return 0.75;
-  const ageDays = (now - new Date(postedAt).getTime()) / 864e5;
-  if (ageDays < 7) return 1;
-  if (ageDays < 30) return 0.9;
-  if (ageDays < 90) return 0.75;
+  const ageDays2 = (now - new Date(postedAt).getTime()) / 864e5;
+  if (ageDays2 < 7) return 1;
+  if (ageDays2 < 30) return 0.9;
+  if (ageDays2 < 90) return 0.75;
   return 0.6;
 }
 function passesFilters(fp, job) {
@@ -847,6 +850,33 @@ var init_himalayas = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/entities.ts
+function fromCodePoint(cp) {
+  if (!Number.isFinite(cp) || cp < 0 || cp > 1114111) return "";
+  try {
+    return String.fromCodePoint(cp);
+  } catch {
+    return "";
+  }
+}
+function decodeEntities(input) {
+  if (!input || !input.includes("&")) return input;
+  return input.replace(/&#(\d+);/g, (_, n) => fromCodePoint(parseInt(n, 10))).replace(/&#[xX]([0-9a-fA-F]+);/g, (_, h) => fromCodePoint(parseInt(h, 16))).replace(/&(lt|gt|quot|apos|nbsp);/g, (_, name) => NAMED[name] ?? `&${name};`).replace(/&amp;/g, "&");
+}
+var NAMED;
+var init_entities = __esm({
+  "../../packages/core/src/feeds/entities.ts"() {
+    "use strict";
+    NAMED = {
+      lt: "<",
+      gt: ">",
+      quot: '"',
+      apos: "'",
+      nbsp: " "
+    };
+  }
+});
+
 // ../../packages/core/src/feeds/wwr.ts
 function tokenize5(text) {
   return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
@@ -870,9 +900,9 @@ function parseRss(xml) {
   for (const block of itemBlocks) {
     const get = (tag) => {
       const cdataMatch = block.match(new RegExp(`<${tag}[^>]*><!\\[CDATA\\[([\\s\\S]*?)\\]\\]><\\/${tag}>`, "i"));
-      if (cdataMatch) return cdataMatch[1].trim();
+      if (cdataMatch) return decodeEntities(cdataMatch[1].trim());
       const plainMatch = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
-      return plainMatch?.[1].trim() ?? "";
+      return decodeEntities(plainMatch?.[1].trim() ?? "");
     };
     const rawTitle = get("title");
     const colonIdx = rawTitle.indexOf(":");
@@ -899,6 +929,7 @@ var init_wwr = __esm({
   "../../packages/core/src/feeds/wwr.ts"() {
     "use strict";
     init_vocabulary();
+    init_entities();
     WWR_RSS_URL = "https://weworkremotely.com/remote-jobs.rss";
     wwr = {
       source: "wwr",
@@ -937,7 +968,7 @@ function tokenize6(text) {
   return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
 }
 function stripHtml2(html) {
-  return html.replace(/<p>/gi, " ").replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/\s+/g, " ").trim();
+  return decodeEntities(html.replace(/<p>/gi, " ").replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim();
 }
 function extractUrl(text) {
   const match2 = text.match(/https?:\/\/[^\s<>"']+/);
@@ -991,6 +1022,7 @@ var init_hn = __esm({
   "../../packages/core/src/feeds/hn.ts"() {
     "use strict";
     init_vocabulary();
+    init_entities();
     ALGOLIA_SEARCH = "https://hn.algolia.com/api/v1/search?query=Ask+HN%3A+Who+is+Hiring%3F&tags=story,ask_hn&hitsPerPage=1";
     ALGOLIA_ITEMS = "https://hn.algolia.com/api/v1/items/";
     hn = {
@@ -1027,7 +1059,198 @@ var init_hn = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/bounty-gate.ts
+function ageDays(createdAtIso) {
+  const created = Date.parse(createdAtIso);
+  if (!Number.isFinite(created)) return 0;
+  return (Date.now() - created) / (1e3 * 60 * 60 * 24);
+}
+function passesMaturityGate(repo) {
+  if (repo.archived || repo.disabled) return false;
+  if (repo.stargazers < MIN_REPO_STARS) return false;
+  if (ageDays(repo.createdAt) < MIN_REPO_AGE_DAYS) return false;
+  return true;
+}
+var DEFAULT_BOUNTY_REPOS, MAX_BOUNTIES_PER_REPO, MIN_REPO_STARS, MIN_REPO_AGE_DAYS;
+var init_bounty_gate = __esm({
+  "../../packages/core/src/feeds/bounty-gate.ts"() {
+    "use strict";
+    DEFAULT_BOUNTY_REPOS = [
+      "tenstorrent/tt-metal",
+      "sequelize/sequelize",
+      "commaai/opendbc",
+      "aragon/hack",
+      "spacemeshos/app",
+      "archestra-ai/archestra",
+      "boundlessfi/boundless",
+      "ucfopen/Obojobo",
+      "widgetti/ipyvolume",
+      "moorcheh-ai/memanto",
+      "PrismarineJS/mineflayer"
+    ];
+    MAX_BOUNTIES_PER_REPO = 10;
+    MIN_REPO_STARS = 5;
+    MIN_REPO_AGE_DAYS = 30;
+  }
+});
+
+// ../../packages/core/src/feeds/github-bounties.ts
+function authHeaders() {
+  const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
+  const h = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "terminalhire",
+    "X-GitHub-Api-Version": "2022-11-28"
+  };
+  if (token) h["Authorization"] = `Bearer ${token}`;
+  return h;
+}
+function tokenize7(text) {
+  return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
+}
+function parseAmountUSD(text) {
+  const m = text.match(/\$\s?([0-9][0-9,]*(?:\.[0-9]+)?)\s?([kK])?/);
+  if (!m) return void 0;
+  let n = parseFloat(m[1].replace(/,/g, ""));
+  if (m[2]) n *= 1e3;
+  if (!Number.isFinite(n) || n <= 0 || n > 1e6) return void 0;
+  return Math.round(n);
+}
+function effortFromAmount(amount) {
+  if (amount == null) return void 0;
+  if (amount <= 500) return "small";
+  if (amount <= 2e3) return "medium";
+  return "large";
+}
+function labelNames(issue) {
+  return (issue.labels ?? []).map((l) => typeof l === "string" ? l : l.name ?? "").filter(Boolean);
+}
+function isBountyIssue(issue) {
+  if (issue.pull_request) return false;
+  const labels = labelNames(issue);
+  if (labels.some((n) => BOUNTY_LABEL_RE.test(n))) return true;
+  return /bounty/i.test(issue.title) && parseAmountUSD(issue.title) != null;
+}
+async function ghJson(path) {
+  let res;
+  try {
+    res = await fetch(`${GITHUB_API}${path}`, { headers: authHeaders() });
+  } catch (err) {
+    console.warn(`[github-bounties] network error ${path} \u2014`, err);
+    return null;
+  }
+  if (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0") {
+    console.warn("[github-bounties] rate-limited (set GITHUB_TOKEN for 5000/hr)");
+    return null;
+  }
+  if (!res.ok) {
+    console.warn(`[github-bounties] HTTP ${res.status} ${path}`);
+    return null;
+  }
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+async function fetchCommentAmount(repoFullName, issueNumber) {
+  const comments = await ghJson(
+    `/repos/${repoFullName}/issues/${issueNumber}/comments?per_page=30`
+  );
+  if (!comments) return void 0;
+  for (const c of comments) {
+    const body = c.body ?? "";
+    if (BOUNTY_LABEL_RE.test(body)) {
+      const amt = parseAmountUSD(body);
+      if (amt != null) return amt;
+    }
+  }
+  return void 0;
+}
+async function fetchRepoBounties(repoFullName) {
+  const repo = await ghJson(`/repos/${repoFullName}`);
+  if (!repo) return [];
+  const meta = {
+    fullName: repo.full_name,
+    stargazers: repo.stargazers_count,
+    createdAt: repo.created_at,
+    archived: repo.archived,
+    disabled: repo.disabled
+  };
+  if (!passesMaturityGate(meta)) {
+    console.info(`[github-bounties] ${repoFullName}: failed maturity gate, skipping`);
+    return [];
+  }
+  const issues = await ghJson(`/repos/${repoFullName}/issues?state=open&per_page=100`);
+  if (!issues) return [];
+  const bounties = issues.filter(isBountyIssue).slice(0, MAX_BOUNTIES_PER_REPO);
+  const owner = repo.owner.login;
+  return Promise.all(bounties.map(async (issue) => {
+    const title = decodeEntities(issue.title).trim();
+    const body = issue.body ? decodeEntities(issue.body) : "";
+    const amountUSD = parseAmountUSD(title) ?? parseAmountUSD(body) ?? await fetchCommentAmount(repoFullName, issue.number);
+    const labels = labelNames(issue);
+    const tags = normalize(tokenize7([title, labels.join(" "), body.slice(0, 2e3)].join(" ")));
+    return {
+      id: `bounty:${repoFullName}#${issue.number}`,
+      source: "bounty",
+      title,
+      company: owner,
+      url: issue.html_url,
+      remote: true,
+      location: "Remote",
+      tags,
+      roleType: "freelance",
+      postedAt: issue.created_at,
+      applyMode: "direct",
+      bounty: {
+        amountUSD,
+        estimatedEffort: effortFromAmount(amountUSD),
+        bountySource: "github",
+        claimUrl: issue.html_url,
+        repoFullName,
+        repoStars: repo.stargazers_count,
+        issueBody: body.slice(0, 1e3) || void 0
+      },
+      raw: issue
+    };
+  }));
+}
+var GITHUB_API, BOUNTY_LABEL_RE, githubBounties;
+var init_github_bounties = __esm({
+  "../../packages/core/src/feeds/github-bounties.ts"() {
+    "use strict";
+    init_vocabulary();
+    init_entities();
+    init_bounty_gate();
+    GITHUB_API = "https://api.github.com";
+    BOUNTY_LABEL_RE = /bounty|reward|funded|💎|💰/i;
+    githubBounties = {
+      source: "bounty",
+      async fetch(opts) {
+        const repos = opts?.slugs && opts.slugs.length > 0 ? opts.slugs : DEFAULT_BOUNTY_REPOS;
+        console.info(`[github-bounties] scanning ${repos.length} repos`);
+        const settled = await Promise.allSettled(repos.map(fetchRepoBounties));
+        const jobs = [];
+        let failures = 0;
+        for (const r of settled) {
+          if (r.status === "fulfilled") jobs.push(...r.value);
+          else {
+            failures++;
+            console.warn("[github-bounties] repo fetch rejected:", r.reason);
+          }
+        }
+        console.info(`[github-bounties] total: ${jobs.length} bounties, ${failures} repo failures`);
+        return jobs;
+      }
+    };
+  }
+});
+
 // ../../packages/core/src/feeds/index.ts
+async function aggregateBounties(opts) {
+  return githubBounties.fetch({ slugs: opts?.repos });
+}
 function flattenTiers(t) {
   return [.../* @__PURE__ */ new Set([...t.bigco, ...t.scaleup, ...t.startup])];
 }
@@ -1060,6 +1283,19 @@ async function aggregate(opts) {
       }
     }
   }
+  if (opts?.includeBounties !== false) {
+    try {
+      const bounties = await githubBounties.fetch({ slugs: opts?.slugs?.["bounty"], limit });
+      for (const b of bounties) {
+        if (!seen.has(b.id)) {
+          seen.add(b.id);
+          jobs.push(b);
+        }
+      }
+    } catch (err) {
+      console.warn("[feeds] bounties failed:", err);
+    }
+  }
   return jobs;
 }
 var FEEDS, GREENHOUSE_SLUGS_BY_TIER, ASHBY_SLUGS_BY_TIER, LEVER_SLUGS_BY_TIER, DEFAULT_GREENHOUSE_SLUGS, DEFAULT_ASHBY_SLUGS, DEFAULT_LEVER_SLUGS;
@@ -1072,6 +1308,8 @@ var init_feeds = __esm({
     init_himalayas();
     init_wwr();
     init_hn();
+    init_github_bounties();
+    init_bounty_gate();
     FEEDS = [greenhouse, ashby, lever, himalayas, wwr, hn];
     GREENHOUSE_SLUGS_BY_TIER = {
       bigco: [
@@ -1372,6 +1610,7 @@ __export(src_exports, {
   ASHBY_SLUGS_BY_TIER: () => ASHBY_SLUGS_BY_TIER,
   DECAY_FLOOR: () => DECAY_FLOOR,
   DEFAULT_ASHBY_SLUGS: () => DEFAULT_ASHBY_SLUGS,
+  DEFAULT_BOUNTY_REPOS: () => DEFAULT_BOUNTY_REPOS,
   DEFAULT_GREENHOUSE_SLUGS: () => DEFAULT_GREENHOUSE_SLUGS,
   DEFAULT_LEVER_SLUGS: () => DEFAULT_LEVER_SLUGS,
   EXAMPLE_BUYER: () => EXAMPLE_BUYER,
@@ -1383,6 +1622,7 @@ __export(src_exports, {
   VOCABULARY: () => VOCABULARY,
   VOCAB_NODES: () => VOCAB_NODES,
   aggregate: () => aggregate,
+  aggregateBounties: () => aggregateBounties,
   ashby: () => ashby,
   buildGraph: () => buildGraph,
   buildIndex: () => buildIndex,
@@ -1391,15 +1631,18 @@ __export(src_exports, {
   fetchGitHubProfile: () => fetchGitHubProfile,
   flattenTiers: () => flattenTiers,
   getBuyer: () => getBuyer,
+  githubBounties: () => githubBounties,
   githubToFingerprint: () => githubToFingerprint,
   greenhouse: () => greenhouse,
   himalayas: () => himalayas,
   hn: () => hn,
+  isBounty: () => isBounty,
   lever: () => lever,
   loadPartnerRoles: () => loadPartnerRoles,
   match: () => match,
   matchOne: () => matchOne,
   normalize: () => normalize,
+  passesMaturityGate: () => passesMaturityGate,
   validateGraph: () => validateGraph,
   wwr: () => wwr
 });

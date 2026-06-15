@@ -400,11 +400,19 @@ var init_himalayas = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/entities.ts
+var init_entities = __esm({
+  "../../packages/core/src/feeds/entities.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/feeds/wwr.ts
 var init_wwr = __esm({
   "../../packages/core/src/feeds/wwr.ts"() {
     "use strict";
     init_vocabulary();
+    init_entities();
   }
 });
 
@@ -413,6 +421,24 @@ var init_hn = __esm({
   "../../packages/core/src/feeds/hn.ts"() {
     "use strict";
     init_vocabulary();
+    init_entities();
+  }
+});
+
+// ../../packages/core/src/feeds/bounty-gate.ts
+var init_bounty_gate = __esm({
+  "../../packages/core/src/feeds/bounty-gate.ts"() {
+    "use strict";
+  }
+});
+
+// ../../packages/core/src/feeds/github-bounties.ts
+var init_github_bounties = __esm({
+  "../../packages/core/src/feeds/github-bounties.ts"() {
+    "use strict";
+    init_vocabulary();
+    init_entities();
+    init_bounty_gate();
   }
 });
 
@@ -430,6 +456,8 @@ var init_feeds = __esm({
     init_himalayas();
     init_wwr();
     init_hn();
+    init_github_bounties();
+    init_bounty_gate();
     GREENHOUSE_SLUGS_BY_TIER = {
       bigco: [
         "stripe",
