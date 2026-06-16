@@ -128,7 +128,7 @@ var VOCAB_NODES = [
   { id: "airflow", parents: ["data-engineering"], synonyms: ["apache-airflow"] },
   { id: "dbt", parents: ["data-engineering"] },
   { id: "ml", synonyms: ["machine-learning"], related: [{ to: "pytorch", w: 0.5 }, { to: "tensorflow", w: 0.5 }, { to: "scikit-learn", w: 0.5 }, { to: "data-engineering", w: 0.4 }] },
-  { id: "llm", parents: ["ml"], synonyms: ["llms", "genai", "generative-ai"], related: [{ to: "langchain", w: 0.5 }, { to: "rag", w: 0.55 }, { to: "openai", w: 0.45 }, { to: "anthropic", w: 0.45 }] },
+  { id: "llm", parents: ["ml"], synonyms: ["llms", "genai", "generative-ai", "gpt"], related: [{ to: "langchain", w: 0.5 }, { to: "rag", w: 0.55 }, { to: "openai", w: 0.45 }, { to: "anthropic", w: 0.45 }] },
   { id: "pytorch", parents: ["ml"], synonyms: ["torch"], related: [{ to: "tensorflow", w: 0.5 }] },
   { id: "tensorflow", parents: ["ml"], synonyms: ["keras", "tf-keras"] },
   { id: "pandas", parents: ["python"], related: [{ to: "numpy", w: 0.6 }, { to: "data-engineering", w: 0.45 }, { to: "spark", w: 0.4 }] },
@@ -141,6 +141,14 @@ var VOCAB_NODES = [
   { id: "anthropic", parents: ["llm"], synonyms: ["claude"] },
   { id: "rag", parents: ["llm"], synonyms: ["retrieval-augmented-generation"] },
   { id: "mlops", parents: ["ml"], related: [{ to: "devops", w: 0.4 }] },
+  { id: "agents", parents: ["llm"], synonyms: ["agentic", "ai-agents", "multi-agent"], related: [{ to: "rag", w: 0.4 }] },
+  { id: "mcp", parents: ["agents"], synonyms: ["model-context-protocol"], related: [{ to: "llm", w: 0.45 }] },
+  { id: "inference", parents: ["ml"], synonyms: ["model-inference", "llm-inference", "model-serving"], related: [{ to: "mlops", w: 0.5 }, { to: "llm", w: 0.4 }] },
+  { id: "embeddings", parents: ["ml"], synonyms: ["embedding", "vector-embeddings"], related: [{ to: "rag", w: 0.55 }, { to: "llm", w: 0.45 }] },
+  { id: "prompt-engineering", parents: ["llm"], synonyms: ["prompting", "prompt"] },
+  { id: "fine-tuning", parents: ["ml"], synonyms: ["finetuning", "fine-tune", "rlhf"], related: [{ to: "llm", w: 0.5 }] },
+  { id: "computer-vision", parents: ["ml"], synonyms: ["image-recognition", "object-detection"] },
+  { id: "recsys", parents: ["ml"], synonyms: ["recommender-systems", "recommendation-systems", "recommendation"] },
   // ── Mobile ──────────────────────────────────────────────────────────────────
   { id: "mobile", related: [{ to: "ios", w: 0.5 }, { to: "android", w: 0.5 }] },
   { id: "ios", parents: ["mobile", "swift"], related: [{ to: "android", w: 0.4 }] },
@@ -334,6 +342,9 @@ function normalize(tokens) {
   }
   return Array.from(result);
 }
+
+// ../../packages/core/src/github.ts
+var RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
 
 // ../../packages/core/src/feeds/index.ts
 var GREENHOUSE_SLUGS_BY_TIER = {

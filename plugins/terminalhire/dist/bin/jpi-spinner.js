@@ -103,7 +103,7 @@ function buildContextVerbs(topMatches, sessionTags) {
   }
   const list = Array.isArray(topMatches) ? topMatches : [];
   const hasBounty = list.some((m) => m && m.source === "bounty");
-  if (hasBounty) headers.unshift(`\u2726 Roles + \u{1F48E} paid bounties in your stack \u2014 link below`);
+  if (hasBounty) headers.push(`\u2726 Roles + \u{1F48E} paid bounties in your stack \u2014 link below`);
   return headers;
 }
 function buildSpinnerPool(topMatches, max = 6, opts = {}) {

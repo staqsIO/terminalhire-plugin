@@ -110,7 +110,7 @@ function buildContextVerbs(topMatches, sessionTags) {
   }
   const list = Array.isArray(topMatches) ? topMatches : [];
   const hasBounty = list.some((m) => m && m.source === "bounty");
-  if (hasBounty) headers.unshift(`\u2726 Roles + \u{1F48E} paid bounties in your stack \u2014 link below`);
+  if (hasBounty) headers.push(`\u2726 Roles + \u{1F48E} paid bounties in your stack \u2014 link below`);
   return headers;
 }
 function buildSpinnerPool(topMatches, max = 6, opts = {}) {
@@ -202,8 +202,8 @@ function buildTips(topMatches, baseUrl, max = 8) {
   let bi = 0;
   let ri = 0;
   while (bi < bountyQ.length || ri < roleQ.length) {
-    if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
     if (ri < roleQ.length) ordered.push(roleQ[ri++]);
+    if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
   }
   for (const m of ordered) {
     if (!m || !m.title || !m.company || !m.id) continue;

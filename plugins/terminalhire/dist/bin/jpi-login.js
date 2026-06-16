@@ -362,7 +362,7 @@ var init_graph_data = __esm({
       { id: "airflow", parents: ["data-engineering"], synonyms: ["apache-airflow"] },
       { id: "dbt", parents: ["data-engineering"] },
       { id: "ml", synonyms: ["machine-learning"], related: [{ to: "pytorch", w: 0.5 }, { to: "tensorflow", w: 0.5 }, { to: "scikit-learn", w: 0.5 }, { to: "data-engineering", w: 0.4 }] },
-      { id: "llm", parents: ["ml"], synonyms: ["llms", "genai", "generative-ai"], related: [{ to: "langchain", w: 0.5 }, { to: "rag", w: 0.55 }, { to: "openai", w: 0.45 }, { to: "anthropic", w: 0.45 }] },
+      { id: "llm", parents: ["ml"], synonyms: ["llms", "genai", "generative-ai", "gpt"], related: [{ to: "langchain", w: 0.5 }, { to: "rag", w: 0.55 }, { to: "openai", w: 0.45 }, { to: "anthropic", w: 0.45 }] },
       { id: "pytorch", parents: ["ml"], synonyms: ["torch"], related: [{ to: "tensorflow", w: 0.5 }] },
       { id: "tensorflow", parents: ["ml"], synonyms: ["keras", "tf-keras"] },
       { id: "pandas", parents: ["python"], related: [{ to: "numpy", w: 0.6 }, { to: "data-engineering", w: 0.45 }, { to: "spark", w: 0.4 }] },
@@ -375,6 +375,14 @@ var init_graph_data = __esm({
       { id: "anthropic", parents: ["llm"], synonyms: ["claude"] },
       { id: "rag", parents: ["llm"], synonyms: ["retrieval-augmented-generation"] },
       { id: "mlops", parents: ["ml"], related: [{ to: "devops", w: 0.4 }] },
+      { id: "agents", parents: ["llm"], synonyms: ["agentic", "ai-agents", "multi-agent"], related: [{ to: "rag", w: 0.4 }] },
+      { id: "mcp", parents: ["agents"], synonyms: ["model-context-protocol"], related: [{ to: "llm", w: 0.45 }] },
+      { id: "inference", parents: ["ml"], synonyms: ["model-inference", "llm-inference", "model-serving"], related: [{ to: "mlops", w: 0.5 }, { to: "llm", w: 0.4 }] },
+      { id: "embeddings", parents: ["ml"], synonyms: ["embedding", "vector-embeddings"], related: [{ to: "rag", w: 0.55 }, { to: "llm", w: 0.45 }] },
+      { id: "prompt-engineering", parents: ["llm"], synonyms: ["prompting", "prompt"] },
+      { id: "fine-tuning", parents: ["ml"], synonyms: ["finetuning", "fine-tune", "rlhf"], related: [{ to: "llm", w: 0.5 }] },
+      { id: "computer-vision", parents: ["ml"], synonyms: ["image-recognition", "object-detection"] },
+      { id: "recsys", parents: ["ml"], synonyms: ["recommender-systems", "recommendation-systems", "recommendation"] },
       // ── Mobile ──────────────────────────────────────────────────────────────────
       { id: "mobile", related: [{ to: "ios", w: 0.5 }, { to: "android", w: 0.5 }] },
       { id: "ios", parents: ["mobile", "swift"], related: [{ to: "android", w: 0.4 }] },
@@ -797,7 +805,10 @@ var init_vocabulary = __esm({
 function ghHeaders(token) {
   const headers = {
     Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28"
+    "X-GitHub-Api-Version": "2022-11-28",
+    // GitHub's REST API REQUIRES a User-Agent; serverless runtimes don't always
+    // send a default (omitting it yields a 403 "administrative rules" error).
+    "User-Agent": "terminalhire"
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
   return headers;
@@ -941,16 +952,25 @@ async function fetchRepoMeta(owner, name, token, cache) {
   cache.set(key, meta);
   return meta;
 }
-async function computeAcceptanceCredential(login, token, cache = /* @__PURE__ */ new Map()) {
+function emptyCredential(status) {
+  return { status, byDomain: {}, qualifyingTotal: 0, computedAt: (/* @__PURE__ */ new Date()).toISOString() };
+}
+async function fetchPublicOrgs(login, token) {
+  try {
+    const orgs = await ghFetch(
+      `/users/${login}/orgs?per_page=100`,
+      token
+    );
+    return new Set(orgs.map((o) => o.login.toLowerCase()));
+  } catch {
+    return /* @__PURE__ */ new Set();
+  }
+}
+async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates = {
+  minStars: MIN_STARS,
+  minContributors: MIN_CONTRIBUTORS
+}) {
   const computedAt = (/* @__PURE__ */ new Date()).toISOString();
-  const empty = (status) => ({
-    status,
-    byDomain: {},
-    qualifyingTotal: 0,
-    computedAt
-  });
-  if (!token) return empty("no-token");
-  const ownedOrgs = await fetchOwnedOrgs(token);
   const loginLc = login.toLowerCase();
   let items;
   try {
@@ -961,8 +981,9 @@ async function computeAcceptanceCredential(login, token, cache = /* @__PURE__ */
     );
     items = res.items ?? [];
   } catch (err) {
-    const msg = String(err);
-    return empty(/HTTP 403|HTTP 429|rate limit/i.test(msg) ? "rate-limited" : "failed");
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn("[acceptance] search failed:", msg);
+    return emptyCredential(/HTTP 403|HTTP 429|rate limit/i.test(msg) ? "rate-limited" : "failed");
   }
   const byDomain = {};
   let qualifyingTotal = 0;
@@ -976,8 +997,8 @@ async function computeAcceptanceCredential(login, token, cache = /* @__PURE__ */
     const meta = await fetchRepoMeta(repo.owner, repo.name, token, cache);
     if (!meta) continue;
     if (meta.archived || meta.fork) continue;
-    if (meta.stars < MIN_STARS) continue;
-    if (meta.contributors !== void 0 && meta.contributors < MIN_CONTRIBUTORS) continue;
+    if (meta.stars < gates.minStars) continue;
+    if (meta.contributors !== void 0 && meta.contributors < gates.minContributors) continue;
     qualifyingTotal += 1;
     const mergedAt = item.pull_request?.merged_at ?? item.closed_at ?? item.created_at;
     const rawDomains = [meta.language ?? "", ...meta.topics].filter(Boolean);
@@ -998,6 +1019,18 @@ async function computeAcceptanceCredential(login, token, cache = /* @__PURE__ */
   }
   return { status: "ok", byDomain: finalDomains, qualifyingTotal, computedAt };
 }
+async function computeAcceptanceCredential(login, token, cache = /* @__PURE__ */ new Map()) {
+  if (!token) return emptyCredential("no-token");
+  const ownedOrgs = await fetchOwnedOrgs(token);
+  return computeAcceptanceFromSearch(login, token, ownedOrgs, cache);
+}
+async function computeAcceptanceCredentialPublic(login, token, cache = /* @__PURE__ */ new Map(), opts) {
+  if (!token) return emptyCredential("no-token");
+  const ownedOrgs = await fetchPublicOrgs(login, token);
+  for (const org of opts?.includeOrgs ?? []) ownedOrgs.delete(org.toLowerCase());
+  const gates = opts?.relaxGates ? { minStars: 0, minContributors: 0 } : void 0;
+  return computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates);
+}
 function acceptanceCountForDomains(cred, domains) {
   if (cred.status !== "ok") return 0;
   let max = 0;
@@ -1016,7 +1049,60 @@ function bestAcceptanceDomain(cred, domains) {
   }
   return best;
 }
-var MIN_STARS, MIN_CONTRIBUTORS, CANDIDATE_PR_PAGE, TRIVIAL_PR_TITLE;
+function resumeRecencyDecay(lastSeenIso, now) {
+  const ageMs = now - new Date(lastSeenIso).getTime();
+  if (!Number.isFinite(ageMs)) return 0;
+  return Math.pow(0.5, ageMs / RESUME_DECAY_HALF_LIFE_MS);
+}
+async function fetchRepoRecency(login, token) {
+  try {
+    const repos = await ghFetch(`/users/${login}/repos?sort=pushed&per_page=100`, token);
+    return repos.filter((r) => !r.fork && !!r.pushed_at).map((r) => ({ pushedAt: r.pushed_at, language: r.language ?? null, topics: r.topics ?? [] }));
+  } catch {
+    return [];
+  }
+}
+function deriveResumeTrend(cred, repoRecency, now = Date.now()) {
+  const agg = /* @__PURE__ */ new Map();
+  const bump = (domain, when, count, mergedPRs) => {
+    const e = agg.get(domain);
+    if (!e) {
+      agg.set(domain, { count, last: when, earliest: when, mergedPRs });
+    } else {
+      e.count += count;
+      e.mergedPRs += mergedPRs;
+      if (when > e.last) e.last = when;
+      if (when < e.earliest) e.earliest = when;
+    }
+  };
+  if (cred.status === "ok") {
+    for (const [domain, d] of Object.entries(cred.byDomain)) {
+      bump(domain, d.lastMergedAt, d.mergedPRs, d.mergedPRs);
+    }
+  }
+  for (const r of repoRecency) {
+    for (const domain of new Set(normalize([r.language ?? "", ...r.topics].filter(Boolean)))) {
+      bump(domain, r.pushedAt, 1, 0);
+    }
+  }
+  const oneHalfLifeAgoIso = new Date(now - RESUME_DECAY_HALF_LIFE_MS).toISOString();
+  const scored = [];
+  for (const [domain, e] of agg.entries()) {
+    const recencyScore2 = resumeRecencyDecay(e.last, now);
+    const weight = e.count * recencyScore2;
+    if (weight < RESUME_MIN_SCORE) continue;
+    let direction;
+    if (e.earliest > oneHalfLifeAgoIso) direction = "new";
+    else if (recencyScore2 >= 0.5) direction = "up";
+    else direction = "down";
+    scored.push({
+      t: { domain, direction, recencyScore: Math.round(recencyScore2 * 1e3) / 1e3, mergedPRs: e.mergedPRs },
+      weight
+    });
+  }
+  return scored.sort((a, b) => b.weight - a.weight).slice(0, 12).map((s) => s.t);
+}
+var MIN_STARS, MIN_CONTRIBUTORS, CANDIDATE_PR_PAGE, TRIVIAL_PR_TITLE, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
@@ -1025,6 +1111,8 @@ var init_github = __esm({
     MIN_CONTRIBUTORS = 10;
     CANDIDATE_PR_PAGE = 50;
     TRIVIAL_PR_TITLE = /^\s*(fix\s+typo|typo\b|update\s+readme|readme\b|docs?:|docs?\(|chore:|chore\(|style:|ci:|build:|bump\b|update\s+dependenc)/i;
+    RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
+    RESUME_MIN_SCORE = 0.05;
   }
 });
 
@@ -1172,6 +1260,18 @@ var init_matcher = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/http.ts
+function fetchWithTimeout(input, init, timeoutMs = FEED_FETCH_TIMEOUT_MS) {
+  return fetch(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+}
+var FEED_FETCH_TIMEOUT_MS;
+var init_http = __esm({
+  "../../packages/core/src/feeds/http.ts"() {
+    "use strict";
+    FEED_FETCH_TIMEOUT_MS = 1e4;
+  }
+});
+
 // ../../packages/core/src/feeds/greenhouse.ts
 function extractTags(job) {
   const body = [
@@ -1190,7 +1290,7 @@ async function fetchSlug(slug) {
   const url = `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs?content=true`;
   let res;
   try {
-    res = await fetch(url, { headers: { Accept: "application/json" } });
+    res = await fetchWithTimeout(url, { headers: { Accept: "application/json" } });
   } catch (err) {
     console.warn(`[greenhouse] ${slug}: network error \u2014`, err);
     return [];
@@ -1232,6 +1332,7 @@ var init_greenhouse = __esm({
   "../../packages/core/src/feeds/greenhouse.ts"() {
     "use strict";
     init_vocabulary();
+    init_http();
     FALLBACK_SLUGS = [
       "stripe",
       "linear",
@@ -1302,7 +1403,7 @@ function inferRemote2(job) {
 }
 async function fetchSlug2(slug) {
   const url = `https://api.ashbyhq.com/posting-api/job-board/${slug}`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     headers: { Accept: "application/json" }
   });
   if (!res.ok) {
@@ -1334,6 +1435,7 @@ var init_ashby = __esm({
   "../../packages/core/src/feeds/ashby.ts"() {
     "use strict";
     init_vocabulary();
+    init_http();
     ashby = {
       source: "ashby",
       async fetch(opts) {
@@ -1384,7 +1486,7 @@ function toIso(ms) {
 }
 async function fetchSlug3(slug) {
   const url = `https://api.lever.co/v0/postings/${slug}?mode=json`;
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  const res = await fetchWithTimeout(url, { headers: { Accept: "application/json" } });
   if (!res.ok) {
     throw new Error(`Lever ${slug}: HTTP ${res.status}`);
   }
@@ -1415,6 +1517,7 @@ var init_lever = __esm({
   "../../packages/core/src/feeds/lever.ts"() {
     "use strict";
     init_vocabulary();
+    init_http();
     lever = {
       source: "lever",
       async fetch(opts) {
@@ -1456,12 +1559,13 @@ var init_himalayas = __esm({
   "../../packages/core/src/feeds/himalayas.ts"() {
     "use strict";
     init_vocabulary();
+    init_http();
     himalayas = {
       source: "himalayas",
       async fetch(opts) {
         const limit = opts?.limit ?? 100;
         const url = `https://himalayas.app/jobs/api?limit=${limit}`;
-        const res = await fetch(url, {
+        const res = await fetchWithTimeout(url, {
           headers: { Accept: "application/json" }
         });
         if (!res.ok) {
@@ -1570,12 +1674,13 @@ var init_wwr = __esm({
     "use strict";
     init_vocabulary();
     init_entities();
+    init_http();
     WWR_RSS_URL = "https://weworkremotely.com/remote-jobs.rss";
     wwr = {
       source: "wwr",
       async fetch(opts) {
         const limit = opts?.limit ?? 200;
-        const res = await fetch(WWR_RSS_URL, {
+        const res = await fetchWithTimeout(WWR_RSS_URL, {
           headers: { Accept: "application/rss+xml, application/xml, text/xml" }
         });
         if (!res.ok) {
@@ -1583,6 +1688,11 @@ var init_wwr = __esm({
         }
         const xml = await res.text();
         const items = parseRss(xml).slice(0, limit);
+        function safeIso(s) {
+          if (!s) return void 0;
+          const d = new Date(s);
+          return Number.isNaN(d.getTime()) ? void 0 : d.toISOString();
+        }
         return items.map((item) => ({
           id: extractId(item.link),
           source: "wwr",
@@ -1594,7 +1704,7 @@ var init_wwr = __esm({
           location: "Remote",
           tags: extractTags5(item),
           roleType: inferRoleType(item.category),
-          postedAt: item.pubDate ? new Date(item.pubDate).toISOString() : void 0,
+          postedAt: safeIso(item.pubDate),
           applyMode: "direct",
           raw: item
         }));
@@ -1660,13 +1770,14 @@ var init_hn = __esm({
     "use strict";
     init_vocabulary();
     init_entities();
+    init_http();
     ALGOLIA_SEARCH = "https://hn.algolia.com/api/v1/search?query=Ask+HN%3A+Who+is+Hiring%3F&tags=story,ask_hn&hitsPerPage=1";
     ALGOLIA_ITEMS = "https://hn.algolia.com/api/v1/items/";
     hn = {
       source: "hn",
       async fetch(opts) {
         const limit = opts?.limit ?? 150;
-        const searchRes = await fetch(ALGOLIA_SEARCH, {
+        const searchRes = await fetchWithTimeout(ALGOLIA_SEARCH, {
           headers: { Accept: "application/json" }
         });
         if (!searchRes.ok) {
@@ -1677,7 +1788,7 @@ var init_hn = __esm({
         if (!story) {
           throw new Error('HN: No "Who is Hiring" story found');
         }
-        const itemRes = await fetch(`${ALGOLIA_ITEMS}${story.objectID}`, {
+        const itemRes = await fetchWithTimeout(`${ALGOLIA_ITEMS}${story.objectID}`, {
           headers: { Accept: "application/json" }
         });
         if (!itemRes.ok) {
@@ -1771,7 +1882,7 @@ function isBountyIssue(issue) {
 async function ghJson(path) {
   let res;
   try {
-    res = await fetch(`${GITHUB_API}${path}`, { headers: authHeaders() });
+    res = await fetchWithTimeout(`${GITHUB_API}${path}`, { headers: authHeaders() });
   } catch (err) {
     console.warn(`[github-bounties] network error ${path} \u2014`, err);
     return null;
@@ -1853,31 +1964,328 @@ async function fetchRepoBounties(repoFullName) {
     };
   }));
 }
-var GITHUB_API, BOUNTY_LABEL_RE, githubBounties;
+function repoFullNameFromApiUrl(url) {
+  const m = url.match(/\/repos\/([^/]+)\/([^/]+)\/?$/);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+async function searchBountyIssues() {
+  const byUrl = /* @__PURE__ */ new Map();
+  for (const q of SEARCH_QUERIES) {
+    const res = await ghJson(
+      `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE}`
+    );
+    for (const it of res?.items ?? []) {
+      if (it.pull_request) continue;
+      if (!byUrl.has(it.html_url)) byUrl.set(it.html_url, it);
+    }
+  }
+  return [...byUrl.values()].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+}
+async function repoMetaCached(fullName) {
+  const hit = repoMetaCache.get(fullName);
+  if (hit !== void 0) return hit;
+  const r = await ghJson(`/repos/${fullName}`) ?? null;
+  repoMetaCache.set(fullName, r);
+  return r;
+}
+async function fetchSearchBounties() {
+  const issues = (await searchBountyIssues()).slice(0, MAX_SEARCH_ISSUES_SCANNED);
+  const distinctRepos = [
+    ...new Set(
+      issues.map((i) => repoFullNameFromApiUrl(i.repository_url)).filter((x) => !!x)
+    )
+  ];
+  for (let i = 0; i < distinctRepos.length; i += REPO_META_CONCURRENCY) {
+    await Promise.all(distinctRepos.slice(i, i + REPO_META_CONCURRENCY).map(repoMetaCached));
+  }
+  const jobs = [];
+  const perRepo = /* @__PURE__ */ new Map();
+  for (const issue of issues) {
+    if (jobs.length >= MAX_SEARCH_BOUNTIES) break;
+    const fullName = repoFullNameFromApiUrl(issue.repository_url);
+    if (!fullName) continue;
+    if ((perRepo.get(fullName) ?? 0) >= MAX_BOUNTIES_PER_REPO) continue;
+    const repo = await repoMetaCached(fullName);
+    if (!repo) continue;
+    const passes = passesMaturityGate({
+      fullName: repo.full_name,
+      stargazers: repo.stargazers_count,
+      createdAt: repo.created_at,
+      archived: repo.archived,
+      disabled: repo.disabled
+    });
+    if (!passes) continue;
+    const title = decodeEntities(issue.title).trim();
+    const body = issue.body ? decodeEntities(issue.body) : "";
+    const labels = labelNames(issue);
+    let amountUSD = parseAmountUSD(title) ?? parseAmountUSD(labels.join(" ")) ?? parseAmountUSD(body);
+    if (amountUSD == null && labels.some((n) => /💎|💰/.test(n))) {
+      amountUSD = await fetchCommentAmount(fullName, issue.number);
+    }
+    if (amountUSD == null) continue;
+    if (amountUSD > SEARCH_HIGH_VALUE_USD && repo.stargazers_count < SEARCH_HIGH_VALUE_MIN_STARS) continue;
+    const tags = normalize(
+      tokenize2([title, labels.join(" "), body.slice(0, 2e3)].join(" "))
+    );
+    perRepo.set(fullName, (perRepo.get(fullName) ?? 0) + 1);
+    jobs.push({
+      id: `bounty:${fullName}#${issue.number}`,
+      source: "bounty",
+      title,
+      company: repo.owner.login,
+      url: issue.html_url,
+      remote: true,
+      location: "Remote",
+      tags,
+      roleType: "freelance",
+      postedAt: issue.created_at,
+      applyMode: "direct",
+      bounty: {
+        amountUSD,
+        estimatedEffort: effortFromAmount(amountUSD),
+        bountySource: "github",
+        claimUrl: issue.html_url,
+        repoFullName: fullName,
+        repoStars: repo.stargazers_count,
+        issueBody: body.slice(0, 1e3) || void 0
+      },
+      raw: issue
+    });
+  }
+  return jobs;
+}
+var GITHUB_API, BOUNTY_LABEL_RE, SEARCH_QUERIES, SEARCH_PER_PAGE, MAX_SEARCH_BOUNTIES, MAX_SEARCH_ISSUES_SCANNED, REPO_META_CONCURRENCY, SEARCH_HIGH_VALUE_USD, SEARCH_HIGH_VALUE_MIN_STARS, repoMetaCache, githubBounties;
 var init_github_bounties = __esm({
   "../../packages/core/src/feeds/github-bounties.ts"() {
     "use strict";
     init_vocabulary();
     init_entities();
     init_bounty_gate();
+    init_http();
     GITHUB_API = "https://api.github.com";
     BOUNTY_LABEL_RE = /bounty|reward|funded|💎|💰/i;
+    SEARCH_QUERIES = [
+      'label:"\u{1F48E} Bounty" type:issue state:open',
+      // Algora-applied — highest signal
+      "label:bounty type:issue state:open",
+      'label:"\u{1F4B0} Bounty" type:issue state:open'
+    ];
+    SEARCH_PER_PAGE = 100;
+    MAX_SEARCH_BOUNTIES = 150;
+    MAX_SEARCH_ISSUES_SCANNED = 300;
+    REPO_META_CONCURRENCY = 15;
+    SEARCH_HIGH_VALUE_USD = 500;
+    SEARCH_HIGH_VALUE_MIN_STARS = 50;
+    repoMetaCache = /* @__PURE__ */ new Map();
     githubBounties = {
       source: "bounty",
       async fetch(opts) {
-        const repos = opts?.slugs && opts.slugs.length > 0 ? opts.slugs : DEFAULT_BOUNTY_REPOS;
-        console.info(`[github-bounties] scanning ${repos.length} repos`);
-        const settled = await Promise.allSettled(repos.map(fetchRepoBounties));
-        const jobs = [];
-        let failures = 0;
-        for (const r of settled) {
-          if (r.status === "fulfilled") jobs.push(...r.value);
-          else {
-            failures++;
-            console.warn("[github-bounties] repo fetch rejected:", r.reason);
+        const allowlist = opts?.slugs && opts.slugs.length > 0 ? opts.slugs : DEFAULT_BOUNTY_REPOS;
+        const [searched, listed] = await Promise.all([
+          fetchSearchBounties().catch((e) => {
+            console.warn("[github-bounties] search discovery failed:", e);
+            return [];
+          }),
+          Promise.allSettled(allowlist.map(fetchRepoBounties)).then(
+            (settled) => settled.flatMap((r) => r.status === "fulfilled" ? r.value : [])
+          )
+        ]);
+        const seen = /* @__PURE__ */ new Set();
+        const out = [];
+        for (const j of [...searched, ...listed]) {
+          if (!seen.has(j.id)) {
+            seen.add(j.id);
+            out.push(j);
           }
         }
-        console.info(`[github-bounties] total: ${jobs.length} bounties, ${failures} repo failures`);
+        console.info(
+          `[github-bounties] total: ${out.length} bounties (${searched.length} search + ${listed.length} allowlist, deduped)`
+        );
+        return out;
+      }
+    };
+  }
+});
+
+// ../../packages/core/src/feeds/opire.ts
+function tokenize3(text) {
+  return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter((w) => w.length > 1);
+}
+function effortFromAmount2(usd) {
+  if (usd == null) return void 0;
+  if (usd < 150) return "small";
+  if (usd < 750) return "medium";
+  return "large";
+}
+function priceToUSD(p) {
+  if (!p || typeof p.value !== "number") return void 0;
+  if (p.unit === "USD_CENT") return Math.round(p.value) / 100;
+  if (p.unit === "USD") return p.value;
+  return void 0;
+}
+function repoFullNameFromUrl(url) {
+  const m = url?.match(/github\.com\/([^/]+)\/([^/]+)/i);
+  return m ? `${m[1]}/${m[2].replace(/\.git$/, "")}` : void 0;
+}
+var OPIRE_REWARDS_URL, MIN_USD, MAX_USD, MAX_OPIRE_BOUNTIES, opire;
+var init_opire = __esm({
+  "../../packages/core/src/feeds/opire.ts"() {
+    "use strict";
+    init_vocabulary();
+    init_http();
+    OPIRE_REWARDS_URL = "https://api.opire.dev/rewards";
+    MIN_USD = 25;
+    MAX_USD = 25e3;
+    MAX_OPIRE_BOUNTIES = 100;
+    opire = {
+      source: "bounty",
+      async fetch() {
+        let rewards;
+        try {
+          const res = await fetchWithTimeout(OPIRE_REWARDS_URL, {
+            headers: { Accept: "application/json", "User-Agent": "terminalhire" }
+          });
+          if (!res.ok) {
+            console.warn(`[opire] HTTP ${res.status}`);
+            return [];
+          }
+          const json = await res.json();
+          rewards = Array.isArray(json) ? json : json?.data ?? json?.items ?? [];
+        } catch (err) {
+          console.warn("[opire] fetch failed \u2014", err);
+          return [];
+        }
+        const jobs = [];
+        for (const r of rewards) {
+          if (r.platform !== "GitHub") continue;
+          if (r.project && r.project.isPublic === false) continue;
+          const repoFullName = repoFullNameFromUrl(r.project?.url ?? r.url);
+          if (!repoFullName) continue;
+          const amountUSD = priceToUSD(r.pendingPrice);
+          if (amountUSD == null || amountUSD < MIN_USD || amountUSD > MAX_USD) continue;
+          const title = (r.title ?? "").trim();
+          if (title.length < 4) continue;
+          const tags = normalize([...r.programmingLanguages ?? [], ...tokenize3(title)]);
+          jobs.push({
+            id: `bounty:opire:${r.id}`,
+            source: "bounty",
+            title,
+            company: r.organization?.name ?? repoFullName.split("/")[0],
+            url: r.url,
+            remote: true,
+            location: "Remote",
+            tags,
+            roleType: "freelance",
+            postedAt: Number.isFinite(r.createdAt) ? new Date(r.createdAt).toISOString() : void 0,
+            applyMode: "direct",
+            bounty: {
+              amountUSD,
+              estimatedEffort: effortFromAmount2(amountUSD),
+              bountySource: "opire",
+              claimUrl: r.url,
+              repoFullName
+            },
+            raw: r
+          });
+          if (jobs.length >= MAX_OPIRE_BOUNTIES) break;
+        }
+        console.info(`[opire] ${jobs.length} bounties (from ${rewards.length} rewards)`);
+        return jobs;
+      }
+    };
+  }
+});
+
+// ../../packages/core/src/feeds/workable.ts
+function locationStr(loc) {
+  if (!loc) return "";
+  return [loc.city, loc.country].filter(Boolean).join(", ");
+}
+function isRemote(j) {
+  return j.remote === true || (j.workplace ?? "").toLowerCase() === "remote";
+}
+function extractTags7(j) {
+  const body = [...j.department ?? [], locationStr(j.location)].filter(Boolean).join(" ");
+  return extractSkillTags(j.title, body);
+}
+async function fetchAccount(account) {
+  const url = `https://apply.workable.com/api/v3/accounts/${account}/jobs`;
+  const out = [];
+  let token;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    let res;
+    try {
+      res = await fetchWithTimeout(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(token ? { token } : {})
+      });
+    } catch (err) {
+      console.warn(`[workable] ${account}: network error \u2014`, err);
+      break;
+    }
+    if (!res.ok) {
+      console.warn(`[workable] ${account}: HTTP ${res.status}`);
+      break;
+    }
+    let data;
+    try {
+      data = await res.json();
+    } catch (err) {
+      console.warn(`[workable] ${account}: JSON parse error \u2014`, err);
+      break;
+    }
+    const results = data.results ?? [];
+    for (const j of results) {
+      if (j.state && j.state !== "published") continue;
+      out.push({
+        id: `workable:${j.id}`,
+        source: "workable",
+        title: j.title,
+        company: account,
+        url: `https://apply.workable.com/${account}/j/${j.shortcode}/`,
+        remote: isRemote(j),
+        location: locationStr(j.location) || void 0,
+        tags: extractTags7(j),
+        roleType: "full_time",
+        postedAt: j.published,
+        applyMode: "direct",
+        raw: j
+      });
+    }
+    token = data.token;
+    if (!token || results.length === 0) break;
+  }
+  if (out.length > 0) console.info(`[workable] ${account}: ${out.length} jobs`);
+  return out;
+}
+var FALLBACK_ACCOUNTS, MAX_PAGES, workable;
+var init_workable = __esm({
+  "../../packages/core/src/feeds/workable.ts"() {
+    "use strict";
+    init_vocabulary();
+    init_http();
+    FALLBACK_ACCOUNTS = ["zego", "workmotion"];
+    MAX_PAGES = 5;
+    workable = {
+      source: "workable",
+      async fetch(opts) {
+        const accounts = opts?.slugs && opts.slugs.length > 0 ? opts.slugs : FALLBACK_ACCOUNTS;
+        console.info(`[workable] fetching ${accounts.length} accounts: ${accounts.join(", ")}`);
+        const results = await Promise.allSettled(accounts.map(fetchAccount));
+        const jobs = [];
+        let failures = 0;
+        for (const r of results) {
+          if (r.status === "fulfilled") {
+            jobs.push(...r.value);
+          } else {
+            failures++;
+            console.warn("[workable] account fetch rejected:", r.reason);
+          }
+        }
+        console.info(`[workable] total: ${jobs.length} jobs, ${failures} account failures`);
         return jobs;
       }
     };
@@ -1886,7 +2294,19 @@ var init_github_bounties = __esm({
 
 // ../../packages/core/src/feeds/index.ts
 async function aggregateBounties(opts) {
-  return githubBounties.fetch({ slugs: opts?.repos });
+  const [gh, op] = await Promise.all([
+    githubBounties.fetch({ slugs: opts?.repos }),
+    opire.fetch()
+  ]);
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const j of [...gh, ...op]) {
+    const key = j.bounty?.claimUrl ?? j.url;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(j);
+  }
+  return out;
 }
 function flattenTiers(t) {
   return [.../* @__PURE__ */ new Set([...t.bigco, ...t.scaleup, ...t.startup])];
@@ -1895,18 +2315,20 @@ async function aggregate(opts) {
   const ghSlugs = opts?.slugs?.["greenhouse"] ?? DEFAULT_GREENHOUSE_SLUGS;
   const ashbySlugs = opts?.slugs?.["ashby"] ?? DEFAULT_ASHBY_SLUGS;
   const leverSlugs = opts?.slugs?.["lever"] ?? DEFAULT_LEVER_SLUGS;
+  const workableSlugs = opts?.slugs?.["workable"] ?? DEFAULT_WORKABLE_SLUGS;
   const limit = opts?.limit ?? 150;
   const settled = await Promise.allSettled([
     greenhouse.fetch({ slugs: ghSlugs, limit }),
     ashby.fetch({ slugs: ashbySlugs, limit }),
     lever.fetch({ slugs: leverSlugs, limit }),
+    workable.fetch({ slugs: workableSlugs, limit }),
     himalayas.fetch({ limit }),
     wwr.fetch({ limit }),
     hn.fetch({ limit })
   ]);
   const seen = /* @__PURE__ */ new Set();
   const jobs = [];
-  const sourceNames = ["greenhouse", "ashby", "lever", "himalayas", "wwr", "hn"];
+  const sourceNames = ["greenhouse", "ashby", "lever", "workable", "himalayas", "wwr", "hn"];
   for (let i = 0; i < settled.length; i++) {
     const result = settled[i];
     if (result.status === "rejected") {
@@ -1922,7 +2344,7 @@ async function aggregate(opts) {
   }
   if (opts?.includeBounties !== false) {
     try {
-      const bounties = await githubBounties.fetch({ slugs: opts?.slugs?.["bounty"], limit });
+      const bounties = await aggregateBounties({ repos: opts?.slugs?.["bounty"] });
       for (const b of bounties) {
         if (!seen.has(b.id)) {
           seen.add(b.id);
@@ -1935,7 +2357,7 @@ async function aggregate(opts) {
   }
   return jobs;
 }
-var FEEDS, GREENHOUSE_SLUGS_BY_TIER, ASHBY_SLUGS_BY_TIER, LEVER_SLUGS_BY_TIER, DEFAULT_GREENHOUSE_SLUGS, DEFAULT_ASHBY_SLUGS, DEFAULT_LEVER_SLUGS;
+var FEEDS, GREENHOUSE_SLUGS_BY_TIER, ASHBY_SLUGS_BY_TIER, LEVER_SLUGS_BY_TIER, DEFAULT_GREENHOUSE_SLUGS, DEFAULT_ASHBY_SLUGS, DEFAULT_LEVER_SLUGS, DEFAULT_WORKABLE_SLUGS;
 var init_feeds = __esm({
   "../../packages/core/src/feeds/index.ts"() {
     "use strict";
@@ -1946,8 +2368,10 @@ var init_feeds = __esm({
     init_wwr();
     init_hn();
     init_github_bounties();
+    init_opire();
+    init_workable();
     init_bounty_gate();
-    FEEDS = [greenhouse, ashby, lever, himalayas, wwr, hn];
+    FEEDS = [greenhouse, ashby, lever, workable, himalayas, wwr, hn];
     GREENHOUSE_SLUGS_BY_TIER = {
       bigco: [
         "stripe",
@@ -2053,6 +2477,7 @@ var init_feeds = __esm({
     DEFAULT_GREENHOUSE_SLUGS = flattenTiers(GREENHOUSE_SLUGS_BY_TIER);
     DEFAULT_ASHBY_SLUGS = flattenTiers(ASHBY_SLUGS_BY_TIER);
     DEFAULT_LEVER_SLUGS = flattenTiers(LEVER_SLUGS_BY_TIER);
+    DEFAULT_WORKABLE_SLUGS = ["zego", "workmotion"];
   }
 });
 
@@ -2153,6 +2578,7 @@ __export(src_exports, {
   DEFAULT_BOUNTY_REPOS: () => DEFAULT_BOUNTY_REPOS,
   DEFAULT_GREENHOUSE_SLUGS: () => DEFAULT_GREENHOUSE_SLUGS,
   DEFAULT_LEVER_SLUGS: () => DEFAULT_LEVER_SLUGS,
+  DEFAULT_WORKABLE_SLUGS: () => DEFAULT_WORKABLE_SLUGS,
   EXAMPLE_BUYER: () => EXAMPLE_BUYER,
   FEEDS: () => FEEDS,
   GRAPH: () => GRAPH,
@@ -2171,10 +2597,13 @@ __export(src_exports, {
   buildIndex: () => buildIndex,
   buildReason: () => buildReason,
   computeAcceptanceCredential: () => computeAcceptanceCredential,
+  computeAcceptanceCredentialPublic: () => computeAcceptanceCredentialPublic,
   coreTagsFromTitle: () => coreTagsFromTitle,
+  deriveResumeTrend: () => deriveResumeTrend,
   expandWeighted: () => expandWeighted,
   extractSkillTags: () => extractSkillTags,
   fetchGitHubProfile: () => fetchGitHubProfile,
+  fetchRepoRecency: () => fetchRepoRecency,
   flattenTiers: () => flattenTiers,
   getBuyer: () => getBuyer,
   githubBounties: () => githubBounties,
@@ -2188,9 +2617,11 @@ __export(src_exports, {
   looksLikeEngRole: () => looksLikeEngRole,
   match: () => match,
   normalize: () => normalize,
+  opire: () => opire,
   passesMaturityGate: () => passesMaturityGate,
   tokenize: () => tokenize,
   validateGraph: () => validateGraph,
+  workable: () => workable,
   wwr: () => wwr
 });
 var init_src = __esm({

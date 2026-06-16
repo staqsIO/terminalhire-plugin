@@ -7,14 +7,14 @@
   },
   "metadata": {
     "description": "Developer tools by staqs",
-    "version": "0.4.0"
+    "version": "0.4.1"
   },
   "plugins": [
     {
       "name": "terminalhire",
       "source": "./plugins/terminalhire",
       "description": "Local-first job matching for developers, in the terminal. Surfaces contextually-relevant roles in the Claude Code spinner while you work — matching runs 100% on your machine and your profile never leaves it. Run `terminalhire init` after install.",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "author": {
         "name": "staqs",
         "email": "eric@staqs.io"

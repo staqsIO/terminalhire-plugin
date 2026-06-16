@@ -145,7 +145,7 @@ var init_graph_data = __esm({
       { id: "airflow", parents: ["data-engineering"], synonyms: ["apache-airflow"] },
       { id: "dbt", parents: ["data-engineering"] },
       { id: "ml", synonyms: ["machine-learning"], related: [{ to: "pytorch", w: 0.5 }, { to: "tensorflow", w: 0.5 }, { to: "scikit-learn", w: 0.5 }, { to: "data-engineering", w: 0.4 }] },
-      { id: "llm", parents: ["ml"], synonyms: ["llms", "genai", "generative-ai"], related: [{ to: "langchain", w: 0.5 }, { to: "rag", w: 0.55 }, { to: "openai", w: 0.45 }, { to: "anthropic", w: 0.45 }] },
+      { id: "llm", parents: ["ml"], synonyms: ["llms", "genai", "generative-ai", "gpt"], related: [{ to: "langchain", w: 0.5 }, { to: "rag", w: 0.55 }, { to: "openai", w: 0.45 }, { to: "anthropic", w: 0.45 }] },
       { id: "pytorch", parents: ["ml"], synonyms: ["torch"], related: [{ to: "tensorflow", w: 0.5 }] },
       { id: "tensorflow", parents: ["ml"], synonyms: ["keras", "tf-keras"] },
       { id: "pandas", parents: ["python"], related: [{ to: "numpy", w: 0.6 }, { to: "data-engineering", w: 0.45 }, { to: "spark", w: 0.4 }] },
@@ -158,6 +158,14 @@ var init_graph_data = __esm({
       { id: "anthropic", parents: ["llm"], synonyms: ["claude"] },
       { id: "rag", parents: ["llm"], synonyms: ["retrieval-augmented-generation"] },
       { id: "mlops", parents: ["ml"], related: [{ to: "devops", w: 0.4 }] },
+      { id: "agents", parents: ["llm"], synonyms: ["agentic", "ai-agents", "multi-agent"], related: [{ to: "rag", w: 0.4 }] },
+      { id: "mcp", parents: ["agents"], synonyms: ["model-context-protocol"], related: [{ to: "llm", w: 0.45 }] },
+      { id: "inference", parents: ["ml"], synonyms: ["model-inference", "llm-inference", "model-serving"], related: [{ to: "mlops", w: 0.5 }, { to: "llm", w: 0.4 }] },
+      { id: "embeddings", parents: ["ml"], synonyms: ["embedding", "vector-embeddings"], related: [{ to: "rag", w: 0.55 }, { to: "llm", w: 0.45 }] },
+      { id: "prompt-engineering", parents: ["llm"], synonyms: ["prompting", "prompt"] },
+      { id: "fine-tuning", parents: ["ml"], synonyms: ["finetuning", "fine-tune", "rlhf"], related: [{ to: "llm", w: 0.5 }] },
+      { id: "computer-vision", parents: ["ml"], synonyms: ["image-recognition", "object-detection"] },
+      { id: "recsys", parents: ["ml"], synonyms: ["recommender-systems", "recommendation-systems", "recommendation"] },
       // ── Mobile ──────────────────────────────────────────────────────────────────
       { id: "mobile", related: [{ to: "ios", w: 0.5 }, { to: "android", w: 0.5 }] },
       { id: "ios", parents: ["mobile", "swift"], related: [{ to: "android", w: 0.4 }] },
@@ -403,10 +411,12 @@ var init_vocabulary = __esm({
 });
 
 // ../../packages/core/src/github.ts
+var RESUME_DECAY_HALF_LIFE_MS;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
     init_vocabulary();
+    RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
   }
 });
 
@@ -419,11 +429,19 @@ var init_matcher = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/http.ts
+var init_http = __esm({
+  "../../packages/core/src/feeds/http.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/feeds/greenhouse.ts
 var init_greenhouse = __esm({
   "../../packages/core/src/feeds/greenhouse.ts"() {
     "use strict";
     init_vocabulary();
+    init_http();
   }
 });
 
@@ -432,6 +450,7 @@ var init_ashby = __esm({
   "../../packages/core/src/feeds/ashby.ts"() {
     "use strict";
     init_vocabulary();
+    init_http();
   }
 });
 
@@ -440,6 +459,7 @@ var init_lever = __esm({
   "../../packages/core/src/feeds/lever.ts"() {
     "use strict";
     init_vocabulary();
+    init_http();
   }
 });
 
@@ -448,6 +468,7 @@ var init_himalayas = __esm({
   "../../packages/core/src/feeds/himalayas.ts"() {
     "use strict";
     init_vocabulary();
+    init_http();
   }
 });
 
@@ -464,6 +485,7 @@ var init_wwr = __esm({
     "use strict";
     init_vocabulary();
     init_entities();
+    init_http();
   }
 });
 
@@ -473,6 +495,7 @@ var init_hn = __esm({
     "use strict";
     init_vocabulary();
     init_entities();
+    init_http();
   }
 });
 
@@ -490,6 +513,25 @@ var init_github_bounties = __esm({
     init_vocabulary();
     init_entities();
     init_bounty_gate();
+    init_http();
+  }
+});
+
+// ../../packages/core/src/feeds/opire.ts
+var init_opire = __esm({
+  "../../packages/core/src/feeds/opire.ts"() {
+    "use strict";
+    init_vocabulary();
+    init_http();
+  }
+});
+
+// ../../packages/core/src/feeds/workable.ts
+var init_workable = __esm({
+  "../../packages/core/src/feeds/workable.ts"() {
+    "use strict";
+    init_vocabulary();
+    init_http();
   }
 });
 
@@ -508,6 +550,8 @@ var init_feeds = __esm({
     init_wwr();
     init_hn();
     init_github_bounties();
+    init_opire();
+    init_workable();
     init_bounty_gate();
     GREENHOUSE_SLUGS_BY_TIER = {
       bigco: [
