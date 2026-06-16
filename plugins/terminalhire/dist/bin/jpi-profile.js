@@ -144,11 +144,11 @@ var init_graph_data = __esm({
       { id: "spark", parents: ["data-engineering"], synonyms: ["apache-spark"] },
       { id: "airflow", parents: ["data-engineering"], synonyms: ["apache-airflow"] },
       { id: "dbt", parents: ["data-engineering"] },
-      { id: "ml", synonyms: ["machine-learning"], related: [{ to: "pytorch", w: 0.5 }, { to: "tensorflow", w: 0.5 }, { to: "scikit-learn", w: 0.5 }] },
+      { id: "ml", synonyms: ["machine-learning"], related: [{ to: "pytorch", w: 0.5 }, { to: "tensorflow", w: 0.5 }, { to: "scikit-learn", w: 0.5 }, { to: "data-engineering", w: 0.4 }] },
       { id: "llm", parents: ["ml"], synonyms: ["llms", "genai", "generative-ai"], related: [{ to: "langchain", w: 0.5 }, { to: "rag", w: 0.55 }, { to: "openai", w: 0.45 }, { to: "anthropic", w: 0.45 }] },
       { id: "pytorch", parents: ["ml"], synonyms: ["torch"], related: [{ to: "tensorflow", w: 0.5 }] },
       { id: "tensorflow", parents: ["ml"], synonyms: ["keras", "tf-keras"] },
-      { id: "pandas", parents: ["python"], related: [{ to: "numpy", w: 0.6 }] },
+      { id: "pandas", parents: ["python"], related: [{ to: "numpy", w: 0.6 }, { to: "data-engineering", w: 0.45 }, { to: "spark", w: 0.4 }] },
       { id: "numpy", parents: ["python"] },
       { id: "scikit-learn", parents: ["ml"], synonyms: ["sklearn"] },
       { id: "jupyter", parents: ["python"] },
@@ -323,6 +323,46 @@ var init_types2 = __esm({
   }
 });
 
+// ../../packages/core/src/vocab/extract.ts
+var SOFT_DOMAIN, SYNONYM_ONLY;
+var init_extract = __esm({
+  "../../packages/core/src/vocab/extract.ts"() {
+    "use strict";
+    init_vocab();
+    SOFT_DOMAIN = /* @__PURE__ */ new Set([
+      "frontend",
+      "backend",
+      "devops",
+      "security",
+      "payments",
+      "billing",
+      "microservices",
+      "caching",
+      "search",
+      "observability",
+      "monitoring",
+      "testing",
+      "accessibility",
+      "seo",
+      "performance",
+      "realtime",
+      "authentication",
+      "api-design"
+    ]);
+    SYNONYM_ONLY = /* @__PURE__ */ new Set(["performance", "security", "seo"]);
+    for (const id of SYNONYM_ONLY) {
+      if (!SOFT_DOMAIN.has(id)) throw new Error(`extract: SYNONYM_ONLY "${id}" not in SOFT_DOMAIN`);
+    }
+  }
+});
+
+// ../../packages/core/src/vocab/idf-background.ts
+var init_idf_background = __esm({
+  "../../packages/core/src/vocab/idf-background.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/vocab/index.ts
 function normalize(tokens) {
   const result = /* @__PURE__ */ new Set();
@@ -346,6 +386,8 @@ var init_vocab = __esm({
     init_types2();
     init_closure();
     init_graph_data();
+    init_extract();
+    init_idf_background();
     GRAPH = buildGraph(VOCAB_NODES);
     VOCABULARY = [...GRAPH.ids];
     SYNONYMS = Object.fromEntries(GRAPH.synonyms);
@@ -360,11 +402,20 @@ var init_vocabulary = __esm({
   }
 });
 
+// ../../packages/core/src/github.ts
+var init_github = __esm({
+  "../../packages/core/src/github.ts"() {
+    "use strict";
+    init_vocabulary();
+  }
+});
+
 // ../../packages/core/src/matcher.ts
 var init_matcher = __esm({
   "../../packages/core/src/matcher.ts"() {
     "use strict";
     init_vocabulary();
+    init_github();
   }
 });
 
@@ -591,14 +642,6 @@ var init_indexer = __esm({
     "use strict";
     init_feeds();
     init_partners();
-  }
-});
-
-// ../../packages/core/src/github.ts
-var init_github = __esm({
-  "../../packages/core/src/github.ts"() {
-    "use strict";
-    init_vocabulary();
   }
 });
 

@@ -3,6 +3,6 @@
     "name": "terminalhire-refresh",
     "description": "Refreshing your job matches",
     "when": "always",
-    "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/refresh-loop.sh"
+    "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/refresh-loop.sh\" \"${CLAUDE_PLUGIN_ROOT}\""
   }
 ]

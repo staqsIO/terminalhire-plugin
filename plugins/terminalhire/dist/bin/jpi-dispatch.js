@@ -361,11 +361,11 @@ var init_graph_data = __esm({
       { id: "spark", parents: ["data-engineering"], synonyms: ["apache-spark"] },
       { id: "airflow", parents: ["data-engineering"], synonyms: ["apache-airflow"] },
       { id: "dbt", parents: ["data-engineering"] },
-      { id: "ml", synonyms: ["machine-learning"], related: [{ to: "pytorch", w: 0.5 }, { to: "tensorflow", w: 0.5 }, { to: "scikit-learn", w: 0.5 }] },
+      { id: "ml", synonyms: ["machine-learning"], related: [{ to: "pytorch", w: 0.5 }, { to: "tensorflow", w: 0.5 }, { to: "scikit-learn", w: 0.5 }, { to: "data-engineering", w: 0.4 }] },
       { id: "llm", parents: ["ml"], synonyms: ["llms", "genai", "generative-ai"], related: [{ to: "langchain", w: 0.5 }, { to: "rag", w: 0.55 }, { to: "openai", w: 0.45 }, { to: "anthropic", w: 0.45 }] },
       { id: "pytorch", parents: ["ml"], synonyms: ["torch"], related: [{ to: "tensorflow", w: 0.5 }] },
       { id: "tensorflow", parents: ["ml"], synonyms: ["keras", "tf-keras"] },
-      { id: "pandas", parents: ["python"], related: [{ to: "numpy", w: 0.6 }] },
+      { id: "pandas", parents: ["python"], related: [{ to: "numpy", w: 0.6 }, { to: "data-engineering", w: 0.45 }, { to: "spark", w: 0.4 }] },
       { id: "numpy", parents: ["python"] },
       { id: "scikit-learn", parents: ["ml"], synonyms: ["sklearn"] },
       { id: "jupyter", parents: ["python"] },
@@ -540,6 +540,207 @@ var init_types2 = __esm({
   }
 });
 
+// ../../packages/core/src/vocab/extract.ts
+function tokenize(text) {
+  return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
+}
+function looksLikeEngRole(title) {
+  return !NON_ENG_TITLE.test(title) && ENG_INTENT.test(title);
+}
+function resolveToken(token) {
+  const tryOne = (t) => {
+    if (GRAPH.ids.has(t)) return { id: t, viaSynonym: false };
+    const mapped = GRAPH.synonyms.get(t);
+    return mapped ? { id: mapped, viaSynonym: true } : null;
+  };
+  return tryOne(token) ?? tryOne(token.replace(/^[.\-+#]+|[.\-+#]+$/g, ""));
+}
+function extractSkillTags(title, body = "") {
+  if (!looksLikeEngRole(title)) return [];
+  const text = `${title}
+${body}`;
+  const tokens = tokenize(text);
+  const ids = /* @__PURE__ */ new Set();
+  const ambiguousPending = /* @__PURE__ */ new Set();
+  for (const tok of tokens) {
+    const r = resolveToken(tok);
+    if (!r) continue;
+    if (NON_EXTRACTABLE.has(r.id)) continue;
+    if (SYNONYM_ONLY.has(r.id) && !r.viaSynonym) continue;
+    const cue = AMBIGUOUS[r.id];
+    if (cue) {
+      if (cue.test(text)) ids.add(r.id);
+      else ambiguousPending.add(r.id);
+      continue;
+    }
+    ids.add(r.id);
+  }
+  const hardCount = [...ids].filter((id) => !SOFT_DOMAIN.has(id)).length;
+  if (hardCount >= 2) for (const id of ambiguousPending) ids.add(id);
+  return [...ids];
+}
+function coreTagsFromTitle(title) {
+  return extractSkillTags(title, "").filter((t) => !SOFT_DOMAIN.has(t));
+}
+var SOFT_DOMAIN, SYNONYM_ONLY, NON_EXTRACTABLE, AMBIGUOUS, ENG_INTENT, NON_ENG_TITLE;
+var init_extract = __esm({
+  "../../packages/core/src/vocab/extract.ts"() {
+    "use strict";
+    init_vocab();
+    SOFT_DOMAIN = /* @__PURE__ */ new Set([
+      "frontend",
+      "backend",
+      "devops",
+      "security",
+      "payments",
+      "billing",
+      "microservices",
+      "caching",
+      "search",
+      "observability",
+      "monitoring",
+      "testing",
+      "accessibility",
+      "seo",
+      "performance",
+      "realtime",
+      "authentication",
+      "api-design"
+    ]);
+    SYNONYM_ONLY = /* @__PURE__ */ new Set(["performance", "security", "seo"]);
+    NON_EXTRACTABLE = /* @__PURE__ */ new Set(["payments", "billing"]);
+    for (const id of SYNONYM_ONLY) {
+      if (!SOFT_DOMAIN.has(id)) throw new Error(`extract: SYNONYM_ONLY "${id}" not in SOFT_DOMAIN`);
+    }
+    AMBIGUOUS = {
+      // Accept "go" with an ecosystem cue OR an explicit-skill phrasing ("Go developer",
+      // "in Go", "experience with Go"). Rejects prose: "ready to go", "go above", "go live".
+      go: /\b(golang|goroutines?|go\.mod|gin framework|gorm)\b|\bgo\b\s+(developer|engineer|programmer|microservices?|backend|services?|lang)|\b(in|with|using|written in|built in|experience (?:in|with)|proficient in|fluent in)\s+go\b/i,
+      r: /\b(rstudio|tidyverse|ggplot|shiny|dplyr|cran|r-lang|rlang)\b/i,
+      ml: /\b(machine[\s-]?learning|pytorch|tensorflow|scikit|sklearn|keras|neural|model training|deep[\s-]?learning|numpy|pandas|ml\s+(?:engineer|platform|researcher|infrastructure)|(?:ml|ai)\s+research)\b/i
+    };
+    ENG_INTENT = /\b(engineer|engineering|developer|dev\b|swe|sde|programmer|architect|full[\s-]?stack|front[\s-]?end|back[\s-]?end|devops|sre|software|coding|codebase|technical staff|tech(?:nical)? lead)\b/i;
+    NON_ENG_TITLE = /\b(account executive|account manager|sales (?:rep|representative|development|manager|lead)|sdr|bdr|recruiter|recruiting|talent|marketing|administrative|business partner|billing coordinator|operations (?:administrator|coordinator)|customer success|project finance|controller|bookkeeper|graphic|brand)\b/i;
+  }
+});
+
+// ../../packages/core/src/vocab/idf-background.ts
+var IDF_BACKGROUND;
+var init_idf_background = __esm({
+  "../../packages/core/src/vocab/idf-background.ts"() {
+    "use strict";
+    IDF_BACKGROUND = {
+      N: 244,
+      df: {
+        "backend": 71,
+        "python": 57,
+        "monitoring": 44,
+        "nextjs": 40,
+        "testing": 40,
+        "observability": 38,
+        "llm": 38,
+        "go": 36,
+        "aws": 36,
+        "react": 33,
+        "frontend": 30,
+        "ml": 28,
+        "mobile": 24,
+        "realtime": 24,
+        "typescript": 23,
+        "devops": 22,
+        "kubernetes": 22,
+        "javascript": 21,
+        "java": 20,
+        "rag": 20,
+        "api-design": 20,
+        "linux": 19,
+        "postgresql": 19,
+        "search": 17,
+        "azure": 16,
+        "snowflake": 15,
+        "spark": 15,
+        "kotlin": 14,
+        "gcp": 14,
+        "accessibility": 14,
+        "nodejs": 14,
+        "graphql": 14,
+        "airflow": 14,
+        "docker": 14,
+        "ci-cd": 13,
+        "android": 12,
+        "cpp": 12,
+        "gitlab-ci": 11,
+        "anthropic": 11,
+        "terraform": 11,
+        "mysql": 11,
+        "r": 10,
+        "dbt": 9,
+        "langchain": 9,
+        "pytorch": 9,
+        "ruby": 9,
+        "rails": 9,
+        "cloudflare": 7,
+        "datadog": 7,
+        "css": 7,
+        "ansible": 7,
+        "openai": 6,
+        "kafka": 6,
+        "rust": 5,
+        "grpc": 5,
+        "microservices": 5,
+        "serverless": 5,
+        "scala": 5,
+        "prometheus": 5,
+        "grafana": 5,
+        "php": 5,
+        "redis": 5,
+        "huggingface": 4,
+        "pandas": 4,
+        "scikit-learn": 4,
+        "html": 4,
+        "ios": 4,
+        "authentication": 4,
+        "vue": 4,
+        "mlops": 3,
+        "spring": 3,
+        "mongodb": 3,
+        "csharp": 3,
+        "swift": 2,
+        "caching": 2,
+        "haskell": 2,
+        "pulumi": 2,
+        "argocd": 2,
+        "tensorflow": 2,
+        "express": 2,
+        "elasticsearch": 2,
+        "clickhouse": 2,
+        "nestjs": 2,
+        "vite": 2,
+        "svelte": 2,
+        "phoenix": 2,
+        "angular": 2,
+        "django": 2,
+        "dotnet": 2,
+        "elixir": 2,
+        "bun": 1,
+        "oauth": 1,
+        "dynamodb": 1,
+        "helm": 1,
+        "playwright": 1,
+        "cypress": 1,
+        "jest": 1,
+        "mocha": 1,
+        "typeorm": 1,
+        "tailwind": 1,
+        "prisma": 1,
+        "expo": 1,
+        "rabbitmq": 1,
+        "redux": 1
+      }
+    };
+  }
+});
+
 // ../../packages/core/src/vocab/index.ts
 function normalize(tokens) {
   const result = /* @__PURE__ */ new Set();
@@ -576,6 +777,8 @@ var init_vocab = __esm({
     init_types2();
     init_closure();
     init_graph_data();
+    init_extract();
+    init_idf_background();
     GRAPH = buildGraph(VOCAB_NODES);
     VOCABULARY = [...GRAPH.ids];
     SYNONYMS = Object.fromEntries(GRAPH.synonyms);
@@ -590,23 +793,250 @@ var init_vocabulary = __esm({
   }
 });
 
-// ../../packages/core/src/matcher.ts
-function computeIdf(jobs) {
-  const docFreq = /* @__PURE__ */ new Map();
-  const N = jobs.length;
-  for (const job of jobs) {
-    const unique = new Set(job.tags);
-    for (const tag of unique) {
-      docFreq.set(tag, (docFreq.get(tag) ?? 0) + 1);
+// ../../packages/core/src/github.ts
+function ghHeaders(token) {
+  const headers = {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28"
+  };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
+}
+async function ghFetch(path, token) {
+  const url = `https://api.github.com${path}`;
+  const res = await fetch(url, { headers: ghHeaders(token) });
+  if (!res.ok) {
+    throw new Error(`GitHub API ${path}: HTTP ${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+async function fetchGitHubProfile(login, token) {
+  const user = await ghFetch(`/users/${login}`, token);
+  let repos = [];
+  try {
+    repos = await ghFetch(
+      `/users/${login}/repos?sort=pushed&per_page=100`,
+      token
+    );
+  } catch (err) {
+    console.warn(`[github] ${login}: repos fetch failed, continuing \u2014`, err);
+  }
+  const langCount = {};
+  for (const repo of repos) {
+    if (repo.fork) continue;
+    if (repo.language) {
+      langCount[repo.language.toLowerCase()] = (langCount[repo.language.toLowerCase()] ?? 0) + 1;
     }
   }
-  const idf = /* @__PURE__ */ new Map();
-  for (const [tag, df] of docFreq) {
-    idf.set(tag, Math.log((N + 1) / (df + 1)) + 1);
+  const topLanguages = Object.entries(langCount).sort(([, a], [, b]) => b - a).slice(0, 10).map(([lang]) => lang);
+  const topicSet = /* @__PURE__ */ new Set();
+  for (const repo of repos) {
+    if (repo.fork) continue;
+    for (const t of repo.topics ?? []) topicSet.add(t.toLowerCase());
   }
-  return idf;
+  const topics = Array.from(topicSet).slice(0, 30);
+  let recentPRorgs;
+  try {
+    const q = encodeURIComponent(
+      `type:pr is:merged author:${login} sort:updated`
+    );
+    const result = await ghFetch(
+      `/search/issues?q=${q}&per_page=30`,
+      token
+    );
+    const orgs = /* @__PURE__ */ new Set();
+    for (const item of result.items ?? []) {
+      const orgLogin = item.repository?.owner?.login;
+      if (orgLogin && orgLogin !== login) orgs.add(orgLogin);
+    }
+    if (orgs.size > 0) recentPRorgs = Array.from(orgs);
+  } catch {
+  }
+  return {
+    login: user.login,
+    name: user.name ?? void 0,
+    publicEmail: user.email ?? void 0,
+    avatarUrl: user.avatar_url,
+    accountCreatedAt: user.created_at,
+    publicRepos: user.public_repos,
+    followers: user.followers,
+    topLanguages,
+    topics,
+    recentPRorgs
+  };
 }
-function inferSeniority(title) {
+function inferSeniority(p) {
+  const ageMs = Date.now() - new Date(p.accountCreatedAt).getTime();
+  const ageYears = ageMs / (1e3 * 60 * 60 * 24 * 365.25);
+  if (ageYears >= 9 && (p.publicRepos >= 40 || p.followers >= 500)) return "staff";
+  if (ageYears >= 5 && (p.publicRepos >= 20 || p.followers >= 100)) return "senior";
+  if (ageYears >= 2 && p.publicRepos >= 5) return "mid";
+  return "junior";
+}
+function githubToFingerprint(p) {
+  const rawTokens = [
+    ...p.topLanguages,
+    ...p.topics
+    // recentPRorgs intentionally excluded — org names are not skill tags
+  ];
+  const skillTags = normalize(rawTokens);
+  const seniorityBand = inferSeniority(p);
+  return { skillTags, seniorityBand };
+}
+async function ghFetchRaw(path, token) {
+  return fetch(`https://api.github.com${path}`, { headers: ghHeaders(token) });
+}
+function parseRepoUrl(repoUrl) {
+  const m = repoUrl.match(/\/repos\/([^/]+)\/([^/]+)\/?$/);
+  return m ? { owner: m[1], name: m[2] } : null;
+}
+function isTrivialPRTitle(title) {
+  return TRIVIAL_PR_TITLE.test(title);
+}
+async function fetchOwnedOrgs(token) {
+  try {
+    const memberships = await ghFetch(`/user/memberships/orgs?per_page=100`, token);
+    return new Set(
+      memberships.filter((m) => m.role === "admin").map((m) => m.organization.login.toLowerCase())
+    );
+  } catch {
+    return /* @__PURE__ */ new Set();
+  }
+}
+async function repoContributorCount(owner, name, token) {
+  try {
+    const res = await ghFetchRaw(
+      `/repos/${owner}/${name}/contributors?per_page=1&anon=false`,
+      token
+    );
+    if (!res.ok) return void 0;
+    const link = res.headers.get("link");
+    const m = link?.match(/[?&]page=(\d+)>;\s*rel="last"/);
+    if (m) return Number(m[1]);
+    const body = await res.json();
+    return Array.isArray(body) ? body.length : 0;
+  } catch {
+    return void 0;
+  }
+}
+async function fetchRepoMeta(owner, name, token, cache) {
+  const key = `${owner}/${name}`.toLowerCase();
+  const cached = cache.get(key);
+  if (cached !== void 0) return cached;
+  let meta = null;
+  try {
+    const r = await ghFetch(`/repos/${owner}/${name}`, token);
+    const contributors = await repoContributorCount(owner, name, token);
+    meta = {
+      stars: r.stargazers_count ?? 0,
+      archived: !!r.archived,
+      fork: !!r.fork,
+      language: r.language ?? null,
+      topics: r.topics ?? [],
+      contributors
+    };
+  } catch {
+    meta = null;
+  }
+  cache.set(key, meta);
+  return meta;
+}
+async function computeAcceptanceCredential(login, token, cache = /* @__PURE__ */ new Map()) {
+  const computedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const empty = (status) => ({
+    status,
+    byDomain: {},
+    qualifyingTotal: 0,
+    computedAt
+  });
+  if (!token) return empty("no-token");
+  const ownedOrgs = await fetchOwnedOrgs(token);
+  const loginLc = login.toLowerCase();
+  let items;
+  try {
+    const q = encodeURIComponent(`type:pr is:merged author:${login} -user:${login} sort:updated`);
+    const res = await ghFetch(
+      `/search/issues?q=${q}&per_page=${CANDIDATE_PR_PAGE}`,
+      token
+    );
+    items = res.items ?? [];
+  } catch (err) {
+    const msg = String(err);
+    return empty(/HTTP 403|HTTP 429|rate limit/i.test(msg) ? "rate-limited" : "failed");
+  }
+  const byDomain = {};
+  let qualifyingTotal = 0;
+  for (const item of items) {
+    const repo = parseRepoUrl(item.repository_url);
+    if (!repo) continue;
+    const ownerLc = repo.owner.toLowerCase();
+    if (ownerLc === loginLc) continue;
+    if (ownedOrgs.has(ownerLc)) continue;
+    if (isTrivialPRTitle(item.title)) continue;
+    const meta = await fetchRepoMeta(repo.owner, repo.name, token, cache);
+    if (!meta) continue;
+    if (meta.archived || meta.fork) continue;
+    if (meta.stars < MIN_STARS) continue;
+    if (meta.contributors !== void 0 && meta.contributors < MIN_CONTRIBUTORS) continue;
+    qualifyingTotal += 1;
+    const mergedAt = item.pull_request?.merged_at ?? item.closed_at ?? item.created_at;
+    const rawDomains = [meta.language ?? "", ...meta.topics].filter(Boolean);
+    for (const d of new Set(normalize(rawDomains))) {
+      const b = byDomain[d] ?? (byDomain[d] = { mergedPRs: 0, distinctOrgs: 0, lastMergedAt: mergedAt, orgs: /* @__PURE__ */ new Set() });
+      b.mergedPRs += 1;
+      b.orgs.add(ownerLc);
+      if (mergedAt > b.lastMergedAt) b.lastMergedAt = mergedAt;
+    }
+  }
+  const finalDomains = {};
+  for (const [d, b] of Object.entries(byDomain)) {
+    finalDomains[d] = {
+      mergedPRs: b.mergedPRs,
+      distinctOrgs: b.orgs.size,
+      lastMergedAt: b.lastMergedAt
+    };
+  }
+  return { status: "ok", byDomain: finalDomains, qualifyingTotal, computedAt };
+}
+function acceptanceCountForDomains(cred, domains) {
+  if (cred.status !== "ok") return 0;
+  let max = 0;
+  for (const d of domains) {
+    const c = cred.byDomain[d]?.mergedPRs ?? 0;
+    if (c > max) max = c;
+  }
+  return max;
+}
+function bestAcceptanceDomain(cred, domains) {
+  if (cred.status !== "ok") return null;
+  let best = null;
+  for (const d of domains) {
+    const count = cred.byDomain[d]?.mergedPRs ?? 0;
+    if (count > 0 && (best === null || count > best.count)) best = { domain: d, count };
+  }
+  return best;
+}
+var MIN_STARS, MIN_CONTRIBUTORS, CANDIDATE_PR_PAGE, TRIVIAL_PR_TITLE;
+var init_github = __esm({
+  "../../packages/core/src/github.ts"() {
+    "use strict";
+    init_vocabulary();
+    MIN_STARS = 50;
+    MIN_CONTRIBUTORS = 10;
+    CANDIDATE_PR_PAGE = 50;
+    TRIVIAL_PR_TITLE = /^\s*(fix\s+typo|typo\b|update\s+readme|readme\b|docs?:|docs?\(|chore:|chore\(|style:|ci:|build:|bump\b|update\s+dependenc)/i;
+  }
+});
+
+// ../../packages/core/src/matcher.ts
+function acceptanceDomainsOf(job) {
+  return job.coreTags && job.coreTags.length > 0 ? job.coreTags : job.tags;
+}
+function backgroundIdf(tag) {
+  const df = IDF_BACKGROUND.df[tag] ?? 0;
+  return Math.log((IDF_BACKGROUND.N + 1) / (df + 1)) + 1;
+}
+function inferSeniority2(title) {
   if (!ENG_TITLE.test(title)) return void 0;
   for (const [re, level] of SENIORITY_PATTERNS) {
     if (re.test(title)) return level;
@@ -615,7 +1045,7 @@ function inferSeniority(title) {
 }
 function seniorityScore(fp, job) {
   if (!fp.seniorityBand) return 1;
-  const jobLevel = inferSeniority(job.title);
+  const jobLevel = inferSeniority2(job.title);
   if (!jobLevel) return 0.85;
   const wanted = SENIORITY_RANK[fp.seniorityBand] ?? 1;
   const got = SENIORITY_RANK[jobLevel] ?? 1;
@@ -625,8 +1055,10 @@ function seniorityScore(fp, job) {
   return 0.4;
 }
 function recencyScore(postedAt, now) {
-  if (!postedAt) return 0.75;
-  const ageDays2 = (now - new Date(postedAt).getTime()) / 864e5;
+  if (!postedAt) return UNKNOWN_RECENCY;
+  const ms = new Date(postedAt).getTime();
+  if (Number.isNaN(ms)) return UNKNOWN_RECENCY;
+  const ageDays2 = (now - ms) / 864e5;
   if (ageDays2 < 7) return 1;
   if (ageDays2 < 30) return 0.9;
   if (ageDays2 < 90) return 0.75;
@@ -657,9 +1089,8 @@ function harmonicMean(a, b) {
   if (a <= 0 || b <= 0) return 0;
   return 2 * a * b / (a + b);
 }
-function match(fp, jobs, limit = 5, now = Date.now()) {
-  const idf = computeIdf(jobs);
-  const idfOf = (t) => idf.get(t) ?? 0;
+function match(fp, jobs, limit = 5, now = Date.now(), opts = {}) {
+  const idfOf = backgroundIdf;
   const expanded = expandWeighted(fp.skillTags);
   const maxDevScore = fp.skillTags.reduce((acc, t) => acc + idfOf(t), 0);
   const candidates = jobs.filter((j) => passesFilters(fp, j));
@@ -685,32 +1116,45 @@ function match(fp, jobs, limit = 5, now = Date.now()) {
     const jobCov = jobMaxScore > 0 ? Math.min(1, jobMatchScore / jobMaxScore) : 0;
     const tagComponent = harmonicMean(devCov, jobCov);
     if (tagComponent === 0) return null;
+    const coreTags = job.coreTags ?? coreTagsFromTitle(job.title);
+    let coreComponent = tagComponent;
+    if (coreTags.length > 0) {
+      const coreCov = Math.max(0, ...coreTags.map((ct) => expanded.get(ct)?.weight ?? 0));
+      if (coreCov === 0) coreComponent = tagComponent * CORE_MISS_PENALTY;
+    }
     details.sort((a, b) => idfOf(b.tag) * b.weight - idfOf(a.tag) * a.weight);
     const sScore = seniorityScore(fp, job);
     const rScore = recencyScore(job.postedAt, now);
-    const score = tagComponent * 0.6 + sScore * 0.25 + rScore * 0.15;
+    const score = coreComponent * 0.6 + sScore * 0.25 + rScore * 0.15;
     const matchedTags = [...new Set(details.map((d) => d.via ?? d.tag))];
+    const badge = opts.acceptance ? bestAcceptanceDomain(opts.acceptance, acceptanceDomainsOf(job)) : null;
     return {
       job,
       score: Math.round(score * 1e3) / 1e3,
       matchedTags,
       matchDetails: details,
+      ...badge ? { acceptance: { status: "ok", domain: badge.domain, count: badge.count } } : {},
       reason: buildReason(details)
     };
   });
-  return scored.filter((r) => r !== null && r.score >= MIN_SCORE).sort((a, b) => b.score - a.score).slice(0, limit);
+  return scored.filter((r) => r !== null && r.score >= MIN_SCORE).sort((a, b) => {
+    const byScore = b.score - a.score;
+    if (Math.abs(byScore) > TIEBREAK_EPS) return byScore;
+    const byAcceptance = (b.acceptance?.count ?? 0) - (a.acceptance?.count ?? 0);
+    if (byAcceptance !== 0) return byAcceptance;
+    return byScore;
+  }).slice(0, limit);
 }
-function matchOne(fp, job) {
-  const results = match(fp, [job], 1);
-  return results.length > 0 ? results[0] : null;
-}
-var MIN_SCORE, SHARPEN, SENIORITY_RANK, SENIORITY_PATTERNS, ENG_TITLE;
+var MIN_SCORE, TIEBREAK_EPS, SHARPEN, CORE_MISS_PENALTY, SENIORITY_RANK, SENIORITY_PATTERNS, ENG_TITLE, UNKNOWN_RECENCY;
 var init_matcher = __esm({
   "../../packages/core/src/matcher.ts"() {
     "use strict";
     init_vocabulary();
+    init_github();
     MIN_SCORE = 0.15;
+    TIEBREAK_EPS = 5e-3;
     SHARPEN = 1.6;
+    CORE_MISS_PENALTY = 0.4;
     SENIORITY_RANK = {
       junior: 0,
       mid: 1,
@@ -724,24 +1168,19 @@ var init_matcher = __esm({
       [/\bmid[\s-]?level\b|\bmid\b/i, "mid"]
     ];
     ENG_TITLE = /\b(engineer|engineering|developer|dev|swe|sde|programmer|architect)\b/i;
+    UNKNOWN_RECENCY = 0.75;
   }
 });
 
 // ../../packages/core/src/feeds/greenhouse.ts
-function tokenize(text) {
-  return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
-}
 function extractTags(job) {
-  const texts = [
-    job.title,
+  const body = [
     ...(job.departments ?? []).map((d) => d.name),
     job.location?.name ?? "",
     ...(job.offices ?? []).map((o) => o.name),
-    // mine the full HTML description for additional signal when present
     ...job.content ? [job.content.replace(/<[^>]*>/g, " ")] : []
-  ].filter(Boolean);
-  const tokens = texts.flatMap(tokenize);
-  return normalize(tokens);
+  ].filter(Boolean).join(" ");
+  return extractSkillTags(job.title, body);
 }
 function inferRemote(location) {
   const l = location.toLowerCase();
@@ -839,17 +1278,15 @@ var init_greenhouse = __esm({
 });
 
 // ../../packages/core/src/feeds/ashby.ts
-function tokenize2(text) {
-  return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
-}
 function extractTags2(job) {
-  const texts = [
-    job.title,
-    job.teamName ?? "",
-    job.locationName ?? "",
-    ...(job.secondaryLocations ?? []).map((l) => l.locationName ?? "")
-  ];
-  return normalize(texts.flatMap(tokenize2));
+  const body = [
+    job.team ?? "",
+    job.department ?? "",
+    job.location ?? "",
+    ...(job.secondaryLocations ?? []).map((l) => l.location ?? ""),
+    job.descriptionPlain ?? ""
+  ].join(" ");
+  return extractSkillTags(job.title, body);
 }
 function mapEmploymentType(raw) {
   if (!raw) return "full_time";
@@ -860,7 +1297,7 @@ function mapEmploymentType(raw) {
 }
 function inferRemote2(job) {
   if (job.isRemote === true) return true;
-  const loc = (job.locationName ?? "").toLowerCase();
+  const loc = (job.location ?? "").toLowerCase();
   return loc.includes("remote") || loc.includes("anywhere");
 }
 async function fetchSlug2(slug) {
@@ -879,14 +1316,14 @@ async function fetchSlug2(slug) {
       source: "ashby",
       title: j.title,
       company: slug,
-      url: j.applyUrl ?? `https://jobs.ashbyhq.com/${slug}/${j.id}`,
+      url: j.jobUrl ?? j.applyUrl ?? `https://jobs.ashbyhq.com/${slug}/${j.id}`,
       remote: inferRemote2(j),
-      location: j.locationName,
+      location: j.location,
       compMin: comp?.minValue,
       compMax: comp?.maxValue,
       tags: extractTags2(j),
       roleType: mapEmploymentType(j.employmentType),
-      postedAt: j.publishedDate,
+      postedAt: j.publishedAt,
       applyMode: "direct",
       raw: j
     };
@@ -913,20 +1350,16 @@ var init_ashby = __esm({
 });
 
 // ../../packages/core/src/feeds/lever.ts
-function tokenize3(text) {
-  return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
-}
 function extractTags3(p) {
   const cat = p.categories ?? {};
-  const texts = [
-    p.text,
+  const body = [
     cat.team ?? "",
     cat.department ?? "",
     cat.location ?? "",
     ...cat.allLocations ?? [],
     p.descriptionPlain ?? ""
-  ];
-  return normalize(texts.flatMap(tokenize3));
+  ].join(" ");
+  return extractSkillTags(p.text, body);
 }
 function mapCommitment(raw) {
   if (!raw) return "full_time";
@@ -999,15 +1432,8 @@ var init_lever = __esm({
 });
 
 // ../../packages/core/src/feeds/himalayas.ts
-function tokenize4(text) {
-  return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
-}
 function extractTags4(job) {
-  const texts = [
-    job.title,
-    ...job.tags ?? []
-  ];
-  return normalize(texts.flatMap(tokenize4));
+  return extractSkillTags(job.title, (job.tags ?? []).join(" "));
 }
 function mapJobType(raw) {
   if (!raw) return "full_time";
@@ -1092,9 +1518,6 @@ var init_entities = __esm({
 });
 
 // ../../packages/core/src/feeds/wwr.ts
-function tokenize5(text) {
-  return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
-}
 function stripHtml(html) {
   return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -1138,8 +1561,8 @@ function parseRss(xml) {
   return items;
 }
 function extractTags5(item) {
-  const text = [item.title, item.category, stripHtml(item.description)].join(" ");
-  return normalize(tokenize5(text));
+  const body = [item.category, stripHtml(item.description)].join(" ");
+  return extractSkillTags(item.title, body);
 }
 var WWR_RSS_URL, wwr;
 var init_wwr = __esm({
@@ -1181,9 +1604,6 @@ var init_wwr = __esm({
 });
 
 // ../../packages/core/src/feeds/hn.ts
-function tokenize6(text) {
-  return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
-}
 function stripHtml2(html) {
   return decodeEntities(html.replace(/<p>/gi, " ").replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim();
 }
@@ -1214,7 +1634,7 @@ function parseComment(item) {
     return null;
   }
   const url = extractUrl(raw) || `https://news.ycombinator.com/item?id=${item.id}`;
-  const tags = extractTags6(raw);
+  const tags = extractTags6(title, raw);
   if (tags.length === 0) return null;
   return {
     id: `hn:${item.id}`,
@@ -1231,8 +1651,8 @@ function parseComment(item) {
     raw: item
   };
 }
-function extractTags6(text) {
-  return normalize(tokenize6(text));
+function extractTags6(title, text) {
+  return extractSkillTags(title, text);
 }
 var ALGOLIA_SEARCH, ALGOLIA_ITEMS, hn;
 var init_hn = __esm({
@@ -1322,7 +1742,7 @@ function authHeaders() {
   if (token) h["Authorization"] = `Bearer ${token}`;
   return h;
 }
-function tokenize7(text) {
+function tokenize2(text) {
   return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
 }
 function parseAmountUSD(text) {
@@ -1407,7 +1827,7 @@ async function fetchRepoBounties(repoFullName) {
     const body = issue.body ? decodeEntities(issue.body) : "";
     const amountUSD = parseAmountUSD(title) ?? parseAmountUSD(body) ?? await fetchCommentAmount(repoFullName, issue.number);
     const labels = labelNames(issue);
-    const tags = normalize(tokenize7([title, labels.join(" "), body.slice(0, 2e3)].join(" ")));
+    const tags = normalize(tokenize2([title, labels.join(" "), body.slice(0, 2e3)].join(" ")));
     return {
       id: `bounty:${repoFullName}#${issue.number}`,
       source: "bounty",
@@ -1724,103 +2144,6 @@ var init_indexer = __esm({
   }
 });
 
-// ../../packages/core/src/github.ts
-function ghHeaders(token) {
-  const headers = {
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28"
-  };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  return headers;
-}
-async function ghFetch(path, token) {
-  const url = `https://api.github.com${path}`;
-  const res = await fetch(url, { headers: ghHeaders(token) });
-  if (!res.ok) {
-    throw new Error(`GitHub API ${path}: HTTP ${res.status} ${res.statusText}`);
-  }
-  return res.json();
-}
-async function fetchGitHubProfile(login, token) {
-  const user = await ghFetch(`/users/${login}`, token);
-  let repos = [];
-  try {
-    repos = await ghFetch(
-      `/users/${login}/repos?sort=pushed&per_page=100`,
-      token
-    );
-  } catch (err) {
-    console.warn(`[github] ${login}: repos fetch failed, continuing \u2014`, err);
-  }
-  const langCount = {};
-  for (const repo of repos) {
-    if (repo.fork) continue;
-    if (repo.language) {
-      langCount[repo.language.toLowerCase()] = (langCount[repo.language.toLowerCase()] ?? 0) + 1;
-    }
-  }
-  const topLanguages = Object.entries(langCount).sort(([, a], [, b]) => b - a).slice(0, 10).map(([lang]) => lang);
-  const topicSet = /* @__PURE__ */ new Set();
-  for (const repo of repos) {
-    if (repo.fork) continue;
-    for (const t of repo.topics ?? []) topicSet.add(t.toLowerCase());
-  }
-  const topics = Array.from(topicSet).slice(0, 30);
-  let recentPRorgs;
-  try {
-    const q = encodeURIComponent(
-      `type:pr is:merged author:${login} sort:updated`
-    );
-    const result = await ghFetch(
-      `/search/issues?q=${q}&per_page=30`,
-      token
-    );
-    const orgs = /* @__PURE__ */ new Set();
-    for (const item of result.items ?? []) {
-      const orgLogin = item.repository?.owner?.login;
-      if (orgLogin && orgLogin !== login) orgs.add(orgLogin);
-    }
-    if (orgs.size > 0) recentPRorgs = Array.from(orgs);
-  } catch {
-  }
-  return {
-    login: user.login,
-    name: user.name ?? void 0,
-    publicEmail: user.email ?? void 0,
-    avatarUrl: user.avatar_url,
-    accountCreatedAt: user.created_at,
-    publicRepos: user.public_repos,
-    followers: user.followers,
-    topLanguages,
-    topics,
-    recentPRorgs
-  };
-}
-function inferSeniority2(p) {
-  const ageMs = Date.now() - new Date(p.accountCreatedAt).getTime();
-  const ageYears = ageMs / (1e3 * 60 * 60 * 24 * 365.25);
-  if (ageYears >= 9 && (p.publicRepos >= 40 || p.followers >= 500)) return "staff";
-  if (ageYears >= 5 && (p.publicRepos >= 20 || p.followers >= 100)) return "senior";
-  if (ageYears >= 2 && p.publicRepos >= 5) return "mid";
-  return "junior";
-}
-function githubToFingerprint(p) {
-  const rawTokens = [
-    ...p.topLanguages,
-    ...p.topics
-    // recentPRorgs intentionally excluded — org names are not skill tags
-  ];
-  const skillTags = normalize(rawTokens);
-  const seniorityBand = inferSeniority2(p);
-  return { skillTags, seniorityBand };
-}
-var init_github = __esm({
-  "../../packages/core/src/github.ts"() {
-    "use strict";
-    init_vocabulary();
-  }
-});
-
 // ../../packages/core/src/index.ts
 var src_exports = {};
 __export(src_exports, {
@@ -1834,17 +2157,23 @@ __export(src_exports, {
   FEEDS: () => FEEDS,
   GRAPH: () => GRAPH,
   GREENHOUSE_SLUGS_BY_TIER: () => GREENHOUSE_SLUGS_BY_TIER,
+  IDF_BACKGROUND: () => IDF_BACKGROUND,
   LEVER_SLUGS_BY_TIER: () => LEVER_SLUGS_BY_TIER,
   SYNONYMS: () => SYNONYMS,
   VOCABULARY: () => VOCABULARY,
   VOCAB_NODES: () => VOCAB_NODES,
+  acceptanceCountForDomains: () => acceptanceCountForDomains,
   aggregate: () => aggregate,
   aggregateBounties: () => aggregateBounties,
   ashby: () => ashby,
+  bestAcceptanceDomain: () => bestAcceptanceDomain,
   buildGraph: () => buildGraph,
   buildIndex: () => buildIndex,
   buildReason: () => buildReason,
+  computeAcceptanceCredential: () => computeAcceptanceCredential,
+  coreTagsFromTitle: () => coreTagsFromTitle,
   expandWeighted: () => expandWeighted,
+  extractSkillTags: () => extractSkillTags,
   fetchGitHubProfile: () => fetchGitHubProfile,
   flattenTiers: () => flattenTiers,
   getBuyer: () => getBuyer,
@@ -1856,10 +2185,11 @@ __export(src_exports, {
   isBounty: () => isBounty,
   lever: () => lever,
   loadPartnerRoles: () => loadPartnerRoles,
+  looksLikeEngRole: () => looksLikeEngRole,
   match: () => match,
-  matchOne: () => matchOne,
   normalize: () => normalize,
   passesMaturityGate: () => passesMaturityGate,
+  tokenize: () => tokenize,
   validateGraph: () => validateGraph,
   wwr: () => wwr
 });
@@ -2131,7 +2461,7 @@ async function run() {
 }
 async function runLogin() {
   const { runDeviceFlow: runDeviceFlow2, readGitHubToken: readGitHubToken2 } = await Promise.resolve().then(() => (init_github_auth(), github_auth_exports));
-  const { fetchGitHubProfile: fetchGitHubProfile2, githubToFingerprint: githubToFingerprint2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+  const { fetchGitHubProfile: fetchGitHubProfile2, githubToFingerprint: githubToFingerprint2, computeAcceptanceCredential: computeAcceptanceCredential2 } = await Promise.resolve().then(() => (init_src(), src_exports));
   const { readProfile: readProfile2, writeProfile: writeProfile2, accumulateGitHubTags: accumulateGitHubTags2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
   console.log("");
   console.log("  terminalhire \u2014 Sign in with GitHub");
@@ -2147,7 +2477,7 @@ async function runLogin() {
     console.log(`
   Fetching public profile for @${login}...`);
     let ghProfile;
-    if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
+    if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
       const { createRequire: createRequire2 } = await import("module");
       const { fileURLToPath: fileURLToPath7 } = await import("url");
       const { join: join15, dirname: dirname3 } = await import("path");
@@ -2173,6 +2503,15 @@ async function runLogin() {
       topLanguages: ghProfile.topLanguages.slice(0, 5),
       publicRepos: ghProfile.publicRepos
     };
+    const isMock = process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1";
+    if (!isMock) {
+      try {
+        console.log("  Computing proof-of-work acceptance credential...");
+        profile.acceptance = await computeAcceptanceCredential2(ghProfile.login, token);
+      } catch (err) {
+        if (process.env["DEBUG"]) console.warn("  [acceptance] credential compute failed:", err);
+      }
+    }
     await writeProfile2(profile);
     console.log("");
     console.log("  GitHub profile merged into local encrypted profile:");
@@ -2188,6 +2527,9 @@ async function runLogin() {
     console.log(`    Skill tags:    ${fragment.skillTags.join(", ")}`);
     if (fragment.skillTags.length === 0) {
       console.log("    (No matching vocabulary tags found in public repos/topics)");
+    }
+    if (profile.acceptance?.status === "ok" && profile.acceptance.qualifyingTotal > 0) {
+      console.log(`    Proof-of-work: ${profile.acceptance.qualifyingTotal} merged PR${profile.acceptance.qualifyingTotal === 1 ? "" : "s"} into external repos`);
     }
     console.log("");
     console.log("  Profile updated at ~/.terminalhire/profile.enc (encrypted at rest)");
@@ -2210,10 +2552,18 @@ async function runLogout() {
   }
   await deleteGitHubToken2();
   const profile = await readProfile2();
+  let changed = false;
   if (profile.github) {
     delete profile.github;
+    changed = true;
+  }
+  if (profile.acceptance) {
+    delete profile.acceptance;
+    changed = true;
+  }
+  if (changed) {
     await writeProfile2(profile);
-    console.log("\n  GitHub identity cleared from local profile.");
+    console.log("\n  GitHub identity + proof-of-work credential cleared from local profile.");
   }
   console.log("  GitHub token deleted from ~/.terminalhire/github-token.enc");
   console.log("  Skill tags accumulated from GitHub remain in your profile.");
@@ -2336,7 +2686,7 @@ function linkTitle(title, url) {
   return url ? `${title} (${url})` : title;
 }
 function printResult(i, result) {
-  const { job, score, matchedTags, reason } = result;
+  const { job, score, matchedTags, reason, acceptance } = result;
   const comp = formatComp(job);
   const remote = job.remote ? "remote" : job.location ?? "onsite";
   const compStr = comp ? ` \xB7 ${comp}` : "";
@@ -2348,6 +2698,9 @@ ${i + 1}. ${titleStr} \u2014 ${job.company}${mode}`);
   console.log(`   ${remote}${compStr} \xB7 ${job.roleType} \xB7 score: ${formatScore(score)}`);
   console.log(`   ${reason}`);
   console.log(`   Tags matched: ${matchedTags.slice(0, 5).join(", ")}`);
+  if (acceptance && acceptance.status === "ok" && acceptance.count > 0) {
+    console.log(`   \u2713 proof-of-work: ${acceptance.count} merged PR${acceptance.count === 1 ? "" : "s"} into external ${acceptance.domain} repos`);
+  }
   if (job.applyMode === "direct") {
     console.log(`   Apply: ${job.url}`);
   } else {
@@ -2405,7 +2758,9 @@ async function run2() {
     }
     const fp = profileToFingerprint2(profile);
     if (REMOTE_ONLY) fp.prefs = { ...fp.prefs, remoteOnly: true };
-    const results = match2(fp, jobs, SHOW_ALL ? jobs.length : LIMIT);
+    const results = match2(fp, jobs, SHOW_ALL ? jobs.length : LIMIT, Date.now(), {
+      acceptance: profile.acceptance
+    });
     try {
       const cacheRaw = readFileSync4(INDEX_CACHE_FILE, "utf8");
       const cacheEntry = JSON.parse(cacheRaw);

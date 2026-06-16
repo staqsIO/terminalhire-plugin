@@ -127,11 +127,11 @@ var VOCAB_NODES = [
   { id: "spark", parents: ["data-engineering"], synonyms: ["apache-spark"] },
   { id: "airflow", parents: ["data-engineering"], synonyms: ["apache-airflow"] },
   { id: "dbt", parents: ["data-engineering"] },
-  { id: "ml", synonyms: ["machine-learning"], related: [{ to: "pytorch", w: 0.5 }, { to: "tensorflow", w: 0.5 }, { to: "scikit-learn", w: 0.5 }] },
+  { id: "ml", synonyms: ["machine-learning"], related: [{ to: "pytorch", w: 0.5 }, { to: "tensorflow", w: 0.5 }, { to: "scikit-learn", w: 0.5 }, { to: "data-engineering", w: 0.4 }] },
   { id: "llm", parents: ["ml"], synonyms: ["llms", "genai", "generative-ai"], related: [{ to: "langchain", w: 0.5 }, { to: "rag", w: 0.55 }, { to: "openai", w: 0.45 }, { to: "anthropic", w: 0.45 }] },
   { id: "pytorch", parents: ["ml"], synonyms: ["torch"], related: [{ to: "tensorflow", w: 0.5 }] },
   { id: "tensorflow", parents: ["ml"], synonyms: ["keras", "tf-keras"] },
-  { id: "pandas", parents: ["python"], related: [{ to: "numpy", w: 0.6 }] },
+  { id: "pandas", parents: ["python"], related: [{ to: "numpy", w: 0.6 }, { to: "data-engineering", w: 0.45 }, { to: "spark", w: 0.4 }] },
   { id: "numpy", parents: ["python"] },
   { id: "scikit-learn", parents: ["ml"], synonyms: ["sklearn"] },
   { id: "jupyter", parents: ["python"] },
@@ -289,6 +289,32 @@ function buildGraph(nodes) {
   const closure = /* @__PURE__ */ new Map();
   for (const n of nodes) closure.set(n.id, closureFrom(n.id, adj));
   return { ids, synonyms, closure };
+}
+
+// ../../packages/core/src/vocab/extract.ts
+var SOFT_DOMAIN = /* @__PURE__ */ new Set([
+  "frontend",
+  "backend",
+  "devops",
+  "security",
+  "payments",
+  "billing",
+  "microservices",
+  "caching",
+  "search",
+  "observability",
+  "monitoring",
+  "testing",
+  "accessibility",
+  "seo",
+  "performance",
+  "realtime",
+  "authentication",
+  "api-design"
+]);
+var SYNONYM_ONLY = /* @__PURE__ */ new Set(["performance", "security", "seo"]);
+for (const id of SYNONYM_ONLY) {
+  if (!SOFT_DOMAIN.has(id)) throw new Error(`extract: SYNONYM_ONLY "${id}" not in SOFT_DOMAIN`);
 }
 
 // ../../packages/core/src/vocab/index.ts
