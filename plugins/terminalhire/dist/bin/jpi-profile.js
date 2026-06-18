@@ -500,9 +500,12 @@ var init_hn = __esm({
 });
 
 // ../../packages/core/src/feeds/bounty-gate.ts
+var BOUNTY_REPO_DENYLIST, DENYLIST_LC;
 var init_bounty_gate = __esm({
   "../../packages/core/src/feeds/bounty-gate.ts"() {
     "use strict";
+    BOUNTY_REPO_DENYLIST = ["SecureBananaLabs/bug-bounty"];
+    DENYLIST_LC = new Set(BOUNTY_REPO_DENYLIST.map((r) => r.toLowerCase()));
   }
 });
 
@@ -522,6 +525,8 @@ var init_opire = __esm({
   "../../packages/core/src/feeds/opire.ts"() {
     "use strict";
     init_vocabulary();
+    init_bounty_gate();
+    init_github_bounties();
     init_http();
   }
 });
@@ -552,6 +557,7 @@ var init_feeds = __esm({
     init_github_bounties();
     init_opire();
     init_workable();
+    init_bounty_gate();
     init_bounty_gate();
     GREENHOUSE_SLUGS_BY_TIER = {
       bigco: [

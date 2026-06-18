@@ -1594,18 +1594,25 @@ var init_hn = __esm({
 });
 
 // ../../packages/core/src/feeds/bounty-gate.ts
+function isDenylistedRepo(fullName) {
+  return DENYLIST_LC.has(fullName.toLowerCase());
+}
+function passesAntiFarm(amountUSD, stargazers) {
+  return !(amountUSD > HIGH_VALUE_USD && stargazers < HIGH_VALUE_MIN_STARS);
+}
 function ageDays(createdAtIso) {
   const created = Date.parse(createdAtIso);
   if (!Number.isFinite(created)) return 0;
   return (Date.now() - created) / (1e3 * 60 * 60 * 24);
 }
 function passesMaturityGate(repo) {
+  if (isDenylistedRepo(repo.fullName)) return false;
   if (repo.archived || repo.disabled) return false;
   if (repo.stargazers < MIN_REPO_STARS) return false;
   if (ageDays(repo.createdAt) < MIN_REPO_AGE_DAYS) return false;
   return true;
 }
-var DEFAULT_BOUNTY_REPOS, MAX_BOUNTIES_PER_REPO, MIN_REPO_STARS, MIN_REPO_AGE_DAYS;
+var DEFAULT_BOUNTY_REPOS, BOUNTY_REPO_DENYLIST, DENYLIST_LC, MAX_BOUNTIES_PER_REPO, MAX_BOUNTIES_PER_DISCOVERED_REPO, MIN_REPO_STARS, HIGH_VALUE_USD, HIGH_VALUE_MIN_STARS, MIN_REPO_AGE_DAYS;
 var init_bounty_gate = __esm({
   "../../packages/core/src/feeds/bounty-gate.ts"() {
     "use strict";
@@ -1622,8 +1629,13 @@ var init_bounty_gate = __esm({
       "moorcheh-ai/memanto",
       "PrismarineJS/mineflayer"
     ];
+    BOUNTY_REPO_DENYLIST = ["SecureBananaLabs/bug-bounty"];
+    DENYLIST_LC = new Set(BOUNTY_REPO_DENYLIST.map((r) => r.toLowerCase()));
     MAX_BOUNTIES_PER_REPO = 10;
+    MAX_BOUNTIES_PER_DISCOVERED_REPO = 3;
     MIN_REPO_STARS = 5;
+    HIGH_VALUE_USD = 500;
+    HIGH_VALUE_MIN_STARS = 50;
     MIN_REPO_AGE_DAYS = 30;
   }
 });
@@ -1776,6 +1788,54 @@ async function repoMetaCached(fullName) {
   repoMetaCache.set(fullName, r);
   return r;
 }
+async function fetchRepoMeta2(fullName) {
+  const repo = await repoMetaCached(fullName);
+  if (!repo) return null;
+  return {
+    fullName: repo.full_name,
+    stargazers: repo.stargazers_count,
+    createdAt: repo.created_at,
+    archived: repo.archived,
+    disabled: repo.disabled
+  };
+}
+async function fetchRepoOpenPRRefs(fullName) {
+  const hit = repoOpenPRRefsCache.get(fullName);
+  if (hit !== void 0) return hit;
+  const refs = /* @__PURE__ */ new Map();
+  let scannedAny = false;
+  for (let page = 1; page <= MAX_PR_PAGES; page++) {
+    const prs = await ghJson(
+      `/repos/${fullName}/pulls?state=open&per_page=100&page=${page}`
+    );
+    if (!Array.isArray(prs)) break;
+    scannedAny = true;
+    for (const pr of prs) {
+      const counted = /* @__PURE__ */ new Set();
+      for (const m of `${pr.title ?? ""}
+${pr.body ?? ""}`.matchAll(/#(\d+)\b/g)) {
+        const n = Number(m[1]);
+        if (!counted.has(n)) {
+          counted.add(n);
+          refs.set(n, (refs.get(n) ?? 0) + 1);
+        }
+      }
+    }
+    if (prs.length < 100) break;
+  }
+  const result = scannedAny ? refs : null;
+  repoOpenPRRefsCache.set(fullName, result);
+  return result;
+}
+async function fetchIssueState(fullName, issueNumber) {
+  const key = `${fullName}#${issueNumber}`;
+  const hit = issueStateCache.get(key);
+  if (hit !== void 0) return hit;
+  const issue = await ghJson(`/repos/${fullName}/issues/${issueNumber}`);
+  const state = issue?.state === "open" ? "open" : issue?.state === "closed" ? "closed" : null;
+  issueStateCache.set(key, state);
+  return state;
+}
 async function fetchSearchBounties() {
   const issues = (await searchBountyIssues()).slice(0, MAX_SEARCH_ISSUES_SCANNED);
   const distinctRepos = [
@@ -1811,7 +1871,7 @@ async function fetchSearchBounties() {
       amountUSD = await fetchCommentAmount(fullName, issue.number);
     }
     if (amountUSD == null) continue;
-    if (amountUSD > SEARCH_HIGH_VALUE_USD && repo.stargazers_count < SEARCH_HIGH_VALUE_MIN_STARS) continue;
+    if (!passesAntiFarm(amountUSD, repo.stargazers_count)) continue;
     const tags = normalize(
       tokenize2([title, labels.join(" "), body.slice(0, 2e3)].join(" "))
     );
@@ -1842,7 +1902,7 @@ async function fetchSearchBounties() {
   }
   return jobs;
 }
-var GITHUB_API, BOUNTY_LABEL_RE, SEARCH_QUERIES, SEARCH_PER_PAGE, MAX_SEARCH_BOUNTIES, MAX_SEARCH_ISSUES_SCANNED, REPO_META_CONCURRENCY, SEARCH_HIGH_VALUE_USD, SEARCH_HIGH_VALUE_MIN_STARS, repoMetaCache, githubBounties;
+var GITHUB_API, BOUNTY_LABEL_RE, SEARCH_QUERIES, SEARCH_PER_PAGE, MAX_SEARCH_BOUNTIES, MAX_SEARCH_ISSUES_SCANNED, REPO_META_CONCURRENCY, repoMetaCache, MAX_PR_PAGES, repoOpenPRRefsCache, issueStateCache, githubBounties;
 var init_github_bounties = __esm({
   "../../packages/core/src/feeds/github-bounties.ts"() {
     "use strict";
@@ -1862,9 +1922,10 @@ var init_github_bounties = __esm({
     MAX_SEARCH_BOUNTIES = 150;
     MAX_SEARCH_ISSUES_SCANNED = 300;
     REPO_META_CONCURRENCY = 15;
-    SEARCH_HIGH_VALUE_USD = 500;
-    SEARCH_HIGH_VALUE_MIN_STARS = 50;
     repoMetaCache = /* @__PURE__ */ new Map();
+    MAX_PR_PAGES = 3;
+    repoOpenPRRefsCache = /* @__PURE__ */ new Map();
+    issueStateCache = /* @__PURE__ */ new Map();
     githubBounties = {
       source: "bounty",
       async fetch(opts) {
@@ -1915,16 +1976,23 @@ function repoFullNameFromUrl(url) {
   const m = url?.match(/github\.com\/([^/]+)\/([^/]+)/i);
   return m ? `${m[1]}/${m[2].replace(/\.git$/, "")}` : void 0;
 }
-var OPIRE_REWARDS_URL, MIN_USD, MAX_USD, MAX_OPIRE_BOUNTIES, opire;
+function issueNumberFromUrl(url) {
+  const m = url?.match(/\/issues\/(\d+)/);
+  return m ? parseInt(m[1], 10) : void 0;
+}
+var OPIRE_REWARDS_URL, MIN_USD, MAX_USD, MAX_OPIRE_BOUNTIES, REPO_META_CONCURRENCY2, opire;
 var init_opire = __esm({
   "../../packages/core/src/feeds/opire.ts"() {
     "use strict";
     init_vocabulary();
+    init_bounty_gate();
+    init_github_bounties();
     init_http();
     OPIRE_REWARDS_URL = "https://api.opire.dev/rewards";
     MIN_USD = 25;
     MAX_USD = 25e3;
     MAX_OPIRE_BOUNTIES = 100;
+    REPO_META_CONCURRENCY2 = 15;
     opire = {
       source: "bounty",
       async fetch() {
@@ -1943,7 +2011,7 @@ var init_opire = __esm({
           console.warn("[opire] fetch failed \u2014", err);
           return [];
         }
-        const jobs = [];
+        const candidates = [];
         for (const r of rewards) {
           if (r.platform !== "GitHub") continue;
           if (r.project && r.project.isPublic === false) continue;
@@ -1954,30 +2022,81 @@ var init_opire = __esm({
           const title = (r.title ?? "").trim();
           if (title.length < 4) continue;
           const tags = normalize([...r.programmingLanguages ?? [], ...tokenize3(title)]);
-          jobs.push({
-            id: `bounty:opire:${r.id}`,
-            source: "bounty",
-            title,
-            company: r.organization?.name ?? repoFullName.split("/")[0],
-            url: r.url,
-            remote: true,
-            location: "Remote",
-            tags,
-            roleType: "freelance",
-            postedAt: Number.isFinite(r.createdAt) ? new Date(r.createdAt).toISOString() : void 0,
-            applyMode: "direct",
-            bounty: {
-              amountUSD,
-              estimatedEffort: effortFromAmount2(amountUSD),
-              bountySource: "opire",
-              claimUrl: r.url,
-              repoFullName
-            },
-            raw: r
+          const bounty = {
+            amountUSD,
+            estimatedEffort: effortFromAmount2(amountUSD),
+            bountySource: "opire",
+            claimUrl: r.url,
+            repoFullName
+          };
+          candidates.push({
+            repoFullName,
+            amountUSD,
+            issueNumber: issueNumberFromUrl(r.url),
+            bounty,
+            job: {
+              id: `bounty:opire:${r.id}`,
+              source: "bounty",
+              title,
+              company: r.organization?.name ?? repoFullName.split("/")[0],
+              url: r.url,
+              remote: true,
+              location: "Remote",
+              tags,
+              roleType: "freelance",
+              postedAt: Number.isFinite(r.createdAt) ? new Date(r.createdAt).toISOString() : void 0,
+              applyMode: "direct",
+              bounty,
+              raw: r
+            }
           });
-          if (jobs.length >= MAX_OPIRE_BOUNTIES) break;
         }
-        console.info(`[opire] ${jobs.length} bounties (from ${rewards.length} rewards)`);
+        const distinctRepos = [...new Set(candidates.map((c) => c.repoFullName))];
+        const meta = /* @__PURE__ */ new Map();
+        for (let i = 0; i < distinctRepos.length; i += REPO_META_CONCURRENCY2) {
+          const batch = distinctRepos.slice(i, i + REPO_META_CONCURRENCY2);
+          const metas = await Promise.all(batch.map((name) => fetchRepoMeta2(name)));
+          batch.forEach((name, k) => meta.set(name, metas[k]));
+        }
+        const gated = [];
+        let dropped = 0;
+        let ungated = 0;
+        for (const c of candidates) {
+          const m = meta.get(c.repoFullName);
+          if (m) {
+            if (!passesMaturityGate(m) || !passesAntiFarm(c.amountUSD, m.stargazers)) {
+              dropped++;
+              continue;
+            }
+            c.bounty.repoStars = m.stargazers;
+          } else {
+            ungated++;
+          }
+          gated.push(c);
+        }
+        const issueState = /* @__PURE__ */ new Map();
+        for (let i = 0; i < gated.length; i += REPO_META_CONCURRENCY2) {
+          const batch = gated.slice(i, i + REPO_META_CONCURRENCY2);
+          const states = await Promise.all(
+            batch.map(
+              (c) => c.issueNumber != null ? fetchIssueState(c.repoFullName, c.issueNumber) : Promise.resolve(null)
+            )
+          );
+          batch.forEach((c, k) => issueState.set(c.job.id, states[k]));
+        }
+        const jobs = [];
+        let closed = 0;
+        for (const c of gated) {
+          if (jobs.length >= MAX_OPIRE_BOUNTIES) break;
+          if (issueState.get(c.job.id) === "closed") {
+            closed++;
+            continue;
+          }
+          jobs.push(c.job);
+        }
+        console.info(
+          `[opire] ${jobs.length} bounties (from ${rewards.length} rewards; ${dropped} repo-gated, ${closed} closed-issue, ${ungated} kept ungated)`
+        );
         return jobs;
       }
     };
@@ -2084,15 +2203,53 @@ async function aggregateBounties(opts) {
     githubBounties.fetch({ slugs: opts?.repos }),
     opire.fetch()
   ]);
+  const allowlist = new Set(
+    (opts?.repos && opts.repos.length > 0 ? opts.repos : DEFAULT_BOUNTY_REPOS).map(
+      (r) => r.toLowerCase()
+    )
+  );
   const seen = /* @__PURE__ */ new Set();
+  const perRepo = /* @__PURE__ */ new Map();
+  const seenRepoTitles = /* @__PURE__ */ new Set();
   const out = [];
   for (const j of [...gh, ...op]) {
     const key = j.bounty?.claimUrl ?? j.url;
     if (seen.has(key)) continue;
+    const repo = j.bounty?.repoFullName?.toLowerCase();
+    if (repo) {
+      if (isDenylistedRepo(repo)) continue;
+      const titleKey = `${repo} ${normalizeBountyTitle(j.title)}`;
+      if (seenRepoTitles.has(titleKey)) continue;
+      const cap = allowlist.has(repo) ? MAX_BOUNTIES_PER_REPO : MAX_BOUNTIES_PER_DISCOVERED_REPO;
+      const n = perRepo.get(repo) ?? 0;
+      if (n >= cap) continue;
+      perRepo.set(repo, n + 1);
+      seenRepoTitles.add(titleKey);
+    }
     seen.add(key);
     out.push(j);
   }
+  const repos = [...new Set(out.map((j) => j.bounty?.repoFullName).filter((r) => !!r))];
+  const refsByRepo = /* @__PURE__ */ new Map();
+  const PR_REFS_CONCURRENCY = 15;
+  for (let i = 0; i < repos.length; i += PR_REFS_CONCURRENCY) {
+    const batch = repos.slice(i, i + PR_REFS_CONCURRENCY);
+    const results = await Promise.all(batch.map((r) => fetchRepoOpenPRRefs(r)));
+    batch.forEach((r, k) => refsByRepo.set(r, results[k]));
+  }
+  for (const j of out) {
+    const num = bountyIssueNumber(j.bounty?.claimUrl);
+    const refs = j.bounty?.repoFullName ? refsByRepo.get(j.bounty.repoFullName) : void 0;
+    if (j.bounty && refs && num != null) j.bounty.competingOpenPRs = refs.get(num) ?? 0;
+  }
   return out;
+}
+function bountyIssueNumber(url) {
+  const m = url?.match(/\/issues\/(\d+)/);
+  return m ? Number(m[1]) : void 0;
+}
+function normalizeBountyTitle(title) {
+  return title.toLowerCase().replace(/#\d+\s*$/, "").replace(/[^a-z0-9]+/g, " ").trim();
 }
 function flattenTiers(t) {
   return [.../* @__PURE__ */ new Set([...t.bigco, ...t.scaleup, ...t.startup])];
@@ -2156,6 +2313,7 @@ var init_feeds = __esm({
     init_github_bounties();
     init_opire();
     init_workable();
+    init_bounty_gate();
     init_bounty_gate();
     FEEDS = [greenhouse, ashby, lever, workable, himalayas, wwr, hn];
     GREENHOUSE_SLUGS_BY_TIER = {

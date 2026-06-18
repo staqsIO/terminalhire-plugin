@@ -346,6 +346,10 @@ function normalize(tokens) {
 // ../../packages/core/src/github.ts
 var RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
 
+// ../../packages/core/src/feeds/bounty-gate.ts
+var BOUNTY_REPO_DENYLIST = ["SecureBananaLabs/bug-bounty"];
+var DENYLIST_LC = new Set(BOUNTY_REPO_DENYLIST.map((r) => r.toLowerCase()));
+
 // ../../packages/core/src/feeds/index.ts
 var GREENHOUSE_SLUGS_BY_TIER = {
   bigco: [
