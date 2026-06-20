@@ -3694,7 +3694,7 @@ ${p.body ?? ""}`)).length;
     return null;
   }
 }
-async function fetchIssueState2(repoFullName, issueNumber) {
+async function fetchIssue(repoFullName, issueNumber) {
   try {
     const res = await fetch(`${GH_API}/repos/${repoFullName}/issues/${issueNumber}`, {
       headers: GH_HEADERS,
@@ -3702,7 +3702,8 @@ async function fetchIssueState2(repoFullName, issueNumber) {
     });
     if (!res.ok) return null;
     const issue = await res.json();
-    return issue.state === "open" ? "open" : issue.state === "closed" ? "closed" : null;
+    const state = issue.state === "open" ? "open" : issue.state === "closed" ? "closed" : null;
+    return { state, title: typeof issue.title === "string" ? issue.title : null };
   } catch {
     return null;
   }
@@ -3730,14 +3731,7 @@ function printMetric(rate) {
   console.log(`
 \u{1F4CA} Accepted-PR rate: ${rate.merged}/${rate.total} claims merged (${pct}%)`);
 }
-async function cmdRecord(arg) {
-  const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
-  if (!arg) {
-    console.error("Usage: terminalhire claim record <bountyId|issueUrl>");
-    console.error("  Run `terminalhire bounties` first to populate the local index cache,");
-    console.error("  then pass the id shown in its output \u2014 or pass a GitHub issue URL directly.");
-    process.exit(1);
-  }
+async function resolveBounty(arg) {
   let bountyId, title, repoFullName, issueUrl, amountUSD;
   const job = findBountyInCache(arg);
   if (job) {
@@ -3749,11 +3743,7 @@ async function cmdRecord(arg) {
     amountUSD = b.amountUSD ?? null;
   } else {
     const parsed = parseGitHubUrl(arg);
-    if (!parsed) {
-      console.error(`terminalhire claim: '${arg}' is not in the index cache and is not a GitHub issue URL.`);
-      console.error("  Run `terminalhire bounties` to populate the cache, or pass a full issue URL.");
-      process.exit(1);
-    }
+    if (!parsed) return null;
     bountyId = `gh:${parsed.repoFullName}#${parsed.number}`;
     title = `${parsed.repoFullName}#${parsed.number}`;
     repoFullName = parsed.repoFullName;
@@ -3761,14 +3751,40 @@ async function cmdRecord(arg) {
     amountUSD = null;
   }
   const ghIssue = parseGitHubUrl(issueUrl);
-  const [issueState, openPRs] = ghIssue ? await Promise.all([
-    fetchIssueState2(repoFullName, ghIssue.number),
+  const [issue, openPRs] = ghIssue ? await Promise.all([
+    fetchIssue(repoFullName, ghIssue.number),
     countOpenPRsReferencingIssue(repoFullName, ghIssue.number)
-    // Guardrail #5
   ]) : [null, null];
-  if (issueState === "closed") {
+  const issueState = issue ? issue.state : null;
+  if (!job && issue && issue.title) title = issue.title;
+  return {
+    bountyId,
+    title,
+    repoFullName,
+    issueUrl,
+    amountUSD,
+    issueState,
+    openPRs,
+    issueNumber: ghIssue ? ghIssue.number : null
+  };
+}
+async function cmdRecord(arg) {
+  const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+  if (!arg) {
+    console.error("Usage: terminalhire claim record <bountyId|issueUrl>");
+    console.error("  Run `terminalhire bounties` first to populate the local index cache,");
+    console.error("  then pass the id shown in its output \u2014 or pass a GitHub issue URL directly.");
+    process.exit(1);
+  }
+  const b = await resolveBounty(arg);
+  if (!b) {
+    console.error(`terminalhire claim: '${arg}' is not in the index cache and is not a GitHub issue URL.`);
+    console.error("  Run `terminalhire bounties` to populate the cache, or pass a full issue URL.");
+    process.exit(1);
+  }
+  if (b.issueState === "closed") {
     console.error(
-      `terminalhire claim: ${repoFullName}#${ghIssue.number} is CLOSED \u2014 not claimable.
+      `terminalhire claim: ${b.repoFullName}#${b.issueNumber} is CLOSED \u2014 not claimable.
   The bounty index drops closed issues; this one is likely a stale cache entry.
   Run \`terminalhire bounties\` for the current open pool.`
     );
@@ -3776,7 +3792,7 @@ async function cmdRecord(arg) {
   }
   let claim;
   try {
-    claim = claims.recordClaim({ id: bountyId, bountyId, title, repoFullName, issueUrl, amountUSD, openPRsAtClaim: openPRs });
+    claim = claims.recordClaim({ id: b.bountyId, bountyId: b.bountyId, title: b.title, repoFullName: b.repoFullName, issueUrl: b.issueUrl, amountUSD: b.amountUSD, openPRsAtClaim: b.openPRs });
   } catch (err) {
     console.error(`terminalhire claim: ${err.message ?? err}`);
     process.exit(1);
@@ -3787,10 +3803,10 @@ async function cmdRecord(arg) {
   console.log(`  repo:   ${claim.repoFullName}`);
   console.log(`  amount: ${fmtAmount(claim.amountUSD)}`);
   console.log(`  issue:  ${claim.issueUrl}`);
-  if (openPRs == null) {
+  if (b.openPRs == null) {
     console.log("  open PRs: unknown (GitHub read unavailable \u2014 check the issue manually before working)");
-  } else if (openPRs > 0) {
-    console.log(`  \u26A0 open PRs referencing this issue: ${openPRs} \u2014 someone may already be on it. Check before working.`);
+  } else if (b.openPRs > 0) {
+    console.log(`  \u26A0 open PRs referencing this issue: ${b.openPRs} \u2014 someone may already be on it. Check before working.`);
   } else {
     console.log("  open PRs referencing this issue: 0");
   }
@@ -3800,6 +3816,49 @@ async function cmdRecord(arg) {
   console.log("   \u2022 clone + static analysis + patch only; NO test/build execution without explicit approval");
   console.log("   \u2022 no access to ~/.terminalhire (the executor never needs your profile)");
   console.log("\n  Next: do the work, then `terminalhire claim update " + claim.id + " <state>` as you progress.");
+}
+async function cmdPreview(arg, { json } = {}) {
+  if (!arg) {
+    console.error("Usage: terminalhire claim preview <bountyId|issueUrl> [--json]");
+    process.exit(1);
+  }
+  const b = await resolveBounty(arg);
+  if (!b) {
+    console.error(`terminalhire claim: '${arg}' is not in the index cache and is not a GitHub issue URL.`);
+    console.error("  Run `terminalhire bounties` to populate the cache, or pass a full issue URL.");
+    process.exit(1);
+  }
+  if (json) {
+    process.stdout.write(
+      JSON.stringify({
+        bountyId: b.bountyId,
+        title: b.title,
+        amountUSD: b.amountUSD,
+        repoFullName: b.repoFullName,
+        issueUrl: b.issueUrl,
+        issueState: b.issueState,
+        openPRs: b.openPRs
+      }) + "\n"
+    );
+    return;
+  }
+  console.log(`
+  BOUNTY \xB7 ${b.title}`);
+  console.log(`  id:     ${b.bountyId}`);
+  console.log(`  repo:   ${b.repoFullName}`);
+  console.log(`  amount: ${fmtAmount(b.amountUSD)}`);
+  console.log(`  issue:  ${b.issueUrl}`);
+  if (b.issueState === "closed") {
+    console.log("  \u2717 CLOSED \u2014 not claimable (the pool drops closed issues; likely a stale cache entry)");
+  }
+  if (b.openPRs == null) {
+    console.log("  open PRs: unknown (GitHub read unavailable \u2014 check the issue manually before working)");
+  } else if (b.openPRs > 0) {
+    console.log(`  \u26A0 open PRs referencing this issue: ${b.openPRs} \u2014 someone may already be on it. Check before working.`);
+  } else {
+    console.log("  open PRs referencing this issue: 0");
+  }
+  console.log("\n  Preview only \u2014 NOT claimed. Run `terminalhire claim record " + arg + "` to claim it.");
 }
 async function cmdList(active) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -3886,8 +3945,12 @@ async function run4() {
   const verb = process.argv[2];
   const rest = process.argv.slice(3).filter((a) => !a.startsWith("--"));
   const active = process.argv.includes("--active");
+  const json = process.argv.includes("--json");
   try {
     switch (verb) {
+      case "preview":
+        await cmdPreview(rest[0], { json });
+        break;
       case "record":
         await cmdRecord(rest[0]);
         break;
@@ -3904,7 +3967,7 @@ async function run4() {
         await cmdRelease(rest[0]);
         break;
       default:
-        console.error(`terminalhire claim: unknown verb '${verb ?? ""}'. Expected: record | list | status | update | release`);
+        console.error(`terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | list | status | update | release`);
         process.exit(1);
     }
   } catch (err) {

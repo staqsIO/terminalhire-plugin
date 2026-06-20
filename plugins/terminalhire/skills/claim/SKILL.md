@@ -11,11 +11,43 @@ Invoke the bundled engine in a Bash tool call. Pick the subcommand that matches 
 
 **Where does the ID come from?** The `id:` line in `terminalhire bounties` output (e.g. `bounty:opire:01HTN…` or `bounty:commaai/opendbc#3426`). If the user hasn't picked one yet, run the `bounties` skill first so they can choose. You can also pass a raw GitHub issue URL instead of an ID.
 
-### Claim a bounty
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim record <bountyId|issueUrl>
-```
-Prints the executor brief, the dollar amount, the issue URL, and a **live open-PR warning** — if other PRs already reference the issue, surface that to the user and suggest they verify before working (there is no server-side lock; the race is real).
+### Claim a bounty (preview → confirm → record)
+
+**Always preview and confirm before recording.** Claiming is a commitment — show the dev *what* they're about to take and let them approve it first. Never run `claim record` without the confirm step below.
+
+1. **Preview (read-only — does NOT claim):**
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim preview <bountyId|issueUrl> --json
+   ```
+   Parse the single JSON line: `{ bountyId, title, amountUSD, repoFullName, issueUrl, issueState, openPRs }`.
+
+2. **Confirm via a styled `AskUserQuestion`.** One question — *"Claim this bounty?"* — with options **"Claim it"** (recommended, listed first) and **"Cancel"**. Put a terminal-styled card in the `preview` field of the **Claim it** option so it renders inline. Build the card from the JSON:
+   ```
+   $ terminalhire claim
+   // BOUNTY · <repoFullName>#<n>
+
+     <title>
+
+     amount   <"$"+amountUSD, or "unlisted" when null>
+     repo     <repoFullName>
+     issue    <issueUrl>
+     <race line — see below>
+
+     → records the claim locally; you still review the
+       diff before any push (nothing is sent anywhere)
+   ```
+   Race / guard line, from the JSON:
+   - `openPRs > 0` → `⚠ <openPRs> open PRs already reference this — the race is real`
+   - `openPRs === 0` → `no open PRs reference this yet`
+   - `openPRs === null` → `open PRs: unknown — verify on the issue before working`
+
+   **If `issueState === "closed"`: do NOT show the confirm card and do NOT call `claim record`.** Tell the dev the issue is closed and can't be claimed (the pool drops closed issues — likely a stale cache entry; suggest `terminalhire bounties` for the current pool), then stop.
+
+3. **Record only if the dev picks "Claim it":**
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim record <bountyId|issueUrl>
+   ```
+   On **Cancel** (or a closed issue), do not record — tell the dev nothing was claimed. `claim record` prints the executor brief and re-checks the live open-PR race at commit time.
 
 ### Track claims and the metric
 ```bash
