@@ -509,6 +509,13 @@ var init_bounty_gate = __esm({
   }
 });
 
+// ../../packages/core/src/concurrency.ts
+var init_concurrency = __esm({
+  "../../packages/core/src/concurrency.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/feeds/github-bounties.ts
 var init_github_bounties = __esm({
   "../../packages/core/src/feeds/github-bounties.ts"() {
@@ -517,6 +524,7 @@ var init_github_bounties = __esm({
     init_entities();
     init_bounty_gate();
     init_http();
+    init_concurrency();
   }
 });
 

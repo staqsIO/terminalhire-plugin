@@ -1640,6 +1640,28 @@ var init_bounty_gate = __esm({
   }
 });
 
+// ../../packages/core/src/concurrency.ts
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  if (items.length === 0) return results;
+  const workers = Math.max(1, Math.min(Math.floor(limit) || 1, items.length));
+  let next = 0;
+  async function run2() {
+    for (; ; ) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: workers }, run2));
+  return results;
+}
+var init_concurrency = __esm({
+  "../../packages/core/src/concurrency.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/feeds/github-bounties.ts
 function authHeaders() {
   const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
@@ -1731,7 +1753,7 @@ async function fetchRepoBounties(repoFullName) {
   if (!issues) return [];
   const bounties = issues.filter(isBountyIssue).slice(0, MAX_BOUNTIES_PER_REPO);
   const owner = repo.owner.login;
-  return Promise.all(bounties.map(async (issue) => {
+  return mapWithConcurrency(bounties, BOUNTY_FETCH_CONCURRENCY, async (issue) => {
     const title = decodeEntities(issue.title).trim();
     const body = issue.body ? decodeEntities(issue.body) : "";
     const amountUSD = parseAmountUSD(title) ?? parseAmountUSD(body) ?? await fetchCommentAmount(repoFullName, issue.number);
@@ -1760,7 +1782,7 @@ async function fetchRepoBounties(repoFullName) {
       },
       raw: issue
     };
-  }));
+  });
 }
 function repoFullNameFromApiUrl(url) {
   const m = url.match(/\/repos\/([^/]+)\/([^/]+)\/?$/);
@@ -1902,7 +1924,7 @@ async function fetchSearchBounties() {
   }
   return jobs;
 }
-var GITHUB_API, BOUNTY_LABEL_RE, SEARCH_QUERIES, SEARCH_PER_PAGE, MAX_SEARCH_BOUNTIES, MAX_SEARCH_ISSUES_SCANNED, REPO_META_CONCURRENCY, repoMetaCache, MAX_PR_PAGES, repoOpenPRRefsCache, issueStateCache, githubBounties;
+var GITHUB_API, BOUNTY_LABEL_RE, SEARCH_QUERIES, SEARCH_PER_PAGE, MAX_SEARCH_BOUNTIES, MAX_SEARCH_ISSUES_SCANNED, REPO_META_CONCURRENCY, BOUNTY_FETCH_CONCURRENCY, repoMetaCache, MAX_PR_PAGES, repoOpenPRRefsCache, issueStateCache, githubBounties;
 var init_github_bounties = __esm({
   "../../packages/core/src/feeds/github-bounties.ts"() {
     "use strict";
@@ -1910,6 +1932,7 @@ var init_github_bounties = __esm({
     init_entities();
     init_bounty_gate();
     init_http();
+    init_concurrency();
     GITHUB_API = "https://api.github.com";
     BOUNTY_LABEL_RE = /bounty|reward|funded|💎|💰/i;
     SEARCH_QUERIES = [
@@ -1922,6 +1945,7 @@ var init_github_bounties = __esm({
     MAX_SEARCH_BOUNTIES = 150;
     MAX_SEARCH_ISSUES_SCANNED = 300;
     REPO_META_CONCURRENCY = 15;
+    BOUNTY_FETCH_CONCURRENCY = 6;
     repoMetaCache = /* @__PURE__ */ new Map();
     MAX_PR_PAGES = 3;
     repoOpenPRRefsCache = /* @__PURE__ */ new Map();

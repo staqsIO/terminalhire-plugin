@@ -9,6 +9,35 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// src/open-url.js
+import { spawn } from "child_process";
+function openInBrowser(url) {
+  let cmd;
+  let args3;
+  if (process.platform === "darwin") {
+    cmd = "open";
+    args3 = [url];
+  } else if (process.platform === "win32") {
+    cmd = "cmd";
+    args3 = ["/c", "start", "", url];
+  } else {
+    cmd = "xdg-open";
+    args3 = [url];
+  }
+  try {
+    const child = spawn(cmd, args3, { stdio: "ignore", detached: true });
+    child.on("error", () => {
+    });
+    child.unref();
+  } catch {
+  }
+}
+var init_open_url = __esm({
+  "src/open-url.js"() {
+    "use strict";
+  }
+});
+
 // src/github-auth.ts
 var github_auth_exports = {};
 __export(github_auth_exports, {
@@ -1854,6 +1883,28 @@ var init_bounty_gate = __esm({
   }
 });
 
+// ../../packages/core/src/concurrency.ts
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  if (items.length === 0) return results;
+  const workers = Math.max(1, Math.min(Math.floor(limit) || 1, items.length));
+  let next = 0;
+  async function run13() {
+    for (; ; ) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: workers }, run13));
+  return results;
+}
+var init_concurrency = __esm({
+  "../../packages/core/src/concurrency.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/feeds/github-bounties.ts
 function authHeaders() {
   const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
@@ -1945,7 +1996,7 @@ async function fetchRepoBounties(repoFullName) {
   if (!issues) return [];
   const bounties = issues.filter(isBountyIssue).slice(0, MAX_BOUNTIES_PER_REPO);
   const owner = repo.owner.login;
-  return Promise.all(bounties.map(async (issue) => {
+  return mapWithConcurrency(bounties, BOUNTY_FETCH_CONCURRENCY, async (issue) => {
     const title = decodeEntities(issue.title).trim();
     const body = issue.body ? decodeEntities(issue.body) : "";
     const amountUSD = parseAmountUSD(title) ?? parseAmountUSD(body) ?? await fetchCommentAmount(repoFullName, issue.number);
@@ -1974,7 +2025,7 @@ async function fetchRepoBounties(repoFullName) {
       },
       raw: issue
     };
-  }));
+  });
 }
 function repoFullNameFromApiUrl(url) {
   const m = url.match(/\/repos\/([^/]+)\/([^/]+)\/?$/);
@@ -2116,7 +2167,7 @@ async function fetchSearchBounties() {
   }
   return jobs;
 }
-var GITHUB_API, BOUNTY_LABEL_RE, SEARCH_QUERIES, SEARCH_PER_PAGE, MAX_SEARCH_BOUNTIES, MAX_SEARCH_ISSUES_SCANNED, REPO_META_CONCURRENCY, repoMetaCache, MAX_PR_PAGES, repoOpenPRRefsCache, issueStateCache, githubBounties;
+var GITHUB_API, BOUNTY_LABEL_RE, SEARCH_QUERIES, SEARCH_PER_PAGE, MAX_SEARCH_BOUNTIES, MAX_SEARCH_ISSUES_SCANNED, REPO_META_CONCURRENCY, BOUNTY_FETCH_CONCURRENCY, repoMetaCache, MAX_PR_PAGES, repoOpenPRRefsCache, issueStateCache, githubBounties;
 var init_github_bounties = __esm({
   "../../packages/core/src/feeds/github-bounties.ts"() {
     "use strict";
@@ -2124,6 +2175,7 @@ var init_github_bounties = __esm({
     init_entities();
     init_bounty_gate();
     init_http();
+    init_concurrency();
     GITHUB_API = "https://api.github.com";
     BOUNTY_LABEL_RE = /bounty|reward|funded|💎|💰/i;
     SEARCH_QUERIES = [
@@ -2136,6 +2188,7 @@ var init_github_bounties = __esm({
     MAX_SEARCH_BOUNTIES = 150;
     MAX_SEARCH_ISSUES_SCANNED = 300;
     REPO_META_CONCURRENCY = 15;
+    BOUNTY_FETCH_CONCURRENCY = 6;
     repoMetaCache = /* @__PURE__ */ new Map();
     MAX_PR_PAGES = 3;
     repoOpenPRRefsCache = /* @__PURE__ */ new Map();
@@ -3124,6 +3177,26 @@ async function runLogin() {
     console.log("  Profile updated at ~/.terminalhire/profile.enc (encrypted at rest)");
     console.log("  GitHub data stays on your machine unless you consent to share it in a lead.");
     console.log("");
+    const skipWeb = process.argv.includes("--no-web");
+    if (!isMock && !skipWeb) {
+      try {
+        const OAUTH_BASE = "https://www.terminalhire.com";
+        const webUrl = `${OAUTH_BASE}/api/auth/github?next=/dashboard`;
+        console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+        console.log("  Your web profile & r\xE9sum\xE9 \u2014 public GitHub data only,");
+        console.log("  your local profile is NOT uploaded.");
+        console.log(`  \u2192 ${webUrl}`);
+        if (process.stdout.isTTY) {
+          console.log("  Opening it now to sign you in at terminalhire.com\u2026");
+          openInBrowser(webUrl);
+        } else {
+          console.log("  Open the link above to sign in & view your r\xE9sum\xE9.");
+        }
+        console.log("  (skip next time with: terminalhire login --no-web)");
+        console.log("");
+      } catch {
+      }
+    }
     console.log("  Run `terminalhire jobs` to see matching roles using your enriched profile.");
     console.log("");
   } catch (err) {
@@ -3161,6 +3234,7 @@ async function runLogout() {
 var init_jpi_login = __esm({
   "bin/jpi-login.js"() {
     "use strict";
+    init_open_url();
   }
 });
 
@@ -4949,7 +5023,6 @@ import { readFileSync as readFileSync12, writeFileSync as writeFileSync9, mkdirS
 import { join as join12 } from "path";
 import { homedir as homedir10, hostname as osHostname } from "os";
 import { createInterface as createInterface5 } from "readline";
-import { spawn } from "child_process";
 function ask2(question) {
   const rl = createInterface5({ input: process.stdin, output: process.stdout });
   return new Promise((res) => {
@@ -5017,27 +5090,6 @@ function renderPreview(fields) {
   console.log("");
   console.log("  This is NOT required to use terminalhire.");
   console.log("");
-}
-function openInBrowser(url) {
-  let cmd;
-  let args3;
-  if (process.platform === "darwin") {
-    cmd = "open";
-    args3 = [url];
-  } else if (process.platform === "win32") {
-    cmd = "cmd";
-    args3 = ["/c", "start", "", url];
-  } else {
-    cmd = "xdg-open";
-    args3 = [url];
-  }
-  try {
-    const child = spawn(cmd, args3, { stdio: "ignore", detached: true });
-    child.on("error", () => {
-    });
-    child.unref();
-  } catch {
-  }
 }
 function sleep2(ms) {
   return new Promise((res) => setTimeout(res, ms));
@@ -5307,6 +5359,7 @@ var TH_DIR3, TIER1_MARKER, API_URL3, SYNC_BASE, POLL_INTERVAL_MS, POLL_TIMEOUT_M
 var init_jpi_sync = __esm({
   "bin/jpi-sync.js"() {
     "use strict";
+    init_open_url();
     TH_DIR3 = process.env["TERMINALHIRE_DIR"] || join12(homedir10(), ".terminalhire");
     TIER1_MARKER = join12(TH_DIR3, "tier1.json");
     API_URL3 = process.env["TERMINALHIRE_API_URL"] || process.env["JPI_API_URL"] || "https://terminalhire.com";

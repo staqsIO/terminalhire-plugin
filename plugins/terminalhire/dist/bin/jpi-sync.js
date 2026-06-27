@@ -509,6 +509,13 @@ var init_bounty_gate = __esm({
   }
 });
 
+// ../../packages/core/src/concurrency.ts
+var init_concurrency = __esm({
+  "../../packages/core/src/concurrency.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/feeds/github-bounties.ts
 var init_github_bounties = __esm({
   "../../packages/core/src/feeds/github-bounties.ts"() {
@@ -517,6 +524,7 @@ var init_github_bounties = __esm({
     init_entities();
     init_bounty_gate();
     init_http();
+    init_concurrency();
   }
 });
 
@@ -954,7 +962,32 @@ import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, mkdirSy
 import { join as join3 } from "path";
 import { homedir as homedir2, hostname as osHostname } from "os";
 import { createInterface } from "readline";
+
+// src/open-url.js
 import { spawn } from "child_process";
+function openInBrowser(url) {
+  let cmd;
+  let args;
+  if (process.platform === "darwin") {
+    cmd = "open";
+    args = [url];
+  } else if (process.platform === "win32") {
+    cmd = "cmd";
+    args = ["/c", "start", "", url];
+  } else {
+    cmd = "xdg-open";
+    args = [url];
+  }
+  try {
+    const child = spawn(cmd, args, { stdio: "ignore", detached: true });
+    child.on("error", () => {
+    });
+    child.unref();
+  } catch {
+  }
+}
+
+// bin/jpi-sync.js
 var TH_DIR = process.env["TERMINALHIRE_DIR"] || join3(homedir2(), ".terminalhire");
 var TIER1_MARKER = join3(TH_DIR, "tier1.json");
 var API_URL = process.env["TERMINALHIRE_API_URL"] || process.env["JPI_API_URL"] || "https://terminalhire.com";
@@ -1029,27 +1062,6 @@ function renderPreview(fields) {
   console.log("");
   console.log("  This is NOT required to use terminalhire.");
   console.log("");
-}
-function openInBrowser(url) {
-  let cmd;
-  let args;
-  if (process.platform === "darwin") {
-    cmd = "open";
-    args = [url];
-  } else if (process.platform === "win32") {
-    cmd = "cmd";
-    args = ["/c", "start", "", url];
-  } else {
-    cmd = "xdg-open";
-    args = [url];
-  }
-  try {
-    const child = spawn(cmd, args, { stdio: "ignore", detached: true });
-    child.on("error", () => {
-    });
-    child.unref();
-  } catch {
-  }
 }
 function sleep(ms) {
   return new Promise((res) => setTimeout(res, ms));
