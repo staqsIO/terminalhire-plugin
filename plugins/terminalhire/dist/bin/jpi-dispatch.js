@@ -1889,14 +1889,14 @@ async function mapWithConcurrency(items, limit, fn) {
   if (items.length === 0) return results;
   const workers = Math.max(1, Math.min(Math.floor(limit) || 1, items.length));
   let next = 0;
-  async function run13() {
+  async function run14() {
     for (; ; ) {
       const i = next++;
       if (i >= items.length) return;
       results[i] = await fn(items[i], i);
     }
   }
-  await Promise.all(Array.from({ length: workers }, run13));
+  await Promise.all(Array.from({ length: workers }, run14));
   return results;
 }
 var init_concurrency = __esm({
@@ -3122,11 +3122,11 @@ async function runLogin() {
     if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
       const { createRequire: createRequire2 } = await import("module");
       const { fileURLToPath: fileURLToPath7 } = await import("url");
-      const { join: join17, dirname: dirname3 } = await import("path");
+      const { join: join18, dirname: dirname3 } = await import("path");
       const __dirname6 = fileURLToPath7(new URL(".", import.meta.url));
-      const fixturePath = join17(__dirname6, "../../fixtures/github-sample.json");
-      const { readFileSync: readFileSync16 } = await import("fs");
-      ghProfile = JSON.parse(readFileSync16(fixturePath, "utf8"));
+      const fixturePath = join18(__dirname6, "../../fixtures/github-sample.json");
+      const { readFileSync: readFileSync17 } = await import("fs");
+      ghProfile = JSON.parse(readFileSync17(fixturePath, "utf8"));
     } else {
       ghProfile = await fetchGitHubProfile2(login, token);
     }
@@ -3801,9 +3801,9 @@ function fmtAmount(a) {
   return a != null ? "$" + a.toLocaleString() : "$\u2014";
 }
 function printMetric(rate) {
-  const pct = Math.round(rate.rate * 100);
+  const pct2 = Math.round(rate.rate * 100);
   console.log(`
-\u{1F4CA} Accepted-PR rate: ${rate.merged}/${rate.total} claims merged (${pct}%)`);
+\u{1F4CA} Accepted-PR rate: ${rate.merged}/${rate.total} claims merged (${pct2}%)`);
 }
 async function resolveBounty(arg) {
   let bountyId, title, repoFullName, issueUrl, amountUSD;
@@ -4060,10 +4060,1082 @@ var init_jpi_claim = __esm({
   }
 });
 
+// ../../packages/core/src/episodes/node-model.ts
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function asString(value, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+function asStringOrNull(value) {
+  return typeof value === "string" ? value : null;
+}
+function asBool(value) {
+  return value === true;
+}
+function parseBlock(raw) {
+  if (!isRecord(raw)) {
+    return { type: "unknown", rawType: typeof raw };
+  }
+  const t = raw.type;
+  if (t === "text") {
+    return { type: "text", text: asString(raw.text) };
+  }
+  if (t === "tool_use") {
+    return { type: "tool_use", id: asString(raw.id), name: asString(raw.name), input: raw.input };
+  }
+  if (t === "tool_result") {
+    return {
+      type: "tool_result",
+      toolUseId: asString(raw.tool_use_id),
+      content: raw.content,
+      isError: asBool(raw.is_error)
+    };
+  }
+  return { type: "unknown", rawType: typeof t === "string" ? t : String(t) };
+}
+function parseContent(content) {
+  if (typeof content === "string") {
+    return content.length > 0 ? [{ type: "text", text: content }] : [];
+  }
+  if (Array.isArray(content)) {
+    return content.map(parseBlock);
+  }
+  return [];
+}
+function toNode(raw, opts = {}) {
+  if (!isRecord(raw)) {
+    if (opts.strict) {
+      throw new Error(`toNode: node is not an object (got ${typeof raw})`);
+    }
+    return makeUnknown(emptyBase(), typeof raw);
+  }
+  const message = isRecord(raw.message) ? raw.message : void 0;
+  const content = parseContent(message?.content);
+  const base = {
+    uuid: asString(raw.uuid),
+    parentUuid: asStringOrNull(raw.parentUuid),
+    sessionId: asString(raw.sessionId),
+    cwd: asString(raw.cwd),
+    gitBranch: asString(raw.gitBranch),
+    timestamp: asString(raw.timestamp),
+    isSidechain: asBool(raw.isSidechain),
+    userType: asString(raw.userType),
+    role: asString(message?.role),
+    content,
+    text: content.reduce((acc, b) => b.type === "text" ? [...acc, b.text] : acc, []).join("\n")
+  };
+  const type = raw.type;
+  if (type === "summary" || asBool(raw.isCompactSummary) || isRecord(raw.compactMetadata)) {
+    return { ...base, kind: "summary" /* Summary */, toolName: null, toolUseId: null, isError: false, rawType: asString(type, "summary") };
+  }
+  if (type === "system") {
+    return { ...base, kind: "system" /* System */, toolName: null, toolUseId: null, isError: false, rawType: "system" };
+  }
+  if (type === "user") {
+    const tr = content.find((b) => b.type === "tool_result");
+    if (tr) {
+      return { ...base, kind: "tool_result" /* ToolResult */, toolName: null, toolUseId: tr.toolUseId, isError: tr.isError, rawType: "user" };
+    }
+    return { ...base, kind: "user" /* User */, toolName: null, toolUseId: null, isError: false, rawType: "user" };
+  }
+  if (type === "assistant") {
+    const tu = content.find((b) => b.type === "tool_use");
+    if (tu) {
+      return { ...base, kind: "tool_use" /* ToolUse */, toolName: tu.name, toolUseId: tu.id, isError: false, rawType: "assistant" };
+    }
+    return { ...base, kind: "assistant" /* Assistant */, toolName: null, toolUseId: null, isError: false, rawType: "assistant" };
+  }
+  const rawType = typeof type === "string" ? type : String(type);
+  if (opts.strict) {
+    throw new Error(`toNode: unrecognized node kind: ${rawType}`);
+  }
+  return makeUnknown(base, rawType);
+}
+function makeUnknown(base, rawType) {
+  return { ...base, kind: "unknown" /* Unknown */, toolName: null, toolUseId: null, isError: false, rawType };
+}
+function emptyBase() {
+  return {
+    uuid: "",
+    parentUuid: null,
+    sessionId: "",
+    cwd: "",
+    gitBranch: "",
+    timestamp: "",
+    isSidechain: false,
+    userType: "",
+    role: "",
+    content: [],
+    text: ""
+  };
+}
+var init_node_model = __esm({
+  "../../packages/core/src/episodes/node-model.ts"() {
+    "use strict";
+  }
+});
+
+// ../../packages/core/src/episodes/parser.ts
+function parseTranscript(text, opts = {}) {
+  const nodes = [];
+  const unknownKinds = /* @__PURE__ */ new Set();
+  let malformedCount = 0;
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    let raw;
+    try {
+      raw = JSON.parse(trimmed);
+    } catch {
+      malformedCount++;
+      continue;
+    }
+    const node = toNode(raw, { strict: opts.strict });
+    if (node.kind === "unknown" /* Unknown */) {
+      unknownKinds.add(node.rawType);
+    }
+    nodes.push(node);
+  }
+  return { nodes, malformedCount, unknownKinds: [...unknownKinds] };
+}
+var init_parser = __esm({
+  "../../packages/core/src/episodes/parser.ts"() {
+    "use strict";
+    init_node_model();
+  }
+});
+
+// ../../packages/core/src/episodes/episode.ts
+var init_episode = __esm({
+  "../../packages/core/src/episodes/episode.ts"() {
+    "use strict";
+  }
+});
+
+// ../../packages/core/src/episodes/reconstructor.ts
+function sidechainRatio(nodes) {
+  if (nodes.length === 0) {
+    return 0;
+  }
+  const n = nodes.reduce((acc, node) => node.isSidechain ? acc + 1 : acc, 0);
+  return n / nodes.length;
+}
+function fileSessionId(nodes) {
+  return nodes.length > 0 ? nodes[0].sessionId : "";
+}
+function byTimestamp(a, b) {
+  return a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0;
+}
+function isGenuineUserTurn(node) {
+  return node.kind === "user" /* User */ && !node.isSidechain;
+}
+function boundMainSession(sessionId, nodes) {
+  const ordered = [...nodes].sort(byTimestamp);
+  const episodes = [];
+  const leading = [];
+  let current = null;
+  for (const node of ordered) {
+    if (isGenuineUserTurn(node)) {
+      current = {
+        sessionId,
+        rootUuid: node.uuid,
+        mainNodes: [...leading, node],
+        sidechainNodes: [],
+        joinedSidechainPaths: []
+      };
+      leading.length = 0;
+      episodes.push(current);
+    } else if (current) {
+      current.mainNodes.push(node);
+    } else {
+      leading.push(node);
+    }
+  }
+  if (leading.length > 0) {
+    if (episodes.length > 0) {
+      episodes[0].mainNodes.unshift(...leading);
+    } else {
+      episodes.push({
+        sessionId,
+        rootUuid: leading[0].uuid,
+        mainNodes: [...leading],
+        sidechainNodes: [],
+        joinedSidechainPaths: []
+      });
+    }
+  }
+  return episodes;
+}
+function isCompaction(node) {
+  return node.kind === "summary" /* Summary */;
+}
+function deriveLifecycle(mainNodes) {
+  const meaningful = mainNodes.filter((n) => !isCompaction(n)).sort(byTimestamp);
+  const hasWork = meaningful.some((n) => n.kind !== "user" /* User */);
+  if (!hasWork) {
+    return "open";
+  }
+  const last = meaningful[meaningful.length - 1];
+  if (last.kind === "tool_result" /* ToolResult */ && last.isError) {
+    return "abandoned";
+  }
+  if (last.kind === "assistant" /* Assistant */) {
+    return "resolved";
+  }
+  return "updated";
+}
+function findAgentDispatchEpisodes(episodes) {
+  const out = [];
+  for (const ep of episodes) {
+    for (const node of ep.mainNodes) {
+      if (node.kind === "tool_use" /* ToolUse */ && node.toolName === AGENT_TOOL) {
+        out.push({ episode: ep, ts: node.timestamp });
+      }
+    }
+  }
+  return out.sort((a, b) => a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0);
+}
+function episodeContainingTs(episodes, ts) {
+  let chosen = null;
+  for (const ep of episodes) {
+    const sorted = [...ep.mainNodes].sort(byTimestamp);
+    const start = sorted[0]?.timestamp ?? "";
+    const end = sorted[sorted.length - 1]?.timestamp ?? "";
+    if (ts >= start && ts <= end) {
+      return ep;
+    }
+    if (ts >= start) {
+      chosen = ep;
+    }
+  }
+  return chosen ?? (episodes.length > 0 ? episodes[episodes.length - 1] : null);
+}
+function finalize(build) {
+  const mainSorted = [...build.mainNodes].sort(byTimestamp);
+  const mainNodeUuids = mainSorted.map((n) => n.uuid);
+  const sidechainNodeUuids = [...build.sidechainNodes].sort(byTimestamp).map((n) => n.uuid);
+  const compactedNodeUuids = mainSorted.filter(isCompaction).map((n) => n.uuid);
+  const start = mainSorted[0]?.timestamp ?? "";
+  const end = mainSorted[mainSorted.length - 1]?.timestamp ?? "";
+  return {
+    id: build.rootUuid,
+    sessionId: build.sessionId,
+    rootUuid: build.rootUuid,
+    lifecycle: deriveLifecycle(build.mainNodes),
+    mainNodeUuids,
+    sidechainNodeUuids,
+    nodeUuids: [...mainNodeUuids, ...sidechainNodeUuids],
+    joinedSidechainPaths: [...build.joinedSidechainPaths],
+    compacted: compactedNodeUuids.length > 0,
+    compactedNodeUuids,
+    startTimestamp: start,
+    endTimestamp: end
+  };
+}
+function reconstruct(files, opts = {}) {
+  const join18 = opts.joinSidechains !== false;
+  const mains = [];
+  const sidechains = [];
+  for (const file of files) {
+    const sessionId = fileSessionId(file.nodes);
+    if (sidechainRatio(file.nodes) >= SIDECHAIN_FILE_THRESHOLD) {
+      const firstTs = [...file.nodes].sort(byTimestamp)[0]?.timestamp ?? "";
+      sidechains.push({ path: file.path, sessionId, nodes: file.nodes, firstTs });
+    } else {
+      mains.push(file);
+    }
+  }
+  const mainNodesBySession = /* @__PURE__ */ new Map();
+  for (const file of mains) {
+    const sessionId = fileSessionId(file.nodes);
+    const acc = mainNodesBySession.get(sessionId) ?? [];
+    acc.push(...file.nodes);
+    mainNodesBySession.set(sessionId, acc);
+  }
+  const episodesBySession = /* @__PURE__ */ new Map();
+  for (const [sessionId, nodes] of mainNodesBySession) {
+    episodesBySession.set(sessionId, boundMainSession(sessionId, nodes));
+  }
+  const orphanedSidechainPaths = [];
+  const joinedPaths = /* @__PURE__ */ new Set();
+  if (join18) {
+    const sidechainsBySession = /* @__PURE__ */ new Map();
+    for (const sc of sidechains) {
+      const acc = sidechainsBySession.get(sc.sessionId) ?? [];
+      acc.push(sc);
+      sidechainsBySession.set(sc.sessionId, acc);
+    }
+    for (const [sessionId, group] of sidechainsBySession) {
+      const parentEpisodes = episodesBySession.get(sessionId);
+      if (!parentEpisodes || parentEpisodes.length === 0) {
+        for (const sc of group) {
+          orphanedSidechainPaths.push(sc.path);
+        }
+        continue;
+      }
+      const dispatches = findAgentDispatchEpisodes(parentEpisodes);
+      const orderedScs = [...group].sort((a, b) => a.firstTs < b.firstTs ? -1 : a.firstTs > b.firstTs ? 1 : 0);
+      orderedScs.forEach((sc, i) => {
+        let target = null;
+        if (dispatches.length > 0) {
+          target = dispatches[Math.min(i, dispatches.length - 1)].episode;
+        } else {
+          target = episodeContainingTs(parentEpisodes, sc.firstTs);
+        }
+        if (target) {
+          target.sidechainNodes.push(...sc.nodes);
+          target.joinedSidechainPaths.push(sc.path);
+          joinedPaths.add(sc.path);
+        } else {
+          orphanedSidechainPaths.push(sc.path);
+        }
+      });
+    }
+  } else {
+    for (const sc of sidechains) {
+      orphanedSidechainPaths.push(sc.path);
+    }
+  }
+  const episodes = [];
+  const compactedNodeUuids = [];
+  for (const builds of episodesBySession.values()) {
+    for (const build of builds) {
+      const ep = finalize(build);
+      episodes.push(ep);
+      compactedNodeUuids.push(...ep.compactedNodeUuids);
+    }
+  }
+  episodes.sort(
+    (a, b) => a.startTimestamp < b.startTimestamp ? -1 : a.startTimestamp > b.startTimestamp ? 1 : 0
+  );
+  const classification = [
+    ...mains.map((f) => ({
+      path: f.path,
+      sessionId: fileSessionId(f.nodes),
+      role: "main",
+      nodeCount: f.nodes.length,
+      joined: false
+    })),
+    ...sidechains.map((sc) => ({
+      path: sc.path,
+      sessionId: sc.sessionId,
+      role: "sidechain",
+      nodeCount: sc.nodes.length,
+      joined: joinedPaths.has(sc.path)
+    }))
+  ];
+  return {
+    episodes,
+    files: classification,
+    orphanedSidechainPaths,
+    compactedNodeUuids
+  };
+}
+var AGENT_TOOL, SIDECHAIN_FILE_THRESHOLD;
+var init_reconstructor = __esm({
+  "../../packages/core/src/episodes/reconstructor.ts"() {
+    "use strict";
+    init_node_model();
+    AGENT_TOOL = "Agent";
+    SIDECHAIN_FILE_THRESHOLD = 0.5;
+  }
+});
+
+// ../../packages/core/src/episodes/coverage.ts
+function pct(part, whole) {
+  return whole === 0 ? 0 : part / whole * 100;
+}
+function computeCoverage(files, result) {
+  const totalNodes = files.reduce((acc, f) => acc + f.nodes.length, 0);
+  const nodeCountByPath = /* @__PURE__ */ new Map();
+  for (const f of files) {
+    nodeCountByPath.set(f.path, f.nodes.length);
+  }
+  const orphanedNodes = result.orphanedSidechainPaths.reduce(
+    (acc, path) => acc + (nodeCountByPath.get(path) ?? 0),
+    0
+  );
+  const attributedNodes = totalNodes - orphanedNodes;
+  const compactedNodes = result.compactedNodeUuids.length;
+  return {
+    totalNodes,
+    attributedNodes,
+    orphanedNodes,
+    compactedNodes,
+    attributedPct: pct(attributedNodes, totalNodes),
+    orphanedPct: pct(orphanedNodes, totalNodes),
+    compactedPct: pct(compactedNodes, totalNodes)
+  };
+}
+var init_coverage = __esm({
+  "../../packages/core/src/episodes/coverage.ts"() {
+    "use strict";
+  }
+});
+
+// ../../packages/core/src/episodes/schema.ts
+var SCHEMA_VERSION;
+var init_schema = __esm({
+  "../../packages/core/src/episodes/schema.ts"() {
+    "use strict";
+    SCHEMA_VERSION = 1;
+  }
+});
+
+// ../../packages/core/src/episodes/doors.ts
+function recruiterMetric(value) {
+  return { value };
+}
+function inwardMetric(value) {
+  return { value };
+}
+function metricValue(metric) {
+  return metric.value;
+}
+function declassify(metrics, coveragePct = 0) {
+  const velocity = metrics.skillAdoptionVelocity.value;
+  const drift = metrics.distributionDrift.value;
+  const recency = metrics.recencySplit.value;
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    headline: {
+      distinctSignalCount: velocity.distinctSignalCount,
+      recentAdoptionCount: velocity.recentAdoptionCount,
+      velocityPerWeek: velocity.velocityPerWeek,
+      rising: drift.rising.map((entry) => ({ signal: entry.signal, delta: entry.delta })),
+      falling: drift.falling.map((entry) => ({ signal: entry.signal, delta: entry.delta }))
+    },
+    liveStack: [...recency.live],
+    dormantStack: [...recency.dormant],
+    coveragePct
+  };
+}
+function buildExport(metrics, coveragePct = 0) {
+  return declassify(metrics, coveragePct);
+}
+var init_doors = __esm({
+  "../../packages/core/src/episodes/doors.ts"() {
+    "use strict";
+    init_schema();
+  }
+});
+
+// ../../packages/core/src/episodes/events.ts
+var init_events = __esm({
+  "../../packages/core/src/episodes/events.ts"() {
+    "use strict";
+    init_schema();
+  }
+});
+
+// ../../packages/core/src/episodes/derivers/signals.ts
+function normalizeToolName(name) {
+  if (!name.toLowerCase().startsWith("mcp__")) {
+    return name;
+  }
+  const rest = name.slice("mcp__".length);
+  const sep = rest.indexOf("__");
+  if (sep <= 0) {
+    return "mcp:custom";
+  }
+  const server = rest.slice(0, sep).toLowerCase();
+  const leaf = rest.slice(sep + 2);
+  if (leaf.length === 0 || !PUBLIC_MCP_SERVERS.has(server)) {
+    return "mcp:custom";
+  }
+  return `mcp:${leaf}`;
+}
+function isRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function fileExtLang(input) {
+  if (!isRecord2(input)) {
+    return null;
+  }
+  const filePath = input.file_path;
+  if (typeof filePath !== "string") {
+    return null;
+  }
+  const dot = filePath.lastIndexOf(".");
+  if (dot < 0 || dot === filePath.length - 1) {
+    return null;
+  }
+  const ext = filePath.slice(dot + 1).toLowerCase();
+  return EXT_LANG[ext] ?? null;
+}
+function toolUseInput(node) {
+  const block = node.content.find((b) => b.type === "tool_use");
+  return block?.input;
+}
+function compareSignal(a, b) {
+  if (a.ts !== b.ts) {
+    return a.ts < b.ts ? -1 : 1;
+  }
+  if (a.signal !== b.signal) {
+    return a.signal < b.signal ? -1 : 1;
+  }
+  return 0;
+}
+function extractToolSignals(nodes) {
+  const out = [];
+  for (const node of nodes) {
+    if (node.kind !== "tool_use" /* ToolUse */ || node.toolName === null) {
+      continue;
+    }
+    out.push({ signal: `tool:${normalizeToolName(node.toolName)}`, ts: node.timestamp });
+    const lang = fileExtLang(toolUseInput(node));
+    if (lang !== null) {
+      out.push({ signal: `lang:${lang}`, ts: node.timestamp });
+    }
+  }
+  out.sort(compareSignal);
+  return out;
+}
+var EXT_LANG, PUBLIC_MCP_SERVERS;
+var init_signals = __esm({
+  "../../packages/core/src/episodes/derivers/signals.ts"() {
+    "use strict";
+    init_node_model();
+    EXT_LANG = {
+      ts: "ts",
+      tsx: "ts",
+      js: "js",
+      jsx: "js",
+      mjs: "js",
+      cjs: "js",
+      py: "py",
+      rs: "rs",
+      go: "go",
+      rb: "rb",
+      java: "java",
+      kt: "kt",
+      sql: "sql",
+      md: "md"
+    };
+    PUBLIC_MCP_SERVERS = /* @__PURE__ */ new Set([
+      // Anthropic first-party connectors (claude.ai)
+      "claude_ai_linear",
+      "claude_ai_gmail",
+      "claude_ai_google_calendar",
+      "claude_ai_google_drive",
+      "claude_ai_figma",
+      "claude_ai_vercel",
+      "claude_ai_ideabrowser",
+      // Common public Claude Code plugins
+      "plugin_playwright_playwright",
+      "plugin_context-mode_context-mode",
+      "plugin_vercel_vercel",
+      "playwright",
+      "ideabrowser",
+      "blender",
+      "figma",
+      "n8n-knowledge",
+      "pencil"
+    ]);
+  }
+});
+
+// ../../packages/core/src/episodes/derivers/skill-adoption-velocity.ts
+function deriveSkillAdoptionVelocity(nodes, opts = {}) {
+  const signals = extractToolSignals(nodes);
+  const firstSeen = /* @__PURE__ */ new Map();
+  for (const s of signals) {
+    const cur = firstSeen.get(s.signal);
+    if (cur === void 0 || s.ts < cur) {
+      firstSeen.set(s.signal, s.ts);
+    }
+  }
+  const firstAppearances = [...firstSeen.entries()].map(([signal, ts]) => ({ signal, ts })).sort((a, b) => a.ts !== b.ts ? a.ts < b.ts ? -1 : 1 : a.signal < b.signal ? -1 : 1);
+  const minTs = signals.length > 0 ? signals[0].ts : "";
+  const maxTs = signals.length > 0 ? signals[signals.length - 1].ts : "";
+  const now = opts.now ?? maxTs;
+  const windowDays = opts.recentWindowDays ?? RECENT_WINDOW_DAYS;
+  const spanDays = minTs !== "" && maxTs !== "" ? (Date.parse(maxTs) - Date.parse(minTs)) / DAY_MS : 0;
+  const nowMs = now !== "" ? Date.parse(now) : 0;
+  const recentAdoptionCount = now === "" ? 0 : firstAppearances.filter((f) => nowMs - Date.parse(f.ts) <= windowDays * DAY_MS).length;
+  const spanWeeks = spanDays / 7;
+  const velocityPerWeek = spanWeeks > 0 ? firstSeen.size / spanWeeks : firstSeen.size;
+  return recruiterMetric({
+    distinctSignalCount: firstSeen.size,
+    firstAppearances,
+    recentAdoptionCount,
+    spanDays,
+    velocityPerWeek
+  });
+}
+var DAY_MS, RECENT_WINDOW_DAYS;
+var init_skill_adoption_velocity = __esm({
+  "../../packages/core/src/episodes/derivers/skill-adoption-velocity.ts"() {
+    "use strict";
+    init_doors();
+    init_signals();
+    DAY_MS = 864e5;
+    RECENT_WINDOW_DAYS = 90;
+  }
+});
+
+// ../../packages/core/src/episodes/derivers/distribution-drift.ts
+function shareMap(signals) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const s of signals) {
+    counts.set(s.signal, (counts.get(s.signal) ?? 0) + 1);
+  }
+  const total = signals.length > 0 ? signals.length : 1;
+  const shares = /* @__PURE__ */ new Map();
+  for (const [signal, count] of counts) {
+    shares.set(signal, count / total);
+  }
+  return shares;
+}
+function deriveDistributionDrift(nodes) {
+  const signals = extractToolSignals(nodes);
+  const mid = Math.floor(signals.length / 2);
+  const early = signals.slice(0, mid);
+  const late = signals.slice(mid);
+  const earlyShares = shareMap(early);
+  const lateShares = shareMap(late);
+  const all = /* @__PURE__ */ new Set([...earlyShares.keys(), ...lateShares.keys()]);
+  const entries = [...all].map((signal) => {
+    const earlyShare = earlyShares.get(signal) ?? 0;
+    const lateShare = lateShares.get(signal) ?? 0;
+    return { signal, earlyShare, lateShare, delta: lateShare - earlyShare };
+  });
+  const rising = entries.filter((e) => e.delta > 0).sort((a, b) => b.delta !== a.delta ? b.delta - a.delta : a.signal < b.signal ? -1 : 1);
+  const falling = entries.filter((e) => e.delta < 0).sort((a, b) => a.delta !== b.delta ? a.delta - b.delta : a.signal < b.signal ? -1 : 1);
+  return recruiterMetric({ rising, falling });
+}
+var init_distribution_drift = __esm({
+  "../../packages/core/src/episodes/derivers/distribution-drift.ts"() {
+    "use strict";
+    init_doors();
+    init_signals();
+  }
+});
+
+// ../../packages/core/src/episodes/derivers/recency-split.ts
+function deriveRecencySplit(nodes, opts = {}) {
+  const signals = extractToolSignals(nodes);
+  const lastSeen = /* @__PURE__ */ new Map();
+  for (const s of signals) {
+    const cur = lastSeen.get(s.signal);
+    if (cur === void 0 || s.ts > cur) {
+      lastSeen.set(s.signal, s.ts);
+    }
+  }
+  const maxTs = signals.length > 0 ? signals[signals.length - 1].ts : "";
+  const now = opts.now ?? maxTs;
+  const thresholdDays = opts.thresholdDays ?? DORMANT_THRESHOLD_DAYS;
+  const nowMs = now !== "" ? Date.parse(now) : 0;
+  const live = [];
+  const dormant = [];
+  for (const [signal, ts] of [...lastSeen.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1)) {
+    const ageDays2 = now !== "" ? (nowMs - Date.parse(ts)) / DAY_MS2 : 0;
+    if (ageDays2 <= thresholdDays) {
+      live.push(signal);
+    } else {
+      dormant.push(signal);
+    }
+  }
+  return recruiterMetric({ now, thresholdDays, live, dormant });
+}
+var DAY_MS2, DORMANT_THRESHOLD_DAYS;
+var init_recency_split = __esm({
+  "../../packages/core/src/episodes/derivers/recency-split.ts"() {
+    "use strict";
+    init_doors();
+    init_signals();
+    DAY_MS2 = 864e5;
+    DORMANT_THRESHOLD_DAYS = 90;
+  }
+});
+
+// ../../packages/core/src/episodes/derivers/rework-density.ts
+function isRecord3(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function filePathOf(node) {
+  const block = node.content.find((b) => b.type === "tool_use");
+  const input = block?.input;
+  if (isRecord3(input) && typeof input.file_path === "string") {
+    return input.file_path;
+  }
+  return null;
+}
+function deriveReworkDensity(episodes, nodesByUuid) {
+  let totalEdits = 0;
+  let reworkEdits = 0;
+  let spansConsidered = 0;
+  let spansSkipped = 0;
+  for (const episode of episodes) {
+    if (episode.compacted) {
+      spansSkipped++;
+      continue;
+    }
+    spansConsidered++;
+    const seen = /* @__PURE__ */ new Set();
+    for (const uuid of episode.mainNodeUuids) {
+      const node = nodesByUuid.get(uuid);
+      if (node === void 0 || node.kind !== "tool_use" /* ToolUse */ || node.toolName === null) {
+        continue;
+      }
+      if (!EDIT_TOOLS.has(node.toolName)) {
+        continue;
+      }
+      const filePath = filePathOf(node);
+      if (filePath === null) {
+        continue;
+      }
+      totalEdits++;
+      if (seen.has(filePath)) {
+        reworkEdits++;
+      } else {
+        seen.add(filePath);
+      }
+    }
+  }
+  const reworkRatio = totalEdits > 0 ? reworkEdits / totalEdits : 0;
+  return inwardMetric({ totalEdits, reworkEdits, reworkRatio, spansConsidered, spansSkipped });
+}
+var EDIT_TOOLS;
+var init_rework_density = __esm({
+  "../../packages/core/src/episodes/derivers/rework-density.ts"() {
+    "use strict";
+    init_node_model();
+    init_doors();
+    EDIT_TOOLS = /* @__PURE__ */ new Set(["Edit", "Write", "NotebookEdit"]);
+  }
+});
+
+// ../../packages/core/src/episodes/derivers/recovery-depth.ts
+function deriveRecoveryDepth(episodes, nodesByUuid) {
+  let maxConsecutiveErrors = 0;
+  let totalDepth = 0;
+  let recoveryChains = 0;
+  let spansConsidered = 0;
+  let spansSkipped = 0;
+  for (const episode of episodes) {
+    if (episode.compacted) {
+      spansSkipped++;
+      continue;
+    }
+    spansConsidered++;
+    let run14 = 0;
+    const closeChain = () => {
+      if (run14 > 0) {
+        recoveryChains++;
+        totalDepth += run14;
+        run14 = 0;
+      }
+    };
+    for (const uuid of episode.mainNodeUuids) {
+      const node = nodesByUuid.get(uuid);
+      if (node === void 0) {
+        continue;
+      }
+      if (node.kind === "tool_result" /* ToolResult */ && node.isError) {
+        run14++;
+        if (run14 > maxConsecutiveErrors) {
+          maxConsecutiveErrors = run14;
+        }
+      } else if (node.kind === "tool_result" /* ToolResult */ && !node.isError) {
+        closeChain();
+      } else if (node.kind === "assistant" /* Assistant */) {
+        closeChain();
+      }
+    }
+    closeChain();
+  }
+  const meanRecoveryDepth = recoveryChains > 0 ? totalDepth / recoveryChains : 0;
+  return inwardMetric({ maxConsecutiveErrors, meanRecoveryDepth, recoveryChains, spansConsidered, spansSkipped });
+}
+var init_recovery_depth = __esm({
+  "../../packages/core/src/episodes/derivers/recovery-depth.ts"() {
+    "use strict";
+    init_node_model();
+    init_doors();
+  }
+});
+
+// ../../packages/core/src/episodes/index.ts
+var init_episodes = __esm({
+  "../../packages/core/src/episodes/index.ts"() {
+    "use strict";
+    init_node_model();
+    init_parser();
+    init_episode();
+    init_reconstructor();
+    init_coverage();
+    init_schema();
+    init_doors();
+    init_events();
+    init_signals();
+    init_skill_adoption_velocity();
+    init_distribution_drift();
+    init_recency_split();
+    init_rework_density();
+    init_recovery_depth();
+  }
+});
+
+// src/trajectory.ts
+var trajectory_exports = {};
+__export(trajectory_exports, {
+  runTrajectory: () => runTrajectory
+});
+import {
+  existsSync as existsSync6,
+  mkdirSync as mkdirSync6,
+  readFileSync as readFileSync8,
+  readdirSync,
+  writeFileSync as writeFileSync6
+} from "fs";
+import { homedir as homedir7 } from "os";
+import { join as join8 } from "path";
+function isRecord4(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function filePathOf2(node) {
+  const block = node.content.find((b) => b.type === "tool_use");
+  const input = block?.input;
+  if (isRecord4(input) && typeof input.file_path === "string") {
+    return input.file_path;
+  }
+  return null;
+}
+function slimNode(node) {
+  if (node.kind === "tool_use" /* ToolUse */) {
+    const fp = filePathOf2(node);
+    const input = fp === null ? {} : { file_path: fp };
+    const content = [
+      { type: "tool_use", id: node.toolUseId ?? "", name: node.toolName ?? "", input }
+    ];
+    return { ...node, content, text: "" };
+  }
+  return { ...node, content: [], text: "" };
+}
+function findJsonlFiles(dir) {
+  const out = [];
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true, encoding: "utf8" });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    const full = join8(dir, entry.name);
+    if (entry.isDirectory()) {
+      out.push(...findJsonlFiles(full));
+    } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+function loadCorpus(paths) {
+  const files = [];
+  for (const path of paths) {
+    let text;
+    try {
+      text = readFileSync8(path, "utf8");
+    } catch {
+      continue;
+    }
+    const parsed = parseTranscript(text);
+    const nodes = parsed.nodes.map(slimNode);
+    files.push({ path, nodes });
+  }
+  return files;
+}
+function prettySignal(signal) {
+  if (signal.startsWith("tool:")) return signal.slice("tool:".length);
+  if (signal.startsWith("lang:")) return `.${signal.slice("lang:".length)}`;
+  return signal;
+}
+function prettyList(signals, max = 12) {
+  if (signals.length === 0) return "(none)";
+  const shown = signals.slice(0, max).map(prettySignal).join(", ");
+  const extra = signals.length - max;
+  return extra > 0 ? `${shown}, +${extra} more` : shown;
+}
+function round(n) {
+  return Math.round(n);
+}
+function oneDecimal(n) {
+  return (Math.round(n * 10) / 10).toFixed(1);
+}
+function coverageLine(view) {
+  const attr = round(view.coverage.attributedPct);
+  const sub = round(view.subagentPct);
+  const comp = round(view.coverage.compactedPct);
+  return `Built from ${view.sessions} session${view.sessions === 1 ? "" : "s"}; ${attr}% attributed, ${sub}% in subagent dispatches, ${comp}% compacted. Covers stack currency + trajectory \u2014 not seniority, impact, or judgment. Pair with a conversation.`;
+}
+function renderTerminal(view) {
+  const h = view.score.headline;
+  const rising = h.rising.map((e) => prettySignal(e.signal)).slice(0, 6);
+  const falling = h.falling.map((e) => prettySignal(e.signal)).slice(0, 6);
+  console.log("");
+  console.log("  Trajectory \u2014 your code is your r\xE9sum\xE9");
+  console.log("  " + "\u2500".repeat(68));
+  console.log("");
+  console.log("  \u258C Trajectory");
+  console.log(
+    `    ${h.distinctSignalCount} distinct tools/languages \xB7 ${h.recentAdoptionCount} adopted in the last 90d \xB7 ${oneDecimal(h.velocityPerWeek)} new/wk`
+  );
+  if (rising.length > 0) console.log(`    \u2191 rising:  ${rising.join(", ")}`);
+  if (falling.length > 0) console.log(`    \u2193 falling: ${falling.join(", ")}`);
+  console.log("");
+  console.log("  \u258C Stack");
+  console.log(`    live (this quarter):    ${prettyList(view.score.liveStack)}`);
+  console.log(`    dormant (90d+ untouched): ${prettyList(view.score.dormantStack)}`);
+  console.log("");
+  console.log("  \u258C Coverage / scope");
+  console.log(`    ${coverageLine(view)}`);
+  console.log("");
+}
+function renderMarkdown(view) {
+  const h = view.score.headline;
+  const rising = h.rising.map((e) => prettySignal(e.signal)).slice(0, 8);
+  const falling = h.falling.map((e) => prettySignal(e.signal)).slice(0, 8);
+  const lines = [];
+  lines.push("# Trajectory");
+  lines.push("");
+  lines.push("> Your code is your r\xE9sum\xE9. Local-first, derived from your own Claude Code corpus.");
+  lines.push("");
+  lines.push("## Trajectory");
+  lines.push("");
+  lines.push(`- Distinct tools/languages: **${h.distinctSignalCount}**`);
+  lines.push(`- Adopted in the last 90 days: **${h.recentAdoptionCount}**`);
+  lines.push(`- Adoption velocity: **${oneDecimal(h.velocityPerWeek)} new/week**`);
+  lines.push(`- Rising: ${rising.length > 0 ? rising.join(", ") : "_none_"}`);
+  lines.push(`- Falling: ${falling.length > 0 ? falling.join(", ") : "_none_"}`);
+  lines.push("");
+  lines.push("## Stack");
+  lines.push("");
+  lines.push(`- **Live** (used this quarter): ${prettyList(view.score.liveStack, 64)}`);
+  lines.push(`- **Dormant** (90d+ untouched): ${prettyList(view.score.dormantStack, 64)}`);
+  lines.push("");
+  lines.push("## Coverage / scope");
+  lines.push("");
+  lines.push(coverageLine(view));
+  lines.push("");
+  return lines.join("\n");
+}
+function writeExportArtifacts(score, markdown) {
+  const dir = join8(homedir7(), ".terminalhire");
+  mkdirSync6(dir, { recursive: true });
+  const jsonPath = join8(dir, "trajectory-export.json");
+  const mdPath = join8(dir, "trajectory-export.md");
+  writeFileSync6(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
+  writeFileSync6(mdPath, markdown, "utf8");
+  return { jsonPath, mdPath };
+}
+function renderInward(allNodes, view, files) {
+  const result = reconstruct(files);
+  const nodesByUuid = /* @__PURE__ */ new Map();
+  for (const n of allNodes) nodesByUuid.set(n.uuid, n);
+  const rework = metricValue(deriveReworkDensity(result.episodes, nodesByUuid));
+  const recovery = metricValue(deriveRecoveryDepth(result.episodes, nodesByUuid));
+  console.log("  \u258C Inward (private \u2014 never exported)");
+  console.log(
+    `    rework: ${rework.reworkEdits}/${rework.totalEdits} edits revisited (ratio ${oneDecimal(rework.reworkRatio * 100)}%) over ${rework.spansConsidered} spans (${rework.spansSkipped} compacted skipped)`
+  );
+  console.log(
+    `    recovery: max chain ${recovery.maxConsecutiveErrors}, mean depth ${oneDecimal(recovery.meanRecoveryDepth)} over ${recovery.recoveryChains} chains (${recovery.spansConsidered} spans, ${recovery.spansSkipped} compacted skipped)`
+  );
+  console.log("");
+}
+async function runTrajectory(opts) {
+  const projectsDir = join8(homedir7(), ".claude", "projects");
+  if (!existsSync6(projectsDir)) {
+    console.log("terminalhire trajectory: no ~/.claude/projects directory found.");
+    console.log("  Start a Claude Code session and your trajectory will appear here.");
+    return;
+  }
+  const paths = findJsonlFiles(projectsDir);
+  if (paths.length === 0) {
+    console.log("terminalhire trajectory: no transcripts found under ~/.claude/projects.");
+    console.log("  Start a Claude Code session and your trajectory will appear here.");
+    return;
+  }
+  const files = loadCorpus(paths);
+  const allNodes = [];
+  for (const f of files) {
+    for (const n of f.nodes) allNodes.push(n);
+  }
+  const reconstructed = reconstruct(files);
+  const coverage = computeCoverage(files, reconstructed);
+  const velocity = deriveSkillAdoptionVelocity(allNodes);
+  const drift = deriveDistributionDrift(allNodes);
+  const recency = deriveRecencySplit(allNodes);
+  const score = buildExport(
+    {
+      skillAdoptionVelocity: velocity,
+      distributionDrift: drift,
+      recencySplit: recency
+    },
+    round(coverage.attributedPct)
+  );
+  let sidechainNodes = 0;
+  for (const n of allNodes) if (n.isSidechain) sidechainNodes++;
+  const subagentPct = allNodes.length > 0 ? sidechainNodes / allNodes.length * 100 : 0;
+  const sessions = new Set(reconstructed.files.map((f) => f.sessionId)).size;
+  const view = {
+    score,
+    coverage,
+    sessions,
+    subagentPct,
+    fileCount: files.length
+  };
+  renderTerminal(view);
+  if (opts.inward) {
+    renderInward(allNodes, view, files);
+  }
+  if (opts.export) {
+    const markdown = renderMarkdown(view);
+    const { jsonPath, mdPath } = writeExportArtifacts(score, markdown);
+    console.log("  Export written:");
+    console.log(`    ${jsonPath}`);
+    console.log(`    ${mdPath}`);
+    console.log("");
+  }
+}
+var init_trajectory = __esm({
+  "src/trajectory.ts"() {
+    "use strict";
+    init_episodes();
+  }
+});
+
+// bin/jpi-trajectory.js
+var jpi_trajectory_exports = {};
+__export(jpi_trajectory_exports, {
+  run: () => run5
+});
+async function run5() {
+  try {
+    const args3 = process.argv.slice(2);
+    const doExport = args3.includes("--export");
+    const inward = args3.includes("--inward");
+    const { runTrajectory: runTrajectory2 } = await Promise.resolve().then(() => (init_trajectory(), trajectory_exports));
+    await runTrajectory2({ export: doExport, inward });
+  } catch (err) {
+    console.error("terminalhire trajectory error:", err?.message ?? err);
+    process.exit(1);
+  }
+}
+var init_jpi_trajectory = __esm({
+  "bin/jpi-trajectory.js"() {
+    "use strict";
+  }
+});
+
 // bin/jpi-profile.js
 var jpi_profile_exports = {};
 __export(jpi_profile_exports, {
-  run: () => run5
+  run: () => run6
 });
 import { createInterface as createInterface3 } from "readline";
 function prompt3(question) {
@@ -4075,7 +5147,7 @@ function prompt3(question) {
     });
   });
 }
-async function run5() {
+async function run6() {
   const { readProfile: readProfile2, writeProfile: writeProfile2, deleteProfile: deleteProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
   const args3 = process.argv.slice(2);
   if (args3.includes("--show")) {
@@ -4148,9 +5220,9 @@ var signal_exports = {};
 __export(signal_exports, {
   extractFingerprint: () => extractFingerprint
 });
-import { readFileSync as readFileSync8, readdirSync } from "fs";
+import { readFileSync as readFileSync9, readdirSync as readdirSync2 } from "fs";
 import { execFileSync } from "child_process";
-import { join as join8 } from "path";
+import { join as join9 } from "path";
 function safeGit(args3, cwd) {
   try {
     return execFileSync("git", ["-C", cwd, ...args3], {
@@ -4178,20 +5250,20 @@ function isEmployerContext(cwd) {
 }
 function readJsonSafe(path) {
   try {
-    return JSON.parse(readFileSync8(path, "utf8"));
+    return JSON.parse(readFileSync9(path, "utf8"));
   } catch {
     return null;
   }
 }
 function readFileSafe(path) {
   try {
-    return readFileSync8(path, "utf8");
+    return readFileSync9(path, "utf8");
   } catch {
     return "";
   }
 }
 function tokensFromPackageJson(cwd) {
-  const pkg = readJsonSafe(join8(cwd, "package.json"));
+  const pkg = readJsonSafe(join9(cwd, "package.json"));
   if (!pkg || typeof pkg !== "object") return [];
   const p = pkg;
   const deps = {
@@ -4205,9 +5277,9 @@ function workspaceMemberDirs(cwd) {
   const dirs = [cwd];
   for (const group of ["apps", "packages"]) {
     try {
-      const groupDir = join8(cwd, group);
-      for (const e of readdirSync(groupDir, { withFileTypes: true })) {
-        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join8(groupDir, e.name));
+      const groupDir = join9(cwd, group);
+      for (const e of readdirSync2(groupDir, { withFileTypes: true })) {
+        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join9(groupDir, e.name));
       }
     } catch {
     }
@@ -4215,18 +5287,18 @@ function workspaceMemberDirs(cwd) {
   return dirs;
 }
 function tokensFromRequirementsTxt(cwd) {
-  const content = readFileSafe(join8(cwd, "requirements.txt"));
+  const content = readFileSafe(join9(cwd, "requirements.txt"));
   if (!content) return [];
   return content.split("\n").map((l) => l.trim().split(/[>=<!\[;]/)[0].trim().toLowerCase()).filter(Boolean);
 }
 function tokensFromGoMod(cwd) {
-  const content = readFileSafe(join8(cwd, "go.mod"));
+  const content = readFileSafe(join9(cwd, "go.mod"));
   if (!content) return [];
   const requires = Array.from(content.matchAll(/^\s+([^\s]+)\s+v/gm)).map((m) => m[1].split("/").pop() ?? "").filter(Boolean);
   return ["go", ...requires];
 }
 function tokensFromCargoToml(cwd) {
-  const content = readFileSafe(join8(cwd, "Cargo.toml"));
+  const content = readFileSafe(join9(cwd, "Cargo.toml"));
   if (!content) return [];
   const deps = [];
   let inDeps = false;
@@ -4247,14 +5319,14 @@ function tokensFromFileExtensions(cwd) {
   const tokens = [];
   const scanDirs = [cwd];
   try {
-    const srcDir = join8(cwd, "src");
-    readdirSync(srcDir);
+    const srcDir = join9(cwd, "src");
+    readdirSync2(srcDir);
     scanDirs.push(srcDir);
   } catch {
   }
   for (const dir of scanDirs) {
     try {
-      const entries = readdirSync(dir, { withFileTypes: true });
+      const entries = readdirSync2(dir, { withFileTypes: true });
       for (const e of entries) {
         if (!e.isFile()) continue;
         const dotIdx = e.name.lastIndexOf(".");
@@ -4408,9 +5480,9 @@ var init_signal = __esm({
 // bin/jpi-learn.js
 var jpi_learn_exports = {};
 __export(jpi_learn_exports, {
-  run: () => run6
+  run: () => run7
 });
-async function run6() {
+async function run7() {
   try {
     const args3 = process.argv.slice(2);
     const cwdIdx = args3.indexOf("--cwd");
@@ -4437,7 +5509,7 @@ var init_jpi_learn = __esm({
     "use strict";
     isMain = process.argv[1]?.endsWith("jpi-learn.js") || process.argv[1]?.endsWith("jpi-learn");
     if (isMain) {
-      run6();
+      run7();
     }
   }
 });
@@ -4445,23 +5517,23 @@ var init_jpi_learn = __esm({
 // bin/jpi-config.js
 var jpi_config_exports = {};
 __export(jpi_config_exports, {
-  run: () => run7
+  run: () => run8
 });
-import { readFileSync as readFileSync9, writeFileSync as writeFileSync6, mkdirSync as mkdirSync6, existsSync as existsSync6 } from "fs";
-import { join as join9 } from "path";
-import { homedir as homedir7 } from "os";
+import { readFileSync as readFileSync10, writeFileSync as writeFileSync7, mkdirSync as mkdirSync7, existsSync as existsSync7 } from "fs";
+import { join as join10 } from "path";
+import { homedir as homedir8 } from "os";
 function readConfig() {
   try {
-    if (!existsSync6(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
-    return { ...DEFAULT_CONFIG, ...JSON.parse(readFileSync9(CONFIG_FILE, "utf8")) };
+    if (!existsSync7(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
+    return { ...DEFAULT_CONFIG, ...JSON.parse(readFileSync10(CONFIG_FILE, "utf8")) };
   } catch {
     return { ...DEFAULT_CONFIG };
   }
 }
 function writeConfig(patch) {
-  mkdirSync6(TERMINALHIRE_DIR7, { recursive: true });
+  mkdirSync7(TERMINALHIRE_DIR7, { recursive: true });
   const merged = { ...readConfig(), ...patch };
-  writeFileSync6(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  writeFileSync7(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function parseNudgeMode(raw) {
   if (raw === "session" || raw === "always") return raw;
@@ -4469,7 +5541,7 @@ function parseNudgeMode(raw) {
   if (m && parseInt(m[1], 10) >= 1) return raw;
   return null;
 }
-async function run7() {
+async function run8() {
   const args3 = process.argv.slice(2);
   const filtered = args3[0] === "config" ? args3.slice(1) : args3;
   if (filtered.includes("--show") || filtered.length === 0) {
@@ -4516,8 +5588,8 @@ var TERMINALHIRE_DIR7, CONFIG_FILE, DEFAULT_CONFIG;
 var init_jpi_config = __esm({
   "bin/jpi-config.js"() {
     "use strict";
-    TERMINALHIRE_DIR7 = join9(homedir7(), ".terminalhire");
-    CONFIG_FILE = join9(TERMINALHIRE_DIR7, "config.json");
+    TERMINALHIRE_DIR7 = join10(homedir8(), ".terminalhire");
+    CONFIG_FILE = join10(TERMINALHIRE_DIR7, "config.json");
     DEFAULT_CONFIG = { nudge: "session" };
   }
 });
@@ -4540,25 +5612,25 @@ __export(spinner_exports, {
   readSpinnerConfig: () => readSpinnerConfig
 });
 import {
-  readFileSync as readFileSync10,
-  writeFileSync as writeFileSync7,
-  existsSync as existsSync7,
-  mkdirSync as mkdirSync7,
+  readFileSync as readFileSync11,
+  writeFileSync as writeFileSync8,
+  existsSync as existsSync8,
+  mkdirSync as mkdirSync8,
   renameSync as renameSync2
 } from "fs";
-import { join as join10, dirname } from "path";
-import { homedir as homedir8 } from "os";
+import { join as join11, dirname } from "path";
+import { homedir as homedir9 } from "os";
 function readJson(path, fallback) {
   try {
-    return existsSync7(path) ? JSON.parse(readFileSync10(path, "utf8")) : fallback;
+    return existsSync8(path) ? JSON.parse(readFileSync11(path, "utf8")) : fallback;
   } catch {
     return fallback;
   }
 }
 function atomicWriteJson(path, obj) {
-  mkdirSync7(dirname(path), { recursive: true });
+  mkdirSync8(dirname(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync7(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  writeFileSync8(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
   renameSync2(tmp, path);
 }
 function titleCase(s) {
@@ -4587,12 +5659,12 @@ function formatVerbs(topMatches, max = 6) {
     let title = String(m.title).trim().replace(/\s+/g, " ");
     if (title.length > 32) title = title.slice(0, 31).trimEnd() + "\u2026";
     const company = titleCase(String(m.company).trim().replace(/\s+/g, " "));
-    const pct = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
+    const pct2 = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
     const key = `${title.toLowerCase()}@${company.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
     const intro = VERB_INTROS[out.length % VERB_INTROS.length];
-    out.push(`${intro} ${title} @ ${company} \xB7 ${pct}% match`);
+    out.push(`${intro} ${title} @ ${company} \xB7 ${pct2}% match`);
     if (out.length >= max) break;
   }
   return out;
@@ -4755,15 +5827,15 @@ function buildTips(topMatches, baseUrl, max = 8) {
     let title = titleRaw;
     if (title.length > 34) title = title.slice(0, 33).trimEnd() + "\u2026";
     const company = titleCase(companyRaw);
-    const pct = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
+    const pct2 = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
     const token = Buffer.from(String(m.id)).toString("base64url");
     const url = `${base}/j/${token}`;
     if (source === "bounty") {
       const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
       const repo = m.repo || companyRaw;
-      out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct}% \u2014 ${url}`);
+      out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct2}% \u2014 ${url}`);
     } else {
-      out.push(`\u2197 ${title} @ ${company} \xB7 ${pct}% \u2014 ${url}`);
+      out.push(`\u2197 ${title} @ ${company} \xB7 ${pct2}% \u2014 ${url}`);
     }
     if (out.length >= max) break;
   }
@@ -4810,10 +5882,10 @@ var TH_DIR, CLAUDE_SETTINGS, CONFIG_FILE2, SPINNER_STATE_FILE, SPINNER_DEFAULTS,
 var init_spinner = __esm({
   "bin/spinner.js"() {
     "use strict";
-    TH_DIR = process.env["TERMINALHIRE_DIR"] || join10(homedir8(), ".terminalhire");
-    CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join10(homedir8(), ".claude", "settings.json");
-    CONFIG_FILE2 = join10(TH_DIR, "config.json");
-    SPINNER_STATE_FILE = join10(TH_DIR, "spinner-state.json");
+    TH_DIR = process.env["TERMINALHIRE_DIR"] || join11(homedir9(), ".terminalhire");
+    CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join11(homedir9(), ".claude", "settings.json");
+    CONFIG_FILE2 = join11(TH_DIR, "config.json");
+    SPINNER_STATE_FILE = join11(TH_DIR, "spinner-state.json");
     SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
     VERB_INTROS = ["Matched:", "You\u2019d fit:", "Worth a look:", "On your radar:", "Fits your stack:"];
   }
@@ -4822,32 +5894,32 @@ var init_spinner = __esm({
 // bin/jpi-spinner.js
 var jpi_spinner_exports = {};
 __export(jpi_spinner_exports, {
-  run: () => run8
+  run: () => run9
 });
 import {
-  readFileSync as readFileSync11,
-  writeFileSync as writeFileSync8,
+  readFileSync as readFileSync12,
+  writeFileSync as writeFileSync9,
   copyFileSync,
-  existsSync as existsSync8,
-  mkdirSync as mkdirSync8
+  existsSync as existsSync9,
+  mkdirSync as mkdirSync9
 } from "fs";
-import { join as join11 } from "path";
-import { homedir as homedir9 } from "os";
+import { join as join12 } from "path";
+import { homedir as homedir10 } from "os";
 import { createInterface as createInterface4 } from "readline";
 function readConfig2() {
   try {
-    return existsSync8(CONFIG_FILE3) ? JSON.parse(readFileSync11(CONFIG_FILE3, "utf8")) : {};
+    return existsSync9(CONFIG_FILE3) ? JSON.parse(readFileSync12(CONFIG_FILE3, "utf8")) : {};
   } catch {
     return {};
   }
 }
 function writeConfig2(patch) {
-  mkdirSync8(TH_DIR2, { recursive: true });
+  mkdirSync9(TH_DIR2, { recursive: true });
   const merged = { ...readConfig2(), ...patch };
-  writeFileSync8(CONFIG_FILE3, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  writeFileSync9(CONFIG_FILE3, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function backupSettings() {
-  if (!existsSync8(SETTINGS_PATH)) return null;
+  if (!existsSync9(SETTINGS_PATH)) return null;
   const ts = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
   const backupPath = `${SETTINGS_PATH}.terminalhire-backup-${ts}`;
   copyFileSync(SETTINGS_PATH, backupPath);
@@ -4864,13 +5936,13 @@ function ask(question) {
 }
 function readTopMatches() {
   try {
-    const c = JSON.parse(readFileSync11(CACHE_FILE, "utf8"));
+    const c = JSON.parse(readFileSync12(CACHE_FILE, "utf8"));
     return Array.isArray(c.topMatches) ? c.topMatches : [];
   } catch {
     return [];
   }
 }
-async function run8() {
+async function run9() {
   const args3 = process.argv.slice(2).filter((a) => a !== "spinner");
   const has = (f) => args3.includes(f);
   const val = (f) => {
@@ -5007,21 +6079,21 @@ var init_jpi_spinner = __esm({
   "bin/jpi-spinner.js"() {
     "use strict";
     init_spinner();
-    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join11(homedir9(), ".terminalhire");
-    CONFIG_FILE3 = join11(TH_DIR2, "config.json");
-    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join11(homedir9(), ".claude", "settings.json");
-    CACHE_FILE = join11(TH_DIR2, "index-cache.json");
+    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join12(homedir10(), ".terminalhire");
+    CONFIG_FILE3 = join12(TH_DIR2, "config.json");
+    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join12(homedir10(), ".claude", "settings.json");
+    CACHE_FILE = join12(TH_DIR2, "index-cache.json");
   }
 });
 
 // bin/jpi-sync.js
 var jpi_sync_exports = {};
 __export(jpi_sync_exports, {
-  run: () => run9
+  run: () => run10
 });
-import { readFileSync as readFileSync12, writeFileSync as writeFileSync9, mkdirSync as mkdirSync9, existsSync as existsSync9, rmSync as rmSync2 } from "fs";
-import { join as join12 } from "path";
-import { homedir as homedir10, hostname as osHostname } from "os";
+import { readFileSync as readFileSync13, writeFileSync as writeFileSync10, mkdirSync as mkdirSync10, existsSync as existsSync10, rmSync as rmSync2 } from "fs";
+import { join as join13 } from "path";
+import { homedir as homedir11, hostname as osHostname } from "os";
 import { createInterface as createInterface5 } from "readline";
 function ask2(question) {
   const rl = createInterface5({ input: process.stdin, output: process.stdout });
@@ -5034,14 +6106,14 @@ function ask2(question) {
 }
 function readMarker() {
   try {
-    return existsSync9(TIER1_MARKER) ? JSON.parse(readFileSync12(TIER1_MARKER, "utf8")) : null;
+    return existsSync10(TIER1_MARKER) ? JSON.parse(readFileSync13(TIER1_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
 }
 function writeMarker(marker) {
-  mkdirSync9(TH_DIR3, { recursive: true });
-  writeFileSync9(TIER1_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  mkdirSync10(TH_DIR3, { recursive: true });
+  writeFileSync10(TIER1_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearMarker() {
   try {
@@ -5329,7 +6401,7 @@ async function runDelete() {
   clearMarker();
   console.log("\n  Synced profile deleted and local marker cleared.\n");
 }
-async function run9() {
+async function run10() {
   const args3 = process.argv.slice(2).filter((a) => a !== "sync");
   const has = (f) => args3.includes(f);
   if (has("--push") || has("--enable")) {
@@ -5360,8 +6432,8 @@ var init_jpi_sync = __esm({
   "bin/jpi-sync.js"() {
     "use strict";
     init_open_url();
-    TH_DIR3 = process.env["TERMINALHIRE_DIR"] || join12(homedir10(), ".terminalhire");
-    TIER1_MARKER = join12(TH_DIR3, "tier1.json");
+    TH_DIR3 = process.env["TERMINALHIRE_DIR"] || join13(homedir11(), ".terminalhire");
+    TIER1_MARKER = join13(TH_DIR3, "tier1.json");
     API_URL3 = process.env["TERMINALHIRE_API_URL"] || process.env["JPI_API_URL"] || "https://terminalhire.com";
     SYNC_BASE = "https://www.terminalhire.com";
     POLL_INTERVAL_MS = 2e3;
@@ -5373,14 +6445,14 @@ var init_jpi_sync = __esm({
 // bin/jpi-init.js
 var jpi_init_exports = {};
 __export(jpi_init_exports, {
-  run: () => run10
+  run: () => run11
 });
-import { existsSync as existsSync10 } from "fs";
-import { join as join13, resolve } from "path";
+import { existsSync as existsSync11 } from "fs";
+import { join as join14, resolve } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
 import { createInterface as createInterface6 } from "readline";
 import { spawnSync, spawn as spawn2 } from "child_process";
-import { homedir as homedir11 } from "os";
+import { homedir as homedir12 } from "os";
 function ask3(question) {
   const rl = createInterface6({ input: process.stdin, output: process.stdout });
   return new Promise((resolve2) => {
@@ -5391,18 +6463,18 @@ function ask3(question) {
   });
 }
 function resolveScript(name) {
-  const distPath = resolve(join13(__dirname2, "..", "..", "dist", "bin", `${name}.js`));
-  const legacyPath = resolve(join13(__dirname2, `${name}.js`));
-  return existsSync10(distPath) ? distPath : legacyPath;
+  const distPath = resolve(join14(__dirname2, "..", "..", "dist", "bin", `${name}.js`));
+  const legacyPath = resolve(join14(__dirname2, `${name}.js`));
+  return existsSync11(distPath) ? distPath : legacyPath;
 }
 function resolveInstallJs() {
-  const fromDist = resolve(join13(__dirname2, "..", "..", "install.js"));
-  const fromBin = resolve(join13(__dirname2, "..", "install.js"));
-  if (existsSync10(fromDist)) return fromDist;
-  if (existsSync10(fromBin)) return fromBin;
+  const fromDist = resolve(join14(__dirname2, "..", "..", "install.js"));
+  const fromBin = resolve(join14(__dirname2, "..", "install.js"));
+  if (existsSync11(fromDist)) return fromDist;
+  if (existsSync11(fromBin)) return fromBin;
   return fromBin;
 }
-async function run10() {
+async function run11() {
   console.log("");
   console.log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
   console.log("\u2502           terminalhire init \u2014 one-command onboarding            \u2502");
@@ -5505,13 +6577,13 @@ var init_jpi_init = __esm({
 // bin/jpi-refresh.js
 var jpi_refresh_exports = {};
 __export(jpi_refresh_exports, {
-  run: () => run11
+  run: () => run12
 });
-import { readFileSync as readFileSync13, writeFileSync as writeFileSync10, existsSync as existsSync11, mkdirSync as mkdirSync10 } from "fs";
-import { join as join14 } from "path";
-import { homedir as homedir12 } from "os";
+import { readFileSync as readFileSync14, writeFileSync as writeFileSync11, existsSync as existsSync12, mkdirSync as mkdirSync11 } from "fs";
+import { join as join15 } from "path";
+import { homedir as homedir13 } from "os";
 import { fileURLToPath as fileURLToPath4 } from "url";
-async function run11() {
+async function run12() {
   try {
     let index;
     try {
@@ -5563,14 +6635,14 @@ async function run11() {
       }
     } catch {
     }
-    mkdirSync10(TERMINALHIRE_DIR8, { recursive: true });
+    mkdirSync11(TERMINALHIRE_DIR8, { recursive: true });
     const cacheEntry = {
       ts: Date.now(),
       index,
       matchCount,
       topMatches
     };
-    writeFileSync10(INDEX_CACHE_FILE4, JSON.stringify(cacheEntry), "utf8");
+    writeFileSync11(INDEX_CACHE_FILE4, JSON.stringify(cacheEntry), "utf8");
     try {
       const {
         readSpinnerConfig: readSpinnerConfig2,
@@ -5619,8 +6691,8 @@ var init_jpi_refresh = __esm({
   "bin/jpi-refresh.js"() {
     "use strict";
     __dirname3 = fileURLToPath4(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR8 = join14(homedir12(), ".terminalhire");
-    INDEX_CACHE_FILE4 = join14(TERMINALHIRE_DIR8, "index-cache.json");
+    TERMINALHIRE_DIR8 = join15(homedir13(), ".terminalhire");
+    INDEX_CACHE_FILE4 = join15(TERMINALHIRE_DIR8, "index-cache.json");
     API_URL4 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
   }
 });
@@ -5628,16 +6700,16 @@ var init_jpi_refresh = __esm({
 // bin/jpi-save.js
 var jpi_save_exports = {};
 __export(jpi_save_exports, {
-  run: () => run12
+  run: () => run13
 });
-import { readFileSync as readFileSync14, existsSync as existsSync12 } from "fs";
-import { join as join15 } from "path";
-import { homedir as homedir13 } from "os";
+import { readFileSync as readFileSync15, existsSync as existsSync13 } from "fs";
+import { join as join16 } from "path";
+import { homedir as homedir14 } from "os";
 import { fileURLToPath as fileURLToPath5 } from "url";
 function findJobInCache(jobId) {
   try {
-    if (!existsSync12(INDEX_CACHE_FILE5)) return null;
-    const raw = readFileSync14(INDEX_CACHE_FILE5, "utf8");
+    if (!existsSync13(INDEX_CACHE_FILE5)) return null;
+    const raw = readFileSync15(INDEX_CACHE_FILE5, "utf8");
     const entry = JSON.parse(raw);
     const jobs = entry?.index?.jobs ?? [];
     return jobs.find((j) => j.id === jobId) ?? null;
@@ -5706,7 +6778,7 @@ async function cmdUnsave(jobId) {
     process.exit(1);
   }
 }
-async function run12() {
+async function run13() {
   const verb = process.argv[2];
   const jobId = process.argv[3];
   try {
@@ -5730,26 +6802,26 @@ var init_jpi_save = __esm({
   "bin/jpi-save.js"() {
     "use strict";
     __dirname4 = fileURLToPath5(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR9 = join15(homedir13(), ".terminalhire");
-    INDEX_CACHE_FILE5 = join15(TERMINALHIRE_DIR9, "index-cache.json");
+    TERMINALHIRE_DIR9 = join16(homedir14(), ".terminalhire");
+    INDEX_CACHE_FILE5 = join16(TERMINALHIRE_DIR9, "index-cache.json");
   }
 });
 
 // bin/jpi-dispatch.js
 import { fileURLToPath as fileURLToPath6 } from "url";
-import { join as join16, dirname as dirname2 } from "path";
-import { existsSync as existsSync13, readFileSync as readFileSync15 } from "fs";
+import { join as join17, dirname as dirname2 } from "path";
+import { existsSync as existsSync14, readFileSync as readFileSync16 } from "fs";
 import { createRequire } from "module";
 var __dirname5 = fileURLToPath6(new URL(".", import.meta.url));
 function readPackageVersion() {
   try {
     const candidates = [
-      join16(__dirname5, "..", "..", "package.json"),
-      join16(__dirname5, "..", "package.json")
+      join17(__dirname5, "..", "..", "package.json"),
+      join17(__dirname5, "..", "package.json")
     ];
     for (const p of candidates) {
-      if (existsSync13(p)) {
-        const pkg = JSON.parse(readFileSync15(p, "utf8"));
+      if (existsSync14(p)) {
+        const pkg = JSON.parse(readFileSync16(p, "utf8"));
         if (pkg.version) return pkg.version;
       }
     }
@@ -5760,7 +6832,7 @@ function readPackageVersion() {
 var firstArg = process.argv[2];
 if (!firstArg && !process.stdin.isTTY) {
   const { default: childProcess } = await import("child_process");
-  const nudgeScript = join16(__dirname5, "jpi.js");
+  const nudgeScript = join17(__dirname5, "jpi.js");
   const child = childProcess.spawnSync(process.execPath, [nudgeScript], {
     stdio: ["inherit", "inherit", "inherit"]
   });
@@ -5782,6 +6854,9 @@ if (!firstArg || firstArg === "help" || firstArg === "--help" || firstArg === "-
   console.log("  terminalhire claim record <id|issueUrl>     Claim a bounty locally + print the executor brief");
   console.log("  terminalhire claim list [--active]          List your claims + accepted-PR rate");
   console.log("  terminalhire claim status [<id>]            Poll source PR merge state (updates the metric)");
+  console.log("  terminalhire trajectory                     Trajectory from your local Claude Code corpus");
+  console.log("  terminalhire trajectory --export            Write a derived score + Markdown to ~/.terminalhire/");
+  console.log("  terminalhire trajectory --inward            Also show private rework/recovery (never exported)");
   console.log("  terminalhire profile --show                 Display your encrypted local profile");
   console.log("  terminalhire profile --edit                 Set displayName, contactEmail, prefs");
   console.log("  terminalhire profile --delete               Wipe profile and encryption key from disk");
@@ -5837,6 +6912,12 @@ if (firstArg === "bounties") {
 if (firstArg === "claim") {
   process.argv.splice(2, 1);
   const mod = await Promise.resolve().then(() => (init_jpi_claim(), jpi_claim_exports));
+  await mod.run();
+  process.exit(0);
+}
+if (firstArg === "trajectory" || firstArg === "mirror") {
+  process.argv.splice(2, 1);
+  const mod = await Promise.resolve().then(() => (init_jpi_trajectory(), jpi_trajectory_exports));
   await mod.run();
   process.exit(0);
 }
