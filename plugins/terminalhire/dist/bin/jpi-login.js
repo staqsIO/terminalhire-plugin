@@ -894,6 +894,52 @@ function githubToFingerprint(p) {
   const seniorityBand = inferSeniority(p);
   return { skillTags, seniorityBand };
 }
+async function fetchOwnedRepoTraction(login, token) {
+  const computedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const empty = (status) => ({
+    status,
+    totalStars: 0,
+    totalForks: 0,
+    reposWithStars: 0,
+    top: [],
+    computedAt
+  });
+  let repos;
+  try {
+    repos = await ghFetch(
+      `/users/${login}/repos?sort=pushed&per_page=100`,
+      token
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const status = /HTTP 403|HTTP 429|rate limit/i.test(msg) ? "rate-limited" : "failed";
+    console.warn(`[github] ${login}: traction fetch failed (${status}) \u2014`, msg);
+    return empty(status);
+  }
+  if (!Array.isArray(repos)) return empty("failed");
+  const owned = repos.filter((r) => r && !r.fork && !r.archived);
+  let totalStars = 0;
+  let totalForks = 0;
+  let reposWithStars = 0;
+  const ranked = [];
+  for (const r of owned) {
+    const stars = typeof r.stargazers_count === "number" ? r.stargazers_count : 0;
+    const forks = typeof r.forks_count === "number" ? r.forks_count : 0;
+    totalStars += stars;
+    totalForks += forks;
+    if (stars >= 1) reposWithStars++;
+    ranked.push({ name: r.name, stars, forks });
+  }
+  ranked.sort((a, b) => b.stars - a.stars || b.forks - a.forks);
+  return {
+    status: "ok",
+    totalStars,
+    totalForks,
+    reposWithStars,
+    top: ranked.slice(0, TRACTION_TOP_N),
+    computedAt
+  };
+}
 async function ghFetchRaw(path, token) {
   return fetch(`https://api.github.com${path}`, { headers: ghHeaders(token) });
 }
@@ -1102,11 +1148,12 @@ function deriveResumeTrend(cred, repoRecency, now = Date.now()) {
   }
   return scored.sort((a, b) => b.weight - a.weight).slice(0, 12).map((s) => s.t);
 }
-var MIN_STARS, MIN_CONTRIBUTORS, CANDIDATE_PR_PAGE, TRIVIAL_PR_TITLE, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
+var TRACTION_TOP_N, MIN_STARS, MIN_CONTRIBUTORS, CANDIDATE_PR_PAGE, TRIVIAL_PR_TITLE, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
     init_vocabulary();
+    TRACTION_TOP_N = 6;
     MIN_STARS = 50;
     MIN_CONTRIBUTORS = 10;
     CANDIDATE_PR_PAGE = 50;
@@ -2785,6 +2832,7 @@ __export(src_exports, {
   expandWeighted: () => expandWeighted,
   extractSkillTags: () => extractSkillTags,
   fetchGitHubProfile: () => fetchGitHubProfile,
+  fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
   fetchRepoRecency: () => fetchRepoRecency,
   flattenTiers: () => flattenTiers,
   getBuyer: () => getBuyer,

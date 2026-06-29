@@ -106,10 +106,56 @@ var init_claims = __esm({
 import { readFileSync as readFileSync2, existsSync as existsSync2 } from "fs";
 import { join as join2 } from "path";
 import { homedir as homedir2 } from "os";
+import { execFile } from "child_process";
+import { promisify } from "util";
+import { createInterface } from "readline";
 var TERMINALHIRE_DIR2 = join2(homedir2(), ".terminalhire");
 var INDEX_CACHE_FILE = join2(TERMINALHIRE_DIR2, "index-cache.json");
 var GH_API = "https://api.github.com";
 var GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
+var pExecFile = promisify(execFile);
+async function sh(cmd, args, opts = {}) {
+  const { stdout } = await pExecFile(cmd, args, { ...opts, shell: false, maxBuffer: 16 * 1024 * 1024 });
+  return String(stdout).trim();
+}
+async function confirm(question) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const ans = await new Promise((resolve) => rl.question(question, resolve));
+    return /^y(es)?$/i.test(String(ans).trim());
+  } finally {
+    rl.close();
+  }
+}
+var VALUE_FLAGS = /* @__PURE__ */ new Set(["worktree", "branch"]);
+function parseArgs(argv) {
+  const flags = {};
+  const positional = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a.startsWith("--")) {
+      const key = a.slice(2);
+      if (VALUE_FLAGS.has(key)) {
+        const val = argv[i + 1];
+        if (val === void 0 || val.startsWith("--")) {
+          console.error(`terminalhire claim: --${key} requires a value.`);
+          process.exit(1);
+        }
+        flags[key] = val;
+        i++;
+      } else {
+        flags[key] = true;
+      }
+    } else {
+      positional.push(a);
+    }
+  }
+  return { flags, positional };
+}
+function parseRepoFromRemote(url) {
+  const m = String(url ?? "").trim().match(/github\.com[:/]+([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
 function findBountyInCache(bountyId) {
   try {
     if (!existsSync2(INDEX_CACHE_FILE)) return null;
@@ -264,7 +310,10 @@ async function cmdRecord(arg) {
   console.log("   \u2022 MUST NOT `git push` or `gh pr` \u2014 pushing happens only via `terminalhire submit`");
   console.log("   \u2022 clone + static analysis + patch only; NO test/build execution without explicit approval");
   console.log("   \u2022 no access to ~/.terminalhire (the executor never needs your profile)");
-  console.log("\n  Next: do the work, then `terminalhire claim update " + claim.id + " <state>` as you progress.");
+  console.log("\n  Next:");
+  console.log("   1. record the worktree:  terminalhire claim attach " + claim.id + " --worktree <path> --branch <branch>");
+  console.log("   2. do the work + review, then mark it cleared:  terminalhire claim update " + claim.id + " ready");
+  console.log("   3. publish (pushes to your fork + opens the PR):  terminalhire claim submit " + claim.id);
 }
 async function cmdPreview(arg, { json } = {}) {
   if (!arg) {
@@ -390,33 +439,223 @@ async function cmdRelease(id) {
   console.log(removed ? `Released claim: ${id}` : `terminalhire claim: no claim with id '${id}'.`);
   if (!removed) process.exit(1);
 }
+async function cmdAttach(id, worktree, branch) {
+  const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+  if (!id || !worktree || !branch) {
+    console.error("Usage: terminalhire claim attach <id> --worktree <path> --branch <branchName>");
+    console.error("  Records the worktree + branch so `terminalhire claim submit` can verify identity before pushing.");
+    process.exit(1);
+  }
+  if (!claims.findClaim(id)) {
+    console.error(`terminalhire claim: no claim with id '${id}'.`);
+    process.exit(1);
+  }
+  let toplevel;
+  try {
+    toplevel = await sh("git", ["-C", worktree, "rev-parse", "--show-toplevel"]);
+  } catch {
+    console.error(`terminalhire claim: '${worktree}' is not a git work tree.`);
+    process.exit(1);
+  }
+  claims.updateClaim(id, { worktreePath: toplevel, branch });
+  console.log(`Attached ${id}: worktree=${toplevel} branch=${branch}`);
+}
+async function cmdSubmit(id, worktreeOverride) {
+  const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+  if (!id) {
+    console.error("Usage: terminalhire claim submit <id> [--worktree <path>]");
+    process.exit(1);
+  }
+  const claim = claims.findClaim(id);
+  if (!claim) {
+    console.error(`terminalhire claim: no claim with id '${id}'.`);
+    process.exit(1);
+  }
+  if (claim.state !== "ready") {
+    console.error(
+      `terminalhire claim: ${id} is '${claim.state}', not 'ready'. Submit only runs after the review gate clears it:
+  terminalhire claim update ${id} ready`
+    );
+    process.exit(1);
+  }
+  if (claim.review && claim.review.verdict === "revise") {
+    console.error(`terminalhire claim: ${id} review verdict is 'revise' \u2014 the gate said do not submit. Resolve blockers and re-review first.`);
+    process.exit(1);
+  }
+  if (!claim.worktreePath || !claim.branch) {
+    console.error(
+      `terminalhire claim: ${id} has no recorded worktree/branch \u2014 cannot verify what to push. Run:
+  terminalhire claim attach ${id} --worktree <path> --branch <branch>`
+    );
+    process.exit(1);
+  }
+  const inspectDir = worktreeOverride || process.cwd();
+  let toplevel;
+  try {
+    toplevel = await sh("git", ["-C", inspectDir, "rev-parse", "--show-toplevel"]);
+  } catch {
+    console.error(
+      `terminalhire claim: '${inspectDir}' is not a git work tree.
+  Run submit from inside the claim's worktree (or pass --worktree <path>).`
+    );
+    process.exit(1);
+  }
+  if (toplevel !== claim.worktreePath) {
+    console.error(
+      `terminalhire claim: worktree mismatch \u2014 refusing to push.
+  expected: ${claim.worktreePath}
+  found:    ${toplevel}
+  Run submit from inside the claim's worktree (or pass --worktree <path>).`
+    );
+    process.exit(1);
+  }
+  const wt = toplevel;
+  const curBranch = await sh("git", ["-C", wt, "rev-parse", "--abbrev-ref", "HEAD"]);
+  if (curBranch !== claim.branch) {
+    console.error(
+      `terminalhire claim: branch mismatch \u2014 refusing to push.
+  expected: ${claim.branch}
+  found:    ${curBranch}
+  Check out the claim's branch first.`
+    );
+    process.exit(1);
+  }
+  let defaultBranch = null;
+  try {
+    defaultBranch = (await sh("git", ["-C", wt, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"])).replace(/^origin\//, "");
+  } catch {
+  }
+  if (defaultBranch && claim.branch === defaultBranch) {
+    console.error(`terminalhire claim: '${claim.branch}' is the default branch \u2014 open the PR from a feature branch.`);
+    process.exit(1);
+  }
+  if (defaultBranch) {
+    let ahead = "0";
+    try {
+      ahead = await sh("git", ["-C", wt, "rev-list", "--count", `origin/${defaultBranch}..HEAD`]);
+    } catch {
+      ahead = "1";
+    }
+    if (ahead === "0") {
+      console.error(`terminalhire claim: branch has no commits ahead of origin/${defaultBranch} \u2014 nothing to submit.`);
+      process.exit(1);
+    }
+  }
+  const dirty = await sh("git", ["-C", wt, "status", "--porcelain"]);
+  if (dirty) {
+    console.error("terminalhire claim: working tree is not clean \u2014 commit or stash before submitting (submit pushes what was reviewed).");
+    process.exit(1);
+  }
+  let originUrl;
+  try {
+    originUrl = await sh("git", ["-C", wt, "remote", "get-url", "origin"]);
+  } catch {
+    console.error("terminalhire claim: no 'origin' remote in the worktree.");
+    process.exit(1);
+  }
+  const originRepo = parseRepoFromRemote(originUrl);
+  if (!originRepo) {
+    console.error(`terminalhire claim: could not parse owner/repo from origin (${originUrl}).`);
+    process.exit(1);
+  }
+  if (originRepo.toLowerCase() === claim.repoFullName.toLowerCase()) {
+    console.error(
+      `terminalhire claim: origin points at the UPSTREAM bounty repo (${claim.repoFullName}), not a fork.
+  Pushing would create a branch directly on the target repo. Fork first:
+    gh repo fork ${claim.repoFullName} --clone=false
+  set your fork as 'origin' (or push it there), then retry.`
+    );
+    process.exit(1);
+  }
+  let ghUser;
+  try {
+    ghUser = await sh("gh", ["api", "user", "-q", ".login"]);
+  } catch {
+    console.error("terminalhire claim: 'gh' CLI not available or not authenticated. Run 'gh auth login'.");
+    process.exit(1);
+  }
+  const upstream = claim.repoFullName;
+  const head = `${ghUser}:${claim.branch}`;
+  console.log(`
+  SUBMIT \xB7 ${claim.title}`);
+  console.log(`  upstream: ${upstream}`);
+  console.log(`  fork:     ${originRepo}`);
+  console.log(`  branch:   ${claim.branch}`);
+  console.log(`  head:     ${head}`);
+  console.log(`  issue:    ${claim.issueUrl}`);
+  const ok = await confirm(`
+  Push '${claim.branch}' to ${originRepo} and open a PR against ${upstream}? (y/N) `);
+  if (!ok) {
+    console.log("Aborted \u2014 nothing pushed.");
+    return;
+  }
+  try {
+    await sh("git", ["-C", wt, "push", "origin", claim.branch]);
+  } catch (err) {
+    console.error(`terminalhire claim: git push failed (NOT force-pushed). ${err.stderr || err.message || err}`);
+    console.error(`  Resolve and retry, or open the PR manually then: terminalhire claim update ${id} submitted <prUrl>`);
+    process.exit(1);
+  }
+  let prUrl = null;
+  try {
+    const existing = await sh("gh", ["pr", "list", "--repo", upstream, "--head", head, "--state", "open", "--json", "url", "-q", ".[0].url // empty"]);
+    if (existing) prUrl = existing;
+  } catch {
+  }
+  if (!prUrl) {
+    const issueNum = (parseGitHubUrl(claim.issueUrl) || {}).number;
+    const body = issueNum ? `Closes #${issueNum}` : "";
+    try {
+      const out = await sh("gh", ["pr", "create", "--repo", upstream, "--head", head, "--title", claim.title, "--body", body]);
+      prUrl = out.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("https://github.com/")).pop() || null;
+    } catch (err) {
+      console.error(`terminalhire claim: branch pushed, but 'gh pr create' failed. ${err.stderr || err.message || err}`);
+      console.error(`  Open the PR manually (gh pr create / web UI), then: terminalhire claim update ${id} submitted <prUrl>`);
+      process.exit(1);
+    }
+  }
+  if (!prUrl || !parseGitHubUrl(prUrl)) {
+    console.error(`terminalhire claim: could not determine the PR URL. Set it manually: terminalhire claim update ${id} submitted <prUrl>`);
+    process.exit(1);
+  }
+  claims.updateClaim(id, { state: "submitted", prUrl });
+  console.log(`
+\u2713 Submitted ${id} \u2192 ${prUrl}`);
+  console.log(`  Run 'terminalhire claim status ${id}' after the maintainer acts to fold the merge into your accepted-PR rate.`);
+}
 async function run() {
   const verb = process.argv[2];
-  const rest = process.argv.slice(3).filter((a) => !a.startsWith("--"));
-  const active = process.argv.includes("--active");
-  const json = process.argv.includes("--json");
+  const { flags, positional } = parseArgs(process.argv.slice(3));
+  const active = Boolean(flags.active);
+  const json = Boolean(flags.json);
   try {
     switch (verb) {
       case "preview":
-        await cmdPreview(rest[0], { json });
+        await cmdPreview(positional[0], { json });
         break;
       case "record":
-        await cmdRecord(rest[0]);
+        await cmdRecord(positional[0]);
         break;
       case "list":
         await cmdList(active);
         break;
       case "status":
-        await cmdStatus(rest[0]);
+        await cmdStatus(positional[0]);
         break;
       case "update":
-        await cmdUpdate(rest[0], rest[1], rest[2]);
+        await cmdUpdate(positional[0], positional[1], positional[2]);
+        break;
+      case "attach":
+        await cmdAttach(positional[0], flags.worktree, flags.branch);
+        break;
+      case "submit":
+        await cmdSubmit(positional[0], flags.worktree);
         break;
       case "release":
-        await cmdRelease(rest[0]);
+        await cmdRelease(positional[0]);
         break;
       default:
-        console.error(`terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | list | status | update | release`);
+        console.error(`terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | attach | list | status | update | submit | release`);
         process.exit(1);
     }
   } catch (err) {

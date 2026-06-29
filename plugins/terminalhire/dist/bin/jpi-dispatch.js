@@ -10,6 +10,10 @@ var __export = (target, all) => {
 };
 
 // src/open-url.js
+var open_url_exports = {};
+__export(open_url_exports, {
+  openInBrowser: () => openInBrowser
+});
 import { spawn } from "child_process";
 function openInBrowser(url) {
   let cmd;
@@ -923,6 +927,52 @@ function githubToFingerprint(p) {
   const seniorityBand = inferSeniority(p);
   return { skillTags, seniorityBand };
 }
+async function fetchOwnedRepoTraction(login, token) {
+  const computedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const empty = (status) => ({
+    status,
+    totalStars: 0,
+    totalForks: 0,
+    reposWithStars: 0,
+    top: [],
+    computedAt
+  });
+  let repos;
+  try {
+    repos = await ghFetch(
+      `/users/${login}/repos?sort=pushed&per_page=100`,
+      token
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const status = /HTTP 403|HTTP 429|rate limit/i.test(msg) ? "rate-limited" : "failed";
+    console.warn(`[github] ${login}: traction fetch failed (${status}) \u2014`, msg);
+    return empty(status);
+  }
+  if (!Array.isArray(repos)) return empty("failed");
+  const owned = repos.filter((r) => r && !r.fork && !r.archived);
+  let totalStars = 0;
+  let totalForks = 0;
+  let reposWithStars = 0;
+  const ranked = [];
+  for (const r of owned) {
+    const stars = typeof r.stargazers_count === "number" ? r.stargazers_count : 0;
+    const forks = typeof r.forks_count === "number" ? r.forks_count : 0;
+    totalStars += stars;
+    totalForks += forks;
+    if (stars >= 1) reposWithStars++;
+    ranked.push({ name: r.name, stars, forks });
+  }
+  ranked.sort((a, b) => b.stars - a.stars || b.forks - a.forks);
+  return {
+    status: "ok",
+    totalStars,
+    totalForks,
+    reposWithStars,
+    top: ranked.slice(0, TRACTION_TOP_N),
+    computedAt
+  };
+}
 async function ghFetchRaw(path, token) {
   return fetch(`https://api.github.com${path}`, { headers: ghHeaders(token) });
 }
@@ -1131,11 +1181,12 @@ function deriveResumeTrend(cred, repoRecency, now = Date.now()) {
   }
   return scored.sort((a, b) => b.weight - a.weight).slice(0, 12).map((s) => s.t);
 }
-var MIN_STARS, MIN_CONTRIBUTORS, CANDIDATE_PR_PAGE, TRIVIAL_PR_TITLE, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
+var TRACTION_TOP_N, MIN_STARS, MIN_CONTRIBUTORS, CANDIDATE_PR_PAGE, TRIVIAL_PR_TITLE, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
     init_vocabulary();
+    TRACTION_TOP_N = 6;
     MIN_STARS = 50;
     MIN_CONTRIBUTORS = 10;
     CANDIDATE_PR_PAGE = 50;
@@ -2814,6 +2865,7 @@ __export(src_exports, {
   expandWeighted: () => expandWeighted,
   extractSkillTags: () => extractSkillTags,
   fetchGitHubProfile: () => fetchGitHubProfile,
+  fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
   fetchRepoRecency: () => fetchRepoRecency,
   flattenTiers: () => flattenTiers,
   getBuyer: () => getBuyer,
@@ -3180,8 +3232,8 @@ async function runLogin() {
     const skipWeb = process.argv.includes("--no-web");
     if (!isMock && !skipWeb) {
       try {
-        const OAUTH_BASE = "https://www.terminalhire.com";
-        const webUrl = `${OAUTH_BASE}/api/auth/github?next=/dashboard`;
+        const OAUTH_BASE2 = "https://www.terminalhire.com";
+        const webUrl = `${OAUTH_BASE2}/api/auth/github?next=/dashboard`;
         console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
         console.log("  Your web profile & r\xE9sum\xE9 \u2014 public GitHub data only,");
         console.log("  your local profile is NOT uploaded.");
@@ -3735,6 +3787,50 @@ __export(jpi_claim_exports, {
 import { readFileSync as readFileSync7, existsSync as existsSync5 } from "fs";
 import { join as join7 } from "path";
 import { homedir as homedir6 } from "os";
+import { execFile } from "child_process";
+import { promisify } from "util";
+import { createInterface as createInterface3 } from "readline";
+async function sh(cmd, args3, opts = {}) {
+  const { stdout } = await pExecFile(cmd, args3, { ...opts, shell: false, maxBuffer: 16 * 1024 * 1024 });
+  return String(stdout).trim();
+}
+async function confirm(question) {
+  const rl = createInterface3({ input: process.stdin, output: process.stdout });
+  try {
+    const ans = await new Promise((resolve2) => rl.question(question, resolve2));
+    return /^y(es)?$/i.test(String(ans).trim());
+  } finally {
+    rl.close();
+  }
+}
+function parseArgs(argv) {
+  const flags = {};
+  const positional = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a.startsWith("--")) {
+      const key = a.slice(2);
+      if (VALUE_FLAGS.has(key)) {
+        const val = argv[i + 1];
+        if (val === void 0 || val.startsWith("--")) {
+          console.error(`terminalhire claim: --${key} requires a value.`);
+          process.exit(1);
+        }
+        flags[key] = val;
+        i++;
+      } else {
+        flags[key] = true;
+      }
+    } else {
+      positional.push(a);
+    }
+  }
+  return { flags, positional };
+}
+function parseRepoFromRemote(url) {
+  const m = String(url ?? "").trim().match(/github\.com[:/]+([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
 function findBountyInCache(bountyId) {
   try {
     if (!existsSync5(INDEX_CACHE_FILE3)) return null;
@@ -3889,7 +3985,10 @@ async function cmdRecord(arg) {
   console.log("   \u2022 MUST NOT `git push` or `gh pr` \u2014 pushing happens only via `terminalhire submit`");
   console.log("   \u2022 clone + static analysis + patch only; NO test/build execution without explicit approval");
   console.log("   \u2022 no access to ~/.terminalhire (the executor never needs your profile)");
-  console.log("\n  Next: do the work, then `terminalhire claim update " + claim.id + " <state>` as you progress.");
+  console.log("\n  Next:");
+  console.log("   1. record the worktree:  terminalhire claim attach " + claim.id + " --worktree <path> --branch <branch>");
+  console.log("   2. do the work + review, then mark it cleared:  terminalhire claim update " + claim.id + " ready");
+  console.log("   3. publish (pushes to your fork + opens the PR):  terminalhire claim submit " + claim.id);
 }
 async function cmdPreview(arg, { json } = {}) {
   if (!arg) {
@@ -4015,33 +4114,223 @@ async function cmdRelease(id) {
   console.log(removed ? `Released claim: ${id}` : `terminalhire claim: no claim with id '${id}'.`);
   if (!removed) process.exit(1);
 }
+async function cmdAttach(id, worktree, branch) {
+  const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+  if (!id || !worktree || !branch) {
+    console.error("Usage: terminalhire claim attach <id> --worktree <path> --branch <branchName>");
+    console.error("  Records the worktree + branch so `terminalhire claim submit` can verify identity before pushing.");
+    process.exit(1);
+  }
+  if (!claims.findClaim(id)) {
+    console.error(`terminalhire claim: no claim with id '${id}'.`);
+    process.exit(1);
+  }
+  let toplevel;
+  try {
+    toplevel = await sh("git", ["-C", worktree, "rev-parse", "--show-toplevel"]);
+  } catch {
+    console.error(`terminalhire claim: '${worktree}' is not a git work tree.`);
+    process.exit(1);
+  }
+  claims.updateClaim(id, { worktreePath: toplevel, branch });
+  console.log(`Attached ${id}: worktree=${toplevel} branch=${branch}`);
+}
+async function cmdSubmit(id, worktreeOverride) {
+  const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+  if (!id) {
+    console.error("Usage: terminalhire claim submit <id> [--worktree <path>]");
+    process.exit(1);
+  }
+  const claim = claims.findClaim(id);
+  if (!claim) {
+    console.error(`terminalhire claim: no claim with id '${id}'.`);
+    process.exit(1);
+  }
+  if (claim.state !== "ready") {
+    console.error(
+      `terminalhire claim: ${id} is '${claim.state}', not 'ready'. Submit only runs after the review gate clears it:
+  terminalhire claim update ${id} ready`
+    );
+    process.exit(1);
+  }
+  if (claim.review && claim.review.verdict === "revise") {
+    console.error(`terminalhire claim: ${id} review verdict is 'revise' \u2014 the gate said do not submit. Resolve blockers and re-review first.`);
+    process.exit(1);
+  }
+  if (!claim.worktreePath || !claim.branch) {
+    console.error(
+      `terminalhire claim: ${id} has no recorded worktree/branch \u2014 cannot verify what to push. Run:
+  terminalhire claim attach ${id} --worktree <path> --branch <branch>`
+    );
+    process.exit(1);
+  }
+  const inspectDir = worktreeOverride || process.cwd();
+  let toplevel;
+  try {
+    toplevel = await sh("git", ["-C", inspectDir, "rev-parse", "--show-toplevel"]);
+  } catch {
+    console.error(
+      `terminalhire claim: '${inspectDir}' is not a git work tree.
+  Run submit from inside the claim's worktree (or pass --worktree <path>).`
+    );
+    process.exit(1);
+  }
+  if (toplevel !== claim.worktreePath) {
+    console.error(
+      `terminalhire claim: worktree mismatch \u2014 refusing to push.
+  expected: ${claim.worktreePath}
+  found:    ${toplevel}
+  Run submit from inside the claim's worktree (or pass --worktree <path>).`
+    );
+    process.exit(1);
+  }
+  const wt = toplevel;
+  const curBranch = await sh("git", ["-C", wt, "rev-parse", "--abbrev-ref", "HEAD"]);
+  if (curBranch !== claim.branch) {
+    console.error(
+      `terminalhire claim: branch mismatch \u2014 refusing to push.
+  expected: ${claim.branch}
+  found:    ${curBranch}
+  Check out the claim's branch first.`
+    );
+    process.exit(1);
+  }
+  let defaultBranch = null;
+  try {
+    defaultBranch = (await sh("git", ["-C", wt, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"])).replace(/^origin\//, "");
+  } catch {
+  }
+  if (defaultBranch && claim.branch === defaultBranch) {
+    console.error(`terminalhire claim: '${claim.branch}' is the default branch \u2014 open the PR from a feature branch.`);
+    process.exit(1);
+  }
+  if (defaultBranch) {
+    let ahead = "0";
+    try {
+      ahead = await sh("git", ["-C", wt, "rev-list", "--count", `origin/${defaultBranch}..HEAD`]);
+    } catch {
+      ahead = "1";
+    }
+    if (ahead === "0") {
+      console.error(`terminalhire claim: branch has no commits ahead of origin/${defaultBranch} \u2014 nothing to submit.`);
+      process.exit(1);
+    }
+  }
+  const dirty = await sh("git", ["-C", wt, "status", "--porcelain"]);
+  if (dirty) {
+    console.error("terminalhire claim: working tree is not clean \u2014 commit or stash before submitting (submit pushes what was reviewed).");
+    process.exit(1);
+  }
+  let originUrl;
+  try {
+    originUrl = await sh("git", ["-C", wt, "remote", "get-url", "origin"]);
+  } catch {
+    console.error("terminalhire claim: no 'origin' remote in the worktree.");
+    process.exit(1);
+  }
+  const originRepo = parseRepoFromRemote(originUrl);
+  if (!originRepo) {
+    console.error(`terminalhire claim: could not parse owner/repo from origin (${originUrl}).`);
+    process.exit(1);
+  }
+  if (originRepo.toLowerCase() === claim.repoFullName.toLowerCase()) {
+    console.error(
+      `terminalhire claim: origin points at the UPSTREAM bounty repo (${claim.repoFullName}), not a fork.
+  Pushing would create a branch directly on the target repo. Fork first:
+    gh repo fork ${claim.repoFullName} --clone=false
+  set your fork as 'origin' (or push it there), then retry.`
+    );
+    process.exit(1);
+  }
+  let ghUser;
+  try {
+    ghUser = await sh("gh", ["api", "user", "-q", ".login"]);
+  } catch {
+    console.error("terminalhire claim: 'gh' CLI not available or not authenticated. Run 'gh auth login'.");
+    process.exit(1);
+  }
+  const upstream = claim.repoFullName;
+  const head = `${ghUser}:${claim.branch}`;
+  console.log(`
+  SUBMIT \xB7 ${claim.title}`);
+  console.log(`  upstream: ${upstream}`);
+  console.log(`  fork:     ${originRepo}`);
+  console.log(`  branch:   ${claim.branch}`);
+  console.log(`  head:     ${head}`);
+  console.log(`  issue:    ${claim.issueUrl}`);
+  const ok = await confirm(`
+  Push '${claim.branch}' to ${originRepo} and open a PR against ${upstream}? (y/N) `);
+  if (!ok) {
+    console.log("Aborted \u2014 nothing pushed.");
+    return;
+  }
+  try {
+    await sh("git", ["-C", wt, "push", "origin", claim.branch]);
+  } catch (err) {
+    console.error(`terminalhire claim: git push failed (NOT force-pushed). ${err.stderr || err.message || err}`);
+    console.error(`  Resolve and retry, or open the PR manually then: terminalhire claim update ${id} submitted <prUrl>`);
+    process.exit(1);
+  }
+  let prUrl = null;
+  try {
+    const existing = await sh("gh", ["pr", "list", "--repo", upstream, "--head", head, "--state", "open", "--json", "url", "-q", ".[0].url // empty"]);
+    if (existing) prUrl = existing;
+  } catch {
+  }
+  if (!prUrl) {
+    const issueNum = (parseGitHubUrl(claim.issueUrl) || {}).number;
+    const body = issueNum ? `Closes #${issueNum}` : "";
+    try {
+      const out = await sh("gh", ["pr", "create", "--repo", upstream, "--head", head, "--title", claim.title, "--body", body]);
+      prUrl = out.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("https://github.com/")).pop() || null;
+    } catch (err) {
+      console.error(`terminalhire claim: branch pushed, but 'gh pr create' failed. ${err.stderr || err.message || err}`);
+      console.error(`  Open the PR manually (gh pr create / web UI), then: terminalhire claim update ${id} submitted <prUrl>`);
+      process.exit(1);
+    }
+  }
+  if (!prUrl || !parseGitHubUrl(prUrl)) {
+    console.error(`terminalhire claim: could not determine the PR URL. Set it manually: terminalhire claim update ${id} submitted <prUrl>`);
+    process.exit(1);
+  }
+  claims.updateClaim(id, { state: "submitted", prUrl });
+  console.log(`
+\u2713 Submitted ${id} \u2192 ${prUrl}`);
+  console.log(`  Run 'terminalhire claim status ${id}' after the maintainer acts to fold the merge into your accepted-PR rate.`);
+}
 async function run4() {
   const verb = process.argv[2];
-  const rest = process.argv.slice(3).filter((a) => !a.startsWith("--"));
-  const active = process.argv.includes("--active");
-  const json = process.argv.includes("--json");
+  const { flags, positional } = parseArgs(process.argv.slice(3));
+  const active = Boolean(flags.active);
+  const json = Boolean(flags.json);
   try {
     switch (verb) {
       case "preview":
-        await cmdPreview(rest[0], { json });
+        await cmdPreview(positional[0], { json });
         break;
       case "record":
-        await cmdRecord(rest[0]);
+        await cmdRecord(positional[0]);
         break;
       case "list":
         await cmdList(active);
         break;
       case "status":
-        await cmdStatus(rest[0]);
+        await cmdStatus(positional[0]);
         break;
       case "update":
-        await cmdUpdate(rest[0], rest[1], rest[2]);
+        await cmdUpdate(positional[0], positional[1], positional[2]);
+        break;
+      case "attach":
+        await cmdAttach(positional[0], flags.worktree, flags.branch);
+        break;
+      case "submit":
+        await cmdSubmit(positional[0], flags.worktree);
         break;
       case "release":
-        await cmdRelease(rest[0]);
+        await cmdRelease(positional[0]);
         break;
       default:
-        console.error(`terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | list | status | update | release`);
+        console.error(`terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | attach | list | status | update | submit | release`);
         process.exit(1);
     }
   } catch (err) {
@@ -4049,7 +4338,7 @@ async function run4() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR6, INDEX_CACHE_FILE3, GH_API, GH_HEADERS;
+var TERMINALHIRE_DIR6, INDEX_CACHE_FILE3, GH_API, GH_HEADERS, pExecFile, VALUE_FLAGS;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
@@ -4057,6 +4346,8 @@ var init_jpi_claim = __esm({
     INDEX_CACHE_FILE3 = join7(TERMINALHIRE_DIR6, "index-cache.json");
     GH_API = "https://api.github.com";
     GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
+    pExecFile = promisify(execFile);
+    VALUE_FLAGS = /* @__PURE__ */ new Set(["worktree", "branch"]);
   }
 });
 
@@ -4532,21 +4823,23 @@ var init_events = __esm({
 });
 
 // ../../packages/core/src/episodes/derivers/signals.ts
-function normalizeToolName(name) {
-  if (!name.toLowerCase().startsWith("mcp__")) {
-    return name;
-  }
+function mcpToolSignal(name) {
   const rest = name.slice("mcp__".length);
   const sep = rest.indexOf("__");
-  if (sep <= 0) {
-    return "mcp:custom";
-  }
+  if (sep <= 0) return "mcp:custom";
   const server = rest.slice(0, sep).toLowerCase();
   const leaf = rest.slice(sep + 2);
-  if (leaf.length === 0 || !PUBLIC_MCP_SERVERS.has(server)) {
-    return "mcp:custom";
+  if (leaf.length === 0) return "mcp:custom";
+  if (MCP_SERVER_CAPABILITY.has(server)) return MCP_SERVER_CAPABILITY.get(server) ?? null;
+  return "mcp:custom";
+}
+function classifyToolSignal(name) {
+  if (name.toLowerCase().startsWith("mcp__")) {
+    return mcpToolSignal(name);
   }
-  return `mcp:${leaf}`;
+  const key = name.toLowerCase();
+  if (ORCHESTRATION_TOOLS.has(key)) return AGENTIC_WORKFLOW_SIGNAL;
+  return null;
 }
 function isRecord2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -4585,7 +4878,10 @@ function extractToolSignals(nodes) {
     if (node.kind !== "tool_use" /* ToolUse */ || node.toolName === null) {
       continue;
     }
-    out.push({ signal: `tool:${normalizeToolName(node.toolName)}`, ts: node.timestamp });
+    const toolSignal = classifyToolSignal(node.toolName);
+    if (toolSignal !== null) {
+      out.push({ signal: toolSignal, ts: node.timestamp });
+    }
     const lang = fileExtLang(toolUseInput(node));
     if (lang !== null) {
       out.push({ signal: `lang:${lang}`, ts: node.timestamp });
@@ -4594,7 +4890,7 @@ function extractToolSignals(nodes) {
   out.sort(compareSignal);
   return out;
 }
-var EXT_LANG, PUBLIC_MCP_SERVERS;
+var EXT_LANG, MCP_SERVER_CAPABILITY, ORCHESTRATION_TOOLS, AGENTIC_WORKFLOW_SIGNAL;
 var init_signals = __esm({
   "../../packages/core/src/episodes/derivers/signals.ts"() {
     "use strict";
@@ -4615,26 +4911,47 @@ var init_signals = __esm({
       sql: "sql",
       md: "md"
     };
-    PUBLIC_MCP_SERVERS = /* @__PURE__ */ new Set([
-      // Anthropic first-party connectors (claude.ai)
-      "claude_ai_linear",
-      "claude_ai_gmail",
-      "claude_ai_google_calendar",
-      "claude_ai_google_drive",
-      "claude_ai_figma",
-      "claude_ai_vercel",
-      "claude_ai_ideabrowser",
-      // Common public Claude Code plugins
-      "plugin_playwright_playwright",
-      "plugin_context-mode_context-mode",
-      "plugin_vercel_vercel",
-      "playwright",
-      "ideabrowser",
-      "blender",
-      "figma",
-      "n8n-knowledge",
-      "pencil"
+    MCP_SERVER_CAPABILITY = /* @__PURE__ */ new Map([
+      // Coding-relevant public servers → a capability.
+      ["plugin_playwright_playwright", "cap:ui-automation"],
+      ["playwright", "cap:ui-automation"],
+      ["claude_ai_linear", "cap:project-mgmt"],
+      ["claude_ai_vercel", "cap:deploys"],
+      ["plugin_vercel_vercel", "cap:deploys"],
+      ["claude_ai_figma", "cap:design"],
+      ["figma", "cap:design"],
+      ["pencil", "cap:design"],
+      ["claude_ai_ideabrowser", "cap:product-research"],
+      ["ideabrowser", "cap:product-research"],
+      ["blender", "cap:3d-modeling"],
+      ["n8n-knowledge", "cap:workflow-automation"],
+      // Public but NOT a coding skill → dropped from the trajectory.
+      ["plugin_context-mode_context-mode", null],
+      // agent context plumbing
+      ["claude_ai_gmail", null],
+      ["claude_ai_google_calendar", null],
+      ["claude_ai_google_drive", null]
     ]);
+    ORCHESTRATION_TOOLS = /* @__PURE__ */ new Set([
+      "task",
+      "agent",
+      "workflow",
+      "enterworktree",
+      "exitworktree",
+      "schedulewakeup",
+      "monitor",
+      "sendmessage",
+      "taskcreate",
+      "tasklist",
+      "taskstop",
+      "taskupdate",
+      "taskget",
+      "taskoutput",
+      "croncreate",
+      "cronlist",
+      "crondelete"
+    ]);
+    AGENTIC_WORKFLOW_SIGNAL = "cap:agentic-workflow";
   }
 });
 
@@ -4883,7 +5200,10 @@ var init_episodes = __esm({
 // src/trajectory.ts
 var trajectory_exports = {};
 __export(trajectory_exports, {
-  runTrajectory: () => runTrajectory
+  PUSH_DENYLIST: () => PUSH_DENYLIST,
+  computeDerivedScore: () => computeDerivedScore,
+  runTrajectory: () => runTrajectory,
+  runTrajectoryPush: () => runTrajectoryPush
 });
 import {
   existsSync as existsSync6,
@@ -4949,9 +5269,13 @@ function loadCorpus(paths) {
   }
   return files;
 }
+function isLang(signal) {
+  return signal.startsWith("lang:");
+}
 function prettySignal(signal) {
-  if (signal.startsWith("tool:")) return signal.slice("tool:".length);
   if (signal.startsWith("lang:")) return `.${signal.slice("lang:".length)}`;
+  if (CAP_LABELS[signal]) return CAP_LABELS[signal];
+  if (signal.startsWith("cap:")) return signal.slice("cap:".length).replace(/-/g, " ");
   return signal;
 }
 function prettyList(signals, max = 12) {
@@ -4987,9 +5311,15 @@ function renderTerminal(view) {
   if (rising.length > 0) console.log(`    \u2191 rising:  ${rising.join(", ")}`);
   if (falling.length > 0) console.log(`    \u2193 falling: ${falling.join(", ")}`);
   console.log("");
-  console.log("  \u258C Stack");
-  console.log(`    live (this quarter):    ${prettyList(view.score.liveStack)}`);
-  console.log(`    dormant (90d+ untouched): ${prettyList(view.score.dormantStack)}`);
+  const liveLangs = view.score.liveStack.filter(isLang);
+  const liveCaps = view.score.liveStack.filter((s) => !isLang(s));
+  const dormantLangs = view.score.dormantStack.filter(isLang);
+  console.log("  \u258C Stack (languages)");
+  console.log(`    live (this quarter):      ${prettyList(liveLangs)}`);
+  console.log(`    dormant (90d+ untouched): ${prettyList(dormantLangs)}`);
+  console.log("");
+  console.log("  \u258C Capabilities (tools & integrations)");
+  console.log(`    ${prettyList(liveCaps)}`);
   console.log("");
   console.log("  \u258C Coverage / scope");
   console.log(`    ${coverageLine(view)}`);
@@ -5012,10 +5342,14 @@ function renderMarkdown(view) {
   lines.push(`- Rising: ${rising.length > 0 ? rising.join(", ") : "_none_"}`);
   lines.push(`- Falling: ${falling.length > 0 ? falling.join(", ") : "_none_"}`);
   lines.push("");
-  lines.push("## Stack");
+  lines.push("## Stack (languages)");
   lines.push("");
-  lines.push(`- **Live** (used this quarter): ${prettyList(view.score.liveStack, 64)}`);
-  lines.push(`- **Dormant** (90d+ untouched): ${prettyList(view.score.dormantStack, 64)}`);
+  lines.push(`- **Live** (used this quarter): ${prettyList(view.score.liveStack.filter(isLang), 64)}`);
+  lines.push(`- **Dormant** (90d+ untouched): ${prettyList(view.score.dormantStack.filter(isLang), 64)}`);
+  lines.push("");
+  lines.push("## Capabilities (tools & integrations)");
+  lines.push("");
+  lines.push(`- ${prettyList(view.score.liveStack.filter((s) => !isLang(s)), 64)}`);
   lines.push("");
   lines.push("## Coverage / scope");
   lines.push("");
@@ -5047,19 +5381,11 @@ function renderInward(allNodes, view, files) {
   );
   console.log("");
 }
-async function runTrajectory(opts) {
+function buildTrajectory() {
   const projectsDir = join8(homedir7(), ".claude", "projects");
-  if (!existsSync6(projectsDir)) {
-    console.log("terminalhire trajectory: no ~/.claude/projects directory found.");
-    console.log("  Start a Claude Code session and your trajectory will appear here.");
-    return;
-  }
+  if (!existsSync6(projectsDir)) return null;
   const paths = findJsonlFiles(projectsDir);
-  if (paths.length === 0) {
-    console.log("terminalhire trajectory: no transcripts found under ~/.claude/projects.");
-    console.log("  Start a Claude Code session and your trajectory will appear here.");
-    return;
-  }
+  if (paths.length === 0) return null;
   const files = loadCorpus(paths);
   const allNodes = [];
   for (const f of files) {
@@ -5082,30 +5408,245 @@ async function runTrajectory(opts) {
   for (const n of allNodes) if (n.isSidechain) sidechainNodes++;
   const subagentPct = allNodes.length > 0 ? sidechainNodes / allNodes.length * 100 : 0;
   const sessions = new Set(reconstructed.files.map((f) => f.sessionId)).size;
-  const view = {
-    score,
-    coverage,
-    sessions,
-    subagentPct,
-    fileCount: files.length
-  };
+  const view = { score, coverage, sessions, subagentPct, fileCount: files.length };
+  return { view, allNodes, files };
+}
+function computeDerivedScore() {
+  return buildTrajectory()?.view.score ?? null;
+}
+async function runTrajectory(opts) {
+  const built = buildTrajectory();
+  if (!built) {
+    console.log("terminalhire trajectory: no transcripts found under ~/.claude/projects.");
+    console.log("  Start a Claude Code session and your trajectory will appear here.");
+    return;
+  }
+  const { view, allNodes, files } = built;
   renderTerminal(view);
   if (opts.inward) {
     renderInward(allNodes, view, files);
   }
   if (opts.export) {
     const markdown = renderMarkdown(view);
-    const { jsonPath, mdPath } = writeExportArtifacts(score, markdown);
+    const { jsonPath, mdPath } = writeExportArtifacts(view.score, markdown);
     console.log("  Export written:");
     console.log(`    ${jsonPath}`);
     console.log(`    ${mdPath}`);
     console.log("");
   }
 }
+function dashboardLinkUrl(serialized) {
+  const payload = Buffer.from(serialized, "utf8").toString("base64url");
+  return `${OAUTH_BASE}/dashboard#link=${payload}`;
+}
+function scanDenylist(serialized) {
+  const haystack = serialized.toLowerCase();
+  return PUSH_DENYLIST.filter((needle) => haystack.includes(needle));
+}
+function defaultPushDeps() {
+  return {
+    computeScore: computeDerivedScore,
+    readGithubLogin: async () => {
+      try {
+        const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+        const profile = await readProfile2();
+        return profile?.github?.login ?? null;
+      } catch {
+        return null;
+      }
+    },
+    prompt: async (question) => {
+      const { createInterface: createInterface8 } = await import("readline");
+      const rl = createInterface8({ input: process.stdin, output: process.stdout });
+      return new Promise((res) => {
+        rl.question(question, (answer) => {
+          rl.close();
+          res(answer.trim().toLowerCase());
+        });
+      });
+    },
+    fetchImpl: (...args3) => globalThis.fetch(...args3),
+    openBrowser: (url) => {
+      void Promise.resolve().then(() => (init_open_url(), open_url_exports)).then((m) => m.openInBrowser(url)).catch(() => {
+      });
+    },
+    sessionCookie: () => {
+      const v = process.env["TERMINALHIRE_WEB_SESSION"];
+      return typeof v === "string" && v.length > 0 ? v : null;
+    },
+    log: (msg) => console.log(msg),
+    errorLog: (msg) => console.error(msg),
+    exit: (code) => process.exit(code)
+  };
+}
+function renderConsentCard(score, login, log) {
+  const h = score.headline;
+  const rising = h.rising.map((e) => prettySignal(e.signal)).slice(0, 6);
+  const falling = h.falling.map((e) => prettySignal(e.signal)).slice(0, 6);
+  log("");
+  log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
+  log("\u2502   terminalhire \u2014 link your trajectory (opt-in)                \u2502");
+  log("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518");
+  log("");
+  log(`  This shares your DERIVED trajectory for @${login} with your`);
+  log("  terminalhire.com dashboard, shown next to your GitHub r\xE9sum\xE9:");
+  log("");
+  log(`    Distinct tools/languages : ${h.distinctSignalCount}`);
+  log(`    Adopted in last 90d      : ${h.recentAdoptionCount}`);
+  log(`    Adoption velocity        : ${oneDecimal(h.velocityPerWeek)} new/week`);
+  log(`    Rising                   : ${rising.length ? rising.join(", ") : "(none)"}`);
+  log(`    Falling                  : ${falling.length ? falling.join(", ") : "(none)"}`);
+  log(`    Live stack               : ${prettyList(score.liveStack)}`);
+  log(`    Dormant stack            : ${prettyList(score.dormantStack)}`);
+  log(`    Coverage                 : ${score.coveragePct}%`);
+  log("");
+  log("  What is NEVER sent:");
+  log("    - Raw transcripts, file contents, code, project/file names");
+  log("    - Inward metrics (rework / recovery / fatigue) \u2014 local-only");
+  log("");
+  log("  This is the SAME derived score `terminalhire trajectory --export` writes.");
+  log("  Not required to use terminalhire. Revoke any time: trajectory --push --delete");
+  log("");
+}
+async function runTrajectoryPush(opts, overrides) {
+  const deps = { ...defaultPushDeps(), ...overrides };
+  const login = await deps.readGithubLogin();
+  if (!login) {
+    deps.log("");
+    deps.log("  Not signed in. Run `terminalhire login` first, then re-run this command.");
+    deps.log("");
+    deps.exit(1);
+    return;
+  }
+  const cookie = deps.sessionCookie();
+  if (opts.delete) {
+    const answer2 = await deps.prompt('  Unlink your trajectory from terminalhire.com? Type "yes" to confirm: ');
+    if (answer2 !== "yes") {
+      deps.log("\n  Aborted \u2014 nothing was changed.\n");
+      deps.exit(0);
+      return;
+    }
+    if (!cookie) {
+      deps.log('\n  Open your dashboard and use "remove trajectory" there, or set a bridged');
+      deps.log("  session. Nothing was sent.\n");
+      deps.openBrowser(`${LINK_BASE}/dashboard`);
+      deps.exit(0);
+      return;
+    }
+    let res2;
+    try {
+      res2 = await deps.fetchImpl(`${LINK_BASE}/api/trajectory-sync`, {
+        method: "DELETE",
+        headers: { Cookie: `${GH_SESSION_COOKIE}=${cookie}` },
+        signal: AbortSignal.timeout(1e4)
+      });
+    } catch (err) {
+      deps.errorLog(`
+  Unlink failed: ${err instanceof Error ? err.message : String(err)}
+`);
+      deps.exit(1);
+      return;
+    }
+    if (!res2.ok) {
+      deps.errorLog(`
+  Unlink failed: /api/trajectory-sync returned ${res2.status}.
+`);
+      deps.exit(1);
+      return;
+    }
+    deps.log("\n  Trajectory unlinked from terminalhire.com.\n");
+    return;
+  }
+  const score = deps.computeScore();
+  if (!score) {
+    deps.log("");
+    deps.log("  No trajectory to link yet \u2014 no transcripts under ~/.claude/projects.");
+    deps.log("  Start a Claude Code session, then re-run `terminalhire trajectory --push`.");
+    deps.log("");
+    deps.exit(1);
+    return;
+  }
+  renderConsentCard(score, login, deps.log);
+  const answer = await deps.prompt('  Type "yes" to link your trajectory (anything else cancels): ');
+  const consented = answer === "yes";
+  if (!consented) {
+    deps.log("\n  Cancelled \u2014 nothing was sent.\n");
+    deps.exit(0);
+    return;
+  }
+  const serialized = JSON.stringify(score);
+  const hits = scanDenylist(serialized);
+  if (hits.length > 0) {
+    deps.errorLog(`
+  Aborted: the derived score unexpectedly contains a private field (${hits.join(", ")}).`);
+    deps.errorLog("  This should never happen \u2014 nothing was sent. Please report this.\n");
+    deps.exit(1);
+    return;
+  }
+  if (!cookie) {
+    const url = dashboardLinkUrl(serialized);
+    deps.log("  Opening your browser to finish linking\u2026");
+    deps.log(`  \u2192 ${url}`);
+    deps.openBrowser(url);
+    deps.log("");
+    deps.log("  (Sign in if prompted \u2014 your trajectory then appears on your dashboard.)");
+    deps.log("");
+    return;
+  }
+  let res;
+  try {
+    res = await deps.fetchImpl(`${LINK_BASE}/api/trajectory-sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: `${GH_SESSION_COOKIE}=${cookie}` },
+      body: serialized,
+      signal: AbortSignal.timeout(1e4)
+    });
+  } catch (err) {
+    deps.errorLog(`
+  Link failed: ${err instanceof Error ? err.message : String(err)}
+`);
+    deps.exit(1);
+    return;
+  }
+  if (res.status === 401) {
+    const url = dashboardLinkUrl(serialized);
+    deps.log("\n  Your web session expired \u2014 opening your browser to re-auth and finish linking\u2026");
+    deps.log(`  \u2192 ${url}
+`);
+    deps.openBrowser(url);
+    return;
+  }
+  if (!res.ok) {
+    deps.errorLog(`
+  Link failed: /api/trajectory-sync returned ${res.status}.
+`);
+    deps.exit(1);
+    return;
+  }
+  deps.log("\n  Trajectory linked. It now appears next to your r\xE9sum\xE9 on your dashboard.");
+  deps.log(`  \u2192 ${LINK_BASE}/dashboard
+`);
+}
+var CAP_LABELS, LINK_BASE, OAUTH_BASE, GH_SESSION_COOKIE, PUSH_DENYLIST;
 var init_trajectory = __esm({
   "src/trajectory.ts"() {
     "use strict";
     init_episodes();
+    CAP_LABELS = {
+      "cap:ui-automation": "UI automation",
+      "cap:deploys": "Deployment",
+      "cap:project-mgmt": "Project tracking",
+      "cap:product-research": "Product research",
+      "cap:design": "Design",
+      "cap:3d-modeling": "3D modeling",
+      "cap:workflow-automation": "Workflow automation",
+      "cap:agentic-workflow": "Agent orchestration",
+      "mcp:custom": "Private integrations"
+    };
+    LINK_BASE = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
+    OAUTH_BASE = "https://www.terminalhire.com";
+    GH_SESSION_COOKIE = "__jpi_gh_session";
+    PUSH_DENYLIST = ["rework", "recovery", "within_session", "fatigue", "vector", "mcp__"];
   }
 });
 
@@ -5117,6 +5658,12 @@ __export(jpi_trajectory_exports, {
 async function run5() {
   try {
     const args3 = process.argv.slice(2);
+    if (args3.includes("--push")) {
+      const doDelete = args3.includes("--delete") || args3.includes("--unlink");
+      const { runTrajectoryPush: runTrajectoryPush2 } = await Promise.resolve().then(() => (init_trajectory(), trajectory_exports));
+      await runTrajectoryPush2({ delete: doDelete });
+      return;
+    }
     const doExport = args3.includes("--export");
     const inward = args3.includes("--inward");
     const { runTrajectory: runTrajectory2 } = await Promise.resolve().then(() => (init_trajectory(), trajectory_exports));
@@ -5137,9 +5684,9 @@ var jpi_profile_exports = {};
 __export(jpi_profile_exports, {
   run: () => run6
 });
-import { createInterface as createInterface3 } from "readline";
+import { createInterface as createInterface4 } from "readline";
 function prompt3(question) {
-  const rl = createInterface3({ input: process.stdin, output: process.stdout });
+  const rl = createInterface4({ input: process.stdin, output: process.stdout });
   return new Promise((resolve2) => {
     rl.question(question, (answer) => {
       rl.close();
@@ -5905,7 +6452,7 @@ import {
 } from "fs";
 import { join as join12 } from "path";
 import { homedir as homedir10 } from "os";
-import { createInterface as createInterface4 } from "readline";
+import { createInterface as createInterface5 } from "readline";
 function readConfig2() {
   try {
     return existsSync9(CONFIG_FILE3) ? JSON.parse(readFileSync12(CONFIG_FILE3, "utf8")) : {};
@@ -5926,7 +6473,7 @@ function backupSettings() {
   return backupPath;
 }
 function ask(question) {
-  const rl = createInterface4({ input: process.stdin, output: process.stdout });
+  const rl = createInterface5({ input: process.stdin, output: process.stdout });
   return new Promise((res) => {
     rl.question(question, (answer) => {
       rl.close();
@@ -6094,9 +6641,9 @@ __export(jpi_sync_exports, {
 import { readFileSync as readFileSync13, writeFileSync as writeFileSync10, mkdirSync as mkdirSync10, existsSync as existsSync10, rmSync as rmSync2 } from "fs";
 import { join as join13 } from "path";
 import { homedir as homedir11, hostname as osHostname } from "os";
-import { createInterface as createInterface5 } from "readline";
+import { createInterface as createInterface6 } from "readline";
 function ask2(question) {
-  const rl = createInterface5({ input: process.stdin, output: process.stdout });
+  const rl = createInterface6({ input: process.stdin, output: process.stdout });
   return new Promise((res) => {
     rl.question(question, (answer) => {
       rl.close();
@@ -6179,7 +6726,7 @@ async function runPush() {
   const fields = buildConsentFields(profile);
   renderPreview(fields);
   await new Promise((resolve2) => {
-    const rl = createInterface5({ input: process.stdin, output: process.stdout });
+    const rl = createInterface6({ input: process.stdin, output: process.stdout });
     rl.question(
       "  Press Enter to open your browser to authorize + consent (or Ctrl-C to cancel)... ",
       () => {
@@ -6450,11 +6997,11 @@ __export(jpi_init_exports, {
 import { existsSync as existsSync11 } from "fs";
 import { join as join14, resolve } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
-import { createInterface as createInterface6 } from "readline";
+import { createInterface as createInterface7 } from "readline";
 import { spawnSync, spawn as spawn2 } from "child_process";
 import { homedir as homedir12 } from "os";
 function ask3(question) {
-  const rl = createInterface6({ input: process.stdin, output: process.stdout });
+  const rl = createInterface7({ input: process.stdin, output: process.stdout });
   return new Promise((resolve2) => {
     rl.question(question, (answer) => {
       rl.close();
@@ -6857,6 +7404,8 @@ if (!firstArg || firstArg === "help" || firstArg === "--help" || firstArg === "-
   console.log("  terminalhire trajectory                     Trajectory from your local Claude Code corpus");
   console.log("  terminalhire trajectory --export            Write a derived score + Markdown to ~/.terminalhire/");
   console.log("  terminalhire trajectory --inward            Also show private rework/recovery (never exported)");
+  console.log("  terminalhire trajectory --push              Opt-in: link your derived trajectory to your dashboard (typed-yes)");
+  console.log("  terminalhire trajectory --push --delete     Unlink (revoke) your trajectory from the dashboard");
   console.log("  terminalhire profile --show                 Display your encrypted local profile");
   console.log("  terminalhire profile --edit                 Set displayName, contactEmail, prefs");
   console.log("  terminalhire profile --delete               Wipe profile and encryption key from disk");

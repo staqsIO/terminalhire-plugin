@@ -56,17 +56,28 @@ node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim list --active   # ex
 node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim status [<id>]   # poll source PR merge state → updates the metric
 ```
 
-### Advance a claim (hand-cranking, until `submit` exists)
+### Advance a claim
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim update <id> <state> [prUrl]
 node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim release <id>
 ```
-States: `claimed` → `working` → `in-review` → `ready` → `submitted` → `merged` (or `abandoned`). When the user opens their PR, attach it: `claim update <id> submitted <prUrl>` — then `claim status` polls its merge state and rolls it into the **accepted-PR rate** (merged ÷ claimed), the one metric that matters.
+States: `claimed` → `working` → `in-review` → `ready` → `submitted` → `merged` (or `abandoned`). Mark `ready` only after the diff has passed the review gate. `claim status` polls the source PR's merge state and rolls it into the **accepted-PR rate** (merged ÷ claimed), the one metric that matters.
+
+### Submit a `ready` claim (the only step that pushes)
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim submit <id>   # run from INSIDE the claim's worktree
+```
+`submit` pushes the worktree branch to the user's **fork** and opens the PR against the upstream bounty repo, then advances `ready → submitted` with the PR URL attached. It refuses unless the claim is `ready` (and not `revise`), the worktree/branch match what was recorded (see `attach` below), the tree is clean, and `origin` is a fork (never the upstream). It **always asks for explicit confirmation** before pushing and **never force-pushes**. If the push succeeds but PR creation fails, open the PR manually then `claim update <id> submitted <prUrl>`.
 
 ## Doing the work (executor guardrails)
 
 If the user asks you to actually DO a claimed bounty, work it in an **isolated git worktree**, and enforce these guardrails (a slop PR under the user's GitHub identity is permanent and damages their reputation):
-- **Never `git push` or `gh pr`** — the user reviews the diff first and pushes deliberately.
+- **Record the worktree so `submit` can verify it later** — right after you create the worktree + branch, run:
+  ```bash
+  node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim attach <id> --worktree <absPath> --branch <branchName>
+  ```
+  `origin` in that worktree must be the user's **fork** of the bounty repo (`gh repo fork <upstream> --clone=false` if needed), not the upstream — `submit` refuses to push to the upstream.
+- **Never `git push` or `gh pr`** — the user reviews the diff first, then `claim submit` pushes deliberately.
 - Clone + read the issue + write a patch. **Do not run the repo's tests/build** without the user's explicit go-ahead (it is arbitrary third-party code).
 - Never read or pass `~/.terminalhire/*` or the user's tokens into the work — the bounty work never needs the profile.
 
