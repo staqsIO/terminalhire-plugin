@@ -547,6 +547,13 @@ var init_workable = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/directory.ts
+var init_directory = __esm({
+  "../../packages/core/src/feeds/directory.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/feeds/index.ts
 function flattenTiers(t) {
   return [.../* @__PURE__ */ new Set([...t.bigco, ...t.scaleup, ...t.startup])];
@@ -564,6 +571,7 @@ var init_feeds = __esm({
     init_github_bounties();
     init_opire();
     init_workable();
+    init_directory();
     init_bounty_gate();
     init_bounty_gate();
     GREENHOUSE_SLUGS_BY_TIER = {
@@ -702,6 +710,24 @@ var init_indexer = __esm({
   }
 });
 
+// ../../packages/core/src/intro.ts
+var INTRO_ALLOWED_FIELDS, INTRO_ALLOWED_SET, INTRO_PENDING_TTL_MS, INTRO_ACCEPTED_TTL_MS;
+var init_intro = __esm({
+  "../../packages/core/src/intro.ts"() {
+    "use strict";
+    INTRO_ALLOWED_FIELDS = [
+      "requesterLogin",
+      "requesterDisplayName",
+      "requesterContact",
+      "note",
+      "targetLogin"
+    ];
+    INTRO_ALLOWED_SET = new Set(INTRO_ALLOWED_FIELDS);
+    INTRO_PENDING_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
+    INTRO_ACCEPTED_TTL_MS = 365 * 24 * 60 * 60 * 1e3;
+  }
+});
+
 // ../../packages/core/src/index.ts
 var init_src = __esm({
   "../../packages/core/src/index.ts"() {
@@ -713,6 +739,7 @@ var init_src = __esm({
     init_indexer();
     init_partners();
     init_github();
+    init_intro();
   }
 });
 

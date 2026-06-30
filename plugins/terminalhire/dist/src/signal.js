@@ -473,6 +473,18 @@ var BUYER_REGISTRY = {
   [EXAMPLE_BUYER.id]: EXAMPLE_BUYER
 };
 
+// ../../packages/core/src/intro.ts
+var INTRO_ALLOWED_FIELDS = [
+  "requesterLogin",
+  "requesterDisplayName",
+  "requesterContact",
+  "note",
+  "targetLogin"
+];
+var INTRO_ALLOWED_SET = new Set(INTRO_ALLOWED_FIELDS);
+var INTRO_PENDING_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
+var INTRO_ACCEPTED_TTL_MS = 365 * 24 * 60 * 60 * 1e3;
+
 // src/signal.ts
 var LANGUAGE_TAGS = /* @__PURE__ */ new Set([
   "typescript",

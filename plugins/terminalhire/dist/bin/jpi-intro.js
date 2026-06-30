@@ -712,6 +712,17 @@ var init_indexer = __esm({
 });
 
 // ../../packages/core/src/intro.ts
+function buildIntroPayload(input) {
+  const payload = {
+    requesterLogin: input.requesterLogin,
+    requesterDisplayName: input.requesterDisplayName,
+    requesterContact: input.requesterContact,
+    targetLogin: input.targetLogin
+  };
+  const note = input.note?.trim();
+  if (note) payload.note = note;
+  return payload;
+}
 var INTRO_ALLOWED_FIELDS, INTRO_ALLOWED_SET, INTRO_PENDING_TTL_MS, INTRO_ACCEPTED_TTL_MS;
 var init_intro = __esm({
   "../../packages/core/src/intro.ts"() {
@@ -984,78 +995,405 @@ var init_profile = __esm({
   }
 });
 
-// bin/jpi-profile.js
-import { createInterface } from "readline";
-function prompt(question) {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim());
+// src/open-url.js
+var open_url_exports = {};
+__export(open_url_exports, {
+  openInBrowser: () => openInBrowser
+});
+import { spawn } from "child_process";
+function openInBrowser(url) {
+  let cmd;
+  let args;
+  if (process.platform === "darwin") {
+    cmd = "open";
+    args = [url];
+  } else if (process.platform === "win32") {
+    cmd = "cmd";
+    args = ["/c", "start", "", url];
+  } else {
+    cmd = "xdg-open";
+    args = [url];
+  }
+  try {
+    const child = spawn(cmd, args, { stdio: "ignore", detached: true });
+    child.on("error", () => {
     });
+    child.unref();
+  } catch {
+  }
+}
+var init_open_url = __esm({
+  "src/open-url.js"() {
+    "use strict";
+  }
+});
+
+// src/intro.ts
+var intro_exports = {};
+__export(intro_exports, {
+  runIntroDecision: () => runIntroDecision,
+  runIntroList: () => runIntroList,
+  runIntroRequest: () => runIntroRequest
+});
+function defaultIntroDeps() {
+  return {
+    readGithubLogin: async () => {
+      try {
+        const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+        const profile = await readProfile2();
+        return profile?.github?.login ?? null;
+      } catch {
+        return null;
+      }
+    },
+    readProfileContact: async () => {
+      try {
+        const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+        const profile = await readProfile2();
+        return { displayName: profile?.displayName, contactEmail: profile?.contactEmail };
+      } catch {
+        return {};
+      }
+    },
+    prompt: async (question) => {
+      const { createInterface } = await import("readline");
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      return new Promise((res) => {
+        rl.question(question, (answer) => {
+          rl.close();
+          res(answer.trim().toLowerCase());
+        });
+      });
+    },
+    fetchImpl: (...args) => globalThis.fetch(...args),
+    openBrowser: (url) => {
+      void Promise.resolve().then(() => (init_open_url(), open_url_exports)).then((m) => m.openInBrowser(url)).catch(() => {
+      });
+    },
+    sessionCookie: () => {
+      const v = process.env["TERMINALHIRE_WEB_SESSION"];
+      return typeof v === "string" && v.length > 0 ? v : null;
+    },
+    log: (msg) => console.log(msg),
+    errorLog: (msg) => console.error(msg),
+    exit: (code) => process.exit(code)
+  };
+}
+function renderConsentCard(payload, deps) {
+  const { log } = deps;
+  log("");
+  log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
+  log("\u2502   terminalhire \u2014 request an intro (opt-in)                    \u2502");
+  log("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518");
+  log("");
+  log("  This sends the following \u2014 and ONLY the following \u2014 to terminalhire,");
+  log(`  to ask @${payload.targetLogin} for an intro:`);
+  log("");
+  log(`    Your GitHub login   : @${payload.requesterLogin}`);
+  log(`    Your display name   : ${payload.requesterDisplayName}`);
+  log(`    Your contact        : ${payload.requesterContact}`);
+  log(`    Note                : ${payload.note ?? "(none)"}`);
+  log(`    To developer        : @${payload.targetLogin}`);
+  log("");
+  log("  What is NEVER sent: your fingerprint, trajectory, repos, or any other");
+  log("  profile field. @" + payload.targetLogin + " sees only your public login");
+  log("  until they accept \u2014 your contact is shared only on their acceptance.");
+  log("");
+}
+async function runIntroRequest(args, overrides) {
+  const deps = { ...defaultIntroDeps(), ...overrides };
+  const targetLogin = args.targetLogin?.trim();
+  if (!targetLogin) {
+    deps.errorLog('\n  Usage: terminalhire intro <github-login> [--note "..."] [--contact <email>] [--name "..."]\n');
+    deps.exit(1);
+    return;
+  }
+  const requesterLogin = await deps.readGithubLogin();
+  if (!requesterLogin) {
+    deps.log("\n  Not signed in. Run `terminalhire login` first, then re-run this command.\n");
+    deps.exit(1);
+    return;
+  }
+  if (targetLogin.toLowerCase() === requesterLogin.toLowerCase()) {
+    deps.errorLog("\n  You cannot request an intro to yourself.\n");
+    deps.exit(1);
+    return;
+  }
+  const profile = await deps.readProfileContact();
+  const displayName = (args.name ?? profile.displayName ?? requesterLogin).trim();
+  const contact = (args.contact ?? profile.contactEmail ?? "").trim();
+  if (!contact) {
+    deps.errorLog("\n  No contact on file. Set one with `terminalhire profile --edit`,");
+    deps.errorLog("  or pass `--contact <email-or-handle>`. Nothing was sent.\n");
+    deps.exit(1);
+    return;
+  }
+  const payload = buildIntroPayload({
+    requesterLogin,
+    requesterDisplayName: displayName,
+    requesterContact: contact,
+    targetLogin,
+    note: args.note
   });
+  renderConsentCard(payload, deps);
+  const answer = await deps.prompt('  Type "yes" to send this intro request (anything else cancels): ');
+  if (answer !== "yes") {
+    deps.log("\n  Cancelled \u2014 nothing was sent.\n");
+    deps.exit(0);
+    return;
+  }
+  const cookie = deps.sessionCookie();
+  if (!cookie) {
+    deps.log("\n  No linked web session found on this machine.");
+    deps.log("  Sign in at your dashboard first, then re-run with a bridged session.");
+    deps.log(`  \u2192 ${LINK_BASE}/dashboard
+`);
+    deps.openBrowser(`${LINK_BASE}/dashboard`);
+    deps.exit(0);
+    return;
+  }
+  let res;
+  try {
+    res = await deps.fetchImpl(`${LINK_BASE}/api/intro/request`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: `${GH_SESSION_COOKIE}=${cookie}` },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(1e4)
+    });
+  } catch (err) {
+    deps.errorLog(`
+  Request failed: ${err instanceof Error ? err.message : String(err)}
+`);
+    deps.exit(1);
+    return;
+  }
+  if (res.status === 401) {
+    deps.log("\n  Your web session expired \u2014 sign in again at your dashboard, then re-run.");
+    deps.log(`  \u2192 ${LINK_BASE}/dashboard
+`);
+    deps.exit(1);
+    return;
+  }
+  if (res.status === 429) {
+    deps.errorLog("\n  Too many intro requests right now \u2014 please try again later.\n");
+    deps.exit(1);
+    return;
+  }
+  if (!res.ok) {
+    deps.errorLog(`
+  Request failed: /api/intro/request returned ${res.status}.
+`);
+    deps.exit(1);
+    return;
+  }
+  deps.log(`
+  Intro request sent to @${targetLogin}. They will see only your public login`);
+  deps.log("  until they accept; your contact is shared only if they do.\n");
+}
+async function runIntroDecision(args, overrides) {
+  const deps = { ...defaultIntroDeps(), ...overrides };
+  const id = args.id?.trim();
+  if (!id) {
+    deps.errorLog("\n  Usage: terminalhire intro --accept <id> | --decline <id>\n");
+    deps.exit(1);
+    return;
+  }
+  const cookie = deps.sessionCookie();
+  if (!cookie) {
+    deps.log("\n  No linked web session found on this machine.");
+    deps.log("  Sign in at your dashboard first, then re-run.");
+    deps.log(`  \u2192 ${LINK_BASE}/dashboard
+`);
+    deps.openBrowser(`${LINK_BASE}/dashboard`);
+    deps.exit(0);
+    return;
+  }
+  let contact = "";
+  if (args.action === "accept") {
+    const profile = await deps.readProfileContact();
+    contact = (args.contact ?? profile.contactEmail ?? "").trim();
+    if (!contact) {
+      deps.errorLog("\n  No contact on file to share back. Set one with `terminalhire profile --edit`,");
+      deps.errorLog("  or pass `--contact <email-or-handle>`. Nothing was sent.\n");
+      deps.exit(1);
+      return;
+    }
+    deps.log("");
+    deps.log("  Accepting shares your contact with the requester so they can reach you:");
+    deps.log(`    Your contact : ${contact}`);
+    deps.log("  Nothing else is shared. Declining shares nothing.");
+    deps.log("");
+    const answer = await deps.prompt('  Type "yes" to accept and share your contact (anything else cancels): ');
+    if (answer !== "yes") {
+      deps.log("\n  Cancelled \u2014 nothing was sent.\n");
+      deps.exit(0);
+      return;
+    }
+  }
+  const body = args.action === "accept" ? { introId: id, action: "accept", targetContact: contact } : { introId: id, action: "decline" };
+  let res;
+  try {
+    res = await deps.fetchImpl(`${LINK_BASE}/api/intro/accept`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: `${GH_SESSION_COOKIE}=${cookie}` },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(1e4)
+    });
+  } catch (err) {
+    deps.errorLog(`
+  Request failed: ${err instanceof Error ? err.message : String(err)}
+`);
+    deps.exit(1);
+    return;
+  }
+  if (res.status === 401) {
+    deps.log("\n  Your web session expired \u2014 sign in again at your dashboard, then re-run.");
+    deps.log(`  \u2192 ${LINK_BASE}/dashboard
+`);
+    deps.exit(1);
+    return;
+  }
+  if (res.status === 403) {
+    deps.errorLog("\n  You are not the developer this intro was sent to.\n");
+    deps.exit(1);
+    return;
+  }
+  if (res.status === 404) {
+    deps.errorLog("\n  Intro not found.\n");
+    deps.exit(1);
+    return;
+  }
+  if (!res.ok) {
+    deps.errorLog(`
+  Request failed: /api/intro/accept returned ${res.status}.
+`);
+    deps.exit(1);
+    return;
+  }
+  let data = {};
+  try {
+    data = await res.json();
+  } catch {
+  }
+  if (args.action === "decline") {
+    deps.log("\n  Declined \u2014 no contact was shared.\n");
+    return;
+  }
+  deps.log("\n  Accepted. Your contact was shared with the requester.");
+  if (data.contact) deps.log(`  You can reach them at: ${data.contact}`);
+  deps.log("");
+}
+async function runIntroList(overrides) {
+  const deps = { ...defaultIntroDeps(), ...overrides };
+  const cookie = deps.sessionCookie();
+  if (!cookie) {
+    deps.log("\n  No linked web session found on this machine.");
+    deps.log("  Sign in at your dashboard first, then re-run.");
+    deps.log(`  \u2192 ${LINK_BASE}/dashboard
+`);
+    deps.openBrowser(`${LINK_BASE}/dashboard`);
+    deps.exit(0);
+    return;
+  }
+  let res;
+  try {
+    res = await deps.fetchImpl(`${LINK_BASE}/api/intro/list`, {
+      method: "GET",
+      headers: { Cookie: `${GH_SESSION_COOKIE}=${cookie}` },
+      signal: AbortSignal.timeout(1e4)
+    });
+  } catch (err) {
+    deps.errorLog(`
+  Request failed: ${err instanceof Error ? err.message : String(err)}
+`);
+    deps.exit(1);
+    return;
+  }
+  if (res.status === 401) {
+    deps.log("\n  Your web session expired \u2014 sign in again at your dashboard, then re-run.");
+    deps.log(`  \u2192 ${LINK_BASE}/dashboard
+`);
+    deps.exit(1);
+    return;
+  }
+  if (!res.ok) {
+    deps.errorLog(`
+  Request failed: /api/intro/list returned ${res.status}.
+`);
+    deps.exit(1);
+    return;
+  }
+  let data = {};
+  try {
+    data = await res.json();
+  } catch {
+  }
+  const intros = data.intros ?? [];
+  if (intros.length === 0) {
+    deps.log("\n  No intros yet.\n");
+    return;
+  }
+  deps.log("");
+  for (const it of intros) {
+    const dir = it.role === "incoming" ? "from" : "to";
+    deps.log(`  [${it.status}] ${dir} @${it.counterpartyLogin}`);
+    if (it.note) deps.log(`      note: ${it.note}`);
+    if (it.contact) deps.log(`      contact: ${it.contact}`);
+    else if (it.role === "incoming" && it.status === "pending") {
+      deps.log(`      \u2192 accept: terminalhire intro --accept ${it.id}`);
+    }
+  }
+  deps.log("");
+}
+var LINK_BASE, GH_SESSION_COOKIE;
+var init_intro2 = __esm({
+  "src/intro.ts"() {
+    "use strict";
+    init_src();
+    LINK_BASE = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
+    GH_SESSION_COOKIE = "__jpi_gh_session";
+  }
+});
+
+// bin/jpi-intro.js
+function readOption(args, name) {
+  const i = args.indexOf(name);
+  if (i === -1) return void 0;
+  const v = args[i + 1];
+  return typeof v === "string" && !v.startsWith("--") ? v : void 0;
 }
 async function run() {
-  const { readProfile: readProfile2, writeProfile: writeProfile2, deleteProfile: deleteProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-  const args = process.argv.slice(2);
-  if (args.includes("--show")) {
-    const profile = await readProfile2();
-    console.log("\n\u2726 terminalhire local profile (encrypted at rest \u2014 shown here for your review only)\n");
-    console.log("  Skill tags:      " + (profile.skillTags.length > 0 ? profile.skillTags.join(", ") : "(none yet)"));
-    console.log("  Seniority:       " + (profile.seniority ?? "(not set)"));
-    if (profile.displayName) console.log("  Display name:    " + profile.displayName);
-    if (profile.contactEmail) console.log("  Contact email:   " + profile.contactEmail);
-    if (profile.remoteOnly !== void 0) console.log("  Remote only:     " + profile.remoteOnly);
-    if (profile.compFloorUsd !== void 0) console.log("  Comp floor USD:  $" + profile.compFloorUsd);
-    console.log("  Employer sessions contributed: " + profile.hasEmployerSessions);
-    if (profile.github) {
-      console.log("");
-      console.log("  GitHub (public data only, scope: read:user):");
-      console.log("    Login:         @" + profile.github.login);
-      console.log("    Profile URL:   " + profile.github.profileUrl);
-      console.log("    Top languages: " + profile.github.topLanguages.join(", "));
-      console.log("    Public repos:  " + profile.github.publicRepos);
-      console.log("");
-      console.log('  GitHub fields are included in a lead ONLY when you consent "yes".');
-      console.log("  To disconnect GitHub: terminalhire logout");
-    } else {
-      console.log("");
-      console.log("  GitHub: not connected  (run: terminalhire login for instant enrichment)");
+  try {
+    const args = process.argv.slice(2);
+    if (args.includes("--list")) {
+      const { runIntroList: runIntroList2 } = await Promise.resolve().then(() => (init_intro2(), intro_exports));
+      await runIntroList2();
+      return;
     }
-    console.log("");
-    console.log("  Raw profile JSON:");
-    console.log(JSON.stringify(profile, null, 2));
-    console.log("\nThis profile NEVER leaves your machine except in a consented lead payload.");
-    return;
-  }
-  if (args.includes("--delete")) {
-    console.log("\nThis will permanently delete your local terminalhire profile and encryption key.");
-    const answer = await prompt('Type "yes" to confirm: ');
-    if (answer !== "yes") {
-      console.log("Aborted.");
-      process.exit(0);
+    const acceptId = readOption(args, "--accept");
+    const declineId = readOption(args, "--decline");
+    if (acceptId || declineId) {
+      const contact2 = readOption(args, "--contact");
+      const name2 = readOption(args, "--name");
+      const { runIntroDecision: runIntroDecision2 } = await Promise.resolve().then(() => (init_intro2(), intro_exports));
+      await runIntroDecision2({
+        id: acceptId ?? declineId,
+        action: acceptId ? "accept" : "decline",
+        contact: contact2,
+        name: name2
+      });
+      return;
     }
-    await deleteProfile2();
-    console.log("Profile and key deleted from ~/.terminalhire/");
-    return;
+    const targetLogin = args.find((a) => !a.startsWith("--"));
+    const note = readOption(args, "--note");
+    const contact = readOption(args, "--contact");
+    const name = readOption(args, "--name");
+    const { runIntroRequest: runIntroRequest2 } = await Promise.resolve().then(() => (init_intro2(), intro_exports));
+    await runIntroRequest2({ targetLogin, note, contact, name });
+  } catch (err) {
+    console.error("terminalhire intro error:", err?.message ?? err);
+    process.exit(1);
   }
-  if (args.includes("--edit")) {
-    const profile = await readProfile2();
-    console.log("\n\u2726 terminalhire profile editor (press Enter to keep current value)\n");
-    const name = await prompt(`Display name [${profile.displayName ?? "not set"}]: `);
-    if (name) profile.displayName = name;
-    const email = await prompt(`Contact email [${profile.contactEmail ?? "not set"}]: `);
-    if (email) profile.contactEmail = email;
-    const remote = await prompt(`Remote only? (y/n) [${profile.remoteOnly ? "y" : "n"}]: `);
-    if (remote === "y") profile.remoteOnly = true;
-    if (remote === "n") profile.remoteOnly = false;
-    const floor = await prompt(`Comp floor USD [${profile.compFloorUsd ?? "not set"}]: `);
-    if (floor && !isNaN(parseInt(floor, 10))) profile.compFloorUsd = parseInt(floor, 10);
-    await writeProfile2(profile);
-    console.log("\nProfile updated (encrypted at ~/.terminalhire/profile.enc)");
-    return;
-  }
-  console.log("Usage: terminalhire profile --show | --edit | --delete");
 }
 export {
   run

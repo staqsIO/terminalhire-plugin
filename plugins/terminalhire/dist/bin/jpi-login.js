@@ -2482,6 +2482,51 @@ var init_workable = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/directory.ts
+function personCardToJob(row) {
+  const tags = [...row.skill_tags];
+  return {
+    id: `dev:${row.login}`,
+    source: "person",
+    title: row.name ?? row.login,
+    company: row.login,
+    url: `/r/${row.login}`,
+    remote: true,
+    tags,
+    coreTags: tags.slice(0, TOP_CORE_TAGS),
+    roleType: "full_time",
+    applyMode: "direct"
+  };
+}
+function buildDirectoryIndex(people, opts) {
+  return {
+    builtAt: opts?.builtAt ?? (/* @__PURE__ */ new Date()).toISOString(),
+    cards: people.map(personCardToJob)
+  };
+}
+function projectCardToJob(row) {
+  const tags = [...row.needed_skills];
+  return {
+    id: `proj:${row.id}`,
+    source: "project",
+    title: row.title,
+    company: row.owner_login,
+    url: `/r/${row.owner_login}`,
+    remote: true,
+    tags,
+    coreTags: tags.slice(0, TOP_CORE_TAGS),
+    roleType: "full_time",
+    applyMode: "direct"
+  };
+}
+var TOP_CORE_TAGS;
+var init_directory = __esm({
+  "../../packages/core/src/feeds/directory.ts"() {
+    "use strict";
+    TOP_CORE_TAGS = 4;
+  }
+});
+
 // ../../packages/core/src/feeds/index.ts
 async function aggregateBounties(opts) {
   const [gh, op] = await Promise.all([
@@ -2598,6 +2643,7 @@ var init_feeds = __esm({
     init_github_bounties();
     init_opire();
     init_workable();
+    init_directory();
     init_bounty_gate();
     init_bounty_gate();
     FEEDS = [greenhouse, ashby, lever, workable, himalayas, wwr, hn];
@@ -2798,6 +2844,176 @@ var init_indexer = __esm({
   }
 });
 
+// ../../packages/core/src/intro.ts
+function buildIntroPayload(input) {
+  const payload = {
+    requesterLogin: input.requesterLogin,
+    requesterDisplayName: input.requesterDisplayName,
+    requesterContact: input.requesterContact,
+    targetLogin: input.targetLogin
+  };
+  const note = input.note?.trim();
+  if (note) payload.note = note;
+  return payload;
+}
+function rejectExtraIntroFields(body) {
+  for (const key of Object.keys(body)) {
+    if (!INTRO_ALLOWED_SET.has(key)) {
+      return `intro payload contains disallowed field: "${key}"`;
+    }
+  }
+  return null;
+}
+function validateIntroPayload(body) {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return { ok: false, reason: "intro payload must be a JSON object" };
+  }
+  const b = body;
+  const extra = rejectExtraIntroFields(b);
+  if (extra) return { ok: false, reason: extra };
+  const ok = (v, max) => typeof v === "string" && v.trim().length > 0 && v.length <= max;
+  if (!ok(b.requesterLogin, MAX_SHORT)) return { ok: false, reason: "requesterLogin is required" };
+  if (!ok(b.requesterDisplayName, MAX_SHORT)) return { ok: false, reason: "requesterDisplayName is required" };
+  if (!ok(b.requesterContact, MAX_SHORT)) return { ok: false, reason: "requesterContact is required" };
+  if (!ok(b.targetLogin, MAX_SHORT)) return { ok: false, reason: "targetLogin is required" };
+  if (b.note !== void 0 && (typeof b.note !== "string" || b.note.length > MAX_NOTE)) {
+    return { ok: false, reason: "note must be a string of at most 500 chars" };
+  }
+  const value = {
+    requesterLogin: b.requesterLogin.trim(),
+    requesterDisplayName: b.requesterDisplayName.trim(),
+    requesterContact: b.requesterContact.trim(),
+    targetLogin: b.targetLogin.trim()
+  };
+  const note = typeof b.note === "string" ? b.note.trim() : "";
+  if (note) value.note = note;
+  return { ok: true, value };
+}
+function introRateLimitCheck(history, now, opts) {
+  const cutoff = now - opts.windowMs;
+  const recent = history.filter((t) => t > cutoff);
+  if (recent.length >= opts.max) {
+    const oldest = recent[0] ?? now;
+    return { allowed: false, retained: recent, retryAfterMs: Math.max(0, oldest + opts.windowMs - now) };
+  }
+  return { allowed: true, retained: [...recent, now], retryAfterMs: 0 };
+}
+function isOverIntroLimit(recentCount, max) {
+  return recentCount >= max;
+}
+function composeIntroEmail(args) {
+  const subject = `New intro request from @${args.requesterLogin} \xB7 terminalhire`;
+  const text = `@${args.requesterLogin} wants an intro to you on terminalhire.
+
+Sign in to view the request and choose whether to share your contact back:
+${args.dashboardUrl}
+
+You control whether this connects \u2014 no contact details are shared unless you accept.
+
+\u2014 Terminalhire`;
+  return { subject, text };
+}
+function introActorRole(intro, actorLogin) {
+  const a = actorLogin.trim().toLowerCase();
+  if (a && a === intro.targetLogin.trim().toLowerCase()) return "target";
+  if (a && a === intro.requesterLogin.trim().toLowerCase()) return "requester";
+  return "other";
+}
+function authorizeIntroDecision(intro, actorLogin) {
+  const role = introActorRole(intro, actorLogin);
+  if (role === "target") return { ok: true };
+  if (role === "requester") {
+    return { ok: false, status: 403, reason: "the requester cannot accept or decline their own intro request" };
+  }
+  return { ok: false, status: 404, reason: "intro not found" };
+}
+function authorizeIntroDeletion(intro, actorLogin) {
+  const role = introActorRole(intro, actorLogin);
+  if (role === "other") return { ok: false, status: 404, reason: "intro not found" };
+  return { ok: true };
+}
+function revealIntroContacts(intro) {
+  if (intro.status !== "accepted") return { toRequester: null, toTarget: null };
+  return { toRequester: intro.targetContact ?? null, toTarget: intro.requesterContact };
+}
+function validateTargetContact(v) {
+  if (typeof v !== "string" || v.trim().length === 0) return { ok: false, reason: "targetContact is required" };
+  if (v.length > MAX_SHORT) return { ok: false, reason: `targetContact must be at most ${MAX_SHORT} chars` };
+  return { ok: true, value: v.trim() };
+}
+function buildIntroListItem(intro, viewerLogin) {
+  const role = introActorRole(intro, viewerLogin);
+  if (role === "other") return null;
+  const reveal = revealIntroContacts(intro);
+  if (role === "target") {
+    return {
+      id: intro.id,
+      role: "incoming",
+      counterpartyLogin: intro.requesterLogin,
+      status: intro.status,
+      note: intro.note ?? null,
+      contact: reveal.toTarget
+    };
+  }
+  return {
+    id: intro.id,
+    role: "outgoing",
+    counterpartyLogin: intro.targetLogin,
+    status: intro.status,
+    note: intro.note ?? null,
+    contact: reveal.toRequester
+  };
+}
+function composeIntroAcceptedEmail(args) {
+  const subject = `Intro connected with @${args.counterpartyLogin} \xB7 terminalhire`;
+  const lead = args.recipientRole === "requester" ? `@${args.counterpartyLogin} accepted your intro request on terminalhire.` : `You accepted @${args.counterpartyLogin}'s intro request on terminalhire.`;
+  const text = `${lead}
+
+You can now reach them directly:
+    @${args.counterpartyLogin} \u2014 ${args.counterpartyContact}
+
+Take it from here.
+
+\u2014 Terminalhire`;
+  return { subject, text };
+}
+function introRetentionAction(row, now) {
+  if (row.status === "pending") {
+    const created = Date.parse(row.createdAt);
+    if (Number.isFinite(created) && now - created > INTRO_PENDING_TTL_MS) return "purge";
+    return "keep";
+  }
+  if (row.status === "declined") {
+    return row.hasContact ? "scrub-declined" : "keep";
+  }
+  if (row.status === "accepted") {
+    const updated = Date.parse(row.updatedAt);
+    if (row.hasContact && Number.isFinite(updated) && now - updated > INTRO_ACCEPTED_TTL_MS) {
+      return "expire-accepted";
+    }
+    return "keep";
+  }
+  return "keep";
+}
+var INTRO_ALLOWED_FIELDS, INTRO_ALLOWED_SET, MAX_SHORT, MAX_NOTE, INTRO_PENDING_TTL_MS, INTRO_ACCEPTED_TTL_MS;
+var init_intro = __esm({
+  "../../packages/core/src/intro.ts"() {
+    "use strict";
+    INTRO_ALLOWED_FIELDS = [
+      "requesterLogin",
+      "requesterDisplayName",
+      "requesterContact",
+      "note",
+      "targetLogin"
+    ];
+    INTRO_ALLOWED_SET = new Set(INTRO_ALLOWED_FIELDS);
+    MAX_SHORT = 200;
+    MAX_NOTE = 500;
+    INTRO_PENDING_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
+    INTRO_ACCEPTED_TTL_MS = 365 * 24 * 60 * 60 * 1e3;
+  }
+});
+
 // ../../packages/core/src/index.ts
 var src_exports = {};
 __export(src_exports, {
@@ -2813,6 +3029,9 @@ __export(src_exports, {
   GRAPH: () => GRAPH,
   GREENHOUSE_SLUGS_BY_TIER: () => GREENHOUSE_SLUGS_BY_TIER,
   IDF_BACKGROUND: () => IDF_BACKGROUND,
+  INTRO_ACCEPTED_TTL_MS: () => INTRO_ACCEPTED_TTL_MS,
+  INTRO_ALLOWED_FIELDS: () => INTRO_ALLOWED_FIELDS,
+  INTRO_PENDING_TTL_MS: () => INTRO_PENDING_TTL_MS,
   LEVER_SLUGS_BY_TIER: () => LEVER_SLUGS_BY_TIER,
   SYNONYMS: () => SYNONYMS,
   VOCABULARY: () => VOCABULARY,
@@ -2821,10 +3040,17 @@ __export(src_exports, {
   aggregate: () => aggregate,
   aggregateBounties: () => aggregateBounties,
   ashby: () => ashby,
+  authorizeIntroDecision: () => authorizeIntroDecision,
+  authorizeIntroDeletion: () => authorizeIntroDeletion,
   bestAcceptanceDomain: () => bestAcceptanceDomain,
+  buildDirectoryIndex: () => buildDirectoryIndex,
   buildGraph: () => buildGraph,
   buildIndex: () => buildIndex,
+  buildIntroListItem: () => buildIntroListItem,
+  buildIntroPayload: () => buildIntroPayload,
   buildReason: () => buildReason,
+  composeIntroAcceptedEmail: () => composeIntroAcceptedEmail,
+  composeIntroEmail: () => composeIntroEmail,
   computeAcceptanceCredential: () => computeAcceptanceCredential,
   computeAcceptanceCredentialPublic: () => computeAcceptanceCredentialPublic,
   coreTagsFromTitle: () => coreTagsFromTitle,
@@ -2841,7 +3067,11 @@ __export(src_exports, {
   greenhouse: () => greenhouse,
   himalayas: () => himalayas,
   hn: () => hn,
+  introActorRole: () => introActorRole,
+  introRateLimitCheck: () => introRateLimitCheck,
+  introRetentionAction: () => introRetentionAction,
   isBounty: () => isBounty,
+  isOverIntroLimit: () => isOverIntroLimit,
   lever: () => lever,
   loadPartnerRoles: () => loadPartnerRoles,
   looksLikeEngRole: () => looksLikeEngRole,
@@ -2849,8 +3079,14 @@ __export(src_exports, {
   normalize: () => normalize,
   opire: () => opire,
   passesMaturityGate: () => passesMaturityGate,
+  personCardToJob: () => personCardToJob,
+  projectCardToJob: () => projectCardToJob,
+  rejectExtraIntroFields: () => rejectExtraIntroFields,
+  revealIntroContacts: () => revealIntroContacts,
   tokenize: () => tokenize,
   validateGraph: () => validateGraph,
+  validateIntroPayload: () => validateIntroPayload,
+  validateTargetContact: () => validateTargetContact,
   workable: () => workable,
   wwr: () => wwr
 });
@@ -2864,6 +3100,7 @@ var init_src = __esm({
     init_indexer();
     init_partners();
     init_github();
+    init_intro();
   }
 });
 
