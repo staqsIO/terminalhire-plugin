@@ -4786,7 +4786,7 @@ async function runChatPane(opts = {}) {
         signals.removeListener("exit", onExit);
       } catch {
       }
-      output.write(SHOW_CURSOR + "\n");
+      output.write(SHOW_CURSOR + EXIT_ALT);
     }
     function finish(reason) {
       if (cleaned) return;
@@ -4972,7 +4972,7 @@ async function runChatPane(opts = {}) {
     try {
       if (typeof input.setRawMode === "function") input.setRawMode(true);
       if (typeof input.resume === "function") input.resume();
-      output.write(HIDE_CURSOR);
+      output.write(ENTER_ALT + HIDE_CURSOR);
       input.on("data", onData);
       signals.on("SIGINT", onSignal);
       signals.on("SIGTERM", onTerm);
@@ -5094,14 +5094,14 @@ async function run() {
     process.exit(0);
   } catch (err) {
     try {
-      process.stdout.write(SHOW_CURSOR);
+      process.stdout.write(SHOW_CURSOR + EXIT_ALT);
     } catch {
     }
     console.error("terminalhire chat error:", err instanceof Error ? err.message : err);
     process.exit(1);
   }
 }
-var CHAT_BASE3, GH_SESSION_COOKIE3, HIDE_CURSOR, SHOW_CURSOR, CLEAR, KEY_CTRL_C, KEY_CTRL_S, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, MAX_INPUT_LEN, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA;
+var CHAT_BASE3, GH_SESSION_COOKIE3, HIDE_CURSOR, SHOW_CURSOR, ENTER_ALT, EXIT_ALT, CLEAR, KEY_CTRL_C, KEY_CTRL_S, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, MAX_INPUT_LEN, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA;
 var init_jpi_chat = __esm({
   "bin/jpi-chat.js"() {
     init_chat_client();
@@ -5111,6 +5111,8 @@ var init_jpi_chat = __esm({
     GH_SESSION_COOKIE3 = "__jpi_gh_session";
     HIDE_CURSOR = "\x1B[?25l";
     SHOW_CURSOR = "\x1B[?25h";
+    ENTER_ALT = "\x1B[?1049h";
+    EXIT_ALT = "\x1B[?1049l";
     CLEAR = "\x1B[2J\x1B[H";
     KEY_CTRL_C = "";
     KEY_CTRL_S = "";
