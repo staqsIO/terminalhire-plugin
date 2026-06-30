@@ -285,7 +285,7 @@ function finalize(build) {
   };
 }
 function reconstruct(files, opts = {}) {
-  const join4 = opts.joinSidechains !== false;
+  const join5 = opts.joinSidechains !== false;
   const mains = [];
   const sidechains = [];
   for (const file of files) {
@@ -310,7 +310,7 @@ function reconstruct(files, opts = {}) {
   }
   const orphanedSidechainPaths = [];
   const joinedPaths = /* @__PURE__ */ new Set();
-  if (join4) {
+  if (join5) {
     const sidechainsBySession = /* @__PURE__ */ new Map();
     for (const sc of sidechains) {
       const acc = sidechainsBySession.get(sc.sessionId) ?? [];
@@ -852,6 +852,45 @@ var init_episodes = __esm({
     init_recency_split();
     init_rework_density();
     init_recovery_depth();
+  }
+});
+
+// src/web-session.ts
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from "fs";
+import { homedir } from "os";
+import { join } from "path";
+function terminalhireDir() {
+  return join(homedir(), ".terminalhire");
+}
+function webSessionFilePath() {
+  return join(terminalhireDir(), "web-session");
+}
+function readWebSessionFile() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync(path)) return null;
+    const v = readFileSync(path, "utf8").trim();
+    return v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+function readWebSessionCookie() {
+  const fromFile = readWebSessionFile();
+  if (fromFile) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return typeof env === "string" && env.length > 0 ? env : null;
+}
+var init_web_session = __esm({
+  "src/web-session.ts"() {
+    "use strict";
   }
 });
 
@@ -1530,8 +1569,8 @@ var init_feeds = __esm({
 });
 
 // ../../packages/core/src/partners.ts
-import { readFileSync } from "fs";
-import { join } from "path";
+import { readFileSync as readFileSync2 } from "fs";
+import { join as join2 } from "path";
 import { fileURLToPath } from "url";
 var EXAMPLE_BUYER, BUYER_REGISTRY;
 var init_partners = __esm({
@@ -1629,13 +1668,13 @@ import {
   randomBytes as randomBytes2
 } from "crypto";
 import {
-  readFileSync as readFileSync2,
-  writeFileSync,
-  mkdirSync,
-  existsSync
+  readFileSync as readFileSync3,
+  writeFileSync as writeFileSync2,
+  mkdirSync as mkdirSync2,
+  existsSync as existsSync2
 } from "fs";
-import { join as join2 } from "path";
-import { homedir } from "os";
+import { join as join3 } from "path";
+import { homedir as homedir2 } from "os";
 async function loadKey() {
   try {
     const kt = await import("keytar");
@@ -1648,12 +1687,12 @@ async function loadKey() {
     return key2;
   } catch {
   }
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
-  if (existsSync(KEY_FILE)) {
-    return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");
+  mkdirSync2(TERMINALHIRE_DIR, { recursive: true });
+  if (existsSync2(KEY_FILE)) {
+    return Buffer.from(readFileSync3(KEY_FILE, "utf8").trim(), "hex");
   }
   const key = randomBytes2(KEY_BYTES);
-  writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  writeFileSync2(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
   return key;
 }
 function encrypt(plaintext, key) {
@@ -1711,10 +1750,10 @@ function migrateTagWeights(profile) {
   }
 }
 async function readProfile() {
-  if (!existsSync(PROFILE_FILE)) return blankProfile();
+  if (!existsSync2(PROFILE_FILE)) return blankProfile();
   try {
     const key = await loadKey();
-    const raw = readFileSync2(PROFILE_FILE, "utf8");
+    const raw = readFileSync3(PROFILE_FILE, "utf8");
     const blob = JSON.parse(raw);
     const plaintext = decrypt(blob, key);
     const parsed = JSON.parse(plaintext);
@@ -1725,12 +1764,12 @@ async function readProfile() {
   }
 }
 async function writeProfile(profile) {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  mkdirSync2(TERMINALHIRE_DIR, { recursive: true });
   const key = await loadKey();
   profile.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
   profile.skillTags = deriveSkillTags(profile.tagWeights);
   const blob = encrypt(JSON.stringify(profile), key);
-  writeFileSync(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+  writeFileSync2(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 function accumulateSession(profile, tags, isEmployerContext, inferredSeniority, seniorityIsAuthoritative = false) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -1791,13 +1830,13 @@ async function removeSavedJob(id) {
   return true;
 }
 async function deleteProfile() {
-  const { rmSync } = await import("fs");
+  const { rmSync: rmSync2 } = await import("fs");
   try {
-    rmSync(PROFILE_FILE);
+    rmSync2(PROFILE_FILE);
   } catch {
   }
   try {
-    rmSync(KEY_FILE);
+    rmSync2(KEY_FILE);
   } catch {
   }
 }
@@ -1819,9 +1858,9 @@ var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
     init_src();
-    TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");
-    PROFILE_FILE = join2(TERMINALHIRE_DIR, "profile.enc");
-    KEY_FILE = join2(TERMINALHIRE_DIR, "key");
+    TERMINALHIRE_DIR = join3(homedir2(), ".terminalhire");
+    PROFILE_FILE = join3(TERMINALHIRE_DIR, "profile.enc");
+    KEY_FILE = join3(TERMINALHIRE_DIR, "key");
     ALGO = "aes-256-gcm";
     KEY_BYTES = 32;
     IV_BYTES = 12;
@@ -1891,14 +1930,14 @@ __export(trajectory_exports, {
   runTrajectoryPush: () => runTrajectoryPush
 });
 import {
-  existsSync as existsSync2,
-  mkdirSync as mkdirSync2,
-  readFileSync as readFileSync3,
+  existsSync as existsSync3,
+  mkdirSync as mkdirSync3,
+  readFileSync as readFileSync4,
   readdirSync,
-  writeFileSync as writeFileSync2
+  writeFileSync as writeFileSync3
 } from "fs";
-import { homedir as homedir2 } from "os";
-import { join as join3 } from "path";
+import { homedir as homedir3 } from "os";
+import { join as join4 } from "path";
 function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -1930,7 +1969,7 @@ function findJsonlFiles(dir) {
     return out;
   }
   for (const entry of entries) {
-    const full = join3(dir, entry.name);
+    const full = join4(dir, entry.name);
     if (entry.isDirectory()) {
       out.push(...findJsonlFiles(full));
     } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
@@ -1944,7 +1983,7 @@ function loadCorpus(paths) {
   for (const path of paths) {
     let text;
     try {
-      text = readFileSync3(path, "utf8");
+      text = readFileSync4(path, "utf8");
     } catch {
       continue;
     }
@@ -2043,12 +2082,12 @@ function renderMarkdown(view) {
   return lines.join("\n");
 }
 function writeExportArtifacts(score, markdown) {
-  const dir = join3(homedir2(), ".terminalhire");
-  mkdirSync2(dir, { recursive: true });
-  const jsonPath = join3(dir, "trajectory-export.json");
-  const mdPath = join3(dir, "trajectory-export.md");
-  writeFileSync2(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
-  writeFileSync2(mdPath, markdown, "utf8");
+  const dir = join4(homedir3(), ".terminalhire");
+  mkdirSync3(dir, { recursive: true });
+  const jsonPath = join4(dir, "trajectory-export.json");
+  const mdPath = join4(dir, "trajectory-export.md");
+  writeFileSync3(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
+  writeFileSync3(mdPath, markdown, "utf8");
   return { jsonPath, mdPath };
 }
 function renderInward(allNodes, view, files) {
@@ -2067,8 +2106,8 @@ function renderInward(allNodes, view, files) {
   console.log("");
 }
 function buildTrajectory() {
-  const projectsDir = join3(homedir2(), ".claude", "projects");
-  if (!existsSync2(projectsDir)) return null;
+  const projectsDir = join4(homedir3(), ".claude", "projects");
+  if (!existsSync3(projectsDir)) return null;
   const paths = findJsonlFiles(projectsDir);
   if (paths.length === 0) return null;
   const files = loadCorpus(paths);
@@ -2155,10 +2194,9 @@ function defaultPushDeps() {
       void Promise.resolve().then(() => (init_open_url(), open_url_exports)).then((m) => m.openInBrowser(url)).catch(() => {
       });
     },
-    sessionCookie: () => {
-      const v = process.env["TERMINALHIRE_WEB_SESSION"];
-      return typeof v === "string" && v.length > 0 ? v : null;
-    },
+    // Session source priority: persisted file (`terminalhire link`) FIRST, then the
+    // legacy TERMINALHIRE_WEB_SESSION env, then none.
+    sessionCookie: () => readWebSessionCookie(),
     log: (msg) => console.log(msg),
     errorLog: (msg) => console.error(msg),
     exit: (code) => process.exit(code)
@@ -2317,6 +2355,7 @@ var init_trajectory = __esm({
   "src/trajectory.ts"() {
     "use strict";
     init_episodes();
+    init_web_session();
     CAP_LABELS = {
       "cap:ui-automation": "UI automation",
       "cap:deploys": "Deployment",

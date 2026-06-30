@@ -793,13 +793,13 @@ import {
   randomBytes as randomBytes2
 } from "crypto";
 import {
-  readFileSync as readFileSync2,
-  writeFileSync,
-  mkdirSync,
-  existsSync
+  readFileSync as readFileSync3,
+  writeFileSync as writeFileSync2,
+  mkdirSync as mkdirSync2,
+  existsSync as existsSync2
 } from "fs";
-import { join as join2 } from "path";
-import { homedir } from "os";
+import { join as join3 } from "path";
+import { homedir as homedir2 } from "os";
 async function loadKey() {
   try {
     const kt = await import("keytar");
@@ -812,12 +812,12 @@ async function loadKey() {
     return key2;
   } catch {
   }
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
-  if (existsSync(KEY_FILE)) {
-    return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");
+  mkdirSync2(TERMINALHIRE_DIR, { recursive: true });
+  if (existsSync2(KEY_FILE)) {
+    return Buffer.from(readFileSync3(KEY_FILE, "utf8").trim(), "hex");
   }
   const key = randomBytes2(KEY_BYTES);
-  writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  writeFileSync2(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
   return key;
 }
 function encrypt(plaintext, key) {
@@ -875,10 +875,10 @@ function migrateTagWeights(profile) {
   }
 }
 async function readProfile() {
-  if (!existsSync(PROFILE_FILE)) return blankProfile();
+  if (!existsSync2(PROFILE_FILE)) return blankProfile();
   try {
     const key = await loadKey();
-    const raw = readFileSync2(PROFILE_FILE, "utf8");
+    const raw = readFileSync3(PROFILE_FILE, "utf8");
     const blob = JSON.parse(raw);
     const plaintext = decrypt(blob, key);
     const parsed = JSON.parse(plaintext);
@@ -889,12 +889,12 @@ async function readProfile() {
   }
 }
 async function writeProfile(profile) {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  mkdirSync2(TERMINALHIRE_DIR, { recursive: true });
   const key = await loadKey();
   profile.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
   profile.skillTags = deriveSkillTags(profile.tagWeights);
   const blob = encrypt(JSON.stringify(profile), key);
-  writeFileSync(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+  writeFileSync2(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 function accumulateSession(profile, tags, isEmployerContext, inferredSeniority, seniorityIsAuthoritative = false) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -955,13 +955,13 @@ async function removeSavedJob(id) {
   return true;
 }
 async function deleteProfile() {
-  const { rmSync } = await import("fs");
+  const { rmSync: rmSync2 } = await import("fs");
   try {
-    rmSync(PROFILE_FILE);
+    rmSync2(PROFILE_FILE);
   } catch {
   }
   try {
-    rmSync(KEY_FILE);
+    rmSync2(KEY_FILE);
   } catch {
   }
 }
@@ -983,9 +983,9 @@ var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
     init_src();
-    TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");
-    PROFILE_FILE = join2(TERMINALHIRE_DIR, "profile.enc");
-    KEY_FILE = join2(TERMINALHIRE_DIR, "key");
+    TERMINALHIRE_DIR = join3(homedir2(), ".terminalhire");
+    PROFILE_FILE = join3(TERMINALHIRE_DIR, "profile.enc");
+    KEY_FILE = join3(TERMINALHIRE_DIR, "key");
     ALGO = "aes-256-gcm";
     KEY_BYTES = 32;
     IV_BYTES = 12;
@@ -1048,6 +1048,42 @@ var init_open_url = __esm({
 
 // src/intro.ts
 init_src();
+
+// src/web-session.ts
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync as readFileSync2,
+  rmSync,
+  writeFileSync
+} from "fs";
+import { homedir } from "os";
+import { join as join2 } from "path";
+function terminalhireDir() {
+  return join2(homedir(), ".terminalhire");
+}
+function webSessionFilePath() {
+  return join2(terminalhireDir(), "web-session");
+}
+function readWebSessionFile() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync(path)) return null;
+    const v = readFileSync2(path, "utf8").trim();
+    return v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+function readWebSessionCookie() {
+  const fromFile = readWebSessionFile();
+  if (fromFile) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return typeof env === "string" && env.length > 0 ? env : null;
+}
+
+// src/intro.ts
 var LINK_BASE = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
 var GH_SESSION_COOKIE = "__jpi_gh_session";
 function defaultIntroDeps() {
@@ -1085,10 +1121,9 @@ function defaultIntroDeps() {
       void Promise.resolve().then(() => (init_open_url(), open_url_exports)).then((m) => m.openInBrowser(url)).catch(() => {
       });
     },
-    sessionCookie: () => {
-      const v = process.env["TERMINALHIRE_WEB_SESSION"];
-      return typeof v === "string" && v.length > 0 ? v : null;
-    },
+    // Session source priority: persisted file (`terminalhire link`) FIRST, then the
+    // legacy TERMINALHIRE_WEB_SESSION env, then none.
+    sessionCookie: () => readWebSessionCookie(),
     log: (msg) => console.log(msg),
     errorLog: (msg) => console.error(msg),
     exit: (code) => process.exit(code)
@@ -1160,10 +1195,7 @@ async function runIntroRequest(args, overrides) {
   const cookie = deps.sessionCookie();
   if (!cookie) {
     deps.log("\n  No linked web session found on this machine.");
-    deps.log("  Sign in at your dashboard first, then re-run with a bridged session.");
-    deps.log(`  \u2192 ${LINK_BASE}/dashboard
-`);
-    deps.openBrowser(`${LINK_BASE}/dashboard`);
+    deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
     deps.exit(0);
     return;
   }
@@ -1183,9 +1215,8 @@ async function runIntroRequest(args, overrides) {
     return;
   }
   if (res.status === 401) {
-    deps.log("\n  Your web session expired \u2014 sign in again at your dashboard, then re-run.");
-    deps.log(`  \u2192 ${LINK_BASE}/dashboard
-`);
+    deps.log("\n  Your linked web session expired.");
+    deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
     deps.exit(1);
     return;
   }
@@ -1216,10 +1247,7 @@ async function runIntroDecision(args, overrides) {
   const cookie = deps.sessionCookie();
   if (!cookie) {
     deps.log("\n  No linked web session found on this machine.");
-    deps.log("  Sign in at your dashboard first, then re-run.");
-    deps.log(`  \u2192 ${LINK_BASE}/dashboard
-`);
-    deps.openBrowser(`${LINK_BASE}/dashboard`);
+    deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
     deps.exit(0);
     return;
   }
@@ -1262,9 +1290,8 @@ async function runIntroDecision(args, overrides) {
     return;
   }
   if (res.status === 401) {
-    deps.log("\n  Your web session expired \u2014 sign in again at your dashboard, then re-run.");
-    deps.log(`  \u2192 ${LINK_BASE}/dashboard
-`);
+    deps.log("\n  Your linked web session expired.");
+    deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
     deps.exit(1);
     return;
   }
@@ -1303,10 +1330,7 @@ async function runIntroList(overrides) {
   const cookie = deps.sessionCookie();
   if (!cookie) {
     deps.log("\n  No linked web session found on this machine.");
-    deps.log("  Sign in at your dashboard first, then re-run.");
-    deps.log(`  \u2192 ${LINK_BASE}/dashboard
-`);
-    deps.openBrowser(`${LINK_BASE}/dashboard`);
+    deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
     deps.exit(0);
     return;
   }
@@ -1325,9 +1349,8 @@ async function runIntroList(overrides) {
     return;
   }
   if (res.status === 401) {
-    deps.log("\n  Your web session expired \u2014 sign in again at your dashboard, then re-run.");
-    deps.log(`  \u2192 ${LINK_BASE}/dashboard
-`);
+    deps.log("\n  Your linked web session expired.");
+    deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
     deps.exit(1);
     return;
   }

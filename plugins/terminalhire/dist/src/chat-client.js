@@ -1,7 +1,7 @@
 // src/chat-client.ts
-import { existsSync as existsSync3, mkdirSync as mkdirSync3, readFileSync as readFileSync4, writeFileSync as writeFileSync3 } from "fs";
-import { homedir as homedir3 } from "os";
-import { join as join4 } from "path";
+import { existsSync as existsSync4, mkdirSync as mkdirSync4, readFileSync as readFileSync5, writeFileSync as writeFileSync4 } from "fs";
+import { homedir as homedir4 } from "os";
+import { join as join5 } from "path";
 
 // ../../packages/core/src/vocab/graph.data.ts
 var VOCAB_NODES = [
@@ -3455,16 +3455,50 @@ async function loadOrCreateIdentity() {
   return keypair;
 }
 
+// src/web-session.ts
+import {
+  chmodSync,
+  existsSync as existsSync3,
+  mkdirSync as mkdirSync3,
+  readFileSync as readFileSync4,
+  rmSync as rmSync3,
+  writeFileSync as writeFileSync3
+} from "fs";
+import { homedir as homedir3 } from "os";
+import { join as join4 } from "path";
+function terminalhireDir() {
+  return join4(homedir3(), ".terminalhire");
+}
+function webSessionFilePath() {
+  return join4(terminalhireDir(), "web-session");
+}
+function readWebSessionFile() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync3(path)) return null;
+    const v = readFileSync4(path, "utf8").trim();
+    return v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+function readWebSessionCookie() {
+  const fromFile = readWebSessionFile();
+  if (fromFile) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return typeof env === "string" && env.length > 0 ? env : null;
+}
+
 // src/chat-client.ts
 var CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
 var GH_SESSION_COOKIE = "__jpi_gh_session";
-var TERMINALHIRE_DIR3 = join4(homedir3(), ".terminalhire");
-var PEERS_FILE = join4(TERMINALHIRE_DIR3, "chat-peers.json");
+var TERMINALHIRE_DIR3 = join5(homedir4(), ".terminalhire");
+var PEERS_FILE = join5(TERMINALHIRE_DIR3, "chat-peers.json");
 var REQUEST_TIMEOUT_MS = 1e4;
 var ChatNotLinkedError = class extends Error {
   constructor() {
     super(
-      `No linked web session found on this machine. Sign in at ${CHAT_BASE}/dashboard, then re-run with a bridged session (TERMINALHIRE_WEB_SESSION).`
+      "No linked web session found on this machine. Run `terminalhire link` to connect this terminal to your account, then re-run."
     );
     this.name = "ChatNotLinkedError";
   }
@@ -3472,7 +3506,7 @@ var ChatNotLinkedError = class extends Error {
 var ChatSessionExpiredError = class extends Error {
   constructor() {
     super(
-      `Your web session expired \u2014 re-link it by signing in again at ${CHAT_BASE}/dashboard and re-bridging TERMINALHIRE_WEB_SESSION, then re-run.`
+      "Your linked web session expired. Run `terminalhire link` to reconnect this terminal, then re-run."
     );
     this.name = "ChatSessionExpiredError";
   }
@@ -3499,8 +3533,8 @@ var ChatRequestError = class extends Error {
 };
 function defaultReadPeerPins() {
   try {
-    if (!existsSync3(PEERS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync4(PEERS_FILE, "utf8"));
+    if (!existsSync4(PEERS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync5(PEERS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, key] of Object.entries(parsed)) {
@@ -3512,16 +3546,15 @@ function defaultReadPeerPins() {
   }
 }
 function defaultWritePeerPins(pins) {
-  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
-  writeFileSync3(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
+  mkdirSync4(TERMINALHIRE_DIR3, { recursive: true });
+  writeFileSync4(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
 }
 function defaultChatClientDeps() {
   return {
     fetchImpl: (...args) => globalThis.fetch(...args),
-    sessionCookie: () => {
-      const v = process.env["TERMINALHIRE_WEB_SESSION"];
-      return typeof v === "string" && v.length > 0 ? v : null;
-    },
+    // Session source priority: persisted file (`terminalhire link`) FIRST, then the
+    // legacy TERMINALHIRE_WEB_SESSION env, then none.
+    sessionCookie: () => readWebSessionCookie(),
     loadIdentity: () => loadOrCreateIdentity(),
     readPeerPins: defaultReadPeerPins,
     writePeerPins: defaultWritePeerPins

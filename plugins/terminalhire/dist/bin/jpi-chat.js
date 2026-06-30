@@ -3860,14 +3860,53 @@ var init_chat_keystore = __esm({
   }
 });
 
-// src/chat-client.ts
-import { existsSync as existsSync3, mkdirSync as mkdirSync3, readFileSync as readFileSync4, writeFileSync as writeFileSync3 } from "fs";
+// src/web-session.ts
+import {
+  chmodSync,
+  existsSync as existsSync3,
+  mkdirSync as mkdirSync3,
+  readFileSync as readFileSync4,
+  rmSync as rmSync3,
+  writeFileSync as writeFileSync3
+} from "fs";
 import { homedir as homedir3 } from "os";
 import { join as join4 } from "path";
+function terminalhireDir() {
+  return join4(homedir3(), ".terminalhire");
+}
+function webSessionFilePath() {
+  return join4(terminalhireDir(), "web-session");
+}
+function readWebSessionFile() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync3(path)) return null;
+    const v = readFileSync4(path, "utf8").trim();
+    return v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+function readWebSessionCookie() {
+  const fromFile = readWebSessionFile();
+  if (fromFile) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return typeof env === "string" && env.length > 0 ? env : null;
+}
+var init_web_session = __esm({
+  "src/web-session.ts"() {
+    "use strict";
+  }
+});
+
+// src/chat-client.ts
+import { existsSync as existsSync4, mkdirSync as mkdirSync4, readFileSync as readFileSync5, writeFileSync as writeFileSync4 } from "fs";
+import { homedir as homedir4 } from "os";
+import { join as join5 } from "path";
 function defaultReadPeerPins() {
   try {
-    if (!existsSync3(PEERS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync4(PEERS_FILE, "utf8"));
+    if (!existsSync4(PEERS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync5(PEERS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, key] of Object.entries(parsed)) {
@@ -3879,16 +3918,15 @@ function defaultReadPeerPins() {
   }
 }
 function defaultWritePeerPins(pins) {
-  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
-  writeFileSync3(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
+  mkdirSync4(TERMINALHIRE_DIR3, { recursive: true });
+  writeFileSync4(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
 }
 function defaultChatClientDeps() {
   return {
     fetchImpl: (...args) => globalThis.fetch(...args),
-    sessionCookie: () => {
-      const v = process.env["TERMINALHIRE_WEB_SESSION"];
-      return typeof v === "string" && v.length > 0 ? v : null;
-    },
+    // Session source priority: persisted file (`terminalhire link`) FIRST, then the
+    // legacy TERMINALHIRE_WEB_SESSION env, then none.
+    sessionCookie: () => readWebSessionCookie(),
     loadIdentity: () => loadOrCreateIdentity(),
     readPeerPins: defaultReadPeerPins,
     writePeerPins: defaultWritePeerPins
@@ -4041,15 +4079,16 @@ var init_chat_client = __esm({
     "use strict";
     init_src();
     init_chat_keystore();
+    init_web_session();
     CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
     GH_SESSION_COOKIE = "__jpi_gh_session";
-    TERMINALHIRE_DIR3 = join4(homedir3(), ".terminalhire");
-    PEERS_FILE = join4(TERMINALHIRE_DIR3, "chat-peers.json");
+    TERMINALHIRE_DIR3 = join5(homedir4(), ".terminalhire");
+    PEERS_FILE = join5(TERMINALHIRE_DIR3, "chat-peers.json");
     REQUEST_TIMEOUT_MS = 1e4;
     ChatNotLinkedError = class extends Error {
       constructor() {
         super(
-          `No linked web session found on this machine. Sign in at ${CHAT_BASE}/dashboard, then re-run with a bridged session (TERMINALHIRE_WEB_SESSION).`
+          "No linked web session found on this machine. Run `terminalhire link` to connect this terminal to your account, then re-run."
         );
         this.name = "ChatNotLinkedError";
       }
@@ -4057,7 +4096,7 @@ var init_chat_client = __esm({
     ChatSessionExpiredError = class extends Error {
       constructor() {
         super(
-          `Your web session expired \u2014 re-link it by signing in again at ${CHAT_BASE}/dashboard and re-bridging TERMINALHIRE_WEB_SESSION, then re-run.`
+          "Your linked web session expired. Run `terminalhire link` to reconnect this terminal, then re-run."
         );
         this.name = "ChatSessionExpiredError";
       }
@@ -4086,13 +4125,13 @@ var init_chat_client = __esm({
 });
 
 // src/config.ts
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4, existsSync as existsSync4 } from "fs";
-import { join as join5 } from "path";
-import { homedir as homedir4 } from "os";
+import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, mkdirSync as mkdirSync5, existsSync as existsSync5 } from "fs";
+import { join as join6 } from "path";
+import { homedir as homedir5 } from "os";
 function readConfig() {
   try {
-    if (!existsSync4(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
-    const raw = readFileSync5(CONFIG_FILE, "utf8");
+    if (!existsSync5(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
+    const raw = readFileSync6(CONFIG_FILE, "utf8");
     const parsed = JSON.parse(raw);
     return { ...DEFAULT_CONFIG, ...parsed };
   } catch {
@@ -4100,17 +4139,17 @@ function readConfig() {
   }
 }
 function writeConfig(config) {
-  mkdirSync4(TERMINALHIRE_DIR4, { recursive: true });
+  mkdirSync5(TERMINALHIRE_DIR4, { recursive: true });
   const current = readConfig();
   const merged = { ...current, ...config };
-  writeFileSync4(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  writeFileSync5(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 var TERMINALHIRE_DIR4, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
-    TERMINALHIRE_DIR4 = join5(homedir4(), ".terminalhire");
-    CONFIG_FILE = join5(TERMINALHIRE_DIR4, "config.json");
+    TERMINALHIRE_DIR4 = join6(homedir5(), ".terminalhire");
+    CONFIG_FILE = join6(TERMINALHIRE_DIR4, "config.json");
     DEFAULT_CONFIG = {
       nudge: "session",
       peerConnect: false,
@@ -4134,13 +4173,13 @@ __export(jpi_chat_read_exports, {
   runSend: () => runSend,
   writeReadCursor: () => writeReadCursor
 });
-import { existsSync as existsSync5, mkdirSync as mkdirSync5, readFileSync as readFileSync6, writeFileSync as writeFileSync5 } from "fs";
-import { homedir as homedir5 } from "os";
-import { join as join6 } from "path";
+import { existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "fs";
+import { homedir as homedir6 } from "os";
+import { join as join7 } from "path";
 function readReadCursors() {
   try {
-    if (!existsSync5(READS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync6(READS_FILE, "utf8"));
+    if (!existsSync6(READS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync7(READS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, iso] of Object.entries(parsed)) {
@@ -4155,8 +4194,8 @@ function writeReadCursor(login, iso, deps = {}) {
   const read = deps.readReadCursors ?? readReadCursors;
   const cursors = read();
   cursors[login] = iso;
-  mkdirSync5(TERMINALHIRE_DIR5, { recursive: true });
-  writeFileSync5(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
+  mkdirSync6(TERMINALHIRE_DIR5, { recursive: true });
+  writeFileSync6(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
 }
 function formatClock(iso) {
   const d = new Date(iso);
@@ -4440,8 +4479,8 @@ var init_jpi_chat_read = __esm({
     init_chat_client();
     init_jpi_chat();
     CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
-    TERMINALHIRE_DIR5 = join6(homedir5(), ".terminalhire");
-    READS_FILE = join6(TERMINALHIRE_DIR5, "chat-reads.json");
+    TERMINALHIRE_DIR5 = join7(homedir6(), ".terminalhire");
+    READS_FILE = join7(TERMINALHIRE_DIR5, "chat-reads.json");
   }
 });
 

@@ -1,6 +1,6 @@
 {
   "name": "terminalhire",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Local-first job matching for developers — ambient job matches in the Claude Code spinner. Matching runs on your machine; your profile never leaves it.",
   "repository": {
     "type": "git",

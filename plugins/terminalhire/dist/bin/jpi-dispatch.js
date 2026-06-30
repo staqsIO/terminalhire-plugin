@@ -1943,14 +1943,14 @@ async function mapWithConcurrency(items, limit, fn) {
   if (items.length === 0) return results;
   const workers = Math.max(1, Math.min(Math.floor(limit) || 1, items.length));
   let next = 0;
-  async function run18() {
+  async function run19() {
     for (; ; ) {
       const i = next++;
       if (i >= items.length) return;
       results[i] = await fn(items[i], i);
     }
   }
-  await Promise.all(Array.from({ length: workers }, run18));
+  await Promise.all(Array.from({ length: workers }, run19));
   return results;
 }
 var init_concurrency = __esm({
@@ -4603,7 +4603,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   });
   const { prehash } = eddsaOpts;
   const { BASE, Fp: Fp2, Fn: Fn2 } = Point;
-  const randomBytes5 = eddsaOpts.randomBytes || randomBytes2;
+  const randomBytes6 = eddsaOpts.randomBytes || randomBytes2;
   const adjustScalarBytes2 = eddsaOpts.adjustScalarBytes || ((bytes) => bytes);
   const domain = eddsaOpts.domain || ((data, ctx, phflag) => {
     _abool2(phflag, "phflag");
@@ -4685,7 +4685,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
     signature: 2 * _size,
     seed: _size
   };
-  function randomSecretKey(seed = randomBytes5(lengths.seed)) {
+  function randomSecretKey(seed = randomBytes6(lengths.seed)) {
     return _abytes2(seed, lengths.seed, "seed");
   }
   function keygen(seed) {
@@ -6370,13 +6370,13 @@ async function removeSavedJob(id) {
   return true;
 }
 async function deleteProfile() {
-  const { rmSync: rmSync4 } = await import("fs");
+  const { rmSync: rmSync5 } = await import("fs");
   try {
-    rmSync4(PROFILE_FILE);
+    rmSync5(PROFILE_FILE);
   } catch {
   }
   try {
-    rmSync4(KEY_FILE2);
+    rmSync5(KEY_FILE2);
   } catch {
   }
 }
@@ -6613,11 +6613,11 @@ async function runLogin() {
     if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
       const { createRequire: createRequire2 } = await import("module");
       const { fileURLToPath: fileURLToPath7 } = await import("url");
-      const { join: join24, dirname: dirname3 } = await import("path");
+      const { join: join25, dirname: dirname3 } = await import("path");
       const __dirname6 = fileURLToPath7(new URL(".", import.meta.url));
-      const fixturePath = join24(__dirname6, "../../fixtures/github-sample.json");
-      const { readFileSync: readFileSync22 } = await import("fs");
-      ghProfile = JSON.parse(readFileSync22(fixturePath, "utf8"));
+      const fixturePath = join25(__dirname6, "../../fixtures/github-sample.json");
+      const { readFileSync: readFileSync23 } = await import("fs");
+      ghProfile = JSON.parse(readFileSync23(fixturePath, "utf8"));
     } else {
       ghProfile = await fetchGitHubProfile2(login, token);
     }
@@ -8377,7 +8377,7 @@ function finalize(build) {
   };
 }
 function reconstruct(files, opts = {}) {
-  const join24 = opts.joinSidechains !== false;
+  const join25 = opts.joinSidechains !== false;
   const mains = [];
   const sidechains = [];
   for (const file of files) {
@@ -8402,7 +8402,7 @@ function reconstruct(files, opts = {}) {
   }
   const orphanedSidechainPaths = [];
   const joinedPaths = /* @__PURE__ */ new Set();
-  if (join24) {
+  if (join25) {
     const sidechainsBySession = /* @__PURE__ */ new Map();
     for (const sc of sidechains) {
       const acc = sidechainsBySession.get(sc.sessionId) ?? [];
@@ -8889,12 +8889,12 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
       continue;
     }
     spansConsidered++;
-    let run18 = 0;
+    let run19 = 0;
     const closeChain = () => {
-      if (run18 > 0) {
+      if (run19 > 0) {
         recoveryChains++;
-        totalDepth += run18;
-        run18 = 0;
+        totalDepth += run19;
+        run19 = 0;
       }
     };
     for (const uuid of episode.mainNodeUuids) {
@@ -8903,9 +8903,9 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
         continue;
       }
       if (node.kind === "tool_result" /* ToolResult */ && node.isError) {
-        run18++;
-        if (run18 > maxConsecutiveErrors) {
-          maxConsecutiveErrors = run18;
+        run19++;
+        if (run19 > maxConsecutiveErrors) {
+          maxConsecutiveErrors = run19;
         }
       } else if (node.kind === "tool_result" /* ToolResult */ && !node.isError) {
         closeChain();
@@ -8947,6 +8947,60 @@ var init_episodes = __esm({
   }
 });
 
+// src/web-session.ts
+import {
+  chmodSync as chmodSync2,
+  existsSync as existsSync7,
+  mkdirSync as mkdirSync9,
+  readFileSync as readFileSync11,
+  rmSync as rmSync2,
+  writeFileSync as writeFileSync9
+} from "fs";
+import { homedir as homedir10 } from "os";
+import { join as join11 } from "path";
+function terminalhireDir() {
+  return join11(homedir10(), ".terminalhire");
+}
+function webSessionFilePath() {
+  return join11(terminalhireDir(), "web-session");
+}
+function readWebSessionFile() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync7(path)) return null;
+    const v = readFileSync11(path, "utf8").trim();
+    return v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+function readWebSessionCookie() {
+  const fromFile = readWebSessionFile();
+  if (fromFile) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return typeof env === "string" && env.length > 0 ? env : null;
+}
+function writeWebSessionFile(token) {
+  mkdirSync9(terminalhireDir(), { recursive: true });
+  const path = webSessionFilePath();
+  writeFileSync9(path, token, { mode: 384, encoding: "utf8" });
+  try {
+    chmodSync2(path, 384);
+  } catch {
+  }
+}
+function clearWebSessionFile() {
+  try {
+    rmSync2(webSessionFilePath());
+  } catch {
+  }
+}
+var init_web_session = __esm({
+  "src/web-session.ts"() {
+    "use strict";
+  }
+});
+
 // src/trajectory.ts
 var trajectory_exports = {};
 __export(trajectory_exports, {
@@ -8956,14 +9010,14 @@ __export(trajectory_exports, {
   runTrajectoryPush: () => runTrajectoryPush
 });
 import {
-  existsSync as existsSync7,
-  mkdirSync as mkdirSync9,
-  readFileSync as readFileSync11,
+  existsSync as existsSync8,
+  mkdirSync as mkdirSync10,
+  readFileSync as readFileSync12,
   readdirSync,
-  writeFileSync as writeFileSync9
+  writeFileSync as writeFileSync10
 } from "fs";
-import { homedir as homedir10 } from "os";
-import { join as join11 } from "path";
+import { homedir as homedir11 } from "os";
+import { join as join12 } from "path";
 function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -8995,7 +9049,7 @@ function findJsonlFiles(dir) {
     return out;
   }
   for (const entry of entries) {
-    const full = join11(dir, entry.name);
+    const full = join12(dir, entry.name);
     if (entry.isDirectory()) {
       out.push(...findJsonlFiles(full));
     } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
@@ -9009,7 +9063,7 @@ function loadCorpus(paths) {
   for (const path of paths) {
     let text;
     try {
-      text = readFileSync11(path, "utf8");
+      text = readFileSync12(path, "utf8");
     } catch {
       continue;
     }
@@ -9108,12 +9162,12 @@ function renderMarkdown(view) {
   return lines.join("\n");
 }
 function writeExportArtifacts(score, markdown) {
-  const dir = join11(homedir10(), ".terminalhire");
-  mkdirSync9(dir, { recursive: true });
-  const jsonPath = join11(dir, "trajectory-export.json");
-  const mdPath = join11(dir, "trajectory-export.md");
-  writeFileSync9(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
-  writeFileSync9(mdPath, markdown, "utf8");
+  const dir = join12(homedir11(), ".terminalhire");
+  mkdirSync10(dir, { recursive: true });
+  const jsonPath = join12(dir, "trajectory-export.json");
+  const mdPath = join12(dir, "trajectory-export.md");
+  writeFileSync10(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
+  writeFileSync10(mdPath, markdown, "utf8");
   return { jsonPath, mdPath };
 }
 function renderInward(allNodes, view, files) {
@@ -9132,8 +9186,8 @@ function renderInward(allNodes, view, files) {
   console.log("");
 }
 function buildTrajectory() {
-  const projectsDir = join11(homedir10(), ".claude", "projects");
-  if (!existsSync7(projectsDir)) return null;
+  const projectsDir = join12(homedir11(), ".claude", "projects");
+  if (!existsSync8(projectsDir)) return null;
   const paths = findJsonlFiles(projectsDir);
   if (paths.length === 0) return null;
   const files = loadCorpus(paths);
@@ -9220,10 +9274,9 @@ function defaultPushDeps() {
       void Promise.resolve().then(() => (init_open_url(), open_url_exports)).then((m) => m.openInBrowser(url)).catch(() => {
       });
     },
-    sessionCookie: () => {
-      const v = process.env["TERMINALHIRE_WEB_SESSION"];
-      return typeof v === "string" && v.length > 0 ? v : null;
-    },
+    // Session source priority: persisted file (`terminalhire link`) FIRST, then the
+    // legacy TERMINALHIRE_WEB_SESSION env, then none.
+    sessionCookie: () => readWebSessionCookie(),
     log: (msg) => console.log(msg),
     errorLog: (msg) => console.error(msg),
     exit: (code) => process.exit(code)
@@ -9382,6 +9435,7 @@ var init_trajectory = __esm({
   "src/trajectory.ts"() {
     "use strict";
     init_episodes();
+    init_web_session();
     CAP_LABELS = {
       "cap:ui-automation": "UI automation",
       "cap:deploys": "Deployment",
@@ -9471,10 +9525,9 @@ function defaultIntroDeps() {
       void Promise.resolve().then(() => (init_open_url(), open_url_exports)).then((m) => m.openInBrowser(url)).catch(() => {
       });
     },
-    sessionCookie: () => {
-      const v = process.env["TERMINALHIRE_WEB_SESSION"];
-      return typeof v === "string" && v.length > 0 ? v : null;
-    },
+    // Session source priority: persisted file (`terminalhire link`) FIRST, then the
+    // legacy TERMINALHIRE_WEB_SESSION env, then none.
+    sessionCookie: () => readWebSessionCookie(),
     log: (msg) => console.log(msg),
     errorLog: (msg) => console.error(msg),
     exit: (code) => process.exit(code)
@@ -9546,10 +9599,7 @@ async function runIntroRequest(args5, overrides) {
   const cookie = deps.sessionCookie();
   if (!cookie) {
     deps.log("\n  No linked web session found on this machine.");
-    deps.log("  Sign in at your dashboard first, then re-run with a bridged session.");
-    deps.log(`  \u2192 ${LINK_BASE2}/dashboard
-`);
-    deps.openBrowser(`${LINK_BASE2}/dashboard`);
+    deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
     deps.exit(0);
     return;
   }
@@ -9569,9 +9619,8 @@ async function runIntroRequest(args5, overrides) {
     return;
   }
   if (res.status === 401) {
-    deps.log("\n  Your web session expired \u2014 sign in again at your dashboard, then re-run.");
-    deps.log(`  \u2192 ${LINK_BASE2}/dashboard
-`);
+    deps.log("\n  Your linked web session expired.");
+    deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
     deps.exit(1);
     return;
   }
@@ -9602,10 +9651,7 @@ async function runIntroDecision(args5, overrides) {
   const cookie = deps.sessionCookie();
   if (!cookie) {
     deps.log("\n  No linked web session found on this machine.");
-    deps.log("  Sign in at your dashboard first, then re-run.");
-    deps.log(`  \u2192 ${LINK_BASE2}/dashboard
-`);
-    deps.openBrowser(`${LINK_BASE2}/dashboard`);
+    deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
     deps.exit(0);
     return;
   }
@@ -9648,9 +9694,8 @@ async function runIntroDecision(args5, overrides) {
     return;
   }
   if (res.status === 401) {
-    deps.log("\n  Your web session expired \u2014 sign in again at your dashboard, then re-run.");
-    deps.log(`  \u2192 ${LINK_BASE2}/dashboard
-`);
+    deps.log("\n  Your linked web session expired.");
+    deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
     deps.exit(1);
     return;
   }
@@ -9689,10 +9734,7 @@ async function runIntroList(overrides) {
   const cookie = deps.sessionCookie();
   if (!cookie) {
     deps.log("\n  No linked web session found on this machine.");
-    deps.log("  Sign in at your dashboard first, then re-run.");
-    deps.log(`  \u2192 ${LINK_BASE2}/dashboard
-`);
-    deps.openBrowser(`${LINK_BASE2}/dashboard`);
+    deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
     deps.exit(0);
     return;
   }
@@ -9711,9 +9753,8 @@ async function runIntroList(overrides) {
     return;
   }
   if (res.status === 401) {
-    deps.log("\n  Your web session expired \u2014 sign in again at your dashboard, then re-run.");
-    deps.log(`  \u2192 ${LINK_BASE2}/dashboard
-`);
+    deps.log("\n  Your linked web session expired.");
+    deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
     deps.exit(1);
     return;
   }
@@ -9751,6 +9792,7 @@ var init_intro2 = __esm({
   "src/intro.ts"() {
     "use strict";
     init_src();
+    init_web_session();
     LINK_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
     GH_SESSION_COOKIE2 = "__jpi_gh_session";
   }
@@ -9807,19 +9849,19 @@ var init_jpi_intro = __esm({
 });
 
 // src/chat-keystore.ts
-import { existsSync as existsSync8, mkdirSync as mkdirSync10, readFileSync as readFileSync12, writeFileSync as writeFileSync10, rmSync as rmSync2 } from "fs";
-import { homedir as homedir11 } from "os";
-import { join as join12 } from "path";
+import { existsSync as existsSync9, mkdirSync as mkdirSync11, readFileSync as readFileSync13, writeFileSync as writeFileSync11, rmSync as rmSync3 } from "fs";
+import { homedir as homedir12 } from "os";
+import { join as join13 } from "path";
 async function loadOrCreateIdentity() {
   const key = await loadKey();
-  if (existsSync8(IDENTITY_FILE)) {
-    const blob2 = JSON.parse(readFileSync12(IDENTITY_FILE, "utf8"));
+  if (existsSync9(IDENTITY_FILE)) {
+    const blob2 = JSON.parse(readFileSync13(IDENTITY_FILE, "utf8"));
     return JSON.parse(decrypt(blob2, key));
   }
   const keypair = generateIdentityKeypair();
-  mkdirSync10(TERMINALHIRE_DIR10, { recursive: true });
+  mkdirSync11(TERMINALHIRE_DIR10, { recursive: true });
   const blob = encrypt(JSON.stringify(keypair), key);
-  writeFileSync10(IDENTITY_FILE, JSON.stringify(blob, null, 2), { mode: 384, encoding: "utf8" });
+  writeFileSync11(IDENTITY_FILE, JSON.stringify(blob, null, 2), { mode: 384, encoding: "utf8" });
   return keypair;
 }
 var TERMINALHIRE_DIR10, IDENTITY_FILE;
@@ -9828,19 +9870,19 @@ var init_chat_keystore = __esm({
     "use strict";
     init_src();
     init_github_auth();
-    TERMINALHIRE_DIR10 = join12(homedir11(), ".terminalhire");
-    IDENTITY_FILE = join12(TERMINALHIRE_DIR10, "chat-identity.enc");
+    TERMINALHIRE_DIR10 = join13(homedir12(), ".terminalhire");
+    IDENTITY_FILE = join13(TERMINALHIRE_DIR10, "chat-identity.enc");
   }
 });
 
 // src/chat-client.ts
-import { existsSync as existsSync9, mkdirSync as mkdirSync11, readFileSync as readFileSync13, writeFileSync as writeFileSync11 } from "fs";
-import { homedir as homedir12 } from "os";
-import { join as join13 } from "path";
+import { existsSync as existsSync10, mkdirSync as mkdirSync12, readFileSync as readFileSync14, writeFileSync as writeFileSync12 } from "fs";
+import { homedir as homedir13 } from "os";
+import { join as join14 } from "path";
 function defaultReadPeerPins() {
   try {
-    if (!existsSync9(PEERS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync13(PEERS_FILE, "utf8"));
+    if (!existsSync10(PEERS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync14(PEERS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, key] of Object.entries(parsed)) {
@@ -9852,16 +9894,15 @@ function defaultReadPeerPins() {
   }
 }
 function defaultWritePeerPins(pins) {
-  mkdirSync11(TERMINALHIRE_DIR11, { recursive: true });
-  writeFileSync11(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
+  mkdirSync12(TERMINALHIRE_DIR11, { recursive: true });
+  writeFileSync12(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
 }
 function defaultChatClientDeps() {
   return {
     fetchImpl: (...args5) => globalThis.fetch(...args5),
-    sessionCookie: () => {
-      const v = process.env["TERMINALHIRE_WEB_SESSION"];
-      return typeof v === "string" && v.length > 0 ? v : null;
-    },
+    // Session source priority: persisted file (`terminalhire link`) FIRST, then the
+    // legacy TERMINALHIRE_WEB_SESSION env, then none.
+    sessionCookie: () => readWebSessionCookie(),
     loadIdentity: () => loadOrCreateIdentity(),
     readPeerPins: defaultReadPeerPins,
     writePeerPins: defaultWritePeerPins
@@ -10014,15 +10055,16 @@ var init_chat_client = __esm({
     "use strict";
     init_src();
     init_chat_keystore();
+    init_web_session();
     CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
     GH_SESSION_COOKIE3 = "__jpi_gh_session";
-    TERMINALHIRE_DIR11 = join13(homedir12(), ".terminalhire");
-    PEERS_FILE = join13(TERMINALHIRE_DIR11, "chat-peers.json");
+    TERMINALHIRE_DIR11 = join14(homedir13(), ".terminalhire");
+    PEERS_FILE = join14(TERMINALHIRE_DIR11, "chat-peers.json");
     REQUEST_TIMEOUT_MS = 1e4;
     ChatNotLinkedError = class extends Error {
       constructor() {
         super(
-          `No linked web session found on this machine. Sign in at ${CHAT_BASE}/dashboard, then re-run with a bridged session (TERMINALHIRE_WEB_SESSION).`
+          "No linked web session found on this machine. Run `terminalhire link` to connect this terminal to your account, then re-run."
         );
         this.name = "ChatNotLinkedError";
       }
@@ -10030,7 +10072,7 @@ var init_chat_client = __esm({
     ChatSessionExpiredError = class extends Error {
       constructor() {
         super(
-          `Your web session expired \u2014 re-link it by signing in again at ${CHAT_BASE}/dashboard and re-bridging TERMINALHIRE_WEB_SESSION, then re-run.`
+          "Your linked web session expired. Run `terminalhire link` to reconnect this terminal, then re-run."
         );
         this.name = "ChatSessionExpiredError";
       }
@@ -10071,13 +10113,13 @@ __export(jpi_chat_read_exports, {
   runSend: () => runSend,
   writeReadCursor: () => writeReadCursor
 });
-import { existsSync as existsSync10, mkdirSync as mkdirSync12, readFileSync as readFileSync14, writeFileSync as writeFileSync12 } from "fs";
-import { homedir as homedir13 } from "os";
-import { join as join14 } from "path";
+import { existsSync as existsSync11, mkdirSync as mkdirSync13, readFileSync as readFileSync15, writeFileSync as writeFileSync13 } from "fs";
+import { homedir as homedir14 } from "os";
+import { join as join15 } from "path";
 function readReadCursors() {
   try {
-    if (!existsSync10(READS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync14(READS_FILE, "utf8"));
+    if (!existsSync11(READS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync15(READS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, iso] of Object.entries(parsed)) {
@@ -10092,8 +10134,8 @@ function writeReadCursor(login, iso, deps = {}) {
   const read = deps.readReadCursors ?? readReadCursors;
   const cursors = read();
   cursors[login] = iso;
-  mkdirSync12(TERMINALHIRE_DIR12, { recursive: true });
-  writeFileSync12(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
+  mkdirSync13(TERMINALHIRE_DIR12, { recursive: true });
+  writeFileSync13(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
 }
 function formatClock(iso) {
   const d = new Date(iso);
@@ -10377,8 +10419,8 @@ var init_jpi_chat_read = __esm({
     init_chat_client();
     init_jpi_chat();
     CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
-    TERMINALHIRE_DIR12 = join14(homedir13(), ".terminalhire");
-    READS_FILE = join14(TERMINALHIRE_DIR12, "chat-reads.json");
+    TERMINALHIRE_DIR12 = join15(homedir14(), ".terminalhire");
+    READS_FILE = join15(TERMINALHIRE_DIR12, "chat-reads.json");
   }
 });
 
@@ -11030,10 +11072,210 @@ var init_jpi_chat = __esm({
   }
 });
 
+// src/link.ts
+var link_exports = {};
+__export(link_exports, {
+  resolveLoopbackRequest: () => resolveLoopbackRequest,
+  runLink: () => runLink,
+  runLinkLogout: () => runLinkLogout
+});
+import { createServer } from "http";
+import { randomBytes as randomBytes5 } from "crypto";
+function resolveLoopbackRequest(rawUrl, expectedNonce) {
+  let u;
+  try {
+    u = new URL(rawUrl, "http://127.0.0.1");
+  } catch {
+    return { ok: false, reason: "bad_url" };
+  }
+  const nonce = u.searchParams.get("nonce");
+  if (!nonce || nonce !== expectedNonce) return { ok: false, reason: "nonce_mismatch" };
+  const token = u.searchParams.get("token");
+  if (!token) return { ok: false, reason: "missing_token" };
+  return { ok: true, token };
+}
+function defaultStartLoopback(expectedNonce, timeoutMs) {
+  return new Promise((resolveHandle) => {
+    let settle;
+    const result = new Promise((res) => {
+      settle = res;
+    });
+    let done = false;
+    const finish = (r) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      settle(r);
+      setImmediate(() => {
+        try {
+          server.close();
+        } catch {
+        }
+      });
+    };
+    const server = createServer((req, res) => {
+      const outcome = resolveLoopbackRequest(req.url ?? "", expectedNonce);
+      res.writeHead(outcome.ok ? 200 : 400, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(outcome.ok ? LINKED_HTML : FAILED_HTML);
+      finish(outcome);
+    });
+    const timer = setTimeout(() => finish({ ok: false, reason: "timeout" }), timeoutMs);
+    if (typeof timer.unref === "function") timer.unref();
+    server.on("error", () => finish({ ok: false, reason: "listen_error" }));
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      resolveHandle({
+        port,
+        result,
+        close: () => {
+          try {
+            server.close();
+          } catch {
+          }
+        }
+      });
+    });
+  });
+}
+function defaultLinkDeps() {
+  return {
+    startLoopback: defaultStartLoopback,
+    openBrowser: (url) => {
+      void Promise.resolve().then(() => (init_open_url(), open_url_exports)).then((m) => m.openInBrowser(url)).catch(() => {
+      });
+    },
+    generateNonce: () => randomBytes5(16).toString("hex"),
+    persistToken: (token) => writeWebSessionFile(token),
+    log: (msg) => console.log(msg),
+    errorLog: (msg) => console.error(msg),
+    exit: (code) => process.exit(code)
+  };
+}
+async function runLink(overrides) {
+  const deps = { ...defaultLinkDeps(), ...overrides };
+  const nonce = deps.generateNonce();
+  const handle = await deps.startLoopback(nonce, LINK_TIMEOUT_MS);
+  const url = `${LINK_BASE3}/api/auth/link?port=${handle.port}&nonce=${encodeURIComponent(nonce)}`;
+  deps.log("");
+  deps.log("  terminalhire \u2014 link this terminal to your account");
+  deps.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+  deps.log("  Opening your browser to approve. If it does not open, paste this URL:");
+  deps.log(`  \u2192 ${url}`);
+  deps.log("  Waiting for approval (this tab closes itself once you approve)\u2026");
+  deps.openBrowser(url);
+  let outcome;
+  try {
+    outcome = await handle.result;
+  } finally {
+    handle.close();
+  }
+  if (!outcome.ok || !outcome.token) {
+    if (outcome.reason === "timeout") {
+      deps.errorLog("\n  Link timed out \u2014 run `terminalhire link` again.\n");
+    } else if (outcome.reason === "nonce_mismatch") {
+      deps.errorLog("\n  Link rejected (nonce did not match) \u2014 run `terminalhire link` again.\n");
+    } else {
+      deps.errorLog("\n  Link failed \u2014 run `terminalhire link` again.\n");
+    }
+    deps.exit(1);
+    return;
+  }
+  deps.persistToken(outcome.token);
+  deps.log("\n  This terminal is now linked to your terminalhire account.");
+  deps.log("  Try `terminalhire intro <login>`, `terminalhire chat`, or `terminalhire trajectory --push`.");
+  deps.log("  Unlink any time with `terminalhire link --logout`.\n");
+  deps.exit(0);
+}
+function defaultLinkLogoutDeps() {
+  return {
+    fetchImpl: (...args5) => globalThis.fetch(...args5),
+    readSessionFile: () => readWebSessionFile(),
+    clearSessionFile: () => clearWebSessionFile(),
+    log: (msg) => console.log(msg),
+    errorLog: (msg) => console.error(msg),
+    exit: (code) => process.exit(code)
+  };
+}
+async function runLinkLogout(overrides) {
+  const deps = { ...defaultLinkLogoutDeps(), ...overrides };
+  const token = deps.readSessionFile();
+  if (!token) {
+    deps.log("\n  No linked web session on this machine \u2014 nothing to unlink.\n");
+    deps.exit(0);
+    return;
+  }
+  let revoked = false;
+  try {
+    const res = await deps.fetchImpl(`${LINK_BASE3}/api/auth/session`, {
+      method: "DELETE",
+      headers: { Cookie: `${GH_SESSION_COOKIE5}=${token}` },
+      signal: AbortSignal.timeout(1e4)
+    });
+    revoked = res.ok;
+  } catch {
+  }
+  deps.clearSessionFile();
+  if (revoked) {
+    deps.log("\n  Unlinked \u2014 the session was revoked server-side and removed from this machine.\n");
+  } else {
+    deps.log("\n  Removed the local session from this machine.");
+    deps.log("  (Could not reach the server to revoke it \u2014 it expires on its own.)\n");
+  }
+  deps.exit(0);
+}
+var LINK_BASE3, GH_SESSION_COOKIE5, LINK_TIMEOUT_MS, LINKED_HTML, FAILED_HTML;
+var init_link = __esm({
+  "src/link.ts"() {
+    "use strict";
+    init_web_session();
+    LINK_BASE3 = "https://www.terminalhire.com";
+    GH_SESSION_COOKIE5 = "__jpi_gh_session";
+    LINK_TIMEOUT_MS = 12e4;
+    LINKED_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>terminalhire</title></head>
+<body style="font-family:system-ui;padding:2rem;background:#0b0d10;color:#e6e6e6">
+<script>history.replaceState({},'','/');</script>
+<p>CLI linked \u2014 you can close this tab.</p>
+<script>setTimeout(function(){window.close();},400);</script>
+</body></html>`;
+    FAILED_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>terminalhire</title></head>
+<body style="font-family:system-ui;padding:2rem;background:#0b0d10;color:#e6e6e6">
+<script>history.replaceState({},'','/');</script>
+<p>Link failed \u2014 return to your terminal and run <code>terminalhire link</code> again.</p>
+</body></html>`;
+  }
+});
+
+// bin/jpi-link.js
+var jpi_link_exports = {};
+__export(jpi_link_exports, {
+  run: () => run10
+});
+async function run10() {
+  try {
+    const args5 = process.argv.slice(2);
+    if (args5.includes("--logout")) {
+      const { runLinkLogout: runLinkLogout2 } = await Promise.resolve().then(() => (init_link(), link_exports));
+      await runLinkLogout2();
+      return;
+    }
+    const { runLink: runLink2 } = await Promise.resolve().then(() => (init_link(), link_exports));
+    await runLink2();
+  } catch (err) {
+    console.error("terminalhire link error:", err?.message ?? err);
+    process.exit(1);
+  }
+}
+var init_jpi_link = __esm({
+  "bin/jpi-link.js"() {
+    "use strict";
+  }
+});
+
 // bin/jpi-profile.js
 var jpi_profile_exports = {};
 __export(jpi_profile_exports, {
-  run: () => run10
+  run: () => run11
 });
 import { createInterface as createInterface8 } from "readline";
 function prompt4(question) {
@@ -11045,7 +11287,7 @@ function prompt4(question) {
     });
   });
 }
-async function run10() {
+async function run11() {
   const { readProfile: readProfile2, writeProfile: writeProfile2, deleteProfile: deleteProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
   const args5 = process.argv.slice(2);
   if (args5.includes("--show")) {
@@ -11118,9 +11360,9 @@ var signal_exports = {};
 __export(signal_exports, {
   extractFingerprint: () => extractFingerprint
 });
-import { readFileSync as readFileSync15, readdirSync as readdirSync2 } from "fs";
+import { readFileSync as readFileSync16, readdirSync as readdirSync2 } from "fs";
 import { execFileSync } from "child_process";
-import { join as join15 } from "path";
+import { join as join16 } from "path";
 function safeGit(args5, cwd) {
   try {
     return execFileSync("git", ["-C", cwd, ...args5], {
@@ -11148,20 +11390,20 @@ function isEmployerContext(cwd) {
 }
 function readJsonSafe(path) {
   try {
-    return JSON.parse(readFileSync15(path, "utf8"));
+    return JSON.parse(readFileSync16(path, "utf8"));
   } catch {
     return null;
   }
 }
 function readFileSafe(path) {
   try {
-    return readFileSync15(path, "utf8");
+    return readFileSync16(path, "utf8");
   } catch {
     return "";
   }
 }
 function tokensFromPackageJson(cwd) {
-  const pkg = readJsonSafe(join15(cwd, "package.json"));
+  const pkg = readJsonSafe(join16(cwd, "package.json"));
   if (!pkg || typeof pkg !== "object") return [];
   const p = pkg;
   const deps = {
@@ -11175,9 +11417,9 @@ function workspaceMemberDirs(cwd) {
   const dirs = [cwd];
   for (const group of ["apps", "packages"]) {
     try {
-      const groupDir = join15(cwd, group);
+      const groupDir = join16(cwd, group);
       for (const e of readdirSync2(groupDir, { withFileTypes: true })) {
-        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join15(groupDir, e.name));
+        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join16(groupDir, e.name));
       }
     } catch {
     }
@@ -11185,18 +11427,18 @@ function workspaceMemberDirs(cwd) {
   return dirs;
 }
 function tokensFromRequirementsTxt(cwd) {
-  const content = readFileSafe(join15(cwd, "requirements.txt"));
+  const content = readFileSafe(join16(cwd, "requirements.txt"));
   if (!content) return [];
   return content.split("\n").map((l) => l.trim().split(/[>=<!\[;]/)[0].trim().toLowerCase()).filter(Boolean);
 }
 function tokensFromGoMod(cwd) {
-  const content = readFileSafe(join15(cwd, "go.mod"));
+  const content = readFileSafe(join16(cwd, "go.mod"));
   if (!content) return [];
   const requires = Array.from(content.matchAll(/^\s+([^\s]+)\s+v/gm)).map((m) => m[1].split("/").pop() ?? "").filter(Boolean);
   return ["go", ...requires];
 }
 function tokensFromCargoToml(cwd) {
-  const content = readFileSafe(join15(cwd, "Cargo.toml"));
+  const content = readFileSafe(join16(cwd, "Cargo.toml"));
   if (!content) return [];
   const deps = [];
   let inDeps = false;
@@ -11217,7 +11459,7 @@ function tokensFromFileExtensions(cwd) {
   const tokens = [];
   const scanDirs = [cwd];
   try {
-    const srcDir = join15(cwd, "src");
+    const srcDir = join16(cwd, "src");
     readdirSync2(srcDir);
     scanDirs.push(srcDir);
   } catch {
@@ -11378,9 +11620,9 @@ var init_signal = __esm({
 // bin/jpi-learn.js
 var jpi_learn_exports = {};
 __export(jpi_learn_exports, {
-  run: () => run11
+  run: () => run12
 });
-async function run11() {
+async function run12() {
   try {
     const args5 = process.argv.slice(2);
     const cwdIdx = args5.indexOf("--cwd");
@@ -11407,7 +11649,7 @@ var init_jpi_learn = __esm({
     "use strict";
     isMain = process.argv[1]?.endsWith("jpi-learn.js") || process.argv[1]?.endsWith("jpi-learn");
     if (isMain) {
-      run11();
+      run12();
     }
   }
 });
@@ -11415,17 +11657,17 @@ var init_jpi_learn = __esm({
 // bin/jpi-config.js
 var jpi_config_exports = {};
 __export(jpi_config_exports, {
-  run: () => run12
+  run: () => run13
 });
-import { join as join16 } from "path";
-import { homedir as homedir14 } from "os";
+import { join as join17 } from "path";
+import { homedir as homedir15 } from "os";
 function parseNudgeMode(raw) {
   if (raw === "session" || raw === "always") return raw;
   const m = /^every:(\d+)$/.exec(raw);
   if (m && parseInt(m[1], 10) >= 1) return raw;
   return null;
 }
-async function run12() {
+async function run13() {
   const args5 = process.argv.slice(2);
   const filtered = args5[0] === "config" ? args5.slice(1) : args5;
   if (filtered.includes("--show") || filtered.length === 0) {
@@ -11491,8 +11733,8 @@ var init_jpi_config = __esm({
   "bin/jpi-config.js"() {
     "use strict";
     init_config();
-    TERMINALHIRE_DIR13 = join16(homedir14(), ".terminalhire");
-    CONFIG_FILE2 = join16(TERMINALHIRE_DIR13, "config.json");
+    TERMINALHIRE_DIR13 = join17(homedir15(), ".terminalhire");
+    CONFIG_FILE2 = join17(TERMINALHIRE_DIR13, "config.json");
   }
 });
 
@@ -11515,25 +11757,25 @@ __export(spinner_exports, {
   readSpinnerConfig: () => readSpinnerConfig
 });
 import {
-  readFileSync as readFileSync16,
-  writeFileSync as writeFileSync13,
-  existsSync as existsSync11,
-  mkdirSync as mkdirSync13,
+  readFileSync as readFileSync17,
+  writeFileSync as writeFileSync14,
+  existsSync as existsSync12,
+  mkdirSync as mkdirSync14,
   renameSync as renameSync2
 } from "fs";
-import { join as join17, dirname } from "path";
-import { homedir as homedir15 } from "os";
+import { join as join18, dirname } from "path";
+import { homedir as homedir16 } from "os";
 function readJson(path, fallback) {
   try {
-    return existsSync11(path) ? JSON.parse(readFileSync16(path, "utf8")) : fallback;
+    return existsSync12(path) ? JSON.parse(readFileSync17(path, "utf8")) : fallback;
   } catch {
     return fallback;
   }
 }
 function atomicWriteJson(path, obj) {
-  mkdirSync13(dirname(path), { recursive: true });
+  mkdirSync14(dirname(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync13(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  writeFileSync14(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
   renameSync2(tmp, path);
 }
 function titleCase(s) {
@@ -11793,10 +12035,10 @@ var TH_DIR, CLAUDE_SETTINGS, CONFIG_FILE3, SPINNER_STATE_FILE, SPINNER_DEFAULTS,
 var init_spinner = __esm({
   "bin/spinner.js"() {
     "use strict";
-    TH_DIR = process.env["TERMINALHIRE_DIR"] || join17(homedir15(), ".terminalhire");
-    CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join17(homedir15(), ".claude", "settings.json");
-    CONFIG_FILE3 = join17(TH_DIR, "config.json");
-    SPINNER_STATE_FILE = join17(TH_DIR, "spinner-state.json");
+    TH_DIR = process.env["TERMINALHIRE_DIR"] || join18(homedir16(), ".terminalhire");
+    CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join18(homedir16(), ".claude", "settings.json");
+    CONFIG_FILE3 = join18(TH_DIR, "config.json");
+    SPINNER_STATE_FILE = join18(TH_DIR, "spinner-state.json");
     SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
     VERB_INTROS = ["Matched:", "You\u2019d fit:", "Worth a look:", "On your radar:", "Fits your stack:"];
   }
@@ -11805,32 +12047,32 @@ var init_spinner = __esm({
 // bin/jpi-spinner.js
 var jpi_spinner_exports = {};
 __export(jpi_spinner_exports, {
-  run: () => run13
+  run: () => run14
 });
 import {
-  readFileSync as readFileSync17,
-  writeFileSync as writeFileSync14,
+  readFileSync as readFileSync18,
+  writeFileSync as writeFileSync15,
   copyFileSync,
-  existsSync as existsSync12,
-  mkdirSync as mkdirSync14
+  existsSync as existsSync13,
+  mkdirSync as mkdirSync15
 } from "fs";
-import { join as join18 } from "path";
-import { homedir as homedir16 } from "os";
+import { join as join19 } from "path";
+import { homedir as homedir17 } from "os";
 import { createInterface as createInterface9 } from "readline";
 function readConfig2() {
   try {
-    return existsSync12(CONFIG_FILE4) ? JSON.parse(readFileSync17(CONFIG_FILE4, "utf8")) : {};
+    return existsSync13(CONFIG_FILE4) ? JSON.parse(readFileSync18(CONFIG_FILE4, "utf8")) : {};
   } catch {
     return {};
   }
 }
 function writeConfig2(patch) {
-  mkdirSync14(TH_DIR2, { recursive: true });
+  mkdirSync15(TH_DIR2, { recursive: true });
   const merged = { ...readConfig2(), ...patch };
-  writeFileSync14(CONFIG_FILE4, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  writeFileSync15(CONFIG_FILE4, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function backupSettings() {
-  if (!existsSync12(SETTINGS_PATH)) return null;
+  if (!existsSync13(SETTINGS_PATH)) return null;
   const ts = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
   const backupPath = `${SETTINGS_PATH}.terminalhire-backup-${ts}`;
   copyFileSync(SETTINGS_PATH, backupPath);
@@ -11847,13 +12089,13 @@ function ask(question) {
 }
 function readTopMatches() {
   try {
-    const c = JSON.parse(readFileSync17(CACHE_FILE, "utf8"));
+    const c = JSON.parse(readFileSync18(CACHE_FILE, "utf8"));
     return Array.isArray(c.topMatches) ? c.topMatches : [];
   } catch {
     return [];
   }
 }
-async function run13() {
+async function run14() {
   const args5 = process.argv.slice(2).filter((a) => a !== "spinner");
   const has = (f) => args5.includes(f);
   const val = (f) => {
@@ -11990,21 +12232,21 @@ var init_jpi_spinner = __esm({
   "bin/jpi-spinner.js"() {
     "use strict";
     init_spinner();
-    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join18(homedir16(), ".terminalhire");
-    CONFIG_FILE4 = join18(TH_DIR2, "config.json");
-    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join18(homedir16(), ".claude", "settings.json");
-    CACHE_FILE = join18(TH_DIR2, "index-cache.json");
+    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join19(homedir17(), ".terminalhire");
+    CONFIG_FILE4 = join19(TH_DIR2, "config.json");
+    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join19(homedir17(), ".claude", "settings.json");
+    CACHE_FILE = join19(TH_DIR2, "index-cache.json");
   }
 });
 
 // bin/jpi-sync.js
 var jpi_sync_exports = {};
 __export(jpi_sync_exports, {
-  run: () => run14
+  run: () => run15
 });
-import { readFileSync as readFileSync18, writeFileSync as writeFileSync15, mkdirSync as mkdirSync15, existsSync as existsSync13, rmSync as rmSync3 } from "fs";
-import { join as join19 } from "path";
-import { homedir as homedir17, hostname as osHostname } from "os";
+import { readFileSync as readFileSync19, writeFileSync as writeFileSync16, mkdirSync as mkdirSync16, existsSync as existsSync14, rmSync as rmSync4 } from "fs";
+import { join as join20 } from "path";
+import { homedir as homedir18, hostname as osHostname } from "os";
 import { createInterface as createInterface10 } from "readline";
 function ask2(question) {
   const rl = createInterface10({ input: process.stdin, output: process.stdout });
@@ -12017,18 +12259,18 @@ function ask2(question) {
 }
 function readMarker() {
   try {
-    return existsSync13(TIER1_MARKER) ? JSON.parse(readFileSync18(TIER1_MARKER, "utf8")) : null;
+    return existsSync14(TIER1_MARKER) ? JSON.parse(readFileSync19(TIER1_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
 }
 function writeMarker(marker) {
-  mkdirSync15(TH_DIR3, { recursive: true });
-  writeFileSync15(TIER1_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  mkdirSync16(TH_DIR3, { recursive: true });
+  writeFileSync16(TIER1_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearMarker() {
   try {
-    rmSync3(TIER1_MARKER);
+    rmSync4(TIER1_MARKER);
   } catch {
   }
 }
@@ -12312,7 +12554,7 @@ async function runDelete() {
   clearMarker();
   console.log("\n  Synced profile deleted and local marker cleared.\n");
 }
-async function run14() {
+async function run15() {
   const args5 = process.argv.slice(2).filter((a) => a !== "sync");
   const has = (f) => args5.includes(f);
   if (has("--push") || has("--enable")) {
@@ -12343,8 +12585,8 @@ var init_jpi_sync = __esm({
   "bin/jpi-sync.js"() {
     "use strict";
     init_open_url();
-    TH_DIR3 = process.env["TERMINALHIRE_DIR"] || join19(homedir17(), ".terminalhire");
-    TIER1_MARKER = join19(TH_DIR3, "tier1.json");
+    TH_DIR3 = process.env["TERMINALHIRE_DIR"] || join20(homedir18(), ".terminalhire");
+    TIER1_MARKER = join20(TH_DIR3, "tier1.json");
     API_URL5 = process.env["TERMINALHIRE_API_URL"] || process.env["JPI_API_URL"] || "https://terminalhire.com";
     SYNC_BASE = "https://www.terminalhire.com";
     POLL_INTERVAL_MS = 2e3;
@@ -12356,14 +12598,14 @@ var init_jpi_sync = __esm({
 // bin/jpi-init.js
 var jpi_init_exports = {};
 __export(jpi_init_exports, {
-  run: () => run15
+  run: () => run16
 });
-import { existsSync as existsSync14 } from "fs";
-import { join as join20, resolve } from "path";
+import { existsSync as existsSync15 } from "fs";
+import { join as join21, resolve } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
 import { createInterface as createInterface11 } from "readline";
 import { spawnSync, spawn as spawn2 } from "child_process";
-import { homedir as homedir18 } from "os";
+import { homedir as homedir19 } from "os";
 function ask3(question) {
   const rl = createInterface11({ input: process.stdin, output: process.stdout });
   return new Promise((resolve2) => {
@@ -12374,18 +12616,18 @@ function ask3(question) {
   });
 }
 function resolveScript(name) {
-  const distPath = resolve(join20(__dirname2, "..", "..", "dist", "bin", `${name}.js`));
-  const legacyPath = resolve(join20(__dirname2, `${name}.js`));
-  return existsSync14(distPath) ? distPath : legacyPath;
+  const distPath = resolve(join21(__dirname2, "..", "..", "dist", "bin", `${name}.js`));
+  const legacyPath = resolve(join21(__dirname2, `${name}.js`));
+  return existsSync15(distPath) ? distPath : legacyPath;
 }
 function resolveInstallJs() {
-  const fromDist = resolve(join20(__dirname2, "..", "..", "install.js"));
-  const fromBin = resolve(join20(__dirname2, "..", "install.js"));
-  if (existsSync14(fromDist)) return fromDist;
-  if (existsSync14(fromBin)) return fromBin;
+  const fromDist = resolve(join21(__dirname2, "..", "..", "install.js"));
+  const fromBin = resolve(join21(__dirname2, "..", "install.js"));
+  if (existsSync15(fromDist)) return fromDist;
+  if (existsSync15(fromBin)) return fromBin;
   return fromBin;
 }
-async function run15() {
+async function run16() {
   console.log("");
   console.log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
   console.log("\u2502           terminalhire init \u2014 one-command onboarding            \u2502");
@@ -12488,13 +12730,13 @@ var init_jpi_init = __esm({
 // bin/jpi-refresh.js
 var jpi_refresh_exports = {};
 __export(jpi_refresh_exports, {
-  run: () => run16
+  run: () => run17
 });
-import { readFileSync as readFileSync19, writeFileSync as writeFileSync16, existsSync as existsSync15, mkdirSync as mkdirSync16 } from "fs";
-import { join as join21 } from "path";
-import { homedir as homedir19 } from "os";
+import { readFileSync as readFileSync20, writeFileSync as writeFileSync17, existsSync as existsSync16, mkdirSync as mkdirSync17 } from "fs";
+import { join as join22 } from "path";
+import { homedir as homedir20 } from "os";
 import { fileURLToPath as fileURLToPath4 } from "url";
-async function run16() {
+async function run17() {
   try {
     let index;
     try {
@@ -12584,7 +12826,7 @@ async function run16() {
       }
     } catch {
     }
-    mkdirSync16(TERMINALHIRE_DIR14, { recursive: true });
+    mkdirSync17(TERMINALHIRE_DIR14, { recursive: true });
     const cacheEntry = {
       ts: Date.now(),
       index,
@@ -12592,7 +12834,7 @@ async function run16() {
       topMatches,
       topPeers
     };
-    writeFileSync16(INDEX_CACHE_FILE4, JSON.stringify(cacheEntry), "utf8");
+    writeFileSync17(INDEX_CACHE_FILE4, JSON.stringify(cacheEntry), "utf8");
     try {
       const {
         readSpinnerConfig: readSpinnerConfig2,
@@ -12643,8 +12885,8 @@ var init_jpi_refresh = __esm({
     init_directory2();
     init_config();
     __dirname3 = fileURLToPath4(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR14 = join21(homedir19(), ".terminalhire");
-    INDEX_CACHE_FILE4 = join21(TERMINALHIRE_DIR14, "index-cache.json");
+    TERMINALHIRE_DIR14 = join22(homedir20(), ".terminalhire");
+    INDEX_CACHE_FILE4 = join22(TERMINALHIRE_DIR14, "index-cache.json");
     API_URL6 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
   }
 });
@@ -12652,16 +12894,16 @@ var init_jpi_refresh = __esm({
 // bin/jpi-save.js
 var jpi_save_exports = {};
 __export(jpi_save_exports, {
-  run: () => run17
+  run: () => run18
 });
-import { readFileSync as readFileSync20, existsSync as existsSync16 } from "fs";
-import { join as join22 } from "path";
-import { homedir as homedir20 } from "os";
+import { readFileSync as readFileSync21, existsSync as existsSync17 } from "fs";
+import { join as join23 } from "path";
+import { homedir as homedir21 } from "os";
 import { fileURLToPath as fileURLToPath5 } from "url";
 function findJobInCache(jobId) {
   try {
-    if (!existsSync16(INDEX_CACHE_FILE5)) return null;
-    const raw = readFileSync20(INDEX_CACHE_FILE5, "utf8");
+    if (!existsSync17(INDEX_CACHE_FILE5)) return null;
+    const raw = readFileSync21(INDEX_CACHE_FILE5, "utf8");
     const entry = JSON.parse(raw);
     const jobs = entry?.index?.jobs ?? [];
     return jobs.find((j) => j.id === jobId) ?? null;
@@ -12730,7 +12972,7 @@ async function cmdUnsave(jobId) {
     process.exit(1);
   }
 }
-async function run17() {
+async function run18() {
   const verb = process.argv[2];
   const jobId = process.argv[3];
   try {
@@ -12754,26 +12996,26 @@ var init_jpi_save = __esm({
   "bin/jpi-save.js"() {
     "use strict";
     __dirname4 = fileURLToPath5(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR15 = join22(homedir20(), ".terminalhire");
-    INDEX_CACHE_FILE5 = join22(TERMINALHIRE_DIR15, "index-cache.json");
+    TERMINALHIRE_DIR15 = join23(homedir21(), ".terminalhire");
+    INDEX_CACHE_FILE5 = join23(TERMINALHIRE_DIR15, "index-cache.json");
   }
 });
 
 // bin/jpi-dispatch.js
 import { fileURLToPath as fileURLToPath6 } from "url";
-import { join as join23, dirname as dirname2 } from "path";
-import { existsSync as existsSync17, readFileSync as readFileSync21 } from "fs";
+import { join as join24, dirname as dirname2 } from "path";
+import { existsSync as existsSync18, readFileSync as readFileSync22 } from "fs";
 import { createRequire } from "module";
 var __dirname5 = fileURLToPath6(new URL(".", import.meta.url));
 function readPackageVersion() {
   try {
     const candidates = [
-      join23(__dirname5, "..", "..", "package.json"),
-      join23(__dirname5, "..", "package.json")
+      join24(__dirname5, "..", "..", "package.json"),
+      join24(__dirname5, "..", "package.json")
     ];
     for (const p of candidates) {
-      if (existsSync17(p)) {
-        const pkg = JSON.parse(readFileSync21(p, "utf8"));
+      if (existsSync18(p)) {
+        const pkg = JSON.parse(readFileSync22(p, "utf8"));
         if (pkg.version) return pkg.version;
       }
     }
@@ -12784,7 +13026,7 @@ function readPackageVersion() {
 var firstArg = process.argv[2];
 if (!firstArg && !process.stdin.isTTY) {
   const { default: childProcess } = await import("child_process");
-  const nudgeScript = join23(__dirname5, "jpi.js");
+  const nudgeScript = join24(__dirname5, "jpi.js");
   const child = childProcess.spawnSync(process.execPath, [nudgeScript], {
     stdio: ["inherit", "inherit", "inherit"]
   });
@@ -12820,6 +13062,8 @@ if (!firstArg || firstArg === "help" || firstArg === "--help" || firstArg === "-
   console.log("  terminalhire chat <github-login> --read     Read a thread inline (last 8; -n N / --all for depth)");
   console.log('  terminalhire chat <github-login> --send "\u2026" Send one line to a connection (E2E encrypted)');
   console.log("  terminalhire chat <github-login>            Open the live E2E chat pane with an accepted connection");
+  console.log("  terminalhire link                           Connect this terminal to your terminalhire account");
+  console.log("  terminalhire link --logout                  Revoke + remove this terminal's linked session");
   console.log("  terminalhire profile --show                 Display your encrypted local profile");
   console.log("  terminalhire profile --edit                 Set displayName, contactEmail, prefs");
   console.log("  terminalhire profile --delete               Wipe profile and encryption key from disk");
@@ -12906,6 +13150,12 @@ if (firstArg === "intro") {
 if (firstArg === "chat") {
   process.argv.splice(2, 1);
   const mod2 = await Promise.resolve().then(() => (init_jpi_chat(), jpi_chat_exports));
+  await mod2.run();
+  process.exit(0);
+}
+if (firstArg === "link") {
+  process.argv.splice(2, 1);
+  const mod2 = await Promise.resolve().then(() => (init_jpi_link(), jpi_link_exports));
   await mod2.run();
   process.exit(0);
 }
