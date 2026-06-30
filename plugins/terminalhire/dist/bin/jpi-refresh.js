@@ -2543,21 +2543,21 @@ var init_feeds = __esm({
 });
 
 // ../../packages/core/src/partners.ts
-import { readFileSync } from "fs";
-import { join } from "path";
+import { readFileSync as readFileSync3 } from "fs";
+import { join as join3 } from "path";
 import { fileURLToPath } from "url";
 function resolveDataPath() {
   try {
     const dir = fileURLToPath(new URL("../../../data", import.meta.url));
-    return join(dir, "partner-roles.json");
+    return join3(dir, "partner-roles.json");
   } catch {
-    return join(process.cwd(), "data", "partner-roles.json");
+    return join3(process.cwd(), "data", "partner-roles.json");
   }
 }
 function loadPartnerRoles() {
   const filePath = resolveDataPath();
   try {
-    const raw = readFileSync(filePath, "utf-8");
+    const raw = readFileSync3(filePath, "utf-8");
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
       console.warn("[partners] partner-roles.json is not an array \u2014 skipping");
@@ -2800,6 +2800,15 @@ var init_intro = __esm({
   }
 });
 
+// ../../packages/core/src/directoryThreshold.ts
+var STRONG_MATCH_THRESHOLD;
+var init_directoryThreshold = __esm({
+  "../../packages/core/src/directoryThreshold.ts"() {
+    "use strict";
+    STRONG_MATCH_THRESHOLD = 0.58;
+  }
+});
+
 // ../../packages/core/src/index.ts
 var src_exports = {};
 __export(src_exports, {
@@ -2819,6 +2828,7 @@ __export(src_exports, {
   INTRO_ALLOWED_FIELDS: () => INTRO_ALLOWED_FIELDS,
   INTRO_PENDING_TTL_MS: () => INTRO_PENDING_TTL_MS,
   LEVER_SLUGS_BY_TIER: () => LEVER_SLUGS_BY_TIER,
+  STRONG_MATCH_THRESHOLD: () => STRONG_MATCH_THRESHOLD,
   SYNONYMS: () => SYNONYMS,
   VOCABULARY: () => VOCABULARY,
   VOCAB_NODES: () => VOCAB_NODES,
@@ -2887,6 +2897,7 @@ var init_src = __esm({
     init_partners();
     init_github();
     init_intro();
+    init_directoryThreshold();
   }
 });
 
@@ -2910,13 +2921,13 @@ import {
   randomBytes
 } from "crypto";
 import {
-  readFileSync as readFileSync2,
-  writeFileSync,
-  mkdirSync,
-  existsSync
+  readFileSync as readFileSync4,
+  writeFileSync as writeFileSync3,
+  mkdirSync as mkdirSync3,
+  existsSync as existsSync2
 } from "fs";
-import { join as join2 } from "path";
-import { homedir } from "os";
+import { join as join4 } from "path";
+import { homedir as homedir3 } from "os";
 async function loadKey() {
   try {
     const kt = await import("keytar");
@@ -2929,12 +2940,12 @@ async function loadKey() {
     return key2;
   } catch {
   }
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
-  if (existsSync(KEY_FILE)) {
-    return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");
+  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
+  if (existsSync2(KEY_FILE)) {
+    return Buffer.from(readFileSync4(KEY_FILE, "utf8").trim(), "hex");
   }
   const key = randomBytes(KEY_BYTES);
-  writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  writeFileSync3(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
   return key;
 }
 function encrypt(plaintext, key) {
@@ -2992,10 +3003,10 @@ function migrateTagWeights(profile) {
   }
 }
 async function readProfile() {
-  if (!existsSync(PROFILE_FILE)) return blankProfile();
+  if (!existsSync2(PROFILE_FILE)) return blankProfile();
   try {
     const key = await loadKey();
-    const raw = readFileSync2(PROFILE_FILE, "utf8");
+    const raw = readFileSync4(PROFILE_FILE, "utf8");
     const blob = JSON.parse(raw);
     const plaintext = decrypt(blob, key);
     const parsed = JSON.parse(plaintext);
@@ -3006,12 +3017,12 @@ async function readProfile() {
   }
 }
 async function writeProfile(profile) {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
   const key = await loadKey();
   profile.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
   profile.skillTags = deriveSkillTags(profile.tagWeights);
   const blob = encrypt(JSON.stringify(profile), key);
-  writeFileSync(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+  writeFileSync3(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 function accumulateSession(profile, tags, isEmployerContext2, inferredSeniority, seniorityIsAuthoritative = false) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -3095,14 +3106,14 @@ function profileToFingerprint(profile) {
     }
   };
 }
-var TERMINALHIRE_DIR, PROFILE_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var TERMINALHIRE_DIR3, PROFILE_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
 var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
     init_src();
-    TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");
-    PROFILE_FILE = join2(TERMINALHIRE_DIR, "profile.enc");
-    KEY_FILE = join2(TERMINALHIRE_DIR, "key");
+    TERMINALHIRE_DIR3 = join4(homedir3(), ".terminalhire");
+    PROFILE_FILE = join4(TERMINALHIRE_DIR3, "profile.enc");
+    KEY_FILE = join4(TERMINALHIRE_DIR3, "key");
     ALGO = "aes-256-gcm";
     KEY_BYTES = 32;
     IV_BYTES = 12;
@@ -3130,311 +3141,14 @@ var init_profile = __esm({
   }
 });
 
-// bin/spinner.js
-var spinner_exports = {};
-__export(spinner_exports, {
-  SPINNER_DEFAULTS: () => SPINNER_DEFAULTS,
-  applySpinnerTips: () => applySpinnerTips,
-  applySpinnerVerbs: () => applySpinnerVerbs,
-  buildContextVerbs: () => buildContextVerbs,
-  buildSpinnerPool: () => buildSpinnerPool,
-  buildTips: () => buildTips,
-  clearSpinnerTips: () => clearSpinnerTips,
-  clearSpinnerVerbs: () => clearSpinnerVerbs,
-  ctaVerb: () => ctaVerb,
-  formatVerbs: () => formatVerbs,
-  interleaveBySource: () => interleaveBySource,
-  rankBySessionTags: () => rankBySessionTags,
-  readSpinnerConfig: () => readSpinnerConfig
-});
-import {
-  readFileSync as readFileSync3,
-  writeFileSync as writeFileSync2,
-  existsSync as existsSync2,
-  mkdirSync as mkdirSync2,
-  renameSync
-} from "fs";
-import { join as join3, dirname } from "path";
-import { homedir as homedir2 } from "os";
-function readJson(path, fallback) {
-  try {
-    return existsSync2(path) ? JSON.parse(readFileSync3(path, "utf8")) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-function atomicWriteJson(path, obj) {
-  mkdirSync2(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync2(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
-  renameSync(tmp, path);
-}
-function titleCase(s) {
-  return String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-function readSpinnerConfig() {
-  const cfg = readJson(CONFIG_FILE, {});
-  const spinner = cfg && typeof cfg.spinner === "object" ? cfg.spinner : {};
-  const merged = { ...SPINNER_DEFAULTS, ...spinner };
-  if (merged.mode !== "append" && merged.mode !== "replace") merged.mode = SPINNER_DEFAULTS.mode;
-  merged.max = Math.max(1, Math.min(12, Number(merged.max) || SPINNER_DEFAULTS.max));
-  merged.enabled = merged.enabled === true;
-  if (!["always", "sometimes", "rare"].includes(merged.frequency)) {
-    merged.frequency = SPINNER_DEFAULTS.frequency;
-  }
-  return merged;
-}
-function ctaVerb() {
-  return "\u2605 jobs that fit you \xB7 run: terminalhire jobs";
-}
-function formatVerbs(topMatches, max = 6) {
-  const out = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const m of Array.isArray(topMatches) ? topMatches : []) {
-    if (!m || !m.title || !m.company) continue;
-    let title = String(m.title).trim().replace(/\s+/g, " ");
-    if (title.length > 32) title = title.slice(0, 31).trimEnd() + "\u2026";
-    const company = titleCase(String(m.company).trim().replace(/\s+/g, " "));
-    const pct = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
-    const key = `${title.toLowerCase()}@${company.toLowerCase()}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const intro = VERB_INTROS[out.length % VERB_INTROS.length];
-    out.push(`${intro} ${title} @ ${company} \xB7 ${pct}% match`);
-    if (out.length >= max) break;
-  }
-  return out;
-}
-function rankBySessionTags(topMatches, sessionTags) {
-  const tags = Array.isArray(sessionTags) ? sessionTags.filter(Boolean) : [];
-  if (tags.length === 0 || !Array.isArray(topMatches)) return topMatches;
-  const normalized = tags.map((t) => String(t).toLowerCase().trim());
-  return topMatches.map((m, originalIndex) => {
-    const haystack = `${String(m.title || "").toLowerCase()} ${String(m.company || "").toLowerCase()}`;
-    const hits = normalized.reduce((n, tag) => n + (haystack.includes(tag) ? 1 : 0), 0);
-    return { m, hits, originalIndex };
-  }).sort((a, b) => b.hits - a.hits || a.originalIndex - b.originalIndex).map(({ m }) => m);
-}
-function verbCountForFrequency(frequency, max) {
-  switch (frequency) {
-    case "always":
-      return max;
-    case "rare":
-      return 1;
-    case "sometimes":
-    default:
-      return 2;
-  }
-}
-function buildContextVerbs(topMatches, sessionTags) {
-  const sess = (Array.isArray(sessionTags) ? sessionTags : []).map((t) => String(t).toLowerCase().trim()).filter(Boolean);
-  const roleTags = /* @__PURE__ */ new Set();
-  for (const m of Array.isArray(topMatches) ? topMatches : []) {
-    const mt = m && Array.isArray(m.matchedTags) ? m.matchedTags : [];
-    for (const t of mt) roleTags.add(String(t).toLowerCase().trim());
-  }
-  const overlap = [];
-  for (const t of sess) {
-    if (roleTags.has(t) && !overlap.includes(t)) overlap.push(t);
-  }
-  let headers;
-  if (overlap.length >= 2) {
-    const a = titleCase(overlap[0]);
-    const b = titleCase(overlap[1]);
-    headers = [`\u2726 Fits your ${a} + ${b} work`, `\u2726 A match for what you're building \u2014 link below`];
-  } else if (overlap.length === 1) {
-    const a = titleCase(overlap[0]);
-    headers = [`\u2726 Work in your ${a} stack \u2014 link below`, `\u2726 Your ${a} work \u2014 link in the tip below`];
-  } else {
-    headers = [`\u2726 Work that fits your stack`, `\u2726 A match for you \u2014 link in the tip below`];
-  }
-  const list = Array.isArray(topMatches) ? topMatches : [];
-  const hasBounty = list.some((m) => m && m.source === "bounty");
-  if (hasBounty) headers.push(`\u2726 Roles + \u{1F48E} paid bounties in your stack \u2014 link below`);
-  return headers;
-}
-function buildSpinnerPool(topMatches, max = 6, opts = {}) {
-  const { sessionTags, frequency = "always" } = opts;
-  const ranked = rankBySessionTags(topMatches, sessionTags);
-  if (!Array.isArray(ranked) || ranked.length === 0) return [];
-  const headers = buildContextVerbs(ranked, sessionTags);
-  const cap = Math.max(1, verbCountForFrequency(frequency, headers.length));
-  return [...headers.slice(0, cap), ctaVerb()];
-}
-function readState() {
-  return readJson(SPINNER_STATE_FILE, { verbs: [], mode: "replace" });
-}
-function applySpinnerVerbs(ourVerbs, mode = "replace") {
-  const verbs = (Array.isArray(ourVerbs) ? ourVerbs : []).filter(Boolean);
-  if (verbs.length === 0) return clearSpinnerVerbs();
-  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
-  const existing = settings.spinnerVerbs && typeof settings.spinnerVerbs === "object" ? settings.spinnerVerbs : null;
-  const prevOurs = new Set(readState().verbs || []);
-  const userVerbs = existing && Array.isArray(existing.verbs) ? existing.verbs.filter((v) => !prevOurs.has(v)) : [];
-  const newVerbs = [...verbs, ...userVerbs];
-  settings.spinnerVerbs = { mode: mode === "append" ? "append" : "replace", verbs: newVerbs };
-  atomicWriteJson(CLAUDE_SETTINGS, settings);
-  const st = readState();
-  atomicWriteJson(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
-  return { applied: verbs.length, total: newVerbs.length };
-}
-function clearSpinnerVerbs() {
-  const settings = readJson(CLAUDE_SETTINGS, null);
-  const prevOurs = new Set(readState().verbs || []);
-  let keptUserVerbs = 0;
-  if (settings && settings.spinnerVerbs && Array.isArray(settings.spinnerVerbs.verbs)) {
-    const userVerbs = settings.spinnerVerbs.verbs.filter((v) => !prevOurs.has(v));
-    keptUserVerbs = userVerbs.length;
-    if (userVerbs.length > 0) {
-      settings.spinnerVerbs = {
-        mode: settings.spinnerVerbs.mode === "append" ? "append" : "replace",
-        verbs: userVerbs
-      };
-    } else {
-      delete settings.spinnerVerbs;
-    }
-    atomicWriteJson(CLAUDE_SETTINGS, settings);
-  }
-  try {
-    const st = readState();
-    atomicWriteJson(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
-  } catch {
-  }
-  return { cleared: true, keptUserVerbs };
-}
-function interleaveBySource(topMatches) {
-  if (!Array.isArray(topMatches) || topMatches.length === 0) return topMatches;
-  const buckets = /* @__PURE__ */ new Map();
-  const order = [];
-  for (const m of topMatches) {
-    const id = m && m.id ? String(m.id) : "";
-    const idx = id.indexOf(":");
-    const source = idx > 0 ? id.slice(0, idx) : "_";
-    if (!buckets.has(source)) {
-      buckets.set(source, []);
-      order.push(source);
-    }
-    buckets.get(source).push(m);
-  }
-  const out = [];
-  let remaining = topMatches.length;
-  while (remaining > 0) {
-    for (const source of order) {
-      const b = buckets.get(source);
-      if (b && b.length) {
-        out.push(b.shift());
-        remaining--;
-      }
-    }
-  }
-  return out;
-}
-function buildTips(topMatches, baseUrl, max = 8) {
-  const base = String(baseUrl || "https://terminalhire.com").replace(/\/+$/, "");
-  const out = [];
-  const seenRole = /* @__PURE__ */ new Set();
-  const perCompany = /* @__PURE__ */ new Map();
-  const COMPANY_CAP = 2;
-  const all = Array.isArray(topMatches) ? topMatches : [];
-  const bountyQ = all.filter((m) => m && m.source === "bounty");
-  const roleQ = interleaveBySource(all.filter((m) => m && m.source !== "bounty"));
-  const ordered = [];
-  let bi = 0;
-  let ri = 0;
-  while (bi < bountyQ.length || ri < roleQ.length) {
-    if (ri < roleQ.length) ordered.push(roleQ[ri++]);
-    if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
-  }
-  for (const m of ordered) {
-    if (!m || !m.title || !m.company || !m.id) continue;
-    const idx = String(m.id).indexOf(":");
-    if (idx <= 0) continue;
-    const source = String(m.id).slice(0, idx);
-    const ext = String(m.id).slice(idx + 1);
-    if (!source || !ext) continue;
-    const companyRaw = String(m.company).trim().replace(/\s+/g, " ");
-    const titleRaw = String(m.title).trim().replace(/\s+/g, " ");
-    const roleKey = `${titleRaw.toLowerCase()}@${companyRaw.toLowerCase()}`;
-    const coKey = companyRaw.toLowerCase();
-    if (seenRole.has(roleKey)) continue;
-    if ((perCompany.get(coKey) || 0) >= COMPANY_CAP) continue;
-    seenRole.add(roleKey);
-    perCompany.set(coKey, (perCompany.get(coKey) || 0) + 1);
-    let title = titleRaw;
-    if (title.length > 34) title = title.slice(0, 33).trimEnd() + "\u2026";
-    const company = titleCase(companyRaw);
-    const pct = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
-    const token = Buffer.from(String(m.id)).toString("base64url");
-    const url = `${base}/j/${token}`;
-    if (source === "bounty") {
-      const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
-      const repo = m.repo || companyRaw;
-      out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct}% \u2014 ${url}`);
-    } else {
-      out.push(`\u2197 ${title} @ ${company} \xB7 ${pct}% \u2014 ${url}`);
-    }
-    if (out.length >= max) break;
-  }
-  return out;
-}
-function applySpinnerTips(ourTips) {
-  const tips = (Array.isArray(ourTips) ? ourTips : []).filter(Boolean);
-  if (tips.length === 0) return clearSpinnerTips();
-  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
-  const existing = settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips) ? settings.spinnerTipsOverride.tips : [];
-  const prevOurs = new Set(readState().tips || []);
-  const userTips = existing.filter((t) => !prevOurs.has(t));
-  settings.spinnerTipsEnabled = true;
-  settings.spinnerTipsOverride = { excludeDefault: true, tips: [...tips, ...userTips] };
-  atomicWriteJson(CLAUDE_SETTINGS, settings);
-  const st = readState();
-  atomicWriteJson(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
-  return { applied: tips.length };
-}
-function clearSpinnerTips() {
-  const settings = readJson(CLAUDE_SETTINGS, null);
-  const prevOurs = new Set(readState().tips || []);
-  if (settings && settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips)) {
-    const userTips = settings.spinnerTipsOverride.tips.filter((t) => !prevOurs.has(t));
-    if (userTips.length > 0) {
-      settings.spinnerTipsOverride = {
-        excludeDefault: settings.spinnerTipsOverride.excludeDefault === true,
-        tips: userTips
-      };
-    } else {
-      delete settings.spinnerTipsOverride;
-      delete settings.spinnerTipsEnabled;
-    }
-    atomicWriteJson(CLAUDE_SETTINGS, settings);
-  }
-  try {
-    const st = readState();
-    atomicWriteJson(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
-  } catch {
-  }
-  return { cleared: true };
-}
-var TH_DIR, CLAUDE_SETTINGS, CONFIG_FILE, SPINNER_STATE_FILE, SPINNER_DEFAULTS, VERB_INTROS;
-var init_spinner = __esm({
-  "bin/spinner.js"() {
-    "use strict";
-    TH_DIR = process.env["TERMINALHIRE_DIR"] || join3(homedir2(), ".terminalhire");
-    CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join3(homedir2(), ".claude", "settings.json");
-    CONFIG_FILE = join3(TH_DIR, "config.json");
-    SPINNER_STATE_FILE = join3(TH_DIR, "spinner-state.json");
-    SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
-    VERB_INTROS = ["Matched:", "You\u2019d fit:", "Worth a look:", "On your radar:", "Fits your stack:"];
-  }
-});
-
 // src/signal.ts
 var signal_exports = {};
 __export(signal_exports, {
   extractFingerprint: () => extractFingerprint
 });
-import { readFileSync as readFileSync4, readdirSync } from "fs";
+import { readFileSync as readFileSync5, readdirSync } from "fs";
 import { execFileSync } from "child_process";
-import { join as join4 } from "path";
+import { join as join5 } from "path";
 function safeGit(args, cwd) {
   try {
     return execFileSync("git", ["-C", cwd, ...args], {
@@ -3462,20 +3176,20 @@ function isEmployerContext(cwd) {
 }
 function readJsonSafe(path) {
   try {
-    return JSON.parse(readFileSync4(path, "utf8"));
+    return JSON.parse(readFileSync5(path, "utf8"));
   } catch {
     return null;
   }
 }
 function readFileSafe(path) {
   try {
-    return readFileSync4(path, "utf8");
+    return readFileSync5(path, "utf8");
   } catch {
     return "";
   }
 }
 function tokensFromPackageJson(cwd) {
-  const pkg = readJsonSafe(join4(cwd, "package.json"));
+  const pkg = readJsonSafe(join5(cwd, "package.json"));
   if (!pkg || typeof pkg !== "object") return [];
   const p = pkg;
   const deps = {
@@ -3489,9 +3203,9 @@ function workspaceMemberDirs(cwd) {
   const dirs = [cwd];
   for (const group of ["apps", "packages"]) {
     try {
-      const groupDir = join4(cwd, group);
+      const groupDir = join5(cwd, group);
       for (const e of readdirSync(groupDir, { withFileTypes: true })) {
-        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join4(groupDir, e.name));
+        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join5(groupDir, e.name));
       }
     } catch {
     }
@@ -3499,18 +3213,18 @@ function workspaceMemberDirs(cwd) {
   return dirs;
 }
 function tokensFromRequirementsTxt(cwd) {
-  const content = readFileSafe(join4(cwd, "requirements.txt"));
+  const content = readFileSafe(join5(cwd, "requirements.txt"));
   if (!content) return [];
   return content.split("\n").map((l) => l.trim().split(/[>=<!\[;]/)[0].trim().toLowerCase()).filter(Boolean);
 }
 function tokensFromGoMod(cwd) {
-  const content = readFileSafe(join4(cwd, "go.mod"));
+  const content = readFileSafe(join5(cwd, "go.mod"));
   if (!content) return [];
   const requires = Array.from(content.matchAll(/^\s+([^\s]+)\s+v/gm)).map((m) => m[1].split("/").pop() ?? "").filter(Boolean);
   return ["go", ...requires];
 }
 function tokensFromCargoToml(cwd) {
-  const content = readFileSafe(join4(cwd, "Cargo.toml"));
+  const content = readFileSafe(join5(cwd, "Cargo.toml"));
   if (!content) return [];
   const deps = [];
   let inDeps = false;
@@ -3531,7 +3245,7 @@ function tokensFromFileExtensions(cwd) {
   const tokens = [];
   const scanDirs = [cwd];
   try {
-    const srcDir = join4(cwd, "src");
+    const srcDir = join5(cwd, "src");
     readdirSync(srcDir);
     scanDirs.push(srcDir);
   } catch {
@@ -3689,20 +3403,424 @@ var init_signal = __esm({
   }
 });
 
+// bin/spinner.js
+var spinner_exports = {};
+__export(spinner_exports, {
+  SPINNER_DEFAULTS: () => SPINNER_DEFAULTS,
+  applySpinnerTips: () => applySpinnerTips,
+  applySpinnerVerbs: () => applySpinnerVerbs,
+  buildContextVerbs: () => buildContextVerbs,
+  buildPeerLine: () => buildPeerLine,
+  buildSpinnerPool: () => buildSpinnerPool,
+  buildTips: () => buildTips,
+  clearSpinnerTips: () => clearSpinnerTips,
+  clearSpinnerVerbs: () => clearSpinnerVerbs,
+  ctaVerb: () => ctaVerb,
+  formatVerbs: () => formatVerbs,
+  interleaveBySource: () => interleaveBySource,
+  rankBySessionTags: () => rankBySessionTags,
+  readSpinnerConfig: () => readSpinnerConfig
+});
+import {
+  readFileSync as readFileSync6,
+  writeFileSync as writeFileSync4,
+  existsSync as existsSync3,
+  mkdirSync as mkdirSync4,
+  renameSync
+} from "fs";
+import { join as join6, dirname } from "path";
+import { homedir as homedir4 } from "os";
+function readJson(path, fallback) {
+  try {
+    return existsSync3(path) ? JSON.parse(readFileSync6(path, "utf8")) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function atomicWriteJson(path, obj) {
+  mkdirSync4(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync4(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  renameSync(tmp, path);
+}
+function titleCase(s) {
+  return String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+function readSpinnerConfig() {
+  const cfg = readJson(CONFIG_FILE2, {});
+  const spinner = cfg && typeof cfg.spinner === "object" ? cfg.spinner : {};
+  const merged = { ...SPINNER_DEFAULTS, ...spinner };
+  if (merged.mode !== "append" && merged.mode !== "replace") merged.mode = SPINNER_DEFAULTS.mode;
+  merged.max = Math.max(1, Math.min(12, Number(merged.max) || SPINNER_DEFAULTS.max));
+  merged.enabled = merged.enabled === true;
+  if (!["always", "sometimes", "rare"].includes(merged.frequency)) {
+    merged.frequency = SPINNER_DEFAULTS.frequency;
+  }
+  return merged;
+}
+function ctaVerb() {
+  return "\u2605 jobs that fit you \xB7 run: terminalhire jobs";
+}
+function formatVerbs(topMatches, max = 6) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const m of Array.isArray(topMatches) ? topMatches : []) {
+    if (!m || !m.title || !m.company) continue;
+    let title = String(m.title).trim().replace(/\s+/g, " ");
+    if (title.length > 32) title = title.slice(0, 31).trimEnd() + "\u2026";
+    const company = titleCase(String(m.company).trim().replace(/\s+/g, " "));
+    const pct = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
+    const key = `${title.toLowerCase()}@${company.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const intro = VERB_INTROS[out.length % VERB_INTROS.length];
+    out.push(`${intro} ${title} @ ${company} \xB7 ${pct}% match`);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+function rankBySessionTags(topMatches, sessionTags) {
+  const tags = Array.isArray(sessionTags) ? sessionTags.filter(Boolean) : [];
+  if (tags.length === 0 || !Array.isArray(topMatches)) return topMatches;
+  const normalized = tags.map((t) => String(t).toLowerCase().trim());
+  return topMatches.map((m, originalIndex) => {
+    const haystack = `${String(m.title || "").toLowerCase()} ${String(m.company || "").toLowerCase()}`;
+    const hits = normalized.reduce((n, tag) => n + (haystack.includes(tag) ? 1 : 0), 0);
+    return { m, hits, originalIndex };
+  }).sort((a, b) => b.hits - a.hits || a.originalIndex - b.originalIndex).map(({ m }) => m);
+}
+function verbCountForFrequency(frequency, max) {
+  switch (frequency) {
+    case "always":
+      return max;
+    case "rare":
+      return 1;
+    case "sometimes":
+    default:
+      return 2;
+  }
+}
+function buildContextVerbs(topMatches, sessionTags) {
+  const sess = (Array.isArray(sessionTags) ? sessionTags : []).map((t) => String(t).toLowerCase().trim()).filter(Boolean);
+  const roleTags = /* @__PURE__ */ new Set();
+  for (const m of Array.isArray(topMatches) ? topMatches : []) {
+    const mt = m && Array.isArray(m.matchedTags) ? m.matchedTags : [];
+    for (const t of mt) roleTags.add(String(t).toLowerCase().trim());
+  }
+  const overlap = [];
+  for (const t of sess) {
+    if (roleTags.has(t) && !overlap.includes(t)) overlap.push(t);
+  }
+  let headers;
+  if (overlap.length >= 2) {
+    const a = titleCase(overlap[0]);
+    const b = titleCase(overlap[1]);
+    headers = [`\u2726 Fits your ${a} + ${b} work`, `\u2726 A match for what you're building \u2014 link below`];
+  } else if (overlap.length === 1) {
+    const a = titleCase(overlap[0]);
+    headers = [`\u2726 Work in your ${a} stack \u2014 link below`, `\u2726 Your ${a} work \u2014 link in the tip below`];
+  } else {
+    headers = [`\u2726 Work that fits your stack`, `\u2726 A match for you \u2014 link in the tip below`];
+  }
+  const list = Array.isArray(topMatches) ? topMatches : [];
+  const hasBounty = list.some((m) => m && m.source === "bounty");
+  if (hasBounty) headers.push(`\u2726 Roles + \u{1F48E} paid bounties in your stack \u2014 link below`);
+  return headers;
+}
+function buildPeerLine(topPeers) {
+  const n = (Array.isArray(topPeers) ? topPeers : []).filter(Boolean).length;
+  if (n < 1) return null;
+  return n === 1 ? `\u25C6 1 builder matches what you're building \xB7 terminalhire devs` : `\u25C6 ${n} builders match what you're building \xB7 terminalhire devs`;
+}
+function buildSpinnerPool(topMatches, max = 6, opts = {}) {
+  const { sessionTags, frequency = "always", topPeers } = opts;
+  const ranked = rankBySessionTags(topMatches, sessionTags);
+  if (!Array.isArray(ranked) || ranked.length === 0) {
+    const peerLine = buildPeerLine(topPeers);
+    return peerLine ? [peerLine] : [];
+  }
+  const headers = buildContextVerbs(ranked, sessionTags);
+  const cap = Math.max(1, verbCountForFrequency(frequency, headers.length));
+  return [...headers.slice(0, cap), ctaVerb()];
+}
+function readState() {
+  return readJson(SPINNER_STATE_FILE, { verbs: [], mode: "replace" });
+}
+function applySpinnerVerbs(ourVerbs, mode = "replace") {
+  const verbs = (Array.isArray(ourVerbs) ? ourVerbs : []).filter(Boolean);
+  if (verbs.length === 0) return clearSpinnerVerbs();
+  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
+  const existing = settings.spinnerVerbs && typeof settings.spinnerVerbs === "object" ? settings.spinnerVerbs : null;
+  const prevOurs = new Set(readState().verbs || []);
+  const userVerbs = existing && Array.isArray(existing.verbs) ? existing.verbs.filter((v) => !prevOurs.has(v)) : [];
+  const newVerbs = [...verbs, ...userVerbs];
+  settings.spinnerVerbs = { mode: mode === "append" ? "append" : "replace", verbs: newVerbs };
+  atomicWriteJson(CLAUDE_SETTINGS, settings);
+  const st = readState();
+  atomicWriteJson(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
+  return { applied: verbs.length, total: newVerbs.length };
+}
+function clearSpinnerVerbs() {
+  const settings = readJson(CLAUDE_SETTINGS, null);
+  const prevOurs = new Set(readState().verbs || []);
+  let keptUserVerbs = 0;
+  if (settings && settings.spinnerVerbs && Array.isArray(settings.spinnerVerbs.verbs)) {
+    const userVerbs = settings.spinnerVerbs.verbs.filter((v) => !prevOurs.has(v));
+    keptUserVerbs = userVerbs.length;
+    if (userVerbs.length > 0) {
+      settings.spinnerVerbs = {
+        mode: settings.spinnerVerbs.mode === "append" ? "append" : "replace",
+        verbs: userVerbs
+      };
+    } else {
+      delete settings.spinnerVerbs;
+    }
+    atomicWriteJson(CLAUDE_SETTINGS, settings);
+  }
+  try {
+    const st = readState();
+    atomicWriteJson(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
+  } catch {
+  }
+  return { cleared: true, keptUserVerbs };
+}
+function interleaveBySource(topMatches) {
+  if (!Array.isArray(topMatches) || topMatches.length === 0) return topMatches;
+  const buckets = /* @__PURE__ */ new Map();
+  const order = [];
+  for (const m of topMatches) {
+    const id = m && m.id ? String(m.id) : "";
+    const idx = id.indexOf(":");
+    const source = idx > 0 ? id.slice(0, idx) : "_";
+    if (!buckets.has(source)) {
+      buckets.set(source, []);
+      order.push(source);
+    }
+    buckets.get(source).push(m);
+  }
+  const out = [];
+  let remaining = topMatches.length;
+  while (remaining > 0) {
+    for (const source of order) {
+      const b = buckets.get(source);
+      if (b && b.length) {
+        out.push(b.shift());
+        remaining--;
+      }
+    }
+  }
+  return out;
+}
+function buildTips(topMatches, baseUrl, max = 8) {
+  const base = String(baseUrl || "https://terminalhire.com").replace(/\/+$/, "");
+  const out = [];
+  const seenRole = /* @__PURE__ */ new Set();
+  const perCompany = /* @__PURE__ */ new Map();
+  const COMPANY_CAP = 2;
+  const all = Array.isArray(topMatches) ? topMatches : [];
+  const bountyQ = all.filter((m) => m && m.source === "bounty");
+  const roleQ = interleaveBySource(all.filter((m) => m && m.source !== "bounty"));
+  const ordered = [];
+  let bi = 0;
+  let ri = 0;
+  while (bi < bountyQ.length || ri < roleQ.length) {
+    if (ri < roleQ.length) ordered.push(roleQ[ri++]);
+    if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
+  }
+  for (const m of ordered) {
+    if (!m || !m.title || !m.company || !m.id) continue;
+    const idx = String(m.id).indexOf(":");
+    if (idx <= 0) continue;
+    const source = String(m.id).slice(0, idx);
+    const ext = String(m.id).slice(idx + 1);
+    if (!source || !ext) continue;
+    const companyRaw = String(m.company).trim().replace(/\s+/g, " ");
+    const titleRaw = String(m.title).trim().replace(/\s+/g, " ");
+    const roleKey = `${titleRaw.toLowerCase()}@${companyRaw.toLowerCase()}`;
+    const coKey = companyRaw.toLowerCase();
+    if (seenRole.has(roleKey)) continue;
+    if ((perCompany.get(coKey) || 0) >= COMPANY_CAP) continue;
+    seenRole.add(roleKey);
+    perCompany.set(coKey, (perCompany.get(coKey) || 0) + 1);
+    let title = titleRaw;
+    if (title.length > 34) title = title.slice(0, 33).trimEnd() + "\u2026";
+    const company = titleCase(companyRaw);
+    const pct = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
+    const token = Buffer.from(String(m.id)).toString("base64url");
+    const url = `${base}/j/${token}`;
+    if (source === "bounty") {
+      const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
+      const repo = m.repo || companyRaw;
+      out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct}% \u2014 ${url}`);
+    } else {
+      out.push(`\u2197 ${title} @ ${company} \xB7 ${pct}% \u2014 ${url}`);
+    }
+    if (out.length >= max) break;
+  }
+  return out;
+}
+function applySpinnerTips(ourTips) {
+  const tips = (Array.isArray(ourTips) ? ourTips : []).filter(Boolean);
+  if (tips.length === 0) return clearSpinnerTips();
+  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
+  const existing = settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips) ? settings.spinnerTipsOverride.tips : [];
+  const prevOurs = new Set(readState().tips || []);
+  const userTips = existing.filter((t) => !prevOurs.has(t));
+  settings.spinnerTipsEnabled = true;
+  settings.spinnerTipsOverride = { excludeDefault: true, tips: [...tips, ...userTips] };
+  atomicWriteJson(CLAUDE_SETTINGS, settings);
+  const st = readState();
+  atomicWriteJson(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
+  return { applied: tips.length };
+}
+function clearSpinnerTips() {
+  const settings = readJson(CLAUDE_SETTINGS, null);
+  const prevOurs = new Set(readState().tips || []);
+  if (settings && settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips)) {
+    const userTips = settings.spinnerTipsOverride.tips.filter((t) => !prevOurs.has(t));
+    if (userTips.length > 0) {
+      settings.spinnerTipsOverride = {
+        excludeDefault: settings.spinnerTipsOverride.excludeDefault === true,
+        tips: userTips
+      };
+    } else {
+      delete settings.spinnerTipsOverride;
+      delete settings.spinnerTipsEnabled;
+    }
+    atomicWriteJson(CLAUDE_SETTINGS, settings);
+  }
+  try {
+    const st = readState();
+    atomicWriteJson(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
+  } catch {
+  }
+  return { cleared: true };
+}
+var TH_DIR, CLAUDE_SETTINGS, CONFIG_FILE2, SPINNER_STATE_FILE, SPINNER_DEFAULTS, VERB_INTROS;
+var init_spinner = __esm({
+  "bin/spinner.js"() {
+    "use strict";
+    TH_DIR = process.env["TERMINALHIRE_DIR"] || join6(homedir4(), ".terminalhire");
+    CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join6(homedir4(), ".claude", "settings.json");
+    CONFIG_FILE2 = join6(TH_DIR, "config.json");
+    SPINNER_STATE_FILE = join6(TH_DIR, "spinner-state.json");
+    SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
+    VERB_INTROS = ["Matched:", "You\u2019d fit:", "Worth a look:", "On your radar:", "Fits your stack:"];
+  }
+});
+
 // bin/jpi-refresh.js
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync3, existsSync as existsSync3, mkdirSync as mkdirSync3 } from "fs";
-import { join as join5 } from "path";
-import { homedir as homedir3 } from "os";
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync5, existsSync as existsSync4, mkdirSync as mkdirSync5 } from "fs";
+import { join as join7 } from "path";
+import { homedir as homedir5 } from "os";
 import { fileURLToPath as fileURLToPath2 } from "url";
-var __dirname = fileURLToPath2(new URL(".", import.meta.url));
-var TERMINALHIRE_DIR2 = join5(homedir3(), ".terminalhire");
-var INDEX_CACHE_FILE = join5(TERMINALHIRE_DIR2, "index-cache.json");
+
+// bin/directory.js
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
+var TERMINALHIRE_DIR = join(homedir(), ".terminalhire");
+var DIRECTORY_CACHE_FILE = join(TERMINALHIRE_DIR, "directory-cache.json");
+var PROJECT_FILE = join(TERMINALHIRE_DIR, "project.json");
+var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+function readDirectoryCache() {
+  try {
+    const entry = JSON.parse(readFileSync(DIRECTORY_CACHE_FILE, "utf8"));
+    if (typeof entry.ts === "number" && Number.isFinite(entry.ts) && Date.now() - entry.ts < INDEX_TTL_MS) {
+      return { index: entry.index, ts: entry.ts };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+function writeDirectoryCache(index) {
+  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  writeFileSync(DIRECTORY_CACHE_FILE, JSON.stringify({ ts: Date.now(), index }), "utf8");
+}
+function readProject() {
+  try {
+    return JSON.parse(readFileSync(PROJECT_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function relativeTime(ts) {
+  const secs = Math.max(0, Math.round((Date.now() - ts) / 1e3));
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.round(secs / 60);
+  return mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
+}
+async function fetchDirectory({ quiet = false } = {}) {
+  const cached = readDirectoryCache();
+  if (cached) {
+    if (!quiet) console.log(`\u2713 Using cached directory (updated ${relativeTime(cached.ts)})`);
+    return cached.index;
+  }
+  if (!quiet) console.log(`\u21BB Refreshing builder directory from ${API_URL}/api/directory...`);
+  const res = await fetch(`${API_URL}/api/directory`, { signal: AbortSignal.timeout(1e4) });
+  if (!res.ok) throw new Error(`/api/directory returned ${res.status}`);
+  const index = await res.json();
+  writeDirectoryCache(index);
+  return index;
+}
+function reportMatched(results, fetchImpl = fetch) {
+  try {
+    const logins = [
+      ...new Set(
+        results.map((r) => r?.job?.company).filter((login) => typeof login === "string" && login.length > 0)
+      )
+    ];
+    if (logins.length === 0) return;
+    return Promise.resolve(
+      fetchImpl(`${API_URL}/api/directory/matched`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matched: logins }),
+        signal: AbortSignal.timeout(3e3)
+      })
+    ).catch(() => {
+    });
+  } catch {
+  }
+}
+
+// src/config.ts
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, existsSync } from "fs";
+import { join as join2 } from "path";
+import { homedir as homedir2 } from "os";
+var TERMINALHIRE_DIR2 = join2(homedir2(), ".terminalhire");
+var CONFIG_FILE = join2(TERMINALHIRE_DIR2, "config.json");
+var DEFAULT_CONFIG = {
+  nudge: "session",
+  peerConnect: false,
+  peerConnectPrompted: false
+};
+function readConfig() {
+  try {
+    if (!existsSync(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
+    const raw = readFileSync2(CONFIG_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_CONFIG, ...parsed };
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+}
+function isPeerConnectEnabled() {
+  return readConfig().peerConnect === true;
+}
+
+// bin/jpi-refresh.js
+var __dirname = fileURLToPath2(new URL(".", import.meta.url));
+var TERMINALHIRE_DIR4 = join7(homedir5(), ".terminalhire");
+var INDEX_CACHE_FILE = join7(TERMINALHIRE_DIR4, "index-cache.json");
+var API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
 async function run() {
   try {
     let index;
     try {
-      const res = await fetch(`${API_URL}/api/index`, {
+      const res = await fetch(`${API_URL2}/api/index`, {
         signal: AbortSignal.timeout(15e3),
         headers: { "Accept": "application/json" }
       });
@@ -3750,14 +3868,53 @@ async function run() {
       }
     } catch {
     }
-    mkdirSync3(TERMINALHIRE_DIR2, { recursive: true });
+    let topPeers = [];
+    if (isPeerConnectEnabled()) try {
+      const { match: match2, STRONG_MATCH_THRESHOLD: STRONG_MATCH_THRESHOLD2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+      const { extractFingerprint: extractFingerprint2 } = await Promise.resolve().then(() => (init_signal(), signal_exports));
+      const sig = extractFingerprint2(process.cwd());
+      const project = readProject();
+      const skillTags = [
+        .../* @__PURE__ */ new Set([
+          ...Array.isArray(sig?.skillTags) ? sig.skillTags : [],
+          ...project && Array.isArray(project.skillTags) ? project.skillTags : []
+        ])
+      ];
+      if (skillTags.length > 0) {
+        const fp = { skillTags, prefs: project?.prefs ?? {} };
+        const directory = await fetchDirectory({ quiet: true });
+        const cards = directory?.cards ?? [];
+        if (cards.length > 0) {
+          const peerResults = match2(fp, cards, cards.length).filter(
+            (r) => r.score >= STRONG_MATCH_THRESHOLD2
+          );
+          topPeers = peerResults.map((r) => ({
+            login: r.job.company,
+            // public handle (person login / project owner)
+            title: r.job.title,
+            // public card title (name or project title)
+            score: r.score,
+            matchedTags: r.matchedTags,
+            source: r.job.source,
+            // 'person' | 'project'
+            url: r.job.url,
+            // public /r/<login> credential link
+            id: r.job.id
+          }));
+          await reportMatched(peerResults);
+        }
+      }
+    } catch {
+    }
+    mkdirSync5(TERMINALHIRE_DIR4, { recursive: true });
     const cacheEntry = {
       ts: Date.now(),
       index,
       matchCount,
-      topMatches
+      topMatches,
+      topPeers
     };
-    writeFileSync3(INDEX_CACHE_FILE, JSON.stringify(cacheEntry), "utf8");
+    writeFileSync5(INDEX_CACHE_FILE, JSON.stringify(cacheEntry), "utf8");
     try {
       const {
         readSpinnerConfig: readSpinnerConfig2,
@@ -3781,10 +3938,10 @@ async function run() {
         } catch {
         }
         const ranked = rankBySessionTags2(topMatches, sessionTags);
-        const verbs = buildSpinnerPool2(ranked, sc.max, { sessionTags, frequency: sc.frequency });
+        const verbs = buildSpinnerPool2(ranked, sc.max, { sessionTags, frequency: sc.frequency, topPeers });
         if (verbs.length > 0) applySpinnerVerbs2(verbs, sc.mode);
         else clearSpinnerVerbs2();
-        const tips = buildTips2(ranked, API_URL, 8);
+        const tips = buildTips2(ranked, API_URL2, 8);
         if (tips.length > 0) applySpinnerTips2(tips);
         else clearSpinnerTips2();
       } else {

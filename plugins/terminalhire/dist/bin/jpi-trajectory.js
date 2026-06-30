@@ -1575,6 +1575,13 @@ var init_intro = __esm({
   }
 });
 
+// ../../packages/core/src/directoryThreshold.ts
+var init_directoryThreshold = __esm({
+  "../../packages/core/src/directoryThreshold.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/index.ts
 var init_src = __esm({
   "../../packages/core/src/index.ts"() {
@@ -1587,6 +1594,7 @@ var init_src = __esm({
     init_partners();
     init_github();
     init_intro();
+    init_directoryThreshold();
   }
 });
 

@@ -2800,6 +2800,15 @@ var init_intro = __esm({
   }
 });
 
+// ../../packages/core/src/directoryThreshold.ts
+var STRONG_MATCH_THRESHOLD;
+var init_directoryThreshold = __esm({
+  "../../packages/core/src/directoryThreshold.ts"() {
+    "use strict";
+    STRONG_MATCH_THRESHOLD = 0.58;
+  }
+});
+
 // ../../packages/core/src/index.ts
 var src_exports = {};
 __export(src_exports, {
@@ -2819,6 +2828,7 @@ __export(src_exports, {
   INTRO_ALLOWED_FIELDS: () => INTRO_ALLOWED_FIELDS,
   INTRO_PENDING_TTL_MS: () => INTRO_PENDING_TTL_MS,
   LEVER_SLUGS_BY_TIER: () => LEVER_SLUGS_BY_TIER,
+  STRONG_MATCH_THRESHOLD: () => STRONG_MATCH_THRESHOLD,
   SYNONYMS: () => SYNONYMS,
   VOCABULARY: () => VOCABULARY,
   VOCAB_NODES: () => VOCAB_NODES,
@@ -2887,6 +2897,7 @@ var init_src = __esm({
     init_partners();
     init_github();
     init_intro();
+    init_directoryThreshold();
   }
 });
 

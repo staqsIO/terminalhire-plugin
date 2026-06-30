@@ -2543,21 +2543,21 @@ var init_feeds = __esm({
 });
 
 // ../../packages/core/src/partners.ts
-import { readFileSync } from "fs";
-import { join } from "path";
+import { readFileSync as readFileSync2 } from "fs";
+import { join as join2 } from "path";
 import { fileURLToPath } from "url";
 function resolveDataPath() {
   try {
     const dir = fileURLToPath(new URL("../../../data", import.meta.url));
-    return join(dir, "partner-roles.json");
+    return join2(dir, "partner-roles.json");
   } catch {
-    return join(process.cwd(), "data", "partner-roles.json");
+    return join2(process.cwd(), "data", "partner-roles.json");
   }
 }
 function loadPartnerRoles() {
   const filePath = resolveDataPath();
   try {
-    const raw = readFileSync(filePath, "utf-8");
+    const raw = readFileSync2(filePath, "utf-8");
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
       console.warn("[partners] partner-roles.json is not an array \u2014 skipping");
@@ -2800,6 +2800,15 @@ var init_intro = __esm({
   }
 });
 
+// ../../packages/core/src/directoryThreshold.ts
+var STRONG_MATCH_THRESHOLD;
+var init_directoryThreshold = __esm({
+  "../../packages/core/src/directoryThreshold.ts"() {
+    "use strict";
+    STRONG_MATCH_THRESHOLD = 0.58;
+  }
+});
+
 // ../../packages/core/src/index.ts
 var src_exports = {};
 __export(src_exports, {
@@ -2819,6 +2828,7 @@ __export(src_exports, {
   INTRO_ALLOWED_FIELDS: () => INTRO_ALLOWED_FIELDS,
   INTRO_PENDING_TTL_MS: () => INTRO_PENDING_TTL_MS,
   LEVER_SLUGS_BY_TIER: () => LEVER_SLUGS_BY_TIER,
+  STRONG_MATCH_THRESHOLD: () => STRONG_MATCH_THRESHOLD,
   SYNONYMS: () => SYNONYMS,
   VOCABULARY: () => VOCABULARY,
   VOCAB_NODES: () => VOCAB_NODES,
@@ -2887,6 +2897,7 @@ var init_src = __esm({
     init_partners();
     init_github();
     init_intro();
+    init_directoryThreshold();
   }
 });
 
@@ -2910,13 +2921,13 @@ import {
   randomBytes
 } from "crypto";
 import {
-  readFileSync as readFileSync2,
-  writeFileSync,
-  mkdirSync,
+  readFileSync as readFileSync3,
+  writeFileSync as writeFileSync2,
+  mkdirSync as mkdirSync2,
   existsSync
 } from "fs";
-import { join as join2 } from "path";
-import { homedir } from "os";
+import { join as join3 } from "path";
+import { homedir as homedir2 } from "os";
 async function loadKey() {
   try {
     const kt = await import("keytar");
@@ -2929,12 +2940,12 @@ async function loadKey() {
     return key2;
   } catch {
   }
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
   if (existsSync(KEY_FILE)) {
-    return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");
+    return Buffer.from(readFileSync3(KEY_FILE, "utf8").trim(), "hex");
   }
   const key = randomBytes(KEY_BYTES);
-  writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  writeFileSync2(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
   return key;
 }
 function encrypt(plaintext, key) {
@@ -2995,7 +3006,7 @@ async function readProfile() {
   if (!existsSync(PROFILE_FILE)) return blankProfile();
   try {
     const key = await loadKey();
-    const raw = readFileSync2(PROFILE_FILE, "utf8");
+    const raw = readFileSync3(PROFILE_FILE, "utf8");
     const blob = JSON.parse(raw);
     const plaintext = decrypt(blob, key);
     const parsed = JSON.parse(plaintext);
@@ -3006,12 +3017,12 @@ async function readProfile() {
   }
 }
 async function writeProfile(profile) {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
   const key = await loadKey();
   profile.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
   profile.skillTags = deriveSkillTags(profile.tagWeights);
   const blob = encrypt(JSON.stringify(profile), key);
-  writeFileSync(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+  writeFileSync2(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 function accumulateSession(profile, tags, isEmployerContext, inferredSeniority, seniorityIsAuthoritative = false) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -3095,14 +3106,14 @@ function profileToFingerprint(profile) {
     }
   };
 }
-var TERMINALHIRE_DIR, PROFILE_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var TERMINALHIRE_DIR2, PROFILE_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
 var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
     init_src();
-    TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");
-    PROFILE_FILE = join2(TERMINALHIRE_DIR, "profile.enc");
-    KEY_FILE = join2(TERMINALHIRE_DIR, "key");
+    TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
+    PROFILE_FILE = join3(TERMINALHIRE_DIR2, "profile.enc");
+    KEY_FILE = join3(TERMINALHIRE_DIR2, "key");
     ALGO = "aes-256-gcm";
     KEY_BYTES = 32;
     IV_BYTES = 12;
@@ -3131,24 +3142,20 @@ var init_profile = __esm({
 });
 
 // bin/jpi-devs.js
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2 } from "fs";
-import { join as join3 } from "path";
-import { homedir as homedir2 } from "os";
 import { createInterface } from "readline";
-var TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
-var DIRECTORY_CACHE_FILE = join3(TERMINALHIRE_DIR2, "directory-cache.json");
-var PROJECT_FILE = join3(TERMINALHIRE_DIR2, "project.json");
+
+// bin/directory.js
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
+var TERMINALHIRE_DIR = join(homedir(), ".terminalhire");
+var DIRECTORY_CACHE_FILE = join(TERMINALHIRE_DIR, "directory-cache.json");
+var PROJECT_FILE = join(TERMINALHIRE_DIR, "project.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
-var DEFAULT_LIMIT = 10;
-var args = process.argv.slice(2);
-var limitArg = args.indexOf("--limit");
-var LIMIT = limitArg !== -1 ? parseInt(args[limitArg + 1] ?? "10", 10) : DEFAULT_LIMIT;
-var SHOW_ALL = args.includes("--all");
-var AS_PROJECT = args.includes("--as-project");
 function readDirectoryCache() {
   try {
-    const entry = JSON.parse(readFileSync3(DIRECTORY_CACHE_FILE, "utf8"));
+    const entry = JSON.parse(readFileSync(DIRECTORY_CACHE_FILE, "utf8"));
     if (typeof entry.ts === "number" && Number.isFinite(entry.ts) && Date.now() - entry.ts < INDEX_TTL_MS) {
       return { index: entry.index, ts: entry.ts };
     }
@@ -3158,12 +3165,12 @@ function readDirectoryCache() {
   }
 }
 function writeDirectoryCache(index) {
-  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
-  writeFileSync2(DIRECTORY_CACHE_FILE, JSON.stringify({ ts: Date.now(), index }), "utf8");
+  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  writeFileSync(DIRECTORY_CACHE_FILE, JSON.stringify({ ts: Date.now(), index }), "utf8");
 }
 function readProject() {
   try {
-    return JSON.parse(readFileSync3(PROJECT_FILE, "utf8"));
+    return JSON.parse(readFileSync(PROJECT_FILE, "utf8"));
   } catch {
     return null;
   }
@@ -3174,13 +3181,13 @@ function relativeTime(ts) {
   const mins = Math.round(secs / 60);
   return mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
 }
-async function fetchDirectory() {
+async function fetchDirectory({ quiet = false } = {}) {
   const cached = readDirectoryCache();
   if (cached) {
-    console.log(`\u2713 Using cached directory (updated ${relativeTime(cached.ts)})`);
+    if (!quiet) console.log(`\u2713 Using cached directory (updated ${relativeTime(cached.ts)})`);
     return cached.index;
   }
-  console.log(`\u21BB Refreshing builder directory from ${API_URL}/api/directory...`);
+  if (!quiet) console.log(`\u21BB Refreshing builder directory from ${API_URL}/api/directory...`);
   const res = await fetch(`${API_URL}/api/directory`, { signal: AbortSignal.timeout(1e4) });
   if (!res.ok) throw new Error(`/api/directory returned ${res.status}`);
   const index = await res.json();
@@ -3195,7 +3202,7 @@ function reportMatched(results, fetchImpl = fetch) {
       )
     ];
     if (logins.length === 0) return;
-    Promise.resolve(
+    return Promise.resolve(
       fetchImpl(`${API_URL}/api/directory/matched`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -3207,6 +3214,15 @@ function reportMatched(results, fetchImpl = fetch) {
   } catch {
   }
 }
+
+// bin/jpi-devs.js
+var API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+var DEFAULT_LIMIT = 10;
+var args = process.argv.slice(2);
+var limitArg = args.indexOf("--limit");
+var LIMIT = limitArg !== -1 ? parseInt(args[limitArg + 1] ?? "10", 10) : DEFAULT_LIMIT;
+var SHOW_ALL = args.includes("--all");
+var AS_PROJECT = args.includes("--as-project");
 function prompt(question) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
@@ -3218,7 +3234,7 @@ function prompt(question) {
 }
 function credentialUrl(job) {
   const u = job.url ?? "";
-  return u.startsWith("http") ? u : `${API_URL}${u}`;
+  return u.startsWith("http") ? u : `${API_URL2}${u}`;
 }
 function linkTitle(title, url) {
   const isTTY = process.stdout.isTTY;

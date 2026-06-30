@@ -5,7 +5,9 @@ import { homedir } from "os";
 var TERMINALHIRE_DIR = join(homedir(), ".terminalhire");
 var CONFIG_FILE = join(TERMINALHIRE_DIR, "config.json");
 var DEFAULT_CONFIG = {
-  nudge: "session"
+  nudge: "session",
+  peerConnect: false,
+  peerConnectPrompted: false
 };
 function readConfig() {
   try {
@@ -41,8 +43,12 @@ function getNudgeMode() {
   const config = readConfig();
   return config.nudge ?? "session";
 }
+function isPeerConnectEnabled() {
+  return readConfig().peerConnect === true;
+}
 export {
   getNudgeMode,
+  isPeerConnectEnabled,
   parseNudgeMode,
   readConfig,
   writeConfig

@@ -113,10 +113,18 @@ function buildContextVerbs(topMatches, sessionTags) {
   if (hasBounty) headers.push(`\u2726 Roles + \u{1F48E} paid bounties in your stack \u2014 link below`);
   return headers;
 }
+function buildPeerLine(topPeers) {
+  const n = (Array.isArray(topPeers) ? topPeers : []).filter(Boolean).length;
+  if (n < 1) return null;
+  return n === 1 ? `\u25C6 1 builder matches what you're building \xB7 terminalhire devs` : `\u25C6 ${n} builders match what you're building \xB7 terminalhire devs`;
+}
 function buildSpinnerPool(topMatches, max = 6, opts = {}) {
-  const { sessionTags, frequency = "always" } = opts;
+  const { sessionTags, frequency = "always", topPeers } = opts;
   const ranked = rankBySessionTags(topMatches, sessionTags);
-  if (!Array.isArray(ranked) || ranked.length === 0) return [];
+  if (!Array.isArray(ranked) || ranked.length === 0) {
+    const peerLine = buildPeerLine(topPeers);
+    return peerLine ? [peerLine] : [];
+  }
   const headers = buildContextVerbs(ranked, sessionTags);
   const cap = Math.max(1, verbCountForFrequency(frequency, headers.length));
   return [...headers.slice(0, cap), ctaVerb()];
@@ -279,6 +287,7 @@ export {
   applySpinnerTips,
   applySpinnerVerbs,
   buildContextVerbs,
+  buildPeerLine,
   buildSpinnerPool,
   buildTips,
   clearSpinnerTips,

@@ -3014,6 +3014,15 @@ var init_intro = __esm({
   }
 });
 
+// ../../packages/core/src/directoryThreshold.ts
+var STRONG_MATCH_THRESHOLD;
+var init_directoryThreshold = __esm({
+  "../../packages/core/src/directoryThreshold.ts"() {
+    "use strict";
+    STRONG_MATCH_THRESHOLD = 0.58;
+  }
+});
+
 // ../../packages/core/src/index.ts
 var src_exports = {};
 __export(src_exports, {
@@ -3033,6 +3042,7 @@ __export(src_exports, {
   INTRO_ALLOWED_FIELDS: () => INTRO_ALLOWED_FIELDS,
   INTRO_PENDING_TTL_MS: () => INTRO_PENDING_TTL_MS,
   LEVER_SLUGS_BY_TIER: () => LEVER_SLUGS_BY_TIER,
+  STRONG_MATCH_THRESHOLD: () => STRONG_MATCH_THRESHOLD,
   SYNONYMS: () => SYNONYMS,
   VOCABULARY: () => VOCABULARY,
   VOCAB_NODES: () => VOCAB_NODES,
@@ -3101,6 +3111,7 @@ var init_src = __esm({
     init_partners();
     init_github();
     init_intro();
+    init_directoryThreshold();
   }
 });
 
@@ -3344,6 +3355,92 @@ var init_profile = __esm({
   }
 });
 
+// src/config.ts
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync as existsSync3 } from "fs";
+import { join as join4 } from "path";
+import { homedir as homedir3 } from "os";
+function readConfig() {
+  try {
+    if (!existsSync3(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
+    const raw = readFileSync4(CONFIG_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_CONFIG, ...parsed };
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+}
+function writeConfig(config) {
+  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
+  const current = readConfig();
+  const merged = { ...current, ...config };
+  writeFileSync3(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
+}
+var TERMINALHIRE_DIR3, CONFIG_FILE, DEFAULT_CONFIG;
+var init_config = __esm({
+  "src/config.ts"() {
+    "use strict";
+    TERMINALHIRE_DIR3 = join4(homedir3(), ".terminalhire");
+    CONFIG_FILE = join4(TERMINALHIRE_DIR3, "config.json");
+    DEFAULT_CONFIG = {
+      nudge: "session",
+      peerConnect: false,
+      peerConnectPrompted: false
+    };
+  }
+});
+
+// bin/peer-connect-prompt.js
+var peer_connect_prompt_exports = {};
+__export(peer_connect_prompt_exports, {
+  maybePromptPeerConnect: () => maybePromptPeerConnect
+});
+import { createInterface } from "readline";
+async function maybePromptPeerConnect({
+  input = process.stdin,
+  output = process.stdout,
+  isInteractive = Boolean(process.stdin.isTTY && process.stdout.isTTY)
+} = {}) {
+  const cfg = readConfig();
+  if (cfg.peerConnectPrompted) {
+    return { prompted: false, peerConnect: cfg.peerConnect === true };
+  }
+  if (!isInteractive) {
+    return { prompted: false, peerConnect: cfg.peerConnect === true };
+  }
+  const rl = createInterface({ input, output });
+  const answer = await new Promise((resolve) => {
+    rl.question(PROMPT, (a) => {
+      rl.close();
+      resolve(String(a).trim().toLowerCase());
+    });
+  });
+  const optedIn = answer === "y" || answer === "yes";
+  writeConfig({ peerConnect: optedIn, peerConnectPrompted: true });
+  output.write(
+    optedIn ? "\n  Peer-connect ON \u2014 peers & founders may surface in your spinner.\n  Turn it off anytime: terminalhire config --connect off\n\n" : "\n  Peer-connect stays OFF. Enable anytime: terminalhire config --connect on\n\n"
+  );
+  return { prompted: true, peerConnect: optedIn };
+}
+var PROMPT;
+var init_peer_connect_prompt = __esm({
+  "bin/peer-connect-prompt.js"() {
+    "use strict";
+    init_config();
+    PROMPT = [
+      "",
+      "  Connect with other builders?",
+      "",
+      "  See peers and founders building what you're building \u2014 matched on your machine,",
+      "  so nothing about you leaves it. The only thing ever sent is anonymous: the",
+      "  matched person's public username, never yours, never your profile or fingerprint.",
+      "",
+      "  Change it anytime: terminalhire config --connect on|off",
+      "",
+      "  Opt in? [y/N]: "
+    ].join("\n");
+  }
+});
+
 // src/open-url.js
 import { spawn } from "child_process";
 function openInBrowser(url) {
@@ -3398,11 +3495,11 @@ async function runLogin() {
     if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
       const { createRequire } = await import("module");
       const { fileURLToPath: fileURLToPath2 } = await import("url");
-      const { join: join4, dirname } = await import("path");
+      const { join: join5, dirname } = await import("path");
       const __dirname = fileURLToPath2(new URL(".", import.meta.url));
-      const fixturePath = join4(__dirname, "../../fixtures/github-sample.json");
-      const { readFileSync: readFileSync4 } = await import("fs");
-      ghProfile = JSON.parse(readFileSync4(fixturePath, "utf8"));
+      const fixturePath = join5(__dirname, "../../fixtures/github-sample.json");
+      const { readFileSync: readFileSync5 } = await import("fs");
+      ghProfile = JSON.parse(readFileSync5(fixturePath, "utf8"));
     } else {
       ghProfile = await fetchGitHubProfile2(login, token);
     }
@@ -3472,6 +3569,11 @@ async function runLogin() {
         console.log("");
       } catch {
       }
+    }
+    try {
+      const { maybePromptPeerConnect: maybePromptPeerConnect2 } = await Promise.resolve().then(() => (init_peer_connect_prompt(), peer_connect_prompt_exports));
+      await maybePromptPeerConnect2();
+    } catch {
     }
     console.log("  Run `terminalhire jobs` to see matching roles using your enriched profile.");
     console.log("");
