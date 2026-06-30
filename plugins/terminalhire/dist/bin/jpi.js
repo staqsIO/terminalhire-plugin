@@ -105,6 +105,16 @@ function getCachedUnreadChatCount() {
     return 0;
   }
 }
+function getCachedSessionStale() {
+  try {
+    const raw = readFileSync(INDEX_CACHE_FILE, "utf8");
+    const entry = JSON.parse(raw);
+    if (Date.now() - entry.ts > INDEX_CACHE_TTL_MS) return false;
+    return entry.sessionStale === true;
+  } catch {
+    return false;
+  }
+}
 function getNudgeMode() {
   const envVal = process.env["TERMINALHIRE_NUDGE"];
   if (envVal) {
@@ -178,9 +188,10 @@ try {
   const matchCount = getCachedMatchCount();
   const incomingCount = getCachedIncomingCount();
   const unreadChatCount = getCachedUnreadChatCount();
+  const sessionStale = getCachedSessionStale() && incomingCount === 0 && unreadChatCount === 0;
   const haveRoles = matchCount !== null && matchCount > 0;
-  if (!haveRoles && incomingCount === 0 && unreadChatCount === 0) process.exit(0);
-  const hasConnectionSignal = incomingCount > 0 || unreadChatCount > 0;
+  if (!haveRoles && incomingCount === 0 && unreadChatCount === 0 && !sessionStale) process.exit(0);
+  const hasConnectionSignal = incomingCount > 0 || unreadChatCount > 0 || sessionStale;
   const nudgeMode = getNudgeMode();
   if (!hasConnectionSignal && !shouldNudge(nudgeMode, sessionId)) process.exit(0);
   let line;
@@ -189,11 +200,14 @@ try {
     line = `\u2726 ${matchCount} ${plural} match your current work \u2014 run: terminalhire jobs`;
     if (incomingCount > 0) line += `  \xB7  \u2709 ${incomingCount} waiting to connect`;
     if (unreadChatCount > 0) line += `  \xB7  \u{1F4AC} ${unreadChatCount} unread`;
+    if (sessionStale) line += `  \xB7  \u26A0 session expired \u2014 run: terminalhire link`;
   } else if (incomingCount > 0) {
     line = `\u2709 ${incomingCount} waiting to connect \u2014 run: terminalhire intro --list`;
     if (unreadChatCount > 0) line += `  \xB7  \u{1F4AC} ${unreadChatCount} unread`;
-  } else {
+  } else if (unreadChatCount > 0) {
     line = `\u{1F4AC} ${unreadChatCount} unread \u2014 run: terminalhire chat`;
+  } else {
+    line = `\u26A0 terminalhire session expired \u2014 run: terminalhire link to restore your connection signals`;
   }
   process.stdout.write(line + "\n");
   if (haveRoles && nudgeMode === "session") {

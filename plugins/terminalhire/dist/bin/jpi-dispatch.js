@@ -13090,6 +13090,8 @@ async function run18() {
     } catch {
     }
     let incomingPending = { count: 0 };
+    let sessionStale = false;
+    const sessionExpired = (res) => res.status === 401;
     const sessionCookie = readWebSessionFile();
     if (sessionCookie && !isInboundNudgeMuted()) try {
       const res = await fetch(`${API_URL6}/api/intro/list`, {
@@ -13102,6 +13104,8 @@ async function run18() {
         const intros = Array.isArray(body?.intros) ? body.intros : [];
         const incoming = intros.filter((it) => it && it.role === "incoming" && it.status === "pending");
         incomingPending = { count: incoming.length };
+      } else if (sessionExpired(res)) {
+        sessionStale = true;
       }
     } catch {
     }
@@ -13120,6 +13124,8 @@ async function run18() {
           0
         );
         unreadChat = { count: total };
+      } else if (sessionExpired(res)) {
+        sessionStale = true;
       }
     } catch {
     }
@@ -13131,7 +13137,8 @@ async function run18() {
       topMatches,
       topPeers,
       incomingPending,
-      unreadChat
+      unreadChat,
+      sessionStale
     };
     writeFileSync17(INDEX_CACHE_FILE5, JSON.stringify(cacheEntry), "utf8");
     try {
@@ -13195,7 +13202,7 @@ var init_jpi_refresh = __esm({
     __dirname4 = fileURLToPath5(new URL(".", import.meta.url));
     TERMINALHIRE_DIR14 = join23(homedir21(), ".terminalhire");
     INDEX_CACHE_FILE5 = join23(TERMINALHIRE_DIR14, "index-cache.json");
-    API_URL6 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+    API_URL6 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://www.terminalhire.com";
   }
 });
 

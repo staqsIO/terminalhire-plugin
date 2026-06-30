@@ -6980,7 +6980,7 @@ var GH_SESSION_COOKIE = "__jpi_gh_session";
 var __dirname2 = fileURLToPath3(new URL(".", import.meta.url));
 var TERMINALHIRE_DIR4 = join9(homedir7(), ".terminalhire");
 var INDEX_CACHE_FILE2 = join9(TERMINALHIRE_DIR4, "index-cache.json");
-var API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+var API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://www.terminalhire.com";
 async function run() {
   try {
     let index;
@@ -7079,6 +7079,8 @@ async function run() {
     } catch {
     }
     let incomingPending = { count: 0 };
+    let sessionStale = false;
+    const sessionExpired = (res) => res.status === 401;
     const sessionCookie = readWebSessionFile();
     if (sessionCookie && !isInboundNudgeMuted()) try {
       const res = await fetch(`${API_URL2}/api/intro/list`, {
@@ -7091,6 +7093,8 @@ async function run() {
         const intros = Array.isArray(body?.intros) ? body.intros : [];
         const incoming = intros.filter((it) => it && it.role === "incoming" && it.status === "pending");
         incomingPending = { count: incoming.length };
+      } else if (sessionExpired(res)) {
+        sessionStale = true;
       }
     } catch {
     }
@@ -7109,6 +7113,8 @@ async function run() {
           0
         );
         unreadChat = { count: total };
+      } else if (sessionExpired(res)) {
+        sessionStale = true;
       }
     } catch {
     }
@@ -7120,7 +7126,8 @@ async function run() {
       topMatches,
       topPeers,
       incomingPending,
-      unreadChat
+      unreadChat,
+      sessionStale
     };
     writeFileSync6(INDEX_CACHE_FILE2, JSON.stringify(cacheEntry), "utf8");
     try {
