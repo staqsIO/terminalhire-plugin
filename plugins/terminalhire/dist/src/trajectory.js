@@ -735,6 +735,16 @@ var init_directoryThreshold = __esm({
   }
 });
 
+// ../../packages/core/src/chatCrypto.ts
+import { hkdfSync, createHash, randomBytes } from "crypto";
+var KDF_INFO;
+var init_chatCrypto = __esm({
+  "../../packages/core/src/chatCrypto.ts"() {
+    "use strict";
+    KDF_INFO = Buffer.from("terminalhire-chat-v1");
+  }
+});
+
 // ../../packages/core/src/index.ts
 var init_src = __esm({
   "../../packages/core/src/index.ts"() {
@@ -748,6 +758,7 @@ var init_src = __esm({
     init_github();
     init_intro();
     init_directoryThreshold();
+    init_chatCrypto();
   }
 });
 
@@ -768,7 +779,7 @@ __export(profile_exports, {
 import {
   createCipheriv,
   createDecipheriv,
-  randomBytes
+  randomBytes as randomBytes2
 } from "crypto";
 import {
   readFileSync as readFileSync2,
@@ -785,7 +796,7 @@ async function loadKey() {
     if (stored) {
       return Buffer.from(stored, "hex");
     }
-    const key2 = randomBytes(KEY_BYTES);
+    const key2 = randomBytes2(KEY_BYTES);
     await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
     return key2;
   } catch {
@@ -794,12 +805,12 @@ async function loadKey() {
   if (existsSync(KEY_FILE)) {
     return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");
   }
-  const key = randomBytes(KEY_BYTES);
+  const key = randomBytes2(KEY_BYTES);
   writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
   return key;
 }
 function encrypt(plaintext, key) {
-  const iv = randomBytes(IV_BYTES);
+  const iv = randomBytes2(IV_BYTES);
   const cipher = createCipheriv(ALGO, key, iv);
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();

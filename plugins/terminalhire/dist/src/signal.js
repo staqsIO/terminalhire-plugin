@@ -485,6 +485,10 @@ var INTRO_ALLOWED_SET = new Set(INTRO_ALLOWED_FIELDS);
 var INTRO_PENDING_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
 var INTRO_ACCEPTED_TTL_MS = 365 * 24 * 60 * 60 * 1e3;
 
+// ../../packages/core/src/chatCrypto.ts
+import { hkdfSync, createHash, randomBytes } from "crypto";
+var KDF_INFO = Buffer.from("terminalhire-chat-v1");
+
 // src/signal.ts
 var LANGUAGE_TAGS = /* @__PURE__ */ new Set([
   "typescript",

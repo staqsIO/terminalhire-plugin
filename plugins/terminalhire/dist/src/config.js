@@ -7,7 +7,9 @@ var CONFIG_FILE = join(TERMINALHIRE_DIR, "config.json");
 var DEFAULT_CONFIG = {
   nudge: "session",
   peerConnect: false,
-  peerConnectPrompted: false
+  peerConnectPrompted: false,
+  resumePublishPrompted: false,
+  chatDisclosureAck: false
 };
 function readConfig() {
   try {

@@ -197,8 +197,11 @@ function sleep(ms) {
 }
 export {
   GITHUB_SCOPE,
+  decrypt,
   deleteGitHubToken,
+  encrypt,
   hasGitHubToken,
+  loadKey,
   readGitHubToken,
   resolveStoredLogin,
   runDeviceFlow,
