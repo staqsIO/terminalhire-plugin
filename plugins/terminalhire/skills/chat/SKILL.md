@@ -9,6 +9,28 @@ Read and reply to your end-to-end-encrypted connection chats **inline** in this 
 
 These are the **on-demand** reader modes — each prints into the conversation and exits. (The live both-typing pane, `terminalhire chat <login>` with no flag, is a separate raw-mode TUI and is **not** used here.)
 
+## Selectable actions — the inline picker (PREFERRED entry point)
+
+Make the chat surface feel native to Claude Code: rather than only printing text + a copy-paste command, turn the actionable items into a **selectable prompt** the user arrow-keys through — the same selection widget behind the harness's own pickers. This is the assistant-driven `AskUserQuestion` tool, NOT a raw-mode TUI; never take over the terminal.
+
+When the user opens chat or asks about messages/connections/invitations:
+
+1. Run `chat --inbox` (below) to get current state: PENDING INVITATIONS (incoming, awaiting accept), and accepted connections with their unread (`✉ N`) + last preview.
+2. If there is **anything actionable**, present it with `AskUserQuestion` as one selectable list — most-actionable first, one option per item:
+   - **`Accept @<login>`** — an incoming invitation → on pick, run `… intro --accept @<login>` and confirm the new connection.
+   - **`Open @<login> · 💬 N unread`** — a connection with unread → on pick, run `chat <login> --read`.
+   - **`Open @<login>`** — a read connection → `chat <login> --read`.
+   - Include a plain escape option (e.g. "Just print the inbox" / "Nothing now").
+3. After the pick, run the matching command and report the result. For a reply, ask for the line, then `chat <login> --send "…"`. You may chain (e.g. accept → then offer "say hi").
+
+Accept an invitation via the bundled engine:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" intro --accept @<github-login>
+```
+
+Fall back to the plain printed modes below only when there's a single obvious target or the user named a specific person/command.
+
 ## Inbox — who has messaged me
 
 One line per accepted connection: a presence dot (●/○), an unread marker (✉ N), the last timestamp, and a short preview.

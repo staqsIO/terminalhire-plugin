@@ -4264,10 +4264,19 @@ function truncate(s, n) {
   const t = String(s);
   return t.length <= n ? t : `${t.slice(0, n - 1)}\u2026`;
 }
-function renderInbox(items) {
+function renderInbox(items, invites = []) {
   const lines = [];
   lines.push("  connections \xB7 terminalhire chat");
   lines.push("  " + "\u2500".repeat(64));
+  if (invites && invites.length > 0) {
+    lines.push(`  PENDING INVITATIONS (${invites.length})`);
+    for (const iv of invites) {
+      const login = sanitizeLine(iv.login);
+      const handle = `@${login}`;
+      lines.push(`  \u2198 ${handle.padEnd(18)} wants to connect \xB7 terminalhire intro --accept ${handle}`);
+    }
+    lines.push("  " + "\u2500".repeat(64));
+  }
   if (!items || items.length === 0) {
     lines.push("  (no accepted connections yet \u2014 request one: terminalhire intro <login>)");
   } else {
@@ -4374,6 +4383,7 @@ async function runInbox(opts = {}) {
     input = process.stdin,
     client = createChatClient(),
     listConnections = defaultListConnections,
+    listInvites = defaultListPendingInvites,
     readCursors = readReadCursors,
     ensureDisclosure = ensureChatDisclosure
   } = opts;
@@ -4383,6 +4393,12 @@ async function runInbox(opts = {}) {
   const listed = await listConnections();
   if (listed.status !== "ok") {
     return { ok: false, reason: writeProblem(output, listed, "") };
+  }
+  let invites = [];
+  try {
+    const inv = await listInvites();
+    if (inv && inv.status === "ok") invites = inv.invites;
+  } catch {
   }
   const cursors = readCursors();
   const items = [];
@@ -4408,8 +4424,8 @@ async function runInbox(opts = {}) {
     });
   }
   await clearPresence(client);
-  output.write(renderInbox(items));
-  return { ok: true, count: items.length };
+  output.write(renderInbox(items, invites));
+  return { ok: true, count: items.length, invites: invites.length };
 }
 async function runReadThread(opts = {}) {
   const {
@@ -4619,6 +4635,12 @@ async function defaultListConnections(deps = {}) {
   if (listed.status !== "ok") return listed;
   const connections = listed.intros.filter((it) => it && it.status === "accepted" && it.counterpartyLogin).map((it) => ({ introId: it.id, peerLogin: it.counterpartyLogin }));
   return { status: "ok", connections };
+}
+async function defaultListPendingInvites(deps = {}) {
+  const listed = await fetchIntroList(deps);
+  if (listed.status !== "ok") return listed;
+  const invites = listed.intros.filter((it) => it && it.role === "incoming" && it.status === "pending" && it.counterpartyLogin).map((it) => ({ login: it.counterpartyLogin }));
+  return { status: "ok", invites };
 }
 function formatThread(state) {
   const { peerLogin, online, messages, inputBuffer, banner } = state;
@@ -5168,6 +5190,7 @@ export {
   CHAT_DISCLOSURE,
   CHAT_MIN_AGE,
   defaultListConnections,
+  defaultListPendingInvites,
   defaultResolveConnection,
   ensureChatDisclosure,
   formatThread,
