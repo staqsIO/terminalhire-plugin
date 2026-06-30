@@ -1152,7 +1152,7 @@ function renderConsentCard(payload, deps) {
 }
 async function runIntroRequest(args, overrides) {
   const deps = { ...defaultIntroDeps(), ...overrides };
-  const targetLogin = args.targetLogin?.trim();
+  const targetLogin = args.targetLogin?.trim().replace(/^@/, "");
   if (!targetLogin) {
     deps.errorLog('\n  Usage: terminalhire intro <github-login> [--note "..."] [--contact <email>] [--name "..."]\n');
     deps.exit(1);
@@ -1171,13 +1171,8 @@ async function runIntroRequest(args, overrides) {
   }
   const profile = await deps.readProfileContact();
   const displayName = (args.name ?? profile.displayName ?? requesterLogin).trim();
-  const contact = (args.contact ?? profile.contactEmail ?? "").trim();
-  if (!contact) {
-    deps.errorLog("\n  No contact on file. Set one with `terminalhire profile --edit`,");
-    deps.errorLog("  or pass `--contact <email-or-handle>`. Nothing was sent.\n");
-    deps.exit(1);
-    return;
-  }
+  const explicitContact = (args.contact ?? profile.contactEmail ?? "").trim();
+  const contact = explicitContact || `@${requesterLogin}`;
   const payload = buildIntroPayload({
     requesterLogin,
     requesterDisplayName: displayName,

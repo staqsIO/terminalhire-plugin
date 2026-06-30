@@ -9685,7 +9685,7 @@ function renderConsentCard2(payload, deps) {
 }
 async function runIntroRequest(args5, overrides) {
   const deps = { ...defaultIntroDeps(), ...overrides };
-  const targetLogin = args5.targetLogin?.trim();
+  const targetLogin = args5.targetLogin?.trim().replace(/^@/, "");
   if (!targetLogin) {
     deps.errorLog('\n  Usage: terminalhire intro <github-login> [--note "..."] [--contact <email>] [--name "..."]\n');
     deps.exit(1);
@@ -9704,13 +9704,8 @@ async function runIntroRequest(args5, overrides) {
   }
   const profile = await deps.readProfileContact();
   const displayName = (args5.name ?? profile.displayName ?? requesterLogin).trim();
-  const contact = (args5.contact ?? profile.contactEmail ?? "").trim();
-  if (!contact) {
-    deps.errorLog("\n  No contact on file. Set one with `terminalhire profile --edit`,");
-    deps.errorLog("  or pass `--contact <email-or-handle>`. Nothing was sent.\n");
-    deps.exit(1);
-    return;
-  }
+  const explicitContact = (args5.contact ?? profile.contactEmail ?? "").trim();
+  const contact = explicitContact || `@${requesterLogin}`;
   const payload = buildIntroPayload({
     requesterLogin,
     requesterDisplayName: displayName,
@@ -11275,6 +11270,7 @@ async function run10() {
   console.log("\n  terminalhire connect \u2014 find and reach other developers, locally matched:");
   console.log("    terminalhire devs                 Rank opted-in builders & projects for you");
   console.log('    terminalhire project "<title>: <skills>"   Declare a project to staff');
+  console.log("    terminalhire connect <github-login> Request a consented intro (alias for `intro`)");
   console.log("    terminalhire intro <github-login>  Request a consented intro (double opt-in)");
   console.log("    terminalhire intro --list          See intros you have sent + received");
   console.log("    terminalhire chat                  Message your accepted connections");
@@ -13348,6 +13344,7 @@ if (!firstArg || firstArg === "help" || firstArg === "--help" || firstArg === "-
   console.log("  terminalhire chat <github-login> --read     Read a thread inline (last 8; -n N / --all for depth)");
   console.log('  terminalhire chat <github-login> --send "\u2026" Send one line to a connection (E2E encrypted)');
   console.log("  terminalhire chat <github-login>            Open the live E2E chat pane with an accepted connection");
+  console.log("  terminalhire connect <github-login>         Request a consented intro (alias for `intro`)");
   console.log("  terminalhire connect                        Connect family overview + inbound-nudge state");
   console.log("  terminalhire connect --mute                 Stop surfacing incoming connection requests in the spinner");
   console.log("  terminalhire connect --unmute               Resume surfacing incoming connection requests");
@@ -13451,6 +13448,14 @@ if (firstArg === "chat") {
   process.exit(0);
 }
 if (firstArg === "connect") {
+  const sub = process.argv[3];
+  const isConnectOwn = !sub || sub === "--mute" || sub === "--unmute";
+  if (!isConnectOwn) {
+    process.argv.splice(2, 1);
+    const mod3 = await Promise.resolve().then(() => (init_jpi_intro(), jpi_intro_exports));
+    await mod3.run();
+    process.exit(0);
+  }
   const mod2 = await Promise.resolve().then(() => (init_jpi_connect(), jpi_connect_exports));
   await mod2.run();
   process.exit(0);
