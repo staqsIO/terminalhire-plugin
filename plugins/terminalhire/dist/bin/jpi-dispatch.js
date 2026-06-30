@@ -10296,11 +10296,37 @@ __export(jpi_chat_read_exports, {
   runInbox: () => runInbox,
   runReadThread: () => runReadThread,
   runSend: () => runSend,
+  syncUnreadBadge: () => syncUnreadBadge,
   writeReadCursor: () => writeReadCursor
 });
 import { existsSync as existsSync12, mkdirSync as mkdirSync13, readFileSync as readFileSync16, writeFileSync as writeFileSync13 } from "fs";
 import { homedir as homedir15 } from "os";
 import { join as join16 } from "path";
+async function syncUnreadBadge(deps = {}) {
+  const readCookie = deps.readCookie ?? readWebSessionCookie;
+  const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+  const cacheFile = deps.cacheFile ?? INDEX_CACHE_FILE5;
+  try {
+    const cookie = readCookie();
+    if (!cookie || !existsSync12(cacheFile)) return;
+    const res = await fetchImpl(`${CHAT_BASE2}/api/chat/inbox`, {
+      method: "GET",
+      headers: { Cookie: `${GH_SESSION_COOKIE4}=${cookie}` },
+      signal: AbortSignal.timeout(2500)
+    });
+    if (!res.ok) return;
+    const body = await res.json();
+    const inbox = Array.isArray(body?.inbox) ? body.inbox : [];
+    const total = inbox.reduce(
+      (sum, it) => sum + (it && typeof it.unreadCount === "number" && it.unreadCount > 0 ? it.unreadCount : 0),
+      0
+    );
+    const entry = JSON.parse(readFileSync16(cacheFile, "utf8"));
+    entry.unreadChat = { count: total };
+    writeFileSync13(cacheFile, JSON.stringify(entry), "utf8");
+  } catch {
+  }
+}
 function readReadCursors() {
   try {
     if (!existsSync12(READS_FILE)) return {};
@@ -10518,6 +10544,7 @@ async function runReadThread(opts = {}) {
     resolveConnection = defaultResolveConnection,
     writeCursor = writeReadCursor,
     syncCursor = postReadCursor,
+    syncBadge = syncUnreadBadge,
     ensureDisclosure = ensureChatDisclosure
   } = opts;
   const target = String(login ?? "").replace(/^@/, "").trim();
@@ -10564,6 +10591,7 @@ async function runReadThread(opts = {}) {
       } catch {
       }
       await syncCursor(peerLogin, newest.createdAt);
+      await syncBadge();
     }
   }
   return { ok: true, shown: shownMessages.length, total };
@@ -10611,7 +10639,7 @@ async function runSend(opts = {}) {
   );
   return { ok: true };
 }
-var CHAT_BASE2, GH_SESSION_COOKIE4, TERMINALHIRE_DIR12, READS_FILE;
+var CHAT_BASE2, GH_SESSION_COOKIE4, TERMINALHIRE_DIR12, READS_FILE, INDEX_CACHE_FILE5;
 var init_jpi_chat_read = __esm({
   "bin/jpi-chat-read.js"() {
     "use strict";
@@ -10622,6 +10650,7 @@ var init_jpi_chat_read = __esm({
     GH_SESSION_COOKIE4 = "__jpi_gh_session";
     TERMINALHIRE_DIR12 = join16(homedir15(), ".terminalhire");
     READS_FILE = join16(TERMINALHIRE_DIR12, "chat-reads.json");
+    INDEX_CACHE_FILE5 = join16(TERMINALHIRE_DIR12, "index-cache.json");
   }
 });
 
@@ -13140,7 +13169,7 @@ async function run18() {
       unreadChat,
       sessionStale
     };
-    writeFileSync17(INDEX_CACHE_FILE5, JSON.stringify(cacheEntry), "utf8");
+    writeFileSync17(INDEX_CACHE_FILE6, JSON.stringify(cacheEntry), "utf8");
     try {
       const {
         readSpinnerConfig: readSpinnerConfig2,
@@ -13191,7 +13220,7 @@ async function run18() {
     process.exit(1);
   }
 }
-var GH_SESSION_COOKIE7, __dirname4, TERMINALHIRE_DIR14, INDEX_CACHE_FILE5, API_URL6;
+var GH_SESSION_COOKIE7, __dirname4, TERMINALHIRE_DIR14, INDEX_CACHE_FILE6, API_URL6;
 var init_jpi_refresh = __esm({
   "bin/jpi-refresh.js"() {
     "use strict";
@@ -13201,7 +13230,7 @@ var init_jpi_refresh = __esm({
     GH_SESSION_COOKIE7 = "__jpi_gh_session";
     __dirname4 = fileURLToPath5(new URL(".", import.meta.url));
     TERMINALHIRE_DIR14 = join23(homedir21(), ".terminalhire");
-    INDEX_CACHE_FILE5 = join23(TERMINALHIRE_DIR14, "index-cache.json");
+    INDEX_CACHE_FILE6 = join23(TERMINALHIRE_DIR14, "index-cache.json");
     API_URL6 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://www.terminalhire.com";
   }
 });
@@ -13217,8 +13246,8 @@ import { homedir as homedir22 } from "os";
 import { fileURLToPath as fileURLToPath6 } from "url";
 function findJobInCache(jobId) {
   try {
-    if (!existsSync18(INDEX_CACHE_FILE6)) return null;
-    const raw = readFileSync22(INDEX_CACHE_FILE6, "utf8");
+    if (!existsSync18(INDEX_CACHE_FILE7)) return null;
+    const raw = readFileSync22(INDEX_CACHE_FILE7, "utf8");
     const entry = JSON.parse(raw);
     const jobs = entry?.index?.jobs ?? [];
     return jobs.find((j) => j.id === jobId) ?? null;
@@ -13306,13 +13335,13 @@ async function run19() {
     process.exit(1);
   }
 }
-var __dirname5, TERMINALHIRE_DIR15, INDEX_CACHE_FILE6;
+var __dirname5, TERMINALHIRE_DIR15, INDEX_CACHE_FILE7;
 var init_jpi_save = __esm({
   "bin/jpi-save.js"() {
     "use strict";
     __dirname5 = fileURLToPath6(new URL(".", import.meta.url));
     TERMINALHIRE_DIR15 = join24(homedir22(), ".terminalhire");
-    INDEX_CACHE_FILE6 = join24(TERMINALHIRE_DIR15, "index-cache.json");
+    INDEX_CACHE_FILE7 = join24(TERMINALHIRE_DIR15, "index-cache.json");
   }
 });
 

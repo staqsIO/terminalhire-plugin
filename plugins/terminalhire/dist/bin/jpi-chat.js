@@ -4174,11 +4174,37 @@ __export(jpi_chat_read_exports, {
   runInbox: () => runInbox,
   runReadThread: () => runReadThread,
   runSend: () => runSend,
+  syncUnreadBadge: () => syncUnreadBadge,
   writeReadCursor: () => writeReadCursor
 });
 import { existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "fs";
 import { homedir as homedir6 } from "os";
 import { join as join7 } from "path";
+async function syncUnreadBadge(deps = {}) {
+  const readCookie = deps.readCookie ?? readWebSessionCookie;
+  const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+  const cacheFile = deps.cacheFile ?? INDEX_CACHE_FILE;
+  try {
+    const cookie = readCookie();
+    if (!cookie || !existsSync6(cacheFile)) return;
+    const res = await fetchImpl(`${CHAT_BASE2}/api/chat/inbox`, {
+      method: "GET",
+      headers: { Cookie: `${GH_SESSION_COOKIE2}=${cookie}` },
+      signal: AbortSignal.timeout(2500)
+    });
+    if (!res.ok) return;
+    const body = await res.json();
+    const inbox = Array.isArray(body?.inbox) ? body.inbox : [];
+    const total = inbox.reduce(
+      (sum, it) => sum + (it && typeof it.unreadCount === "number" && it.unreadCount > 0 ? it.unreadCount : 0),
+      0
+    );
+    const entry = JSON.parse(readFileSync7(cacheFile, "utf8"));
+    entry.unreadChat = { count: total };
+    writeFileSync6(cacheFile, JSON.stringify(entry), "utf8");
+  } catch {
+  }
+}
 function readReadCursors() {
   try {
     if (!existsSync6(READS_FILE)) return {};
@@ -4396,6 +4422,7 @@ async function runReadThread(opts = {}) {
     resolveConnection = defaultResolveConnection,
     writeCursor = writeReadCursor,
     syncCursor = postReadCursor,
+    syncBadge = syncUnreadBadge,
     ensureDisclosure = ensureChatDisclosure
   } = opts;
   const target = String(login ?? "").replace(/^@/, "").trim();
@@ -4442,6 +4469,7 @@ async function runReadThread(opts = {}) {
       } catch {
       }
       await syncCursor(peerLogin, newest.createdAt);
+      await syncBadge();
     }
   }
   return { ok: true, shown: shownMessages.length, total };
@@ -4489,7 +4517,7 @@ async function runSend(opts = {}) {
   );
   return { ok: true };
 }
-var CHAT_BASE2, GH_SESSION_COOKIE2, TERMINALHIRE_DIR5, READS_FILE;
+var CHAT_BASE2, GH_SESSION_COOKIE2, TERMINALHIRE_DIR5, READS_FILE, INDEX_CACHE_FILE;
 var init_jpi_chat_read = __esm({
   "bin/jpi-chat-read.js"() {
     "use strict";
@@ -4500,6 +4528,7 @@ var init_jpi_chat_read = __esm({
     GH_SESSION_COOKIE2 = "__jpi_gh_session";
     TERMINALHIRE_DIR5 = join7(homedir6(), ".terminalhire");
     READS_FILE = join7(TERMINALHIRE_DIR5, "chat-reads.json");
+    INDEX_CACHE_FILE = join7(TERMINALHIRE_DIR5, "index-cache.json");
   }
 });
 

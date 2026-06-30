@@ -1,6 +1,6 @@
 {
   "name": "terminalhire",
-  "version": "0.10.8",
+  "version": "0.10.9",
   "description": "Local-first job matching for developers. Two-line ambient surface in the Claude Code spinner (adaptive context header + a ⌘-clickable, tracked job link), kept fresh in the background. Matching runs 100% on your machine; your profile never leaves it.",
   "author": {
     "name": "staqs",
