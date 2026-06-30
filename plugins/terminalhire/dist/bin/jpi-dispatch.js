@@ -9634,7 +9634,7 @@ function defaultIntroDeps() {
       try {
         const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
         const profile = await readProfile2();
-        return { displayName: profile?.displayName, contactEmail: profile?.contactEmail };
+        return { displayName: profile?.displayName };
       } catch {
         return {};
       }
@@ -9704,7 +9704,7 @@ async function runIntroRequest(args5, overrides) {
   }
   const profile = await deps.readProfileContact();
   const displayName = (args5.name ?? profile.displayName ?? requesterLogin).trim();
-  const explicitContact = (args5.contact ?? profile.contactEmail ?? "").trim();
+  const explicitContact = (args5.contact ?? "").trim();
   const contact = explicitContact || `@${requesterLogin}`;
   const payload = buildIntroPayload({
     requesterLogin,
@@ -9835,8 +9835,7 @@ async function runIntroDecision(args5, overrides) {
   let contact = "";
   let shareHandle = false;
   if (args5.action === "accept") {
-    const profile = await deps.readProfileContact();
-    contact = (args5.contact ?? profile.contactEmail ?? "").trim();
+    contact = (args5.contact ?? "").trim();
     shareHandle = contact.length === 0;
     let shareLabel = contact;
     if (shareHandle) {
@@ -9906,8 +9905,11 @@ async function runIntroDecision(args5, overrides) {
     deps.log("\n  Declined \u2014 no contact was shared.\n");
     return;
   }
-  deps.log("\n  Accepted. Your contact was shared with the requester.");
-  if (data.contact) deps.log(`  You can reach them at: ${data.contact}`);
+  const peer = data.counterpartyLogin;
+  deps.log(`
+  \u2713 Connected${peer ? ` with @${peer}` : ""}.`);
+  if (peer) deps.log(`  Message them any time:  terminalhire chat @${peer}`);
+  if (data.contact) deps.log(`  They also shared: ${data.contact}`);
   deps.log("");
 }
 async function runIntroList(overrides) {
@@ -10834,9 +10836,9 @@ async function runChatPane(opts = {}) {
         output.write(
           `
   @${peerLogin} isn't reachable for chat yet.
-  They may not have opened chat (no encryption key published), or the
-  connection is no longer active. Once they run
-    terminalhire chat ${target}
+  Chat is end-to-end encrypted, so they need to open chat once to
+  publish their key. As soon as they run
+    terminalhire chat
   on their side, messages will flow.
 
 `

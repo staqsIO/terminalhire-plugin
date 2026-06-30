@@ -1108,7 +1108,7 @@ function defaultIntroDeps() {
       try {
         const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
         const profile = await readProfile2();
-        return { displayName: profile?.displayName, contactEmail: profile?.contactEmail };
+        return { displayName: profile?.displayName };
       } catch {
         return {};
       }
@@ -1178,7 +1178,7 @@ async function runIntroRequest(args, overrides) {
   }
   const profile = await deps.readProfileContact();
   const displayName = (args.name ?? profile.displayName ?? requesterLogin).trim();
-  const explicitContact = (args.contact ?? profile.contactEmail ?? "").trim();
+  const explicitContact = (args.contact ?? "").trim();
   const contact = explicitContact || `@${requesterLogin}`;
   const payload = buildIntroPayload({
     requesterLogin,
@@ -1309,8 +1309,7 @@ async function runIntroDecision(args, overrides) {
   let contact = "";
   let shareHandle = false;
   if (args.action === "accept") {
-    const profile = await deps.readProfileContact();
-    contact = (args.contact ?? profile.contactEmail ?? "").trim();
+    contact = (args.contact ?? "").trim();
     shareHandle = contact.length === 0;
     let shareLabel = contact;
     if (shareHandle) {
@@ -1380,8 +1379,11 @@ async function runIntroDecision(args, overrides) {
     deps.log("\n  Declined \u2014 no contact was shared.\n");
     return;
   }
-  deps.log("\n  Accepted. Your contact was shared with the requester.");
-  if (data.contact) deps.log(`  You can reach them at: ${data.contact}`);
+  const peer = data.counterpartyLogin;
+  deps.log(`
+  \u2713 Connected${peer ? ` with @${peer}` : ""}.`);
+  if (peer) deps.log(`  Message them any time:  terminalhire chat @${peer}`);
+  if (data.contact) deps.log(`  They also shared: ${data.contact}`);
   deps.log("");
 }
 async function runIntroList(overrides) {

@@ -4699,9 +4699,9 @@ async function runChatPane(opts = {}) {
         output.write(
           `
   @${peerLogin} isn't reachable for chat yet.
-  They may not have opened chat (no encryption key published), or the
-  connection is no longer active. Once they run
-    terminalhire chat ${target}
+  Chat is end-to-end encrypted, so they need to open chat once to
+  publish their key. As soon as they run
+    terminalhire chat
   on their side, messages will flow.
 
 `
