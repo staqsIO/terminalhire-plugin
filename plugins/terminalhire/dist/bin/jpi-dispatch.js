@@ -10289,6 +10289,7 @@ var jpi_chat_read_exports = {};
 __export(jpi_chat_read_exports, {
   formatClock: () => formatClock,
   formatStamp: () => formatStamp,
+  postReadCursor: () => postReadCursor,
   readReadCursors: () => readReadCursors,
   renderInbox: () => renderInbox,
   renderThread: () => renderThread,
@@ -10320,6 +10321,22 @@ function writeReadCursor(login, iso, deps = {}) {
   cursors[login] = iso;
   mkdirSync13(TERMINALHIRE_DIR12, { recursive: true });
   writeFileSync13(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
+}
+async function postReadCursor(peerLogin, lastReadAt, deps = {}) {
+  const readCookie = deps.readCookie ?? readWebSessionCookie;
+  const cookie = readCookie();
+  if (!cookie) return;
+  try {
+    await fetch(`${CHAT_BASE2}/api/chat/read-cursor`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: `${GH_SESSION_COOKIE4}=${cookie}` },
+      body: JSON.stringify({ peerLogin, lastReadAt }),
+      // Best-effort cross-device sync — not latency-sensitive, so a short bound
+      // keeps a cold/unreachable server from stalling the reader's exit.
+      signal: AbortSignal.timeout(2500)
+    });
+  } catch {
+  }
 }
 function formatClock(iso) {
   const d = new Date(iso);
@@ -10500,6 +10517,7 @@ async function runReadThread(opts = {}) {
     client = createChatClient(),
     resolveConnection = defaultResolveConnection,
     writeCursor = writeReadCursor,
+    syncCursor = postReadCursor,
     ensureDisclosure = ensureChatDisclosure
   } = opts;
   const target = String(login ?? "").replace(/^@/, "").trim();
@@ -10545,6 +10563,7 @@ async function runReadThread(opts = {}) {
         writeCursor(peerLogin, newest.createdAt);
       } catch {
       }
+      await syncCursor(peerLogin, newest.createdAt);
     }
   }
   return { ok: true, shown: shownMessages.length, total };
@@ -10592,13 +10611,15 @@ async function runSend(opts = {}) {
   );
   return { ok: true };
 }
-var CHAT_BASE2, TERMINALHIRE_DIR12, READS_FILE;
+var CHAT_BASE2, GH_SESSION_COOKIE4, TERMINALHIRE_DIR12, READS_FILE;
 var init_jpi_chat_read = __esm({
   "bin/jpi-chat-read.js"() {
     "use strict";
     init_chat_client();
+    init_web_session();
     init_jpi_chat();
     CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
+    GH_SESSION_COOKIE4 = "__jpi_gh_session";
     TERMINALHIRE_DIR12 = join16(homedir15(), ".terminalhire");
     READS_FILE = join16(TERMINALHIRE_DIR12, "chat-reads.json");
   }
@@ -10675,7 +10696,7 @@ async function fetchIntroList(deps = {}) {
   try {
     res = await fetchImpl(`${CHAT_BASE3}/api/intro/list`, {
       method: "GET",
-      headers: { Cookie: `${GH_SESSION_COOKIE4}=${cookie}` },
+      headers: { Cookie: `${GH_SESSION_COOKIE5}=${cookie}` },
       signal: AbortSignal.timeout(1e4)
     });
   } catch (err) {
@@ -11217,7 +11238,7 @@ async function run9() {
     process.exit(1);
   }
 }
-var CHAT_BASE3, GH_SESSION_COOKIE4, HIDE_CURSOR, SHOW_CURSOR, CLEAR, KEY_CTRL_C, KEY_CTRL_S, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, MAX_INPUT_LEN, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA;
+var CHAT_BASE3, GH_SESSION_COOKIE5, HIDE_CURSOR, SHOW_CURSOR, CLEAR, KEY_CTRL_C, KEY_CTRL_S, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, MAX_INPUT_LEN, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA;
 var init_jpi_chat = __esm({
   "bin/jpi-chat.js"() {
     "use strict";
@@ -11225,7 +11246,7 @@ var init_jpi_chat = __esm({
     init_config();
     init_web_session();
     CHAT_BASE3 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
-    GH_SESSION_COOKIE4 = "__jpi_gh_session";
+    GH_SESSION_COOKIE5 = "__jpi_gh_session";
     HIDE_CURSOR = "\x1B[?25l";
     SHOW_CURSOR = "\x1B[?25h";
     CLEAR = "\x1B[2J\x1B[H";
@@ -11431,7 +11452,7 @@ async function runLinkLogout(overrides) {
   try {
     const res = await deps.fetchImpl(`${LINK_BASE3}/api/auth/session`, {
       method: "DELETE",
-      headers: { Cookie: `${GH_SESSION_COOKIE5}=${token}` },
+      headers: { Cookie: `${GH_SESSION_COOKIE6}=${token}` },
       signal: AbortSignal.timeout(1e4)
     });
     revoked = res.ok;
@@ -11446,14 +11467,14 @@ async function runLinkLogout(overrides) {
   }
   deps.exit(0);
 }
-var LINK_BASE3, GH_SESSION_COOKIE5, LINK_TIMEOUT_MS, LINKED_HTML, FAILED_HTML;
+var LINK_BASE3, GH_SESSION_COOKIE6, LINK_TIMEOUT_MS, LINKED_HTML, FAILED_HTML;
 var init_link = __esm({
   "src/link.ts"() {
     "use strict";
     init_web_session();
     init_config();
     LINK_BASE3 = "https://www.terminalhire.com";
-    GH_SESSION_COOKIE5 = "__jpi_gh_session";
+    GH_SESSION_COOKIE6 = "__jpi_gh_session";
     LINK_TIMEOUT_MS = 12e4;
     LINKED_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>terminalhire</title></head>
 <body style="font-family:system-ui;padding:2rem;background:#0b0d10;color:#e6e6e6">
@@ -13071,7 +13092,7 @@ async function run18() {
     if (sessionCookie && !isInboundNudgeMuted()) try {
       const res = await fetch(`${API_URL6}/api/intro/list`, {
         method: "GET",
-        headers: { Cookie: `${GH_SESSION_COOKIE6}=${sessionCookie}` },
+        headers: { Cookie: `${GH_SESSION_COOKIE7}=${sessionCookie}` },
         signal: AbortSignal.timeout(1e4)
       });
       if (res.ok) {
@@ -13082,6 +13103,24 @@ async function run18() {
       }
     } catch {
     }
+    let unreadChat = { count: 0 };
+    if (sessionCookie && !isInboundNudgeMuted()) try {
+      const res = await fetch(`${API_URL6}/api/chat/inbox`, {
+        method: "GET",
+        headers: { Cookie: `${GH_SESSION_COOKIE7}=${sessionCookie}` },
+        signal: AbortSignal.timeout(1e4)
+      });
+      if (res.ok) {
+        const body = await res.json();
+        const inbox = Array.isArray(body?.inbox) ? body.inbox : [];
+        const total = inbox.reduce(
+          (sum, it) => sum + (it && typeof it.unreadCount === "number" && it.unreadCount > 0 ? it.unreadCount : 0),
+          0
+        );
+        unreadChat = { count: total };
+      }
+    } catch {
+    }
     mkdirSync17(TERMINALHIRE_DIR14, { recursive: true });
     const cacheEntry = {
       ts: Date.now(),
@@ -13089,7 +13128,8 @@ async function run18() {
       matchCount,
       topMatches,
       topPeers,
-      incomingPending
+      incomingPending,
+      unreadChat
     };
     writeFileSync17(INDEX_CACHE_FILE5, JSON.stringify(cacheEntry), "utf8");
     try {
@@ -13142,14 +13182,14 @@ async function run18() {
     process.exit(1);
   }
 }
-var GH_SESSION_COOKIE6, __dirname4, TERMINALHIRE_DIR14, INDEX_CACHE_FILE5, API_URL6;
+var GH_SESSION_COOKIE7, __dirname4, TERMINALHIRE_DIR14, INDEX_CACHE_FILE5, API_URL6;
 var init_jpi_refresh = __esm({
   "bin/jpi-refresh.js"() {
     "use strict";
     init_directory2();
     init_config();
     init_web_session();
-    GH_SESSION_COOKIE6 = "__jpi_gh_session";
+    GH_SESSION_COOKIE7 = "__jpi_gh_session";
     __dirname4 = fileURLToPath5(new URL(".", import.meta.url));
     TERMINALHIRE_DIR14 = join23(homedir21(), ".terminalhire");
     INDEX_CACHE_FILE5 = join23(TERMINALHIRE_DIR14, "index-cache.json");

@@ -7094,6 +7094,24 @@ async function run() {
       }
     } catch {
     }
+    let unreadChat = { count: 0 };
+    if (sessionCookie && !isInboundNudgeMuted()) try {
+      const res = await fetch(`${API_URL2}/api/chat/inbox`, {
+        method: "GET",
+        headers: { Cookie: `${GH_SESSION_COOKIE}=${sessionCookie}` },
+        signal: AbortSignal.timeout(1e4)
+      });
+      if (res.ok) {
+        const body = await res.json();
+        const inbox = Array.isArray(body?.inbox) ? body.inbox : [];
+        const total = inbox.reduce(
+          (sum, it) => sum + (it && typeof it.unreadCount === "number" && it.unreadCount > 0 ? it.unreadCount : 0),
+          0
+        );
+        unreadChat = { count: total };
+      }
+    } catch {
+    }
     mkdirSync6(TERMINALHIRE_DIR4, { recursive: true });
     const cacheEntry = {
       ts: Date.now(),
@@ -7101,7 +7119,8 @@ async function run() {
       matchCount,
       topMatches,
       topPeers,
-      incomingPending
+      incomingPending,
+      unreadChat
     };
     writeFileSync6(INDEX_CACHE_FILE2, JSON.stringify(cacheEntry), "utf8");
     try {

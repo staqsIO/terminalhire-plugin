@@ -25,4 +25,4 @@ Then run `terminalhire init` (one consent + GitHub sign-in step).
 
 Learn more: https://terminalhire.com · Privacy: https://terminalhire.com/privacy
 
-_Current version: v0.10.4_
+_Current version: v0.10.5_

@@ -4290,6 +4290,22 @@ function writeReadCursor(login, iso, deps = {}) {
   mkdirSync6(TERMINALHIRE_DIR5, { recursive: true });
   writeFileSync6(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
 }
+async function postReadCursor(peerLogin, lastReadAt, deps = {}) {
+  const readCookie = deps.readCookie ?? readWebSessionCookie;
+  const cookie = readCookie();
+  if (!cookie) return;
+  try {
+    await fetch(`${CHAT_BASE3}/api/chat/read-cursor`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: `${GH_SESSION_COOKIE3}=${cookie}` },
+      body: JSON.stringify({ peerLogin, lastReadAt }),
+      // Best-effort cross-device sync — not latency-sensitive, so a short bound
+      // keeps a cold/unreachable server from stalling the reader's exit.
+      signal: AbortSignal.timeout(2500)
+    });
+  } catch {
+  }
+}
 function formatClock(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "--:--";
@@ -4469,6 +4485,7 @@ async function runReadThread(opts = {}) {
     client = createChatClient(),
     resolveConnection = defaultResolveConnection,
     writeCursor = writeReadCursor,
+    syncCursor = postReadCursor,
     ensureDisclosure = ensureChatDisclosure
   } = opts;
   const target = String(login ?? "").replace(/^@/, "").trim();
@@ -4514,6 +4531,7 @@ async function runReadThread(opts = {}) {
         writeCursor(peerLogin, newest.createdAt);
       } catch {
       }
+      await syncCursor(peerLogin, newest.createdAt);
     }
   }
   return { ok: true, shown: shownMessages.length, total };
@@ -4561,12 +4579,14 @@ async function runSend(opts = {}) {
   );
   return { ok: true };
 }
-var CHAT_BASE3, TERMINALHIRE_DIR5, READS_FILE;
+var CHAT_BASE3, GH_SESSION_COOKIE3, TERMINALHIRE_DIR5, READS_FILE;
 var init_jpi_chat_read = __esm({
   "bin/jpi-chat-read.js"() {
     init_chat_client();
+    init_web_session();
     init_jpi_chat();
     CHAT_BASE3 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
+    GH_SESSION_COOKIE3 = "__jpi_gh_session";
     TERMINALHIRE_DIR5 = join7(homedir6(), ".terminalhire");
     READS_FILE = join7(TERMINALHIRE_DIR5, "chat-reads.json");
   }
@@ -4575,6 +4595,7 @@ init_jpi_chat_read();
 export {
   formatClock,
   formatStamp,
+  postReadCursor,
   readReadCursors,
   renderInbox,
   renderThread,
