@@ -4200,8 +4200,7 @@ async function ensureChatDisclosure(opts = {}) {
   return { shown: true, acknowledged: true };
 }
 function defaultSessionCookie() {
-  const v = process.env["TERMINALHIRE_WEB_SESSION"];
-  return typeof v === "string" && v.length > 0 ? v : null;
+  return readWebSessionCookie();
 }
 async function fetchIntroList(deps = {}) {
   const fetchImpl = deps.fetchImpl ?? ((...a) => globalThis.fetch(...a));
@@ -4250,6 +4249,7 @@ var init_jpi_chat = __esm({
     "use strict";
     init_chat_client();
     init_config();
+    init_web_session();
     CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
     GH_SESSION_COOKIE2 = "__jpi_gh_session";
     ANSI_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
@@ -4360,11 +4360,7 @@ function writeProblem(output, result, target) {
   switch (result.status) {
     case "not-linked":
       output.write(
-        `
-  No linked web session found on this machine.
-  Sign in at ${CHAT_BASE3}/dashboard, then re-run.
-
-`
+        "\n  No linked web session found on this machine.\n  Run `terminalhire link` to connect this terminal to your account, then re-run.\n\n"
       );
       return "not-linked";
     case "expired":
