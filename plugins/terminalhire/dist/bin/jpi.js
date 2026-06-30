@@ -83,6 +83,17 @@ function getCachedMatchCount() {
     return null;
   }
 }
+function getCachedIncomingCount() {
+  try {
+    const raw = readFileSync(INDEX_CACHE_FILE, "utf8");
+    const entry = JSON.parse(raw);
+    if (Date.now() - entry.ts > INDEX_CACHE_TTL_MS) return 0;
+    const n = entry.incomingPending && entry.incomingPending.count;
+    return typeof n === "number" && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
 function getNudgeMode() {
   const envVal = process.env["TERMINALHIRE_NUDGE"];
   if (envVal) {
@@ -154,12 +165,20 @@ try {
     markLearned(sessionId);
   }
   const matchCount = getCachedMatchCount();
-  if (matchCount === null || matchCount === 0) process.exit(0);
+  const incomingCount = getCachedIncomingCount();
+  const haveRoles = matchCount !== null && matchCount > 0;
+  if (!haveRoles && incomingCount === 0) process.exit(0);
   const nudgeMode = getNudgeMode();
   if (!shouldNudge(nudgeMode, sessionId)) process.exit(0);
-  const plural = matchCount === 1 ? "role" : "roles";
-  process.stdout.write(`\u2726 ${matchCount} ${plural} match your current work \u2014 run: terminalhire jobs
-`);
+  let line;
+  if (haveRoles) {
+    const plural = matchCount === 1 ? "role" : "roles";
+    line = `\u2726 ${matchCount} ${plural} match your current work \u2014 run: terminalhire jobs`;
+    if (incomingCount > 0) line += `  \xB7  \u2709 ${incomingCount} waiting to connect`;
+  } else {
+    line = `\u2709 ${incomingCount} waiting to connect \u2014 run: terminalhire intro --list`;
+  }
+  process.stdout.write(line + "\n");
   if (nudgeMode === "session") {
     markNudged(sessionId);
   }

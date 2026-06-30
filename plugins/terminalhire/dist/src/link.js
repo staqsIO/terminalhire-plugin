@@ -206,6 +206,8 @@ async function runLink(overrides) {
   deps.persistToken(outcome.token);
   deps.log("\n  This terminal is now linked to your terminalhire account.");
   deps.log("  Try `terminalhire intro <login>`, `terminalhire chat`, or `terminalhire trajectory --push`.");
+  deps.log("  Your spinner will quietly surface incoming connection requests.");
+  deps.log("  Turn that off any time with `terminalhire connect --mute`.");
   deps.log("  Unlink any time with `terminalhire link --logout`.\n");
   deps.exit(0);
 }

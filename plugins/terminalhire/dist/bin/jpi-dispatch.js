@@ -9,6 +9,79 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// bin/version-nudge.js
+var version_nudge_exports = {};
+__export(version_nudge_exports, {
+  buildStaleNudge: () => buildStaleNudge,
+  cachedStaleNudge: () => cachedStaleNudge,
+  compareVersions: () => compareVersions,
+  parseVersion: () => parseVersion,
+  readLatestVersionFromCache: () => readLatestVersionFromCache,
+  readLocalVersion: () => readLocalVersion
+});
+import { readFileSync, existsSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
+import { fileURLToPath } from "url";
+function parseVersion(v) {
+  if (typeof v !== "string") return null;
+  const m = v.trim().replace(/^v/, "").match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+function compareVersions(a, b) {
+  const pa = parseVersion(a);
+  const pb = parseVersion(b);
+  if (!pa || !pb) return null;
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] < pb[i]) return -1;
+    if (pa[i] > pb[i]) return 1;
+  }
+  return 0;
+}
+function buildStaleNudge(local, latest) {
+  if (compareVersions(local, latest) !== -1) return null;
+  return `your terminalhire CLI is behind (${local} \u2192 ${latest}) \u2014 npm i -g terminalhire@latest`;
+}
+function readLocalVersion() {
+  try {
+    const candidates = [
+      join(__dirname, "..", "..", "package.json"),
+      join(__dirname, "..", "package.json")
+    ];
+    for (const p of candidates) {
+      if (existsSync(p)) {
+        const pkg = JSON.parse(readFileSync(p, "utf8"));
+        if (pkg.version) return pkg.version;
+      }
+    }
+  } catch {
+  }
+  return null;
+}
+function readLatestVersionFromCache() {
+  try {
+    const cache = JSON.parse(readFileSync(INDEX_CACHE_FILE, "utf8"));
+    const v = cache?.index?.cliVersion;
+    return typeof v === "string" ? v : null;
+  } catch {
+    return null;
+  }
+}
+function cachedStaleNudge(localVersion) {
+  const local = localVersion ?? readLocalVersion();
+  if (!local) return null;
+  return buildStaleNudge(local, readLatestVersionFromCache());
+}
+var __dirname, INDEX_CACHE_FILE;
+var init_version_nudge = __esm({
+  "bin/version-nudge.js"() {
+    "use strict";
+    __dirname = fileURLToPath(new URL(".", import.meta.url));
+    INDEX_CACHE_FILE = join(homedir(), ".terminalhire", "index-cache.json");
+  }
+});
+
 // src/open-url.js
 var open_url_exports = {};
 __export(open_url_exports, {
@@ -62,14 +135,14 @@ import {
   randomBytes
 } from "crypto";
 import {
-  readFileSync,
+  readFileSync as readFileSync2,
   writeFileSync,
   mkdirSync,
-  existsSync,
+  existsSync as existsSync2,
   rmSync
 } from "fs";
-import { join } from "path";
-import { homedir } from "os";
+import { join as join2 } from "path";
+import { homedir as homedir2 } from "os";
 async function loadKey() {
   try {
     const kt = await import("keytar");
@@ -81,8 +154,8 @@ async function loadKey() {
   } catch {
   }
   mkdirSync(TERMINALHIRE_DIR, { recursive: true });
-  if (existsSync(KEY_FILE)) {
-    return Buffer.from(readFileSync(KEY_FILE, "utf8").trim(), "hex");
+  if (existsSync2(KEY_FILE)) {
+    return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");
   }
   const key = randomBytes(KEY_BYTES);
   writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
@@ -105,10 +178,10 @@ function decrypt(blob, key) {
   return plain.toString("utf8");
 }
 async function readGitHubToken() {
-  if (!existsSync(TOKEN_FILE)) return void 0;
+  if (!existsSync2(TOKEN_FILE)) return void 0;
   try {
     const key = await loadKey();
-    const raw = readFileSync(TOKEN_FILE, "utf8");
+    const raw = readFileSync2(TOKEN_FILE, "utf8");
     const blob = JSON.parse(raw);
     return decrypt(blob, key);
   } catch {
@@ -128,7 +201,7 @@ async function deleteGitHubToken() {
   }
 }
 async function hasGitHubToken() {
-  return existsSync(TOKEN_FILE);
+  return existsSync2(TOKEN_FILE);
 }
 async function runDeviceFlow() {
   if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
@@ -244,9 +317,9 @@ var TERMINALHIRE_DIR, TOKEN_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, GITHUB_SC
 var init_github_auth = __esm({
   "src/github-auth.ts"() {
     "use strict";
-    TERMINALHIRE_DIR = join(homedir(), ".terminalhire");
-    TOKEN_FILE = join(TERMINALHIRE_DIR, "github-token.enc");
-    KEY_FILE = join(TERMINALHIRE_DIR, "key");
+    TERMINALHIRE_DIR = join2(homedir2(), ".terminalhire");
+    TOKEN_FILE = join2(TERMINALHIRE_DIR, "github-token.enc");
+    KEY_FILE = join2(TERMINALHIRE_DIR, "key");
     ALGO = "aes-256-gcm";
     KEY_BYTES = 32;
     IV_BYTES = 12;
@@ -1943,14 +2016,14 @@ async function mapWithConcurrency(items, limit, fn) {
   if (items.length === 0) return results;
   const workers = Math.max(1, Math.min(Math.floor(limit) || 1, items.length));
   let next = 0;
-  async function run19() {
+  async function run20() {
     for (; ; ) {
       const i = next++;
       if (i >= items.length) return;
       results[i] = await fn(items[i], i);
     }
   }
-  await Promise.all(Array.from({ length: workers }, run19));
+  await Promise.all(Array.from({ length: workers }, run20));
   return results;
 }
 var init_concurrency = __esm({
@@ -2793,21 +2866,21 @@ var init_feeds = __esm({
 });
 
 // ../../packages/core/src/partners.ts
-import { readFileSync as readFileSync2 } from "fs";
-import { join as join2 } from "path";
-import { fileURLToPath } from "url";
+import { readFileSync as readFileSync3 } from "fs";
+import { join as join3 } from "path";
+import { fileURLToPath as fileURLToPath2 } from "url";
 function resolveDataPath() {
   try {
-    const dir = fileURLToPath(new URL("../../../data", import.meta.url));
-    return join2(dir, "partner-roles.json");
+    const dir = fileURLToPath2(new URL("../../../data", import.meta.url));
+    return join3(dir, "partner-roles.json");
   } catch {
-    return join2(process.cwd(), "data", "partner-roles.json");
+    return join3(process.cwd(), "data", "partner-roles.json");
   }
 }
 function loadPartnerRoles() {
   const filePath = resolveDataPath();
   try {
-    const raw = readFileSync2(filePath, "utf-8");
+    const raw = readFileSync3(filePath, "utf-8");
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
       console.warn("[partners] partner-roles.json is not an array \u2014 skipping");
@@ -6208,13 +6281,13 @@ import {
   randomBytes as randomBytes4
 } from "crypto";
 import {
-  readFileSync as readFileSync3,
+  readFileSync as readFileSync4,
   writeFileSync as writeFileSync2,
   mkdirSync as mkdirSync2,
-  existsSync as existsSync2
+  existsSync as existsSync3
 } from "fs";
-import { join as join3 } from "path";
-import { homedir as homedir2 } from "os";
+import { join as join4 } from "path";
+import { homedir as homedir3 } from "os";
 async function loadKey2() {
   try {
     const kt = await import("keytar");
@@ -6228,8 +6301,8 @@ async function loadKey2() {
   } catch {
   }
   mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
-  if (existsSync2(KEY_FILE2)) {
-    return Buffer.from(readFileSync3(KEY_FILE2, "utf8").trim(), "hex");
+  if (existsSync3(KEY_FILE2)) {
+    return Buffer.from(readFileSync4(KEY_FILE2, "utf8").trim(), "hex");
   }
   const key = randomBytes4(KEY_BYTES2);
   writeFileSync2(KEY_FILE2, key.toString("hex"), { mode: 384, encoding: "utf8" });
@@ -6290,10 +6363,10 @@ function migrateTagWeights(profile) {
   }
 }
 async function readProfile() {
-  if (!existsSync2(PROFILE_FILE)) return blankProfile();
+  if (!existsSync3(PROFILE_FILE)) return blankProfile();
   try {
     const key = await loadKey2();
-    const raw = readFileSync3(PROFILE_FILE, "utf8");
+    const raw = readFileSync4(PROFILE_FILE, "utf8");
     const blob = JSON.parse(raw);
     const plaintext = decrypt2(blob, key);
     const parsed = JSON.parse(plaintext);
@@ -6398,9 +6471,9 @@ var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
     init_src();
-    TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
-    PROFILE_FILE = join3(TERMINALHIRE_DIR2, "profile.enc");
-    KEY_FILE2 = join3(TERMINALHIRE_DIR2, "key");
+    TERMINALHIRE_DIR2 = join4(homedir3(), ".terminalhire");
+    PROFILE_FILE = join4(TERMINALHIRE_DIR2, "profile.enc");
+    KEY_FILE2 = join4(TERMINALHIRE_DIR2, "key");
     ALGO2 = "aes-256-gcm";
     KEY_BYTES2 = 32;
     IV_BYTES2 = 12;
@@ -6429,13 +6502,13 @@ var init_profile = __esm({
 });
 
 // src/config.ts
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync as existsSync3 } from "fs";
-import { join as join4 } from "path";
-import { homedir as homedir3 } from "os";
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync as existsSync4 } from "fs";
+import { join as join5 } from "path";
+import { homedir as homedir4 } from "os";
 function readConfig() {
   try {
-    if (!existsSync3(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
-    const raw = readFileSync4(CONFIG_FILE, "utf8");
+    if (!existsSync4(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
+    const raw = readFileSync5(CONFIG_FILE, "utf8");
     const parsed = JSON.parse(raw);
     return { ...DEFAULT_CONFIG, ...parsed };
   } catch {
@@ -6451,18 +6524,22 @@ function writeConfig(config) {
 function isPeerConnectEnabled() {
   return readConfig().peerConnect === true;
 }
+function isInboundNudgeMuted() {
+  return readConfig().inboundNudgeMuted === true;
+}
 var TERMINALHIRE_DIR3, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
-    TERMINALHIRE_DIR3 = join4(homedir3(), ".terminalhire");
-    CONFIG_FILE = join4(TERMINALHIRE_DIR3, "config.json");
+    TERMINALHIRE_DIR3 = join5(homedir4(), ".terminalhire");
+    CONFIG_FILE = join5(TERMINALHIRE_DIR3, "config.json");
     DEFAULT_CONFIG = {
       nudge: "session",
       peerConnect: false,
       peerConnectPrompted: false,
       resumePublishPrompted: false,
-      chatDisclosureAck: false
+      chatDisclosureAck: false,
+      inboundNudgeMuted: false
     };
   }
 });
@@ -6612,12 +6689,12 @@ async function runLogin() {
     let ghProfile;
     if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
       const { createRequire: createRequire2 } = await import("module");
-      const { fileURLToPath: fileURLToPath7 } = await import("url");
-      const { join: join25, dirname: dirname3 } = await import("path");
-      const __dirname6 = fileURLToPath7(new URL(".", import.meta.url));
-      const fixturePath = join25(__dirname6, "../../fixtures/github-sample.json");
-      const { readFileSync: readFileSync23 } = await import("fs");
-      ghProfile = JSON.parse(readFileSync23(fixturePath, "utf8"));
+      const { fileURLToPath: fileURLToPath8 } = await import("url");
+      const { join: join26, dirname: dirname3 } = await import("path");
+      const __dirname7 = fileURLToPath8(new URL(".", import.meta.url));
+      const fixturePath = join26(__dirname7, "../../fixtures/github-sample.json");
+      const { readFileSync: readFileSync24 } = await import("fs");
+      ghProfile = JSON.parse(readFileSync24(fixturePath, "utf8"));
     } else {
       ghProfile = await fetchGitHubProfile2(login, token);
     }
@@ -6739,14 +6816,14 @@ var jpi_jobs_exports = {};
 __export(jpi_jobs_exports, {
   run: () => run2
 });
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4, existsSync as existsSync4 } from "fs";
-import { join as join5 } from "path";
-import { homedir as homedir4 } from "os";
+import { readFileSync as readFileSync6, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4, existsSync as existsSync5 } from "fs";
+import { join as join6 } from "path";
+import { homedir as homedir5 } from "os";
 import { createInterface as createInterface2 } from "readline";
-import { fileURLToPath as fileURLToPath2 } from "url";
+import { fileURLToPath as fileURLToPath3 } from "url";
 function readIndexCache() {
   try {
-    const raw = readFileSync5(INDEX_CACHE_FILE, "utf8");
+    const raw = readFileSync6(INDEX_CACHE_FILE2, "utf8");
     const entry = JSON.parse(raw);
     if (Date.now() - entry.ts < INDEX_TTL_MS) return entry.index;
     return null;
@@ -6756,7 +6833,7 @@ function readIndexCache() {
 }
 function writeIndexCache(index) {
   mkdirSync4(TERMINALHIRE_DIR4, { recursive: true });
-  writeFileSync4(INDEX_CACHE_FILE, JSON.stringify({ ts: Date.now(), index }), "utf8");
+  writeFileSync4(INDEX_CACHE_FILE2, JSON.stringify({ ts: Date.now(), index }), "utf8");
 }
 async function fetchIndex() {
   const cached = readIndexCache();
@@ -6921,10 +6998,10 @@ async function run2() {
       acceptance: profile.acceptance
     });
     try {
-      const cacheRaw = readFileSync5(INDEX_CACHE_FILE, "utf8");
+      const cacheRaw = readFileSync6(INDEX_CACHE_FILE2, "utf8");
       const cacheEntry = JSON.parse(cacheRaw);
       cacheEntry.matchCount = results.length;
-      writeFileSync4(INDEX_CACHE_FILE, JSON.stringify(cacheEntry), "utf8");
+      writeFileSync4(INDEX_CACHE_FILE2, JSON.stringify(cacheEntry), "utf8");
     } catch {
     }
     if (results.length === 0) {
@@ -6969,13 +7046,13 @@ Open this URL to apply directly (no data shared):
     process.exit(1);
   }
 }
-var __dirname, TERMINALHIRE_DIR4, INDEX_CACHE_FILE, INDEX_TTL_MS, API_URL, DEFAULT_LIMIT, args, limitArg, LIMIT, REMOTE_ONLY, SHOW_ALL;
+var __dirname2, TERMINALHIRE_DIR4, INDEX_CACHE_FILE2, INDEX_TTL_MS, API_URL, DEFAULT_LIMIT, args, limitArg, LIMIT, REMOTE_ONLY, SHOW_ALL;
 var init_jpi_jobs = __esm({
   "bin/jpi-jobs.js"() {
     "use strict";
-    __dirname = fileURLToPath2(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR4 = join5(homedir4(), ".terminalhire");
-    INDEX_CACHE_FILE = join5(TERMINALHIRE_DIR4, "index-cache.json");
+    __dirname2 = fileURLToPath3(new URL(".", import.meta.url));
+    TERMINALHIRE_DIR4 = join6(homedir5(), ".terminalhire");
+    INDEX_CACHE_FILE2 = join6(TERMINALHIRE_DIR4, "index-cache.json");
     INDEX_TTL_MS = 15 * 60 * 1e3;
     API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
     DEFAULT_LIMIT = 10;
@@ -6988,12 +7065,12 @@ var init_jpi_jobs = __esm({
 });
 
 // bin/directory.js
-import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, mkdirSync as mkdirSync5 } from "fs";
-import { join as join6 } from "path";
-import { homedir as homedir5 } from "os";
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync5, mkdirSync as mkdirSync5 } from "fs";
+import { join as join7 } from "path";
+import { homedir as homedir6 } from "os";
 function readDirectoryCache() {
   try {
-    const entry = JSON.parse(readFileSync6(DIRECTORY_CACHE_FILE, "utf8"));
+    const entry = JSON.parse(readFileSync7(DIRECTORY_CACHE_FILE, "utf8"));
     if (typeof entry.ts === "number" && Number.isFinite(entry.ts) && Date.now() - entry.ts < INDEX_TTL_MS2) {
       return { index: entry.index, ts: entry.ts };
     }
@@ -7008,7 +7085,7 @@ function writeDirectoryCache(index) {
 }
 function readProject() {
   try {
-    return JSON.parse(readFileSync6(PROJECT_FILE, "utf8"));
+    return JSON.parse(readFileSync7(PROJECT_FILE, "utf8"));
   } catch {
     return null;
   }
@@ -7056,9 +7133,9 @@ var TERMINALHIRE_DIR5, DIRECTORY_CACHE_FILE, PROJECT_FILE, INDEX_TTL_MS2, API_UR
 var init_directory2 = __esm({
   "bin/directory.js"() {
     "use strict";
-    TERMINALHIRE_DIR5 = join6(homedir5(), ".terminalhire");
-    DIRECTORY_CACHE_FILE = join6(TERMINALHIRE_DIR5, "directory-cache.json");
-    PROJECT_FILE = join6(TERMINALHIRE_DIR5, "project.json");
+    TERMINALHIRE_DIR5 = join7(homedir6(), ".terminalhire");
+    DIRECTORY_CACHE_FILE = join7(TERMINALHIRE_DIR5, "directory-cache.json");
+    PROJECT_FILE = join7(TERMINALHIRE_DIR5, "project.json");
     INDEX_TTL_MS2 = 15 * 60 * 1e3;
     API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
   }
@@ -7187,13 +7264,13 @@ var jpi_project_exports = {};
 __export(jpi_project_exports, {
   run: () => run4
 });
-import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, mkdirSync as mkdirSync6 } from "fs";
-import { join as join7 } from "path";
-import { homedir as homedir6 } from "os";
+import { readFileSync as readFileSync8, writeFileSync as writeFileSync6, mkdirSync as mkdirSync6 } from "fs";
+import { join as join8 } from "path";
+import { homedir as homedir7 } from "os";
 import { createInterface as createInterface4 } from "readline";
 function readProject2() {
   try {
-    return JSON.parse(readFileSync7(PROJECT_FILE2, "utf8"));
+    return JSON.parse(readFileSync8(PROJECT_FILE2, "utf8"));
   } catch {
     return null;
   }
@@ -7285,8 +7362,8 @@ var TERMINALHIRE_DIR6, PROJECT_FILE2, args3, SHOW, declarationArg;
 var init_jpi_project = __esm({
   "bin/jpi-project.js"() {
     "use strict";
-    TERMINALHIRE_DIR6 = join7(homedir6(), ".terminalhire");
-    PROJECT_FILE2 = join7(TERMINALHIRE_DIR6, "project.json");
+    TERMINALHIRE_DIR6 = join8(homedir7(), ".terminalhire");
+    PROJECT_FILE2 = join8(TERMINALHIRE_DIR6, "project.json");
     args3 = process.argv.slice(2);
     SHOW = args3.includes("--show");
     declarationArg = args3.filter((a) => !a.startsWith("--")).join(" ").trim();
@@ -7298,13 +7375,13 @@ var jpi_bounties_exports = {};
 __export(jpi_bounties_exports, {
   run: () => run5
 });
-import { readFileSync as readFileSync8, writeFileSync as writeFileSync7, mkdirSync as mkdirSync7 } from "fs";
-import { join as join8 } from "path";
-import { homedir as homedir7 } from "os";
+import { readFileSync as readFileSync9, writeFileSync as writeFileSync7, mkdirSync as mkdirSync7 } from "fs";
+import { join as join9 } from "path";
+import { homedir as homedir8 } from "os";
 import { createInterface as createInterface5 } from "readline";
 function readIndexCache2() {
   try {
-    const entry = JSON.parse(readFileSync8(INDEX_CACHE_FILE2, "utf8"));
+    const entry = JSON.parse(readFileSync9(INDEX_CACHE_FILE3, "utf8"));
     if (Date.now() - entry.ts < INDEX_TTL_MS3) return entry.index;
     return null;
   } catch {
@@ -7313,7 +7390,7 @@ function readIndexCache2() {
 }
 function writeIndexCache2(index) {
   mkdirSync7(TERMINALHIRE_DIR7, { recursive: true });
-  writeFileSync7(INDEX_CACHE_FILE2, JSON.stringify({ ts: Date.now(), index }), "utf8");
+  writeFileSync7(INDEX_CACHE_FILE3, JSON.stringify({ ts: Date.now(), index }), "utf8");
 }
 async function fetchIndex2() {
   const cached = readIndexCache2();
@@ -7417,12 +7494,12 @@ Open this to claim/work the bounty (you go straight to the source \u2014 we neve
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR7, INDEX_CACHE_FILE2, INDEX_TTL_MS3, API_URL4, DEFAULT_LIMIT3, args4, limitArg3, LIMIT3, PRICED_ONLY, SHOW_ALL3, WINNABLE_ONLY, EFFORT_LABEL;
+var TERMINALHIRE_DIR7, INDEX_CACHE_FILE3, INDEX_TTL_MS3, API_URL4, DEFAULT_LIMIT3, args4, limitArg3, LIMIT3, PRICED_ONLY, SHOW_ALL3, WINNABLE_ONLY, EFFORT_LABEL;
 var init_jpi_bounties = __esm({
   "bin/jpi-bounties.js"() {
     "use strict";
-    TERMINALHIRE_DIR7 = join8(homedir7(), ".terminalhire");
-    INDEX_CACHE_FILE2 = join8(TERMINALHIRE_DIR7, "index-cache.json");
+    TERMINALHIRE_DIR7 = join9(homedir8(), ".terminalhire");
+    INDEX_CACHE_FILE3 = join9(TERMINALHIRE_DIR7, "index-cache.json");
     INDEX_TTL_MS3 = 15 * 60 * 1e3;
     API_URL4 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
     DEFAULT_LIMIT3 = 15;
@@ -7447,16 +7524,16 @@ __export(claims_exports, {
   removeClaim: () => removeClaim,
   updateClaim: () => updateClaim
 });
-import { readFileSync as readFileSync9, writeFileSync as writeFileSync8, mkdirSync as mkdirSync8, renameSync, existsSync as existsSync5 } from "fs";
-import { join as join9 } from "path";
-import { homedir as homedir8 } from "os";
+import { readFileSync as readFileSync10, writeFileSync as writeFileSync8, mkdirSync as mkdirSync8, renameSync, existsSync as existsSync6 } from "fs";
+import { join as join10 } from "path";
+import { homedir as homedir9 } from "os";
 function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function readClaims() {
   try {
-    if (!existsSync5(CLAIMS_FILE)) return [];
-    const data = JSON.parse(readFileSync9(CLAIMS_FILE, "utf8"));
+    if (!existsSync6(CLAIMS_FILE)) return [];
+    const data = JSON.parse(readFileSync10(CLAIMS_FILE, "utf8"));
     return Array.isArray(data?.claims) ? data.claims : [];
   } catch {
     return [];
@@ -7523,8 +7600,8 @@ var TERMINALHIRE_DIR8, CLAIMS_FILE, TERMINAL_STATES;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
-    TERMINALHIRE_DIR8 = join9(homedir8(), ".terminalhire");
-    CLAIMS_FILE = join9(TERMINALHIRE_DIR8, "claims.json");
+    TERMINALHIRE_DIR8 = join10(homedir9(), ".terminalhire");
+    CLAIMS_FILE = join10(TERMINALHIRE_DIR8, "claims.json");
     TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
   }
 });
@@ -7534,9 +7611,9 @@ var jpi_claim_exports = {};
 __export(jpi_claim_exports, {
   run: () => run6
 });
-import { readFileSync as readFileSync10, existsSync as existsSync6 } from "fs";
-import { join as join10 } from "path";
-import { homedir as homedir9 } from "os";
+import { readFileSync as readFileSync11, existsSync as existsSync7 } from "fs";
+import { join as join11 } from "path";
+import { homedir as homedir10 } from "os";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { createInterface as createInterface6 } from "readline";
@@ -7583,8 +7660,8 @@ function parseRepoFromRemote(url) {
 }
 function findBountyInCache(bountyId) {
   try {
-    if (!existsSync6(INDEX_CACHE_FILE3)) return null;
-    const entry = JSON.parse(readFileSync10(INDEX_CACHE_FILE3, "utf8"));
+    if (!existsSync7(INDEX_CACHE_FILE4)) return null;
+    const entry = JSON.parse(readFileSync11(INDEX_CACHE_FILE4, "utf8"));
     const jobs = entry?.index?.jobs ?? [];
     const job = jobs.find((j) => j.id === bountyId && j.source === "bounty");
     return job ?? null;
@@ -8088,12 +8165,12 @@ async function run6() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR9, INDEX_CACHE_FILE3, GH_API, GH_HEADERS, pExecFile, VALUE_FLAGS;
+var TERMINALHIRE_DIR9, INDEX_CACHE_FILE4, GH_API, GH_HEADERS, pExecFile, VALUE_FLAGS;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
-    TERMINALHIRE_DIR9 = join10(homedir9(), ".terminalhire");
-    INDEX_CACHE_FILE3 = join10(TERMINALHIRE_DIR9, "index-cache.json");
+    TERMINALHIRE_DIR9 = join11(homedir10(), ".terminalhire");
+    INDEX_CACHE_FILE4 = join11(TERMINALHIRE_DIR9, "index-cache.json");
     GH_API = "https://api.github.com";
     GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
     pExecFile = promisify(execFile);
@@ -8377,7 +8454,7 @@ function finalize(build) {
   };
 }
 function reconstruct(files, opts = {}) {
-  const join25 = opts.joinSidechains !== false;
+  const join26 = opts.joinSidechains !== false;
   const mains = [];
   const sidechains = [];
   for (const file of files) {
@@ -8402,7 +8479,7 @@ function reconstruct(files, opts = {}) {
   }
   const orphanedSidechainPaths = [];
   const joinedPaths = /* @__PURE__ */ new Set();
-  if (join25) {
+  if (join26) {
     const sidechainsBySession = /* @__PURE__ */ new Map();
     for (const sc of sidechains) {
       const acc = sidechainsBySession.get(sc.sessionId) ?? [];
@@ -8889,12 +8966,12 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
       continue;
     }
     spansConsidered++;
-    let run19 = 0;
+    let run20 = 0;
     const closeChain = () => {
-      if (run19 > 0) {
+      if (run20 > 0) {
         recoveryChains++;
-        totalDepth += run19;
-        run19 = 0;
+        totalDepth += run20;
+        run20 = 0;
       }
     };
     for (const uuid of episode.mainNodeUuids) {
@@ -8903,9 +8980,9 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
         continue;
       }
       if (node.kind === "tool_result" /* ToolResult */ && node.isError) {
-        run19++;
-        if (run19 > maxConsecutiveErrors) {
-          maxConsecutiveErrors = run19;
+        run20++;
+        if (run20 > maxConsecutiveErrors) {
+          maxConsecutiveErrors = run20;
         }
       } else if (node.kind === "tool_result" /* ToolResult */ && !node.isError) {
         closeChain();
@@ -8950,25 +9027,25 @@ var init_episodes = __esm({
 // src/web-session.ts
 import {
   chmodSync as chmodSync2,
-  existsSync as existsSync7,
+  existsSync as existsSync8,
   mkdirSync as mkdirSync9,
-  readFileSync as readFileSync11,
+  readFileSync as readFileSync12,
   rmSync as rmSync2,
   writeFileSync as writeFileSync9
 } from "fs";
-import { homedir as homedir10 } from "os";
-import { join as join11 } from "path";
+import { homedir as homedir11 } from "os";
+import { join as join12 } from "path";
 function terminalhireDir() {
-  return join11(homedir10(), ".terminalhire");
+  return join12(homedir11(), ".terminalhire");
 }
 function webSessionFilePath() {
-  return join11(terminalhireDir(), "web-session");
+  return join12(terminalhireDir(), "web-session");
 }
 function readWebSessionFile() {
   try {
     const path = webSessionFilePath();
-    if (!existsSync7(path)) return null;
-    const v = readFileSync11(path, "utf8").trim();
+    if (!existsSync8(path)) return null;
+    const v = readFileSync12(path, "utf8").trim();
     return v.length > 0 ? v : null;
   } catch {
     return null;
@@ -9010,14 +9087,14 @@ __export(trajectory_exports, {
   runTrajectoryPush: () => runTrajectoryPush
 });
 import {
-  existsSync as existsSync8,
+  existsSync as existsSync9,
   mkdirSync as mkdirSync10,
-  readFileSync as readFileSync12,
+  readFileSync as readFileSync13,
   readdirSync,
   writeFileSync as writeFileSync10
 } from "fs";
-import { homedir as homedir11 } from "os";
-import { join as join12 } from "path";
+import { homedir as homedir12 } from "os";
+import { join as join13 } from "path";
 function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -9049,7 +9126,7 @@ function findJsonlFiles(dir) {
     return out;
   }
   for (const entry of entries) {
-    const full = join12(dir, entry.name);
+    const full = join13(dir, entry.name);
     if (entry.isDirectory()) {
       out.push(...findJsonlFiles(full));
     } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
@@ -9063,7 +9140,7 @@ function loadCorpus(paths) {
   for (const path of paths) {
     let text;
     try {
-      text = readFileSync12(path, "utf8");
+      text = readFileSync13(path, "utf8");
     } catch {
       continue;
     }
@@ -9162,10 +9239,10 @@ function renderMarkdown(view) {
   return lines.join("\n");
 }
 function writeExportArtifacts(score, markdown) {
-  const dir = join12(homedir11(), ".terminalhire");
+  const dir = join13(homedir12(), ".terminalhire");
   mkdirSync10(dir, { recursive: true });
-  const jsonPath = join12(dir, "trajectory-export.json");
-  const mdPath = join12(dir, "trajectory-export.md");
+  const jsonPath = join13(dir, "trajectory-export.json");
+  const mdPath = join13(dir, "trajectory-export.md");
   writeFileSync10(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
   writeFileSync10(mdPath, markdown, "utf8");
   return { jsonPath, mdPath };
@@ -9186,8 +9263,8 @@ function renderInward(allNodes, view, files) {
   console.log("");
 }
 function buildTrajectory() {
-  const projectsDir = join12(homedir11(), ".claude", "projects");
-  if (!existsSync8(projectsDir)) return null;
+  const projectsDir = join13(homedir12(), ".claude", "projects");
+  if (!existsSync9(projectsDir)) return null;
   const paths = findJsonlFiles(projectsDir);
   if (paths.length === 0) return null;
   const files = loadCorpus(paths);
@@ -9636,9 +9713,24 @@ async function runIntroRequest(args5, overrides) {
     deps.exit(1);
     return;
   }
-  deps.log(`
+  let notified = false;
+  try {
+    const data = await res.json();
+    notified = data.notified === true;
+  } catch {
+  }
+  if (notified) {
+    deps.log(`
   Intro request sent to @${targetLogin}. They will see only your public login`);
-  deps.log("  until they accept; your contact is shared only if they do.\n");
+    deps.log("  until they accept; your contact is shared only if they do.\n");
+  } else {
+    deps.log(`
+  Intro request recorded for @${targetLogin} \u2014 but we couldn't email them`);
+    deps.log("  automatically (no public email on file). Send it to them yourself: they can run");
+    deps.log("  `terminalhire intro --list` (or open their dashboard) to see and accept it.");
+    deps.log("  They will see only your public login until they accept; your contact is");
+    deps.log("  shared only if they do.\n");
+  }
 }
 async function runIntroDecision(args5, overrides) {
   const deps = { ...defaultIntroDeps(), ...overrides };
@@ -9849,13 +9941,13 @@ var init_jpi_intro = __esm({
 });
 
 // src/chat-keystore.ts
-import { existsSync as existsSync9, mkdirSync as mkdirSync11, readFileSync as readFileSync13, writeFileSync as writeFileSync11, rmSync as rmSync3 } from "fs";
-import { homedir as homedir12 } from "os";
-import { join as join13 } from "path";
+import { existsSync as existsSync10, mkdirSync as mkdirSync11, readFileSync as readFileSync14, writeFileSync as writeFileSync11, rmSync as rmSync3 } from "fs";
+import { homedir as homedir13 } from "os";
+import { join as join14 } from "path";
 async function loadOrCreateIdentity() {
   const key = await loadKey();
-  if (existsSync9(IDENTITY_FILE)) {
-    const blob2 = JSON.parse(readFileSync13(IDENTITY_FILE, "utf8"));
+  if (existsSync10(IDENTITY_FILE)) {
+    const blob2 = JSON.parse(readFileSync14(IDENTITY_FILE, "utf8"));
     return JSON.parse(decrypt(blob2, key));
   }
   const keypair = generateIdentityKeypair();
@@ -9870,19 +9962,19 @@ var init_chat_keystore = __esm({
     "use strict";
     init_src();
     init_github_auth();
-    TERMINALHIRE_DIR10 = join13(homedir12(), ".terminalhire");
-    IDENTITY_FILE = join13(TERMINALHIRE_DIR10, "chat-identity.enc");
+    TERMINALHIRE_DIR10 = join14(homedir13(), ".terminalhire");
+    IDENTITY_FILE = join14(TERMINALHIRE_DIR10, "chat-identity.enc");
   }
 });
 
 // src/chat-client.ts
-import { existsSync as existsSync10, mkdirSync as mkdirSync12, readFileSync as readFileSync14, writeFileSync as writeFileSync12 } from "fs";
-import { homedir as homedir13 } from "os";
-import { join as join14 } from "path";
+import { existsSync as existsSync11, mkdirSync as mkdirSync12, readFileSync as readFileSync15, writeFileSync as writeFileSync12 } from "fs";
+import { homedir as homedir14 } from "os";
+import { join as join15 } from "path";
 function defaultReadPeerPins() {
   try {
-    if (!existsSync10(PEERS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync14(PEERS_FILE, "utf8"));
+    if (!existsSync11(PEERS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync15(PEERS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, key] of Object.entries(parsed)) {
@@ -10058,8 +10150,8 @@ var init_chat_client = __esm({
     init_web_session();
     CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
     GH_SESSION_COOKIE3 = "__jpi_gh_session";
-    TERMINALHIRE_DIR11 = join14(homedir13(), ".terminalhire");
-    PEERS_FILE = join14(TERMINALHIRE_DIR11, "chat-peers.json");
+    TERMINALHIRE_DIR11 = join15(homedir14(), ".terminalhire");
+    PEERS_FILE = join15(TERMINALHIRE_DIR11, "chat-peers.json");
     REQUEST_TIMEOUT_MS = 1e4;
     ChatNotLinkedError = class extends Error {
       constructor() {
@@ -10113,13 +10205,13 @@ __export(jpi_chat_read_exports, {
   runSend: () => runSend,
   writeReadCursor: () => writeReadCursor
 });
-import { existsSync as existsSync11, mkdirSync as mkdirSync13, readFileSync as readFileSync15, writeFileSync as writeFileSync13 } from "fs";
-import { homedir as homedir14 } from "os";
-import { join as join15 } from "path";
+import { existsSync as existsSync12, mkdirSync as mkdirSync13, readFileSync as readFileSync16, writeFileSync as writeFileSync13 } from "fs";
+import { homedir as homedir15 } from "os";
+import { join as join16 } from "path";
 function readReadCursors() {
   try {
-    if (!existsSync11(READS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync15(READS_FILE, "utf8"));
+    if (!existsSync12(READS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync16(READS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, iso] of Object.entries(parsed)) {
@@ -10415,8 +10507,8 @@ var init_jpi_chat_read = __esm({
     init_chat_client();
     init_jpi_chat();
     CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
-    TERMINALHIRE_DIR12 = join15(homedir14(), ".terminalhire");
-    READS_FILE = join15(TERMINALHIRE_DIR12, "chat-reads.json");
+    TERMINALHIRE_DIR12 = join16(homedir15(), ".terminalhire");
+    READS_FILE = join16(TERMINALHIRE_DIR12, "chat-reads.json");
   }
 });
 
@@ -11064,6 +11156,44 @@ var init_jpi_chat = __esm({
   }
 });
 
+// bin/jpi-connect.js
+var jpi_connect_exports = {};
+__export(jpi_connect_exports, {
+  run: () => run10
+});
+async function run10() {
+  const args5 = process.argv.slice(2).filter((a) => a !== "connect");
+  if (args5.includes("--mute")) {
+    writeConfig({ inboundNudgeMuted: true });
+    console.log("\n  Muted: your spinner will no longer surface incoming connection requests.");
+    console.log("  Pending intros are still there \u2014 see them any time with `terminalhire intro --list`.");
+    console.log("  Re-enable with `terminalhire connect --unmute`.\n");
+    return;
+  }
+  if (args5.includes("--unmute")) {
+    writeConfig({ inboundNudgeMuted: false });
+    console.log("\n  Unmuted: incoming connection requests will surface in your spinner again.");
+    console.log("  (Requires a linked terminal \u2014 run `terminalhire link` if you have not.)\n");
+    return;
+  }
+  const muted = isInboundNudgeMuted();
+  console.log("\n  terminalhire connect \u2014 find and reach other developers, locally matched:");
+  console.log("    terminalhire devs                 Rank opted-in builders & projects for you");
+  console.log('    terminalhire project "<title>: <skills>"   Declare a project to staff');
+  console.log("    terminalhire intro <github-login>  Request a consented intro (double opt-in)");
+  console.log("    terminalhire intro --list          See intros you have sent + received");
+  console.log("    terminalhire chat                  Message your accepted connections");
+  console.log("");
+  console.log(`  Ambient inbound nudge: ${muted ? "muted" : "on"}  (toggle: terminalhire connect --${muted ? "unmute" : "mute"})`);
+  console.log("");
+}
+var init_jpi_connect = __esm({
+  "bin/jpi-connect.js"() {
+    "use strict";
+    init_config();
+  }
+});
+
 // src/link.ts
 var link_exports = {};
 __export(link_exports, {
@@ -11176,6 +11306,8 @@ async function runLink(overrides) {
   deps.persistToken(outcome.token);
   deps.log("\n  This terminal is now linked to your terminalhire account.");
   deps.log("  Try `terminalhire intro <login>`, `terminalhire chat`, or `terminalhire trajectory --push`.");
+  deps.log("  Your spinner will quietly surface incoming connection requests.");
+  deps.log("  Turn that off any time with `terminalhire connect --mute`.");
   deps.log("  Unlink any time with `terminalhire link --logout`.\n");
   deps.exit(0);
 }
@@ -11241,9 +11373,9 @@ var init_link = __esm({
 // bin/jpi-link.js
 var jpi_link_exports = {};
 __export(jpi_link_exports, {
-  run: () => run10
+  run: () => run11
 });
-async function run10() {
+async function run11() {
   try {
     const args5 = process.argv.slice(2);
     if (args5.includes("--logout")) {
@@ -11267,7 +11399,7 @@ var init_jpi_link = __esm({
 // bin/jpi-profile.js
 var jpi_profile_exports = {};
 __export(jpi_profile_exports, {
-  run: () => run11
+  run: () => run12
 });
 import { createInterface as createInterface8 } from "readline";
 function prompt4(question) {
@@ -11279,7 +11411,7 @@ function prompt4(question) {
     });
   });
 }
-async function run11() {
+async function run12() {
   const { readProfile: readProfile2, writeProfile: writeProfile2, deleteProfile: deleteProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
   const args5 = process.argv.slice(2);
   if (args5.includes("--show")) {
@@ -11352,9 +11484,9 @@ var signal_exports = {};
 __export(signal_exports, {
   extractFingerprint: () => extractFingerprint
 });
-import { readFileSync as readFileSync16, readdirSync as readdirSync2 } from "fs";
+import { readFileSync as readFileSync17, readdirSync as readdirSync2 } from "fs";
 import { execFileSync } from "child_process";
-import { join as join16 } from "path";
+import { join as join17 } from "path";
 function safeGit(args5, cwd) {
   try {
     return execFileSync("git", ["-C", cwd, ...args5], {
@@ -11382,20 +11514,20 @@ function isEmployerContext(cwd) {
 }
 function readJsonSafe(path) {
   try {
-    return JSON.parse(readFileSync16(path, "utf8"));
+    return JSON.parse(readFileSync17(path, "utf8"));
   } catch {
     return null;
   }
 }
 function readFileSafe(path) {
   try {
-    return readFileSync16(path, "utf8");
+    return readFileSync17(path, "utf8");
   } catch {
     return "";
   }
 }
 function tokensFromPackageJson(cwd) {
-  const pkg = readJsonSafe(join16(cwd, "package.json"));
+  const pkg = readJsonSafe(join17(cwd, "package.json"));
   if (!pkg || typeof pkg !== "object") return [];
   const p = pkg;
   const deps = {
@@ -11409,9 +11541,9 @@ function workspaceMemberDirs(cwd) {
   const dirs = [cwd];
   for (const group of ["apps", "packages"]) {
     try {
-      const groupDir = join16(cwd, group);
+      const groupDir = join17(cwd, group);
       for (const e of readdirSync2(groupDir, { withFileTypes: true })) {
-        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join16(groupDir, e.name));
+        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join17(groupDir, e.name));
       }
     } catch {
     }
@@ -11419,18 +11551,18 @@ function workspaceMemberDirs(cwd) {
   return dirs;
 }
 function tokensFromRequirementsTxt(cwd) {
-  const content = readFileSafe(join16(cwd, "requirements.txt"));
+  const content = readFileSafe(join17(cwd, "requirements.txt"));
   if (!content) return [];
   return content.split("\n").map((l) => l.trim().split(/[>=<!\[;]/)[0].trim().toLowerCase()).filter(Boolean);
 }
 function tokensFromGoMod(cwd) {
-  const content = readFileSafe(join16(cwd, "go.mod"));
+  const content = readFileSafe(join17(cwd, "go.mod"));
   if (!content) return [];
   const requires = Array.from(content.matchAll(/^\s+([^\s]+)\s+v/gm)).map((m) => m[1].split("/").pop() ?? "").filter(Boolean);
   return ["go", ...requires];
 }
 function tokensFromCargoToml(cwd) {
-  const content = readFileSafe(join16(cwd, "Cargo.toml"));
+  const content = readFileSafe(join17(cwd, "Cargo.toml"));
   if (!content) return [];
   const deps = [];
   let inDeps = false;
@@ -11451,7 +11583,7 @@ function tokensFromFileExtensions(cwd) {
   const tokens = [];
   const scanDirs = [cwd];
   try {
-    const srcDir = join16(cwd, "src");
+    const srcDir = join17(cwd, "src");
     readdirSync2(srcDir);
     scanDirs.push(srcDir);
   } catch {
@@ -11612,9 +11744,9 @@ var init_signal = __esm({
 // bin/jpi-learn.js
 var jpi_learn_exports = {};
 __export(jpi_learn_exports, {
-  run: () => run12
+  run: () => run13
 });
-async function run12() {
+async function run13() {
   try {
     const args5 = process.argv.slice(2);
     const cwdIdx = args5.indexOf("--cwd");
@@ -11641,7 +11773,7 @@ var init_jpi_learn = __esm({
     "use strict";
     isMain = process.argv[1]?.endsWith("jpi-learn.js") || process.argv[1]?.endsWith("jpi-learn");
     if (isMain) {
-      run12();
+      run13();
     }
   }
 });
@@ -11649,17 +11781,17 @@ var init_jpi_learn = __esm({
 // bin/jpi-config.js
 var jpi_config_exports = {};
 __export(jpi_config_exports, {
-  run: () => run13
+  run: () => run14
 });
-import { join as join17 } from "path";
-import { homedir as homedir15 } from "os";
+import { join as join18 } from "path";
+import { homedir as homedir16 } from "os";
 function parseNudgeMode(raw) {
   if (raw === "session" || raw === "always") return raw;
   const m = /^every:(\d+)$/.exec(raw);
   if (m && parseInt(m[1], 10) >= 1) return raw;
   return null;
 }
-async function run13() {
+async function run14() {
   const args5 = process.argv.slice(2);
   const filtered = args5[0] === "config" ? args5.slice(1) : args5;
   if (filtered.includes("--show") || filtered.length === 0) {
@@ -11725,8 +11857,8 @@ var init_jpi_config = __esm({
   "bin/jpi-config.js"() {
     "use strict";
     init_config();
-    TERMINALHIRE_DIR13 = join17(homedir15(), ".terminalhire");
-    CONFIG_FILE2 = join17(TERMINALHIRE_DIR13, "config.json");
+    TERMINALHIRE_DIR13 = join18(homedir16(), ".terminalhire");
+    CONFIG_FILE2 = join18(TERMINALHIRE_DIR13, "config.json");
   }
 });
 
@@ -11737,6 +11869,7 @@ __export(spinner_exports, {
   applySpinnerTips: () => applySpinnerTips,
   applySpinnerVerbs: () => applySpinnerVerbs,
   buildContextVerbs: () => buildContextVerbs,
+  buildIncomingIntroLine: () => buildIncomingIntroLine,
   buildPeerLine: () => buildPeerLine,
   buildSpinnerPool: () => buildSpinnerPool,
   buildTips: () => buildTips,
@@ -11749,17 +11882,17 @@ __export(spinner_exports, {
   readSpinnerConfig: () => readSpinnerConfig
 });
 import {
-  readFileSync as readFileSync17,
+  readFileSync as readFileSync18,
   writeFileSync as writeFileSync14,
-  existsSync as existsSync12,
+  existsSync as existsSync13,
   mkdirSync as mkdirSync14,
   renameSync as renameSync2
 } from "fs";
-import { join as join18, dirname } from "path";
-import { homedir as homedir16 } from "os";
+import { join as join19, dirname } from "path";
+import { homedir as homedir17 } from "os";
 function readJson(path, fallback) {
   try {
-    return existsSync12(path) ? JSON.parse(readFileSync17(path, "utf8")) : fallback;
+    return existsSync13(path) ? JSON.parse(readFileSync18(path, "utf8")) : fallback;
   } catch {
     return fallback;
   }
@@ -11859,16 +11992,25 @@ function buildPeerLine(topPeers) {
   if (n < 1) return null;
   return n === 1 ? `\u25C6 1 builder matches what you're building \xB7 terminalhire devs` : `\u25C6 ${n} builders match what you're building \xB7 terminalhire devs`;
 }
+function buildIncomingIntroLine(incomingPending) {
+  const n = incomingPending && typeof incomingPending.count === "number" ? incomingPending.count : 0;
+  if (n < 1) return null;
+  return n === 1 ? `\u2198 someone wants to connect \xB7 terminalhire intro --list` : `\u2198 ${n} people want to connect \xB7 terminalhire intro --list`;
+}
 function buildSpinnerPool(topMatches, max = 6, opts = {}) {
-  const { sessionTags, frequency = "always", topPeers } = opts;
+  const { sessionTags, frequency = "always", topPeers, incomingPending } = opts;
+  const introLine = buildIncomingIntroLine(incomingPending);
   const ranked = rankBySessionTags(topMatches, sessionTags);
   if (!Array.isArray(ranked) || ranked.length === 0) {
+    if (introLine) return [introLine];
     const peerLine = buildPeerLine(topPeers);
     return peerLine ? [peerLine] : [];
   }
   const headers = buildContextVerbs(ranked, sessionTags);
   const cap = Math.max(1, verbCountForFrequency(frequency, headers.length));
-  return [...headers.slice(0, cap), ctaVerb()];
+  const pool = [...headers.slice(0, cap), ctaVerb()];
+  if (introLine) pool.push(introLine);
+  return pool;
 }
 function readState() {
   return readJson(SPINNER_STATE_FILE, { verbs: [], mode: "replace" });
@@ -12027,10 +12169,10 @@ var TH_DIR, CLAUDE_SETTINGS, CONFIG_FILE3, SPINNER_STATE_FILE, SPINNER_DEFAULTS,
 var init_spinner = __esm({
   "bin/spinner.js"() {
     "use strict";
-    TH_DIR = process.env["TERMINALHIRE_DIR"] || join18(homedir16(), ".terminalhire");
-    CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join18(homedir16(), ".claude", "settings.json");
-    CONFIG_FILE3 = join18(TH_DIR, "config.json");
-    SPINNER_STATE_FILE = join18(TH_DIR, "spinner-state.json");
+    TH_DIR = process.env["TERMINALHIRE_DIR"] || join19(homedir17(), ".terminalhire");
+    CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join19(homedir17(), ".claude", "settings.json");
+    CONFIG_FILE3 = join19(TH_DIR, "config.json");
+    SPINNER_STATE_FILE = join19(TH_DIR, "spinner-state.json");
     SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
     VERB_INTROS = ["Matched:", "You\u2019d fit:", "Worth a look:", "On your radar:", "Fits your stack:"];
   }
@@ -12039,21 +12181,21 @@ var init_spinner = __esm({
 // bin/jpi-spinner.js
 var jpi_spinner_exports = {};
 __export(jpi_spinner_exports, {
-  run: () => run14
+  run: () => run15
 });
 import {
-  readFileSync as readFileSync18,
+  readFileSync as readFileSync19,
   writeFileSync as writeFileSync15,
   copyFileSync,
-  existsSync as existsSync13,
+  existsSync as existsSync14,
   mkdirSync as mkdirSync15
 } from "fs";
-import { join as join19 } from "path";
-import { homedir as homedir17 } from "os";
+import { join as join20 } from "path";
+import { homedir as homedir18 } from "os";
 import { createInterface as createInterface9 } from "readline";
 function readConfig2() {
   try {
-    return existsSync13(CONFIG_FILE4) ? JSON.parse(readFileSync18(CONFIG_FILE4, "utf8")) : {};
+    return existsSync14(CONFIG_FILE4) ? JSON.parse(readFileSync19(CONFIG_FILE4, "utf8")) : {};
   } catch {
     return {};
   }
@@ -12064,7 +12206,7 @@ function writeConfig2(patch) {
   writeFileSync15(CONFIG_FILE4, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function backupSettings() {
-  if (!existsSync13(SETTINGS_PATH)) return null;
+  if (!existsSync14(SETTINGS_PATH)) return null;
   const ts = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
   const backupPath = `${SETTINGS_PATH}.terminalhire-backup-${ts}`;
   copyFileSync(SETTINGS_PATH, backupPath);
@@ -12081,13 +12223,13 @@ function ask(question) {
 }
 function readTopMatches() {
   try {
-    const c = JSON.parse(readFileSync18(CACHE_FILE, "utf8"));
+    const c = JSON.parse(readFileSync19(CACHE_FILE, "utf8"));
     return Array.isArray(c.topMatches) ? c.topMatches : [];
   } catch {
     return [];
   }
 }
-async function run14() {
+async function run15() {
   const args5 = process.argv.slice(2).filter((a) => a !== "spinner");
   const has = (f) => args5.includes(f);
   const val = (f) => {
@@ -12224,21 +12366,21 @@ var init_jpi_spinner = __esm({
   "bin/jpi-spinner.js"() {
     "use strict";
     init_spinner();
-    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join19(homedir17(), ".terminalhire");
-    CONFIG_FILE4 = join19(TH_DIR2, "config.json");
-    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join19(homedir17(), ".claude", "settings.json");
-    CACHE_FILE = join19(TH_DIR2, "index-cache.json");
+    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join20(homedir18(), ".terminalhire");
+    CONFIG_FILE4 = join20(TH_DIR2, "config.json");
+    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join20(homedir18(), ".claude", "settings.json");
+    CACHE_FILE = join20(TH_DIR2, "index-cache.json");
   }
 });
 
 // bin/jpi-sync.js
 var jpi_sync_exports = {};
 __export(jpi_sync_exports, {
-  run: () => run15
+  run: () => run16
 });
-import { readFileSync as readFileSync19, writeFileSync as writeFileSync16, mkdirSync as mkdirSync16, existsSync as existsSync14, rmSync as rmSync4 } from "fs";
-import { join as join20 } from "path";
-import { homedir as homedir18, hostname as osHostname } from "os";
+import { readFileSync as readFileSync20, writeFileSync as writeFileSync16, mkdirSync as mkdirSync16, existsSync as existsSync15, rmSync as rmSync4 } from "fs";
+import { join as join21 } from "path";
+import { homedir as homedir19, hostname as osHostname } from "os";
 import { createInterface as createInterface10 } from "readline";
 function ask2(question) {
   const rl = createInterface10({ input: process.stdin, output: process.stdout });
@@ -12251,7 +12393,7 @@ function ask2(question) {
 }
 function readMarker() {
   try {
-    return existsSync14(TIER1_MARKER) ? JSON.parse(readFileSync19(TIER1_MARKER, "utf8")) : null;
+    return existsSync15(TIER1_MARKER) ? JSON.parse(readFileSync20(TIER1_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
@@ -12546,7 +12688,7 @@ async function runDelete() {
   clearMarker();
   console.log("\n  Synced profile deleted and local marker cleared.\n");
 }
-async function run15() {
+async function run16() {
   const args5 = process.argv.slice(2).filter((a) => a !== "sync");
   const has = (f) => args5.includes(f);
   if (has("--push") || has("--enable")) {
@@ -12577,8 +12719,8 @@ var init_jpi_sync = __esm({
   "bin/jpi-sync.js"() {
     "use strict";
     init_open_url();
-    TH_DIR3 = process.env["TERMINALHIRE_DIR"] || join20(homedir18(), ".terminalhire");
-    TIER1_MARKER = join20(TH_DIR3, "tier1.json");
+    TH_DIR3 = process.env["TERMINALHIRE_DIR"] || join21(homedir19(), ".terminalhire");
+    TIER1_MARKER = join21(TH_DIR3, "tier1.json");
     API_URL5 = process.env["TERMINALHIRE_API_URL"] || process.env["JPI_API_URL"] || "https://terminalhire.com";
     SYNC_BASE = "https://www.terminalhire.com";
     POLL_INTERVAL_MS = 2e3;
@@ -12590,14 +12732,14 @@ var init_jpi_sync = __esm({
 // bin/jpi-init.js
 var jpi_init_exports = {};
 __export(jpi_init_exports, {
-  run: () => run16
+  run: () => run17
 });
-import { existsSync as existsSync15 } from "fs";
-import { join as join21, resolve } from "path";
-import { fileURLToPath as fileURLToPath3 } from "url";
+import { existsSync as existsSync16 } from "fs";
+import { join as join22, resolve } from "path";
+import { fileURLToPath as fileURLToPath4 } from "url";
 import { createInterface as createInterface11 } from "readline";
 import { spawnSync, spawn as spawn2 } from "child_process";
-import { homedir as homedir19 } from "os";
+import { homedir as homedir20 } from "os";
 function ask3(question) {
   const rl = createInterface11({ input: process.stdin, output: process.stdout });
   return new Promise((resolve2) => {
@@ -12608,18 +12750,18 @@ function ask3(question) {
   });
 }
 function resolveScript(name) {
-  const distPath = resolve(join21(__dirname2, "..", "..", "dist", "bin", `${name}.js`));
-  const legacyPath = resolve(join21(__dirname2, `${name}.js`));
-  return existsSync15(distPath) ? distPath : legacyPath;
+  const distPath = resolve(join22(__dirname3, "..", "..", "dist", "bin", `${name}.js`));
+  const legacyPath = resolve(join22(__dirname3, `${name}.js`));
+  return existsSync16(distPath) ? distPath : legacyPath;
 }
 function resolveInstallJs() {
-  const fromDist = resolve(join21(__dirname2, "..", "..", "install.js"));
-  const fromBin = resolve(join21(__dirname2, "..", "install.js"));
-  if (existsSync15(fromDist)) return fromDist;
-  if (existsSync15(fromBin)) return fromBin;
+  const fromDist = resolve(join22(__dirname3, "..", "..", "install.js"));
+  const fromBin = resolve(join22(__dirname3, "..", "install.js"));
+  if (existsSync16(fromDist)) return fromDist;
+  if (existsSync16(fromBin)) return fromBin;
   return fromBin;
 }
-async function run16() {
+async function run17() {
   console.log("");
   console.log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
   console.log("\u2502           terminalhire init \u2014 one-command onboarding            \u2502");
@@ -12711,24 +12853,24 @@ async function run16() {
   console.log("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518");
   console.log("");
 }
-var __dirname2;
+var __dirname3;
 var init_jpi_init = __esm({
   "bin/jpi-init.js"() {
     "use strict";
-    __dirname2 = fileURLToPath3(new URL(".", import.meta.url));
+    __dirname3 = fileURLToPath4(new URL(".", import.meta.url));
   }
 });
 
 // bin/jpi-refresh.js
 var jpi_refresh_exports = {};
 __export(jpi_refresh_exports, {
-  run: () => run17
+  run: () => run18
 });
-import { readFileSync as readFileSync20, writeFileSync as writeFileSync17, existsSync as existsSync16, mkdirSync as mkdirSync17 } from "fs";
-import { join as join22 } from "path";
-import { homedir as homedir20 } from "os";
-import { fileURLToPath as fileURLToPath4 } from "url";
-async function run17() {
+import { readFileSync as readFileSync21, writeFileSync as writeFileSync17, existsSync as existsSync17, mkdirSync as mkdirSync17 } from "fs";
+import { join as join23 } from "path";
+import { homedir as homedir21 } from "os";
+import { fileURLToPath as fileURLToPath5 } from "url";
+async function run18() {
   try {
     let index;
     try {
@@ -12818,15 +12960,32 @@ async function run17() {
       }
     } catch {
     }
+    let incomingPending = { count: 0 };
+    const sessionCookie = readWebSessionFile();
+    if (sessionCookie && !isInboundNudgeMuted()) try {
+      const res = await fetch(`${API_URL6}/api/intro/list`, {
+        method: "GET",
+        headers: { Cookie: `${GH_SESSION_COOKIE6}=${sessionCookie}` },
+        signal: AbortSignal.timeout(1e4)
+      });
+      if (res.ok) {
+        const body = await res.json();
+        const intros = Array.isArray(body?.intros) ? body.intros : [];
+        const incoming = intros.filter((it) => it && it.role === "incoming" && it.status === "pending");
+        incomingPending = { count: incoming.length };
+      }
+    } catch {
+    }
     mkdirSync17(TERMINALHIRE_DIR14, { recursive: true });
     const cacheEntry = {
       ts: Date.now(),
       index,
       matchCount,
       topMatches,
-      topPeers
+      topPeers,
+      incomingPending
     };
-    writeFileSync17(INDEX_CACHE_FILE4, JSON.stringify(cacheEntry), "utf8");
+    writeFileSync17(INDEX_CACHE_FILE5, JSON.stringify(cacheEntry), "utf8");
     try {
       const {
         readSpinnerConfig: readSpinnerConfig2,
@@ -12850,7 +13009,7 @@ async function run17() {
         } catch {
         }
         const ranked = rankBySessionTags2(topMatches, sessionTags);
-        const verbs = buildSpinnerPool2(ranked, sc.max, { sessionTags, frequency: sc.frequency, topPeers });
+        const verbs = buildSpinnerPool2(ranked, sc.max, { sessionTags, frequency: sc.frequency, topPeers, incomingPending });
         if (verbs.length > 0) applySpinnerVerbs2(verbs, sc.mode);
         else clearSpinnerVerbs2();
         const tips = buildTips2(ranked, API_URL6, 8);
@@ -12862,6 +13021,13 @@ async function run17() {
       }
     } catch {
     }
+    try {
+      const { readLocalVersion: readLocalVersion2, buildStaleNudge: buildStaleNudge2 } = await Promise.resolve().then(() => (init_version_nudge(), version_nudge_exports));
+      const nudge = buildStaleNudge2(readLocalVersion2(), index?.cliVersion);
+      if (nudge) process.stderr.write(`${nudge}
+`);
+    } catch {
+    }
     process.exit(0);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -12870,15 +13036,17 @@ async function run17() {
     process.exit(1);
   }
 }
-var __dirname3, TERMINALHIRE_DIR14, INDEX_CACHE_FILE4, API_URL6;
+var GH_SESSION_COOKIE6, __dirname4, TERMINALHIRE_DIR14, INDEX_CACHE_FILE5, API_URL6;
 var init_jpi_refresh = __esm({
   "bin/jpi-refresh.js"() {
     "use strict";
     init_directory2();
     init_config();
-    __dirname3 = fileURLToPath4(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR14 = join22(homedir20(), ".terminalhire");
-    INDEX_CACHE_FILE4 = join22(TERMINALHIRE_DIR14, "index-cache.json");
+    init_web_session();
+    GH_SESSION_COOKIE6 = "__jpi_gh_session";
+    __dirname4 = fileURLToPath5(new URL(".", import.meta.url));
+    TERMINALHIRE_DIR14 = join23(homedir21(), ".terminalhire");
+    INDEX_CACHE_FILE5 = join23(TERMINALHIRE_DIR14, "index-cache.json");
     API_URL6 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
   }
 });
@@ -12886,16 +13054,16 @@ var init_jpi_refresh = __esm({
 // bin/jpi-save.js
 var jpi_save_exports = {};
 __export(jpi_save_exports, {
-  run: () => run18
+  run: () => run19
 });
-import { readFileSync as readFileSync21, existsSync as existsSync17 } from "fs";
-import { join as join23 } from "path";
-import { homedir as homedir21 } from "os";
-import { fileURLToPath as fileURLToPath5 } from "url";
+import { readFileSync as readFileSync22, existsSync as existsSync18 } from "fs";
+import { join as join24 } from "path";
+import { homedir as homedir22 } from "os";
+import { fileURLToPath as fileURLToPath6 } from "url";
 function findJobInCache(jobId) {
   try {
-    if (!existsSync17(INDEX_CACHE_FILE5)) return null;
-    const raw = readFileSync21(INDEX_CACHE_FILE5, "utf8");
+    if (!existsSync18(INDEX_CACHE_FILE6)) return null;
+    const raw = readFileSync22(INDEX_CACHE_FILE6, "utf8");
     const entry = JSON.parse(raw);
     const jobs = entry?.index?.jobs ?? [];
     return jobs.find((j) => j.id === jobId) ?? null;
@@ -12964,7 +13132,7 @@ async function cmdUnsave(jobId) {
     process.exit(1);
   }
 }
-async function run18() {
+async function run19() {
   const verb = process.argv[2];
   const jobId = process.argv[3];
   try {
@@ -12983,31 +13151,31 @@ async function run18() {
     process.exit(1);
   }
 }
-var __dirname4, TERMINALHIRE_DIR15, INDEX_CACHE_FILE5;
+var __dirname5, TERMINALHIRE_DIR15, INDEX_CACHE_FILE6;
 var init_jpi_save = __esm({
   "bin/jpi-save.js"() {
     "use strict";
-    __dirname4 = fileURLToPath5(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR15 = join23(homedir21(), ".terminalhire");
-    INDEX_CACHE_FILE5 = join23(TERMINALHIRE_DIR15, "index-cache.json");
+    __dirname5 = fileURLToPath6(new URL(".", import.meta.url));
+    TERMINALHIRE_DIR15 = join24(homedir22(), ".terminalhire");
+    INDEX_CACHE_FILE6 = join24(TERMINALHIRE_DIR15, "index-cache.json");
   }
 });
 
 // bin/jpi-dispatch.js
-import { fileURLToPath as fileURLToPath6 } from "url";
-import { join as join24, dirname as dirname2 } from "path";
-import { existsSync as existsSync18, readFileSync as readFileSync22 } from "fs";
+import { fileURLToPath as fileURLToPath7 } from "url";
+import { join as join25, dirname as dirname2 } from "path";
+import { existsSync as existsSync19, readFileSync as readFileSync23 } from "fs";
 import { createRequire } from "module";
-var __dirname5 = fileURLToPath6(new URL(".", import.meta.url));
+var __dirname6 = fileURLToPath7(new URL(".", import.meta.url));
 function readPackageVersion() {
   try {
     const candidates = [
-      join24(__dirname5, "..", "..", "package.json"),
-      join24(__dirname5, "..", "package.json")
+      join25(__dirname6, "..", "..", "package.json"),
+      join25(__dirname6, "..", "package.json")
     ];
     for (const p of candidates) {
-      if (existsSync18(p)) {
-        const pkg = JSON.parse(readFileSync22(p, "utf8"));
+      if (existsSync19(p)) {
+        const pkg = JSON.parse(readFileSync23(p, "utf8"));
         if (pkg.version) return pkg.version;
       }
     }
@@ -13018,7 +13186,7 @@ function readPackageVersion() {
 var firstArg = process.argv[2];
 if (!firstArg && !process.stdin.isTTY) {
   const { default: childProcess } = await import("child_process");
-  const nudgeScript = join24(__dirname5, "jpi.js");
+  const nudgeScript = join25(__dirname6, "jpi.js");
   const child = childProcess.spawnSync(process.execPath, [nudgeScript], {
     stdio: ["inherit", "inherit", "inherit"]
   });
@@ -13054,6 +13222,9 @@ if (!firstArg || firstArg === "help" || firstArg === "--help" || firstArg === "-
   console.log("  terminalhire chat <github-login> --read     Read a thread inline (last 8; -n N / --all for depth)");
   console.log('  terminalhire chat <github-login> --send "\u2026" Send one line to a connection (E2E encrypted)');
   console.log("  terminalhire chat <github-login>            Open the live E2E chat pane with an accepted connection");
+  console.log("  terminalhire connect                        Connect family overview + inbound-nudge state");
+  console.log("  terminalhire connect --mute                 Stop surfacing incoming connection requests in the spinner");
+  console.log("  terminalhire connect --unmute               Resume surfacing incoming connection requests");
   console.log("  terminalhire link                           Connect this terminal to your terminalhire account");
   console.log("  terminalhire link --logout                  Revoke + remove this terminal's linked session");
   console.log("  terminalhire profile --show                 Display your encrypted local profile");
@@ -13089,7 +13260,15 @@ if (!firstArg || firstArg === "help" || firstArg === "--help" || firstArg === "-
   process.exit(0);
 }
 if (firstArg === "--version" || firstArg === "-v") {
-  console.log(`terminalhire v${readPackageVersion()}`);
+  const local = readPackageVersion();
+  console.log(`terminalhire v${local}`);
+  try {
+    const { cachedStaleNudge: cachedStaleNudge2 } = await Promise.resolve().then(() => (init_version_nudge(), version_nudge_exports));
+    const nudge = cachedStaleNudge2(local);
+    if (nudge) process.stderr.write(`${nudge}
+`);
+  } catch {
+  }
   process.exit(0);
 }
 if (firstArg === "login" || firstArg === "logout") {
@@ -13142,6 +13321,11 @@ if (firstArg === "intro") {
 if (firstArg === "chat") {
   process.argv.splice(2, 1);
   const mod2 = await Promise.resolve().then(() => (init_jpi_chat(), jpi_chat_exports));
+  await mod2.run();
+  process.exit(0);
+}
+if (firstArg === "connect") {
+  const mod2 = await Promise.resolve().then(() => (init_jpi_connect(), jpi_connect_exports));
   await mod2.run();
   process.exit(0);
 }

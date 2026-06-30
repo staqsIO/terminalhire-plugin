@@ -9,7 +9,8 @@ var DEFAULT_CONFIG = {
   peerConnect: false,
   peerConnectPrompted: false,
   resumePublishPrompted: false,
-  chatDisclosureAck: false
+  chatDisclosureAck: false,
+  inboundNudgeMuted: false
 };
 function readConfig() {
   try {
@@ -48,8 +49,12 @@ function getNudgeMode() {
 function isPeerConnectEnabled() {
   return readConfig().peerConnect === true;
 }
+function isInboundNudgeMuted() {
+  return readConfig().inboundNudgeMuted === true;
+}
 export {
   getNudgeMode,
+  isInboundNudgeMuted,
   isPeerConnectEnabled,
   parseNudgeMode,
   readConfig,

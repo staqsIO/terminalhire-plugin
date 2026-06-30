@@ -111,16 +111,25 @@ function buildPeerLine(topPeers) {
   if (n < 1) return null;
   return n === 1 ? `\u25C6 1 builder matches what you're building \xB7 terminalhire devs` : `\u25C6 ${n} builders match what you're building \xB7 terminalhire devs`;
 }
+function buildIncomingIntroLine(incomingPending) {
+  const n = incomingPending && typeof incomingPending.count === "number" ? incomingPending.count : 0;
+  if (n < 1) return null;
+  return n === 1 ? `\u2198 someone wants to connect \xB7 terminalhire intro --list` : `\u2198 ${n} people want to connect \xB7 terminalhire intro --list`;
+}
 function buildSpinnerPool(topMatches, max = 6, opts = {}) {
-  const { sessionTags, frequency = "always", topPeers } = opts;
+  const { sessionTags, frequency = "always", topPeers, incomingPending } = opts;
+  const introLine = buildIncomingIntroLine(incomingPending);
   const ranked = rankBySessionTags(topMatches, sessionTags);
   if (!Array.isArray(ranked) || ranked.length === 0) {
+    if (introLine) return [introLine];
     const peerLine = buildPeerLine(topPeers);
     return peerLine ? [peerLine] : [];
   }
   const headers = buildContextVerbs(ranked, sessionTags);
   const cap = Math.max(1, verbCountForFrequency(frequency, headers.length));
-  return [...headers.slice(0, cap), ctaVerb()];
+  const pool = [...headers.slice(0, cap), ctaVerb()];
+  if (introLine) pool.push(introLine);
+  return pool;
 }
 function readState() {
   return readJson(SPINNER_STATE_FILE, { verbs: [], mode: "replace" });

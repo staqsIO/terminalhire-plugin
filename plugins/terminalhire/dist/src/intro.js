@@ -1232,9 +1232,24 @@ async function runIntroRequest(args, overrides) {
     deps.exit(1);
     return;
   }
-  deps.log(`
+  let notified = false;
+  try {
+    const data = await res.json();
+    notified = data.notified === true;
+  } catch {
+  }
+  if (notified) {
+    deps.log(`
   Intro request sent to @${targetLogin}. They will see only your public login`);
-  deps.log("  until they accept; your contact is shared only if they do.\n");
+    deps.log("  until they accept; your contact is shared only if they do.\n");
+  } else {
+    deps.log(`
+  Intro request recorded for @${targetLogin} \u2014 but we couldn't email them`);
+    deps.log("  automatically (no public email on file). Send it to them yourself: they can run");
+    deps.log("  `terminalhire intro --list` (or open their dashboard) to see and accept it.");
+    deps.log("  They will see only your public login until they accept; your contact is");
+    deps.log("  shared only if they do.\n");
+  }
 }
 async function runIntroDecision(args, overrides) {
   const deps = { ...defaultIntroDeps(), ...overrides };
