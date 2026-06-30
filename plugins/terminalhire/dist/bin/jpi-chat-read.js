@@ -4151,7 +4151,8 @@ var init_config = __esm({
       peerConnectPrompted: false,
       resumePublishPrompted: false,
       chatDisclosureAck: false,
-      inboundNudgeMuted: false
+      inboundNudgeMuted: false,
+      inboundNudgeDisclosed: false
     };
   }
 });

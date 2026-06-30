@@ -15,7 +15,8 @@ var DEFAULT_CONFIG = {
   peerConnectPrompted: false,
   resumePublishPrompted: false,
   chatDisclosureAck: false,
-  inboundNudgeMuted: false
+  inboundNudgeMuted: false,
+  inboundNudgeDisclosed: false
 };
 function readConfig() {
   try {

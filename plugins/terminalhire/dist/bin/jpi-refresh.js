@@ -6905,6 +6905,15 @@ function reportMatched(results, fetchImpl = fetch) {
   } catch {
   }
 }
+function excludeOwnCard(results, ownLogin) {
+  if (!Array.isArray(results)) return results;
+  if (typeof ownLogin !== "string" || ownLogin.length === 0) return results;
+  const own = ownLogin.toLowerCase();
+  return results.filter((r) => {
+    const handle = r?.job?.company;
+    return typeof handle !== "string" || handle.toLowerCase() !== own;
+  });
+}
 
 // src/config.ts
 import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, existsSync } from "fs";
@@ -6918,7 +6927,8 @@ var DEFAULT_CONFIG = {
   peerConnectPrompted: false,
   resumePublishPrompted: false,
   chatDisclosureAck: false,
-  inboundNudgeMuted: false
+  inboundNudgeMuted: false,
+  inboundNudgeDisclosed: false
 };
 function readConfig() {
   try {
@@ -7040,9 +7050,16 @@ async function run() {
         const directory = await fetchDirectory({ quiet: true });
         const cards = directory?.cards ?? [];
         if (cards.length > 0) {
-          const peerResults = match2(fp, cards, cards.length).filter(
+          const strongPeers = match2(fp, cards, cards.length).filter(
             (r) => r.score >= STRONG_MATCH_THRESHOLD2
           );
+          let ownLogin;
+          try {
+            const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+            ownLogin = (await readProfile2())?.github?.login;
+          } catch {
+          }
+          const peerResults = excludeOwnCard(strongPeers, ownLogin);
           topPeers = peerResults.map((r) => ({
             login: r.job.company,
             // public handle (person login / project owner)

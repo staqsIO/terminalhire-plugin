@@ -57,6 +57,44 @@ var init_web_session = __esm({
   }
 });
 
+// src/config.ts
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, existsSync as existsSync2 } from "fs";
+import { join as join2 } from "path";
+import { homedir as homedir2 } from "os";
+function readConfig() {
+  try {
+    if (!existsSync2(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
+    const raw = readFileSync2(CONFIG_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_CONFIG, ...parsed };
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+}
+function writeConfig(config) {
+  mkdirSync2(TERMINALHIRE_DIR, { recursive: true });
+  const current = readConfig();
+  const merged = { ...current, ...config };
+  writeFileSync2(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
+}
+var TERMINALHIRE_DIR, CONFIG_FILE, DEFAULT_CONFIG;
+var init_config = __esm({
+  "src/config.ts"() {
+    "use strict";
+    TERMINALHIRE_DIR = join2(homedir2(), ".terminalhire");
+    CONFIG_FILE = join2(TERMINALHIRE_DIR, "config.json");
+    DEFAULT_CONFIG = {
+      nudge: "session",
+      peerConnect: false,
+      peerConnectPrompted: false,
+      resumePublishPrompted: false,
+      chatDisclosureAck: false,
+      inboundNudgeMuted: false,
+      inboundNudgeDisclosed: false
+    };
+  }
+});
+
 // src/open-url.js
 var open_url_exports = {};
 __export(open_url_exports, {
@@ -165,6 +203,7 @@ function defaultLinkDeps() {
     },
     generateNonce: () => randomBytes(16).toString("hex"),
     persistToken: (token) => writeWebSessionFile(token),
+    markNudgeDisclosed: () => writeConfig({ inboundNudgeDisclosed: true }),
     log: (msg) => console.log(msg),
     errorLog: (msg) => console.error(msg),
     exit: (code) => process.exit(code)
@@ -205,6 +244,10 @@ async function runLink(overrides) {
   deps.log("  Your spinner will quietly surface incoming connection requests.");
   deps.log("  Turn that off any time with `terminalhire connect --mute`.");
   deps.log("  Unlink any time with `terminalhire link --logout`.\n");
+  try {
+    deps.markNudgeDisclosed();
+  } catch {
+  }
   deps.exit(0);
 }
 function defaultLinkLogoutDeps() {
@@ -249,6 +292,7 @@ var init_link = __esm({
   "src/link.ts"() {
     "use strict";
     init_web_session();
+    init_config();
     LINK_BASE = "https://www.terminalhire.com";
     GH_SESSION_COOKIE = "__jpi_gh_session";
     LINK_TIMEOUT_MS = 12e4;

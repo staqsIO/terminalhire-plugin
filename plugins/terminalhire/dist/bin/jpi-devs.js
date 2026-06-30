@@ -6251,6 +6251,15 @@ function reportMatched(results, fetchImpl = fetch) {
   } catch {
   }
 }
+function excludeOwnCard(results, ownLogin) {
+  if (!Array.isArray(results)) return results;
+  if (typeof ownLogin !== "string" || ownLogin.length === 0) return results;
+  const own = ownLogin.toLowerCase();
+  return results.filter((r) => {
+    const handle = r?.job?.company;
+    return typeof handle !== "string" || handle.toLowerCase() !== own;
+  });
+}
 
 // bin/jpi-devs.js
 var API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
@@ -6327,7 +6336,14 @@ async function run() {
       console.log("\nNo builders or projects published yet. Check back soon \u2014 the directory fills as devs publish.");
       return;
     }
-    const results = match2(fp, cards, SHOW_ALL ? cards.length : LIMIT);
+    let results = match2(fp, cards, SHOW_ALL ? cards.length : LIMIT);
+    let ownLogin;
+    try {
+      const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+      ownLogin = (await readProfile2())?.github?.login;
+    } catch {
+    }
+    results = excludeOwnCard(results, ownLogin);
     if (results.length === 0) {
       console.log(`No matching builders or projects for your current ${AS_PROJECT ? "project" : "profile"}.`);
       console.log("  Your tags: " + fp.skillTags.join(", "));
