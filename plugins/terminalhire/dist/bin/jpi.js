@@ -180,8 +180,9 @@ try {
   const unreadChatCount = getCachedUnreadChatCount();
   const haveRoles = matchCount !== null && matchCount > 0;
   if (!haveRoles && incomingCount === 0 && unreadChatCount === 0) process.exit(0);
+  const hasConnectionSignal = incomingCount > 0 || unreadChatCount > 0;
   const nudgeMode = getNudgeMode();
-  if (!shouldNudge(nudgeMode, sessionId)) process.exit(0);
+  if (!hasConnectionSignal && !shouldNudge(nudgeMode, sessionId)) process.exit(0);
   let line;
   if (haveRoles) {
     const plural = matchCount === 1 ? "role" : "roles";
@@ -195,7 +196,7 @@ try {
     line = `\u{1F4AC} ${unreadChatCount} unread \u2014 run: terminalhire chat`;
   }
   process.stdout.write(line + "\n");
-  if (nudgeMode === "session") {
+  if (haveRoles && nudgeMode === "session") {
     markNudged(sessionId);
   }
   process.exit(0);
