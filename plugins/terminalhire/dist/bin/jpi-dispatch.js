@@ -9732,11 +9732,21 @@ async function runIntroRequest(args5, overrides) {
     deps.log("  shared only if they do.\n");
   }
 }
+async function fetchIntros(deps, cookie) {
+  const res = await deps.fetchImpl(`${LINK_BASE2}/api/intro/list`, {
+    method: "GET",
+    headers: { Cookie: `${GH_SESSION_COOKIE2}=${cookie}` },
+    signal: AbortSignal.timeout(1e4)
+  });
+  if (!res.ok) throw new Error(`/api/intro/list returned ${res.status}`);
+  const data = await res.json().catch(() => ({}));
+  return data.intros ?? [];
+}
 async function runIntroDecision(args5, overrides) {
   const deps = { ...defaultIntroDeps(), ...overrides };
-  const id = args5.id?.trim();
+  let id = args5.id?.trim() ?? "";
   if (!id) {
-    deps.errorLog("\n  Usage: terminalhire intro --accept <id> | --decline <id>\n");
+    deps.errorLog("\n  Usage: terminalhire intro --accept <@handle|id> | --decline <@handle|id>\n");
     deps.exit(1);
     return;
   }
@@ -9747,19 +9757,51 @@ async function runIntroDecision(args5, overrides) {
     deps.exit(0);
     return;
   }
-  let contact = "";
-  if (args5.action === "accept") {
-    const profile = await deps.readProfileContact();
-    contact = (args5.contact ?? profile.contactEmail ?? "").trim();
-    if (!contact) {
-      deps.errorLog("\n  No contact on file to share back. Set one with `terminalhire profile --edit`,");
-      deps.errorLog("  or pass `--contact <email-or-handle>`. Nothing was sent.\n");
+  if (!UUID_RE.test(id)) {
+    const handle = id.replace(/^@/, "").toLowerCase();
+    let intros;
+    try {
+      intros = await fetchIntros(deps, cookie);
+    } catch (err) {
+      deps.errorLog(`
+  Could not look up the request: ${err instanceof Error ? err.message : String(err)}
+`);
       deps.exit(1);
       return;
     }
+    const matches = intros.filter(
+      (it) => it.role === "incoming" && it.status === "pending" && it.counterpartyLogin.toLowerCase() === handle
+    );
+    if (matches.length === 0) {
+      deps.errorLog(`
+  No pending connection request from @${handle}.`);
+      deps.errorLog("  See your requests with `terminalhire intro --list`.\n");
+      deps.exit(1);
+      return;
+    }
+    if (matches.length > 1) {
+      deps.errorLog(`
+  ${matches.length} pending requests from @${handle} \u2014 ${args5.action === "accept" ? "accepting" : "declining"} one (the rest are redundant duplicates).`);
+    }
+    id = matches[0].id;
+  }
+  let contact = "";
+  let shareHandle = false;
+  if (args5.action === "accept") {
+    const profile = await deps.readProfileContact();
+    contact = (args5.contact ?? profile.contactEmail ?? "").trim();
+    shareHandle = contact.length === 0;
+    let shareLabel = contact;
+    if (shareHandle) {
+      const login = await deps.readGithubLogin().catch(() => null);
+      shareLabel = login ? `your GitHub handle (@${login})` : "your GitHub handle";
+    }
     deps.log("");
-    deps.log("  Accepting shares your contact with the requester so they can reach you:");
-    deps.log(`    Your contact : ${contact}`);
+    deps.log("  Accepting shares a contact with the requester so they can reach you:");
+    deps.log(`    Your contact : ${shareLabel}`);
+    if (shareHandle) {
+      deps.log("    (share an email/handle instead with `--contact <email-or-handle>`)");
+    }
     deps.log("  Nothing else is shared. Declining shares nothing.");
     deps.log("");
     const answer = await deps.prompt('  Type "yes" to accept and share your contact (anything else cancels): ');
@@ -9769,7 +9811,7 @@ async function runIntroDecision(args5, overrides) {
       return;
     }
   }
-  const body = args5.action === "accept" ? { introId: id, action: "accept", targetContact: contact } : { introId: id, action: "decline" };
+  const body = args5.action === "accept" ? shareHandle ? { introId: id, action: "accept" } : { introId: id, action: "accept", targetContact: contact } : { introId: id, action: "decline" };
   let res;
   try {
     res = await deps.fetchImpl(`${LINK_BASE2}/api/intro/accept`, {
@@ -9874,12 +9916,12 @@ async function runIntroList(overrides) {
     if (it.note) deps.log(`      note: ${it.note}`);
     if (it.contact) deps.log(`      contact: ${it.contact}`);
     else if (it.role === "incoming" && it.status === "pending") {
-      deps.log(`      \u2192 accept: terminalhire intro --accept ${it.id}`);
+      deps.log(`      \u2192 accept: terminalhire intro --accept @${it.counterpartyLogin}`);
     }
   }
   deps.log("");
 }
-var LINK_BASE2, GH_SESSION_COOKIE2;
+var LINK_BASE2, GH_SESSION_COOKIE2, UUID_RE;
 var init_intro2 = __esm({
   "src/intro.ts"() {
     "use strict";
@@ -9887,6 +9929,7 @@ var init_intro2 = __esm({
     init_web_session();
     LINK_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
     GH_SESSION_COOKIE2 = "__jpi_gh_session";
+    UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   }
 });
 
@@ -13218,6 +13261,8 @@ if (!firstArg || firstArg === "help" || firstArg === "--help" || firstArg === "-
   console.log("  terminalhire trajectory --push              Opt-in: link your derived trajectory to your dashboard (typed-yes)");
   console.log("  terminalhire trajectory --push --delete     Unlink (revoke) your trajectory from the dashboard");
   console.log("  terminalhire intro <github-login>           Request a consented intro to another developer (typed-yes)");
+  console.log("  terminalhire intro --list                   See your sent + received intros");
+  console.log("  terminalhire intro --accept @<login>        Accept a pending request by handle (or --decline)");
   console.log("  terminalhire chat                           Inbox: one line per connection (presence \xB7 unread \xB7 last)");
   console.log("  terminalhire chat <github-login> --read     Read a thread inline (last 8; -n N / --all for depth)");
   console.log('  terminalhire chat <github-login> --send "\u2026" Send one line to a connection (E2E encrypted)');
