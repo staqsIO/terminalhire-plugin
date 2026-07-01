@@ -2,31 +2,111 @@
 
 // bin/spinner.js
 import {
+  readFileSync as readFileSync2,
+  writeFileSync as writeFileSync2,
+  existsSync,
+  mkdirSync as mkdirSync2,
+  renameSync as renameSync2
+} from "fs";
+import { join as join2, dirname as dirname2 } from "path";
+import { homedir as homedir2 } from "os";
+
+// bin/spinner-seen.js
+import {
   readFileSync,
   writeFileSync,
-  existsSync,
-  mkdirSync,
-  renameSync
+  renameSync,
+  mkdirSync
 } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
-var TH_DIR = process.env["TERMINALHIRE_DIR"] || join(homedir(), ".terminalhire");
-var CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join(homedir(), ".claude", "settings.json");
-var CONFIG_FILE = join(TH_DIR, "config.json");
-var SPINNER_STATE_FILE = join(TH_DIR, "spinner-state.json");
-var SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
-function readJson(path, fallback) {
-  try {
-    return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : fallback;
-  } catch {
-    return fallback;
-  }
+var SEEN_WINDOW_SURFACES = 10;
+var SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
+var SEEN_MAX_ENTRIES = 500;
+function seenFilePath() {
+  const dir = process.env["TERMINALHIRE_DIR"] || join(homedir(), ".terminalhire");
+  return join(dir, "seen-history.json");
 }
 function atomicWriteJson(path, obj) {
   mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  writeFileSync(tmp, JSON.stringify(obj) + "\n", "utf8");
   renameSync(tmp, path);
+}
+function emptyHistory() {
+  return { surface: 0, entries: {} };
+}
+function isFiniteNonNegative(n) {
+  return typeof n === "number" && Number.isFinite(n) && n >= 0;
+}
+function pruneEntries(entries, now) {
+  const out = {};
+  for (const [id, e] of Object.entries(entries)) {
+    if (!e || !isFiniteNonNegative(e.lastSurface) || !isFiniteNonNegative(e.lastSeenAt)) continue;
+    if (now - e.lastSeenAt > SEEN_TTL_MS) continue;
+    out[id] = { lastSurface: e.lastSurface, lastSeenAt: e.lastSeenAt };
+  }
+  return out;
+}
+function capEntries(entries) {
+  const ids = Object.keys(entries);
+  if (ids.length <= SEEN_MAX_ENTRIES) return entries;
+  ids.sort((a, b) => entries[b].lastSurface - entries[a].lastSurface || entries[b].lastSeenAt - entries[a].lastSeenAt);
+  const out = {};
+  for (const id of ids.slice(0, SEEN_MAX_ENTRIES)) out[id] = entries[id];
+  return out;
+}
+function loadSeenHistory(now = Date.now()) {
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(seenFilePath(), "utf8"));
+  } catch {
+    return emptyHistory();
+  }
+  if (!raw || typeof raw !== "object") return emptyHistory();
+  const surface = isFiniteNonNegative(raw.surface) ? Math.floor(raw.surface) : 0;
+  const entries = raw.entries && typeof raw.entries === "object" && !Array.isArray(raw.entries) ? pruneEntries(raw.entries, now) : {};
+  return { surface, entries };
+}
+function isSuppressed(id, history) {
+  const e = history.entries[id];
+  if (!e) return false;
+  return history.surface - e.lastSurface < SEEN_WINDOW_SURFACES;
+}
+function recordSurface(ids, now = Date.now()) {
+  const history = loadSeenHistory(now);
+  const surface = history.surface + 1;
+  const entries = { ...history.entries };
+  for (const id of ids) {
+    if (typeof id !== "string" || id.length === 0) continue;
+    entries[id] = { lastSurface: surface, lastSeenAt: now };
+  }
+  const next = { surface, entries: capEntries(pruneEntries(entries, now)) };
+  try {
+    atomicWriteJson(seenFilePath(), next);
+  } catch {
+  }
+  return next;
+}
+
+// bin/spinner.js
+var TH_DIR = process.env["TERMINALHIRE_DIR"] || join2(homedir2(), ".terminalhire");
+var CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join2(homedir2(), ".claude", "settings.json");
+var CONFIG_FILE = join2(TH_DIR, "config.json");
+var SPINNER_STATE_FILE = join2(TH_DIR, "spinner-state.json");
+var SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
+function readJson(path, fallback) {
+  try {
+    return existsSync(path) ? JSON.parse(readFileSync2(path, "utf8")) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function atomicWriteJson2(path, obj) {
+  mkdirSync2(dirname2(path), { recursive: true });
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync2(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  renameSync2(tmp, path);
 }
 function titleCase(s) {
   return String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -126,12 +206,65 @@ function buildIncomingIntroLine(incomingPending) {
 function buildSessionStaleLine(sessionStale) {
   return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
 }
+function filterFreshMatches(matches, history) {
+  const { eligible, suppressed } = partitionFreshMatches(matches, history);
+  return suppressed.length === 0 ? matches : [...eligible, ...suppressed];
+}
+function partitionFreshMatches(matches, history) {
+  const list = Array.isArray(matches) ? matches : [];
+  if (!history || !history.entries || Object.keys(history.entries).length === 0) {
+    return { eligible: list, suppressed: [] };
+  }
+  const eligible = [];
+  const suppressed = [];
+  for (const m of list) {
+    if (m && m.id != null && isSuppressed(String(m.id), history)) suppressed.push(m);
+    else eligible.push(m);
+  }
+  const stamp = (m) => history.entries[String(m.id)].lastSurface;
+  suppressed.sort((a, b) => stamp(a) - stamp(b));
+  return { eligible, suppressed };
+}
+function widenFreshCandidates(matches, history, capacity, widen) {
+  const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
+  if (!widen || !Array.isArray(widen.reserve) || typeof widen.getAdjacent !== "function") return [];
+  const suppressed = (m) => !!history && !!history.entries && m.id != null && isSuppressed(String(m.id), history);
+  const eligibleCount = list.filter((m) => !suppressed(m)).length;
+  const need = capacity - eligibleCount;
+  if (need <= 0) return [];
+  const counts = /* @__PURE__ */ new Map();
+  for (const m of list) {
+    for (const t of Array.isArray(m.matchedTags) ? m.matchedTags : []) {
+      const tag = String(t).toLowerCase();
+      counts.set(tag, (counts.get(tag) || 0) + 1);
+    }
+  }
+  const maxCount = Math.max(0, ...counts.values());
+  if (maxCount === 0) return [];
+  const dominant = [...counts.entries()].filter(([, c]) => c === maxCount).map(([t]) => t);
+  const inPool = new Set(list.map((m) => String(m.id)));
+  const fresh = (m) => m && m.id != null && !inPool.has(String(m.id)) && !suppressed(m);
+  const tagged = (m, adj) => (Array.isArray(m.matchedTags) ? m.matchedTags : []).some((t) => adj.has(String(t).toLowerCase()));
+  const ringCandidates = (hops) => {
+    const adj = new Set(dominant.flatMap((d) => widen.getAdjacent(d, hops)));
+    if (adj.size === 0) return [];
+    return widen.reserve.filter((m) => fresh(m) && tagged(m, adj));
+  };
+  let widened = ringCandidates(1);
+  if (widened.length === 0) widened = ringCandidates(2);
+  if (widened.length === 0) {
+    widened = widen.reserve.filter(
+      (m) => fresh(m) && (m.source === "bounty" || m.source === "contribute")
+    );
+  }
+  return widened.slice(0, need);
+}
 function buildSpinnerPool(topMatches, max = 6, opts = {}) {
-  const { sessionTags, frequency = "always", topPeers, incomingPending, sessionStale } = opts;
+  const { sessionTags, frequency = "always", topPeers, incomingPending, sessionStale, seenHistory } = opts;
   const staleLine = buildSessionStaleLine(sessionStale);
   const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
   const introLine = buildIncomingIntroLine(incomingPending);
-  const ranked = rankBySessionTags(topMatches, sessionTags);
+  const ranked = filterFreshMatches(rankBySessionTags(topMatches, sessionTags), seenHistory);
   if (!Array.isArray(ranked) || ranked.length === 0) {
     if (introLine) return withStale([introLine]);
     const peerLine = buildPeerLine(topPeers);
@@ -155,9 +288,9 @@ function applySpinnerVerbs(ourVerbs, mode = "replace") {
   const userVerbs = existing && Array.isArray(existing.verbs) ? existing.verbs.filter((v) => !prevOurs.has(v)) : [];
   const newVerbs = [...verbs, ...userVerbs];
   settings.spinnerVerbs = { mode: mode === "append" ? "append" : "replace", verbs: newVerbs };
-  atomicWriteJson(CLAUDE_SETTINGS, settings);
+  atomicWriteJson2(CLAUDE_SETTINGS, settings);
   const st = readState();
-  atomicWriteJson(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
+  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
   return { applied: verbs.length, total: newVerbs.length };
 }
 function clearSpinnerVerbs() {
@@ -175,11 +308,11 @@ function clearSpinnerVerbs() {
     } else {
       delete settings.spinnerVerbs;
     }
-    atomicWriteJson(CLAUDE_SETTINGS, settings);
+    atomicWriteJson2(CLAUDE_SETTINGS, settings);
   }
   try {
     const st = readState();
-    atomicWriteJson(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
+    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
   } catch {
   }
   return { cleared: true, keptUserVerbs };
@@ -211,62 +344,77 @@ function interleaveBySource(topMatches) {
   }
   return out;
 }
-function buildTips(topMatches, baseUrl, max = 8) {
+function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
   const base = String(baseUrl || "https://terminalhire.com").replace(/\/+$/, "");
   const out = [];
+  const surfacedIds = [];
   const seenRole = /* @__PURE__ */ new Set();
   const perCompany = /* @__PURE__ */ new Map();
   const COMPANY_CAP = 2;
-  const all = Array.isArray(topMatches) ? topMatches : [];
-  const bountyQ = all.filter((m) => m && m.source === "bounty");
-  const contributeQ = all.filter((m) => m && m.source === "contribute");
-  const roleQ = interleaveBySource(
-    all.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
+  const { eligible, suppressed } = partitionFreshMatches(
+    Array.isArray(topMatches) ? topMatches : [],
+    opts.seenHistory
   );
-  const ordered = [];
-  let bi = 0;
-  let ri = 0;
-  let ci = 0;
-  while (bi < bountyQ.length || ri < roleQ.length || ci < contributeQ.length) {
-    if (ri < roleQ.length) ordered.push(roleQ[ri++]);
-    if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
-    if (ci < contributeQ.length) ordered.push(contributeQ[ci++]);
-  }
-  for (const m of ordered) {
-    if (!m || !m.title || !m.company || !m.id) continue;
-    const idx = String(m.id).indexOf(":");
-    if (idx <= 0) continue;
-    const source = String(m.id).slice(0, idx);
-    const ext = String(m.id).slice(idx + 1);
-    if (!source || !ext) continue;
-    const companyRaw = String(m.company).trim().replace(/\s+/g, " ");
-    const titleRaw = String(m.title).trim().replace(/\s+/g, " ");
-    const roleKey = `${titleRaw.toLowerCase()}@${companyRaw.toLowerCase()}`;
-    const coKey = companyRaw.toLowerCase();
-    if (seenRole.has(roleKey)) continue;
-    if ((perCompany.get(coKey) || 0) >= COMPANY_CAP) continue;
-    seenRole.add(roleKey);
-    perCompany.set(coKey, (perCompany.get(coKey) || 0) + 1);
-    let title = titleRaw;
-    if (title.length > 34) title = title.slice(0, 33).trimEnd() + "\u2026";
-    const company = titleCase(companyRaw);
-    const pct = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
-    const token = Buffer.from(String(m.id)).toString("base64url");
-    const url = `${base}/j/${token}`;
-    if (source === "bounty") {
-      const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
-      const repo = m.repo || companyRaw;
-      out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct}% \u2014 ${url}`);
-    } else if (source === "contribute") {
-      const repo = m.repo || companyRaw;
-      const num = m.issueNumber != null ? ` #${m.issueNumber}` : "";
-      out.push(`\u2197 contribute \xB7 ${repo}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${pct}%`);
-    } else {
-      out.push(`\u2197 ${title} @ ${company} \xB7 ${pct}% \u2014 ${url}`);
+  const orderForEmit = (list) => {
+    const bountyQ = list.filter((m) => m && m.source === "bounty");
+    const contributeQ = list.filter((m) => m && m.source === "contribute");
+    const roleQ = interleaveBySource(
+      list.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
+    );
+    const ordered = [];
+    let bi = 0;
+    let ri = 0;
+    let ci = 0;
+    while (bi < bountyQ.length || ri < roleQ.length || ci < contributeQ.length) {
+      if (ri < roleQ.length) ordered.push(roleQ[ri++]);
+      if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
+      if (ci < contributeQ.length) ordered.push(contributeQ[ci++]);
     }
-    if (out.length >= max) break;
-  }
-  return out;
+    return ordered;
+  };
+  const emit = (list) => {
+    for (const m of orderForEmit(list)) {
+      if (out.length >= max) return;
+      if (!m || !m.title || !m.company || !m.id) continue;
+      const idx = String(m.id).indexOf(":");
+      if (idx <= 0) continue;
+      const source = String(m.id).slice(0, idx);
+      const ext = String(m.id).slice(idx + 1);
+      if (!source || !ext) continue;
+      const companyRaw = String(m.company).trim().replace(/\s+/g, " ");
+      const titleRaw = String(m.title).trim().replace(/\s+/g, " ");
+      const roleKey = `${titleRaw.toLowerCase()}@${companyRaw.toLowerCase()}`;
+      const coKey = companyRaw.toLowerCase();
+      if (seenRole.has(roleKey)) continue;
+      if ((perCompany.get(coKey) || 0) >= COMPANY_CAP) continue;
+      seenRole.add(roleKey);
+      perCompany.set(coKey, (perCompany.get(coKey) || 0) + 1);
+      let title = titleRaw;
+      if (title.length > 34) title = title.slice(0, 33).trimEnd() + "\u2026";
+      const company = titleCase(companyRaw);
+      const pct = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
+      const token = Buffer.from(String(m.id)).toString("base64url");
+      const url = `${base}/j/${token}`;
+      if (source === "bounty") {
+        const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
+        const repo = m.repo || companyRaw;
+        out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct}% \u2014 ${url}`);
+      } else if (source === "contribute") {
+        const repo = m.repo || companyRaw;
+        const num = m.issueNumber != null ? ` #${m.issueNumber}` : "";
+        out.push(`\u2197 contribute \xB7 ${repo}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${pct}%`);
+      } else {
+        out.push(`\u2197 ${title} @ ${company} \xB7 ${pct}% \u2014 ${url}`);
+      }
+      surfacedIds.push(String(m.id));
+    }
+  };
+  emit(eligible);
+  if (out.length < max) emit(suppressed);
+  return { tips: out, surfacedIds };
+}
+function buildTips(topMatches, baseUrl, max = 8, opts = {}) {
+  return buildTipsDetailed(topMatches, baseUrl, max, opts).tips;
 }
 function applySpinnerTips(ourTips) {
   const tips = (Array.isArray(ourTips) ? ourTips : []).filter(Boolean);
@@ -277,9 +425,9 @@ function applySpinnerTips(ourTips) {
   const userTips = existing.filter((t) => !prevOurs.has(t));
   settings.spinnerTipsEnabled = true;
   settings.spinnerTipsOverride = { excludeDefault: true, tips: [...tips, ...userTips] };
-  atomicWriteJson(CLAUDE_SETTINGS, settings);
+  atomicWriteJson2(CLAUDE_SETTINGS, settings);
   const st = readState();
-  atomicWriteJson(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
+  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
   return { applied: tips.length };
 }
 function clearSpinnerTips() {
@@ -296,14 +444,40 @@ function clearSpinnerTips() {
       delete settings.spinnerTipsOverride;
       delete settings.spinnerTipsEnabled;
     }
-    atomicWriteJson(CLAUDE_SETTINGS, settings);
+    atomicWriteJson2(CLAUDE_SETTINGS, settings);
   }
   try {
     const st = readState();
-    atomicWriteJson(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
+    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
   } catch {
   }
   return { cleared: true };
+}
+function renderRefreshSurface(topMatches, sc, opts = {}) {
+  if (!sc || sc.enabled !== true) {
+    clearSpinnerVerbs();
+    clearSpinnerTips();
+    return { verbs: [], tips: [], surfacedIds: [] };
+  }
+  const seenHistory = opts.seenHistory || loadSeenHistory();
+  let ranked = rankBySessionTags(topMatches, opts.sessionTags);
+  const widened = widenFreshCandidates(ranked, seenHistory, 8, opts.widen);
+  if (widened.length > 0) ranked = [...ranked, ...widened];
+  const verbs = buildSpinnerPool(ranked, sc.max, {
+    sessionTags: opts.sessionTags,
+    frequency: sc.frequency,
+    topPeers: opts.topPeers,
+    incomingPending: opts.incomingPending,
+    sessionStale: opts.sessionStale,
+    seenHistory
+  });
+  if (verbs.length > 0) applySpinnerVerbs(verbs, sc.mode);
+  else clearSpinnerVerbs();
+  const { tips, surfacedIds } = buildTipsDetailed(ranked, opts.baseUrl, 8, { seenHistory });
+  if (tips.length > 0) applySpinnerTips(tips);
+  else clearSpinnerTips();
+  if (verbs.length > 0 || tips.length > 0) recordSurface(surfacedIds);
+  return { verbs, tips, surfacedIds };
 }
 export {
   SPINNER_DEFAULTS,
@@ -315,11 +489,16 @@ export {
   buildSessionStaleLine,
   buildSpinnerPool,
   buildTips,
+  buildTipsDetailed,
   clearSpinnerTips,
   clearSpinnerVerbs,
   ctaVerb,
+  filterFreshMatches,
   formatVerbs,
   interleaveBySource,
+  partitionFreshMatches,
   rankBySessionTags,
-  readSpinnerConfig
+  readSpinnerConfig,
+  renderRefreshSurface,
+  widenFreshCandidates
 };

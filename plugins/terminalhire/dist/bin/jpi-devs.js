@@ -552,6 +552,31 @@ function normalize(tokens) {
   }
   return Array.from(result);
 }
+function getAdjacentTags(tag, hops = 1, graph = GRAPH) {
+  const lower = String(tag ?? "").toLowerCase().trim();
+  const id = graph.ids.has(lower) ? lower : graph.synonyms.get(lower);
+  if (!id) return [];
+  const oneHop = (source) => {
+    const out = [];
+    for (const [to, edge] of graph.closure.get(source) ?? []) {
+      if (edge.via === to) out.push([to, edge.w]);
+    }
+    return out;
+  };
+  const byWeightThenId = (a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1);
+  const ring1 = oneHop(id).sort(byWeightThenId);
+  if (hops === 1) return ring1.map(([to]) => to);
+  const exclude = /* @__PURE__ */ new Set([id, ...ring1.map(([to]) => to)]);
+  const best = /* @__PURE__ */ new Map();
+  for (const [n, w1] of ring1) {
+    for (const [to, w2] of oneHop(n)) {
+      if (exclude.has(to)) continue;
+      const w = w1 * w2;
+      if (w > (best.get(to) ?? 0)) best.set(to, w);
+    }
+  }
+  return [...best.entries()].sort(byWeightThenId).map(([to]) => to);
+}
 function expandWeighted(tags, graph = GRAPH) {
   const out = /* @__PURE__ */ new Map();
   const put = (tag, weight, via) => {
@@ -6346,6 +6371,7 @@ __export(src_exports, {
   flattenTiers: () => flattenTiers,
   funnelCounts: () => funnelCounts,
   generateIdentityKeypair: () => generateIdentityKeypair,
+  getAdjacentTags: () => getAdjacentTags,
   getBuyer: () => getBuyer,
   githubBounties: () => githubBounties,
   githubToFingerprint: () => githubToFingerprint,

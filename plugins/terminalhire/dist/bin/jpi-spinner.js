@@ -2,43 +2,62 @@
 
 // bin/jpi-spinner.js
 import {
-  readFileSync as readFileSync2,
-  writeFileSync as writeFileSync2,
+  readFileSync as readFileSync3,
+  writeFileSync as writeFileSync3,
   copyFileSync,
   existsSync as existsSync2,
-  mkdirSync as mkdirSync2
+  mkdirSync as mkdirSync3
 } from "fs";
-import { join as join2 } from "path";
-import { homedir as homedir2 } from "os";
+import { join as join3 } from "path";
+import { homedir as homedir3 } from "os";
 import { createInterface } from "readline";
 
 // bin/spinner.js
 import {
+  readFileSync as readFileSync2,
+  writeFileSync as writeFileSync2,
+  existsSync,
+  mkdirSync as mkdirSync2,
+  renameSync as renameSync2
+} from "fs";
+import { join as join2, dirname as dirname2 } from "path";
+import { homedir as homedir2 } from "os";
+
+// bin/spinner-seen.js
+import {
   readFileSync,
   writeFileSync,
-  existsSync,
-  mkdirSync,
-  renameSync
+  renameSync,
+  mkdirSync
 } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
-var TH_DIR = process.env["TERMINALHIRE_DIR"] || join(homedir(), ".terminalhire");
-var CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join(homedir(), ".claude", "settings.json");
-var CONFIG_FILE = join(TH_DIR, "config.json");
-var SPINNER_STATE_FILE = join(TH_DIR, "spinner-state.json");
+var SEEN_WINDOW_SURFACES = 10;
+var SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
+function isSuppressed(id, history) {
+  const e = history.entries[id];
+  if (!e) return false;
+  return history.surface - e.lastSurface < SEEN_WINDOW_SURFACES;
+}
+
+// bin/spinner.js
+var TH_DIR = process.env["TERMINALHIRE_DIR"] || join2(homedir2(), ".terminalhire");
+var CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join2(homedir2(), ".claude", "settings.json");
+var CONFIG_FILE = join2(TH_DIR, "config.json");
+var SPINNER_STATE_FILE = join2(TH_DIR, "spinner-state.json");
 var SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
 function readJson(path, fallback) {
   try {
-    return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : fallback;
+    return existsSync(path) ? JSON.parse(readFileSync2(path, "utf8")) : fallback;
   } catch {
     return fallback;
   }
 }
 function atomicWriteJson(path, obj) {
-  mkdirSync(dirname(path), { recursive: true });
+  mkdirSync2(dirname2(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
-  renameSync(tmp, path);
+  writeFileSync2(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  renameSync2(tmp, path);
 }
 function titleCase(s) {
   return String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -119,12 +138,31 @@ function buildIncomingIntroLine(incomingPending) {
 function buildSessionStaleLine(sessionStale) {
   return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
 }
+function filterFreshMatches(matches, history) {
+  const { eligible, suppressed } = partitionFreshMatches(matches, history);
+  return suppressed.length === 0 ? matches : [...eligible, ...suppressed];
+}
+function partitionFreshMatches(matches, history) {
+  const list = Array.isArray(matches) ? matches : [];
+  if (!history || !history.entries || Object.keys(history.entries).length === 0) {
+    return { eligible: list, suppressed: [] };
+  }
+  const eligible = [];
+  const suppressed = [];
+  for (const m of list) {
+    if (m && m.id != null && isSuppressed(String(m.id), history)) suppressed.push(m);
+    else eligible.push(m);
+  }
+  const stamp = (m) => history.entries[String(m.id)].lastSurface;
+  suppressed.sort((a, b) => stamp(a) - stamp(b));
+  return { eligible, suppressed };
+}
 function buildSpinnerPool(topMatches, max = 6, opts = {}) {
-  const { sessionTags, frequency = "always", topPeers, incomingPending, sessionStale } = opts;
+  const { sessionTags, frequency = "always", topPeers, incomingPending, sessionStale, seenHistory } = opts;
   const staleLine = buildSessionStaleLine(sessionStale);
   const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
   const introLine = buildIncomingIntroLine(incomingPending);
-  const ranked = rankBySessionTags(topMatches, sessionTags);
+  const ranked = filterFreshMatches(rankBySessionTags(topMatches, sessionTags), seenHistory);
   if (!Array.isArray(ranked) || ranked.length === 0) {
     if (introLine) return withStale([introLine]);
     const peerLine = buildPeerLine(topPeers);
@@ -202,21 +240,21 @@ function clearSpinnerTips() {
 }
 
 // bin/jpi-spinner.js
-var TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join2(homedir2(), ".terminalhire");
-var CONFIG_FILE2 = join2(TH_DIR2, "config.json");
-var SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join2(homedir2(), ".claude", "settings.json");
-var CACHE_FILE = join2(TH_DIR2, "index-cache.json");
+var TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join3(homedir3(), ".terminalhire");
+var CONFIG_FILE2 = join3(TH_DIR2, "config.json");
+var SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join3(homedir3(), ".claude", "settings.json");
+var CACHE_FILE = join3(TH_DIR2, "index-cache.json");
 function readConfig() {
   try {
-    return existsSync2(CONFIG_FILE2) ? JSON.parse(readFileSync2(CONFIG_FILE2, "utf8")) : {};
+    return existsSync2(CONFIG_FILE2) ? JSON.parse(readFileSync3(CONFIG_FILE2, "utf8")) : {};
   } catch {
     return {};
   }
 }
 function writeConfig(patch) {
-  mkdirSync2(TH_DIR2, { recursive: true });
+  mkdirSync3(TH_DIR2, { recursive: true });
   const merged = { ...readConfig(), ...patch };
-  writeFileSync2(CONFIG_FILE2, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  writeFileSync3(CONFIG_FILE2, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function backupSettings() {
   if (!existsSync2(SETTINGS_PATH)) return null;
@@ -236,7 +274,7 @@ function ask(question) {
 }
 function readTopMatches() {
   try {
-    const c = JSON.parse(readFileSync2(CACHE_FILE, "utf8"));
+    const c = JSON.parse(readFileSync3(CACHE_FILE, "utf8"));
     return Array.isArray(c.topMatches) ? c.topMatches : [];
   } catch {
     return [];

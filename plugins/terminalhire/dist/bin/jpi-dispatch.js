@@ -1015,6 +1015,31 @@ function normalize(tokens) {
   }
   return Array.from(result);
 }
+function getAdjacentTags(tag, hops = 1, graph = GRAPH) {
+  const lower = String(tag ?? "").toLowerCase().trim();
+  const id = graph.ids.has(lower) ? lower : graph.synonyms.get(lower);
+  if (!id) return [];
+  const oneHop = (source) => {
+    const out = [];
+    for (const [to, edge] of graph.closure.get(source) ?? []) {
+      if (edge.via === to) out.push([to, edge.w]);
+    }
+    return out;
+  };
+  const byWeightThenId = (a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1);
+  const ring1 = oneHop(id).sort(byWeightThenId);
+  if (hops === 1) return ring1.map(([to]) => to);
+  const exclude = /* @__PURE__ */ new Set([id, ...ring1.map(([to]) => to)]);
+  const best = /* @__PURE__ */ new Map();
+  for (const [n, w1] of ring1) {
+    for (const [to, w2] of oneHop(n)) {
+      if (exclude.has(to)) continue;
+      const w = w1 * w2;
+      if (w > (best.get(to) ?? 0)) best.set(to, w);
+    }
+  }
+  return [...best.entries()].sort(byWeightThenId).map(([to]) => to);
+}
 function expandWeighted(tags, graph = GRAPH) {
   const out = /* @__PURE__ */ new Map();
   const put = (tag, weight, via) => {
@@ -7101,6 +7126,7 @@ __export(src_exports, {
   flattenTiers: () => flattenTiers,
   funnelCounts: () => funnelCounts,
   generateIdentityKeypair: () => generateIdentityKeypair,
+  getAdjacentTags: () => getAdjacentTags,
   getBuyer: () => getBuyer,
   githubBounties: () => githubBounties,
   githubToFingerprint: () => githubToFingerprint,
@@ -7539,11 +7565,11 @@ async function runLogin() {
     if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
       const { createRequire: createRequire2 } = await import("module");
       const { fileURLToPath: fileURLToPath8 } = await import("url");
-      const { join: join29, dirname: dirname4 } = await import("path");
+      const { join: join30, dirname: dirname5 } = await import("path");
       const __dirname7 = fileURLToPath8(new URL(".", import.meta.url));
-      const fixturePath = join29(__dirname7, "../../fixtures/github-sample.json");
-      const { readFileSync: readFileSync27 } = await import("fs");
-      ghProfile = JSON.parse(readFileSync27(fixturePath, "utf8"));
+      const fixturePath = join30(__dirname7, "../../fixtures/github-sample.json");
+      const { readFileSync: readFileSync28 } = await import("fs");
+      ghProfile = JSON.parse(readFileSync28(fixturePath, "utf8"));
     } else {
       ghProfile = await fetchGitHubProfile2(login, token);
     }
@@ -9594,7 +9620,7 @@ function finalize(build) {
   };
 }
 function reconstruct(files, opts = {}) {
-  const join29 = opts.joinSidechains !== false;
+  const join30 = opts.joinSidechains !== false;
   const mains = [];
   const sidechains = [];
   for (const file of files) {
@@ -9619,7 +9645,7 @@ function reconstruct(files, opts = {}) {
   }
   const orphanedSidechainPaths = [];
   const joinedPaths = /* @__PURE__ */ new Set();
-  if (join29) {
+  if (join30) {
     const sidechainsBySession = /* @__PURE__ */ new Map();
     for (const sc of sidechains) {
       const acc = sidechainsBySession.get(sc.sessionId) ?? [];
@@ -12992,6 +13018,100 @@ var init_jpi_config = __esm({
   }
 });
 
+// bin/spinner-seen.js
+var spinner_seen_exports = {};
+__export(spinner_seen_exports, {
+  SEEN_MAX_ENTRIES: () => SEEN_MAX_ENTRIES,
+  SEEN_TTL_MS: () => SEEN_TTL_MS,
+  SEEN_WINDOW_SURFACES: () => SEEN_WINDOW_SURFACES,
+  isSuppressed: () => isSuppressed,
+  loadSeenHistory: () => loadSeenHistory,
+  recordSurface: () => recordSurface,
+  seenFilePath: () => seenFilePath
+});
+import {
+  readFileSync as readFileSync21,
+  writeFileSync as writeFileSync16,
+  renameSync as renameSync3,
+  mkdirSync as mkdirSync16
+} from "fs";
+import { join as join22, dirname as dirname2 } from "path";
+import { homedir as homedir20 } from "os";
+function seenFilePath() {
+  const dir = process.env["TERMINALHIRE_DIR"] || join22(homedir20(), ".terminalhire");
+  return join22(dir, "seen-history.json");
+}
+function atomicWriteJson2(path, obj) {
+  mkdirSync16(dirname2(path), { recursive: true });
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync16(tmp, JSON.stringify(obj) + "\n", "utf8");
+  renameSync3(tmp, path);
+}
+function emptyHistory() {
+  return { surface: 0, entries: {} };
+}
+function isFiniteNonNegative(n) {
+  return typeof n === "number" && Number.isFinite(n) && n >= 0;
+}
+function pruneEntries(entries, now) {
+  const out = {};
+  for (const [id, e] of Object.entries(entries)) {
+    if (!e || !isFiniteNonNegative(e.lastSurface) || !isFiniteNonNegative(e.lastSeenAt)) continue;
+    if (now - e.lastSeenAt > SEEN_TTL_MS) continue;
+    out[id] = { lastSurface: e.lastSurface, lastSeenAt: e.lastSeenAt };
+  }
+  return out;
+}
+function capEntries(entries) {
+  const ids = Object.keys(entries);
+  if (ids.length <= SEEN_MAX_ENTRIES) return entries;
+  ids.sort((a, b) => entries[b].lastSurface - entries[a].lastSurface || entries[b].lastSeenAt - entries[a].lastSeenAt);
+  const out = {};
+  for (const id of ids.slice(0, SEEN_MAX_ENTRIES)) out[id] = entries[id];
+  return out;
+}
+function loadSeenHistory(now = Date.now()) {
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync21(seenFilePath(), "utf8"));
+  } catch {
+    return emptyHistory();
+  }
+  if (!raw || typeof raw !== "object") return emptyHistory();
+  const surface = isFiniteNonNegative(raw.surface) ? Math.floor(raw.surface) : 0;
+  const entries = raw.entries && typeof raw.entries === "object" && !Array.isArray(raw.entries) ? pruneEntries(raw.entries, now) : {};
+  return { surface, entries };
+}
+function isSuppressed(id, history) {
+  const e = history.entries[id];
+  if (!e) return false;
+  return history.surface - e.lastSurface < SEEN_WINDOW_SURFACES;
+}
+function recordSurface(ids, now = Date.now()) {
+  const history = loadSeenHistory(now);
+  const surface = history.surface + 1;
+  const entries = { ...history.entries };
+  for (const id of ids) {
+    if (typeof id !== "string" || id.length === 0) continue;
+    entries[id] = { lastSurface: surface, lastSeenAt: now };
+  }
+  const next = { surface, entries: capEntries(pruneEntries(entries, now)) };
+  try {
+    atomicWriteJson2(seenFilePath(), next);
+  } catch {
+  }
+  return next;
+}
+var SEEN_WINDOW_SURFACES, SEEN_TTL_MS, SEEN_MAX_ENTRIES;
+var init_spinner_seen = __esm({
+  "bin/spinner-seen.js"() {
+    "use strict";
+    SEEN_WINDOW_SURFACES = 10;
+    SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
+    SEEN_MAX_ENTRIES = 500;
+  }
+});
+
 // bin/spinner.js
 var spinner_exports = {};
 __export(spinner_exports, {
@@ -13004,35 +13124,40 @@ __export(spinner_exports, {
   buildSessionStaleLine: () => buildSessionStaleLine,
   buildSpinnerPool: () => buildSpinnerPool,
   buildTips: () => buildTips,
+  buildTipsDetailed: () => buildTipsDetailed,
   clearSpinnerTips: () => clearSpinnerTips,
   clearSpinnerVerbs: () => clearSpinnerVerbs,
   ctaVerb: () => ctaVerb,
+  filterFreshMatches: () => filterFreshMatches,
   formatVerbs: () => formatVerbs,
   interleaveBySource: () => interleaveBySource,
+  partitionFreshMatches: () => partitionFreshMatches,
   rankBySessionTags: () => rankBySessionTags,
-  readSpinnerConfig: () => readSpinnerConfig
+  readSpinnerConfig: () => readSpinnerConfig,
+  renderRefreshSurface: () => renderRefreshSurface,
+  widenFreshCandidates: () => widenFreshCandidates
 });
 import {
-  readFileSync as readFileSync21,
-  writeFileSync as writeFileSync16,
+  readFileSync as readFileSync22,
+  writeFileSync as writeFileSync17,
   existsSync as existsSync15,
-  mkdirSync as mkdirSync16,
-  renameSync as renameSync3
+  mkdirSync as mkdirSync17,
+  renameSync as renameSync4
 } from "fs";
-import { join as join22, dirname as dirname2 } from "path";
-import { homedir as homedir20 } from "os";
+import { join as join23, dirname as dirname3 } from "path";
+import { homedir as homedir21 } from "os";
 function readJson(path, fallback) {
   try {
-    return existsSync15(path) ? JSON.parse(readFileSync21(path, "utf8")) : fallback;
+    return existsSync15(path) ? JSON.parse(readFileSync22(path, "utf8")) : fallback;
   } catch {
     return fallback;
   }
 }
-function atomicWriteJson2(path, obj) {
-  mkdirSync16(dirname2(path), { recursive: true });
+function atomicWriteJson3(path, obj) {
+  mkdirSync17(dirname3(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync16(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
-  renameSync3(tmp, path);
+  writeFileSync17(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  renameSync4(tmp, path);
 }
 function titleCase(s) {
   return String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -13131,12 +13256,65 @@ function buildIncomingIntroLine(incomingPending) {
 function buildSessionStaleLine(sessionStale) {
   return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
 }
+function filterFreshMatches(matches, history) {
+  const { eligible, suppressed } = partitionFreshMatches(matches, history);
+  return suppressed.length === 0 ? matches : [...eligible, ...suppressed];
+}
+function partitionFreshMatches(matches, history) {
+  const list = Array.isArray(matches) ? matches : [];
+  if (!history || !history.entries || Object.keys(history.entries).length === 0) {
+    return { eligible: list, suppressed: [] };
+  }
+  const eligible = [];
+  const suppressed = [];
+  for (const m of list) {
+    if (m && m.id != null && isSuppressed(String(m.id), history)) suppressed.push(m);
+    else eligible.push(m);
+  }
+  const stamp = (m) => history.entries[String(m.id)].lastSurface;
+  suppressed.sort((a, b) => stamp(a) - stamp(b));
+  return { eligible, suppressed };
+}
+function widenFreshCandidates(matches, history, capacity, widen) {
+  const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
+  if (!widen || !Array.isArray(widen.reserve) || typeof widen.getAdjacent !== "function") return [];
+  const suppressed = (m) => !!history && !!history.entries && m.id != null && isSuppressed(String(m.id), history);
+  const eligibleCount = list.filter((m) => !suppressed(m)).length;
+  const need = capacity - eligibleCount;
+  if (need <= 0) return [];
+  const counts = /* @__PURE__ */ new Map();
+  for (const m of list) {
+    for (const t of Array.isArray(m.matchedTags) ? m.matchedTags : []) {
+      const tag = String(t).toLowerCase();
+      counts.set(tag, (counts.get(tag) || 0) + 1);
+    }
+  }
+  const maxCount = Math.max(0, ...counts.values());
+  if (maxCount === 0) return [];
+  const dominant = [...counts.entries()].filter(([, c]) => c === maxCount).map(([t]) => t);
+  const inPool = new Set(list.map((m) => String(m.id)));
+  const fresh = (m) => m && m.id != null && !inPool.has(String(m.id)) && !suppressed(m);
+  const tagged = (m, adj) => (Array.isArray(m.matchedTags) ? m.matchedTags : []).some((t) => adj.has(String(t).toLowerCase()));
+  const ringCandidates = (hops) => {
+    const adj = new Set(dominant.flatMap((d) => widen.getAdjacent(d, hops)));
+    if (adj.size === 0) return [];
+    return widen.reserve.filter((m) => fresh(m) && tagged(m, adj));
+  };
+  let widened = ringCandidates(1);
+  if (widened.length === 0) widened = ringCandidates(2);
+  if (widened.length === 0) {
+    widened = widen.reserve.filter(
+      (m) => fresh(m) && (m.source === "bounty" || m.source === "contribute")
+    );
+  }
+  return widened.slice(0, need);
+}
 function buildSpinnerPool(topMatches, max = 6, opts = {}) {
-  const { sessionTags, frequency = "always", topPeers, incomingPending, sessionStale } = opts;
+  const { sessionTags, frequency = "always", topPeers, incomingPending, sessionStale, seenHistory } = opts;
   const staleLine = buildSessionStaleLine(sessionStale);
   const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
   const introLine = buildIncomingIntroLine(incomingPending);
-  const ranked = rankBySessionTags(topMatches, sessionTags);
+  const ranked = filterFreshMatches(rankBySessionTags(topMatches, sessionTags), seenHistory);
   if (!Array.isArray(ranked) || ranked.length === 0) {
     if (introLine) return withStale([introLine]);
     const peerLine = buildPeerLine(topPeers);
@@ -13160,9 +13338,9 @@ function applySpinnerVerbs(ourVerbs, mode = "replace") {
   const userVerbs = existing && Array.isArray(existing.verbs) ? existing.verbs.filter((v) => !prevOurs.has(v)) : [];
   const newVerbs = [...verbs, ...userVerbs];
   settings.spinnerVerbs = { mode: mode === "append" ? "append" : "replace", verbs: newVerbs };
-  atomicWriteJson2(CLAUDE_SETTINGS, settings);
+  atomicWriteJson3(CLAUDE_SETTINGS, settings);
   const st = readState();
-  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
+  atomicWriteJson3(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
   return { applied: verbs.length, total: newVerbs.length };
 }
 function clearSpinnerVerbs() {
@@ -13180,11 +13358,11 @@ function clearSpinnerVerbs() {
     } else {
       delete settings.spinnerVerbs;
     }
-    atomicWriteJson2(CLAUDE_SETTINGS, settings);
+    atomicWriteJson3(CLAUDE_SETTINGS, settings);
   }
   try {
     const st = readState();
-    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
+    atomicWriteJson3(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
   } catch {
   }
   return { cleared: true, keptUserVerbs };
@@ -13216,62 +13394,77 @@ function interleaveBySource(topMatches) {
   }
   return out;
 }
-function buildTips(topMatches, baseUrl, max = 8) {
+function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
   const base = String(baseUrl || "https://terminalhire.com").replace(/\/+$/, "");
   const out = [];
+  const surfacedIds = [];
   const seenRole = /* @__PURE__ */ new Set();
   const perCompany = /* @__PURE__ */ new Map();
   const COMPANY_CAP = 2;
-  const all = Array.isArray(topMatches) ? topMatches : [];
-  const bountyQ = all.filter((m) => m && m.source === "bounty");
-  const contributeQ = all.filter((m) => m && m.source === "contribute");
-  const roleQ = interleaveBySource(
-    all.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
+  const { eligible, suppressed } = partitionFreshMatches(
+    Array.isArray(topMatches) ? topMatches : [],
+    opts.seenHistory
   );
-  const ordered = [];
-  let bi = 0;
-  let ri = 0;
-  let ci = 0;
-  while (bi < bountyQ.length || ri < roleQ.length || ci < contributeQ.length) {
-    if (ri < roleQ.length) ordered.push(roleQ[ri++]);
-    if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
-    if (ci < contributeQ.length) ordered.push(contributeQ[ci++]);
-  }
-  for (const m of ordered) {
-    if (!m || !m.title || !m.company || !m.id) continue;
-    const idx = String(m.id).indexOf(":");
-    if (idx <= 0) continue;
-    const source = String(m.id).slice(0, idx);
-    const ext = String(m.id).slice(idx + 1);
-    if (!source || !ext) continue;
-    const companyRaw = String(m.company).trim().replace(/\s+/g, " ");
-    const titleRaw = String(m.title).trim().replace(/\s+/g, " ");
-    const roleKey = `${titleRaw.toLowerCase()}@${companyRaw.toLowerCase()}`;
-    const coKey = companyRaw.toLowerCase();
-    if (seenRole.has(roleKey)) continue;
-    if ((perCompany.get(coKey) || 0) >= COMPANY_CAP) continue;
-    seenRole.add(roleKey);
-    perCompany.set(coKey, (perCompany.get(coKey) || 0) + 1);
-    let title = titleRaw;
-    if (title.length > 34) title = title.slice(0, 33).trimEnd() + "\u2026";
-    const company = titleCase(companyRaw);
-    const pct2 = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
-    const token = Buffer.from(String(m.id)).toString("base64url");
-    const url = `${base}/j/${token}`;
-    if (source === "bounty") {
-      const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
-      const repo = m.repo || companyRaw;
-      out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct2}% \u2014 ${url}`);
-    } else if (source === "contribute") {
-      const repo = m.repo || companyRaw;
-      const num = m.issueNumber != null ? ` #${m.issueNumber}` : "";
-      out.push(`\u2197 contribute \xB7 ${repo}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${pct2}%`);
-    } else {
-      out.push(`\u2197 ${title} @ ${company} \xB7 ${pct2}% \u2014 ${url}`);
+  const orderForEmit = (list) => {
+    const bountyQ = list.filter((m) => m && m.source === "bounty");
+    const contributeQ = list.filter((m) => m && m.source === "contribute");
+    const roleQ = interleaveBySource(
+      list.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
+    );
+    const ordered = [];
+    let bi = 0;
+    let ri = 0;
+    let ci = 0;
+    while (bi < bountyQ.length || ri < roleQ.length || ci < contributeQ.length) {
+      if (ri < roleQ.length) ordered.push(roleQ[ri++]);
+      if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
+      if (ci < contributeQ.length) ordered.push(contributeQ[ci++]);
     }
-    if (out.length >= max) break;
-  }
-  return out;
+    return ordered;
+  };
+  const emit = (list) => {
+    for (const m of orderForEmit(list)) {
+      if (out.length >= max) return;
+      if (!m || !m.title || !m.company || !m.id) continue;
+      const idx = String(m.id).indexOf(":");
+      if (idx <= 0) continue;
+      const source = String(m.id).slice(0, idx);
+      const ext = String(m.id).slice(idx + 1);
+      if (!source || !ext) continue;
+      const companyRaw = String(m.company).trim().replace(/\s+/g, " ");
+      const titleRaw = String(m.title).trim().replace(/\s+/g, " ");
+      const roleKey = `${titleRaw.toLowerCase()}@${companyRaw.toLowerCase()}`;
+      const coKey = companyRaw.toLowerCase();
+      if (seenRole.has(roleKey)) continue;
+      if ((perCompany.get(coKey) || 0) >= COMPANY_CAP) continue;
+      seenRole.add(roleKey);
+      perCompany.set(coKey, (perCompany.get(coKey) || 0) + 1);
+      let title = titleRaw;
+      if (title.length > 34) title = title.slice(0, 33).trimEnd() + "\u2026";
+      const company = titleCase(companyRaw);
+      const pct2 = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
+      const token = Buffer.from(String(m.id)).toString("base64url");
+      const url = `${base}/j/${token}`;
+      if (source === "bounty") {
+        const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
+        const repo = m.repo || companyRaw;
+        out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct2}% \u2014 ${url}`);
+      } else if (source === "contribute") {
+        const repo = m.repo || companyRaw;
+        const num = m.issueNumber != null ? ` #${m.issueNumber}` : "";
+        out.push(`\u2197 contribute \xB7 ${repo}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${pct2}%`);
+      } else {
+        out.push(`\u2197 ${title} @ ${company} \xB7 ${pct2}% \u2014 ${url}`);
+      }
+      surfacedIds.push(String(m.id));
+    }
+  };
+  emit(eligible);
+  if (out.length < max) emit(suppressed);
+  return { tips: out, surfacedIds };
+}
+function buildTips(topMatches, baseUrl, max = 8, opts = {}) {
+  return buildTipsDetailed(topMatches, baseUrl, max, opts).tips;
 }
 function applySpinnerTips(ourTips) {
   const tips = (Array.isArray(ourTips) ? ourTips : []).filter(Boolean);
@@ -13282,9 +13475,9 @@ function applySpinnerTips(ourTips) {
   const userTips = existing.filter((t) => !prevOurs.has(t));
   settings.spinnerTipsEnabled = true;
   settings.spinnerTipsOverride = { excludeDefault: true, tips: [...tips, ...userTips] };
-  atomicWriteJson2(CLAUDE_SETTINGS, settings);
+  atomicWriteJson3(CLAUDE_SETTINGS, settings);
   const st = readState();
-  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
+  atomicWriteJson3(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
   return { applied: tips.length };
 }
 function clearSpinnerTips() {
@@ -13301,23 +13494,50 @@ function clearSpinnerTips() {
       delete settings.spinnerTipsOverride;
       delete settings.spinnerTipsEnabled;
     }
-    atomicWriteJson2(CLAUDE_SETTINGS, settings);
+    atomicWriteJson3(CLAUDE_SETTINGS, settings);
   }
   try {
     const st = readState();
-    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
+    atomicWriteJson3(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
   } catch {
   }
   return { cleared: true };
+}
+function renderRefreshSurface(topMatches, sc, opts = {}) {
+  if (!sc || sc.enabled !== true) {
+    clearSpinnerVerbs();
+    clearSpinnerTips();
+    return { verbs: [], tips: [], surfacedIds: [] };
+  }
+  const seenHistory = opts.seenHistory || loadSeenHistory();
+  let ranked = rankBySessionTags(topMatches, opts.sessionTags);
+  const widened = widenFreshCandidates(ranked, seenHistory, 8, opts.widen);
+  if (widened.length > 0) ranked = [...ranked, ...widened];
+  const verbs = buildSpinnerPool(ranked, sc.max, {
+    sessionTags: opts.sessionTags,
+    frequency: sc.frequency,
+    topPeers: opts.topPeers,
+    incomingPending: opts.incomingPending,
+    sessionStale: opts.sessionStale,
+    seenHistory
+  });
+  if (verbs.length > 0) applySpinnerVerbs(verbs, sc.mode);
+  else clearSpinnerVerbs();
+  const { tips, surfacedIds } = buildTipsDetailed(ranked, opts.baseUrl, 8, { seenHistory });
+  if (tips.length > 0) applySpinnerTips(tips);
+  else clearSpinnerTips();
+  if (verbs.length > 0 || tips.length > 0) recordSurface(surfacedIds);
+  return { verbs, tips, surfacedIds };
 }
 var TH_DIR, CLAUDE_SETTINGS, CONFIG_FILE3, SPINNER_STATE_FILE, SPINNER_DEFAULTS, VERB_INTROS;
 var init_spinner = __esm({
   "bin/spinner.js"() {
     "use strict";
-    TH_DIR = process.env["TERMINALHIRE_DIR"] || join22(homedir20(), ".terminalhire");
-    CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join22(homedir20(), ".claude", "settings.json");
-    CONFIG_FILE3 = join22(TH_DIR, "config.json");
-    SPINNER_STATE_FILE = join22(TH_DIR, "spinner-state.json");
+    init_spinner_seen();
+    TH_DIR = process.env["TERMINALHIRE_DIR"] || join23(homedir21(), ".terminalhire");
+    CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join23(homedir21(), ".claude", "settings.json");
+    CONFIG_FILE3 = join23(TH_DIR, "config.json");
+    SPINNER_STATE_FILE = join23(TH_DIR, "spinner-state.json");
     SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
     VERB_INTROS = ["Matched:", "You\u2019d fit:", "Worth a look:", "On your radar:", "Fits your stack:"];
   }
@@ -13329,26 +13549,26 @@ __export(jpi_spinner_exports, {
   run: () => run16
 });
 import {
-  readFileSync as readFileSync22,
-  writeFileSync as writeFileSync17,
+  readFileSync as readFileSync23,
+  writeFileSync as writeFileSync18,
   copyFileSync as copyFileSync2,
   existsSync as existsSync16,
-  mkdirSync as mkdirSync17
+  mkdirSync as mkdirSync18
 } from "fs";
-import { join as join23 } from "path";
-import { homedir as homedir21 } from "os";
+import { join as join24 } from "path";
+import { homedir as homedir22 } from "os";
 import { createInterface as createInterface10 } from "readline";
 function readConfig2() {
   try {
-    return existsSync16(CONFIG_FILE4) ? JSON.parse(readFileSync22(CONFIG_FILE4, "utf8")) : {};
+    return existsSync16(CONFIG_FILE4) ? JSON.parse(readFileSync23(CONFIG_FILE4, "utf8")) : {};
   } catch {
     return {};
   }
 }
 function writeConfig2(patch) {
-  mkdirSync17(TH_DIR2, { recursive: true });
+  mkdirSync18(TH_DIR2, { recursive: true });
   const merged = { ...readConfig2(), ...patch };
-  writeFileSync17(CONFIG_FILE4, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  writeFileSync18(CONFIG_FILE4, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function backupSettings() {
   if (!existsSync16(SETTINGS_PATH)) return null;
@@ -13368,7 +13588,7 @@ function ask(question) {
 }
 function readTopMatches() {
   try {
-    const c = JSON.parse(readFileSync22(CACHE_FILE, "utf8"));
+    const c = JSON.parse(readFileSync23(CACHE_FILE, "utf8"));
     return Array.isArray(c.topMatches) ? c.topMatches : [];
   } catch {
     return [];
@@ -13511,10 +13731,10 @@ var init_jpi_spinner = __esm({
   "bin/jpi-spinner.js"() {
     "use strict";
     init_spinner();
-    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join23(homedir21(), ".terminalhire");
-    CONFIG_FILE4 = join23(TH_DIR2, "config.json");
-    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join23(homedir21(), ".claude", "settings.json");
-    CACHE_FILE = join23(TH_DIR2, "index-cache.json");
+    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join24(homedir22(), ".terminalhire");
+    CONFIG_FILE4 = join24(TH_DIR2, "config.json");
+    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join24(homedir22(), ".claude", "settings.json");
+    CACHE_FILE = join24(TH_DIR2, "index-cache.json");
   }
 });
 
@@ -13523,9 +13743,9 @@ var jpi_sync_exports = {};
 __export(jpi_sync_exports, {
   run: () => run17
 });
-import { readFileSync as readFileSync23, writeFileSync as writeFileSync18, mkdirSync as mkdirSync18, existsSync as existsSync17, rmSync as rmSync4 } from "fs";
-import { join as join24 } from "path";
-import { homedir as homedir22, hostname as osHostname } from "os";
+import { readFileSync as readFileSync24, writeFileSync as writeFileSync19, mkdirSync as mkdirSync19, existsSync as existsSync17, rmSync as rmSync4 } from "fs";
+import { join as join25 } from "path";
+import { homedir as homedir23, hostname as osHostname } from "os";
 import { createInterface as createInterface11 } from "readline";
 function ask2(question) {
   const rl = createInterface11({ input: process.stdin, output: process.stdout });
@@ -13538,14 +13758,14 @@ function ask2(question) {
 }
 function readMarker() {
   try {
-    return existsSync17(TIER1_MARKER) ? JSON.parse(readFileSync23(TIER1_MARKER, "utf8")) : null;
+    return existsSync17(TIER1_MARKER) ? JSON.parse(readFileSync24(TIER1_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
 }
 function writeMarker(marker) {
-  mkdirSync18(TH_DIR3, { recursive: true });
-  writeFileSync18(TIER1_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  mkdirSync19(TH_DIR3, { recursive: true });
+  writeFileSync19(TIER1_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearMarker() {
   try {
@@ -13864,8 +14084,8 @@ var init_jpi_sync = __esm({
   "bin/jpi-sync.js"() {
     "use strict";
     init_open_url();
-    TH_DIR3 = process.env["TERMINALHIRE_DIR"] || join24(homedir22(), ".terminalhire");
-    TIER1_MARKER = join24(TH_DIR3, "tier1.json");
+    TH_DIR3 = process.env["TERMINALHIRE_DIR"] || join25(homedir23(), ".terminalhire");
+    TIER1_MARKER = join25(TH_DIR3, "tier1.json");
     API_URL6 = process.env["TERMINALHIRE_API_URL"] || process.env["JPI_API_URL"] || "https://terminalhire.com";
     SYNC_BASE = "https://www.terminalhire.com";
     POLL_INTERVAL_MS = 2e3;
@@ -13880,31 +14100,31 @@ __export(jpi_init_exports, {
   run: () => run18
 });
 import { existsSync as existsSync18 } from "fs";
-import { join as join25, resolve } from "path";
+import { join as join26, resolve } from "path";
 import { fileURLToPath as fileURLToPath4, pathToFileURL } from "url";
 import { createInterface as createInterface12 } from "readline";
 import { spawnSync, spawn as spawn2 } from "child_process";
-import { homedir as homedir23 } from "os";
+import { homedir as homedir24 } from "os";
 function resolveScript(name) {
-  const distPath = resolve(join25(__dirname3, "..", "..", "dist", "bin", `${name}.js`));
-  const legacyPath = resolve(join25(__dirname3, `${name}.js`));
+  const distPath = resolve(join26(__dirname3, "..", "..", "dist", "bin", `${name}.js`));
+  const legacyPath = resolve(join26(__dirname3, `${name}.js`));
   return existsSync18(distPath) ? distPath : legacyPath;
 }
 function resolveSrc(name) {
-  const distPath = resolve(join25(__dirname3, "..", "..", "dist", "src", `${name}.js`));
-  const legacyPath = resolve(join25(__dirname3, "..", "src", `${name}.js`));
+  const distPath = resolve(join26(__dirname3, "..", "..", "dist", "src", `${name}.js`));
+  const legacyPath = resolve(join26(__dirname3, "..", "src", `${name}.js`));
   return existsSync18(distPath) ? distPath : legacyPath;
 }
 function resolveInstallJs() {
-  const fromDist = resolve(join25(__dirname3, "..", "..", "install.js"));
-  const fromBin = resolve(join25(__dirname3, "..", "install.js"));
+  const fromDist = resolve(join26(__dirname3, "..", "..", "install.js"));
+  const fromBin = resolve(join26(__dirname3, "..", "install.js"));
   if (existsSync18(fromDist)) return fromDist;
   if (existsSync18(fromBin)) return fromBin;
   return fromBin;
 }
 function resolveStatuslineInstallJs() {
-  const fromDist = resolve(join25(__dirname3, "..", "..", "statusline-install.js"));
-  const fromBin = resolve(join25(__dirname3, "..", "statusline-install.js"));
+  const fromDist = resolve(join26(__dirname3, "..", "..", "statusline-install.js"));
+  const fromBin = resolve(join26(__dirname3, "..", "statusline-install.js"));
   if (existsSync18(fromDist)) return fromDist;
   if (existsSync18(fromBin)) return fromBin;
   return fromBin;
@@ -14072,9 +14292,9 @@ var jpi_refresh_exports = {};
 __export(jpi_refresh_exports, {
   run: () => run19
 });
-import { readFileSync as readFileSync24, writeFileSync as writeFileSync19, existsSync as existsSync19, mkdirSync as mkdirSync19 } from "fs";
-import { join as join26 } from "path";
-import { homedir as homedir24 } from "os";
+import { readFileSync as readFileSync25, writeFileSync as writeFileSync20, existsSync as existsSync19, mkdirSync as mkdirSync20 } from "fs";
+import { join as join27 } from "path";
+import { homedir as homedir25 } from "os";
 import { fileURLToPath as fileURLToPath5 } from "url";
 async function run19() {
   try {
@@ -14100,6 +14320,7 @@ async function run19() {
     const contribute = isContributeEnabled() && Array.isArray(index?.contribute) ? index.contribute : [];
     let matchCount = 0;
     let topMatches = [];
+    let widenReserve = [];
     try {
       const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
       const { match: match2 } = await Promise.resolve().then(() => (init_src(), src_exports));
@@ -14127,22 +14348,21 @@ async function run19() {
         const rRot = rotableRoles.length > 0 ? Math.floor(Date.now() / (5 * 60 * 1e3)) % rotableRoles.length : 0;
         const rotatedRoles = [...rotableRoles.slice(rRot), ...rotableRoles.slice(0, rRot)];
         const roleTop = [...stableRoles, ...rotatedRoles].slice(0, roleSlots);
-        topMatches = [...roleTop, ...bountyTop, ...contributeTop].map((r) => ({
+        const toCard = (r) => ({
           id: r.job.id,
           title: r.job.title,
           company: r.job.company,
           score: r.score,
           remote: r.job.remote,
           matchedTags: r.matchedTags,
-          // Bounty fields so the spinner can render bounty framing ($ + 💎).
-          // Public job text, stays LOCAL (same as the rest of topMatches).
           source: r.job.source,
           amountUSD: r.job.bounty?.amountUSD,
-          // repo = owner/name for BOTH bounties and contribution items;
-          // issueNumber only on contribution items (003 copy §1: `owner/repo #n`).
           repo: r.job.bounty?.repoFullName ?? r.job.contribution?.repoFullName,
           issueNumber: r.job.contribution?.issueNumber
-        }));
+        });
+        topMatches = [...roleTop, ...bountyTop, ...contributeTop].map(toCard);
+        const inTop = new Set(topMatches.map((m) => m.id));
+        widenReserve = results.filter((r) => !inTop.has(r.job.id)).slice(0, 100).map(toCard);
       }
     } catch {
     }
@@ -14231,7 +14451,15 @@ async function run19() {
       }
     } catch {
     }
-    mkdirSync19(TERMINALHIRE_DIR16, { recursive: true });
+    let seenHistory;
+    try {
+      const { loadSeenHistory: loadSeenHistory2 } = await Promise.resolve().then(() => (init_spinner_seen(), spinner_seen_exports));
+      const { filterFreshMatches: filterFreshMatches2 } = await Promise.resolve().then(() => (init_spinner(), spinner_exports));
+      seenHistory = loadSeenHistory2();
+      topMatches = filterFreshMatches2(topMatches, seenHistory);
+    } catch {
+    }
+    mkdirSync20(TERMINALHIRE_DIR16, { recursive: true });
     const cacheEntry = {
       ts: Date.now(),
       index,
@@ -14242,40 +14470,38 @@ async function run19() {
       unreadChat,
       sessionStale
     };
-    writeFileSync19(INDEX_CACHE_FILE7, JSON.stringify(cacheEntry), "utf8");
+    writeFileSync20(INDEX_CACHE_FILE7, JSON.stringify(cacheEntry), "utf8");
     try {
-      const {
-        readSpinnerConfig: readSpinnerConfig2,
-        buildSpinnerPool: buildSpinnerPool2,
-        applySpinnerVerbs: applySpinnerVerbs2,
-        clearSpinnerVerbs: clearSpinnerVerbs2,
-        buildTips: buildTips2,
-        applySpinnerTips: applySpinnerTips2,
-        clearSpinnerTips: clearSpinnerTips2,
-        rankBySessionTags: rankBySessionTags2
-      } = await Promise.resolve().then(() => (init_spinner(), spinner_exports));
+      const { readSpinnerConfig: readSpinnerConfig2, renderRefreshSurface: renderRefreshSurface2 } = await Promise.resolve().then(() => (init_spinner(), spinner_exports));
       const sc = readSpinnerConfig2();
-      if (sc.enabled) {
-        let sessionTags;
-        try {
+      let sessionTags;
+      try {
+        if (sc.enabled) {
           const { extractFingerprint: extractFingerprint2 } = await Promise.resolve().then(() => (init_signal(), signal_exports));
           const fp = extractFingerprint2(process.cwd());
           if (Array.isArray(fp.skillTags) && fp.skillTags.length > 0) {
             sessionTags = fp.skillTags;
           }
-        } catch {
         }
-        const ranked = rankBySessionTags2(topMatches, sessionTags);
-        const verbs = buildSpinnerPool2(ranked, sc.max, { sessionTags, frequency: sc.frequency, topPeers, incomingPending, sessionStale });
-        if (verbs.length > 0) applySpinnerVerbs2(verbs, sc.mode);
-        else clearSpinnerVerbs2();
-        const tips = buildTips2(ranked, API_URL7, 8);
-        if (tips.length > 0) applySpinnerTips2(tips);
-        else clearSpinnerTips2();
-      } else {
-        clearSpinnerVerbs2();
-        clearSpinnerTips2();
+      } catch {
       }
+      let widen;
+      try {
+        if (sc.enabled && widenReserve.length > 0) {
+          const { getAdjacentTags: getAdjacentTags2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+          widen = { reserve: widenReserve, getAdjacent: getAdjacentTags2 };
+        }
+      } catch {
+      }
+      renderRefreshSurface2(topMatches, sc, {
+        sessionTags,
+        topPeers,
+        incomingPending,
+        sessionStale,
+        baseUrl: API_URL7,
+        seenHistory,
+        widen
+      });
     } catch {
     }
     try {
@@ -14302,8 +14528,8 @@ var init_jpi_refresh = __esm({
     init_web_session();
     GH_SESSION_COOKIE7 = "__jpi_gh_session";
     __dirname4 = fileURLToPath5(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR16 = join26(homedir24(), ".terminalhire");
-    INDEX_CACHE_FILE7 = join26(TERMINALHIRE_DIR16, "index-cache.json");
+    TERMINALHIRE_DIR16 = join27(homedir25(), ".terminalhire");
+    INDEX_CACHE_FILE7 = join27(TERMINALHIRE_DIR16, "index-cache.json");
     API_URL7 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://www.terminalhire.com";
   }
 });
@@ -14313,14 +14539,14 @@ var jpi_save_exports = {};
 __export(jpi_save_exports, {
   run: () => run20
 });
-import { readFileSync as readFileSync25, existsSync as existsSync20 } from "fs";
-import { join as join27 } from "path";
-import { homedir as homedir25 } from "os";
+import { readFileSync as readFileSync26, existsSync as existsSync20 } from "fs";
+import { join as join28 } from "path";
+import { homedir as homedir26 } from "os";
 import { fileURLToPath as fileURLToPath6 } from "url";
 function findJobInCache(jobId) {
   try {
     if (!existsSync20(INDEX_CACHE_FILE8)) return null;
-    const raw = readFileSync25(INDEX_CACHE_FILE8, "utf8");
+    const raw = readFileSync26(INDEX_CACHE_FILE8, "utf8");
     const entry = JSON.parse(raw);
     const jobs = entry?.index?.jobs ?? [];
     return jobs.find((j) => j.id === jobId) ?? null;
@@ -14413,26 +14639,26 @@ var init_jpi_save = __esm({
   "bin/jpi-save.js"() {
     "use strict";
     __dirname5 = fileURLToPath6(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR17 = join27(homedir25(), ".terminalhire");
-    INDEX_CACHE_FILE8 = join27(TERMINALHIRE_DIR17, "index-cache.json");
+    TERMINALHIRE_DIR17 = join28(homedir26(), ".terminalhire");
+    INDEX_CACHE_FILE8 = join28(TERMINALHIRE_DIR17, "index-cache.json");
   }
 });
 
 // bin/jpi-dispatch.js
 import { fileURLToPath as fileURLToPath7 } from "url";
-import { join as join28, dirname as dirname3 } from "path";
-import { existsSync as existsSync21, readFileSync as readFileSync26 } from "fs";
+import { join as join29, dirname as dirname4 } from "path";
+import { existsSync as existsSync21, readFileSync as readFileSync27 } from "fs";
 import { createRequire } from "module";
 var __dirname6 = fileURLToPath7(new URL(".", import.meta.url));
 function readPackageVersion() {
   try {
     const candidates = [
-      join28(__dirname6, "..", "..", "package.json"),
-      join28(__dirname6, "..", "package.json")
+      join29(__dirname6, "..", "..", "package.json"),
+      join29(__dirname6, "..", "package.json")
     ];
     for (const p of candidates) {
       if (existsSync21(p)) {
-        const pkg = JSON.parse(readFileSync26(p, "utf8"));
+        const pkg = JSON.parse(readFileSync27(p, "utf8"));
         if (pkg.version) return pkg.version;
       }
     }
@@ -14444,7 +14670,7 @@ var SUBCOMMANDS = ["jobs", "devs", "project", "bounties", "contribute", "claim",
 var firstArg = process.argv[2];
 if (!firstArg && !process.stdin.isTTY) {
   const { default: childProcess } = await import("child_process");
-  const nudgeScript = join28(__dirname6, "jpi.js");
+  const nudgeScript = join29(__dirname6, "jpi.js");
   const child = childProcess.spawnSync(process.execPath, [nudgeScript], {
     stdio: ["inherit", "inherit", "inherit"]
   });
@@ -14660,8 +14886,8 @@ if (firstArg === "statusline") {
     console.error("Usage: terminalhire statusline --on | --off");
     process.exit(1);
   }
-  const fromDist = join28(__dirname6, "..", "..", "statusline-install.js");
-  const fromBin = join28(__dirname6, "..", "statusline-install.js");
+  const fromDist = join29(__dirname6, "..", "..", "statusline-install.js");
+  const fromBin = join29(__dirname6, "..", "statusline-install.js");
   const installer = existsSync21(fromDist) ? fromDist : fromBin;
   const { spawnSync: spawnSync2 } = await import("child_process");
   const child = spawnSync2(
