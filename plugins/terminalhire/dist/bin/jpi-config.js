@@ -18,7 +18,9 @@ var DEFAULT_CONFIG = {
   chatDisclosureAck: false,
   chatShareActivity: false,
   inboundNudgeMuted: false,
-  inboundNudgeDisclosed: false
+  inboundNudgeDisclosed: false,
+  contributeEnabled: false,
+  contributePrompted: false
 };
 function readConfig() {
   try {

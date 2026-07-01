@@ -332,7 +332,48 @@ var init_types2 = __esm({
 });
 
 // ../../packages/core/src/vocab/extract.ts
-var SOFT_DOMAIN, SYNONYM_ONLY;
+function tokenize(text) {
+  return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
+}
+function looksLikeEngRole(title) {
+  return !NON_ENG_TITLE.test(title) && ENG_INTENT.test(title);
+}
+function resolveToken(token) {
+  const tryOne = (t) => {
+    if (GRAPH.ids.has(t)) return { id: t, viaSynonym: false };
+    const mapped = GRAPH.synonyms.get(t);
+    return mapped ? { id: mapped, viaSynonym: true } : null;
+  };
+  return tryOne(token) ?? tryOne(token.replace(/^[.\-+#]+|[.\-+#]+$/g, ""));
+}
+function extractSkillTags(title, body = "") {
+  if (!looksLikeEngRole(title)) return [];
+  const text = `${title}
+${body}`;
+  const tokens = tokenize(text);
+  const ids = /* @__PURE__ */ new Set();
+  const ambiguousPending = /* @__PURE__ */ new Set();
+  for (const tok of tokens) {
+    const r = resolveToken(tok);
+    if (!r) continue;
+    if (NON_EXTRACTABLE.has(r.id)) continue;
+    if (SYNONYM_ONLY.has(r.id) && !r.viaSynonym) continue;
+    const cue = AMBIGUOUS[r.id];
+    if (cue) {
+      if (cue.test(text)) ids.add(r.id);
+      else ambiguousPending.add(r.id);
+      continue;
+    }
+    ids.add(r.id);
+  }
+  const hardCount = [...ids].filter((id) => !SOFT_DOMAIN.has(id)).length;
+  if (hardCount >= 2) for (const id of ambiguousPending) ids.add(id);
+  return [...ids];
+}
+function coreTagsFromTitle(title) {
+  return extractSkillTags(title, "").filter((t) => !SOFT_DOMAIN.has(t));
+}
+var SOFT_DOMAIN, SYNONYM_ONLY, NON_EXTRACTABLE, AMBIGUOUS, ENG_INTENT, NON_ENG_TITLE;
 var init_extract = __esm({
   "../../packages/core/src/vocab/extract.ts"() {
     "use strict";
@@ -358,16 +399,136 @@ var init_extract = __esm({
       "api-design"
     ]);
     SYNONYM_ONLY = /* @__PURE__ */ new Set(["performance", "security", "seo"]);
+    NON_EXTRACTABLE = /* @__PURE__ */ new Set(["payments", "billing"]);
     for (const id of SYNONYM_ONLY) {
       if (!SOFT_DOMAIN.has(id)) throw new Error(`extract: SYNONYM_ONLY "${id}" not in SOFT_DOMAIN`);
     }
+    AMBIGUOUS = {
+      // Accept "go" with an ecosystem cue OR an explicit-skill phrasing ("Go developer",
+      // "in Go", "experience with Go"). Rejects prose: "ready to go", "go above", "go live".
+      go: /\b(golang|goroutines?|go\.mod|gin framework|gorm)\b|\bgo\b\s+(developer|engineer|programmer|microservices?|backend|services?|lang)|\b(in|with|using|written in|built in|experience (?:in|with)|proficient in|fluent in)\s+go\b/i,
+      r: /\b(rstudio|tidyverse|ggplot|shiny|dplyr|cran|r-lang|rlang)\b/i,
+      ml: /\b(machine[\s-]?learning|pytorch|tensorflow|scikit|sklearn|keras|neural|model training|deep[\s-]?learning|numpy|pandas|ml\s+(?:engineer|platform|researcher|infrastructure)|(?:ml|ai)\s+research)\b/i
+    };
+    ENG_INTENT = /\b(engineer|engineering|developer|dev\b|swe|sde|programmer|architect|full[\s-]?stack|front[\s-]?end|back[\s-]?end|devops|sre|software|coding|codebase|technical staff|tech(?:nical)? lead)\b/i;
+    NON_ENG_TITLE = /\b(account executive|account manager|sales (?:rep|representative|development|manager|lead)|sdr|bdr|recruiter|recruiting|talent|marketing|administrative|business partner|billing coordinator|operations (?:administrator|coordinator)|customer success|project finance|controller|bookkeeper|graphic|brand)\b/i;
   }
 });
 
 // ../../packages/core/src/vocab/idf-background.ts
+var IDF_BACKGROUND;
 var init_idf_background = __esm({
   "../../packages/core/src/vocab/idf-background.ts"() {
     "use strict";
+    IDF_BACKGROUND = {
+      N: 244,
+      df: {
+        "backend": 71,
+        "python": 57,
+        "monitoring": 44,
+        "nextjs": 40,
+        "testing": 40,
+        "observability": 38,
+        "llm": 38,
+        "go": 36,
+        "aws": 36,
+        "react": 33,
+        "frontend": 30,
+        "ml": 28,
+        "mobile": 24,
+        "realtime": 24,
+        "typescript": 23,
+        "devops": 22,
+        "kubernetes": 22,
+        "javascript": 21,
+        "java": 20,
+        "rag": 20,
+        "api-design": 20,
+        "linux": 19,
+        "postgresql": 19,
+        "search": 17,
+        "azure": 16,
+        "snowflake": 15,
+        "spark": 15,
+        "kotlin": 14,
+        "gcp": 14,
+        "accessibility": 14,
+        "nodejs": 14,
+        "graphql": 14,
+        "airflow": 14,
+        "docker": 14,
+        "ci-cd": 13,
+        "android": 12,
+        "cpp": 12,
+        "gitlab-ci": 11,
+        "anthropic": 11,
+        "terraform": 11,
+        "mysql": 11,
+        "r": 10,
+        "dbt": 9,
+        "langchain": 9,
+        "pytorch": 9,
+        "ruby": 9,
+        "rails": 9,
+        "cloudflare": 7,
+        "datadog": 7,
+        "css": 7,
+        "ansible": 7,
+        "openai": 6,
+        "kafka": 6,
+        "rust": 5,
+        "grpc": 5,
+        "microservices": 5,
+        "serverless": 5,
+        "scala": 5,
+        "prometheus": 5,
+        "grafana": 5,
+        "php": 5,
+        "redis": 5,
+        "huggingface": 4,
+        "pandas": 4,
+        "scikit-learn": 4,
+        "html": 4,
+        "ios": 4,
+        "authentication": 4,
+        "vue": 4,
+        "mlops": 3,
+        "spring": 3,
+        "mongodb": 3,
+        "csharp": 3,
+        "swift": 2,
+        "caching": 2,
+        "haskell": 2,
+        "pulumi": 2,
+        "argocd": 2,
+        "tensorflow": 2,
+        "express": 2,
+        "elasticsearch": 2,
+        "clickhouse": 2,
+        "nestjs": 2,
+        "vite": 2,
+        "svelte": 2,
+        "phoenix": 2,
+        "angular": 2,
+        "django": 2,
+        "dotnet": 2,
+        "elixir": 2,
+        "bun": 1,
+        "oauth": 1,
+        "dynamodb": 1,
+        "helm": 1,
+        "playwright": 1,
+        "cypress": 1,
+        "jest": 1,
+        "mocha": 1,
+        "typeorm": 1,
+        "tailwind": 1,
+        "prisma": 1,
+        "expo": 1,
+        "rabbitmq": 1,
+        "redux": 1
+      }
+    };
   }
 });
 
@@ -384,6 +545,19 @@ function normalize(tokens) {
     if (mapped) result.add(mapped);
   }
   return Array.from(result);
+}
+function expandWeighted(tags, graph = GRAPH) {
+  const out = /* @__PURE__ */ new Map();
+  const put = (tag, weight, via) => {
+    const ex = out.get(tag);
+    if (!ex || weight > ex.weight) out.set(tag, { tag, weight, via });
+  };
+  for (const t of tags) {
+    put(t, 1, t);
+    const near = graph.closure.get(t);
+    if (near) for (const [n, edge] of near) put(n, edge.w, t);
+  }
+  return out;
 }
 var GRAPH, VOCABULARY, SYNONYMS;
 var init_vocab = __esm({
@@ -418,6 +592,15 @@ var init_contribution_gate = __esm({
 });
 
 // ../../packages/core/src/github.ts
+function bestAcceptanceDomain(cred, domains) {
+  if (cred.status !== "ok") return null;
+  let best = null;
+  for (const d of domains) {
+    const count = cred.byDomain[d]?.mergedPRs ?? 0;
+    if (count > 0 && (best === null || count > best.count)) best = { domain: d, count };
+  }
+  return best;
+}
 var RESUME_DECAY_HALF_LIFE_MS;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
@@ -429,11 +612,146 @@ var init_github = __esm({
 });
 
 // ../../packages/core/src/matcher.ts
+function acceptanceDomainsOf(job) {
+  return job.coreTags && job.coreTags.length > 0 ? job.coreTags : job.tags;
+}
+function backgroundIdf(tag) {
+  const df = IDF_BACKGROUND.df[tag] ?? 0;
+  return Math.log((IDF_BACKGROUND.N + 1) / (df + 1)) + 1;
+}
+function inferSeniority(title) {
+  if (!ENG_TITLE.test(title)) return void 0;
+  for (const [re, level] of SENIORITY_PATTERNS) {
+    if (re.test(title)) return level;
+  }
+  return void 0;
+}
+function seniorityScore(fp, job) {
+  if (!fp.seniorityBand) return 1;
+  const jobLevel = inferSeniority(job.title);
+  if (!jobLevel) return 0.85;
+  const wanted = SENIORITY_RANK[fp.seniorityBand] ?? 1;
+  const got = SENIORITY_RANK[jobLevel] ?? 1;
+  const delta = Math.abs(wanted - got);
+  if (delta === 0) return 1;
+  if (delta === 1) return 0.7;
+  return 0.4;
+}
+function recencyScore(postedAt, now) {
+  if (!postedAt) return UNKNOWN_RECENCY;
+  const ms = new Date(postedAt).getTime();
+  if (Number.isNaN(ms)) return UNKNOWN_RECENCY;
+  const ageDays = (now - ms) / 864e5;
+  if (ageDays < 7) return 1;
+  if (ageDays < 30) return 0.9;
+  if (ageDays < 90) return 0.75;
+  return 0.6;
+}
+function passesFilters(fp, job) {
+  const prefs = fp.prefs;
+  if (!prefs) return true;
+  if (prefs.remoteOnly && !job.remote) return false;
+  if (prefs.roleTypes && prefs.roleTypes.length > 0 && !prefs.roleTypes.includes(job.roleType)) {
+    return false;
+  }
+  if (prefs.compFloorUsd !== void 0) {
+    if (job.compMax !== void 0 && job.compMax < prefs.compFloorUsd) return false;
+  }
+  return true;
+}
+function buildReason(details) {
+  if (details.length === 0) return "No direct skill overlap found.";
+  const render = (d) => !d.via || d.via === d.tag ? d.tag : `${d.via}\u2192${d.tag} (${d.weight})`;
+  const top = details.slice(0, 3).map(render);
+  const rest = details.length - top.length;
+  const listed = top.join(", ");
+  if (rest === 0) return `Matched on ${listed}.`;
+  return `Matched on ${listed} + ${rest} more skill${rest > 1 ? "s" : ""}.`;
+}
+function harmonicMean(a, b) {
+  if (a <= 0 || b <= 0) return 0;
+  return 2 * a * b / (a + b);
+}
+function match(fp, jobs, limit = 5, now = Date.now(), opts = {}) {
+  const idfOf = backgroundIdf;
+  const expanded = expandWeighted(fp.skillTags);
+  const maxDevScore = fp.skillTags.reduce((acc, t) => acc + idfOf(t), 0);
+  const candidates = jobs.filter((j) => passesFilters(fp, j));
+  const scored = candidates.map((job) => {
+    const details = [];
+    let jobMatchScore = 0;
+    let jobMaxScore = 0;
+    const devCovByTag = /* @__PURE__ */ new Map();
+    for (const tag of job.tags) {
+      const w = idfOf(tag);
+      jobMaxScore += w;
+      const hit = expanded.get(tag);
+      if (hit) {
+        const credit = Math.pow(hit.weight, SHARPEN);
+        jobMatchScore += w * credit;
+        details.push({ tag, weight: hit.weight, via: hit.via });
+        if (credit > (devCovByTag.get(hit.via) ?? 0)) devCovByTag.set(hit.via, credit);
+      }
+    }
+    let devScore = 0;
+    for (const t of fp.skillTags) devScore += idfOf(t) * (devCovByTag.get(t) ?? 0);
+    const devCov = maxDevScore > 0 ? Math.min(1, devScore / maxDevScore) : 0;
+    const jobCov = jobMaxScore > 0 ? Math.min(1, jobMatchScore / jobMaxScore) : 0;
+    const tagComponent = harmonicMean(devCov, jobCov);
+    if (tagComponent === 0) return null;
+    const coreTags = job.coreTags ?? coreTagsFromTitle(job.title);
+    let coreComponent = tagComponent;
+    if (coreTags.length > 0) {
+      const coreCov = Math.max(0, ...coreTags.map((ct) => expanded.get(ct)?.weight ?? 0));
+      if (coreCov === 0) coreComponent = tagComponent * CORE_MISS_PENALTY;
+    }
+    details.sort((a, b) => idfOf(b.tag) * b.weight - idfOf(a.tag) * a.weight);
+    const sScore = seniorityScore(fp, job);
+    const rScore = recencyScore(job.postedAt, now);
+    const score = coreComponent * 0.6 + sScore * 0.25 + rScore * 0.15;
+    const matchedTags = [...new Set(details.map((d) => d.via ?? d.tag))];
+    const badge = opts.acceptance ? bestAcceptanceDomain(opts.acceptance, acceptanceDomainsOf(job)) : null;
+    return {
+      job,
+      score: Math.round(score * 1e3) / 1e3,
+      matchedTags,
+      matchDetails: details,
+      ...badge ? { acceptance: { status: "ok", domain: badge.domain, count: badge.count } } : {},
+      reason: buildReason(details)
+    };
+  });
+  return scored.filter((r) => r !== null && r.score >= MIN_SCORE).sort((a, b) => {
+    const byScore = b.score - a.score;
+    if (Math.abs(byScore) > TIEBREAK_EPS) return byScore;
+    const byAcceptance = (b.acceptance?.count ?? 0) - (a.acceptance?.count ?? 0);
+    if (byAcceptance !== 0) return byAcceptance;
+    return byScore;
+  }).slice(0, limit);
+}
+var MIN_SCORE, TIEBREAK_EPS, SHARPEN, CORE_MISS_PENALTY, SENIORITY_RANK, SENIORITY_PATTERNS, ENG_TITLE, UNKNOWN_RECENCY;
 var init_matcher = __esm({
   "../../packages/core/src/matcher.ts"() {
     "use strict";
     init_vocabulary();
     init_github();
+    MIN_SCORE = 0.15;
+    TIEBREAK_EPS = 5e-3;
+    SHARPEN = 1.6;
+    CORE_MISS_PENALTY = 0.4;
+    SENIORITY_RANK = {
+      junior: 0,
+      mid: 1,
+      senior: 2,
+      staff: 3
+    };
+    SENIORITY_PATTERNS = [
+      [/\bstaff\b|\bprincipal\b|\bdistinguished\b/i, "staff"],
+      [/\bsenior\b|\bsr\.?\b/i, "senior"],
+      [/\bjunior\b|\bjr\.?\b|\bentry[\s-]?level\b/i, "junior"],
+      [/\bmid[\s-]?level\b|\bmid\b/i, "mid"]
+    ];
+    ENG_TITLE = /\b(engineer|engineering|developer|dev|swe|sde|programmer|architect)\b/i;
+    UNKNOWN_RECENCY = 0.75;
   }
 });
 
@@ -871,13 +1189,13 @@ import {
   randomBytes as randomBytes2
 } from "crypto";
 import {
-  readFileSync as readFileSync2,
-  writeFileSync,
-  mkdirSync,
-  existsSync
+  readFileSync as readFileSync3,
+  writeFileSync as writeFileSync2,
+  mkdirSync as mkdirSync2,
+  existsSync as existsSync2
 } from "fs";
-import { join as join2 } from "path";
-import { homedir } from "os";
+import { join as join3 } from "path";
+import { homedir as homedir2 } from "os";
 async function loadKey() {
   try {
     const kt = await import("keytar");
@@ -890,12 +1208,12 @@ async function loadKey() {
     return key2;
   } catch {
   }
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
-  if (existsSync(KEY_FILE)) {
-    return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");
+  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
+  if (existsSync2(KEY_FILE)) {
+    return Buffer.from(readFileSync3(KEY_FILE, "utf8").trim(), "hex");
   }
   const key = randomBytes2(KEY_BYTES);
-  writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  writeFileSync2(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
   return key;
 }
 function encrypt(plaintext, key) {
@@ -953,10 +1271,10 @@ function migrateTagWeights(profile) {
   }
 }
 async function readProfile() {
-  if (!existsSync(PROFILE_FILE)) return blankProfile();
+  if (!existsSync2(PROFILE_FILE)) return blankProfile();
   try {
     const key = await loadKey();
-    const raw = readFileSync2(PROFILE_FILE, "utf8");
+    const raw = readFileSync3(PROFILE_FILE, "utf8");
     const blob = JSON.parse(raw);
     const plaintext = decrypt(blob, key);
     const parsed = JSON.parse(plaintext);
@@ -967,12 +1285,12 @@ async function readProfile() {
   }
 }
 async function writeProfile(profile) {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
   const key = await loadKey();
   profile.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
   profile.skillTags = deriveSkillTags(profile.tagWeights);
   const blob = encrypt(JSON.stringify(profile), key);
-  writeFileSync(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+  writeFileSync2(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 function accumulateSession(profile, tags, isEmployerContext, inferredSeniority, seniorityIsAuthoritative = false) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -1056,14 +1374,14 @@ function profileToFingerprint(profile) {
     }
   };
 }
-var TERMINALHIRE_DIR, PROFILE_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var TERMINALHIRE_DIR2, PROFILE_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
 var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
     init_src();
-    TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");
-    PROFILE_FILE = join2(TERMINALHIRE_DIR, "profile.enc");
-    KEY_FILE = join2(TERMINALHIRE_DIR, "key");
+    TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
+    PROFILE_FILE = join3(TERMINALHIRE_DIR2, "profile.enc");
+    KEY_FILE = join3(TERMINALHIRE_DIR2, "key");
     ALGO = "aes-256-gcm";
     KEY_BYTES = 32;
     IV_BYTES = 12;
@@ -1091,79 +1409,208 @@ var init_profile = __esm({
   }
 });
 
-// bin/jpi-profile.js
+// bin/jpi-contribute.js
+init_src();
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3 } from "fs";
+import { join as join4 } from "path";
+import { homedir as homedir3 } from "os";
 import { createInterface } from "readline";
-function prompt(question) {
+
+// src/config.ts
+import { readFileSync as readFileSync2, writeFileSync, mkdirSync, existsSync } from "fs";
+import { join as join2 } from "path";
+import { homedir } from "os";
+var TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");
+var CONFIG_FILE = join2(TERMINALHIRE_DIR, "config.json");
+var DEFAULT_CONFIG = {
+  nudge: "session",
+  peerConnect: false,
+  peerConnectPrompted: false,
+  resumePublishPrompted: false,
+  chatDisclosureAck: false,
+  chatShareActivity: false,
+  inboundNudgeMuted: false,
+  inboundNudgeDisclosed: false,
+  contributeEnabled: false,
+  contributePrompted: false
+};
+function readConfig() {
+  try {
+    if (!existsSync(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
+    const raw = readFileSync2(CONFIG_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_CONFIG, ...parsed };
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+}
+function writeConfig(config) {
+  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  const current = readConfig();
+  const merged = { ...current, ...config };
+  writeFileSync(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
+}
+function isContributeEnabled() {
+  return readConfig().contributeEnabled === true;
+}
+
+// bin/jpi-contribute.js
+var TERMINALHIRE_DIR3 = join4(homedir3(), ".terminalhire");
+var INDEX_CACHE_FILE = join4(TERMINALHIRE_DIR3, "index-cache.json");
+var INDEX_TTL_MS = 15 * 60 * 1e3;
+var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+var HEADER = "Contribution opportunities \u2014 open issues where a merged PR actually counts toward your r\xE9sum\xE9.\nRepos \u226550\u2605 / \u226510 contributors \xB7 unassigned \xB7 merit-merge \xB7 matched locally to your stack.";
+var OPT_IN_PROMPT = "Contribute is off. Turn it on to see open issues where a merged PR would count toward your r\xE9sum\xE9 \u2014\nmatched to your stack. Matching runs locally; your profile never leaves this machine. Enable? [y/N]";
+var EMPTY_STATE = "Nothing clears the bar right now. We only list issues where a merged PR actually counts toward\nyour r\xE9sum\xE9 \u2014 so the list stays honest. Try again after the next refresh.";
+function readIndexCache() {
+  try {
+    const entry = JSON.parse(readFileSync4(INDEX_CACHE_FILE, "utf8"));
+    if (Date.now() - entry.ts < INDEX_TTL_MS) return entry.index;
+    return null;
+  } catch {
+    return null;
+  }
+}
+function writeIndexCache(index) {
+  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
+  writeFileSync3(INDEX_CACHE_FILE, JSON.stringify({ ts: Date.now(), index }), "utf8");
+}
+async function fetchIndex(fetchImpl, useCache = true) {
+  if (useCache) {
+    const cached = readIndexCache();
+    if (cached) return cached;
+  }
+  const res = await fetchImpl(`${API_URL}/api/index`, { signal: AbortSignal.timeout(1e4) });
+  if (!res.ok) throw new Error(`/api/index returned ${res.status}`);
+  const index = await res.json();
+  if (useCache) writeIndexCache(index);
+  return index;
+}
+function defaultPrompt(question) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve(answer.trim());
+      resolve(answer.trim().toLowerCase());
     });
   });
 }
-async function run() {
-  const { readProfile: readProfile2, writeProfile: writeProfile2, deleteProfile: deleteProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-  const args = process.argv.slice(2);
-  if (args.includes("--show")) {
-    const profile = await readProfile2();
-    console.log("\n\u2726 terminalhire local profile (encrypted at rest \u2014 shown here for your review only)\n");
-    console.log("  Skill tags:      " + (profile.skillTags.length > 0 ? profile.skillTags.join(", ") : "(none yet)"));
-    console.log("  Seniority:       " + (profile.seniority ?? "(not set)"));
-    if (profile.displayName) console.log("  Display name:    " + profile.displayName);
-    if (profile.contactEmail) console.log("  Contact email:   " + profile.contactEmail);
-    if (profile.remoteOnly !== void 0) console.log("  Remote only:     " + profile.remoteOnly);
-    if (profile.compFloorUsd !== void 0) console.log("  Comp floor USD:  $" + profile.compFloorUsd);
-    console.log("  Employer sessions contributed: " + profile.hasEmployerSessions);
-    if (profile.github) {
-      console.log("");
-      console.log("  GitHub (public data only, scope: read:user):");
-      console.log("    Login:         @" + profile.github.login);
-      console.log("    Profile URL:   " + profile.github.profileUrl);
-      console.log("    Top languages: " + profile.github.topLanguages.join(", "));
-      console.log("    Public repos:  " + profile.github.publicRepos);
-      console.log("");
-      console.log('  GitHub fields are included in a lead ONLY when you consent "yes".');
-      console.log("  To disconnect GitHub: terminalhire logout");
-    } else {
-      console.log("");
-      console.log("  GitHub: not connected  (run: terminalhire login for instant enrichment)");
+function rankContributions(fp, items) {
+  if (!fp || !Array.isArray(items) || items.length === 0) return [];
+  return match(fp, items, items.length);
+}
+async function rankLocally(items, injectedFp) {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  let fp = injectedFp;
+  if (!fp) {
+    try {
+      const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+      const profile = await readProfile2();
+      if (!profile.skillTags || profile.skillTags.length === 0) return [];
+      fp = profileToFingerprint2(profile);
+    } catch {
+      return [];
     }
-    console.log("");
-    console.log("  Raw profile JSON:");
-    console.log(JSON.stringify(profile, null, 2));
-    console.log("\nThis profile NEVER leaves your machine except in a consented lead payload.");
-    return;
   }
-  if (args.includes("--delete")) {
-    console.log("\nThis will permanently delete your local terminalhire profile and encryption key.");
-    const answer = await prompt('Type "yes" to confirm: ');
-    if (answer !== "yes") {
-      console.log("Aborted.");
-      process.exit(0);
+  return rankContributions(fp, items);
+}
+var LANGUAGES = /* @__PURE__ */ new Set([
+  "typescript",
+  "javascript",
+  "python",
+  "go",
+  "golang",
+  "rust",
+  "java",
+  "ruby",
+  "php",
+  "c",
+  "cpp",
+  "c++",
+  "csharp",
+  "c#",
+  "kotlin",
+  "swift",
+  "scala",
+  "elixir",
+  "erlang",
+  "haskell",
+  "clojure",
+  "dart",
+  "lua",
+  "perl",
+  "r",
+  "ocaml",
+  "julia",
+  "shell",
+  "bash",
+  "html",
+  "css",
+  "sql",
+  "zig",
+  "nim",
+  "crystal",
+  "objective-c"
+]);
+function displayLanguage(job) {
+  const tag = (job.tags ?? []).find((t) => LANGUAGES.has(String(t).toLowerCase()));
+  return tag ?? "\u2014";
+}
+function linkTitle(title, url) {
+  const isTTY = process.stdout.isTTY;
+  const noColor = process.env["NO_COLOR"] !== void 0;
+  if (isTTY && !noColor && url) return `\x1B]8;;${url}\x1B\\${title}\x1B]8;;\x1B\\`;
+  return url ? `${title} (${url})` : title;
+}
+function renderRow(i, result) {
+  const job = result.job;
+  const c = job.contribution ?? {};
+  const repo = c.repoFullName ?? job.company ?? "";
+  const num = c.issueNumber != null ? `#${c.issueNumber}` : "";
+  const label = c.labels && c.labels.length ? c.labels[0] : "\u2014";
+  const lang = displayLanguage(job);
+  const scorePct = `match ${Math.round((result.score ?? 0) * 100)}%`;
+  const line1 = `${i + 1}. ${linkTitle(job.title, c.issueUrl ?? job.url)}`;
+  const line2 = `   ${repo} \xB7 ${num} \xB7 ${label} \xB7 ${lang} \xB7 ${scorePct}`;
+  return `${line1}
+${line2}`;
+}
+async function run(opts = {}) {
+  const log = opts.log ?? console.log;
+  const isTTY = opts.isTTY ?? Boolean(process.stdin.isTTY);
+  const promptImpl = opts.prompt ?? defaultPrompt;
+  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  const useCache = opts.fetchImpl == null;
+  try {
+    if (!isContributeEnabled()) {
+      if (isTTY) {
+        const answer = await promptImpl(OPT_IN_PROMPT + " ");
+        const yes = answer === "y" || answer === "yes";
+        writeConfig(yes ? { contributeEnabled: true, contributePrompted: true } : { contributePrompted: true });
+        if (!yes) return;
+      } else {
+        log(OPT_IN_PROMPT);
+        writeConfig({ contributePrompted: true });
+        return;
+      }
     }
-    await deleteProfile2();
-    console.log("Profile and key deleted from ~/.terminalhire/");
-    return;
+    const index = await fetchIndex(fetchImpl, useCache);
+    const items = Array.isArray(index?.contribute) ? index.contribute : [];
+    const results = await rankLocally(items, opts.fingerprint);
+    if (results.length === 0) {
+      log(EMPTY_STATE);
+      return;
+    }
+    log(HEADER);
+    log("");
+    for (let i = 0; i < results.length; i++) log(renderRow(i, results[i]));
+  } catch (err) {
+    console.error("terminalhire contribute error:", err?.message ?? err);
+    process.exit(1);
   }
-  if (args.includes("--edit")) {
-    const profile = await readProfile2();
-    console.log("\n\u2726 terminalhire profile editor (press Enter to keep current value)\n");
-    const name = await prompt(`Display name [${profile.displayName ?? "not set"}]: `);
-    if (name) profile.displayName = name;
-    const email = await prompt(`Contact email [${profile.contactEmail ?? "not set"}]: `);
-    if (email) profile.contactEmail = email;
-    const remote = await prompt(`Remote only? (y/n) [${profile.remoteOnly ? "y" : "n"}]: `);
-    if (remote === "y") profile.remoteOnly = true;
-    if (remote === "n") profile.remoteOnly = false;
-    const floor = await prompt(`Comp floor USD [${profile.compFloorUsd ?? "not set"}]: `);
-    if (floor && !isNaN(parseInt(floor, 10))) profile.compFloorUsd = parseInt(floor, 10);
-    await writeProfile2(profile);
-    console.log("\nProfile updated (encrypted at ~/.terminalhire/profile.enc)");
-    return;
-  }
-  console.log("Usage: terminalhire profile --show | --edit | --delete");
 }
 export {
+  rankContributions,
+  renderRow,
   run
 };

@@ -259,6 +259,9 @@ var init_github_auth = __esm({
 function isBounty(job) {
   return job.source === "bounty" && job.bounty != null;
 }
+function isContribution(job) {
+  return job.source === "contribute" && job.contribution != null;
+}
 var init_types = __esm({
   "../../packages/core/src/types.ts"() {
     "use strict";
@@ -833,6 +836,21 @@ var init_vocabulary = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/contribution-gate.ts
+function passesContributionGate(input) {
+  if (input.contributors === void 0) return false;
+  return input.stars >= MIN_STARS && input.contributors >= MIN_CONTRIBUTORS && !TRIVIAL_PR_TITLE.test(input.title) && !input.archived && !input.fork;
+}
+var MIN_STARS, MIN_CONTRIBUTORS, TRIVIAL_PR_TITLE;
+var init_contribution_gate = __esm({
+  "../../packages/core/src/feeds/contribution-gate.ts"() {
+    "use strict";
+    MIN_STARS = 50;
+    MIN_CONTRIBUTORS = 10;
+    TRIVIAL_PR_TITLE = /^\s*(fix\s+typo|typo\b|update\s+readme|readme\b|docs?:|docs?\(|chore:|chore\(|style:|ci:|build:|bump\b|update\s+dependenc)/i;
+  }
+});
+
 // ../../packages/core/src/github.ts
 function ghHeaders(token) {
   const headers = {
@@ -1180,16 +1198,14 @@ function deriveResumeTrend(cred, repoRecency, now = Date.now()) {
   }
   return scored.sort((a, b) => b.weight - a.weight).slice(0, 12).map((s) => s.t);
 }
-var TRACTION_TOP_N, MIN_STARS, MIN_CONTRIBUTORS, CANDIDATE_PR_PAGE, TRIVIAL_PR_TITLE, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
+var TRACTION_TOP_N, CANDIDATE_PR_PAGE, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
     init_vocabulary();
+    init_contribution_gate();
     TRACTION_TOP_N = 6;
-    MIN_STARS = 50;
-    MIN_CONTRIBUTORS = 10;
     CANDIDATE_PR_PAGE = 50;
-    TRIVIAL_PR_TITLE = /^\s*(fix\s+typo|typo\b|update\s+readme|readme\b|docs?:|docs?\(|chore:|chore\(|style:|ci:|build:|bump\b|update\s+dependenc)/i;
     RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
     RESUME_MIN_SCORE = 0.05;
   }
@@ -1916,13 +1932,18 @@ var init_bounty_gate = __esm({
       "aragon/hack",
       "spacemeshos/app",
       "archestra-ai/archestra",
-      "boundlessfi/boundless",
       "ucfopen/Obojobo",
-      "widgetti/ipyvolume",
       "moorcheh-ai/memanto",
       "PrismarineJS/mineflayer"
     ];
-    BOUNTY_REPO_DENYLIST = ["SecureBananaLabs/bug-bounty"];
+    BOUNTY_REPO_DENYLIST = [
+      "SecureBananaLabs/bug-bounty",
+      // Meta-farm: a bounty PLATFORM whose own issues are an assignment-gated
+      // contributor queue ("please assign me, my chief") — an unsolicited PR won't
+      // merge, so it's not a real claimable bounty. Not structurally derivable from
+      // any fetched field, so it's a manual entry (also dropped from the allowlist).
+      "boundlessfi/boundless"
+    ];
     DENYLIST_LC = new Set(BOUNTY_REPO_DENYLIST.map((r) => r.toLowerCase()));
     MAX_BOUNTIES_PER_REPO = 10;
     MAX_BOUNTIES_PER_DISCOVERED_REPO = 3;
@@ -1992,6 +2013,9 @@ function isBountyIssue(issue) {
   if (labels.some((n) => BOUNTY_LABEL_RE.test(n))) return true;
   return /bounty/i.test(issue.title) && parseAmountUSD(issue.title) != null;
 }
+function isAssigned(issue) {
+  return !!issue.assignee || (issue.assignees?.length ?? 0) > 0;
+}
 async function ghJson(path) {
   let res;
   try {
@@ -2044,7 +2068,7 @@ async function fetchRepoBounties(repoFullName) {
   }
   const issues = await ghJson(`/repos/${repoFullName}/issues?state=open&per_page=100`);
   if (!issues) return [];
-  const bounties = issues.filter(isBountyIssue).slice(0, MAX_BOUNTIES_PER_REPO);
+  const bounties = issues.filter((i) => isBountyIssue(i) && !isAssigned(i)).slice(0, MAX_BOUNTIES_PER_REPO);
   const owner = repo.owner.login;
   return mapWithConcurrency(bounties, BOUNTY_FETCH_CONCURRENCY, async (issue) => {
     const title = decodeEntities(issue.title).trim();
@@ -2167,6 +2191,7 @@ async function fetchSearchBounties() {
     if (jobs.length >= MAX_SEARCH_BOUNTIES) break;
     const fullName = repoFullNameFromApiUrl(issue.repository_url);
     if (!fullName) continue;
+    if (isAssigned(issue)) continue;
     if ((perRepo.get(fullName) ?? 0) >= MAX_BOUNTIES_PER_REPO) continue;
     const repo = await repoMetaCached(fullName);
     if (!repo) continue;
@@ -2678,6 +2703,7 @@ var init_feeds = __esm({
     init_directory();
     init_bounty_gate();
     init_bounty_gate();
+    init_contribution_gate();
     FEEDS = [greenhouse, ashby, lever, workable, himalayas, wwr, hn];
     GREENHOUSE_SLUGS_BY_TIER = {
       bigco: [
@@ -2788,6 +2814,202 @@ var init_feeds = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/contributions.ts
+function authHeaders2() {
+  const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
+  const h = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "terminalhire",
+    "X-GitHub-Api-Version": "2022-11-28"
+  };
+  if (token) h["Authorization"] = `Bearer ${token}`;
+  return h;
+}
+function tokenize4(text) {
+  return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
+}
+function labelNames2(labels) {
+  return (labels ?? []).map((l) => typeof l === "string" ? l : l.name ?? "").filter(Boolean);
+}
+function repoFullNameFromApiUrl2(url) {
+  const m = url.match(/\/repos\/([^/]+)\/([^/]+)\/?$/);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+function makeClient(fetchImpl) {
+  async function raw(path) {
+    try {
+      return await fetchImpl(`${GITHUB_API2}${path}`, { headers: authHeaders2() });
+    } catch {
+      return null;
+    }
+  }
+  async function json(path) {
+    const res = await raw(path);
+    if (!res) return null;
+    if (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0") return null;
+    if (!res.ok) return null;
+    try {
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+  return { raw, json };
+}
+async function contributorCount(client, fullName) {
+  const res = await client.raw(`/repos/${fullName}/contributors?per_page=1&anon=false`);
+  if (!res || !res.ok) return void 0;
+  const link = res.headers.get("link");
+  const m = link?.match(/[?&]page=(\d+)>;\s*rel="last"/);
+  if (m) return Number(m[1]);
+  try {
+    const body = await res.json();
+    return Array.isArray(body) ? body.length : 0;
+  } catch {
+    return void 0;
+  }
+}
+async function openPRIssueRefs(client, fullName) {
+  const refs = /* @__PURE__ */ new Set();
+  const prs = await client.json(
+    `/repos/${fullName}/pulls?state=open&per_page=100`
+  );
+  if (!Array.isArray(prs)) return refs;
+  for (const pr of prs) {
+    for (const m of `${pr.title ?? ""}
+${pr.body ?? ""}`.matchAll(/#(\d+)\b/g)) {
+      refs.add(Number(m[1]));
+    }
+  }
+  return refs;
+}
+async function searchContribIssues(client, queries) {
+  const byUrl = /* @__PURE__ */ new Map();
+  for (const q of queries) {
+    const res = await client.json(
+      `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE2}`
+    );
+    for (const it of res?.items ?? []) {
+      if (it.pull_request) continue;
+      if (!byUrl.has(it.html_url)) byUrl.set(it.html_url, it);
+    }
+  }
+  return [...byUrl.values()].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+}
+async function aggregateContributions(opts = {}) {
+  const client = makeClient(opts.fetchImpl ?? fetchWithTimeout);
+  const queries = opts.queries ?? CONTRIB_SEARCH_QUERIES;
+  const issues = (await searchContribIssues(client, queries)).slice(0, MAX_CONTRIB_ISSUES_SCANNED);
+  const repoCache = /* @__PURE__ */ new Map();
+  const contribCache = /* @__PURE__ */ new Map();
+  const prRefsCache = /* @__PURE__ */ new Map();
+  async function repoMeta(fullName) {
+    const hit = repoCache.get(fullName);
+    if (hit !== void 0) return hit;
+    const r = await client.json(`/repos/${fullName}`) ?? null;
+    repoCache.set(fullName, r);
+    return r;
+  }
+  async function repoContribCount(fullName) {
+    if (contribCache.has(fullName)) return contribCache.get(fullName);
+    const n = await contributorCount(client, fullName);
+    contribCache.set(fullName, n);
+    return n;
+  }
+  async function repoPRRefs(fullName) {
+    const hit = prRefsCache.get(fullName);
+    if (hit !== void 0) return hit;
+    const refs = await openPRIssueRefs(client, fullName);
+    prRefsCache.set(fullName, refs);
+    return refs;
+  }
+  const jobs = [];
+  const seen = /* @__PURE__ */ new Set();
+  const perRepo = /* @__PURE__ */ new Map();
+  for (const issue of issues) {
+    if (jobs.length >= MAX_CONTRIB_ITEMS) break;
+    const fullName = repoFullNameFromApiUrl2(issue.repository_url);
+    if (!fullName) continue;
+    const id = `contribute:${fullName}#${issue.number}`;
+    if (seen.has(id)) continue;
+    if (isDenylistedRepo(fullName)) continue;
+    if (isAssigned(issue)) continue;
+    if ((perRepo.get(fullName) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) continue;
+    const repo = await repoMeta(fullName);
+    if (!repo) continue;
+    const title = decodeEntities(issue.title).trim();
+    const contributors = await repoContribCount(fullName);
+    if (!passesContributionGate({
+      stars: repo.stargazers_count,
+      contributors,
+      title,
+      archived: repo.archived,
+      fork: repo.fork
+    })) {
+      continue;
+    }
+    if (repo.disabled) continue;
+    const prRefs = await repoPRRefs(fullName);
+    if (prRefs.has(issue.number)) continue;
+    const body = issue.body ? decodeEntities(issue.body) : "";
+    const labels = labelNames2(issue.labels);
+    const tags = normalize(
+      tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
+    );
+    seen.add(id);
+    perRepo.set(fullName, (perRepo.get(fullName) ?? 0) + 1);
+    jobs.push({
+      id,
+      source: "contribute",
+      title,
+      company: repo.owner.login,
+      url: issue.html_url,
+      remote: true,
+      location: "Remote",
+      tags,
+      roleType: "freelance",
+      postedAt: issue.created_at,
+      applyMode: "direct",
+      contribution: {
+        repoFullName: fullName,
+        repoStars: repo.stargazers_count,
+        repoContributors: contributors,
+        // gate guarantees a number here
+        issueNumber: issue.number,
+        labels,
+        issueUrl: issue.html_url,
+        issueBody: body.slice(0, 1e3) || void 0
+      },
+      raw: issue
+    });
+  }
+  return jobs;
+}
+var GITHUB_API2, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, MAX_CONTRIB_ITEMS, MAX_CONTRIB_ISSUES_SCANNED;
+var init_contributions = __esm({
+  "../../packages/core/src/feeds/contributions.ts"() {
+    "use strict";
+    init_vocabulary();
+    init_entities();
+    init_bounty_gate();
+    init_contribution_gate();
+    init_github_bounties();
+    init_http();
+    GITHUB_API2 = "https://api.github.com";
+    CONTRIB_SEARCH_QUERIES = [
+      'label:"good first issue" type:issue state:open',
+      'label:"help wanted" type:issue state:open',
+      'label:"good-first-issue" type:issue state:open',
+      'label:"help-wanted" type:issue state:open'
+    ];
+    SEARCH_PER_PAGE2 = 100;
+    MAX_CONTRIB_ITEMS = 150;
+    MAX_CONTRIB_ISSUES_SCANNED = 300;
+  }
+});
+
 // ../../packages/core/src/partners.ts
 import { readFileSync as readFileSync2 } from "fs";
 import { join as join2 } from "path";
@@ -2863,15 +3085,21 @@ async function buildIndex(opts) {
     }
   }
   const jobs = allJobs.map(({ raw: _raw, ...rest }) => rest);
-  return {
+  const index = {
     builtAt: (/* @__PURE__ */ new Date()).toISOString(),
     jobs
   };
+  if (opts?.includeContribute) {
+    const contributions = await aggregateContributions(opts.contributeOpts);
+    index.contribute = contributions.map(({ raw: _raw, ...rest }) => rest);
+  }
+  return index;
 }
 var init_indexer = __esm({
   "../../packages/core/src/indexer.ts"() {
     "use strict";
     init_feeds();
+    init_contributions();
     init_partners();
   }
 });
@@ -6133,6 +6361,179 @@ var init_job_status = __esm({
   }
 });
 
+// ../../packages/core/src/episodes/schema.ts
+var init_schema = __esm({
+  "../../packages/core/src/episodes/schema.ts"() {
+    "use strict";
+  }
+});
+
+// ../../packages/core/src/episodes/doors.ts
+var init_doors = __esm({
+  "../../packages/core/src/episodes/doors.ts"() {
+    "use strict";
+    init_schema();
+  }
+});
+
+// ../../packages/core/src/episodes/node-model.ts
+var init_node_model = __esm({
+  "../../packages/core/src/episodes/node-model.ts"() {
+    "use strict";
+  }
+});
+
+// ../../packages/core/src/episodes/derivers/signals.ts
+var init_signals = __esm({
+  "../../packages/core/src/episodes/derivers/signals.ts"() {
+    "use strict";
+    init_node_model();
+  }
+});
+
+// ../../packages/core/src/episodes/derivers/recency-split.ts
+var DORMANT_THRESHOLD_DAYS;
+var init_recency_split = __esm({
+  "../../packages/core/src/episodes/derivers/recency-split.ts"() {
+    "use strict";
+    init_doors();
+    init_signals();
+    DORMANT_THRESHOLD_DAYS = 90;
+  }
+});
+
+// ../../packages/core/src/credential/legible.ts
+function labelFor(id) {
+  return DISPLAY_LABEL[id] ?? id.split("-").map((w) => w.length > 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w).join(" ");
+}
+function capitalize(s) {
+  return s.length > 0 ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
+  const ok = credential.status === "ok";
+  const domains = ok ? credential.byDomain : {};
+  const chips = Object.entries(domains).map(([rawDomain, d]) => {
+    const canon = normalize([rawDomain])[0];
+    return canon ? { domain: canon, mergedPRs: d.mergedPRs } : null;
+  }).filter((c) => c !== null).sort((a, b) => b.mergedPRs - a.mergedPRs || (a.domain < b.domain ? -1 : 1));
+  const dominant = chips.length > 0 ? chips[0].domain : void 0;
+  const role = dominant ? ROLE_BY_DOMAIN[dominant] ?? GENERIC_ROLE : GENERIC_ROLE;
+  const stackChips = chips.filter((c) => !(c.domain in CONCEPT_TAGS));
+  const conceptChips = chips.filter((c) => c.domain in CONCEPT_TAGS && c.domain !== dominant);
+  const topStacks = stackChips.slice(0, 3).map((c) => labelFor(c.domain)).join(", ");
+  const specialization = dominant && dominant in CONCEPT_TAGS ? CONCEPT_TAGS[dominant] : conceptChips.length > 0 ? CONCEPT_TAGS[conceptChips[0].domain] : "";
+  const sen = seniorityBand ? capitalize(seniorityBand) : "";
+  let headline;
+  if (chips.length > 0) {
+    const roleSeg = sen ? `${sen} ${role}` : role;
+    const segs = [roleSeg];
+    if (specialization) segs.push(specialization);
+    if (topStacks) segs.push(topStacks);
+    headline = segs.join(" \xB7 ");
+  } else {
+    const roleSeg = sen ? `${sen} ${GENERIC_ROLE}` : GENERIC_ROLE;
+    headline = traction.status === "ok" && traction.totalStars > 0 ? `${roleSeg} \xB7 ${traction.totalStars}\u2605 across owned repos` : roleSeg;
+  }
+  const mergedDates = Object.values(domains).map((d) => d.lastMergedAt).filter((s) => typeof s === "string" && s.length > 0).sort();
+  const mostRecent = mergedDates.length > 0 ? mergedDates[mergedDates.length - 1] : void 0;
+  const thresholdDays = Number.isFinite(recency.value.thresholdDays) && recency.value.thresholdDays > 0 ? recency.value.thresholdDays : DORMANT_THRESHOLD_DAYS;
+  const nowIso = recency.value.now && recency.value.now.length > 0 ? recency.value.now : credential.computedAt || (/* @__PURE__ */ new Date()).toISOString();
+  const nowMs = Date.parse(nowIso);
+  let recencyBadge = null;
+  let daysAgo;
+  if (mostRecent) {
+    const ageDays2 = (nowMs - Date.parse(mostRecent)) / DAY_MS;
+    daysAgo = Math.max(0, Math.round(ageDays2));
+    recencyBadge = { lastMergedAt: mostRecent, state: ageDays2 <= thresholdDays ? "live" : "dormant" };
+  }
+  const orgCount = Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
+  let proofSentence;
+  if (!ok) {
+    proofSentence = "Contribution credential unavailable \u2014 could not verify.";
+  } else {
+    const prs = credential.qualifyingTotal;
+    let s = `${prs} substantive PR${prs === 1 ? "" : "s"} merged into at least ${orgCount} external org${orgCount === 1 ? "" : "s"} (\u2265${MIN_STARS}\u2605, \u2265${MIN_CONTRIBUTORS} contributors)`;
+    if (daysAgo !== void 0) s += ` \u2014 most recent ${daysAgo}d ago`;
+    proofSentence = `${s}.`;
+  }
+  const auditableBadge = ok ? {
+    mergedTotal: credential.qualifyingTotal,
+    distinctOrgs: orgCount,
+    thresholds: { stars: MIN_STARS, contributors: MIN_CONTRIBUTORS }
+  } : null;
+  const profile = {
+    headline,
+    verifiedSkillChips: chips,
+    recencyBadge,
+    proofSentence,
+    auditableBadge
+  };
+  if (seniorityBand) profile.seniority = seniorityBand;
+  return profile;
+}
+var DAY_MS, GENERIC_ROLE, ROLE_BY_DOMAIN, CONCEPT_TAGS, DISPLAY_LABEL;
+var init_legible = __esm({
+  "../../packages/core/src/credential/legible.ts"() {
+    "use strict";
+    init_contribution_gate();
+    init_vocabulary();
+    init_recency_split();
+    DAY_MS = 864e5;
+    GENERIC_ROLE = "Software Engineer";
+    ROLE_BY_DOMAIN = {
+      backend: "Backend Engineer",
+      go: "Backend Engineer",
+      rust: "Backend Engineer",
+      java: "Backend Engineer",
+      python: "Backend Engineer",
+      nodejs: "Backend Engineer",
+      "api-design": "Backend Engineer",
+      microservices: "Backend Engineer",
+      postgresql: "Backend Engineer",
+      frontend: "Frontend Engineer",
+      react: "Frontend Engineer",
+      vue: "Frontend Engineer",
+      css: "Frontend Engineer",
+      ml: "ML Engineer",
+      pytorch: "ML Engineer",
+      llm: "ML Engineer",
+      "computer-vision": "ML Engineer",
+      devops: "Platform Engineer",
+      kubernetes: "Platform Engineer",
+      terraform: "Platform Engineer",
+      docker: "Platform Engineer",
+      aws: "Platform Engineer",
+      ios: "Mobile Engineer",
+      android: "Mobile Engineer"
+    };
+    CONCEPT_TAGS = {
+      "distributed-systems": "Distributed systems",
+      microservices: "Microservices",
+      security: "Security",
+      payments: "Payments",
+      ml: "Machine learning",
+      llm: "LLM systems",
+      "computer-vision": "Computer vision",
+      recsys: "Recommendation systems",
+      "api-design": "API design"
+    };
+    DISPLAY_LABEL = {
+      postgresql: "Postgres",
+      nodejs: "Node.js",
+      ml: "ML",
+      llm: "LLM",
+      "api-design": "API design",
+      "ci-cd": "CI/CD",
+      "computer-vision": "Computer vision",
+      "distributed-systems": "Distributed systems",
+      ios: "iOS",
+      css: "CSS",
+      graphql: "GraphQL",
+      aws: "AWS"
+    };
+  }
+});
+
 // ../../packages/core/src/index.ts
 var src_exports = {};
 __export(src_exports, {
@@ -6152,8 +6553,11 @@ __export(src_exports, {
   INTRO_ALLOWED_FIELDS: () => INTRO_ALLOWED_FIELDS,
   INTRO_PENDING_TTL_MS: () => INTRO_PENDING_TTL_MS,
   LEVER_SLUGS_BY_TIER: () => LEVER_SLUGS_BY_TIER,
+  MIN_CONTRIBUTORS: () => MIN_CONTRIBUTORS,
+  MIN_STARS: () => MIN_STARS,
   STRONG_MATCH_THRESHOLD: () => STRONG_MATCH_THRESHOLD,
   SYNONYMS: () => SYNONYMS,
+  TRIVIAL_PR_TITLE: () => TRIVIAL_PR_TITLE,
   VOCABULARY: () => VOCABULARY,
   VOCAB_NODES: () => VOCAB_NODES,
   acceptanceCountForDomains: () => acceptanceCountForDomains,
@@ -6176,6 +6580,7 @@ __export(src_exports, {
   coreTagsFromTitle: () => coreTagsFromTitle,
   decorate: () => decorate,
   decryptMessage: () => decryptMessage,
+  deriveLegibleProfile: () => deriveLegibleProfile,
   deriveResumeTrend: () => deriveResumeTrend,
   deriveSharedKey: () => deriveSharedKey,
   encryptMessage: () => encryptMessage,
@@ -6197,6 +6602,7 @@ __export(src_exports, {
   introRateLimitCheck: () => introRateLimitCheck,
   introRetentionAction: () => introRetentionAction,
   isBounty: () => isBounty,
+  isContribution: () => isContribution,
   isOverIntroLimit: () => isOverIntroLimit,
   lever: () => lever,
   loadPartnerRoles: () => loadPartnerRoles,
@@ -6205,6 +6611,7 @@ __export(src_exports, {
   normalize: () => normalize,
   opire: () => opire,
   pageMatches: () => pageMatches,
+  passesContributionGate: () => passesContributionGate,
   passesMaturityGate: () => passesMaturityGate,
   personCardToJob: () => personCardToJob,
   projectCardToJob: () => projectCardToJob,
@@ -6234,6 +6641,7 @@ var init_src = __esm({
     init_directoryThreshold();
     init_chatCrypto();
     init_job_status();
+    init_legible();
   }
 });
 
@@ -6511,7 +6919,9 @@ var init_config = __esm({
       chatDisclosureAck: false,
       chatShareActivity: false,
       inboundNudgeMuted: false,
-      inboundNudgeDisclosed: false
+      inboundNudgeDisclosed: false,
+      contributeEnabled: false,
+      contributePrompted: false
     };
   }
 });
@@ -6538,8 +6948,19 @@ async function maybePromptPeerConnect({
   output = process.stdout,
   isInteractive = Boolean(process.stdin.isTTY && process.stdout.isTTY),
   login,
-  openUrl = openInBrowser
+  openUrl = openInBrowser,
+  ask
 } = {}) {
+  const promptOnce = ask ? async (q) => String(await ask(q) ?? "").trim().toLowerCase() : async (q) => {
+    const rl = createInterface({ input, output });
+    const a = await new Promise((resolve) => {
+      rl.question(q, (x) => {
+        rl.close();
+        resolve(x);
+      });
+    });
+    return String(a).trim().toLowerCase();
+  };
   const cfg = readConfig();
   if (cfg.peerConnectPrompted) {
     return {
@@ -6557,13 +6978,7 @@ async function maybePromptPeerConnect({
       resumePublishOpened: false
     };
   }
-  const rl = createInterface({ input, output });
-  const answer = await new Promise((resolve) => {
-    rl.question(PROMPT, (a) => {
-      rl.close();
-      resolve(String(a).trim().toLowerCase());
-    });
-  });
+  const answer = await promptOnce(PROMPT);
   const optedIn = answer === "y" || answer === "yes";
   writeConfig({ peerConnect: optedIn, peerConnectPrompted: true });
   output.write(
@@ -6571,13 +6986,7 @@ async function maybePromptPeerConnect({
   );
   let resumePublishOpened = false;
   if (optedIn && cfg.resumePublishPrompted !== true) {
-    const rl2 = createInterface({ input, output });
-    const supplyAnswer = await new Promise((resolve) => {
-      rl2.question(buildSupplyPrompt(login), (a) => {
-        rl2.close();
-        resolve(String(a).trim().toLowerCase());
-      });
-    });
+    const supplyAnswer = await promptOnce(buildSupplyPrompt(login));
     const wantsPublish = supplyAnswer === "y" || supplyAnswer === "yes";
     writeConfig({ resumePublishPrompted: true });
     if (wantsPublish) {
@@ -6734,7 +7143,7 @@ async function runLogin() {
       } catch {
       }
     }
-    try {
+    if (process.env["JPI_SKIP_PEER_PROMPT"] !== "1") try {
       const { maybePromptPeerConnect: maybePromptPeerConnect2 } = await Promise.resolve().then(() => (init_peer_connect_prompt(), peer_connect_prompt_exports));
       await maybePromptPeerConnect2({ login: ghProfile.login });
     } catch {

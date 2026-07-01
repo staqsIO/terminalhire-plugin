@@ -8,6 +8,339 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// ../../packages/core/src/episodes/node-model.ts
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function asString(value, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+function asStringOrNull(value) {
+  return typeof value === "string" ? value : null;
+}
+function asBool(value) {
+  return value === true;
+}
+function parseBlock(raw) {
+  if (!isRecord(raw)) {
+    return { type: "unknown", rawType: typeof raw };
+  }
+  const t = raw.type;
+  if (t === "text") {
+    return { type: "text", text: asString(raw.text) };
+  }
+  if (t === "tool_use") {
+    return { type: "tool_use", id: asString(raw.id), name: asString(raw.name), input: raw.input };
+  }
+  if (t === "tool_result") {
+    return {
+      type: "tool_result",
+      toolUseId: asString(raw.tool_use_id),
+      content: raw.content,
+      isError: asBool(raw.is_error)
+    };
+  }
+  return { type: "unknown", rawType: typeof t === "string" ? t : String(t) };
+}
+function parseContent(content) {
+  if (typeof content === "string") {
+    return content.length > 0 ? [{ type: "text", text: content }] : [];
+  }
+  if (Array.isArray(content)) {
+    return content.map(parseBlock);
+  }
+  return [];
+}
+function toNode(raw, opts = {}) {
+  if (!isRecord(raw)) {
+    if (opts.strict) {
+      throw new Error(`toNode: node is not an object (got ${typeof raw})`);
+    }
+    return makeUnknown(emptyBase(), typeof raw);
+  }
+  const message = isRecord(raw.message) ? raw.message : void 0;
+  const content = parseContent(message?.content);
+  const base = {
+    uuid: asString(raw.uuid),
+    parentUuid: asStringOrNull(raw.parentUuid),
+    sessionId: asString(raw.sessionId),
+    cwd: asString(raw.cwd),
+    gitBranch: asString(raw.gitBranch),
+    timestamp: asString(raw.timestamp),
+    isSidechain: asBool(raw.isSidechain),
+    userType: asString(raw.userType),
+    role: asString(message?.role),
+    content,
+    text: content.reduce((acc, b) => b.type === "text" ? [...acc, b.text] : acc, []).join("\n")
+  };
+  const type = raw.type;
+  if (type === "summary" || asBool(raw.isCompactSummary) || isRecord(raw.compactMetadata)) {
+    return { ...base, kind: "summary" /* Summary */, toolName: null, toolUseId: null, isError: false, rawType: asString(type, "summary") };
+  }
+  if (type === "system") {
+    return { ...base, kind: "system" /* System */, toolName: null, toolUseId: null, isError: false, rawType: "system" };
+  }
+  if (type === "user") {
+    const tr = content.find((b) => b.type === "tool_result");
+    if (tr) {
+      return { ...base, kind: "tool_result" /* ToolResult */, toolName: null, toolUseId: tr.toolUseId, isError: tr.isError, rawType: "user" };
+    }
+    return { ...base, kind: "user" /* User */, toolName: null, toolUseId: null, isError: false, rawType: "user" };
+  }
+  if (type === "assistant") {
+    const tu = content.find((b) => b.type === "tool_use");
+    if (tu) {
+      return { ...base, kind: "tool_use" /* ToolUse */, toolName: tu.name, toolUseId: tu.id, isError: false, rawType: "assistant" };
+    }
+    return { ...base, kind: "assistant" /* Assistant */, toolName: null, toolUseId: null, isError: false, rawType: "assistant" };
+  }
+  const rawType = typeof type === "string" ? type : String(type);
+  if (opts.strict) {
+    throw new Error(`toNode: unrecognized node kind: ${rawType}`);
+  }
+  return makeUnknown(base, rawType);
+}
+function makeUnknown(base, rawType) {
+  return { ...base, kind: "unknown" /* Unknown */, toolName: null, toolUseId: null, isError: false, rawType };
+}
+function emptyBase() {
+  return {
+    uuid: "",
+    parentUuid: null,
+    sessionId: "",
+    cwd: "",
+    gitBranch: "",
+    timestamp: "",
+    isSidechain: false,
+    userType: "",
+    role: "",
+    content: [],
+    text: ""
+  };
+}
+var init_node_model = __esm({
+  "../../packages/core/src/episodes/node-model.ts"() {
+    "use strict";
+  }
+});
+
+// ../../packages/core/src/episodes/schema.ts
+var SCHEMA_VERSION;
+var init_schema = __esm({
+  "../../packages/core/src/episodes/schema.ts"() {
+    "use strict";
+    SCHEMA_VERSION = 1;
+  }
+});
+
+// ../../packages/core/src/episodes/doors.ts
+function recruiterMetric(value) {
+  return { value };
+}
+function inwardMetric(value) {
+  return { value };
+}
+function metricValue(metric) {
+  return metric.value;
+}
+function declassify(metrics, coveragePct = 0) {
+  const velocity = metrics.skillAdoptionVelocity.value;
+  const drift = metrics.distributionDrift.value;
+  const recency = metrics.recencySplit.value;
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    headline: {
+      distinctSignalCount: velocity.distinctSignalCount,
+      recentAdoptionCount: velocity.recentAdoptionCount,
+      velocityPerWeek: velocity.velocityPerWeek,
+      rising: drift.rising.map((entry) => ({ signal: entry.signal, delta: entry.delta })),
+      falling: drift.falling.map((entry) => ({ signal: entry.signal, delta: entry.delta }))
+    },
+    liveStack: [...recency.live],
+    dormantStack: [...recency.dormant],
+    coveragePct
+  };
+}
+function buildExport(metrics, coveragePct = 0) {
+  return declassify(metrics, coveragePct);
+}
+var init_doors = __esm({
+  "../../packages/core/src/episodes/doors.ts"() {
+    "use strict";
+    init_schema();
+  }
+});
+
+// ../../packages/core/src/episodes/derivers/signals.ts
+function mcpToolSignal(name) {
+  const rest = name.slice("mcp__".length);
+  const sep = rest.indexOf("__");
+  if (sep <= 0) return "mcp:custom";
+  const server = rest.slice(0, sep).toLowerCase();
+  const leaf = rest.slice(sep + 2);
+  if (leaf.length === 0) return "mcp:custom";
+  if (MCP_SERVER_CAPABILITY.has(server)) return MCP_SERVER_CAPABILITY.get(server) ?? null;
+  return "mcp:custom";
+}
+function classifyToolSignal(name) {
+  if (name.toLowerCase().startsWith("mcp__")) {
+    return mcpToolSignal(name);
+  }
+  const key = name.toLowerCase();
+  if (ORCHESTRATION_TOOLS.has(key)) return AGENTIC_WORKFLOW_SIGNAL;
+  return null;
+}
+function isRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function fileExtLang(input) {
+  if (!isRecord2(input)) {
+    return null;
+  }
+  const filePath = input.file_path;
+  if (typeof filePath !== "string") {
+    return null;
+  }
+  const dot = filePath.lastIndexOf(".");
+  if (dot < 0 || dot === filePath.length - 1) {
+    return null;
+  }
+  const ext = filePath.slice(dot + 1).toLowerCase();
+  return EXT_LANG[ext] ?? null;
+}
+function toolUseInput(node) {
+  const block = node.content.find((b) => b.type === "tool_use");
+  return block?.input;
+}
+function compareSignal(a, b) {
+  if (a.ts !== b.ts) {
+    return a.ts < b.ts ? -1 : 1;
+  }
+  if (a.signal !== b.signal) {
+    return a.signal < b.signal ? -1 : 1;
+  }
+  return 0;
+}
+function extractToolSignals(nodes) {
+  const out = [];
+  for (const node of nodes) {
+    if (node.kind !== "tool_use" /* ToolUse */ || node.toolName === null) {
+      continue;
+    }
+    const toolSignal = classifyToolSignal(node.toolName);
+    if (toolSignal !== null) {
+      out.push({ signal: toolSignal, ts: node.timestamp });
+    }
+    const lang = fileExtLang(toolUseInput(node));
+    if (lang !== null) {
+      out.push({ signal: `lang:${lang}`, ts: node.timestamp });
+    }
+  }
+  out.sort(compareSignal);
+  return out;
+}
+var EXT_LANG, MCP_SERVER_CAPABILITY, ORCHESTRATION_TOOLS, AGENTIC_WORKFLOW_SIGNAL;
+var init_signals = __esm({
+  "../../packages/core/src/episodes/derivers/signals.ts"() {
+    "use strict";
+    init_node_model();
+    EXT_LANG = {
+      ts: "ts",
+      tsx: "ts",
+      js: "js",
+      jsx: "js",
+      mjs: "js",
+      cjs: "js",
+      py: "py",
+      rs: "rs",
+      go: "go",
+      rb: "rb",
+      java: "java",
+      kt: "kt",
+      sql: "sql",
+      md: "md"
+    };
+    MCP_SERVER_CAPABILITY = /* @__PURE__ */ new Map([
+      // Coding-relevant public servers → a capability.
+      ["plugin_playwright_playwright", "cap:ui-automation"],
+      ["playwright", "cap:ui-automation"],
+      ["claude_ai_linear", "cap:project-mgmt"],
+      ["claude_ai_vercel", "cap:deploys"],
+      ["plugin_vercel_vercel", "cap:deploys"],
+      ["claude_ai_figma", "cap:design"],
+      ["figma", "cap:design"],
+      ["pencil", "cap:design"],
+      ["claude_ai_ideabrowser", "cap:product-research"],
+      ["ideabrowser", "cap:product-research"],
+      ["blender", "cap:3d-modeling"],
+      ["n8n-knowledge", "cap:workflow-automation"],
+      // Public but NOT a coding skill → dropped from the trajectory.
+      ["plugin_context-mode_context-mode", null],
+      // agent context plumbing
+      ["claude_ai_gmail", null],
+      ["claude_ai_google_calendar", null],
+      ["claude_ai_google_drive", null]
+    ]);
+    ORCHESTRATION_TOOLS = /* @__PURE__ */ new Set([
+      "task",
+      "agent",
+      "workflow",
+      "enterworktree",
+      "exitworktree",
+      "schedulewakeup",
+      "monitor",
+      "sendmessage",
+      "taskcreate",
+      "tasklist",
+      "taskstop",
+      "taskupdate",
+      "taskget",
+      "taskoutput",
+      "croncreate",
+      "cronlist",
+      "crondelete"
+    ]);
+    AGENTIC_WORKFLOW_SIGNAL = "cap:agentic-workflow";
+  }
+});
+
+// ../../packages/core/src/episodes/derivers/recency-split.ts
+function deriveRecencySplit(nodes, opts = {}) {
+  const signals = extractToolSignals(nodes);
+  const lastSeen = /* @__PURE__ */ new Map();
+  for (const s of signals) {
+    const cur = lastSeen.get(s.signal);
+    if (cur === void 0 || s.ts > cur) {
+      lastSeen.set(s.signal, s.ts);
+    }
+  }
+  const maxTs = signals.length > 0 ? signals[signals.length - 1].ts : "";
+  const now = opts.now ?? maxTs;
+  const thresholdDays = opts.thresholdDays ?? DORMANT_THRESHOLD_DAYS;
+  const nowMs = now !== "" ? Date.parse(now) : 0;
+  const live = [];
+  const dormant = [];
+  for (const [signal, ts] of [...lastSeen.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1)) {
+    const ageDays = now !== "" ? (nowMs - Date.parse(ts)) / DAY_MS2 : 0;
+    if (ageDays <= thresholdDays) {
+      live.push(signal);
+    } else {
+      dormant.push(signal);
+    }
+  }
+  return recruiterMetric({ now, thresholdDays, live, dormant });
+}
+var DAY_MS2, DORMANT_THRESHOLD_DAYS;
+var init_recency_split = __esm({
+  "../../packages/core/src/episodes/derivers/recency-split.ts"() {
+    "use strict";
+    init_doors();
+    init_signals();
+    DAY_MS2 = 864e5;
+    DORMANT_THRESHOLD_DAYS = 90;
+  }
+});
+
 // ../../packages/core/src/types.ts
 var init_types = __esm({
   "../../packages/core/src/types.ts"() {
@@ -409,12 +742,20 @@ var init_vocabulary = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/contribution-gate.ts
+var init_contribution_gate = __esm({
+  "../../packages/core/src/feeds/contribution-gate.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/github.ts
 var RESUME_DECAY_HALF_LIFE_MS;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
     init_vocabulary();
+    init_contribution_gate();
     RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
   }
 });
@@ -503,7 +844,14 @@ var BOUNTY_REPO_DENYLIST, DENYLIST_LC;
 var init_bounty_gate = __esm({
   "../../packages/core/src/feeds/bounty-gate.ts"() {
     "use strict";
-    BOUNTY_REPO_DENYLIST = ["SecureBananaLabs/bug-bounty"];
+    BOUNTY_REPO_DENYLIST = [
+      "SecureBananaLabs/bug-bounty",
+      // Meta-farm: a bounty PLATFORM whose own issues are an assignment-gated
+      // contributor queue ("please assign me, my chief") — an unsolicited PR won't
+      // merge, so it's not a real claimable bounty. Not structurally derivable from
+      // any fetched field, so it's a manual entry (also dropped from the allowlist).
+      "boundlessfi/boundless"
+    ];
     DENYLIST_LC = new Set(BOUNTY_REPO_DENYLIST.map((r) => r.toLowerCase()));
   }
 });
@@ -574,6 +922,7 @@ var init_feeds = __esm({
     init_directory();
     init_bounty_gate();
     init_bounty_gate();
+    init_contribution_gate();
     GREENHOUSE_SLUGS_BY_TIER = {
       bigco: [
         "stripe",
@@ -682,6 +1031,19 @@ var init_feeds = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/contributions.ts
+var init_contributions = __esm({
+  "../../packages/core/src/feeds/contributions.ts"() {
+    "use strict";
+    init_vocabulary();
+    init_entities();
+    init_bounty_gate();
+    init_contribution_gate();
+    init_github_bounties();
+    init_http();
+  }
+});
+
 // ../../packages/core/src/partners.ts
 import { readFileSync as readFileSync2 } from "fs";
 import { join as join2 } from "path";
@@ -706,6 +1068,7 @@ var init_indexer = __esm({
   "../../packages/core/src/indexer.ts"() {
     "use strict";
     init_feeds();
+    init_contributions();
     init_partners();
   }
 });
@@ -752,6 +1115,16 @@ var init_job_status = __esm({
   }
 });
 
+// ../../packages/core/src/credential/legible.ts
+var init_legible = __esm({
+  "../../packages/core/src/credential/legible.ts"() {
+    "use strict";
+    init_contribution_gate();
+    init_vocabulary();
+    init_recency_split();
+  }
+});
+
 // ../../packages/core/src/index.ts
 var init_src = __esm({
   "../../packages/core/src/index.ts"() {
@@ -767,6 +1140,7 @@ var init_src = __esm({
     init_directoryThreshold();
     init_chatCrypto();
     init_job_status();
+    init_legible();
   }
 });
 
@@ -1054,118 +1428,11 @@ import {
 import { homedir as homedir3 } from "os";
 import { join as join4 } from "path";
 
-// ../../packages/core/src/episodes/node-model.ts
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function asString(value, fallback = "") {
-  return typeof value === "string" ? value : fallback;
-}
-function asStringOrNull(value) {
-  return typeof value === "string" ? value : null;
-}
-function asBool(value) {
-  return value === true;
-}
-function parseBlock(raw) {
-  if (!isRecord(raw)) {
-    return { type: "unknown", rawType: typeof raw };
-  }
-  const t = raw.type;
-  if (t === "text") {
-    return { type: "text", text: asString(raw.text) };
-  }
-  if (t === "tool_use") {
-    return { type: "tool_use", id: asString(raw.id), name: asString(raw.name), input: raw.input };
-  }
-  if (t === "tool_result") {
-    return {
-      type: "tool_result",
-      toolUseId: asString(raw.tool_use_id),
-      content: raw.content,
-      isError: asBool(raw.is_error)
-    };
-  }
-  return { type: "unknown", rawType: typeof t === "string" ? t : String(t) };
-}
-function parseContent(content) {
-  if (typeof content === "string") {
-    return content.length > 0 ? [{ type: "text", text: content }] : [];
-  }
-  if (Array.isArray(content)) {
-    return content.map(parseBlock);
-  }
-  return [];
-}
-function toNode(raw, opts = {}) {
-  if (!isRecord(raw)) {
-    if (opts.strict) {
-      throw new Error(`toNode: node is not an object (got ${typeof raw})`);
-    }
-    return makeUnknown(emptyBase(), typeof raw);
-  }
-  const message = isRecord(raw.message) ? raw.message : void 0;
-  const content = parseContent(message?.content);
-  const base = {
-    uuid: asString(raw.uuid),
-    parentUuid: asStringOrNull(raw.parentUuid),
-    sessionId: asString(raw.sessionId),
-    cwd: asString(raw.cwd),
-    gitBranch: asString(raw.gitBranch),
-    timestamp: asString(raw.timestamp),
-    isSidechain: asBool(raw.isSidechain),
-    userType: asString(raw.userType),
-    role: asString(message?.role),
-    content,
-    text: content.reduce((acc, b) => b.type === "text" ? [...acc, b.text] : acc, []).join("\n")
-  };
-  const type = raw.type;
-  if (type === "summary" || asBool(raw.isCompactSummary) || isRecord(raw.compactMetadata)) {
-    return { ...base, kind: "summary" /* Summary */, toolName: null, toolUseId: null, isError: false, rawType: asString(type, "summary") };
-  }
-  if (type === "system") {
-    return { ...base, kind: "system" /* System */, toolName: null, toolUseId: null, isError: false, rawType: "system" };
-  }
-  if (type === "user") {
-    const tr = content.find((b) => b.type === "tool_result");
-    if (tr) {
-      return { ...base, kind: "tool_result" /* ToolResult */, toolName: null, toolUseId: tr.toolUseId, isError: tr.isError, rawType: "user" };
-    }
-    return { ...base, kind: "user" /* User */, toolName: null, toolUseId: null, isError: false, rawType: "user" };
-  }
-  if (type === "assistant") {
-    const tu = content.find((b) => b.type === "tool_use");
-    if (tu) {
-      return { ...base, kind: "tool_use" /* ToolUse */, toolName: tu.name, toolUseId: tu.id, isError: false, rawType: "assistant" };
-    }
-    return { ...base, kind: "assistant" /* Assistant */, toolName: null, toolUseId: null, isError: false, rawType: "assistant" };
-  }
-  const rawType = typeof type === "string" ? type : String(type);
-  if (opts.strict) {
-    throw new Error(`toNode: unrecognized node kind: ${rawType}`);
-  }
-  return makeUnknown(base, rawType);
-}
-function makeUnknown(base, rawType) {
-  return { ...base, kind: "unknown" /* Unknown */, toolName: null, toolUseId: null, isError: false, rawType };
-}
-function emptyBase() {
-  return {
-    uuid: "",
-    parentUuid: null,
-    sessionId: "",
-    cwd: "",
-    gitBranch: "",
-    timestamp: "",
-    isSidechain: false,
-    userType: "",
-    role: "",
-    content: [],
-    text: ""
-  };
-}
+// ../../packages/core/src/episodes/index.ts
+init_node_model();
 
 // ../../packages/core/src/episodes/parser.ts
+init_node_model();
 function parseTranscript(text, opts = {}) {
   const nodes = [];
   const unknownKinds = /* @__PURE__ */ new Set();
@@ -1192,6 +1459,7 @@ function parseTranscript(text, opts = {}) {
 }
 
 // ../../packages/core/src/episodes/reconstructor.ts
+init_node_model();
 var AGENT_TOOL = "Agent";
 var SIDECHAIN_FILE_THRESHOLD = 0.5;
 function sidechainRatio(nodes) {
@@ -1440,168 +1708,19 @@ function computeCoverage(files, result) {
   };
 }
 
-// ../../packages/core/src/episodes/schema.ts
-var SCHEMA_VERSION = 1;
+// ../../packages/core/src/episodes/index.ts
+init_schema();
+init_doors();
 
-// ../../packages/core/src/episodes/doors.ts
-function recruiterMetric(value) {
-  return { value };
-}
-function inwardMetric(value) {
-  return { value };
-}
-function metricValue(metric) {
-  return metric.value;
-}
-function declassify(metrics, coveragePct = 0) {
-  const velocity = metrics.skillAdoptionVelocity.value;
-  const drift = metrics.distributionDrift.value;
-  const recency = metrics.recencySplit.value;
-  return {
-    schemaVersion: SCHEMA_VERSION,
-    headline: {
-      distinctSignalCount: velocity.distinctSignalCount,
-      recentAdoptionCount: velocity.recentAdoptionCount,
-      velocityPerWeek: velocity.velocityPerWeek,
-      rising: drift.rising.map((entry) => ({ signal: entry.signal, delta: entry.delta })),
-      falling: drift.falling.map((entry) => ({ signal: entry.signal, delta: entry.delta }))
-    },
-    liveStack: [...recency.live],
-    dormantStack: [...recency.dormant],
-    coveragePct
-  };
-}
-function buildExport(metrics, coveragePct = 0) {
-  return declassify(metrics, coveragePct);
-}
+// ../../packages/core/src/episodes/events.ts
+init_schema();
 
-// ../../packages/core/src/episodes/derivers/signals.ts
-var EXT_LANG = {
-  ts: "ts",
-  tsx: "ts",
-  js: "js",
-  jsx: "js",
-  mjs: "js",
-  cjs: "js",
-  py: "py",
-  rs: "rs",
-  go: "go",
-  rb: "rb",
-  java: "java",
-  kt: "kt",
-  sql: "sql",
-  md: "md"
-};
-var MCP_SERVER_CAPABILITY = /* @__PURE__ */ new Map([
-  // Coding-relevant public servers → a capability.
-  ["plugin_playwright_playwright", "cap:ui-automation"],
-  ["playwright", "cap:ui-automation"],
-  ["claude_ai_linear", "cap:project-mgmt"],
-  ["claude_ai_vercel", "cap:deploys"],
-  ["plugin_vercel_vercel", "cap:deploys"],
-  ["claude_ai_figma", "cap:design"],
-  ["figma", "cap:design"],
-  ["pencil", "cap:design"],
-  ["claude_ai_ideabrowser", "cap:product-research"],
-  ["ideabrowser", "cap:product-research"],
-  ["blender", "cap:3d-modeling"],
-  ["n8n-knowledge", "cap:workflow-automation"],
-  // Public but NOT a coding skill → dropped from the trajectory.
-  ["plugin_context-mode_context-mode", null],
-  // agent context plumbing
-  ["claude_ai_gmail", null],
-  ["claude_ai_google_calendar", null],
-  ["claude_ai_google_drive", null]
-]);
-function mcpToolSignal(name) {
-  const rest = name.slice("mcp__".length);
-  const sep = rest.indexOf("__");
-  if (sep <= 0) return "mcp:custom";
-  const server = rest.slice(0, sep).toLowerCase();
-  const leaf = rest.slice(sep + 2);
-  if (leaf.length === 0) return "mcp:custom";
-  if (MCP_SERVER_CAPABILITY.has(server)) return MCP_SERVER_CAPABILITY.get(server) ?? null;
-  return "mcp:custom";
-}
-var ORCHESTRATION_TOOLS = /* @__PURE__ */ new Set([
-  "task",
-  "agent",
-  "workflow",
-  "enterworktree",
-  "exitworktree",
-  "schedulewakeup",
-  "monitor",
-  "sendmessage",
-  "taskcreate",
-  "tasklist",
-  "taskstop",
-  "taskupdate",
-  "taskget",
-  "taskoutput",
-  "croncreate",
-  "cronlist",
-  "crondelete"
-]);
-var AGENTIC_WORKFLOW_SIGNAL = "cap:agentic-workflow";
-function classifyToolSignal(name) {
-  if (name.toLowerCase().startsWith("mcp__")) {
-    return mcpToolSignal(name);
-  }
-  const key = name.toLowerCase();
-  if (ORCHESTRATION_TOOLS.has(key)) return AGENTIC_WORKFLOW_SIGNAL;
-  return null;
-}
-function isRecord2(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function fileExtLang(input) {
-  if (!isRecord2(input)) {
-    return null;
-  }
-  const filePath = input.file_path;
-  if (typeof filePath !== "string") {
-    return null;
-  }
-  const dot = filePath.lastIndexOf(".");
-  if (dot < 0 || dot === filePath.length - 1) {
-    return null;
-  }
-  const ext = filePath.slice(dot + 1).toLowerCase();
-  return EXT_LANG[ext] ?? null;
-}
-function toolUseInput(node) {
-  const block = node.content.find((b) => b.type === "tool_use");
-  return block?.input;
-}
-function compareSignal(a, b) {
-  if (a.ts !== b.ts) {
-    return a.ts < b.ts ? -1 : 1;
-  }
-  if (a.signal !== b.signal) {
-    return a.signal < b.signal ? -1 : 1;
-  }
-  return 0;
-}
-function extractToolSignals(nodes) {
-  const out = [];
-  for (const node of nodes) {
-    if (node.kind !== "tool_use" /* ToolUse */ || node.toolName === null) {
-      continue;
-    }
-    const toolSignal = classifyToolSignal(node.toolName);
-    if (toolSignal !== null) {
-      out.push({ signal: toolSignal, ts: node.timestamp });
-    }
-    const lang = fileExtLang(toolUseInput(node));
-    if (lang !== null) {
-      out.push({ signal: `lang:${lang}`, ts: node.timestamp });
-    }
-  }
-  out.sort(compareSignal);
-  return out;
-}
+// ../../packages/core/src/episodes/index.ts
+init_signals();
 
 // ../../packages/core/src/episodes/derivers/skill-adoption-velocity.ts
+init_doors();
+init_signals();
 var DAY_MS = 864e5;
 var RECENT_WINDOW_DAYS = 90;
 function deriveSkillAdoptionVelocity(nodes, opts = {}) {
@@ -1633,6 +1752,8 @@ function deriveSkillAdoptionVelocity(nodes, opts = {}) {
 }
 
 // ../../packages/core/src/episodes/derivers/distribution-drift.ts
+init_doors();
+init_signals();
 function shareMap(signals) {
   const counts = /* @__PURE__ */ new Map();
   for (const s of signals) {
@@ -1663,36 +1784,12 @@ function deriveDistributionDrift(nodes) {
   return recruiterMetric({ rising, falling });
 }
 
-// ../../packages/core/src/episodes/derivers/recency-split.ts
-var DAY_MS2 = 864e5;
-var DORMANT_THRESHOLD_DAYS = 90;
-function deriveRecencySplit(nodes, opts = {}) {
-  const signals = extractToolSignals(nodes);
-  const lastSeen = /* @__PURE__ */ new Map();
-  for (const s of signals) {
-    const cur = lastSeen.get(s.signal);
-    if (cur === void 0 || s.ts > cur) {
-      lastSeen.set(s.signal, s.ts);
-    }
-  }
-  const maxTs = signals.length > 0 ? signals[signals.length - 1].ts : "";
-  const now = opts.now ?? maxTs;
-  const thresholdDays = opts.thresholdDays ?? DORMANT_THRESHOLD_DAYS;
-  const nowMs = now !== "" ? Date.parse(now) : 0;
-  const live = [];
-  const dormant = [];
-  for (const [signal, ts] of [...lastSeen.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1)) {
-    const ageDays = now !== "" ? (nowMs - Date.parse(ts)) / DAY_MS2 : 0;
-    if (ageDays <= thresholdDays) {
-      live.push(signal);
-    } else {
-      dormant.push(signal);
-    }
-  }
-  return recruiterMetric({ now, thresholdDays, live, dormant });
-}
+// ../../packages/core/src/episodes/index.ts
+init_recency_split();
 
 // ../../packages/core/src/episodes/derivers/rework-density.ts
+init_node_model();
+init_doors();
 var EDIT_TOOLS = /* @__PURE__ */ new Set(["Edit", "Write", "NotebookEdit"]);
 function isRecord3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -1742,6 +1839,8 @@ function deriveReworkDensity(episodes, nodesByUuid) {
 }
 
 // ../../packages/core/src/episodes/derivers/recovery-depth.ts
+init_node_model();
+init_doors();
 function deriveRecoveryDepth(episodes, nodesByUuid) {
   let maxConsecutiveErrors = 0;
   let totalDepth = 0;

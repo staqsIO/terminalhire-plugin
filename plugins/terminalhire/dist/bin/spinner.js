@@ -219,13 +219,18 @@ function buildTips(topMatches, baseUrl, max = 8) {
   const COMPANY_CAP = 2;
   const all = Array.isArray(topMatches) ? topMatches : [];
   const bountyQ = all.filter((m) => m && m.source === "bounty");
-  const roleQ = interleaveBySource(all.filter((m) => m && m.source !== "bounty"));
+  const contributeQ = all.filter((m) => m && m.source === "contribute");
+  const roleQ = interleaveBySource(
+    all.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
+  );
   const ordered = [];
   let bi = 0;
   let ri = 0;
-  while (bi < bountyQ.length || ri < roleQ.length) {
+  let ci = 0;
+  while (bi < bountyQ.length || ri < roleQ.length || ci < contributeQ.length) {
     if (ri < roleQ.length) ordered.push(roleQ[ri++]);
     if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
+    if (ci < contributeQ.length) ordered.push(contributeQ[ci++]);
   }
   for (const m of ordered) {
     if (!m || !m.title || !m.company || !m.id) continue;
@@ -252,6 +257,10 @@ function buildTips(topMatches, baseUrl, max = 8) {
       const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
       const repo = m.repo || companyRaw;
       out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct}% \u2014 ${url}`);
+    } else if (source === "contribute") {
+      const repo = m.repo || companyRaw;
+      const num = m.issueNumber != null ? ` #${m.issueNumber}` : "";
+      out.push(`\u2197 contribute \xB7 ${repo}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${pct}%`);
     } else {
       out.push(`\u2197 ${title} @ ${company} \xB7 ${pct}% \u2014 ${url}`);
     }

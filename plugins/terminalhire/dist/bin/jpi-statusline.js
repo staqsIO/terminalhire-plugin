@@ -36,7 +36,7 @@ function render() {
     const stale = sessionStale(entry) && unread === 0 && incoming === 0;
     const parts = [];
     if (unread > 0) parts.push(`\u{1F4AC} ${unread} unread`);
-    if (incoming > 0) parts.push(`\u2709 ${incoming} waiting to connect`);
+    if (incoming > 0) parts.push(`\u2709 ${incoming} intro request${incoming === 1 ? "" : "s"}`);
     if (parts.length > 0) {
       let line = parts.join("  \xB7  ");
       line += unread > 0 ? " \u2014 run: terminalhire chat" : " \u2014 run: terminalhire intro --list";

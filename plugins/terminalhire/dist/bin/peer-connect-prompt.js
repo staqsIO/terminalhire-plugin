@@ -17,7 +17,9 @@ var DEFAULT_CONFIG = {
   chatDisclosureAck: false,
   chatShareActivity: false,
   inboundNudgeMuted: false,
-  inboundNudgeDisclosed: false
+  inboundNudgeDisclosed: false,
+  contributeEnabled: false,
+  contributePrompted: false
 };
 function readConfig() {
   try {
@@ -90,8 +92,19 @@ async function maybePromptPeerConnect({
   output = process.stdout,
   isInteractive = Boolean(process.stdin.isTTY && process.stdout.isTTY),
   login,
-  openUrl = openInBrowser
+  openUrl = openInBrowser,
+  ask
 } = {}) {
+  const promptOnce = ask ? async (q) => String(await ask(q) ?? "").trim().toLowerCase() : async (q) => {
+    const rl = createInterface({ input, output });
+    const a = await new Promise((resolve) => {
+      rl.question(q, (x) => {
+        rl.close();
+        resolve(x);
+      });
+    });
+    return String(a).trim().toLowerCase();
+  };
   const cfg = readConfig();
   if (cfg.peerConnectPrompted) {
     return {
@@ -109,13 +122,7 @@ async function maybePromptPeerConnect({
       resumePublishOpened: false
     };
   }
-  const rl = createInterface({ input, output });
-  const answer = await new Promise((resolve) => {
-    rl.question(PROMPT, (a) => {
-      rl.close();
-      resolve(String(a).trim().toLowerCase());
-    });
-  });
+  const answer = await promptOnce(PROMPT);
   const optedIn = answer === "y" || answer === "yes";
   writeConfig({ peerConnect: optedIn, peerConnectPrompted: true });
   output.write(
@@ -123,13 +130,7 @@ async function maybePromptPeerConnect({
   );
   let resumePublishOpened = false;
   if (optedIn && cfg.resumePublishPrompted !== true) {
-    const rl2 = createInterface({ input, output });
-    const supplyAnswer = await new Promise((resolve) => {
-      rl2.question(buildSupplyPrompt(login), (a) => {
-        rl2.close();
-        resolve(String(a).trim().toLowerCase());
-      });
-    });
+    const supplyAnswer = await promptOnce(buildSupplyPrompt(login));
     const wantsPublish = supplyAnswer === "y" || supplyAnswer === "yes";
     writeConfig({ resumePublishPrompted: true });
     if (wantsPublish) {

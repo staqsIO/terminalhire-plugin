@@ -50,14 +50,22 @@ const UNINSTALL = process.argv.includes('--uninstall');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function ask(question) {
+// Prompt helper. When jpi-init runs this installer IN-PROCESS it injects a single
+// shared readline `ask` (one readline lifecycle for the whole onboarding flow) — this
+// is what eliminates the Windows chained-prompt bug: each spawned child used to open a
+// fresh readline that instantly consumed the Enter still buffered in the console from
+// the previous child's answer, silently fail-closing this statusLine consent to "".
+// Standalone (`node statusline-install.js`) it owns a short-lived readline. Resolves
+// the lowercased answer, or null on EOF / non-interactive (no data) stdin.
+function makeAsker(injected) {
+  if (injected) return { ask: injected, close() {} };
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise(res => {
-    rl.question(question, answer => {
-      rl.close();
-      res(answer.trim().toLowerCase());
-    });
+  const ask = (question) => new Promise(res => {
+    let answered = false;
+    rl.question(question, answer => { answered = true; res((answer || '').trim().toLowerCase()); });
+    rl.once('close', () => { if (!answered) res(null); });
   });
+  return { ask, close: () => rl.close() };
 }
 
 function backupSettings() {
@@ -113,7 +121,9 @@ function classifyExisting(statusLine) {
 
 // ── Install ───────────────────────────────────────────────────────────────────
 
-async function install() {
+async function install({ ask: injectedAsk } = {}) {
+  const asker = makeAsker(injectedAsk);
+  const { ask } = asker;
   console.log('');
   console.log('┌─────────────────────────────────────────────────────────────────┐');
   console.log('│   terminalhire — connection notifications in your statusLine     │');
@@ -125,7 +135,7 @@ async function install() {
   console.log('WHAT THIS ENABLES:');
   console.log('  A Claude Code statusLine that shows ONLY personal connection signals:');
   console.log('    • 💬 N unread   — messages from developers you accepted an intro with');
-  console.log('    • ✉ N waiting to connect — inbound intro requests awaiting your reply');
+  console.log('    • ✉ N intro requests — inbound intro requests awaiting your reply');
   console.log('    • ⚠ session expired — a re-link hint when your linked session lapses');
   console.log('  It NEVER shows job matches, role %-scores, or any advert — those stay in');
   console.log('  the ambient spinner. The line is a LOCAL cache read: zero network calls.');
@@ -145,16 +155,25 @@ async function install() {
   console.log('');
 
   const answer = await ask('Enable the connection-notification statusLine? Type "yes" to continue: ');
+  if (answer === null && !process.stdin.isTTY) {
+    // Non-interactive stdin with no input — do NOT silently proceed to a prompt that
+    // resolves empty and fail-closes. Say so plainly and skip (explicit, not a fake abort).
+    console.log('\n  stdin is not interactive — run `terminalhire statusline --on` in a real terminal to enable.');
+    asker.close();
+    return 0;
+  }
   if (answer !== 'yes') {
     console.log('\nAborted — nothing was changed.');
-    process.exit(0);
+    asker.close();
+    return 0;
   }
 
   const src = resolveLauncherSource();
   if (!src) {
     console.log('\n  Could not locate the statusLine launcher — nothing was changed.');
     console.log('  Rebuild the package (npm run build) and try again.');
-    process.exit(1);
+    asker.close();
+    return 1;
   }
 
   const settings = readSettings();
@@ -168,7 +187,8 @@ async function install() {
     const rp = await ask('  Replace it with the self-updating launcher? Type "yes": ');
     if (rp !== 'yes') {
       console.log('\n  Left your existing statusLine as-is — nothing was changed.');
-      process.exit(0);
+      asker.close();
+      return 0;
     }
     // It is our own legacy artifact → do NOT preserve it as "foreign".
   }
@@ -201,11 +221,15 @@ async function install() {
   console.log('Done. Restart Claude Code to see connection notifications in your statusLine.');
   console.log('  Remove any time: node statusline-install.js --uninstall');
   console.log('');
+  asker.close();
+  return 0;
 }
 
 // ── Uninstall ─────────────────────────────────────────────────────────────────
 
-async function uninstall() {
+async function uninstall({ ask: injectedAsk } = {}) {
+  const asker = makeAsker(injectedAsk);
+  const { ask } = asker;
   console.log('');
   console.log('terminalhire — remove the connection-notification statusLine');
   console.log('');
@@ -216,7 +240,8 @@ async function uninstall() {
   const answer = await ask('Remove the terminalhire statusLine? Type "yes" to continue: ');
   if (answer !== 'yes') {
     console.log('\nAborted — nothing was changed.');
-    process.exit(0);
+    asker.close();
+    return 0;
   }
 
   console.log('');
@@ -255,6 +280,8 @@ async function uninstall() {
   console.log('');
   console.log('Done. Restart Claude Code to apply.');
   console.log('');
+  asker.close();
+  return 0;
 }
 
 // ── Entry ─────────────────────────────────────────────────────────────────────
@@ -262,10 +289,12 @@ async function uninstall() {
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   const run = UNINSTALL ? uninstall : install;
-  run().catch(err => {
-    console.error(`${UNINSTALL ? 'Uninstall' : 'Install'} error:`, err.message);
-    process.exit(1);
-  });
+  run()
+    .then(code => process.exit(typeof code === 'number' ? code : 0))
+    .catch(err => {
+      console.error(`${UNINSTALL ? 'Uninstall' : 'Install'} error:`, err.message);
+      process.exit(1);
+    });
 }
 
 export { install as installStatusline, uninstall as uninstallStatusline, LAUNCHER_COMMAND };

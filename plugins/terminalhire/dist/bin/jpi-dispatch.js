@@ -75,6 +75,7 @@ var init_web_session = __esm({
 var config_exports = {};
 __export(config_exports, {
   getNudgeMode: () => getNudgeMode,
+  isContributeEnabled: () => isContributeEnabled,
   isInboundNudgeMuted: () => isInboundNudgeMuted,
   isPeerConnectEnabled: () => isPeerConnectEnabled,
   parseNudgeMode: () => parseNudgeMode,
@@ -124,6 +125,9 @@ function isPeerConnectEnabled() {
 function isInboundNudgeMuted() {
   return readConfig().inboundNudgeMuted === true;
 }
+function isContributeEnabled() {
+  return readConfig().contributeEnabled === true;
+}
 var TERMINALHIRE_DIR, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
@@ -138,7 +142,9 @@ var init_config = __esm({
       chatDisclosureAck: false,
       chatShareActivity: false,
       inboundNudgeMuted: false,
-      inboundNudgeDisclosed: false
+      inboundNudgeDisclosed: false,
+      contributeEnabled: false,
+      contributePrompted: false
     };
   }
 });
@@ -469,6 +475,9 @@ var init_github_auth = __esm({
 // ../../packages/core/src/types.ts
 function isBounty(job) {
   return job.source === "bounty" && job.bounty != null;
+}
+function isContribution(job) {
+  return job.source === "contribute" && job.contribution != null;
 }
 var init_types = __esm({
   "../../packages/core/src/types.ts"() {
@@ -1044,6 +1053,21 @@ var init_vocabulary = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/contribution-gate.ts
+function passesContributionGate(input) {
+  if (input.contributors === void 0) return false;
+  return input.stars >= MIN_STARS && input.contributors >= MIN_CONTRIBUTORS && !TRIVIAL_PR_TITLE.test(input.title) && !input.archived && !input.fork;
+}
+var MIN_STARS, MIN_CONTRIBUTORS, TRIVIAL_PR_TITLE;
+var init_contribution_gate = __esm({
+  "../../packages/core/src/feeds/contribution-gate.ts"() {
+    "use strict";
+    MIN_STARS = 50;
+    MIN_CONTRIBUTORS = 10;
+    TRIVIAL_PR_TITLE = /^\s*(fix\s+typo|typo\b|update\s+readme|readme\b|docs?:|docs?\(|chore:|chore\(|style:|ci:|build:|bump\b|update\s+dependenc)/i;
+  }
+});
+
 // ../../packages/core/src/github.ts
 function ghHeaders(token) {
   const headers = {
@@ -1391,16 +1415,14 @@ function deriveResumeTrend(cred, repoRecency, now = Date.now()) {
   }
   return scored.sort((a, b) => b.weight - a.weight).slice(0, 12).map((s) => s.t);
 }
-var TRACTION_TOP_N, MIN_STARS, MIN_CONTRIBUTORS, CANDIDATE_PR_PAGE, TRIVIAL_PR_TITLE, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
+var TRACTION_TOP_N, CANDIDATE_PR_PAGE, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
     init_vocabulary();
+    init_contribution_gate();
     TRACTION_TOP_N = 6;
-    MIN_STARS = 50;
-    MIN_CONTRIBUTORS = 10;
     CANDIDATE_PR_PAGE = 50;
-    TRIVIAL_PR_TITLE = /^\s*(fix\s+typo|typo\b|update\s+readme|readme\b|docs?:|docs?\(|chore:|chore\(|style:|ci:|build:|bump\b|update\s+dependenc)/i;
     RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
     RESUME_MIN_SCORE = 0.05;
   }
@@ -2127,13 +2149,18 @@ var init_bounty_gate = __esm({
       "aragon/hack",
       "spacemeshos/app",
       "archestra-ai/archestra",
-      "boundlessfi/boundless",
       "ucfopen/Obojobo",
-      "widgetti/ipyvolume",
       "moorcheh-ai/memanto",
       "PrismarineJS/mineflayer"
     ];
-    BOUNTY_REPO_DENYLIST = ["SecureBananaLabs/bug-bounty"];
+    BOUNTY_REPO_DENYLIST = [
+      "SecureBananaLabs/bug-bounty",
+      // Meta-farm: a bounty PLATFORM whose own issues are an assignment-gated
+      // contributor queue ("please assign me, my chief") — an unsolicited PR won't
+      // merge, so it's not a real claimable bounty. Not structurally derivable from
+      // any fetched field, so it's a manual entry (also dropped from the allowlist).
+      "boundlessfi/boundless"
+    ];
     DENYLIST_LC = new Set(BOUNTY_REPO_DENYLIST.map((r) => r.toLowerCase()));
     MAX_BOUNTIES_PER_REPO = 10;
     MAX_BOUNTIES_PER_DISCOVERED_REPO = 3;
@@ -2150,14 +2177,14 @@ async function mapWithConcurrency(items, limit, fn) {
   if (items.length === 0) return results;
   const workers = Math.max(1, Math.min(Math.floor(limit) || 1, items.length));
   let next = 0;
-  async function run20() {
+  async function run21() {
     for (; ; ) {
       const i = next++;
       if (i >= items.length) return;
       results[i] = await fn(items[i], i);
     }
   }
-  await Promise.all(Array.from({ length: workers }, run20));
+  await Promise.all(Array.from({ length: workers }, run21));
   return results;
 }
 var init_concurrency = __esm({
@@ -2202,6 +2229,9 @@ function isBountyIssue(issue) {
   const labels = labelNames(issue);
   if (labels.some((n) => BOUNTY_LABEL_RE.test(n))) return true;
   return /bounty/i.test(issue.title) && parseAmountUSD(issue.title) != null;
+}
+function isAssigned(issue) {
+  return !!issue.assignee || (issue.assignees?.length ?? 0) > 0;
 }
 async function ghJson(path) {
   let res;
@@ -2255,7 +2285,7 @@ async function fetchRepoBounties(repoFullName) {
   }
   const issues = await ghJson(`/repos/${repoFullName}/issues?state=open&per_page=100`);
   if (!issues) return [];
-  const bounties = issues.filter(isBountyIssue).slice(0, MAX_BOUNTIES_PER_REPO);
+  const bounties = issues.filter((i) => isBountyIssue(i) && !isAssigned(i)).slice(0, MAX_BOUNTIES_PER_REPO);
   const owner = repo.owner.login;
   return mapWithConcurrency(bounties, BOUNTY_FETCH_CONCURRENCY, async (issue) => {
     const title = decodeEntities(issue.title).trim();
@@ -2378,6 +2408,7 @@ async function fetchSearchBounties() {
     if (jobs.length >= MAX_SEARCH_BOUNTIES) break;
     const fullName = repoFullNameFromApiUrl(issue.repository_url);
     if (!fullName) continue;
+    if (isAssigned(issue)) continue;
     if ((perRepo.get(fullName) ?? 0) >= MAX_BOUNTIES_PER_REPO) continue;
     const repo = await repoMetaCached(fullName);
     if (!repo) continue;
@@ -2889,6 +2920,7 @@ var init_feeds = __esm({
     init_directory();
     init_bounty_gate();
     init_bounty_gate();
+    init_contribution_gate();
     FEEDS = [greenhouse, ashby, lever, workable, himalayas, wwr, hn];
     GREENHOUSE_SLUGS_BY_TIER = {
       bigco: [
@@ -2999,6 +3031,202 @@ var init_feeds = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/contributions.ts
+function authHeaders2() {
+  const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
+  const h = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "terminalhire",
+    "X-GitHub-Api-Version": "2022-11-28"
+  };
+  if (token) h["Authorization"] = `Bearer ${token}`;
+  return h;
+}
+function tokenize4(text) {
+  return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
+}
+function labelNames2(labels) {
+  return (labels ?? []).map((l) => typeof l === "string" ? l : l.name ?? "").filter(Boolean);
+}
+function repoFullNameFromApiUrl2(url) {
+  const m = url.match(/\/repos\/([^/]+)\/([^/]+)\/?$/);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+function makeClient(fetchImpl) {
+  async function raw(path) {
+    try {
+      return await fetchImpl(`${GITHUB_API2}${path}`, { headers: authHeaders2() });
+    } catch {
+      return null;
+    }
+  }
+  async function json(path) {
+    const res = await raw(path);
+    if (!res) return null;
+    if (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0") return null;
+    if (!res.ok) return null;
+    try {
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+  return { raw, json };
+}
+async function contributorCount(client, fullName) {
+  const res = await client.raw(`/repos/${fullName}/contributors?per_page=1&anon=false`);
+  if (!res || !res.ok) return void 0;
+  const link = res.headers.get("link");
+  const m = link?.match(/[?&]page=(\d+)>;\s*rel="last"/);
+  if (m) return Number(m[1]);
+  try {
+    const body = await res.json();
+    return Array.isArray(body) ? body.length : 0;
+  } catch {
+    return void 0;
+  }
+}
+async function openPRIssueRefs(client, fullName) {
+  const refs = /* @__PURE__ */ new Set();
+  const prs = await client.json(
+    `/repos/${fullName}/pulls?state=open&per_page=100`
+  );
+  if (!Array.isArray(prs)) return refs;
+  for (const pr of prs) {
+    for (const m of `${pr.title ?? ""}
+${pr.body ?? ""}`.matchAll(/#(\d+)\b/g)) {
+      refs.add(Number(m[1]));
+    }
+  }
+  return refs;
+}
+async function searchContribIssues(client, queries) {
+  const byUrl = /* @__PURE__ */ new Map();
+  for (const q of queries) {
+    const res = await client.json(
+      `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE2}`
+    );
+    for (const it of res?.items ?? []) {
+      if (it.pull_request) continue;
+      if (!byUrl.has(it.html_url)) byUrl.set(it.html_url, it);
+    }
+  }
+  return [...byUrl.values()].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+}
+async function aggregateContributions(opts = {}) {
+  const client = makeClient(opts.fetchImpl ?? fetchWithTimeout);
+  const queries = opts.queries ?? CONTRIB_SEARCH_QUERIES;
+  const issues = (await searchContribIssues(client, queries)).slice(0, MAX_CONTRIB_ISSUES_SCANNED);
+  const repoCache = /* @__PURE__ */ new Map();
+  const contribCache = /* @__PURE__ */ new Map();
+  const prRefsCache = /* @__PURE__ */ new Map();
+  async function repoMeta(fullName) {
+    const hit = repoCache.get(fullName);
+    if (hit !== void 0) return hit;
+    const r = await client.json(`/repos/${fullName}`) ?? null;
+    repoCache.set(fullName, r);
+    return r;
+  }
+  async function repoContribCount(fullName) {
+    if (contribCache.has(fullName)) return contribCache.get(fullName);
+    const n = await contributorCount(client, fullName);
+    contribCache.set(fullName, n);
+    return n;
+  }
+  async function repoPRRefs(fullName) {
+    const hit = prRefsCache.get(fullName);
+    if (hit !== void 0) return hit;
+    const refs = await openPRIssueRefs(client, fullName);
+    prRefsCache.set(fullName, refs);
+    return refs;
+  }
+  const jobs = [];
+  const seen = /* @__PURE__ */ new Set();
+  const perRepo = /* @__PURE__ */ new Map();
+  for (const issue of issues) {
+    if (jobs.length >= MAX_CONTRIB_ITEMS) break;
+    const fullName = repoFullNameFromApiUrl2(issue.repository_url);
+    if (!fullName) continue;
+    const id = `contribute:${fullName}#${issue.number}`;
+    if (seen.has(id)) continue;
+    if (isDenylistedRepo(fullName)) continue;
+    if (isAssigned(issue)) continue;
+    if ((perRepo.get(fullName) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) continue;
+    const repo = await repoMeta(fullName);
+    if (!repo) continue;
+    const title = decodeEntities(issue.title).trim();
+    const contributors = await repoContribCount(fullName);
+    if (!passesContributionGate({
+      stars: repo.stargazers_count,
+      contributors,
+      title,
+      archived: repo.archived,
+      fork: repo.fork
+    })) {
+      continue;
+    }
+    if (repo.disabled) continue;
+    const prRefs = await repoPRRefs(fullName);
+    if (prRefs.has(issue.number)) continue;
+    const body = issue.body ? decodeEntities(issue.body) : "";
+    const labels = labelNames2(issue.labels);
+    const tags = normalize(
+      tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
+    );
+    seen.add(id);
+    perRepo.set(fullName, (perRepo.get(fullName) ?? 0) + 1);
+    jobs.push({
+      id,
+      source: "contribute",
+      title,
+      company: repo.owner.login,
+      url: issue.html_url,
+      remote: true,
+      location: "Remote",
+      tags,
+      roleType: "freelance",
+      postedAt: issue.created_at,
+      applyMode: "direct",
+      contribution: {
+        repoFullName: fullName,
+        repoStars: repo.stargazers_count,
+        repoContributors: contributors,
+        // gate guarantees a number here
+        issueNumber: issue.number,
+        labels,
+        issueUrl: issue.html_url,
+        issueBody: body.slice(0, 1e3) || void 0
+      },
+      raw: issue
+    });
+  }
+  return jobs;
+}
+var GITHUB_API2, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, MAX_CONTRIB_ITEMS, MAX_CONTRIB_ISSUES_SCANNED;
+var init_contributions = __esm({
+  "../../packages/core/src/feeds/contributions.ts"() {
+    "use strict";
+    init_vocabulary();
+    init_entities();
+    init_bounty_gate();
+    init_contribution_gate();
+    init_github_bounties();
+    init_http();
+    GITHUB_API2 = "https://api.github.com";
+    CONTRIB_SEARCH_QUERIES = [
+      'label:"good first issue" type:issue state:open',
+      'label:"help wanted" type:issue state:open',
+      'label:"good-first-issue" type:issue state:open',
+      'label:"help-wanted" type:issue state:open'
+    ];
+    SEARCH_PER_PAGE2 = 100;
+    MAX_CONTRIB_ITEMS = 150;
+    MAX_CONTRIB_ISSUES_SCANNED = 300;
+  }
+});
+
 // ../../packages/core/src/partners.ts
 import { readFileSync as readFileSync5 } from "fs";
 import { join as join5 } from "path";
@@ -3074,15 +3302,21 @@ async function buildIndex(opts) {
     }
   }
   const jobs = allJobs.map(({ raw: _raw, ...rest }) => rest);
-  return {
+  const index = {
     builtAt: (/* @__PURE__ */ new Date()).toISOString(),
     jobs
   };
+  if (opts?.includeContribute) {
+    const contributions = await aggregateContributions(opts.contributeOpts);
+    index.contribute = contributions.map(({ raw: _raw, ...rest }) => rest);
+  }
+  return index;
 }
 var init_indexer = __esm({
   "../../packages/core/src/indexer.ts"() {
     "use strict";
     init_feeds();
+    init_contributions();
     init_partners();
   }
 });
@@ -6344,6 +6578,471 @@ var init_job_status = __esm({
   }
 });
 
+// ../../packages/core/src/episodes/schema.ts
+var SCHEMA_VERSION;
+var init_schema = __esm({
+  "../../packages/core/src/episodes/schema.ts"() {
+    "use strict";
+    SCHEMA_VERSION = 1;
+  }
+});
+
+// ../../packages/core/src/episodes/doors.ts
+function recruiterMetric(value) {
+  return { value };
+}
+function inwardMetric(value) {
+  return { value };
+}
+function metricValue(metric) {
+  return metric.value;
+}
+function declassify(metrics, coveragePct = 0) {
+  const velocity = metrics.skillAdoptionVelocity.value;
+  const drift = metrics.distributionDrift.value;
+  const recency = metrics.recencySplit.value;
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    headline: {
+      distinctSignalCount: velocity.distinctSignalCount,
+      recentAdoptionCount: velocity.recentAdoptionCount,
+      velocityPerWeek: velocity.velocityPerWeek,
+      rising: drift.rising.map((entry) => ({ signal: entry.signal, delta: entry.delta })),
+      falling: drift.falling.map((entry) => ({ signal: entry.signal, delta: entry.delta }))
+    },
+    liveStack: [...recency.live],
+    dormantStack: [...recency.dormant],
+    coveragePct
+  };
+}
+function buildExport(metrics, coveragePct = 0) {
+  return declassify(metrics, coveragePct);
+}
+var init_doors = __esm({
+  "../../packages/core/src/episodes/doors.ts"() {
+    "use strict";
+    init_schema();
+  }
+});
+
+// ../../packages/core/src/episodes/node-model.ts
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function asString(value, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+function asStringOrNull(value) {
+  return typeof value === "string" ? value : null;
+}
+function asBool(value) {
+  return value === true;
+}
+function parseBlock(raw) {
+  if (!isRecord(raw)) {
+    return { type: "unknown", rawType: typeof raw };
+  }
+  const t = raw.type;
+  if (t === "text") {
+    return { type: "text", text: asString(raw.text) };
+  }
+  if (t === "tool_use") {
+    return { type: "tool_use", id: asString(raw.id), name: asString(raw.name), input: raw.input };
+  }
+  if (t === "tool_result") {
+    return {
+      type: "tool_result",
+      toolUseId: asString(raw.tool_use_id),
+      content: raw.content,
+      isError: asBool(raw.is_error)
+    };
+  }
+  return { type: "unknown", rawType: typeof t === "string" ? t : String(t) };
+}
+function parseContent(content) {
+  if (typeof content === "string") {
+    return content.length > 0 ? [{ type: "text", text: content }] : [];
+  }
+  if (Array.isArray(content)) {
+    return content.map(parseBlock);
+  }
+  return [];
+}
+function toNode(raw, opts = {}) {
+  if (!isRecord(raw)) {
+    if (opts.strict) {
+      throw new Error(`toNode: node is not an object (got ${typeof raw})`);
+    }
+    return makeUnknown(emptyBase(), typeof raw);
+  }
+  const message = isRecord(raw.message) ? raw.message : void 0;
+  const content = parseContent(message?.content);
+  const base = {
+    uuid: asString(raw.uuid),
+    parentUuid: asStringOrNull(raw.parentUuid),
+    sessionId: asString(raw.sessionId),
+    cwd: asString(raw.cwd),
+    gitBranch: asString(raw.gitBranch),
+    timestamp: asString(raw.timestamp),
+    isSidechain: asBool(raw.isSidechain),
+    userType: asString(raw.userType),
+    role: asString(message?.role),
+    content,
+    text: content.reduce((acc, b) => b.type === "text" ? [...acc, b.text] : acc, []).join("\n")
+  };
+  const type = raw.type;
+  if (type === "summary" || asBool(raw.isCompactSummary) || isRecord(raw.compactMetadata)) {
+    return { ...base, kind: "summary" /* Summary */, toolName: null, toolUseId: null, isError: false, rawType: asString(type, "summary") };
+  }
+  if (type === "system") {
+    return { ...base, kind: "system" /* System */, toolName: null, toolUseId: null, isError: false, rawType: "system" };
+  }
+  if (type === "user") {
+    const tr = content.find((b) => b.type === "tool_result");
+    if (tr) {
+      return { ...base, kind: "tool_result" /* ToolResult */, toolName: null, toolUseId: tr.toolUseId, isError: tr.isError, rawType: "user" };
+    }
+    return { ...base, kind: "user" /* User */, toolName: null, toolUseId: null, isError: false, rawType: "user" };
+  }
+  if (type === "assistant") {
+    const tu = content.find((b) => b.type === "tool_use");
+    if (tu) {
+      return { ...base, kind: "tool_use" /* ToolUse */, toolName: tu.name, toolUseId: tu.id, isError: false, rawType: "assistant" };
+    }
+    return { ...base, kind: "assistant" /* Assistant */, toolName: null, toolUseId: null, isError: false, rawType: "assistant" };
+  }
+  const rawType = typeof type === "string" ? type : String(type);
+  if (opts.strict) {
+    throw new Error(`toNode: unrecognized node kind: ${rawType}`);
+  }
+  return makeUnknown(base, rawType);
+}
+function makeUnknown(base, rawType) {
+  return { ...base, kind: "unknown" /* Unknown */, toolName: null, toolUseId: null, isError: false, rawType };
+}
+function emptyBase() {
+  return {
+    uuid: "",
+    parentUuid: null,
+    sessionId: "",
+    cwd: "",
+    gitBranch: "",
+    timestamp: "",
+    isSidechain: false,
+    userType: "",
+    role: "",
+    content: [],
+    text: ""
+  };
+}
+var init_node_model = __esm({
+  "../../packages/core/src/episodes/node-model.ts"() {
+    "use strict";
+  }
+});
+
+// ../../packages/core/src/episodes/derivers/signals.ts
+function mcpToolSignal(name) {
+  const rest = name.slice("mcp__".length);
+  const sep = rest.indexOf("__");
+  if (sep <= 0) return "mcp:custom";
+  const server = rest.slice(0, sep).toLowerCase();
+  const leaf = rest.slice(sep + 2);
+  if (leaf.length === 0) return "mcp:custom";
+  if (MCP_SERVER_CAPABILITY.has(server)) return MCP_SERVER_CAPABILITY.get(server) ?? null;
+  return "mcp:custom";
+}
+function classifyToolSignal(name) {
+  if (name.toLowerCase().startsWith("mcp__")) {
+    return mcpToolSignal(name);
+  }
+  const key = name.toLowerCase();
+  if (ORCHESTRATION_TOOLS.has(key)) return AGENTIC_WORKFLOW_SIGNAL;
+  return null;
+}
+function isRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function fileExtLang(input) {
+  if (!isRecord2(input)) {
+    return null;
+  }
+  const filePath = input.file_path;
+  if (typeof filePath !== "string") {
+    return null;
+  }
+  const dot = filePath.lastIndexOf(".");
+  if (dot < 0 || dot === filePath.length - 1) {
+    return null;
+  }
+  const ext = filePath.slice(dot + 1).toLowerCase();
+  return EXT_LANG[ext] ?? null;
+}
+function toolUseInput(node) {
+  const block = node.content.find((b) => b.type === "tool_use");
+  return block?.input;
+}
+function compareSignal(a, b) {
+  if (a.ts !== b.ts) {
+    return a.ts < b.ts ? -1 : 1;
+  }
+  if (a.signal !== b.signal) {
+    return a.signal < b.signal ? -1 : 1;
+  }
+  return 0;
+}
+function extractToolSignals(nodes) {
+  const out = [];
+  for (const node of nodes) {
+    if (node.kind !== "tool_use" /* ToolUse */ || node.toolName === null) {
+      continue;
+    }
+    const toolSignal = classifyToolSignal(node.toolName);
+    if (toolSignal !== null) {
+      out.push({ signal: toolSignal, ts: node.timestamp });
+    }
+    const lang = fileExtLang(toolUseInput(node));
+    if (lang !== null) {
+      out.push({ signal: `lang:${lang}`, ts: node.timestamp });
+    }
+  }
+  out.sort(compareSignal);
+  return out;
+}
+var EXT_LANG, MCP_SERVER_CAPABILITY, ORCHESTRATION_TOOLS, AGENTIC_WORKFLOW_SIGNAL;
+var init_signals = __esm({
+  "../../packages/core/src/episodes/derivers/signals.ts"() {
+    "use strict";
+    init_node_model();
+    EXT_LANG = {
+      ts: "ts",
+      tsx: "ts",
+      js: "js",
+      jsx: "js",
+      mjs: "js",
+      cjs: "js",
+      py: "py",
+      rs: "rs",
+      go: "go",
+      rb: "rb",
+      java: "java",
+      kt: "kt",
+      sql: "sql",
+      md: "md"
+    };
+    MCP_SERVER_CAPABILITY = /* @__PURE__ */ new Map([
+      // Coding-relevant public servers → a capability.
+      ["plugin_playwright_playwright", "cap:ui-automation"],
+      ["playwright", "cap:ui-automation"],
+      ["claude_ai_linear", "cap:project-mgmt"],
+      ["claude_ai_vercel", "cap:deploys"],
+      ["plugin_vercel_vercel", "cap:deploys"],
+      ["claude_ai_figma", "cap:design"],
+      ["figma", "cap:design"],
+      ["pencil", "cap:design"],
+      ["claude_ai_ideabrowser", "cap:product-research"],
+      ["ideabrowser", "cap:product-research"],
+      ["blender", "cap:3d-modeling"],
+      ["n8n-knowledge", "cap:workflow-automation"],
+      // Public but NOT a coding skill → dropped from the trajectory.
+      ["plugin_context-mode_context-mode", null],
+      // agent context plumbing
+      ["claude_ai_gmail", null],
+      ["claude_ai_google_calendar", null],
+      ["claude_ai_google_drive", null]
+    ]);
+    ORCHESTRATION_TOOLS = /* @__PURE__ */ new Set([
+      "task",
+      "agent",
+      "workflow",
+      "enterworktree",
+      "exitworktree",
+      "schedulewakeup",
+      "monitor",
+      "sendmessage",
+      "taskcreate",
+      "tasklist",
+      "taskstop",
+      "taskupdate",
+      "taskget",
+      "taskoutput",
+      "croncreate",
+      "cronlist",
+      "crondelete"
+    ]);
+    AGENTIC_WORKFLOW_SIGNAL = "cap:agentic-workflow";
+  }
+});
+
+// ../../packages/core/src/episodes/derivers/recency-split.ts
+function deriveRecencySplit(nodes, opts = {}) {
+  const signals = extractToolSignals(nodes);
+  const lastSeen = /* @__PURE__ */ new Map();
+  for (const s of signals) {
+    const cur = lastSeen.get(s.signal);
+    if (cur === void 0 || s.ts > cur) {
+      lastSeen.set(s.signal, s.ts);
+    }
+  }
+  const maxTs = signals.length > 0 ? signals[signals.length - 1].ts : "";
+  const now = opts.now ?? maxTs;
+  const thresholdDays = opts.thresholdDays ?? DORMANT_THRESHOLD_DAYS;
+  const nowMs = now !== "" ? Date.parse(now) : 0;
+  const live = [];
+  const dormant = [];
+  for (const [signal, ts] of [...lastSeen.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1)) {
+    const ageDays2 = now !== "" ? (nowMs - Date.parse(ts)) / DAY_MS : 0;
+    if (ageDays2 <= thresholdDays) {
+      live.push(signal);
+    } else {
+      dormant.push(signal);
+    }
+  }
+  return recruiterMetric({ now, thresholdDays, live, dormant });
+}
+var DAY_MS, DORMANT_THRESHOLD_DAYS;
+var init_recency_split = __esm({
+  "../../packages/core/src/episodes/derivers/recency-split.ts"() {
+    "use strict";
+    init_doors();
+    init_signals();
+    DAY_MS = 864e5;
+    DORMANT_THRESHOLD_DAYS = 90;
+  }
+});
+
+// ../../packages/core/src/credential/legible.ts
+function labelFor(id) {
+  return DISPLAY_LABEL[id] ?? id.split("-").map((w) => w.length > 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w).join(" ");
+}
+function capitalize(s) {
+  return s.length > 0 ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
+  const ok = credential.status === "ok";
+  const domains = ok ? credential.byDomain : {};
+  const chips = Object.entries(domains).map(([rawDomain, d]) => {
+    const canon = normalize([rawDomain])[0];
+    return canon ? { domain: canon, mergedPRs: d.mergedPRs } : null;
+  }).filter((c) => c !== null).sort((a, b) => b.mergedPRs - a.mergedPRs || (a.domain < b.domain ? -1 : 1));
+  const dominant = chips.length > 0 ? chips[0].domain : void 0;
+  const role = dominant ? ROLE_BY_DOMAIN[dominant] ?? GENERIC_ROLE : GENERIC_ROLE;
+  const stackChips = chips.filter((c) => !(c.domain in CONCEPT_TAGS));
+  const conceptChips = chips.filter((c) => c.domain in CONCEPT_TAGS && c.domain !== dominant);
+  const topStacks = stackChips.slice(0, 3).map((c) => labelFor(c.domain)).join(", ");
+  const specialization = dominant && dominant in CONCEPT_TAGS ? CONCEPT_TAGS[dominant] : conceptChips.length > 0 ? CONCEPT_TAGS[conceptChips[0].domain] : "";
+  const sen = seniorityBand ? capitalize(seniorityBand) : "";
+  let headline;
+  if (chips.length > 0) {
+    const roleSeg = sen ? `${sen} ${role}` : role;
+    const segs = [roleSeg];
+    if (specialization) segs.push(specialization);
+    if (topStacks) segs.push(topStacks);
+    headline = segs.join(" \xB7 ");
+  } else {
+    const roleSeg = sen ? `${sen} ${GENERIC_ROLE}` : GENERIC_ROLE;
+    headline = traction.status === "ok" && traction.totalStars > 0 ? `${roleSeg} \xB7 ${traction.totalStars}\u2605 across owned repos` : roleSeg;
+  }
+  const mergedDates = Object.values(domains).map((d) => d.lastMergedAt).filter((s) => typeof s === "string" && s.length > 0).sort();
+  const mostRecent = mergedDates.length > 0 ? mergedDates[mergedDates.length - 1] : void 0;
+  const thresholdDays = Number.isFinite(recency.value.thresholdDays) && recency.value.thresholdDays > 0 ? recency.value.thresholdDays : DORMANT_THRESHOLD_DAYS;
+  const nowIso = recency.value.now && recency.value.now.length > 0 ? recency.value.now : credential.computedAt || (/* @__PURE__ */ new Date()).toISOString();
+  const nowMs = Date.parse(nowIso);
+  let recencyBadge = null;
+  let daysAgo;
+  if (mostRecent) {
+    const ageDays2 = (nowMs - Date.parse(mostRecent)) / DAY_MS2;
+    daysAgo = Math.max(0, Math.round(ageDays2));
+    recencyBadge = { lastMergedAt: mostRecent, state: ageDays2 <= thresholdDays ? "live" : "dormant" };
+  }
+  const orgCount = Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
+  let proofSentence;
+  if (!ok) {
+    proofSentence = "Contribution credential unavailable \u2014 could not verify.";
+  } else {
+    const prs = credential.qualifyingTotal;
+    let s = `${prs} substantive PR${prs === 1 ? "" : "s"} merged into at least ${orgCount} external org${orgCount === 1 ? "" : "s"} (\u2265${MIN_STARS}\u2605, \u2265${MIN_CONTRIBUTORS} contributors)`;
+    if (daysAgo !== void 0) s += ` \u2014 most recent ${daysAgo}d ago`;
+    proofSentence = `${s}.`;
+  }
+  const auditableBadge = ok ? {
+    mergedTotal: credential.qualifyingTotal,
+    distinctOrgs: orgCount,
+    thresholds: { stars: MIN_STARS, contributors: MIN_CONTRIBUTORS }
+  } : null;
+  const profile = {
+    headline,
+    verifiedSkillChips: chips,
+    recencyBadge,
+    proofSentence,
+    auditableBadge
+  };
+  if (seniorityBand) profile.seniority = seniorityBand;
+  return profile;
+}
+var DAY_MS2, GENERIC_ROLE, ROLE_BY_DOMAIN, CONCEPT_TAGS, DISPLAY_LABEL;
+var init_legible = __esm({
+  "../../packages/core/src/credential/legible.ts"() {
+    "use strict";
+    init_contribution_gate();
+    init_vocabulary();
+    init_recency_split();
+    DAY_MS2 = 864e5;
+    GENERIC_ROLE = "Software Engineer";
+    ROLE_BY_DOMAIN = {
+      backend: "Backend Engineer",
+      go: "Backend Engineer",
+      rust: "Backend Engineer",
+      java: "Backend Engineer",
+      python: "Backend Engineer",
+      nodejs: "Backend Engineer",
+      "api-design": "Backend Engineer",
+      microservices: "Backend Engineer",
+      postgresql: "Backend Engineer",
+      frontend: "Frontend Engineer",
+      react: "Frontend Engineer",
+      vue: "Frontend Engineer",
+      css: "Frontend Engineer",
+      ml: "ML Engineer",
+      pytorch: "ML Engineer",
+      llm: "ML Engineer",
+      "computer-vision": "ML Engineer",
+      devops: "Platform Engineer",
+      kubernetes: "Platform Engineer",
+      terraform: "Platform Engineer",
+      docker: "Platform Engineer",
+      aws: "Platform Engineer",
+      ios: "Mobile Engineer",
+      android: "Mobile Engineer"
+    };
+    CONCEPT_TAGS = {
+      "distributed-systems": "Distributed systems",
+      microservices: "Microservices",
+      security: "Security",
+      payments: "Payments",
+      ml: "Machine learning",
+      llm: "LLM systems",
+      "computer-vision": "Computer vision",
+      recsys: "Recommendation systems",
+      "api-design": "API design"
+    };
+    DISPLAY_LABEL = {
+      postgresql: "Postgres",
+      nodejs: "Node.js",
+      ml: "ML",
+      llm: "LLM",
+      "api-design": "API design",
+      "ci-cd": "CI/CD",
+      "computer-vision": "Computer vision",
+      "distributed-systems": "Distributed systems",
+      ios: "iOS",
+      css: "CSS",
+      graphql: "GraphQL",
+      aws: "AWS"
+    };
+  }
+});
+
 // ../../packages/core/src/index.ts
 var src_exports = {};
 __export(src_exports, {
@@ -6363,8 +7062,11 @@ __export(src_exports, {
   INTRO_ALLOWED_FIELDS: () => INTRO_ALLOWED_FIELDS,
   INTRO_PENDING_TTL_MS: () => INTRO_PENDING_TTL_MS,
   LEVER_SLUGS_BY_TIER: () => LEVER_SLUGS_BY_TIER,
+  MIN_CONTRIBUTORS: () => MIN_CONTRIBUTORS,
+  MIN_STARS: () => MIN_STARS,
   STRONG_MATCH_THRESHOLD: () => STRONG_MATCH_THRESHOLD,
   SYNONYMS: () => SYNONYMS,
+  TRIVIAL_PR_TITLE: () => TRIVIAL_PR_TITLE,
   VOCABULARY: () => VOCABULARY,
   VOCAB_NODES: () => VOCAB_NODES,
   acceptanceCountForDomains: () => acceptanceCountForDomains,
@@ -6387,6 +7089,7 @@ __export(src_exports, {
   coreTagsFromTitle: () => coreTagsFromTitle,
   decorate: () => decorate,
   decryptMessage: () => decryptMessage,
+  deriveLegibleProfile: () => deriveLegibleProfile,
   deriveResumeTrend: () => deriveResumeTrend,
   deriveSharedKey: () => deriveSharedKey,
   encryptMessage: () => encryptMessage,
@@ -6408,6 +7111,7 @@ __export(src_exports, {
   introRateLimitCheck: () => introRateLimitCheck,
   introRetentionAction: () => introRetentionAction,
   isBounty: () => isBounty,
+  isContribution: () => isContribution,
   isOverIntroLimit: () => isOverIntroLimit,
   lever: () => lever,
   loadPartnerRoles: () => loadPartnerRoles,
@@ -6416,6 +7120,7 @@ __export(src_exports, {
   normalize: () => normalize,
   opire: () => opire,
   pageMatches: () => pageMatches,
+  passesContributionGate: () => passesContributionGate,
   passesMaturityGate: () => passesMaturityGate,
   personCardToJob: () => personCardToJob,
   projectCardToJob: () => projectCardToJob,
@@ -6445,6 +7150,7 @@ var init_src = __esm({
     init_directoryThreshold();
     init_chatCrypto();
     init_job_status();
+    init_legible();
   }
 });
 
@@ -6710,8 +7416,19 @@ async function maybePromptPeerConnect({
   output = process.stdout,
   isInteractive = Boolean(process.stdin.isTTY && process.stdout.isTTY),
   login,
-  openUrl = openInBrowser
+  openUrl = openInBrowser,
+  ask: ask3
 } = {}) {
+  const promptOnce = ask3 ? async (q) => String(await ask3(q) ?? "").trim().toLowerCase() : async (q) => {
+    const rl = createInterface({ input, output });
+    const a = await new Promise((resolve2) => {
+      rl.question(q, (x) => {
+        rl.close();
+        resolve2(x);
+      });
+    });
+    return String(a).trim().toLowerCase();
+  };
   const cfg = readConfig();
   if (cfg.peerConnectPrompted) {
     return {
@@ -6729,13 +7446,7 @@ async function maybePromptPeerConnect({
       resumePublishOpened: false
     };
   }
-  const rl = createInterface({ input, output });
-  const answer = await new Promise((resolve2) => {
-    rl.question(PROMPT, (a) => {
-      rl.close();
-      resolve2(String(a).trim().toLowerCase());
-    });
-  });
+  const answer = await promptOnce(PROMPT);
   const optedIn = answer === "y" || answer === "yes";
   writeConfig({ peerConnect: optedIn, peerConnectPrompted: true });
   output.write(
@@ -6743,13 +7454,7 @@ async function maybePromptPeerConnect({
   );
   let resumePublishOpened = false;
   if (optedIn && cfg.resumePublishPrompted !== true) {
-    const rl2 = createInterface({ input, output });
-    const supplyAnswer = await new Promise((resolve2) => {
-      rl2.question(buildSupplyPrompt(login), (a) => {
-        rl2.close();
-        resolve2(String(a).trim().toLowerCase());
-      });
-    });
+    const supplyAnswer = await promptOnce(buildSupplyPrompt(login));
     const wantsPublish = supplyAnswer === "y" || supplyAnswer === "yes";
     writeConfig({ resumePublishPrompted: true });
     if (wantsPublish) {
@@ -6834,11 +7539,11 @@ async function runLogin() {
     if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
       const { createRequire: createRequire2 } = await import("module");
       const { fileURLToPath: fileURLToPath8 } = await import("url");
-      const { join: join28, dirname: dirname4 } = await import("path");
+      const { join: join29, dirname: dirname4 } = await import("path");
       const __dirname7 = fileURLToPath8(new URL(".", import.meta.url));
-      const fixturePath = join28(__dirname7, "../../fixtures/github-sample.json");
-      const { readFileSync: readFileSync26 } = await import("fs");
-      ghProfile = JSON.parse(readFileSync26(fixturePath, "utf8"));
+      const fixturePath = join29(__dirname7, "../../fixtures/github-sample.json");
+      const { readFileSync: readFileSync27 } = await import("fs");
+      ghProfile = JSON.parse(readFileSync27(fixturePath, "utf8"));
     } else {
       ghProfile = await fetchGitHubProfile2(login, token);
     }
@@ -6909,7 +7614,7 @@ async function runLogin() {
       } catch {
       }
     }
-    try {
+    if (process.env["JPI_SKIP_PEER_PROMPT"] !== "1") try {
       const { maybePromptPeerConnect: maybePromptPeerConnect2 } = await Promise.resolve().then(() => (init_peer_connect_prompt(), peer_connect_prompt_exports));
       await maybePromptPeerConnect2({ login: ghProfile.login });
     } catch {
@@ -7670,7 +8375,7 @@ function splitDeclaration(line) {
   }
   return { title: line, skillsRaw: line };
 }
-function tokenize4(skillsRaw) {
+function tokenize5(skillsRaw) {
   return skillsRaw.split(/[,/]|\s+/).map((t) => t.trim()).filter(Boolean);
 }
 async function run4() {
@@ -7709,7 +8414,7 @@ async function run4() {
       return;
     }
     const { title, skillsRaw } = splitDeclaration(declaration);
-    const skillTags = normalize2(tokenize4(skillsRaw));
+    const skillTags = normalize2(tokenize5(skillsRaw));
     if (skillTags.length === 0) {
       console.log("\n\u2726 No recognized skills in that declaration.");
       console.log("  Use known stack names (e.g. react, typescript, go, postgres, kubernetes).");
@@ -7890,6 +8595,180 @@ var init_jpi_bounties = __esm({
   }
 });
 
+// bin/jpi-contribute.js
+var jpi_contribute_exports = {};
+__export(jpi_contribute_exports, {
+  rankContributions: () => rankContributions,
+  renderRow: () => renderRow,
+  run: () => run6
+});
+import { readFileSync as readFileSync12, writeFileSync as writeFileSync10, mkdirSync as mkdirSync10 } from "fs";
+import { join as join12 } from "path";
+import { homedir as homedir11 } from "os";
+import { createInterface as createInterface6 } from "readline";
+function readIndexCache3() {
+  try {
+    const entry = JSON.parse(readFileSync12(INDEX_CACHE_FILE4, "utf8"));
+    if (Date.now() - entry.ts < INDEX_TTL_MS4) return entry.index;
+    return null;
+  } catch {
+    return null;
+  }
+}
+function writeIndexCache3(index) {
+  mkdirSync10(TERMINALHIRE_DIR9, { recursive: true });
+  writeFileSync10(INDEX_CACHE_FILE4, JSON.stringify({ ts: Date.now(), index }), "utf8");
+}
+async function fetchIndex3(fetchImpl, useCache = true) {
+  if (useCache) {
+    const cached = readIndexCache3();
+    if (cached) return cached;
+  }
+  const res = await fetchImpl(`${API_URL5}/api/index`, { signal: AbortSignal.timeout(1e4) });
+  if (!res.ok) throw new Error(`/api/index returned ${res.status}`);
+  const index = await res.json();
+  if (useCache) writeIndexCache3(index);
+  return index;
+}
+function defaultPrompt(question) {
+  const rl = createInterface6({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve2) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve2(answer.trim().toLowerCase());
+    });
+  });
+}
+function rankContributions(fp, items) {
+  if (!fp || !Array.isArray(items) || items.length === 0) return [];
+  return match(fp, items, items.length);
+}
+async function rankLocally(items, injectedFp) {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  let fp = injectedFp;
+  if (!fp) {
+    try {
+      const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+      const profile = await readProfile2();
+      if (!profile.skillTags || profile.skillTags.length === 0) return [];
+      fp = profileToFingerprint2(profile);
+    } catch {
+      return [];
+    }
+  }
+  return rankContributions(fp, items);
+}
+function displayLanguage(job) {
+  const tag = (job.tags ?? []).find((t) => LANGUAGES.has(String(t).toLowerCase()));
+  return tag ?? "\u2014";
+}
+function linkTitle4(title, url) {
+  const isTTY = process.stdout.isTTY;
+  const noColor = process.env["NO_COLOR"] !== void 0;
+  if (isTTY && !noColor && url) return `\x1B]8;;${url}\x1B\\${title}\x1B]8;;\x1B\\`;
+  return url ? `${title} (${url})` : title;
+}
+function renderRow(i, result) {
+  const job = result.job;
+  const c = job.contribution ?? {};
+  const repo = c.repoFullName ?? job.company ?? "";
+  const num = c.issueNumber != null ? `#${c.issueNumber}` : "";
+  const label = c.labels && c.labels.length ? c.labels[0] : "\u2014";
+  const lang = displayLanguage(job);
+  const scorePct = `match ${Math.round((result.score ?? 0) * 100)}%`;
+  const line1 = `${i + 1}. ${linkTitle4(job.title, c.issueUrl ?? job.url)}`;
+  const line2 = `   ${repo} \xB7 ${num} \xB7 ${label} \xB7 ${lang} \xB7 ${scorePct}`;
+  return `${line1}
+${line2}`;
+}
+async function run6(opts = {}) {
+  const log = opts.log ?? console.log;
+  const isTTY = opts.isTTY ?? Boolean(process.stdin.isTTY);
+  const promptImpl = opts.prompt ?? defaultPrompt;
+  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  const useCache = opts.fetchImpl == null;
+  try {
+    if (!isContributeEnabled()) {
+      if (isTTY) {
+        const answer = await promptImpl(OPT_IN_PROMPT + " ");
+        const yes = answer === "y" || answer === "yes";
+        writeConfig(yes ? { contributeEnabled: true, contributePrompted: true } : { contributePrompted: true });
+        if (!yes) return;
+      } else {
+        log(OPT_IN_PROMPT);
+        writeConfig({ contributePrompted: true });
+        return;
+      }
+    }
+    const index = await fetchIndex3(fetchImpl, useCache);
+    const items = Array.isArray(index?.contribute) ? index.contribute : [];
+    const results = await rankLocally(items, opts.fingerprint);
+    if (results.length === 0) {
+      log(EMPTY_STATE);
+      return;
+    }
+    log(HEADER);
+    log("");
+    for (let i = 0; i < results.length; i++) log(renderRow(i, results[i]));
+  } catch (err) {
+    console.error("terminalhire contribute error:", err?.message ?? err);
+    process.exit(1);
+  }
+}
+var TERMINALHIRE_DIR9, INDEX_CACHE_FILE4, INDEX_TTL_MS4, API_URL5, HEADER, OPT_IN_PROMPT, EMPTY_STATE, LANGUAGES;
+var init_jpi_contribute = __esm({
+  "bin/jpi-contribute.js"() {
+    "use strict";
+    init_src();
+    init_config();
+    TERMINALHIRE_DIR9 = join12(homedir11(), ".terminalhire");
+    INDEX_CACHE_FILE4 = join12(TERMINALHIRE_DIR9, "index-cache.json");
+    INDEX_TTL_MS4 = 15 * 60 * 1e3;
+    API_URL5 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+    HEADER = "Contribution opportunities \u2014 open issues where a merged PR actually counts toward your r\xE9sum\xE9.\nRepos \u226550\u2605 / \u226510 contributors \xB7 unassigned \xB7 merit-merge \xB7 matched locally to your stack.";
+    OPT_IN_PROMPT = "Contribute is off. Turn it on to see open issues where a merged PR would count toward your r\xE9sum\xE9 \u2014\nmatched to your stack. Matching runs locally; your profile never leaves this machine. Enable? [y/N]";
+    EMPTY_STATE = "Nothing clears the bar right now. We only list issues where a merged PR actually counts toward\nyour r\xE9sum\xE9 \u2014 so the list stays honest. Try again after the next refresh.";
+    LANGUAGES = /* @__PURE__ */ new Set([
+      "typescript",
+      "javascript",
+      "python",
+      "go",
+      "golang",
+      "rust",
+      "java",
+      "ruby",
+      "php",
+      "c",
+      "cpp",
+      "c++",
+      "csharp",
+      "c#",
+      "kotlin",
+      "swift",
+      "scala",
+      "elixir",
+      "erlang",
+      "haskell",
+      "clojure",
+      "dart",
+      "lua",
+      "perl",
+      "r",
+      "ocaml",
+      "julia",
+      "shell",
+      "bash",
+      "html",
+      "css",
+      "sql",
+      "zig",
+      "nim",
+      "crystal",
+      "objective-c"
+    ]);
+  }
+});
+
 // src/claims.ts
 var claims_exports = {};
 __export(claims_exports, {
@@ -7901,26 +8780,26 @@ __export(claims_exports, {
   removeClaim: () => removeClaim,
   updateClaim: () => updateClaim
 });
-import { readFileSync as readFileSync12, writeFileSync as writeFileSync10, mkdirSync as mkdirSync10, renameSync as renameSync2, existsSync as existsSync8 } from "fs";
-import { join as join12 } from "path";
-import { homedir as homedir11 } from "os";
+import { readFileSync as readFileSync13, writeFileSync as writeFileSync11, mkdirSync as mkdirSync11, renameSync as renameSync2, existsSync as existsSync8 } from "fs";
+import { join as join13 } from "path";
+import { homedir as homedir12 } from "os";
 function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function readClaims() {
   try {
     if (!existsSync8(CLAIMS_FILE)) return [];
-    const data = JSON.parse(readFileSync12(CLAIMS_FILE, "utf8"));
+    const data = JSON.parse(readFileSync13(CLAIMS_FILE, "utf8"));
     return Array.isArray(data?.claims) ? data.claims : [];
   } catch {
     return [];
   }
 }
 function writeClaims(claims) {
-  mkdirSync10(TERMINALHIRE_DIR9, { recursive: true });
+  mkdirSync11(TERMINALHIRE_DIR10, { recursive: true });
   const tmp = `${CLAIMS_FILE}.tmp`;
   const payload = { claims };
-  writeFileSync10(tmp, JSON.stringify(payload, null, 2), "utf8");
+  writeFileSync11(tmp, JSON.stringify(payload, null, 2), "utf8");
   renameSync2(tmp, CLAIMS_FILE);
 }
 function findClaim(id) {
@@ -7973,12 +8852,12 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR9, CLAIMS_FILE, TERMINAL_STATES;
+var TERMINALHIRE_DIR10, CLAIMS_FILE, TERMINAL_STATES;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
-    TERMINALHIRE_DIR9 = join12(homedir11(), ".terminalhire");
-    CLAIMS_FILE = join12(TERMINALHIRE_DIR9, "claims.json");
+    TERMINALHIRE_DIR10 = join13(homedir12(), ".terminalhire");
+    CLAIMS_FILE = join13(TERMINALHIRE_DIR10, "claims.json");
     TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
   }
 });
@@ -7986,20 +8865,20 @@ var init_claims = __esm({
 // bin/jpi-claim.js
 var jpi_claim_exports = {};
 __export(jpi_claim_exports, {
-  run: () => run6
+  run: () => run7
 });
-import { readFileSync as readFileSync13, existsSync as existsSync9 } from "fs";
-import { join as join13 } from "path";
-import { homedir as homedir12 } from "os";
+import { readFileSync as readFileSync14, existsSync as existsSync9 } from "fs";
+import { join as join14 } from "path";
+import { homedir as homedir13 } from "os";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { createInterface as createInterface6 } from "readline";
+import { createInterface as createInterface7 } from "readline";
 async function sh(cmd, args5, opts = {}) {
   const { stdout } = await pExecFile(cmd, args5, { ...opts, shell: false, maxBuffer: 16 * 1024 * 1024 });
   return String(stdout).trim();
 }
 async function confirm(question) {
-  const rl = createInterface6({ input: process.stdin, output: process.stdout });
+  const rl = createInterface7({ input: process.stdin, output: process.stdout });
   try {
     const ans = await new Promise((resolve2) => rl.question(question, resolve2));
     return /^y(es)?$/i.test(String(ans).trim());
@@ -8037,8 +8916,8 @@ function parseRepoFromRemote(url) {
 }
 function findBountyInCache(bountyId) {
   try {
-    if (!existsSync9(INDEX_CACHE_FILE4)) return null;
-    const entry = JSON.parse(readFileSync13(INDEX_CACHE_FILE4, "utf8"));
+    if (!existsSync9(INDEX_CACHE_FILE5)) return null;
+    const entry = JSON.parse(readFileSync14(INDEX_CACHE_FILE5, "utf8"));
     const jobs = entry?.index?.jobs ?? [];
     const job = jobs.find((j) => j.id === bountyId && j.source === "bounty");
     return job ?? null;
@@ -8502,7 +9381,7 @@ async function cmdSubmit(id, worktreeOverride) {
 \u2713 Submitted ${id} \u2192 ${prUrl}`);
   console.log(`  Run 'terminalhire claim status ${id}' after the maintainer acts to fold the merge into your accepted-PR rate.`);
 }
-async function run6() {
+async function run7() {
   const verb = process.argv[2];
   const { flags, positional } = parseArgs(process.argv.slice(3));
   const active = Boolean(flags.active);
@@ -8542,132 +9421,16 @@ async function run6() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR10, INDEX_CACHE_FILE4, GH_API, GH_HEADERS, pExecFile, VALUE_FLAGS;
+var TERMINALHIRE_DIR11, INDEX_CACHE_FILE5, GH_API, GH_HEADERS, pExecFile, VALUE_FLAGS;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
-    TERMINALHIRE_DIR10 = join13(homedir12(), ".terminalhire");
-    INDEX_CACHE_FILE4 = join13(TERMINALHIRE_DIR10, "index-cache.json");
+    TERMINALHIRE_DIR11 = join14(homedir13(), ".terminalhire");
+    INDEX_CACHE_FILE5 = join14(TERMINALHIRE_DIR11, "index-cache.json");
     GH_API = "https://api.github.com";
     GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
     pExecFile = promisify(execFile);
     VALUE_FLAGS = /* @__PURE__ */ new Set(["worktree", "branch"]);
-  }
-});
-
-// ../../packages/core/src/episodes/node-model.ts
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function asString(value, fallback = "") {
-  return typeof value === "string" ? value : fallback;
-}
-function asStringOrNull(value) {
-  return typeof value === "string" ? value : null;
-}
-function asBool(value) {
-  return value === true;
-}
-function parseBlock(raw) {
-  if (!isRecord(raw)) {
-    return { type: "unknown", rawType: typeof raw };
-  }
-  const t = raw.type;
-  if (t === "text") {
-    return { type: "text", text: asString(raw.text) };
-  }
-  if (t === "tool_use") {
-    return { type: "tool_use", id: asString(raw.id), name: asString(raw.name), input: raw.input };
-  }
-  if (t === "tool_result") {
-    return {
-      type: "tool_result",
-      toolUseId: asString(raw.tool_use_id),
-      content: raw.content,
-      isError: asBool(raw.is_error)
-    };
-  }
-  return { type: "unknown", rawType: typeof t === "string" ? t : String(t) };
-}
-function parseContent(content) {
-  if (typeof content === "string") {
-    return content.length > 0 ? [{ type: "text", text: content }] : [];
-  }
-  if (Array.isArray(content)) {
-    return content.map(parseBlock);
-  }
-  return [];
-}
-function toNode(raw, opts = {}) {
-  if (!isRecord(raw)) {
-    if (opts.strict) {
-      throw new Error(`toNode: node is not an object (got ${typeof raw})`);
-    }
-    return makeUnknown(emptyBase(), typeof raw);
-  }
-  const message = isRecord(raw.message) ? raw.message : void 0;
-  const content = parseContent(message?.content);
-  const base = {
-    uuid: asString(raw.uuid),
-    parentUuid: asStringOrNull(raw.parentUuid),
-    sessionId: asString(raw.sessionId),
-    cwd: asString(raw.cwd),
-    gitBranch: asString(raw.gitBranch),
-    timestamp: asString(raw.timestamp),
-    isSidechain: asBool(raw.isSidechain),
-    userType: asString(raw.userType),
-    role: asString(message?.role),
-    content,
-    text: content.reduce((acc, b) => b.type === "text" ? [...acc, b.text] : acc, []).join("\n")
-  };
-  const type = raw.type;
-  if (type === "summary" || asBool(raw.isCompactSummary) || isRecord(raw.compactMetadata)) {
-    return { ...base, kind: "summary" /* Summary */, toolName: null, toolUseId: null, isError: false, rawType: asString(type, "summary") };
-  }
-  if (type === "system") {
-    return { ...base, kind: "system" /* System */, toolName: null, toolUseId: null, isError: false, rawType: "system" };
-  }
-  if (type === "user") {
-    const tr = content.find((b) => b.type === "tool_result");
-    if (tr) {
-      return { ...base, kind: "tool_result" /* ToolResult */, toolName: null, toolUseId: tr.toolUseId, isError: tr.isError, rawType: "user" };
-    }
-    return { ...base, kind: "user" /* User */, toolName: null, toolUseId: null, isError: false, rawType: "user" };
-  }
-  if (type === "assistant") {
-    const tu = content.find((b) => b.type === "tool_use");
-    if (tu) {
-      return { ...base, kind: "tool_use" /* ToolUse */, toolName: tu.name, toolUseId: tu.id, isError: false, rawType: "assistant" };
-    }
-    return { ...base, kind: "assistant" /* Assistant */, toolName: null, toolUseId: null, isError: false, rawType: "assistant" };
-  }
-  const rawType = typeof type === "string" ? type : String(type);
-  if (opts.strict) {
-    throw new Error(`toNode: unrecognized node kind: ${rawType}`);
-  }
-  return makeUnknown(base, rawType);
-}
-function makeUnknown(base, rawType) {
-  return { ...base, kind: "unknown" /* Unknown */, toolName: null, toolUseId: null, isError: false, rawType };
-}
-function emptyBase() {
-  return {
-    uuid: "",
-    parentUuid: null,
-    sessionId: "",
-    cwd: "",
-    gitBranch: "",
-    timestamp: "",
-    isSidechain: false,
-    userType: "",
-    role: "",
-    content: [],
-    text: ""
-  };
-}
-var init_node_model = __esm({
-  "../../packages/core/src/episodes/node-model.ts"() {
-    "use strict";
   }
 });
 
@@ -8831,7 +9594,7 @@ function finalize(build) {
   };
 }
 function reconstruct(files, opts = {}) {
-  const join28 = opts.joinSidechains !== false;
+  const join29 = opts.joinSidechains !== false;
   const mains = [];
   const sidechains = [];
   for (const file of files) {
@@ -8856,7 +9619,7 @@ function reconstruct(files, opts = {}) {
   }
   const orphanedSidechainPaths = [];
   const joinedPaths = /* @__PURE__ */ new Set();
-  if (join28) {
+  if (join29) {
     const sidechainsBySession = /* @__PURE__ */ new Map();
     for (const sc of sidechains) {
       const acc = sidechainsBySession.get(sc.sessionId) ?? [];
@@ -8971,191 +9734,11 @@ var init_coverage = __esm({
   }
 });
 
-// ../../packages/core/src/episodes/schema.ts
-var SCHEMA_VERSION;
-var init_schema = __esm({
-  "../../packages/core/src/episodes/schema.ts"() {
-    "use strict";
-    SCHEMA_VERSION = 1;
-  }
-});
-
-// ../../packages/core/src/episodes/doors.ts
-function recruiterMetric(value) {
-  return { value };
-}
-function inwardMetric(value) {
-  return { value };
-}
-function metricValue(metric) {
-  return metric.value;
-}
-function declassify(metrics, coveragePct = 0) {
-  const velocity = metrics.skillAdoptionVelocity.value;
-  const drift = metrics.distributionDrift.value;
-  const recency = metrics.recencySplit.value;
-  return {
-    schemaVersion: SCHEMA_VERSION,
-    headline: {
-      distinctSignalCount: velocity.distinctSignalCount,
-      recentAdoptionCount: velocity.recentAdoptionCount,
-      velocityPerWeek: velocity.velocityPerWeek,
-      rising: drift.rising.map((entry) => ({ signal: entry.signal, delta: entry.delta })),
-      falling: drift.falling.map((entry) => ({ signal: entry.signal, delta: entry.delta }))
-    },
-    liveStack: [...recency.live],
-    dormantStack: [...recency.dormant],
-    coveragePct
-  };
-}
-function buildExport(metrics, coveragePct = 0) {
-  return declassify(metrics, coveragePct);
-}
-var init_doors = __esm({
-  "../../packages/core/src/episodes/doors.ts"() {
-    "use strict";
-    init_schema();
-  }
-});
-
 // ../../packages/core/src/episodes/events.ts
 var init_events = __esm({
   "../../packages/core/src/episodes/events.ts"() {
     "use strict";
     init_schema();
-  }
-});
-
-// ../../packages/core/src/episodes/derivers/signals.ts
-function mcpToolSignal(name) {
-  const rest = name.slice("mcp__".length);
-  const sep = rest.indexOf("__");
-  if (sep <= 0) return "mcp:custom";
-  const server = rest.slice(0, sep).toLowerCase();
-  const leaf = rest.slice(sep + 2);
-  if (leaf.length === 0) return "mcp:custom";
-  if (MCP_SERVER_CAPABILITY.has(server)) return MCP_SERVER_CAPABILITY.get(server) ?? null;
-  return "mcp:custom";
-}
-function classifyToolSignal(name) {
-  if (name.toLowerCase().startsWith("mcp__")) {
-    return mcpToolSignal(name);
-  }
-  const key = name.toLowerCase();
-  if (ORCHESTRATION_TOOLS.has(key)) return AGENTIC_WORKFLOW_SIGNAL;
-  return null;
-}
-function isRecord2(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function fileExtLang(input) {
-  if (!isRecord2(input)) {
-    return null;
-  }
-  const filePath = input.file_path;
-  if (typeof filePath !== "string") {
-    return null;
-  }
-  const dot = filePath.lastIndexOf(".");
-  if (dot < 0 || dot === filePath.length - 1) {
-    return null;
-  }
-  const ext = filePath.slice(dot + 1).toLowerCase();
-  return EXT_LANG[ext] ?? null;
-}
-function toolUseInput(node) {
-  const block = node.content.find((b) => b.type === "tool_use");
-  return block?.input;
-}
-function compareSignal(a, b) {
-  if (a.ts !== b.ts) {
-    return a.ts < b.ts ? -1 : 1;
-  }
-  if (a.signal !== b.signal) {
-    return a.signal < b.signal ? -1 : 1;
-  }
-  return 0;
-}
-function extractToolSignals(nodes) {
-  const out = [];
-  for (const node of nodes) {
-    if (node.kind !== "tool_use" /* ToolUse */ || node.toolName === null) {
-      continue;
-    }
-    const toolSignal = classifyToolSignal(node.toolName);
-    if (toolSignal !== null) {
-      out.push({ signal: toolSignal, ts: node.timestamp });
-    }
-    const lang = fileExtLang(toolUseInput(node));
-    if (lang !== null) {
-      out.push({ signal: `lang:${lang}`, ts: node.timestamp });
-    }
-  }
-  out.sort(compareSignal);
-  return out;
-}
-var EXT_LANG, MCP_SERVER_CAPABILITY, ORCHESTRATION_TOOLS, AGENTIC_WORKFLOW_SIGNAL;
-var init_signals = __esm({
-  "../../packages/core/src/episodes/derivers/signals.ts"() {
-    "use strict";
-    init_node_model();
-    EXT_LANG = {
-      ts: "ts",
-      tsx: "ts",
-      js: "js",
-      jsx: "js",
-      mjs: "js",
-      cjs: "js",
-      py: "py",
-      rs: "rs",
-      go: "go",
-      rb: "rb",
-      java: "java",
-      kt: "kt",
-      sql: "sql",
-      md: "md"
-    };
-    MCP_SERVER_CAPABILITY = /* @__PURE__ */ new Map([
-      // Coding-relevant public servers → a capability.
-      ["plugin_playwright_playwright", "cap:ui-automation"],
-      ["playwright", "cap:ui-automation"],
-      ["claude_ai_linear", "cap:project-mgmt"],
-      ["claude_ai_vercel", "cap:deploys"],
-      ["plugin_vercel_vercel", "cap:deploys"],
-      ["claude_ai_figma", "cap:design"],
-      ["figma", "cap:design"],
-      ["pencil", "cap:design"],
-      ["claude_ai_ideabrowser", "cap:product-research"],
-      ["ideabrowser", "cap:product-research"],
-      ["blender", "cap:3d-modeling"],
-      ["n8n-knowledge", "cap:workflow-automation"],
-      // Public but NOT a coding skill → dropped from the trajectory.
-      ["plugin_context-mode_context-mode", null],
-      // agent context plumbing
-      ["claude_ai_gmail", null],
-      ["claude_ai_google_calendar", null],
-      ["claude_ai_google_drive", null]
-    ]);
-    ORCHESTRATION_TOOLS = /* @__PURE__ */ new Set([
-      "task",
-      "agent",
-      "workflow",
-      "enterworktree",
-      "exitworktree",
-      "schedulewakeup",
-      "monitor",
-      "sendmessage",
-      "taskcreate",
-      "tasklist",
-      "taskstop",
-      "taskupdate",
-      "taskget",
-      "taskoutput",
-      "croncreate",
-      "cronlist",
-      "crondelete"
-    ]);
-    AGENTIC_WORKFLOW_SIGNAL = "cap:agentic-workflow";
   }
 });
 
@@ -9174,9 +9757,9 @@ function deriveSkillAdoptionVelocity(nodes, opts = {}) {
   const maxTs = signals.length > 0 ? signals[signals.length - 1].ts : "";
   const now = opts.now ?? maxTs;
   const windowDays = opts.recentWindowDays ?? RECENT_WINDOW_DAYS;
-  const spanDays = minTs !== "" && maxTs !== "" ? (Date.parse(maxTs) - Date.parse(minTs)) / DAY_MS : 0;
+  const spanDays = minTs !== "" && maxTs !== "" ? (Date.parse(maxTs) - Date.parse(minTs)) / DAY_MS3 : 0;
   const nowMs = now !== "" ? Date.parse(now) : 0;
-  const recentAdoptionCount = now === "" ? 0 : firstAppearances.filter((f) => nowMs - Date.parse(f.ts) <= windowDays * DAY_MS).length;
+  const recentAdoptionCount = now === "" ? 0 : firstAppearances.filter((f) => nowMs - Date.parse(f.ts) <= windowDays * DAY_MS3).length;
   const spanWeeks = spanDays / 7;
   const velocityPerWeek = spanWeeks > 0 ? firstSeen.size / spanWeeks : firstSeen.size;
   return recruiterMetric({
@@ -9187,13 +9770,13 @@ function deriveSkillAdoptionVelocity(nodes, opts = {}) {
     velocityPerWeek
   });
 }
-var DAY_MS, RECENT_WINDOW_DAYS;
+var DAY_MS3, RECENT_WINDOW_DAYS;
 var init_skill_adoption_velocity = __esm({
   "../../packages/core/src/episodes/derivers/skill-adoption-velocity.ts"() {
     "use strict";
     init_doors();
     init_signals();
-    DAY_MS = 864e5;
+    DAY_MS3 = 864e5;
     RECENT_WINDOW_DAYS = 90;
   }
 });
@@ -9233,43 +9816,6 @@ var init_distribution_drift = __esm({
     "use strict";
     init_doors();
     init_signals();
-  }
-});
-
-// ../../packages/core/src/episodes/derivers/recency-split.ts
-function deriveRecencySplit(nodes, opts = {}) {
-  const signals = extractToolSignals(nodes);
-  const lastSeen = /* @__PURE__ */ new Map();
-  for (const s of signals) {
-    const cur = lastSeen.get(s.signal);
-    if (cur === void 0 || s.ts > cur) {
-      lastSeen.set(s.signal, s.ts);
-    }
-  }
-  const maxTs = signals.length > 0 ? signals[signals.length - 1].ts : "";
-  const now = opts.now ?? maxTs;
-  const thresholdDays = opts.thresholdDays ?? DORMANT_THRESHOLD_DAYS;
-  const nowMs = now !== "" ? Date.parse(now) : 0;
-  const live = [];
-  const dormant = [];
-  for (const [signal, ts] of [...lastSeen.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1)) {
-    const ageDays2 = now !== "" ? (nowMs - Date.parse(ts)) / DAY_MS2 : 0;
-    if (ageDays2 <= thresholdDays) {
-      live.push(signal);
-    } else {
-      dormant.push(signal);
-    }
-  }
-  return recruiterMetric({ now, thresholdDays, live, dormant });
-}
-var DAY_MS2, DORMANT_THRESHOLD_DAYS;
-var init_recency_split = __esm({
-  "../../packages/core/src/episodes/derivers/recency-split.ts"() {
-    "use strict";
-    init_doors();
-    init_signals();
-    DAY_MS2 = 864e5;
-    DORMANT_THRESHOLD_DAYS = 90;
   }
 });
 
@@ -9343,12 +9889,12 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
       continue;
     }
     spansConsidered++;
-    let run20 = 0;
+    let run21 = 0;
     const closeChain = () => {
-      if (run20 > 0) {
+      if (run21 > 0) {
         recoveryChains++;
-        totalDepth += run20;
-        run20 = 0;
+        totalDepth += run21;
+        run21 = 0;
       }
     };
     for (const uuid of episode.mainNodeUuids) {
@@ -9357,9 +9903,9 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
         continue;
       }
       if (node.kind === "tool_result" /* ToolResult */ && node.isError) {
-        run20++;
-        if (run20 > maxConsecutiveErrors) {
-          maxConsecutiveErrors = run20;
+        run21++;
+        if (run21 > maxConsecutiveErrors) {
+          maxConsecutiveErrors = run21;
         }
       } else if (node.kind === "tool_result" /* ToolResult */ && !node.isError) {
         closeChain();
@@ -9411,13 +9957,13 @@ __export(trajectory_exports, {
 });
 import {
   existsSync as existsSync10,
-  mkdirSync as mkdirSync11,
-  readFileSync as readFileSync14,
+  mkdirSync as mkdirSync12,
+  readFileSync as readFileSync15,
   readdirSync,
-  writeFileSync as writeFileSync11
+  writeFileSync as writeFileSync12
 } from "fs";
-import { homedir as homedir13 } from "os";
-import { join as join14 } from "path";
+import { homedir as homedir14 } from "os";
+import { join as join15 } from "path";
 function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -9449,7 +9995,7 @@ function findJsonlFiles(dir) {
     return out;
   }
   for (const entry of entries) {
-    const full = join14(dir, entry.name);
+    const full = join15(dir, entry.name);
     if (entry.isDirectory()) {
       out.push(...findJsonlFiles(full));
     } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
@@ -9463,7 +10009,7 @@ function loadCorpus(paths) {
   for (const path of paths) {
     let text;
     try {
-      text = readFileSync14(path, "utf8");
+      text = readFileSync15(path, "utf8");
     } catch {
       continue;
     }
@@ -9562,12 +10108,12 @@ function renderMarkdown(view) {
   return lines.join("\n");
 }
 function writeExportArtifacts(score, markdown) {
-  const dir = join14(homedir13(), ".terminalhire");
-  mkdirSync11(dir, { recursive: true });
-  const jsonPath = join14(dir, "trajectory-export.json");
-  const mdPath = join14(dir, "trajectory-export.md");
-  writeFileSync11(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
-  writeFileSync11(mdPath, markdown, "utf8");
+  const dir = join15(homedir14(), ".terminalhire");
+  mkdirSync12(dir, { recursive: true });
+  const jsonPath = join15(dir, "trajectory-export.json");
+  const mdPath = join15(dir, "trajectory-export.md");
+  writeFileSync12(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
+  writeFileSync12(mdPath, markdown, "utf8");
   return { jsonPath, mdPath };
 }
 function renderInward(allNodes, view, files) {
@@ -9586,7 +10132,7 @@ function renderInward(allNodes, view, files) {
   console.log("");
 }
 function buildTrajectory() {
-  const projectsDir = join14(homedir13(), ".claude", "projects");
+  const projectsDir = join15(homedir14(), ".claude", "projects");
   if (!existsSync10(projectsDir)) return null;
   const paths = findJsonlFiles(projectsDir);
   if (paths.length === 0) return null;
@@ -9660,8 +10206,8 @@ function defaultPushDeps() {
       }
     },
     prompt: async (question) => {
-      const { createInterface: createInterface12 } = await import("readline");
-      const rl = createInterface12({ input: process.stdin, output: process.stdout });
+      const { createInterface: createInterface13 } = await import("readline");
+      const rl = createInterface13({ input: process.stdin, output: process.stdout });
       return new Promise((res) => {
         rl.question(question, (answer) => {
           rl.close();
@@ -9857,9 +10403,9 @@ var init_trajectory = __esm({
 // bin/jpi-trajectory.js
 var jpi_trajectory_exports = {};
 __export(jpi_trajectory_exports, {
-  run: () => run7
+  run: () => run8
 });
-async function run7() {
+async function run8() {
   try {
     const args5 = process.argv.slice(2);
     if (args5.includes("--push")) {
@@ -9911,8 +10457,8 @@ function defaultIntroDeps() {
       }
     },
     prompt: async (question) => {
-      const { createInterface: createInterface12 } = await import("readline");
-      const rl = createInterface12({ input: process.stdin, output: process.stdout });
+      const { createInterface: createInterface13 } = await import("readline");
+      const rl = createInterface13({ input: process.stdin, output: process.stdout });
       return new Promise((res) => {
         rl.question(question, (answer) => {
           rl.close();
@@ -10256,7 +10802,7 @@ var init_intro2 = __esm({
 // bin/jpi-intro.js
 var jpi_intro_exports = {};
 __export(jpi_intro_exports, {
-  run: () => run8
+  run: () => run9
 });
 function readOption(args5, name) {
   const i = args5.indexOf(name);
@@ -10264,7 +10810,7 @@ function readOption(args5, name) {
   const v = args5[i + 1];
   return typeof v === "string" && !v.startsWith("--") ? v : void 0;
 }
-async function run8() {
+async function run9() {
   try {
     const args5 = process.argv.slice(2);
     if (args5.includes("--list")) {
@@ -10304,40 +10850,40 @@ var init_jpi_intro = __esm({
 });
 
 // src/chat-keystore.ts
-import { existsSync as existsSync11, mkdirSync as mkdirSync12, readFileSync as readFileSync15, writeFileSync as writeFileSync12, rmSync as rmSync3 } from "fs";
-import { homedir as homedir14 } from "os";
-import { join as join15 } from "path";
+import { existsSync as existsSync11, mkdirSync as mkdirSync13, readFileSync as readFileSync16, writeFileSync as writeFileSync13, rmSync as rmSync3 } from "fs";
+import { homedir as homedir15 } from "os";
+import { join as join16 } from "path";
 async function loadOrCreateIdentity() {
   const key = await loadKey();
   if (existsSync11(IDENTITY_FILE)) {
-    const blob2 = JSON.parse(readFileSync15(IDENTITY_FILE, "utf8"));
+    const blob2 = JSON.parse(readFileSync16(IDENTITY_FILE, "utf8"));
     return JSON.parse(decrypt(blob2, key));
   }
   const keypair = generateIdentityKeypair();
-  mkdirSync12(TERMINALHIRE_DIR11, { recursive: true });
+  mkdirSync13(TERMINALHIRE_DIR12, { recursive: true });
   const blob = encrypt(JSON.stringify(keypair), key);
-  writeFileSync12(IDENTITY_FILE, JSON.stringify(blob, null, 2), { mode: 384, encoding: "utf8" });
+  writeFileSync13(IDENTITY_FILE, JSON.stringify(blob, null, 2), { mode: 384, encoding: "utf8" });
   return keypair;
 }
-var TERMINALHIRE_DIR11, IDENTITY_FILE;
+var TERMINALHIRE_DIR12, IDENTITY_FILE;
 var init_chat_keystore = __esm({
   "src/chat-keystore.ts"() {
     "use strict";
     init_src();
     init_github_auth();
-    TERMINALHIRE_DIR11 = join15(homedir14(), ".terminalhire");
-    IDENTITY_FILE = join15(TERMINALHIRE_DIR11, "chat-identity.enc");
+    TERMINALHIRE_DIR12 = join16(homedir15(), ".terminalhire");
+    IDENTITY_FILE = join16(TERMINALHIRE_DIR12, "chat-identity.enc");
   }
 });
 
 // src/chat-client.ts
-import { existsSync as existsSync12, mkdirSync as mkdirSync13, readFileSync as readFileSync16, writeFileSync as writeFileSync13 } from "fs";
-import { homedir as homedir15 } from "os";
-import { join as join16 } from "path";
+import { existsSync as existsSync12, mkdirSync as mkdirSync14, readFileSync as readFileSync17, writeFileSync as writeFileSync14 } from "fs";
+import { homedir as homedir16 } from "os";
+import { join as join17 } from "path";
 function defaultReadPeerPins() {
   try {
     if (!existsSync12(PEERS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync16(PEERS_FILE, "utf8"));
+    const parsed = JSON.parse(readFileSync17(PEERS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, key] of Object.entries(parsed)) {
@@ -10349,8 +10895,8 @@ function defaultReadPeerPins() {
   }
 }
 function defaultWritePeerPins(pins) {
-  mkdirSync13(TERMINALHIRE_DIR12, { recursive: true });
-  writeFileSync13(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
+  mkdirSync14(TERMINALHIRE_DIR13, { recursive: true });
+  writeFileSync14(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
 }
 function defaultChatClientDeps() {
   return {
@@ -10519,7 +11065,7 @@ function createChatClient(overrides) {
     getSafetyNumber
   };
 }
-var CHAT_BASE, GH_SESSION_COOKIE3, TERMINALHIRE_DIR12, PEERS_FILE, REQUEST_TIMEOUT_MS, ChatNotLinkedError, ChatSessionExpiredError, SafetyNumberChangedError, ChatRequestError;
+var CHAT_BASE, GH_SESSION_COOKIE3, TERMINALHIRE_DIR13, PEERS_FILE, REQUEST_TIMEOUT_MS, ChatNotLinkedError, ChatSessionExpiredError, SafetyNumberChangedError, ChatRequestError;
 var init_chat_client = __esm({
   "src/chat-client.ts"() {
     "use strict";
@@ -10528,8 +11074,8 @@ var init_chat_client = __esm({
     init_web_session();
     CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
     GH_SESSION_COOKIE3 = "__jpi_gh_session";
-    TERMINALHIRE_DIR12 = join16(homedir15(), ".terminalhire");
-    PEERS_FILE = join16(TERMINALHIRE_DIR12, "chat-peers.json");
+    TERMINALHIRE_DIR13 = join17(homedir16(), ".terminalhire");
+    PEERS_FILE = join17(TERMINALHIRE_DIR13, "chat-peers.json");
     REQUEST_TIMEOUT_MS = 1e4;
     ChatNotLinkedError = class extends Error {
       constructor() {
@@ -10585,13 +11131,13 @@ __export(jpi_chat_read_exports, {
   syncUnreadBadge: () => syncUnreadBadge,
   writeReadCursor: () => writeReadCursor
 });
-import { existsSync as existsSync13, mkdirSync as mkdirSync14, readFileSync as readFileSync17, writeFileSync as writeFileSync14 } from "fs";
-import { homedir as homedir16 } from "os";
-import { join as join17 } from "path";
+import { existsSync as existsSync13, mkdirSync as mkdirSync15, readFileSync as readFileSync18, writeFileSync as writeFileSync15 } from "fs";
+import { homedir as homedir17 } from "os";
+import { join as join18 } from "path";
 async function syncUnreadBadge(deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
-  const cacheFile = deps.cacheFile ?? INDEX_CACHE_FILE5;
+  const cacheFile = deps.cacheFile ?? INDEX_CACHE_FILE6;
   try {
     const cookie = readCookie();
     if (!cookie || !existsSync13(cacheFile)) return;
@@ -10607,16 +11153,16 @@ async function syncUnreadBadge(deps = {}) {
       (sum, it) => sum + (it && typeof it.unreadCount === "number" && it.unreadCount > 0 ? it.unreadCount : 0),
       0
     );
-    const entry = JSON.parse(readFileSync17(cacheFile, "utf8"));
+    const entry = JSON.parse(readFileSync18(cacheFile, "utf8"));
     entry.unreadChat = { count: total };
-    writeFileSync14(cacheFile, JSON.stringify(entry), "utf8");
+    writeFileSync15(cacheFile, JSON.stringify(entry), "utf8");
   } catch {
   }
 }
 function readReadCursors() {
   try {
     if (!existsSync13(READS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync17(READS_FILE, "utf8"));
+    const parsed = JSON.parse(readFileSync18(READS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, iso] of Object.entries(parsed)) {
@@ -10631,8 +11177,8 @@ function writeReadCursor(login, iso, deps = {}) {
   const read = deps.readReadCursors ?? readReadCursors;
   const cursors = read();
   cursors[login] = iso;
-  mkdirSync14(TERMINALHIRE_DIR13, { recursive: true });
-  writeFileSync14(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
+  mkdirSync15(TERMINALHIRE_DIR14, { recursive: true });
+  writeFileSync15(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
 }
 async function postReadCursor(peerLogin, lastReadAt, deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
@@ -10937,7 +11483,7 @@ async function runSend(opts = {}) {
   );
   return { ok: true };
 }
-var CHAT_BASE2, GH_SESSION_COOKIE4, TERMINALHIRE_DIR13, READS_FILE, INDEX_CACHE_FILE5, REACHABLE_DISPLAY;
+var CHAT_BASE2, GH_SESSION_COOKIE4, TERMINALHIRE_DIR14, READS_FILE, INDEX_CACHE_FILE6, REACHABLE_DISPLAY;
 var init_jpi_chat_read = __esm({
   "bin/jpi-chat-read.js"() {
     "use strict";
@@ -10946,9 +11492,9 @@ var init_jpi_chat_read = __esm({
     init_jpi_chat();
     CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
     GH_SESSION_COOKIE4 = "__jpi_gh_session";
-    TERMINALHIRE_DIR13 = join17(homedir16(), ".terminalhire");
-    READS_FILE = join17(TERMINALHIRE_DIR13, "chat-reads.json");
-    INDEX_CACHE_FILE5 = join17(TERMINALHIRE_DIR13, "index-cache.json");
+    TERMINALHIRE_DIR14 = join18(homedir17(), ".terminalhire");
+    READS_FILE = join18(TERMINALHIRE_DIR14, "chat-reads.json");
+    INDEX_CACHE_FILE6 = join18(TERMINALHIRE_DIR14, "index-cache.json");
     REACHABLE_DISPLAY = { shareActivity: false, optin: false, lastSeen: null };
   }
 });
@@ -10968,22 +11514,22 @@ __export(jpi_chat_exports, {
   formatThread: () => formatThread,
   readCachedSessionStale: () => readCachedSessionStale,
   relativeTime: () => relativeTime2,
-  run: () => run9,
+  run: () => run10,
   runBlockCommand: () => runBlockCommand,
   runChatPane: () => runChatPane,
   runShareActivityCommand: () => runShareActivityCommand,
   sanitizeLine: () => sanitizeLine
 });
-import { createInterface as createInterface7 } from "readline";
-import { existsSync as existsSync14, readFileSync as readFileSync18 } from "fs";
-import { homedir as homedir17 } from "os";
-import { join as join18 } from "path";
+import { createInterface as createInterface8 } from "readline";
+import { existsSync as existsSync14, readFileSync as readFileSync19 } from "fs";
+import { homedir as homedir18 } from "os";
+import { join as join19 } from "path";
 function sanitizeLine(text) {
   return String(text).replace(ANSI_CSI, "").replace(ANSI_OSC, "").replace(ANSI_OTHER, "").replace(C0_C1_DEL, "");
 }
 function defaultPromptAck({ input = process.stdin, output = process.stdout } = {}) {
   if (!input || input.isTTY !== true) return Promise.resolve(false);
-  const rl = createInterface7({ input, output });
+  const rl = createInterface8({ input, output });
   return new Promise((resolve2) => {
     rl.question("  Press Enter to acknowledge and continue (Ctrl-C to cancel): ", () => {
       rl.close();
@@ -11144,9 +11690,9 @@ function mergeMessages(existing, incoming) {
 }
 function readCachedSessionStale() {
   try {
-    const p = join18(homedir17(), ".terminalhire", "index-cache.json");
+    const p = join19(homedir18(), ".terminalhire", "index-cache.json");
     if (!existsSync14(p)) return false;
-    const cache = JSON.parse(readFileSync18(p, "utf8"));
+    const cache = JSON.parse(readFileSync19(p, "utf8"));
     return cache?.sessionStale === true;
   } catch {
     return false;
@@ -11628,7 +12174,7 @@ async function runShareActivityCommand(opts = {}) {
   }
   return { ok: true, share };
 }
-async function run9() {
+async function run10() {
   const args5 = process.argv.slice(2);
   let login;
   let limit = 8;
@@ -11736,9 +12282,9 @@ var init_jpi_chat = __esm({
 // bin/jpi-connect.js
 var jpi_connect_exports = {};
 __export(jpi_connect_exports, {
-  run: () => run10
+  run: () => run11
 });
-async function run10() {
+async function run11() {
   const args5 = process.argv.slice(2).filter((a) => a !== "connect");
   if (args5.includes("--mute")) {
     writeConfig({ inboundNudgeMuted: true });
@@ -11957,9 +12503,9 @@ var init_link = __esm({
 // bin/jpi-link.js
 var jpi_link_exports = {};
 __export(jpi_link_exports, {
-  run: () => run11
+  run: () => run12
 });
-async function run11() {
+async function run12() {
   try {
     const args5 = process.argv.slice(2);
     if (args5.includes("--logout")) {
@@ -11983,11 +12529,11 @@ var init_jpi_link = __esm({
 // bin/jpi-profile.js
 var jpi_profile_exports = {};
 __export(jpi_profile_exports, {
-  run: () => run12
+  run: () => run13
 });
-import { createInterface as createInterface8 } from "readline";
+import { createInterface as createInterface9 } from "readline";
 function prompt4(question) {
-  const rl = createInterface8({ input: process.stdin, output: process.stdout });
+  const rl = createInterface9({ input: process.stdin, output: process.stdout });
   return new Promise((resolve2) => {
     rl.question(question, (answer) => {
       rl.close();
@@ -11995,7 +12541,7 @@ function prompt4(question) {
     });
   });
 }
-async function run12() {
+async function run13() {
   const { readProfile: readProfile2, writeProfile: writeProfile2, deleteProfile: deleteProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
   const args5 = process.argv.slice(2);
   if (args5.includes("--show")) {
@@ -12068,9 +12614,9 @@ var signal_exports = {};
 __export(signal_exports, {
   extractFingerprint: () => extractFingerprint
 });
-import { readFileSync as readFileSync19, readdirSync as readdirSync2 } from "fs";
+import { readFileSync as readFileSync20, readdirSync as readdirSync2 } from "fs";
 import { execFileSync } from "child_process";
-import { join as join19 } from "path";
+import { join as join20 } from "path";
 function safeGit(args5, cwd) {
   try {
     return execFileSync("git", ["-C", cwd, ...args5], {
@@ -12098,20 +12644,20 @@ function isEmployerContext(cwd) {
 }
 function readJsonSafe(path) {
   try {
-    return JSON.parse(readFileSync19(path, "utf8"));
+    return JSON.parse(readFileSync20(path, "utf8"));
   } catch {
     return null;
   }
 }
 function readFileSafe(path) {
   try {
-    return readFileSync19(path, "utf8");
+    return readFileSync20(path, "utf8");
   } catch {
     return "";
   }
 }
 function tokensFromPackageJson(cwd) {
-  const pkg = readJsonSafe(join19(cwd, "package.json"));
+  const pkg = readJsonSafe(join20(cwd, "package.json"));
   if (!pkg || typeof pkg !== "object") return [];
   const p = pkg;
   const deps = {
@@ -12125,9 +12671,9 @@ function workspaceMemberDirs(cwd) {
   const dirs = [cwd];
   for (const group of ["apps", "packages"]) {
     try {
-      const groupDir = join19(cwd, group);
+      const groupDir = join20(cwd, group);
       for (const e of readdirSync2(groupDir, { withFileTypes: true })) {
-        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join19(groupDir, e.name));
+        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join20(groupDir, e.name));
       }
     } catch {
     }
@@ -12135,18 +12681,18 @@ function workspaceMemberDirs(cwd) {
   return dirs;
 }
 function tokensFromRequirementsTxt(cwd) {
-  const content = readFileSafe(join19(cwd, "requirements.txt"));
+  const content = readFileSafe(join20(cwd, "requirements.txt"));
   if (!content) return [];
   return content.split("\n").map((l) => l.trim().split(/[>=<!\[;]/)[0].trim().toLowerCase()).filter(Boolean);
 }
 function tokensFromGoMod(cwd) {
-  const content = readFileSafe(join19(cwd, "go.mod"));
+  const content = readFileSafe(join20(cwd, "go.mod"));
   if (!content) return [];
   const requires = Array.from(content.matchAll(/^\s+([^\s]+)\s+v/gm)).map((m) => m[1].split("/").pop() ?? "").filter(Boolean);
   return ["go", ...requires];
 }
 function tokensFromCargoToml(cwd) {
-  const content = readFileSafe(join19(cwd, "Cargo.toml"));
+  const content = readFileSafe(join20(cwd, "Cargo.toml"));
   if (!content) return [];
   const deps = [];
   let inDeps = false;
@@ -12167,7 +12713,7 @@ function tokensFromFileExtensions(cwd) {
   const tokens = [];
   const scanDirs = [cwd];
   try {
-    const srcDir = join19(cwd, "src");
+    const srcDir = join20(cwd, "src");
     readdirSync2(srcDir);
     scanDirs.push(srcDir);
   } catch {
@@ -12328,9 +12874,9 @@ var init_signal = __esm({
 // bin/jpi-learn.js
 var jpi_learn_exports = {};
 __export(jpi_learn_exports, {
-  run: () => run13
+  run: () => run14
 });
-async function run13() {
+async function run14() {
   try {
     const args5 = process.argv.slice(2);
     const cwdIdx = args5.indexOf("--cwd");
@@ -12357,7 +12903,7 @@ var init_jpi_learn = __esm({
     "use strict";
     isMain = process.argv[1]?.endsWith("jpi-learn.js") || process.argv[1]?.endsWith("jpi-learn");
     if (isMain) {
-      run13();
+      run14();
     }
   }
 });
@@ -12365,17 +12911,17 @@ var init_jpi_learn = __esm({
 // bin/jpi-config.js
 var jpi_config_exports = {};
 __export(jpi_config_exports, {
-  run: () => run14
+  run: () => run15
 });
-import { join as join20 } from "path";
-import { homedir as homedir18 } from "os";
+import { join as join21 } from "path";
+import { homedir as homedir19 } from "os";
 function parseNudgeMode2(raw) {
   if (raw === "session" || raw === "always") return raw;
   const m = /^every:(\d+)$/.exec(raw);
   if (m && parseInt(m[1], 10) >= 1) return raw;
   return null;
 }
-async function run14() {
+async function run15() {
   const args5 = process.argv.slice(2);
   const filtered = args5[0] === "config" ? args5.slice(1) : args5;
   if (filtered.includes("--show") || filtered.length === 0) {
@@ -12436,13 +12982,13 @@ async function run14() {
   console.error("       terminalhire config --show");
   process.exit(1);
 }
-var TERMINALHIRE_DIR14, CONFIG_FILE2;
+var TERMINALHIRE_DIR15, CONFIG_FILE2;
 var init_jpi_config = __esm({
   "bin/jpi-config.js"() {
     "use strict";
     init_config();
-    TERMINALHIRE_DIR14 = join20(homedir18(), ".terminalhire");
-    CONFIG_FILE2 = join20(TERMINALHIRE_DIR14, "config.json");
+    TERMINALHIRE_DIR15 = join21(homedir19(), ".terminalhire");
+    CONFIG_FILE2 = join21(TERMINALHIRE_DIR15, "config.json");
   }
 });
 
@@ -12467,25 +13013,25 @@ __export(spinner_exports, {
   readSpinnerConfig: () => readSpinnerConfig
 });
 import {
-  readFileSync as readFileSync20,
-  writeFileSync as writeFileSync15,
+  readFileSync as readFileSync21,
+  writeFileSync as writeFileSync16,
   existsSync as existsSync15,
-  mkdirSync as mkdirSync15,
+  mkdirSync as mkdirSync16,
   renameSync as renameSync3
 } from "fs";
-import { join as join21, dirname as dirname2 } from "path";
-import { homedir as homedir19 } from "os";
+import { join as join22, dirname as dirname2 } from "path";
+import { homedir as homedir20 } from "os";
 function readJson(path, fallback) {
   try {
-    return existsSync15(path) ? JSON.parse(readFileSync20(path, "utf8")) : fallback;
+    return existsSync15(path) ? JSON.parse(readFileSync21(path, "utf8")) : fallback;
   } catch {
     return fallback;
   }
 }
 function atomicWriteJson2(path, obj) {
-  mkdirSync15(dirname2(path), { recursive: true });
+  mkdirSync16(dirname2(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync15(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  writeFileSync16(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
   renameSync3(tmp, path);
 }
 function titleCase(s) {
@@ -12678,13 +13224,18 @@ function buildTips(topMatches, baseUrl, max = 8) {
   const COMPANY_CAP = 2;
   const all = Array.isArray(topMatches) ? topMatches : [];
   const bountyQ = all.filter((m) => m && m.source === "bounty");
-  const roleQ = interleaveBySource(all.filter((m) => m && m.source !== "bounty"));
+  const contributeQ = all.filter((m) => m && m.source === "contribute");
+  const roleQ = interleaveBySource(
+    all.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
+  );
   const ordered = [];
   let bi = 0;
   let ri = 0;
-  while (bi < bountyQ.length || ri < roleQ.length) {
+  let ci = 0;
+  while (bi < bountyQ.length || ri < roleQ.length || ci < contributeQ.length) {
     if (ri < roleQ.length) ordered.push(roleQ[ri++]);
     if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
+    if (ci < contributeQ.length) ordered.push(contributeQ[ci++]);
   }
   for (const m of ordered) {
     if (!m || !m.title || !m.company || !m.id) continue;
@@ -12711,6 +13262,10 @@ function buildTips(topMatches, baseUrl, max = 8) {
       const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
       const repo = m.repo || companyRaw;
       out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct2}% \u2014 ${url}`);
+    } else if (source === "contribute") {
+      const repo = m.repo || companyRaw;
+      const num = m.issueNumber != null ? ` #${m.issueNumber}` : "";
+      out.push(`\u2197 contribute \xB7 ${repo}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${pct2}%`);
     } else {
       out.push(`\u2197 ${title} @ ${company} \xB7 ${pct2}% \u2014 ${url}`);
     }
@@ -12759,10 +13314,10 @@ var TH_DIR, CLAUDE_SETTINGS, CONFIG_FILE3, SPINNER_STATE_FILE, SPINNER_DEFAULTS,
 var init_spinner = __esm({
   "bin/spinner.js"() {
     "use strict";
-    TH_DIR = process.env["TERMINALHIRE_DIR"] || join21(homedir19(), ".terminalhire");
-    CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join21(homedir19(), ".claude", "settings.json");
-    CONFIG_FILE3 = join21(TH_DIR, "config.json");
-    SPINNER_STATE_FILE = join21(TH_DIR, "spinner-state.json");
+    TH_DIR = process.env["TERMINALHIRE_DIR"] || join22(homedir20(), ".terminalhire");
+    CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join22(homedir20(), ".claude", "settings.json");
+    CONFIG_FILE3 = join22(TH_DIR, "config.json");
+    SPINNER_STATE_FILE = join22(TH_DIR, "spinner-state.json");
     SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
     VERB_INTROS = ["Matched:", "You\u2019d fit:", "Worth a look:", "On your radar:", "Fits your stack:"];
   }
@@ -12771,29 +13326,29 @@ var init_spinner = __esm({
 // bin/jpi-spinner.js
 var jpi_spinner_exports = {};
 __export(jpi_spinner_exports, {
-  run: () => run15
+  run: () => run16
 });
 import {
-  readFileSync as readFileSync21,
-  writeFileSync as writeFileSync16,
+  readFileSync as readFileSync22,
+  writeFileSync as writeFileSync17,
   copyFileSync as copyFileSync2,
   existsSync as existsSync16,
-  mkdirSync as mkdirSync16
+  mkdirSync as mkdirSync17
 } from "fs";
-import { join as join22 } from "path";
-import { homedir as homedir20 } from "os";
-import { createInterface as createInterface9 } from "readline";
+import { join as join23 } from "path";
+import { homedir as homedir21 } from "os";
+import { createInterface as createInterface10 } from "readline";
 function readConfig2() {
   try {
-    return existsSync16(CONFIG_FILE4) ? JSON.parse(readFileSync21(CONFIG_FILE4, "utf8")) : {};
+    return existsSync16(CONFIG_FILE4) ? JSON.parse(readFileSync22(CONFIG_FILE4, "utf8")) : {};
   } catch {
     return {};
   }
 }
 function writeConfig2(patch) {
-  mkdirSync16(TH_DIR2, { recursive: true });
+  mkdirSync17(TH_DIR2, { recursive: true });
   const merged = { ...readConfig2(), ...patch };
-  writeFileSync16(CONFIG_FILE4, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  writeFileSync17(CONFIG_FILE4, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function backupSettings() {
   if (!existsSync16(SETTINGS_PATH)) return null;
@@ -12803,7 +13358,7 @@ function backupSettings() {
   return backupPath;
 }
 function ask(question) {
-  const rl = createInterface9({ input: process.stdin, output: process.stdout });
+  const rl = createInterface10({ input: process.stdin, output: process.stdout });
   return new Promise((res) => {
     rl.question(question, (answer) => {
       rl.close();
@@ -12813,13 +13368,13 @@ function ask(question) {
 }
 function readTopMatches() {
   try {
-    const c = JSON.parse(readFileSync21(CACHE_FILE, "utf8"));
+    const c = JSON.parse(readFileSync22(CACHE_FILE, "utf8"));
     return Array.isArray(c.topMatches) ? c.topMatches : [];
   } catch {
     return [];
   }
 }
-async function run15() {
+async function run16() {
   const args5 = process.argv.slice(2).filter((a) => a !== "spinner");
   const has = (f) => args5.includes(f);
   const val = (f) => {
@@ -12956,24 +13511,24 @@ var init_jpi_spinner = __esm({
   "bin/jpi-spinner.js"() {
     "use strict";
     init_spinner();
-    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join22(homedir20(), ".terminalhire");
-    CONFIG_FILE4 = join22(TH_DIR2, "config.json");
-    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join22(homedir20(), ".claude", "settings.json");
-    CACHE_FILE = join22(TH_DIR2, "index-cache.json");
+    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join23(homedir21(), ".terminalhire");
+    CONFIG_FILE4 = join23(TH_DIR2, "config.json");
+    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join23(homedir21(), ".claude", "settings.json");
+    CACHE_FILE = join23(TH_DIR2, "index-cache.json");
   }
 });
 
 // bin/jpi-sync.js
 var jpi_sync_exports = {};
 __export(jpi_sync_exports, {
-  run: () => run16
+  run: () => run17
 });
-import { readFileSync as readFileSync22, writeFileSync as writeFileSync17, mkdirSync as mkdirSync17, existsSync as existsSync17, rmSync as rmSync4 } from "fs";
-import { join as join23 } from "path";
-import { homedir as homedir21, hostname as osHostname } from "os";
-import { createInterface as createInterface10 } from "readline";
+import { readFileSync as readFileSync23, writeFileSync as writeFileSync18, mkdirSync as mkdirSync18, existsSync as existsSync17, rmSync as rmSync4 } from "fs";
+import { join as join24 } from "path";
+import { homedir as homedir22, hostname as osHostname } from "os";
+import { createInterface as createInterface11 } from "readline";
 function ask2(question) {
-  const rl = createInterface10({ input: process.stdin, output: process.stdout });
+  const rl = createInterface11({ input: process.stdin, output: process.stdout });
   return new Promise((res) => {
     rl.question(question, (answer) => {
       rl.close();
@@ -12983,14 +13538,14 @@ function ask2(question) {
 }
 function readMarker() {
   try {
-    return existsSync17(TIER1_MARKER) ? JSON.parse(readFileSync22(TIER1_MARKER, "utf8")) : null;
+    return existsSync17(TIER1_MARKER) ? JSON.parse(readFileSync23(TIER1_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
 }
 function writeMarker(marker) {
-  mkdirSync17(TH_DIR3, { recursive: true });
-  writeFileSync17(TIER1_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  mkdirSync18(TH_DIR3, { recursive: true });
+  writeFileSync18(TIER1_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearMarker() {
   try {
@@ -13056,7 +13611,7 @@ async function runPush() {
   const fields = buildConsentFields(profile);
   renderPreview(fields);
   await new Promise((resolve2) => {
-    const rl = createInterface10({ input: process.stdin, output: process.stdout });
+    const rl = createInterface11({ input: process.stdin, output: process.stdout });
     rl.question(
       "  Press Enter to open your browser to authorize + consent (or Ctrl-C to cancel)... ",
       () => {
@@ -13254,7 +13809,7 @@ async function runDelete() {
   console.log("\n  Requesting deletion...");
   let res;
   try {
-    res = await fetch(`${API_URL5}/api/profile-sync`, {
+    res = await fetch(`${API_URL6}/api/profile-sync`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ consentToken, login, deleteToken }),
@@ -13278,7 +13833,7 @@ async function runDelete() {
   clearMarker();
   console.log("\n  Synced profile deleted and local marker cleared.\n");
 }
-async function run16() {
+async function run17() {
   const args5 = process.argv.slice(2).filter((a) => a !== "sync");
   const has = (f) => args5.includes(f);
   if (has("--push") || has("--enable")) {
@@ -13304,14 +13859,14 @@ async function run16() {
   console.log("  This is NOT required to use terminalhire.");
   console.log("");
 }
-var TH_DIR3, TIER1_MARKER, API_URL5, SYNC_BASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS, CONSENT_VERSION;
+var TH_DIR3, TIER1_MARKER, API_URL6, SYNC_BASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS, CONSENT_VERSION;
 var init_jpi_sync = __esm({
   "bin/jpi-sync.js"() {
     "use strict";
     init_open_url();
-    TH_DIR3 = process.env["TERMINALHIRE_DIR"] || join23(homedir21(), ".terminalhire");
-    TIER1_MARKER = join23(TH_DIR3, "tier1.json");
-    API_URL5 = process.env["TERMINALHIRE_API_URL"] || process.env["JPI_API_URL"] || "https://terminalhire.com";
+    TH_DIR3 = process.env["TERMINALHIRE_DIR"] || join24(homedir22(), ".terminalhire");
+    TIER1_MARKER = join24(TH_DIR3, "tier1.json");
+    API_URL6 = process.env["TERMINALHIRE_API_URL"] || process.env["JPI_API_URL"] || "https://terminalhire.com";
     SYNC_BASE = "https://www.terminalhire.com";
     POLL_INTERVAL_MS = 2e3;
     POLL_TIMEOUT_MS = 10 * 60 * 1e3;
@@ -13322,43 +13877,50 @@ var init_jpi_sync = __esm({
 // bin/jpi-init.js
 var jpi_init_exports = {};
 __export(jpi_init_exports, {
-  run: () => run17
+  run: () => run18
 });
 import { existsSync as existsSync18 } from "fs";
-import { join as join24, resolve } from "path";
-import { fileURLToPath as fileURLToPath4 } from "url";
-import { createInterface as createInterface11 } from "readline";
+import { join as join25, resolve } from "path";
+import { fileURLToPath as fileURLToPath4, pathToFileURL } from "url";
+import { createInterface as createInterface12 } from "readline";
 import { spawnSync, spawn as spawn2 } from "child_process";
-import { homedir as homedir22 } from "os";
-function ask3(question) {
-  const rl = createInterface11({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve2) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve2(answer.trim().toLowerCase());
-    });
-  });
-}
+import { homedir as homedir23 } from "os";
 function resolveScript(name) {
-  const distPath = resolve(join24(__dirname3, "..", "..", "dist", "bin", `${name}.js`));
-  const legacyPath = resolve(join24(__dirname3, `${name}.js`));
+  const distPath = resolve(join25(__dirname3, "..", "..", "dist", "bin", `${name}.js`));
+  const legacyPath = resolve(join25(__dirname3, `${name}.js`));
+  return existsSync18(distPath) ? distPath : legacyPath;
+}
+function resolveSrc(name) {
+  const distPath = resolve(join25(__dirname3, "..", "..", "dist", "src", `${name}.js`));
+  const legacyPath = resolve(join25(__dirname3, "..", "src", `${name}.js`));
   return existsSync18(distPath) ? distPath : legacyPath;
 }
 function resolveInstallJs() {
-  const fromDist = resolve(join24(__dirname3, "..", "..", "install.js"));
-  const fromBin = resolve(join24(__dirname3, "..", "install.js"));
+  const fromDist = resolve(join25(__dirname3, "..", "..", "install.js"));
+  const fromBin = resolve(join25(__dirname3, "..", "install.js"));
   if (existsSync18(fromDist)) return fromDist;
   if (existsSync18(fromBin)) return fromBin;
   return fromBin;
 }
 function resolveStatuslineInstallJs() {
-  const fromDist = resolve(join24(__dirname3, "..", "..", "statusline-install.js"));
-  const fromBin = resolve(join24(__dirname3, "..", "statusline-install.js"));
+  const fromDist = resolve(join25(__dirname3, "..", "..", "statusline-install.js"));
+  const fromBin = resolve(join25(__dirname3, "..", "statusline-install.js"));
   if (existsSync18(fromDist)) return fromDist;
   if (existsSync18(fromBin)) return fromBin;
   return fromBin;
 }
-async function run17() {
+async function run18() {
+  const rl = createInterface12({ input: process.stdin, output: process.stdout });
+  const ask3 = (question) => new Promise((resolve2) => {
+    let answered = false;
+    rl.question(question, (answer) => {
+      answered = true;
+      resolve2((answer || "").trim().toLowerCase());
+    });
+    rl.once("close", () => {
+      if (!answered) resolve2(null);
+    });
+  });
   console.log("");
   console.log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
   console.log("\u2502           terminalhire init \u2014 one-command onboarding            \u2502");
@@ -13388,14 +13950,34 @@ async function run17() {
     console.log("");
     console.log("  Starting GitHub device flow...");
     const loginScript = resolveScript("jpi-login");
+    rl.pause();
     const child = spawnSync(process.execPath, [loginScript, "login"], {
-      stdio: ["inherit", "inherit", "inherit"],
-      env: process.env
+      stdio: ["ignore", "inherit", "inherit"],
+      env: { ...process.env, JPI_SKIP_PEER_PROMPT: "1" }
     });
+    try {
+      while (process.stdin.read() !== null) {
+      }
+    } catch {
+    }
+    rl.resume();
     if (child.status !== 0) {
       console.log("");
       console.log("  GitHub sign-in did not complete. Continuing without GitHub.");
       console.log("  You can sign in any time with: terminalhire login");
+    } else {
+      try {
+        const { maybePromptPeerConnect: maybePromptPeerConnect2 } = await import(pathToFileURL(resolveScript("peer-connect-prompt")).href);
+        let login;
+        try {
+          const { readProfile: readProfile2 } = await import(pathToFileURL(resolveSrc("profile")).href);
+          const prof = await readProfile2();
+          login = prof?.github?.login;
+        } catch {
+        }
+        await maybePromptPeerConnect2({ ask: ask3, login });
+      } catch {
+      }
     }
   } else {
     console.log("");
@@ -13429,12 +14011,15 @@ async function run17() {
   console.log("  A timestamped backup is created before any change.");
   console.log("  Disable at any time: node install.js --uninstall  (or terminalhire spinner --off)");
   console.log("");
-  const installJs = resolveInstallJs();
-  const installChild = spawnSync(process.execPath, [installJs], {
-    stdio: ["inherit", "inherit", "inherit"],
-    env: process.env
-  });
-  if (installChild.status !== 0) {
+  try {
+    const installMod = await import(pathToFileURL(resolveInstallJs()).href);
+    if (typeof installMod.installSpinner === "function") {
+      await installMod.installSpinner({ ask: ask3 });
+    } else {
+      console.log("");
+      console.log("  Hook installation unavailable in this build. Run manually: node install.js");
+    }
+  } catch {
     console.log("");
     console.log("  Hook installation did not complete. Run manually: node install.js");
   }
@@ -13447,15 +14032,19 @@ async function run17() {
   console.log("  it stays current across plugin updates and preserves any existing");
   console.log("  statusLine you have. Remove any time: node statusline-install.js --uninstall");
   console.log("");
-  const statuslineInstallJs = resolveStatuslineInstallJs();
-  const statuslineChild = spawnSync(process.execPath, [statuslineInstallJs], {
-    stdio: ["inherit", "inherit", "inherit"],
-    env: process.env
-  });
-  if (statuslineChild.status !== 0) {
+  try {
+    const statuslineMod = await import(pathToFileURL(resolveStatuslineInstallJs()).href);
+    if (typeof statuslineMod.installStatusline === "function") {
+      await statuslineMod.installStatusline({ ask: ask3 });
+    } else {
+      console.log("");
+      console.log("  statusLine setup unavailable in this build. Run manually: node statusline-install.js");
+    }
+  } catch {
     console.log("");
     console.log("  statusLine setup did not complete. Run manually: node statusline-install.js");
   }
+  rl.close();
   console.log("");
   console.log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
   console.log("\u2502  terminalhire init complete!                                    \u2502");
@@ -13481,17 +14070,17 @@ var init_jpi_init = __esm({
 // bin/jpi-refresh.js
 var jpi_refresh_exports = {};
 __export(jpi_refresh_exports, {
-  run: () => run18
+  run: () => run19
 });
-import { readFileSync as readFileSync23, writeFileSync as writeFileSync18, existsSync as existsSync19, mkdirSync as mkdirSync18 } from "fs";
-import { join as join25 } from "path";
-import { homedir as homedir23 } from "os";
+import { readFileSync as readFileSync24, writeFileSync as writeFileSync19, existsSync as existsSync19, mkdirSync as mkdirSync19 } from "fs";
+import { join as join26 } from "path";
+import { homedir as homedir24 } from "os";
 import { fileURLToPath as fileURLToPath5 } from "url";
-async function run18() {
+async function run19() {
   try {
     let index;
     try {
-      const res = await fetch(`${API_URL6}/api/index`, {
+      const res = await fetch(`${API_URL7}/api/index`, {
         signal: AbortSignal.timeout(15e3),
         headers: { "Accept": "application/json" }
       });
@@ -13508,6 +14097,7 @@ async function run18() {
       process.exit(1);
     }
     const jobs = index?.jobs ?? [];
+    const contribute = isContributeEnabled() && Array.isArray(index?.contribute) ? index.contribute : [];
     let matchCount = 0;
     let topMatches = [];
     try {
@@ -13516,14 +14106,28 @@ async function run18() {
       const profile = await readProfile2();
       if (profile.skillTags.length > 0 && jobs.length > 0) {
         const fp = profileToFingerprint2(profile);
-        const results = match2(fp, jobs, jobs.length);
+        const pool = contribute.length > 0 ? [...jobs, ...contribute] : jobs;
+        const results = match2(fp, pool, pool.length);
         matchCount = results.length;
         const BOUNTY_SLOTS = 5;
         const bountyMatches = results.filter((r) => r.job.source === "bounty");
         const rot = bountyMatches.length > 0 ? Math.floor(Date.now() / (5 * 60 * 1e3)) % bountyMatches.length : 0;
         const bountyTop = [...bountyMatches.slice(rot), ...bountyMatches.slice(0, rot)].slice(0, BOUNTY_SLOTS);
-        const roleTop = results.filter((r) => r.job.source !== "bounty").slice(0, 25 - bountyTop.length);
-        topMatches = [...roleTop, ...bountyTop].map((r) => ({
+        const CONTRIBUTE_SLOTS = 5;
+        const contributeMatches = results.filter((r) => r.job.source === "contribute");
+        const cRot = contributeMatches.length > 0 ? Math.floor(Date.now() / (5 * 60 * 1e3)) % contributeMatches.length : 0;
+        const contributeTop = [...contributeMatches.slice(cRot), ...contributeMatches.slice(0, cRot)].slice(0, CONTRIBUTE_SLOTS);
+        const roleSlots = 25 - bountyTop.length - contributeTop.length;
+        const roleMatches = results.filter(
+          (r) => r.job.source !== "bounty" && r.job.source !== "contribute"
+        );
+        const ROLE_STABLE = Math.min(8, roleSlots);
+        const stableRoles = roleMatches.slice(0, ROLE_STABLE);
+        const rotableRoles = roleMatches.slice(ROLE_STABLE, ROLE_STABLE + 60);
+        const rRot = rotableRoles.length > 0 ? Math.floor(Date.now() / (5 * 60 * 1e3)) % rotableRoles.length : 0;
+        const rotatedRoles = [...rotableRoles.slice(rRot), ...rotableRoles.slice(0, rRot)];
+        const roleTop = [...stableRoles, ...rotatedRoles].slice(0, roleSlots);
+        topMatches = [...roleTop, ...bountyTop, ...contributeTop].map((r) => ({
           id: r.job.id,
           title: r.job.title,
           company: r.job.company,
@@ -13534,7 +14138,10 @@ async function run18() {
           // Public job text, stays LOCAL (same as the rest of topMatches).
           source: r.job.source,
           amountUSD: r.job.bounty?.amountUSD,
-          repo: r.job.bounty?.repoFullName
+          // repo = owner/name for BOTH bounties and contribution items;
+          // issueNumber only on contribution items (003 copy §1: `owner/repo #n`).
+          repo: r.job.bounty?.repoFullName ?? r.job.contribution?.repoFullName,
+          issueNumber: r.job.contribution?.issueNumber
         }));
       }
     } catch {
@@ -13589,7 +14196,7 @@ async function run18() {
     const sessionExpired = (res) => res.status === 401;
     const sessionCookie = readWebSessionFile();
     if (sessionCookie && !isInboundNudgeMuted()) try {
-      const res = await fetch(`${API_URL6}/api/intro/list`, {
+      const res = await fetch(`${API_URL7}/api/intro/list`, {
         method: "GET",
         headers: { Cookie: `${GH_SESSION_COOKIE7}=${sessionCookie}` },
         signal: AbortSignal.timeout(1e4)
@@ -13606,7 +14213,7 @@ async function run18() {
     }
     let unreadChat = { count: 0 };
     if (sessionCookie && !isInboundNudgeMuted()) try {
-      const res = await fetch(`${API_URL6}/api/chat/inbox`, {
+      const res = await fetch(`${API_URL7}/api/chat/inbox`, {
         method: "GET",
         headers: { Cookie: `${GH_SESSION_COOKIE7}=${sessionCookie}` },
         signal: AbortSignal.timeout(1e4)
@@ -13624,7 +14231,7 @@ async function run18() {
       }
     } catch {
     }
-    mkdirSync18(TERMINALHIRE_DIR15, { recursive: true });
+    mkdirSync19(TERMINALHIRE_DIR16, { recursive: true });
     const cacheEntry = {
       ts: Date.now(),
       index,
@@ -13635,7 +14242,7 @@ async function run18() {
       unreadChat,
       sessionStale
     };
-    writeFileSync18(INDEX_CACHE_FILE6, JSON.stringify(cacheEntry), "utf8");
+    writeFileSync19(INDEX_CACHE_FILE7, JSON.stringify(cacheEntry), "utf8");
     try {
       const {
         readSpinnerConfig: readSpinnerConfig2,
@@ -13662,7 +14269,7 @@ async function run18() {
         const verbs = buildSpinnerPool2(ranked, sc.max, { sessionTags, frequency: sc.frequency, topPeers, incomingPending, sessionStale });
         if (verbs.length > 0) applySpinnerVerbs2(verbs, sc.mode);
         else clearSpinnerVerbs2();
-        const tips = buildTips2(ranked, API_URL6, 8);
+        const tips = buildTips2(ranked, API_URL7, 8);
         if (tips.length > 0) applySpinnerTips2(tips);
         else clearSpinnerTips2();
       } else {
@@ -13686,7 +14293,7 @@ async function run18() {
     process.exit(1);
   }
 }
-var GH_SESSION_COOKIE7, __dirname4, TERMINALHIRE_DIR15, INDEX_CACHE_FILE6, API_URL6;
+var GH_SESSION_COOKIE7, __dirname4, TERMINALHIRE_DIR16, INDEX_CACHE_FILE7, API_URL7;
 var init_jpi_refresh = __esm({
   "bin/jpi-refresh.js"() {
     "use strict";
@@ -13695,25 +14302,25 @@ var init_jpi_refresh = __esm({
     init_web_session();
     GH_SESSION_COOKIE7 = "__jpi_gh_session";
     __dirname4 = fileURLToPath5(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR15 = join25(homedir23(), ".terminalhire");
-    INDEX_CACHE_FILE6 = join25(TERMINALHIRE_DIR15, "index-cache.json");
-    API_URL6 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://www.terminalhire.com";
+    TERMINALHIRE_DIR16 = join26(homedir24(), ".terminalhire");
+    INDEX_CACHE_FILE7 = join26(TERMINALHIRE_DIR16, "index-cache.json");
+    API_URL7 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://www.terminalhire.com";
   }
 });
 
 // bin/jpi-save.js
 var jpi_save_exports = {};
 __export(jpi_save_exports, {
-  run: () => run19
+  run: () => run20
 });
-import { readFileSync as readFileSync24, existsSync as existsSync20 } from "fs";
-import { join as join26 } from "path";
-import { homedir as homedir24 } from "os";
+import { readFileSync as readFileSync25, existsSync as existsSync20 } from "fs";
+import { join as join27 } from "path";
+import { homedir as homedir25 } from "os";
 import { fileURLToPath as fileURLToPath6 } from "url";
 function findJobInCache(jobId) {
   try {
-    if (!existsSync20(INDEX_CACHE_FILE7)) return null;
-    const raw = readFileSync24(INDEX_CACHE_FILE7, "utf8");
+    if (!existsSync20(INDEX_CACHE_FILE8)) return null;
+    const raw = readFileSync25(INDEX_CACHE_FILE8, "utf8");
     const entry = JSON.parse(raw);
     const jobs = entry?.index?.jobs ?? [];
     return jobs.find((j) => j.id === jobId) ?? null;
@@ -13782,7 +14389,7 @@ async function cmdUnsave(jobId) {
     process.exit(1);
   }
 }
-async function run19() {
+async function run20() {
   const verb = process.argv[2];
   const jobId = process.argv[3];
   try {
@@ -13801,31 +14408,31 @@ async function run19() {
     process.exit(1);
   }
 }
-var __dirname5, TERMINALHIRE_DIR16, INDEX_CACHE_FILE7;
+var __dirname5, TERMINALHIRE_DIR17, INDEX_CACHE_FILE8;
 var init_jpi_save = __esm({
   "bin/jpi-save.js"() {
     "use strict";
     __dirname5 = fileURLToPath6(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR16 = join26(homedir24(), ".terminalhire");
-    INDEX_CACHE_FILE7 = join26(TERMINALHIRE_DIR16, "index-cache.json");
+    TERMINALHIRE_DIR17 = join27(homedir25(), ".terminalhire");
+    INDEX_CACHE_FILE8 = join27(TERMINALHIRE_DIR17, "index-cache.json");
   }
 });
 
 // bin/jpi-dispatch.js
 import { fileURLToPath as fileURLToPath7 } from "url";
-import { join as join27, dirname as dirname3 } from "path";
-import { existsSync as existsSync21, readFileSync as readFileSync25 } from "fs";
+import { join as join28, dirname as dirname3 } from "path";
+import { existsSync as existsSync21, readFileSync as readFileSync26 } from "fs";
 import { createRequire } from "module";
 var __dirname6 = fileURLToPath7(new URL(".", import.meta.url));
 function readPackageVersion() {
   try {
     const candidates = [
-      join27(__dirname6, "..", "..", "package.json"),
-      join27(__dirname6, "..", "package.json")
+      join28(__dirname6, "..", "..", "package.json"),
+      join28(__dirname6, "..", "package.json")
     ];
     for (const p of candidates) {
       if (existsSync21(p)) {
-        const pkg = JSON.parse(readFileSync25(p, "utf8"));
+        const pkg = JSON.parse(readFileSync26(p, "utf8"));
         if (pkg.version) return pkg.version;
       }
     }
@@ -13833,11 +14440,11 @@ function readPackageVersion() {
   }
   return "0.1.1";
 }
-var SUBCOMMANDS = ["jobs", "devs", "project", "bounties", "claim", "trajectory", "mirror", "intro", "chat", "connect", "link", "profile", "login", "logout", "learn", "config", "spinner", "sync", "init", "refresh", "save", "saved", "unsave", "help", "--help", "-h", "--version", "-v"];
+var SUBCOMMANDS = ["jobs", "devs", "project", "bounties", "contribute", "claim", "trajectory", "mirror", "intro", "chat", "connect", "link", "profile", "login", "logout", "learn", "config", "spinner", "statusline", "sync", "init", "refresh", "save", "saved", "unsave", "help", "--help", "-h", "--version", "-v"];
 var firstArg = process.argv[2];
 if (!firstArg && !process.stdin.isTTY) {
   const { default: childProcess } = await import("child_process");
-  const nudgeScript = join27(__dirname6, "jpi.js");
+  const nudgeScript = join28(__dirname6, "jpi.js");
   const child = childProcess.spawnSync(process.execPath, [nudgeScript], {
     stdio: ["inherit", "inherit", "inherit"]
   });
@@ -13879,6 +14486,7 @@ if (!firstArg || firstArg === "help" || firstArg === "--help" || firstArg === "-
   console.log("  terminalhire project --show                 Show your locally-declared project");
   console.log("  terminalhire bounties                       Day-sized paid tasks you can knock out today");
   console.log("  terminalhire bounties --priced              Only bounties with a known $ amount");
+  console.log("  terminalhire contribute                     Open issues where a merged PR counts toward your r\xE9sum\xE9");
   console.log("  terminalhire claim record <id|issueUrl>     Claim a bounty locally + print the executor brief");
   console.log("  terminalhire claim list [--active]          List your claims + accepted-PR rate");
   console.log("  terminalhire claim status [<id>]            Poll source PR merge state (updates the metric)");
@@ -13911,6 +14519,8 @@ if (!firstArg || firstArg === "help" || firstArg === "--help" || firstArg === "-
   console.log("  terminalhire spinner --show                 Job matches in the spinner line while Claude works");
   console.log("  terminalhire spinner --off                  Turn the spinner job surface off (restores your spinner)");
   console.log("  terminalhire spinner --mode append|replace  Mix with Claude defaults, or show only matches");
+  console.log("  terminalhire statusline --on                Connection-only statusLine (\u{1F4AC} unread + intro requests)");
+  console.log("  terminalhire statusline --off               Remove it + restore your prior statusLine");
   console.log("  terminalhire refresh                        Fetch index + match locally, update cache (non-interactive)");
   console.log("  terminalhire save <jobId>                   Save a job locally (id shown in `jobs` output)");
   console.log("  terminalhire saved                          List all locally-saved jobs");
@@ -13970,6 +14580,12 @@ if (firstArg === "project") {
 if (firstArg === "bounties") {
   process.argv.splice(2, 1);
   const mod2 = await Promise.resolve().then(() => (init_jpi_bounties(), jpi_bounties_exports));
+  await mod2.run();
+  process.exit(0);
+}
+if (firstArg === "contribute") {
+  process.argv.splice(2, 1);
+  const mod2 = await Promise.resolve().then(() => (init_jpi_contribute(), jpi_contribute_exports));
   await mod2.run();
   process.exit(0);
 }
@@ -14035,6 +14651,25 @@ if (firstArg === "spinner") {
   const mod2 = await Promise.resolve().then(() => (init_jpi_spinner(), jpi_spinner_exports));
   await mod2.run();
   process.exit(0);
+}
+if (firstArg === "statusline") {
+  const flags = process.argv.slice(3);
+  const uninstall = flags.includes("--off") || flags.includes("--uninstall");
+  const on = flags.includes("--on");
+  if (!on && !uninstall) {
+    console.error("Usage: terminalhire statusline --on | --off");
+    process.exit(1);
+  }
+  const fromDist = join28(__dirname6, "..", "..", "statusline-install.js");
+  const fromBin = join28(__dirname6, "..", "statusline-install.js");
+  const installer = existsSync21(fromDist) ? fromDist : fromBin;
+  const { spawnSync: spawnSync2 } = await import("child_process");
+  const child = spawnSync2(
+    process.execPath,
+    uninstall ? [installer, "--uninstall"] : [installer],
+    { stdio: ["inherit", "inherit", "inherit"], env: process.env }
+  );
+  process.exit(child.status ?? 0);
 }
 if (firstArg === "sync") {
   const mod2 = await Promise.resolve().then(() => (init_jpi_sync(), jpi_sync_exports));

@@ -3,23 +3,19 @@
 // bin/jpi-init.js
 import { existsSync } from "fs";
 import { join, resolve } from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { createInterface } from "readline";
 import { spawnSync, spawn } from "child_process";
 import { homedir } from "os";
 var __dirname = fileURLToPath(new URL(".", import.meta.url));
-function ask(question) {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve2) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve2(answer.trim().toLowerCase());
-    });
-  });
-}
 function resolveScript(name) {
   const distPath = resolve(join(__dirname, "..", "..", "dist", "bin", `${name}.js`));
   const legacyPath = resolve(join(__dirname, `${name}.js`));
+  return existsSync(distPath) ? distPath : legacyPath;
+}
+function resolveSrc(name) {
+  const distPath = resolve(join(__dirname, "..", "..", "dist", "src", `${name}.js`));
+  const legacyPath = resolve(join(__dirname, "..", "src", `${name}.js`));
   return existsSync(distPath) ? distPath : legacyPath;
 }
 function resolveInstallJs() {
@@ -37,6 +33,17 @@ function resolveStatuslineInstallJs() {
   return fromBin;
 }
 async function run() {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const ask = (question) => new Promise((resolve2) => {
+    let answered = false;
+    rl.question(question, (answer) => {
+      answered = true;
+      resolve2((answer || "").trim().toLowerCase());
+    });
+    rl.once("close", () => {
+      if (!answered) resolve2(null);
+    });
+  });
   console.log("");
   console.log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
   console.log("\u2502           terminalhire init \u2014 one-command onboarding            \u2502");
@@ -66,14 +73,34 @@ async function run() {
     console.log("");
     console.log("  Starting GitHub device flow...");
     const loginScript = resolveScript("jpi-login");
+    rl.pause();
     const child = spawnSync(process.execPath, [loginScript, "login"], {
-      stdio: ["inherit", "inherit", "inherit"],
-      env: process.env
+      stdio: ["ignore", "inherit", "inherit"],
+      env: { ...process.env, JPI_SKIP_PEER_PROMPT: "1" }
     });
+    try {
+      while (process.stdin.read() !== null) {
+      }
+    } catch {
+    }
+    rl.resume();
     if (child.status !== 0) {
       console.log("");
       console.log("  GitHub sign-in did not complete. Continuing without GitHub.");
       console.log("  You can sign in any time with: terminalhire login");
+    } else {
+      try {
+        const { maybePromptPeerConnect } = await import(pathToFileURL(resolveScript("peer-connect-prompt")).href);
+        let login;
+        try {
+          const { readProfile } = await import(pathToFileURL(resolveSrc("profile")).href);
+          const prof = await readProfile();
+          login = prof?.github?.login;
+        } catch {
+        }
+        await maybePromptPeerConnect({ ask, login });
+      } catch {
+      }
     }
   } else {
     console.log("");
@@ -107,12 +134,15 @@ async function run() {
   console.log("  A timestamped backup is created before any change.");
   console.log("  Disable at any time: node install.js --uninstall  (or terminalhire spinner --off)");
   console.log("");
-  const installJs = resolveInstallJs();
-  const installChild = spawnSync(process.execPath, [installJs], {
-    stdio: ["inherit", "inherit", "inherit"],
-    env: process.env
-  });
-  if (installChild.status !== 0) {
+  try {
+    const installMod = await import(pathToFileURL(resolveInstallJs()).href);
+    if (typeof installMod.installSpinner === "function") {
+      await installMod.installSpinner({ ask });
+    } else {
+      console.log("");
+      console.log("  Hook installation unavailable in this build. Run manually: node install.js");
+    }
+  } catch {
     console.log("");
     console.log("  Hook installation did not complete. Run manually: node install.js");
   }
@@ -125,15 +155,19 @@ async function run() {
   console.log("  it stays current across plugin updates and preserves any existing");
   console.log("  statusLine you have. Remove any time: node statusline-install.js --uninstall");
   console.log("");
-  const statuslineInstallJs = resolveStatuslineInstallJs();
-  const statuslineChild = spawnSync(process.execPath, [statuslineInstallJs], {
-    stdio: ["inherit", "inherit", "inherit"],
-    env: process.env
-  });
-  if (statuslineChild.status !== 0) {
+  try {
+    const statuslineMod = await import(pathToFileURL(resolveStatuslineInstallJs()).href);
+    if (typeof statuslineMod.installStatusline === "function") {
+      await statuslineMod.installStatusline({ ask });
+    } else {
+      console.log("");
+      console.log("  statusLine setup unavailable in this build. Run manually: node statusline-install.js");
+    }
+  } catch {
     console.log("");
     console.log("  statusLine setup did not complete. Run manually: node statusline-install.js");
   }
+  rl.close();
   console.log("");
   console.log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
   console.log("\u2502  terminalhire init complete!                                    \u2502");

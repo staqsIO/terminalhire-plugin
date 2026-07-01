@@ -91,7 +91,9 @@ var init_config = __esm({
       chatDisclosureAck: false,
       chatShareActivity: false,
       inboundNudgeMuted: false,
-      inboundNudgeDisclosed: false
+      inboundNudgeDisclosed: false,
+      contributeEnabled: false,
+      contributePrompted: false
     };
   }
 });

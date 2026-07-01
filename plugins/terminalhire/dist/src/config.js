@@ -12,7 +12,9 @@ var DEFAULT_CONFIG = {
   chatDisclosureAck: false,
   chatShareActivity: false,
   inboundNudgeMuted: false,
-  inboundNudgeDisclosed: false
+  inboundNudgeDisclosed: false,
+  contributeEnabled: false,
+  contributePrompted: false
 };
 function readConfig() {
   try {
@@ -54,8 +56,12 @@ function isPeerConnectEnabled() {
 function isInboundNudgeMuted() {
   return readConfig().inboundNudgeMuted === true;
 }
+function isContributeEnabled() {
+  return readConfig().contributeEnabled === true;
+}
 export {
   getNudgeMode,
+  isContributeEnabled,
   isInboundNudgeMuted,
   isPeerConnectEnabled,
   parseNudgeMode,

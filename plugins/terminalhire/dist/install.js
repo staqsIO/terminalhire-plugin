@@ -79,19 +79,29 @@ function backupSettings() {
   return backupPath;
 }
 
-function ask(question) {
+// Prompt helper. When jpi-init runs this installer IN-PROCESS it injects a single
+// shared readline `ask` (one readline lifecycle for the whole onboarding flow) — this
+// is what eliminates the Windows chained-prompt bug: each spawned child used to open a
+// fresh readline that instantly consumed the Enter still buffered in the console from
+// the previous child's answer. Standalone (`node install.js`) it owns a short-lived
+// readline. Resolves the lowercased answer, or null on EOF / non-interactive (no data)
+// stdin.
+function makeAsker(injected) {
+  if (injected) return { ask: injected, close() {} };
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise(res => {
-    rl.question(question, answer => {
-      rl.close();
-      res(answer.trim().toLowerCase());
-    });
+  const ask = (question) => new Promise(res => {
+    let answered = false;
+    rl.question(question, answer => { answered = true; res((answer || '').trim().toLowerCase()); });
+    rl.once('close', () => { if (!answered) res(null); });
   });
+  return { ask, close: () => rl.close() };
 }
 
 // ── Install ───────────────────────────────────────────────────────────────────
 
-async function install() {
+async function install({ ask: injectedAsk } = {}) {
+  const asker = makeAsker(injectedAsk);
+  const { ask } = asker;
   console.log('');
   console.log('┌─────────────────────────────────────────────────────────────────┐');
   console.log('│        terminalhire — enable the ambient spinner job surface     │');
@@ -152,9 +162,17 @@ async function install() {
   console.log('');
 
   const installAnswer = await ask('Enable the terminalhire ambient spinner job surface? Type "yes" to continue: ');
+  if (installAnswer === null && !process.stdin.isTTY) {
+    // Non-interactive stdin with no input — do NOT silently proceed to a prompt that
+    // resolves empty and fail-closes. Say so plainly and skip (explicit, not a fake abort).
+    console.log('\n  stdin is not interactive — run `terminalhire spinner --on` in a real terminal to enable.');
+    asker.close();
+    return 0;
+  }
   if (installAnswer !== 'yes') {
     console.log('\nAborted — nothing was changed.');
-    process.exit(0);
+    asker.close();
+    return 0;
   }
 
   console.log('');
@@ -226,11 +244,15 @@ async function install() {
   console.log('    terminalhire profile --edit   — set displayName, contactEmail, prefs');
   console.log('    terminalhire profile --delete — wipe profile and key');
   console.log('');
+  asker.close();
+  return 0;
 }
 
 // ── Uninstall ─────────────────────────────────────────────────────────────────
 
-async function uninstall() {
+async function uninstall({ ask: injectedAsk } = {}) {
+  const asker = makeAsker(injectedAsk);
+  const { ask } = asker;
   console.log('');
   console.log('terminalhire uninstall');
   console.log('');
@@ -242,7 +264,8 @@ async function uninstall() {
   const answer = await ask('Disable the terminalhire spinner job surface? Type "yes" to continue: ');
   if (answer !== 'yes') {
     console.log('\nAborted — nothing was changed.');
-    process.exit(0);
+    asker.close();
+    return 0;
   }
 
   console.log('');
@@ -279,18 +302,23 @@ async function uninstall() {
   console.log('');
   console.log('Done. Restart Claude Code to apply.');
   console.log('');
+  asker.close();
+  return 0;
 }
 
 // ── Entry ─────────────────────────────────────────────────────────────────────
+// Guarded so importing this module (jpi-init runs it in-process) does NOT auto-run
+// install() — the same isMain guard statusline-install.js uses.
 
-if (UNINSTALL) {
-  uninstall().catch(err => {
-    console.error('Uninstall error:', err.message);
-    process.exit(1);
-  });
-} else {
-  install().catch(err => {
-    console.error('Install error:', err.message);
-    process.exit(1);
-  });
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
+  const run = UNINSTALL ? uninstall : install;
+  run()
+    .then(code => process.exit(typeof code === 'number' ? code : 0))
+    .catch(err => {
+      console.error(`${UNINSTALL ? 'Uninstall' : 'Install'} error:`, err.message);
+      process.exit(1);
+    });
 }
+
+export { install as installSpinner, uninstall as uninstallSpinner };

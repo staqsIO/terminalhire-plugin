@@ -334,7 +334,14 @@ var SYNONYMS = Object.fromEntries(GRAPH.synonyms);
 var RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
 
 // ../../packages/core/src/feeds/bounty-gate.ts
-var BOUNTY_REPO_DENYLIST = ["SecureBananaLabs/bug-bounty"];
+var BOUNTY_REPO_DENYLIST = [
+  "SecureBananaLabs/bug-bounty",
+  // Meta-farm: a bounty PLATFORM whose own issues are an assignment-gated
+  // contributor queue ("please assign me, my chief") — an unsolicited PR won't
+  // merge, so it's not a real claimable bounty. Not structurally derivable from
+  // any fetched field, so it's a manual entry (also dropped from the allowlist).
+  "boundlessfi/boundless"
+];
 var DENYLIST_LC = new Set(BOUNTY_REPO_DENYLIST.map((r) => r.toLowerCase()));
 
 // ../../packages/core/src/feeds/index.ts

@@ -1295,12 +1295,20 @@ var init_vocabulary = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/contribution-gate.ts
+var init_contribution_gate = __esm({
+  "../../packages/core/src/feeds/contribution-gate.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/github.ts
 var RESUME_DECAY_HALF_LIFE_MS;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
     init_vocabulary();
+    init_contribution_gate();
     RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
   }
 });
@@ -1389,7 +1397,14 @@ var BOUNTY_REPO_DENYLIST, DENYLIST_LC;
 var init_bounty_gate = __esm({
   "../../packages/core/src/feeds/bounty-gate.ts"() {
     "use strict";
-    BOUNTY_REPO_DENYLIST = ["SecureBananaLabs/bug-bounty"];
+    BOUNTY_REPO_DENYLIST = [
+      "SecureBananaLabs/bug-bounty",
+      // Meta-farm: a bounty PLATFORM whose own issues are an assignment-gated
+      // contributor queue ("please assign me, my chief") — an unsolicited PR won't
+      // merge, so it's not a real claimable bounty. Not structurally derivable from
+      // any fetched field, so it's a manual entry (also dropped from the allowlist).
+      "boundlessfi/boundless"
+    ];
     DENYLIST_LC = new Set(BOUNTY_REPO_DENYLIST.map((r) => r.toLowerCase()));
   }
 });
@@ -1460,6 +1475,7 @@ var init_feeds = __esm({
     init_directory();
     init_bounty_gate();
     init_bounty_gate();
+    init_contribution_gate();
     GREENHOUSE_SLUGS_BY_TIER = {
       bigco: [
         "stripe",
@@ -1568,6 +1584,19 @@ var init_feeds = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/contributions.ts
+var init_contributions = __esm({
+  "../../packages/core/src/feeds/contributions.ts"() {
+    "use strict";
+    init_vocabulary();
+    init_entities();
+    init_bounty_gate();
+    init_contribution_gate();
+    init_github_bounties();
+    init_http();
+  }
+});
+
 // ../../packages/core/src/partners.ts
 import { readFileSync as readFileSync2 } from "fs";
 import { join as join2 } from "path";
@@ -1592,6 +1621,7 @@ var init_indexer = __esm({
   "../../packages/core/src/indexer.ts"() {
     "use strict";
     init_feeds();
+    init_contributions();
     init_partners();
   }
 });
@@ -1638,6 +1668,16 @@ var init_job_status = __esm({
   }
 });
 
+// ../../packages/core/src/credential/legible.ts
+var init_legible = __esm({
+  "../../packages/core/src/credential/legible.ts"() {
+    "use strict";
+    init_contribution_gate();
+    init_vocabulary();
+    init_recency_split();
+  }
+});
+
 // ../../packages/core/src/index.ts
 var init_src = __esm({
   "../../packages/core/src/index.ts"() {
@@ -1653,6 +1693,7 @@ var init_src = __esm({
     init_directoryThreshold();
     init_chatCrypto();
     init_job_status();
+    init_legible();
   }
 });
 

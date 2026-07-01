@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 // bin/jpi.js
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readSync } from "fs";
+import { isatty } from "tty";
+import net from "net";
 import { join } from "path";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
@@ -14,13 +16,78 @@ var LEARNED_FILE = join(TERMINALHIRE_DIR, "learned-sessions.json");
 var INDEX_CACHE_TTL_MS = 15 * 60 * 1e3;
 var __dirname = fileURLToPath(new URL(".", import.meta.url));
 function readStdinSync() {
+  if (isatty(0)) return {};
   try {
-    const raw = readFileSync("/dev/stdin", "utf8").trim();
-    if (!raw) return {};
+    const sock = new net.Socket({ fd: 0, readable: true, writable: false });
+    sock.pause();
+    sock.unref();
+  } catch {
+  }
+  const DEADLINE_MS = 200;
+  const start = Date.now();
+  const idle = new Int32Array(new SharedArrayBuffer(4));
+  const chunks = [];
+  const buf = Buffer.alloc(1 << 16);
+  try {
+    for (; ; ) {
+      let n;
+      try {
+        n = readSync(0, buf, 0, buf.length, null);
+      } catch (e) {
+        if (e && e.code === "EAGAIN") {
+          if (Date.now() - start > DEADLINE_MS) break;
+          Atomics.wait(idle, 0, 0, 5);
+          continue;
+        }
+        break;
+      }
+      if (n === 0) break;
+      chunks.push(Buffer.from(buf.subarray(0, n)));
+      if (Date.now() - start > DEADLINE_MS) break;
+    }
+  } catch {
+    return {};
+  }
+  const raw = Buffer.concat(chunks).toString("utf8").trim();
+  if (!raw) return {};
+  try {
     return JSON.parse(raw);
   } catch {
     return {};
   }
+}
+function readStdinWin32() {
+  if (isatty(0)) return Promise.resolve({});
+  return new Promise((resolve) => {
+    const chunks = [];
+    let settled = false;
+    let timer;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        process.stdin.pause();
+      } catch {
+      }
+      const raw = Buffer.concat(chunks).toString("utf8").trim();
+      if (!raw) return resolve({});
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        resolve({});
+      }
+    };
+    timer = setTimeout(finish, 200);
+    if (typeof timer.unref === "function") timer.unref();
+    process.stdin.on("data", (c) => chunks.push(c));
+    process.stdin.on("end", finish);
+    process.stdin.on("error", finish);
+  });
+}
+function readStdin() {
+  if (process.platform === "win32") return readStdinWin32();
+  return Promise.resolve(readStdinSync());
 }
 function readNudged() {
   try {
@@ -176,7 +243,7 @@ function shouldNudge(nudgeMode, sessionId) {
   return !nudged[sessionId];
 }
 try {
-  const input = readStdinSync();
+  const input = await readStdin();
   const sessionId = input?.session_id;
   if (!sessionId) process.exit(0);
   const learned = readLearned();
@@ -198,11 +265,11 @@ try {
   if (haveRoles) {
     const plural = matchCount === 1 ? "role" : "roles";
     line = `\u2726 ${matchCount} ${plural} match your current work \u2014 run: terminalhire jobs`;
-    if (incomingCount > 0) line += `  \xB7  \u2709 ${incomingCount} waiting to connect`;
+    if (incomingCount > 0) line += `  \xB7  \u2709 ${incomingCount} intro request${incomingCount === 1 ? "" : "s"}`;
     if (unreadChatCount > 0) line += `  \xB7  \u{1F4AC} ${unreadChatCount} unread`;
     if (sessionStale) line += `  \xB7  \u26A0 session expired \u2014 run: terminalhire link`;
   } else if (incomingCount > 0) {
-    line = `\u2709 ${incomingCount} waiting to connect \u2014 run: terminalhire intro --list`;
+    line = `\u2709 ${incomingCount} intro request${incomingCount === 1 ? "" : "s"} \u2014 run: terminalhire intro --list`;
     if (unreadChatCount > 0) line += `  \xB7  \u{1F4AC} ${unreadChatCount} unread`;
   } else if (unreadChatCount > 0) {
     line = `\u{1F4AC} ${unreadChatCount} unread \u2014 run: terminalhire chat`;
