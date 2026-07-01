@@ -6297,6 +6297,53 @@ var init_chatCrypto = __esm({
   }
 });
 
+// ../../packages/core/src/job-status.ts
+function recordClick(map, id) {
+  const prev = map[id];
+  if (prev?.clicked === true) return map;
+  return { ...map, [id]: { ...prev, clicked: true } };
+}
+function setStatus(map, id, s, markedAt = (/* @__PURE__ */ new Date()).toISOString()) {
+  const prev = map[id];
+  return { ...map, [id]: { ...prev, status: s, markedAt } };
+}
+function funnelCounts(map) {
+  const counts = { clicked: 0, applied: 0, saved: 0, dismissed: 0 };
+  for (const key of Object.keys(map)) {
+    const rec = map[key];
+    if (rec.clicked === true) counts.clicked++;
+    if (rec.status) counts[rec.status]++;
+  }
+  return counts;
+}
+function pageMatches(items, page, limit) {
+  const lim = Math.max(1, Math.floor(limit));
+  const total = items.length;
+  const totalPages = Math.max(1, Math.ceil(total / lim));
+  const clamped = Math.min(Math.max(1, Math.floor(page)), totalPages);
+  const start = (clamped - 1) * lim;
+  return {
+    items: items.slice(start, start + lim),
+    page: clamped,
+    limit: lim,
+    total,
+    totalPages,
+    hasPrev: clamped > 1,
+    hasNext: clamped < totalPages
+  };
+}
+function decorate(matches, statusMap) {
+  return matches.map((m) => {
+    const rec = statusMap[m.job.id];
+    return rec ? { ...m, jobStatus: rec } : { ...m };
+  });
+}
+var init_job_status = __esm({
+  "../../packages/core/src/job-status.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/index.ts
 var src_exports = {};
 __export(src_exports, {
@@ -6338,6 +6385,7 @@ __export(src_exports, {
   computeAcceptanceCredential: () => computeAcceptanceCredential,
   computeAcceptanceCredentialPublic: () => computeAcceptanceCredentialPublic,
   coreTagsFromTitle: () => coreTagsFromTitle,
+  decorate: () => decorate,
   decryptMessage: () => decryptMessage,
   deriveResumeTrend: () => deriveResumeTrend,
   deriveSharedKey: () => deriveSharedKey,
@@ -6348,6 +6396,7 @@ __export(src_exports, {
   fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
   fetchRepoRecency: () => fetchRepoRecency,
   flattenTiers: () => flattenTiers,
+  funnelCounts: () => funnelCounts,
   generateIdentityKeypair: () => generateIdentityKeypair,
   getBuyer: () => getBuyer,
   githubBounties: () => githubBounties,
@@ -6366,12 +6415,15 @@ __export(src_exports, {
   match: () => match,
   normalize: () => normalize,
   opire: () => opire,
+  pageMatches: () => pageMatches,
   passesMaturityGate: () => passesMaturityGate,
   personCardToJob: () => personCardToJob,
   projectCardToJob: () => projectCardToJob,
+  recordClick: () => recordClick,
   rejectExtraIntroFields: () => rejectExtraIntroFields,
   revealIntroContacts: () => revealIntroContacts,
   safetyNumber: () => safetyNumber,
+  setStatus: () => setStatus,
   tokenize: () => tokenize,
   validateGraph: () => validateGraph,
   validateIntroPayload: () => validateIntroPayload,
@@ -6392,6 +6444,7 @@ var init_src = __esm({
     init_intro();
     init_directoryThreshold();
     init_chatCrypto();
+    init_job_status();
   }
 });
 
@@ -6781,11 +6834,11 @@ async function runLogin() {
     if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
       const { createRequire: createRequire2 } = await import("module");
       const { fileURLToPath: fileURLToPath8 } = await import("url");
-      const { join: join27, dirname: dirname3 } = await import("path");
+      const { join: join28, dirname: dirname4 } = await import("path");
       const __dirname7 = fileURLToPath8(new URL(".", import.meta.url));
-      const fixturePath = join27(__dirname7, "../../fixtures/github-sample.json");
-      const { readFileSync: readFileSync25 } = await import("fs");
-      ghProfile = JSON.parse(readFileSync25(fixturePath, "utf8"));
+      const fixturePath = join28(__dirname7, "../../fixtures/github-sample.json");
+      const { readFileSync: readFileSync26 } = await import("fs");
+      ghProfile = JSON.parse(readFileSync26(fixturePath, "utf8"));
     } else {
       ghProfile = await fetchGitHubProfile2(login, token);
     }
@@ -6902,19 +6955,168 @@ var init_jpi_login = __esm({
   }
 });
 
+// bin/job-status-store.js
+import {
+  readFileSync as readFileSync7,
+  writeFileSync as writeFileSync5,
+  renameSync,
+  mkdirSync as mkdirSync5,
+  existsSync as existsSync6,
+  copyFileSync,
+  openSync,
+  closeSync,
+  unlinkSync
+} from "fs";
+import { join as join7, dirname } from "path";
+import { homedir as homedir6 } from "os";
+function atomicWriteJson(path, obj) {
+  mkdirSync5(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync5(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  renameSync(tmp, path);
+}
+function sleepMs(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+    }
+  }
+}
+function withLock(fn) {
+  const deadline = Date.now() + 2e3;
+  for (; ; ) {
+    let fd;
+    try {
+      mkdirSync5(dirname(LOCK_FILE), { recursive: true });
+      fd = openSync(LOCK_FILE, "wx");
+    } catch (err) {
+      if (err && err.code === "EEXIST") {
+        if (Date.now() > deadline) {
+          try {
+            unlinkSync(LOCK_FILE);
+          } catch {
+          }
+          continue;
+        }
+        sleepMs(5);
+        continue;
+      }
+      throw err;
+    }
+    try {
+      return fn();
+    } finally {
+      try {
+        closeSync(fd);
+      } catch {
+      }
+      try {
+        unlinkSync(LOCK_FILE);
+      } catch {
+      }
+    }
+  }
+}
+function readStatusMap() {
+  if (!existsSync6(STATUS_FILE)) return {};
+  let raw;
+  try {
+    raw = readFileSync7(STATUS_FILE, "utf8");
+  } catch {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    throw new Error("status store is not an object");
+  } catch {
+    try {
+      copyFileSync(STATUS_FILE, BAK_FILE);
+    } catch {
+    }
+    return {};
+  }
+}
+function markStatus(id, status) {
+  return withLock(() => {
+    const current = readStatusMap();
+    const next = setStatus(current, id, status);
+    atomicWriteJson(STATUS_FILE, next);
+    return next[id];
+  });
+}
+function markClicked(id) {
+  return withLock(() => {
+    const current = readStatusMap();
+    const next = recordClick(current, id);
+    atomicWriteJson(STATUS_FILE, next);
+    return next[id];
+  });
+}
+var TERMINALHIRE_DIR4, STATUS_FILE, LOCK_FILE, BAK_FILE;
+var init_job_status_store = __esm({
+  "bin/job-status-store.js"() {
+    "use strict";
+    init_src();
+    TERMINALHIRE_DIR4 = join7(homedir6(), ".terminalhire");
+    STATUS_FILE = join7(TERMINALHIRE_DIR4, "job-status.json");
+    LOCK_FILE = `${STATUS_FILE}.lock`;
+    BAK_FILE = `${STATUS_FILE}.bak`;
+  }
+});
+
 // bin/jpi-jobs.js
 var jpi_jobs_exports = {};
 __export(jpi_jobs_exports, {
-  run: () => run2
+  VALID_STATUS_FILTERS: () => VALID_STATUS_FILTERS,
+  appliedThisWeek: () => appliedThisWeek,
+  applyStatusView: () => applyStatusView,
+  run: () => run2,
+  statusLabel: () => statusLabel
 });
-import { readFileSync as readFileSync7, writeFileSync as writeFileSync5, mkdirSync as mkdirSync5, existsSync as existsSync6 } from "fs";
-import { join as join7 } from "path";
-import { homedir as homedir6 } from "os";
+import { readFileSync as readFileSync8, writeFileSync as writeFileSync6, mkdirSync as mkdirSync6, existsSync as existsSync7 } from "fs";
+import { join as join8 } from "path";
+import { homedir as homedir7 } from "os";
 import { createInterface as createInterface2 } from "readline";
 import { fileURLToPath as fileURLToPath3 } from "url";
+function applyStatusView(decorated, filter) {
+  if (!filter) return decorated.filter((d) => d.jobStatus?.status !== "dismissed");
+  switch (filter) {
+    case "applied":
+    case "saved":
+    case "dismissed":
+      return decorated.filter((d) => d.jobStatus?.status === filter);
+    case "clicked":
+      return decorated.filter((d) => d.jobStatus?.clicked === true);
+    case "unactioned":
+      return decorated.filter(
+        (d) => !d.jobStatus || !d.jobStatus.clicked && !d.jobStatus.status
+      );
+    default:
+      return decorated;
+  }
+}
+function statusLabel(rec) {
+  if (!rec) return "";
+  if (rec.status) return ` [${rec.status}]`;
+  if (rec.clicked) return " [clicked]";
+  return "";
+}
+function appliedThisWeek(statusMap, now = Date.now()) {
+  const weekAgo = now - 7 * 24 * 60 * 60 * 1e3;
+  let n = 0;
+  for (const rec of Object.values(statusMap)) {
+    if (rec && rec.status === "applied" && rec.markedAt && Date.parse(rec.markedAt) >= weekAgo) {
+      n++;
+    }
+  }
+  return n;
+}
 function readIndexCache() {
   try {
-    const raw = readFileSync7(INDEX_CACHE_FILE2, "utf8");
+    const raw = readFileSync8(INDEX_CACHE_FILE2, "utf8");
     const entry = JSON.parse(raw);
     if (Date.now() - entry.ts < INDEX_TTL_MS) return entry.index;
     return null;
@@ -6923,8 +7125,8 @@ function readIndexCache() {
   }
 }
 function writeIndexCache(index) {
-  mkdirSync5(TERMINALHIRE_DIR4, { recursive: true });
-  writeFileSync5(INDEX_CACHE_FILE2, JSON.stringify({ ts: Date.now(), index }), "utf8");
+  mkdirSync6(TERMINALHIRE_DIR5, { recursive: true });
+  writeFileSync6(INDEX_CACHE_FILE2, JSON.stringify({ ts: Date.now(), index }), "utf8");
 }
 async function fetchIndex() {
   const cached = readIndexCache();
@@ -7019,8 +7221,9 @@ function printResult(i, result) {
   const compStr = comp ? ` \xB7 ${comp}` : "";
   const mode = job.applyMode === "buyer-lead" ? " [COASTAL LEAD]" : "";
   const titleStr = linkTitle(job.title, job.url);
+  const label = statusLabel(result.jobStatus);
   console.log(`
-${i + 1}. ${titleStr} \u2014 ${job.company}${mode}`);
+${i + 1}. ${titleStr} \u2014 ${job.company}${mode}${label}`);
   console.log(`   id: ${job.id}`);
   console.log(`   ${remote}${compStr} \xB7 ${job.roleType} \xB7 score: ${formatScore(score)}`);
   console.log(`   ${reason}`);
@@ -7063,10 +7266,39 @@ async function handleBuyerLead(job, profile) {
   }
   console.log("Lead sent. Coastal Recruiting LLC will be in touch if there is a match.");
 }
+function handleMark() {
+  const id = args[1];
+  const status = args[2];
+  const VALID = ["applied", "saved", "dismissed"];
+  if (!id || !id.includes(":")) {
+    console.error(
+      "terminalhire jobs mark: expected a job id like 'greenhouse:acme-123' (shown as `id:` in `jobs` output)."
+    );
+    process.exit(1);
+  }
+  if (!VALID.includes(status)) {
+    console.error(
+      `terminalhire jobs mark: status must be one of ${VALID.join(", ")} (got '${status ?? ""}').`
+    );
+    process.exit(1);
+  }
+  markStatus(id, status);
+  console.log(`Marked ${id} as ${status}.`);
+}
 async function run2() {
   try {
+    if (args[0] === "mark") {
+      handleMark();
+      return;
+    }
+    if (STATUS_FILTER !== null && !VALID_STATUS_FILTERS.includes(STATUS_FILTER)) {
+      console.error(
+        `terminalhire jobs: --status must be one of ${VALID_STATUS_FILTERS.join(", ")} (got '${STATUS_FILTER}').`
+      );
+      process.exit(1);
+    }
     const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-    const { match: match2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+    const { match: match2, decorate: decorate2, pageMatches: pageMatches2, funnelCounts: funnelCounts2 } = await Promise.resolve().then(() => (init_src(), src_exports));
     const profile = await readProfile2();
     if (profile.skillTags.length === 0) {
       console.log("\u2726 terminalhire jobs: no skill tags in local profile yet.");
@@ -7085,26 +7317,54 @@ async function run2() {
     }
     const fp = profileToFingerprint2(profile);
     if (REMOTE_ONLY) fp.prefs = { ...fp.prefs, remoteOnly: true };
-    const results = match2(fp, jobs, SHOW_ALL ? jobs.length : LIMIT, Date.now(), {
+    const ranked = match2(fp, jobs, jobs.length, Date.now(), {
       acceptance: profile.acceptance
     });
     try {
-      const cacheRaw = readFileSync7(INDEX_CACHE_FILE2, "utf8");
+      const cacheRaw = readFileSync8(INDEX_CACHE_FILE2, "utf8");
       const cacheEntry = JSON.parse(cacheRaw);
-      cacheEntry.matchCount = results.length;
-      writeFileSync5(INDEX_CACHE_FILE2, JSON.stringify(cacheEntry), "utf8");
+      cacheEntry.matchCount = ranked.length;
+      writeFileSync6(INDEX_CACHE_FILE2, JSON.stringify(cacheEntry), "utf8");
     } catch {
     }
-    if (results.length === 0) {
+    if (ranked.length === 0) {
       console.log("No matching roles found for your current profile.");
       console.log("  Your tags: " + profile.skillTags.join(", "));
       return;
     }
-    console.log(`
-\u2726 ${results.length} role${results.length === 1 ? "" : "s"} matching your profile (local match \u2014 no data sent)
-`);
-    for (let i = 0; i < results.length; i++) {
-      printResult(i, results[i]);
+    const statusMap = readStatusMap();
+    const decorated = decorate2(ranked, statusMap);
+    const view = applyStatusView(decorated, STATUS_FILTER);
+    const pageSize = SHOW_ALL ? Math.max(1, view.length) : LIMIT;
+    const pageNum = SHOW_ALL ? 1 : PAGE ?? 1;
+    const pageInfo = pageMatches2(view, pageNum, pageSize);
+    const shown = pageInfo.items;
+    const filterNote = STATUS_FILTER ? ` (--status ${STATUS_FILTER})` : "";
+    console.log(
+      `
+\u2726 ${ranked.length} role${ranked.length === 1 ? "" : "s"} matching your profile (local match \u2014 no data sent)${filterNote}
+`
+    );
+    if (shown.length === 0) {
+      console.log(
+        STATUS_FILTER ? `  No roles with status "${STATUS_FILTER}".` : "  Nothing to show on this page."
+      );
+    }
+    for (let i = 0; i < shown.length; i++) {
+      printResult((pageInfo.page - 1) * pageInfo.limit + i, shown[i]);
+    }
+    if (pageInfo.hasNext) {
+      console.log(
+        `
+\u2026 page ${pageInfo.page}/${pageInfo.totalPages} \u2014 next: terminalhire jobs --page ${pageInfo.page + 1}${STATUS_FILTER ? " --status " + STATUS_FILTER : ""}  (or --all for the whole list)`
+      );
+    }
+    const counts = funnelCounts2(statusMap);
+    if (counts.applied + counts.saved + counts.dismissed + counts.clicked > 0) {
+      console.log(
+        `
+\u{1F4CA} Funnel (local only): applied ${appliedThisWeek(statusMap)} this week \xB7 ${counts.applied} applied \xB7 ${counts.saved} saved \xB7 ${counts.clicked} clicked \xB7 ${counts.dismissed} dismissed`
+      );
     }
     if (bountyCount > 0) {
       console.log(
@@ -7116,19 +7376,23 @@ async function run2() {
       return;
     }
     console.log("\n" + "\u2500".repeat(70));
+    console.log("  Tip: terminalhire jobs mark <id> applied|saved|dismissed  to track your funnel.");
     const pick = await prompt(
       `
 Enter a number to act on a role, or press Enter to exit: `
     );
-    const idx = parseInt(pick, 10) - 1;
-    if (isNaN(idx) || idx < 0 || idx >= results.length) {
+    const absIdx = parseInt(pick, 10) - 1;
+    const localIdx = absIdx - (pageInfo.page - 1) * pageInfo.limit;
+    if (isNaN(absIdx) || localIdx < 0 || localIdx >= shown.length) {
       return;
     }
-    const chosen = results[idx];
+    const chosen = shown[localIdx];
     if (chosen.job.applyMode === "direct") {
+      markClicked(chosen.job.id);
       console.log(`
 Open this URL to apply directly (no data shared):
   ${chosen.job.url}`);
+      console.log(`  (marked "clicked" locally \u2014 mark it applied with: terminalhire jobs mark ${chosen.job.id} applied)`);
     } else if (chosen.job.applyMode === "buyer-lead") {
       await handleBuyerLead(chosen.job, profile);
     }
@@ -7137,13 +7401,14 @@ Open this URL to apply directly (no data shared):
     process.exit(1);
   }
 }
-var __dirname2, TERMINALHIRE_DIR4, INDEX_CACHE_FILE2, INDEX_TTL_MS, API_URL, DEFAULT_LIMIT, args, limitArg, LIMIT, REMOTE_ONLY, SHOW_ALL;
+var __dirname2, TERMINALHIRE_DIR5, INDEX_CACHE_FILE2, INDEX_TTL_MS, API_URL, DEFAULT_LIMIT, args, limitArg, LIMIT, REMOTE_ONLY, SHOW_ALL, pageArg, PAGE, statusArg, STATUS_FILTER, VALID_STATUS_FILTERS;
 var init_jpi_jobs = __esm({
   "bin/jpi-jobs.js"() {
     "use strict";
+    init_job_status_store();
     __dirname2 = fileURLToPath3(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR4 = join7(homedir6(), ".terminalhire");
-    INDEX_CACHE_FILE2 = join7(TERMINALHIRE_DIR4, "index-cache.json");
+    TERMINALHIRE_DIR5 = join8(homedir7(), ".terminalhire");
+    INDEX_CACHE_FILE2 = join8(TERMINALHIRE_DIR5, "index-cache.json");
     INDEX_TTL_MS = 15 * 60 * 1e3;
     API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
     DEFAULT_LIMIT = 10;
@@ -7152,16 +7417,21 @@ var init_jpi_jobs = __esm({
     LIMIT = limitArg !== -1 ? parseInt(args[limitArg + 1] ?? "10", 10) : DEFAULT_LIMIT;
     REMOTE_ONLY = args.includes("--remote-only");
     SHOW_ALL = args.includes("--all");
+    pageArg = args.indexOf("--page");
+    PAGE = pageArg !== -1 ? parseInt(args[pageArg + 1] ?? "1", 10) : null;
+    statusArg = args.indexOf("--status");
+    STATUS_FILTER = statusArg !== -1 ? args[statusArg + 1] ?? "" : null;
+    VALID_STATUS_FILTERS = ["applied", "saved", "dismissed", "clicked", "unactioned"];
   }
 });
 
 // bin/directory.js
-import { readFileSync as readFileSync8, writeFileSync as writeFileSync6, mkdirSync as mkdirSync6 } from "fs";
-import { join as join8 } from "path";
-import { homedir as homedir7 } from "os";
+import { readFileSync as readFileSync9, writeFileSync as writeFileSync7, mkdirSync as mkdirSync7 } from "fs";
+import { join as join9 } from "path";
+import { homedir as homedir8 } from "os";
 function readDirectoryCache() {
   try {
-    const entry = JSON.parse(readFileSync8(DIRECTORY_CACHE_FILE, "utf8"));
+    const entry = JSON.parse(readFileSync9(DIRECTORY_CACHE_FILE, "utf8"));
     if (typeof entry.ts === "number" && Number.isFinite(entry.ts) && Date.now() - entry.ts < INDEX_TTL_MS2) {
       return { index: entry.index, ts: entry.ts };
     }
@@ -7171,12 +7441,12 @@ function readDirectoryCache() {
   }
 }
 function writeDirectoryCache(index) {
-  mkdirSync6(TERMINALHIRE_DIR5, { recursive: true });
-  writeFileSync6(DIRECTORY_CACHE_FILE, JSON.stringify({ ts: Date.now(), index }), "utf8");
+  mkdirSync7(TERMINALHIRE_DIR6, { recursive: true });
+  writeFileSync7(DIRECTORY_CACHE_FILE, JSON.stringify({ ts: Date.now(), index }), "utf8");
 }
 function readProject() {
   try {
-    return JSON.parse(readFileSync8(PROJECT_FILE, "utf8"));
+    return JSON.parse(readFileSync9(PROJECT_FILE, "utf8"));
   } catch {
     return null;
   }
@@ -7229,13 +7499,13 @@ function excludeOwnCard(results, ownLogin) {
     return typeof handle !== "string" || handle.toLowerCase() !== own;
   });
 }
-var TERMINALHIRE_DIR5, DIRECTORY_CACHE_FILE, PROJECT_FILE, INDEX_TTL_MS2, API_URL2;
+var TERMINALHIRE_DIR6, DIRECTORY_CACHE_FILE, PROJECT_FILE, INDEX_TTL_MS2, API_URL2;
 var init_directory2 = __esm({
   "bin/directory.js"() {
     "use strict";
-    TERMINALHIRE_DIR5 = join8(homedir7(), ".terminalhire");
-    DIRECTORY_CACHE_FILE = join8(TERMINALHIRE_DIR5, "directory-cache.json");
-    PROJECT_FILE = join8(TERMINALHIRE_DIR5, "project.json");
+    TERMINALHIRE_DIR6 = join9(homedir8(), ".terminalhire");
+    DIRECTORY_CACHE_FILE = join9(TERMINALHIRE_DIR6, "directory-cache.json");
+    PROJECT_FILE = join9(TERMINALHIRE_DIR6, "project.json");
     INDEX_TTL_MS2 = 15 * 60 * 1e3;
     API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
   }
@@ -7371,13 +7641,13 @@ var jpi_project_exports = {};
 __export(jpi_project_exports, {
   run: () => run4
 });
-import { readFileSync as readFileSync9, writeFileSync as writeFileSync7, mkdirSync as mkdirSync7 } from "fs";
-import { join as join9 } from "path";
-import { homedir as homedir8 } from "os";
+import { readFileSync as readFileSync10, writeFileSync as writeFileSync8, mkdirSync as mkdirSync8 } from "fs";
+import { join as join10 } from "path";
+import { homedir as homedir9 } from "os";
 import { createInterface as createInterface4 } from "readline";
 function readProject2() {
   try {
-    return JSON.parse(readFileSync9(PROJECT_FILE2, "utf8"));
+    return JSON.parse(readFileSync10(PROJECT_FILE2, "utf8"));
   } catch {
     return null;
   }
@@ -7453,8 +7723,8 @@ async function run4() {
       prefs: {},
       createdAt: (/* @__PURE__ */ new Date()).toISOString()
     };
-    mkdirSync7(TERMINALHIRE_DIR6, { recursive: true });
-    writeFileSync7(PROJECT_FILE2, JSON.stringify(project, null, 2), "utf8");
+    mkdirSync8(TERMINALHIRE_DIR7, { recursive: true });
+    writeFileSync8(PROJECT_FILE2, JSON.stringify(project, null, 2), "utf8");
     console.log(`
 \u2726 Project saved locally (never sent): ${title}`);
     console.log(`  Skills: ${skillTags.join(", ")}`);
@@ -7465,12 +7735,12 @@ async function run4() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR6, PROJECT_FILE2, args3, SHOW, declarationArg;
+var TERMINALHIRE_DIR7, PROJECT_FILE2, args3, SHOW, declarationArg;
 var init_jpi_project = __esm({
   "bin/jpi-project.js"() {
     "use strict";
-    TERMINALHIRE_DIR6 = join9(homedir8(), ".terminalhire");
-    PROJECT_FILE2 = join9(TERMINALHIRE_DIR6, "project.json");
+    TERMINALHIRE_DIR7 = join10(homedir9(), ".terminalhire");
+    PROJECT_FILE2 = join10(TERMINALHIRE_DIR7, "project.json");
     args3 = process.argv.slice(2);
     SHOW = args3.includes("--show");
     declarationArg = args3.filter((a) => !a.startsWith("--")).join(" ").trim();
@@ -7482,13 +7752,13 @@ var jpi_bounties_exports = {};
 __export(jpi_bounties_exports, {
   run: () => run5
 });
-import { readFileSync as readFileSync10, writeFileSync as writeFileSync8, mkdirSync as mkdirSync8 } from "fs";
-import { join as join10 } from "path";
-import { homedir as homedir9 } from "os";
+import { readFileSync as readFileSync11, writeFileSync as writeFileSync9, mkdirSync as mkdirSync9 } from "fs";
+import { join as join11 } from "path";
+import { homedir as homedir10 } from "os";
 import { createInterface as createInterface5 } from "readline";
 function readIndexCache2() {
   try {
-    const entry = JSON.parse(readFileSync10(INDEX_CACHE_FILE3, "utf8"));
+    const entry = JSON.parse(readFileSync11(INDEX_CACHE_FILE3, "utf8"));
     if (Date.now() - entry.ts < INDEX_TTL_MS3) return entry.index;
     return null;
   } catch {
@@ -7496,8 +7766,8 @@ function readIndexCache2() {
   }
 }
 function writeIndexCache2(index) {
-  mkdirSync8(TERMINALHIRE_DIR7, { recursive: true });
-  writeFileSync8(INDEX_CACHE_FILE3, JSON.stringify({ ts: Date.now(), index }), "utf8");
+  mkdirSync9(TERMINALHIRE_DIR8, { recursive: true });
+  writeFileSync9(INDEX_CACHE_FILE3, JSON.stringify({ ts: Date.now(), index }), "utf8");
 }
 async function fetchIndex2() {
   const cached = readIndexCache2();
@@ -7601,12 +7871,12 @@ Open this to claim/work the bounty (you go straight to the source \u2014 we neve
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR7, INDEX_CACHE_FILE3, INDEX_TTL_MS3, API_URL4, DEFAULT_LIMIT3, args4, limitArg3, LIMIT3, PRICED_ONLY, SHOW_ALL3, WINNABLE_ONLY, EFFORT_LABEL;
+var TERMINALHIRE_DIR8, INDEX_CACHE_FILE3, INDEX_TTL_MS3, API_URL4, DEFAULT_LIMIT3, args4, limitArg3, LIMIT3, PRICED_ONLY, SHOW_ALL3, WINNABLE_ONLY, EFFORT_LABEL;
 var init_jpi_bounties = __esm({
   "bin/jpi-bounties.js"() {
     "use strict";
-    TERMINALHIRE_DIR7 = join10(homedir9(), ".terminalhire");
-    INDEX_CACHE_FILE3 = join10(TERMINALHIRE_DIR7, "index-cache.json");
+    TERMINALHIRE_DIR8 = join11(homedir10(), ".terminalhire");
+    INDEX_CACHE_FILE3 = join11(TERMINALHIRE_DIR8, "index-cache.json");
     INDEX_TTL_MS3 = 15 * 60 * 1e3;
     API_URL4 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
     DEFAULT_LIMIT3 = 15;
@@ -7631,27 +7901,27 @@ __export(claims_exports, {
   removeClaim: () => removeClaim,
   updateClaim: () => updateClaim
 });
-import { readFileSync as readFileSync11, writeFileSync as writeFileSync9, mkdirSync as mkdirSync9, renameSync, existsSync as existsSync7 } from "fs";
-import { join as join11 } from "path";
-import { homedir as homedir10 } from "os";
+import { readFileSync as readFileSync12, writeFileSync as writeFileSync10, mkdirSync as mkdirSync10, renameSync as renameSync2, existsSync as existsSync8 } from "fs";
+import { join as join12 } from "path";
+import { homedir as homedir11 } from "os";
 function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function readClaims() {
   try {
-    if (!existsSync7(CLAIMS_FILE)) return [];
-    const data = JSON.parse(readFileSync11(CLAIMS_FILE, "utf8"));
+    if (!existsSync8(CLAIMS_FILE)) return [];
+    const data = JSON.parse(readFileSync12(CLAIMS_FILE, "utf8"));
     return Array.isArray(data?.claims) ? data.claims : [];
   } catch {
     return [];
   }
 }
 function writeClaims(claims) {
-  mkdirSync9(TERMINALHIRE_DIR8, { recursive: true });
+  mkdirSync10(TERMINALHIRE_DIR9, { recursive: true });
   const tmp = `${CLAIMS_FILE}.tmp`;
   const payload = { claims };
-  writeFileSync9(tmp, JSON.stringify(payload, null, 2), "utf8");
-  renameSync(tmp, CLAIMS_FILE);
+  writeFileSync10(tmp, JSON.stringify(payload, null, 2), "utf8");
+  renameSync2(tmp, CLAIMS_FILE);
 }
 function findClaim(id) {
   return readClaims().find((c) => c.id === id) ?? null;
@@ -7703,12 +7973,12 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR8, CLAIMS_FILE, TERMINAL_STATES;
+var TERMINALHIRE_DIR9, CLAIMS_FILE, TERMINAL_STATES;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
-    TERMINALHIRE_DIR8 = join11(homedir10(), ".terminalhire");
-    CLAIMS_FILE = join11(TERMINALHIRE_DIR8, "claims.json");
+    TERMINALHIRE_DIR9 = join12(homedir11(), ".terminalhire");
+    CLAIMS_FILE = join12(TERMINALHIRE_DIR9, "claims.json");
     TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
   }
 });
@@ -7718,9 +7988,9 @@ var jpi_claim_exports = {};
 __export(jpi_claim_exports, {
   run: () => run6
 });
-import { readFileSync as readFileSync12, existsSync as existsSync8 } from "fs";
-import { join as join12 } from "path";
-import { homedir as homedir11 } from "os";
+import { readFileSync as readFileSync13, existsSync as existsSync9 } from "fs";
+import { join as join13 } from "path";
+import { homedir as homedir12 } from "os";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { createInterface as createInterface6 } from "readline";
@@ -7767,8 +8037,8 @@ function parseRepoFromRemote(url) {
 }
 function findBountyInCache(bountyId) {
   try {
-    if (!existsSync8(INDEX_CACHE_FILE4)) return null;
-    const entry = JSON.parse(readFileSync12(INDEX_CACHE_FILE4, "utf8"));
+    if (!existsSync9(INDEX_CACHE_FILE4)) return null;
+    const entry = JSON.parse(readFileSync13(INDEX_CACHE_FILE4, "utf8"));
     const jobs = entry?.index?.jobs ?? [];
     const job = jobs.find((j) => j.id === bountyId && j.source === "bounty");
     return job ?? null;
@@ -8272,12 +8542,12 @@ async function run6() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR9, INDEX_CACHE_FILE4, GH_API, GH_HEADERS, pExecFile, VALUE_FLAGS;
+var TERMINALHIRE_DIR10, INDEX_CACHE_FILE4, GH_API, GH_HEADERS, pExecFile, VALUE_FLAGS;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
-    TERMINALHIRE_DIR9 = join12(homedir11(), ".terminalhire");
-    INDEX_CACHE_FILE4 = join12(TERMINALHIRE_DIR9, "index-cache.json");
+    TERMINALHIRE_DIR10 = join13(homedir12(), ".terminalhire");
+    INDEX_CACHE_FILE4 = join13(TERMINALHIRE_DIR10, "index-cache.json");
     GH_API = "https://api.github.com";
     GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
     pExecFile = promisify(execFile);
@@ -8561,7 +8831,7 @@ function finalize(build) {
   };
 }
 function reconstruct(files, opts = {}) {
-  const join27 = opts.joinSidechains !== false;
+  const join28 = opts.joinSidechains !== false;
   const mains = [];
   const sidechains = [];
   for (const file of files) {
@@ -8586,7 +8856,7 @@ function reconstruct(files, opts = {}) {
   }
   const orphanedSidechainPaths = [];
   const joinedPaths = /* @__PURE__ */ new Set();
-  if (join27) {
+  if (join28) {
     const sidechainsBySession = /* @__PURE__ */ new Map();
     for (const sc of sidechains) {
       const acc = sidechainsBySession.get(sc.sessionId) ?? [];
@@ -9140,14 +9410,14 @@ __export(trajectory_exports, {
   runTrajectoryPush: () => runTrajectoryPush
 });
 import {
-  existsSync as existsSync9,
-  mkdirSync as mkdirSync10,
-  readFileSync as readFileSync13,
+  existsSync as existsSync10,
+  mkdirSync as mkdirSync11,
+  readFileSync as readFileSync14,
   readdirSync,
-  writeFileSync as writeFileSync10
+  writeFileSync as writeFileSync11
 } from "fs";
-import { homedir as homedir12 } from "os";
-import { join as join13 } from "path";
+import { homedir as homedir13 } from "os";
+import { join as join14 } from "path";
 function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -9179,7 +9449,7 @@ function findJsonlFiles(dir) {
     return out;
   }
   for (const entry of entries) {
-    const full = join13(dir, entry.name);
+    const full = join14(dir, entry.name);
     if (entry.isDirectory()) {
       out.push(...findJsonlFiles(full));
     } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
@@ -9193,7 +9463,7 @@ function loadCorpus(paths) {
   for (const path of paths) {
     let text;
     try {
-      text = readFileSync13(path, "utf8");
+      text = readFileSync14(path, "utf8");
     } catch {
       continue;
     }
@@ -9292,12 +9562,12 @@ function renderMarkdown(view) {
   return lines.join("\n");
 }
 function writeExportArtifacts(score, markdown) {
-  const dir = join13(homedir12(), ".terminalhire");
-  mkdirSync10(dir, { recursive: true });
-  const jsonPath = join13(dir, "trajectory-export.json");
-  const mdPath = join13(dir, "trajectory-export.md");
-  writeFileSync10(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
-  writeFileSync10(mdPath, markdown, "utf8");
+  const dir = join14(homedir13(), ".terminalhire");
+  mkdirSync11(dir, { recursive: true });
+  const jsonPath = join14(dir, "trajectory-export.json");
+  const mdPath = join14(dir, "trajectory-export.md");
+  writeFileSync11(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
+  writeFileSync11(mdPath, markdown, "utf8");
   return { jsonPath, mdPath };
 }
 function renderInward(allNodes, view, files) {
@@ -9316,8 +9586,8 @@ function renderInward(allNodes, view, files) {
   console.log("");
 }
 function buildTrajectory() {
-  const projectsDir = join13(homedir12(), ".claude", "projects");
-  if (!existsSync9(projectsDir)) return null;
+  const projectsDir = join14(homedir13(), ".claude", "projects");
+  if (!existsSync10(projectsDir)) return null;
   const paths = findJsonlFiles(projectsDir);
   if (paths.length === 0) return null;
   const files = loadCorpus(paths);
@@ -10034,40 +10304,40 @@ var init_jpi_intro = __esm({
 });
 
 // src/chat-keystore.ts
-import { existsSync as existsSync10, mkdirSync as mkdirSync11, readFileSync as readFileSync14, writeFileSync as writeFileSync11, rmSync as rmSync3 } from "fs";
-import { homedir as homedir13 } from "os";
-import { join as join14 } from "path";
+import { existsSync as existsSync11, mkdirSync as mkdirSync12, readFileSync as readFileSync15, writeFileSync as writeFileSync12, rmSync as rmSync3 } from "fs";
+import { homedir as homedir14 } from "os";
+import { join as join15 } from "path";
 async function loadOrCreateIdentity() {
   const key = await loadKey();
-  if (existsSync10(IDENTITY_FILE)) {
-    const blob2 = JSON.parse(readFileSync14(IDENTITY_FILE, "utf8"));
+  if (existsSync11(IDENTITY_FILE)) {
+    const blob2 = JSON.parse(readFileSync15(IDENTITY_FILE, "utf8"));
     return JSON.parse(decrypt(blob2, key));
   }
   const keypair = generateIdentityKeypair();
-  mkdirSync11(TERMINALHIRE_DIR10, { recursive: true });
+  mkdirSync12(TERMINALHIRE_DIR11, { recursive: true });
   const blob = encrypt(JSON.stringify(keypair), key);
-  writeFileSync11(IDENTITY_FILE, JSON.stringify(blob, null, 2), { mode: 384, encoding: "utf8" });
+  writeFileSync12(IDENTITY_FILE, JSON.stringify(blob, null, 2), { mode: 384, encoding: "utf8" });
   return keypair;
 }
-var TERMINALHIRE_DIR10, IDENTITY_FILE;
+var TERMINALHIRE_DIR11, IDENTITY_FILE;
 var init_chat_keystore = __esm({
   "src/chat-keystore.ts"() {
     "use strict";
     init_src();
     init_github_auth();
-    TERMINALHIRE_DIR10 = join14(homedir13(), ".terminalhire");
-    IDENTITY_FILE = join14(TERMINALHIRE_DIR10, "chat-identity.enc");
+    TERMINALHIRE_DIR11 = join15(homedir14(), ".terminalhire");
+    IDENTITY_FILE = join15(TERMINALHIRE_DIR11, "chat-identity.enc");
   }
 });
 
 // src/chat-client.ts
-import { existsSync as existsSync11, mkdirSync as mkdirSync12, readFileSync as readFileSync15, writeFileSync as writeFileSync12 } from "fs";
-import { homedir as homedir14 } from "os";
-import { join as join15 } from "path";
+import { existsSync as existsSync12, mkdirSync as mkdirSync13, readFileSync as readFileSync16, writeFileSync as writeFileSync13 } from "fs";
+import { homedir as homedir15 } from "os";
+import { join as join16 } from "path";
 function defaultReadPeerPins() {
   try {
-    if (!existsSync11(PEERS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync15(PEERS_FILE, "utf8"));
+    if (!existsSync12(PEERS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync16(PEERS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, key] of Object.entries(parsed)) {
@@ -10079,8 +10349,8 @@ function defaultReadPeerPins() {
   }
 }
 function defaultWritePeerPins(pins) {
-  mkdirSync12(TERMINALHIRE_DIR11, { recursive: true });
-  writeFileSync12(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
+  mkdirSync13(TERMINALHIRE_DIR12, { recursive: true });
+  writeFileSync13(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
 }
 function defaultChatClientDeps() {
   return {
@@ -10249,7 +10519,7 @@ function createChatClient(overrides) {
     getSafetyNumber
   };
 }
-var CHAT_BASE, GH_SESSION_COOKIE3, TERMINALHIRE_DIR11, PEERS_FILE, REQUEST_TIMEOUT_MS, ChatNotLinkedError, ChatSessionExpiredError, SafetyNumberChangedError, ChatRequestError;
+var CHAT_BASE, GH_SESSION_COOKIE3, TERMINALHIRE_DIR12, PEERS_FILE, REQUEST_TIMEOUT_MS, ChatNotLinkedError, ChatSessionExpiredError, SafetyNumberChangedError, ChatRequestError;
 var init_chat_client = __esm({
   "src/chat-client.ts"() {
     "use strict";
@@ -10258,8 +10528,8 @@ var init_chat_client = __esm({
     init_web_session();
     CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
     GH_SESSION_COOKIE3 = "__jpi_gh_session";
-    TERMINALHIRE_DIR11 = join15(homedir14(), ".terminalhire");
-    PEERS_FILE = join15(TERMINALHIRE_DIR11, "chat-peers.json");
+    TERMINALHIRE_DIR12 = join16(homedir15(), ".terminalhire");
+    PEERS_FILE = join16(TERMINALHIRE_DIR12, "chat-peers.json");
     REQUEST_TIMEOUT_MS = 1e4;
     ChatNotLinkedError = class extends Error {
       constructor() {
@@ -10315,16 +10585,16 @@ __export(jpi_chat_read_exports, {
   syncUnreadBadge: () => syncUnreadBadge,
   writeReadCursor: () => writeReadCursor
 });
-import { existsSync as existsSync12, mkdirSync as mkdirSync13, readFileSync as readFileSync16, writeFileSync as writeFileSync13 } from "fs";
-import { homedir as homedir15 } from "os";
-import { join as join16 } from "path";
+import { existsSync as existsSync13, mkdirSync as mkdirSync14, readFileSync as readFileSync17, writeFileSync as writeFileSync14 } from "fs";
+import { homedir as homedir16 } from "os";
+import { join as join17 } from "path";
 async function syncUnreadBadge(deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   const cacheFile = deps.cacheFile ?? INDEX_CACHE_FILE5;
   try {
     const cookie = readCookie();
-    if (!cookie || !existsSync12(cacheFile)) return;
+    if (!cookie || !existsSync13(cacheFile)) return;
     const res = await fetchImpl(`${CHAT_BASE2}/api/chat/inbox`, {
       method: "GET",
       headers: { Cookie: `${GH_SESSION_COOKIE4}=${cookie}` },
@@ -10337,16 +10607,16 @@ async function syncUnreadBadge(deps = {}) {
       (sum, it) => sum + (it && typeof it.unreadCount === "number" && it.unreadCount > 0 ? it.unreadCount : 0),
       0
     );
-    const entry = JSON.parse(readFileSync16(cacheFile, "utf8"));
+    const entry = JSON.parse(readFileSync17(cacheFile, "utf8"));
     entry.unreadChat = { count: total };
-    writeFileSync13(cacheFile, JSON.stringify(entry), "utf8");
+    writeFileSync14(cacheFile, JSON.stringify(entry), "utf8");
   } catch {
   }
 }
 function readReadCursors() {
   try {
-    if (!existsSync12(READS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync16(READS_FILE, "utf8"));
+    if (!existsSync13(READS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync17(READS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, iso] of Object.entries(parsed)) {
@@ -10361,8 +10631,8 @@ function writeReadCursor(login, iso, deps = {}) {
   const read = deps.readReadCursors ?? readReadCursors;
   const cursors = read();
   cursors[login] = iso;
-  mkdirSync13(TERMINALHIRE_DIR12, { recursive: true });
-  writeFileSync13(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
+  mkdirSync14(TERMINALHIRE_DIR13, { recursive: true });
+  writeFileSync14(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
 }
 async function postReadCursor(peerLogin, lastReadAt, deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
@@ -10687,7 +10957,7 @@ async function runSend(opts = {}) {
   );
   return { ok: true };
 }
-var CHAT_BASE2, GH_SESSION_COOKIE4, TERMINALHIRE_DIR12, READS_FILE, INDEX_CACHE_FILE5;
+var CHAT_BASE2, GH_SESSION_COOKIE4, TERMINALHIRE_DIR13, READS_FILE, INDEX_CACHE_FILE5;
 var init_jpi_chat_read = __esm({
   "bin/jpi-chat-read.js"() {
     "use strict";
@@ -10696,9 +10966,9 @@ var init_jpi_chat_read = __esm({
     init_jpi_chat();
     CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
     GH_SESSION_COOKIE4 = "__jpi_gh_session";
-    TERMINALHIRE_DIR12 = join16(homedir15(), ".terminalhire");
-    READS_FILE = join16(TERMINALHIRE_DIR12, "chat-reads.json");
-    INDEX_CACHE_FILE5 = join16(TERMINALHIRE_DIR12, "index-cache.json");
+    TERMINALHIRE_DIR13 = join17(homedir16(), ".terminalhire");
+    READS_FILE = join17(TERMINALHIRE_DIR13, "chat-reads.json");
+    INDEX_CACHE_FILE5 = join17(TERMINALHIRE_DIR13, "index-cache.json");
   }
 });
 
@@ -10724,9 +10994,9 @@ __export(jpi_chat_exports, {
   sanitizeLine: () => sanitizeLine
 });
 import { createInterface as createInterface7 } from "readline";
-import { existsSync as existsSync13, readFileSync as readFileSync17 } from "fs";
-import { homedir as homedir16 } from "os";
-import { join as join17 } from "path";
+import { existsSync as existsSync14, readFileSync as readFileSync18 } from "fs";
+import { homedir as homedir17 } from "os";
+import { join as join18 } from "path";
 function sanitizeLine(text) {
   return String(text).replace(ANSI_CSI, "").replace(ANSI_OSC, "").replace(ANSI_OTHER, "").replace(C0_C1_DEL, "");
 }
@@ -10893,9 +11163,9 @@ function mergeMessages(existing, incoming) {
 }
 function readCachedSessionStale() {
   try {
-    const p = join17(homedir16(), ".terminalhire", "index-cache.json");
-    if (!existsSync13(p)) return false;
-    const cache = JSON.parse(readFileSync17(p, "utf8"));
+    const p = join18(homedir17(), ".terminalhire", "index-cache.json");
+    if (!existsSync14(p)) return false;
+    const cache = JSON.parse(readFileSync18(p, "utf8"));
     return cache?.sessionStale === true;
   } catch {
     return false;
@@ -11817,9 +12087,9 @@ var signal_exports = {};
 __export(signal_exports, {
   extractFingerprint: () => extractFingerprint
 });
-import { readFileSync as readFileSync18, readdirSync as readdirSync2 } from "fs";
+import { readFileSync as readFileSync19, readdirSync as readdirSync2 } from "fs";
 import { execFileSync } from "child_process";
-import { join as join18 } from "path";
+import { join as join19 } from "path";
 function safeGit(args5, cwd) {
   try {
     return execFileSync("git", ["-C", cwd, ...args5], {
@@ -11847,20 +12117,20 @@ function isEmployerContext(cwd) {
 }
 function readJsonSafe(path) {
   try {
-    return JSON.parse(readFileSync18(path, "utf8"));
+    return JSON.parse(readFileSync19(path, "utf8"));
   } catch {
     return null;
   }
 }
 function readFileSafe(path) {
   try {
-    return readFileSync18(path, "utf8");
+    return readFileSync19(path, "utf8");
   } catch {
     return "";
   }
 }
 function tokensFromPackageJson(cwd) {
-  const pkg = readJsonSafe(join18(cwd, "package.json"));
+  const pkg = readJsonSafe(join19(cwd, "package.json"));
   if (!pkg || typeof pkg !== "object") return [];
   const p = pkg;
   const deps = {
@@ -11874,9 +12144,9 @@ function workspaceMemberDirs(cwd) {
   const dirs = [cwd];
   for (const group of ["apps", "packages"]) {
     try {
-      const groupDir = join18(cwd, group);
+      const groupDir = join19(cwd, group);
       for (const e of readdirSync2(groupDir, { withFileTypes: true })) {
-        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join18(groupDir, e.name));
+        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join19(groupDir, e.name));
       }
     } catch {
     }
@@ -11884,18 +12154,18 @@ function workspaceMemberDirs(cwd) {
   return dirs;
 }
 function tokensFromRequirementsTxt(cwd) {
-  const content = readFileSafe(join18(cwd, "requirements.txt"));
+  const content = readFileSafe(join19(cwd, "requirements.txt"));
   if (!content) return [];
   return content.split("\n").map((l) => l.trim().split(/[>=<!\[;]/)[0].trim().toLowerCase()).filter(Boolean);
 }
 function tokensFromGoMod(cwd) {
-  const content = readFileSafe(join18(cwd, "go.mod"));
+  const content = readFileSafe(join19(cwd, "go.mod"));
   if (!content) return [];
   const requires = Array.from(content.matchAll(/^\s+([^\s]+)\s+v/gm)).map((m) => m[1].split("/").pop() ?? "").filter(Boolean);
   return ["go", ...requires];
 }
 function tokensFromCargoToml(cwd) {
-  const content = readFileSafe(join18(cwd, "Cargo.toml"));
+  const content = readFileSafe(join19(cwd, "Cargo.toml"));
   if (!content) return [];
   const deps = [];
   let inDeps = false;
@@ -11916,7 +12186,7 @@ function tokensFromFileExtensions(cwd) {
   const tokens = [];
   const scanDirs = [cwd];
   try {
-    const srcDir = join18(cwd, "src");
+    const srcDir = join19(cwd, "src");
     readdirSync2(srcDir);
     scanDirs.push(srcDir);
   } catch {
@@ -12116,8 +12386,8 @@ var jpi_config_exports = {};
 __export(jpi_config_exports, {
   run: () => run14
 });
-import { join as join19 } from "path";
-import { homedir as homedir17 } from "os";
+import { join as join20 } from "path";
+import { homedir as homedir18 } from "os";
 function parseNudgeMode2(raw) {
   if (raw === "session" || raw === "always") return raw;
   const m = /^every:(\d+)$/.exec(raw);
@@ -12185,13 +12455,13 @@ async function run14() {
   console.error("       terminalhire config --show");
   process.exit(1);
 }
-var TERMINALHIRE_DIR13, CONFIG_FILE2;
+var TERMINALHIRE_DIR14, CONFIG_FILE2;
 var init_jpi_config = __esm({
   "bin/jpi-config.js"() {
     "use strict";
     init_config();
-    TERMINALHIRE_DIR13 = join19(homedir17(), ".terminalhire");
-    CONFIG_FILE2 = join19(TERMINALHIRE_DIR13, "config.json");
+    TERMINALHIRE_DIR14 = join20(homedir18(), ".terminalhire");
+    CONFIG_FILE2 = join20(TERMINALHIRE_DIR14, "config.json");
   }
 });
 
@@ -12216,26 +12486,26 @@ __export(spinner_exports, {
   readSpinnerConfig: () => readSpinnerConfig
 });
 import {
-  readFileSync as readFileSync19,
-  writeFileSync as writeFileSync14,
-  existsSync as existsSync14,
-  mkdirSync as mkdirSync14,
-  renameSync as renameSync2
+  readFileSync as readFileSync20,
+  writeFileSync as writeFileSync15,
+  existsSync as existsSync15,
+  mkdirSync as mkdirSync15,
+  renameSync as renameSync3
 } from "fs";
-import { join as join20, dirname } from "path";
-import { homedir as homedir18 } from "os";
+import { join as join21, dirname as dirname2 } from "path";
+import { homedir as homedir19 } from "os";
 function readJson(path, fallback) {
   try {
-    return existsSync14(path) ? JSON.parse(readFileSync19(path, "utf8")) : fallback;
+    return existsSync15(path) ? JSON.parse(readFileSync20(path, "utf8")) : fallback;
   } catch {
     return fallback;
   }
 }
-function atomicWriteJson(path, obj) {
-  mkdirSync14(dirname(path), { recursive: true });
+function atomicWriteJson2(path, obj) {
+  mkdirSync15(dirname2(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync14(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
-  renameSync2(tmp, path);
+  writeFileSync15(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  renameSync3(tmp, path);
 }
 function titleCase(s) {
   return String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -12363,9 +12633,9 @@ function applySpinnerVerbs(ourVerbs, mode = "replace") {
   const userVerbs = existing && Array.isArray(existing.verbs) ? existing.verbs.filter((v) => !prevOurs.has(v)) : [];
   const newVerbs = [...verbs, ...userVerbs];
   settings.spinnerVerbs = { mode: mode === "append" ? "append" : "replace", verbs: newVerbs };
-  atomicWriteJson(CLAUDE_SETTINGS, settings);
+  atomicWriteJson2(CLAUDE_SETTINGS, settings);
   const st = readState();
-  atomicWriteJson(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
+  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
   return { applied: verbs.length, total: newVerbs.length };
 }
 function clearSpinnerVerbs() {
@@ -12383,11 +12653,11 @@ function clearSpinnerVerbs() {
     } else {
       delete settings.spinnerVerbs;
     }
-    atomicWriteJson(CLAUDE_SETTINGS, settings);
+    atomicWriteJson2(CLAUDE_SETTINGS, settings);
   }
   try {
     const st = readState();
-    atomicWriteJson(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
+    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
   } catch {
   }
   return { cleared: true, keptUserVerbs };
@@ -12476,9 +12746,9 @@ function applySpinnerTips(ourTips) {
   const userTips = existing.filter((t) => !prevOurs.has(t));
   settings.spinnerTipsEnabled = true;
   settings.spinnerTipsOverride = { excludeDefault: true, tips: [...tips, ...userTips] };
-  atomicWriteJson(CLAUDE_SETTINGS, settings);
+  atomicWriteJson2(CLAUDE_SETTINGS, settings);
   const st = readState();
-  atomicWriteJson(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
+  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
   return { applied: tips.length };
 }
 function clearSpinnerTips() {
@@ -12495,11 +12765,11 @@ function clearSpinnerTips() {
       delete settings.spinnerTipsOverride;
       delete settings.spinnerTipsEnabled;
     }
-    atomicWriteJson(CLAUDE_SETTINGS, settings);
+    atomicWriteJson2(CLAUDE_SETTINGS, settings);
   }
   try {
     const st = readState();
-    atomicWriteJson(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
+    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
   } catch {
   }
   return { cleared: true };
@@ -12508,10 +12778,10 @@ var TH_DIR, CLAUDE_SETTINGS, CONFIG_FILE3, SPINNER_STATE_FILE, SPINNER_DEFAULTS,
 var init_spinner = __esm({
   "bin/spinner.js"() {
     "use strict";
-    TH_DIR = process.env["TERMINALHIRE_DIR"] || join20(homedir18(), ".terminalhire");
-    CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join20(homedir18(), ".claude", "settings.json");
-    CONFIG_FILE3 = join20(TH_DIR, "config.json");
-    SPINNER_STATE_FILE = join20(TH_DIR, "spinner-state.json");
+    TH_DIR = process.env["TERMINALHIRE_DIR"] || join21(homedir19(), ".terminalhire");
+    CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join21(homedir19(), ".claude", "settings.json");
+    CONFIG_FILE3 = join21(TH_DIR, "config.json");
+    SPINNER_STATE_FILE = join21(TH_DIR, "spinner-state.json");
     SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
     VERB_INTROS = ["Matched:", "You\u2019d fit:", "Worth a look:", "On your radar:", "Fits your stack:"];
   }
@@ -12523,32 +12793,32 @@ __export(jpi_spinner_exports, {
   run: () => run15
 });
 import {
-  readFileSync as readFileSync20,
-  writeFileSync as writeFileSync15,
-  copyFileSync,
-  existsSync as existsSync15,
-  mkdirSync as mkdirSync15
+  readFileSync as readFileSync21,
+  writeFileSync as writeFileSync16,
+  copyFileSync as copyFileSync2,
+  existsSync as existsSync16,
+  mkdirSync as mkdirSync16
 } from "fs";
-import { join as join21 } from "path";
-import { homedir as homedir19 } from "os";
+import { join as join22 } from "path";
+import { homedir as homedir20 } from "os";
 import { createInterface as createInterface9 } from "readline";
 function readConfig2() {
   try {
-    return existsSync15(CONFIG_FILE4) ? JSON.parse(readFileSync20(CONFIG_FILE4, "utf8")) : {};
+    return existsSync16(CONFIG_FILE4) ? JSON.parse(readFileSync21(CONFIG_FILE4, "utf8")) : {};
   } catch {
     return {};
   }
 }
 function writeConfig2(patch) {
-  mkdirSync15(TH_DIR2, { recursive: true });
+  mkdirSync16(TH_DIR2, { recursive: true });
   const merged = { ...readConfig2(), ...patch };
-  writeFileSync15(CONFIG_FILE4, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  writeFileSync16(CONFIG_FILE4, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function backupSettings() {
-  if (!existsSync15(SETTINGS_PATH)) return null;
+  if (!existsSync16(SETTINGS_PATH)) return null;
   const ts = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
   const backupPath = `${SETTINGS_PATH}.terminalhire-backup-${ts}`;
-  copyFileSync(SETTINGS_PATH, backupPath);
+  copyFileSync2(SETTINGS_PATH, backupPath);
   return backupPath;
 }
 function ask(question) {
@@ -12562,7 +12832,7 @@ function ask(question) {
 }
 function readTopMatches() {
   try {
-    const c = JSON.parse(readFileSync20(CACHE_FILE, "utf8"));
+    const c = JSON.parse(readFileSync21(CACHE_FILE, "utf8"));
     return Array.isArray(c.topMatches) ? c.topMatches : [];
   } catch {
     return [];
@@ -12705,10 +12975,10 @@ var init_jpi_spinner = __esm({
   "bin/jpi-spinner.js"() {
     "use strict";
     init_spinner();
-    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join21(homedir19(), ".terminalhire");
-    CONFIG_FILE4 = join21(TH_DIR2, "config.json");
-    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join21(homedir19(), ".claude", "settings.json");
-    CACHE_FILE = join21(TH_DIR2, "index-cache.json");
+    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join22(homedir20(), ".terminalhire");
+    CONFIG_FILE4 = join22(TH_DIR2, "config.json");
+    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join22(homedir20(), ".claude", "settings.json");
+    CACHE_FILE = join22(TH_DIR2, "index-cache.json");
   }
 });
 
@@ -12717,9 +12987,9 @@ var jpi_sync_exports = {};
 __export(jpi_sync_exports, {
   run: () => run16
 });
-import { readFileSync as readFileSync21, writeFileSync as writeFileSync16, mkdirSync as mkdirSync16, existsSync as existsSync16, rmSync as rmSync4 } from "fs";
-import { join as join22 } from "path";
-import { homedir as homedir20, hostname as osHostname } from "os";
+import { readFileSync as readFileSync22, writeFileSync as writeFileSync17, mkdirSync as mkdirSync17, existsSync as existsSync17, rmSync as rmSync4 } from "fs";
+import { join as join23 } from "path";
+import { homedir as homedir21, hostname as osHostname } from "os";
 import { createInterface as createInterface10 } from "readline";
 function ask2(question) {
   const rl = createInterface10({ input: process.stdin, output: process.stdout });
@@ -12732,14 +13002,14 @@ function ask2(question) {
 }
 function readMarker() {
   try {
-    return existsSync16(TIER1_MARKER) ? JSON.parse(readFileSync21(TIER1_MARKER, "utf8")) : null;
+    return existsSync17(TIER1_MARKER) ? JSON.parse(readFileSync22(TIER1_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
 }
 function writeMarker(marker) {
-  mkdirSync16(TH_DIR3, { recursive: true });
-  writeFileSync16(TIER1_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  mkdirSync17(TH_DIR3, { recursive: true });
+  writeFileSync17(TIER1_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearMarker() {
   try {
@@ -13058,8 +13328,8 @@ var init_jpi_sync = __esm({
   "bin/jpi-sync.js"() {
     "use strict";
     init_open_url();
-    TH_DIR3 = process.env["TERMINALHIRE_DIR"] || join22(homedir20(), ".terminalhire");
-    TIER1_MARKER = join22(TH_DIR3, "tier1.json");
+    TH_DIR3 = process.env["TERMINALHIRE_DIR"] || join23(homedir21(), ".terminalhire");
+    TIER1_MARKER = join23(TH_DIR3, "tier1.json");
     API_URL5 = process.env["TERMINALHIRE_API_URL"] || process.env["JPI_API_URL"] || "https://terminalhire.com";
     SYNC_BASE = "https://www.terminalhire.com";
     POLL_INTERVAL_MS = 2e3;
@@ -13073,12 +13343,12 @@ var jpi_init_exports = {};
 __export(jpi_init_exports, {
   run: () => run17
 });
-import { existsSync as existsSync17 } from "fs";
-import { join as join23, resolve } from "path";
+import { existsSync as existsSync18 } from "fs";
+import { join as join24, resolve } from "path";
 import { fileURLToPath as fileURLToPath4 } from "url";
 import { createInterface as createInterface11 } from "readline";
 import { spawnSync, spawn as spawn2 } from "child_process";
-import { homedir as homedir21 } from "os";
+import { homedir as homedir22 } from "os";
 function ask3(question) {
   const rl = createInterface11({ input: process.stdin, output: process.stdout });
   return new Promise((resolve2) => {
@@ -13089,15 +13359,15 @@ function ask3(question) {
   });
 }
 function resolveScript(name) {
-  const distPath = resolve(join23(__dirname3, "..", "..", "dist", "bin", `${name}.js`));
-  const legacyPath = resolve(join23(__dirname3, `${name}.js`));
-  return existsSync17(distPath) ? distPath : legacyPath;
+  const distPath = resolve(join24(__dirname3, "..", "..", "dist", "bin", `${name}.js`));
+  const legacyPath = resolve(join24(__dirname3, `${name}.js`));
+  return existsSync18(distPath) ? distPath : legacyPath;
 }
 function resolveInstallJs() {
-  const fromDist = resolve(join23(__dirname3, "..", "..", "install.js"));
-  const fromBin = resolve(join23(__dirname3, "..", "install.js"));
-  if (existsSync17(fromDist)) return fromDist;
-  if (existsSync17(fromBin)) return fromBin;
+  const fromDist = resolve(join24(__dirname3, "..", "..", "install.js"));
+  const fromBin = resolve(join24(__dirname3, "..", "install.js"));
+  if (existsSync18(fromDist)) return fromDist;
+  if (existsSync18(fromBin)) return fromBin;
   return fromBin;
 }
 async function run17() {
@@ -13205,9 +13475,9 @@ var jpi_refresh_exports = {};
 __export(jpi_refresh_exports, {
   run: () => run18
 });
-import { readFileSync as readFileSync22, writeFileSync as writeFileSync17, existsSync as existsSync18, mkdirSync as mkdirSync17 } from "fs";
-import { join as join24 } from "path";
-import { homedir as homedir22 } from "os";
+import { readFileSync as readFileSync23, writeFileSync as writeFileSync18, existsSync as existsSync19, mkdirSync as mkdirSync18 } from "fs";
+import { join as join25 } from "path";
+import { homedir as homedir23 } from "os";
 import { fileURLToPath as fileURLToPath5 } from "url";
 async function run18() {
   try {
@@ -13346,7 +13616,7 @@ async function run18() {
       }
     } catch {
     }
-    mkdirSync17(TERMINALHIRE_DIR14, { recursive: true });
+    mkdirSync18(TERMINALHIRE_DIR15, { recursive: true });
     const cacheEntry = {
       ts: Date.now(),
       index,
@@ -13357,7 +13627,7 @@ async function run18() {
       unreadChat,
       sessionStale
     };
-    writeFileSync17(INDEX_CACHE_FILE6, JSON.stringify(cacheEntry), "utf8");
+    writeFileSync18(INDEX_CACHE_FILE6, JSON.stringify(cacheEntry), "utf8");
     try {
       const {
         readSpinnerConfig: readSpinnerConfig2,
@@ -13408,7 +13678,7 @@ async function run18() {
     process.exit(1);
   }
 }
-var GH_SESSION_COOKIE7, __dirname4, TERMINALHIRE_DIR14, INDEX_CACHE_FILE6, API_URL6;
+var GH_SESSION_COOKIE7, __dirname4, TERMINALHIRE_DIR15, INDEX_CACHE_FILE6, API_URL6;
 var init_jpi_refresh = __esm({
   "bin/jpi-refresh.js"() {
     "use strict";
@@ -13417,8 +13687,8 @@ var init_jpi_refresh = __esm({
     init_web_session();
     GH_SESSION_COOKIE7 = "__jpi_gh_session";
     __dirname4 = fileURLToPath5(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR14 = join24(homedir22(), ".terminalhire");
-    INDEX_CACHE_FILE6 = join24(TERMINALHIRE_DIR14, "index-cache.json");
+    TERMINALHIRE_DIR15 = join25(homedir23(), ".terminalhire");
+    INDEX_CACHE_FILE6 = join25(TERMINALHIRE_DIR15, "index-cache.json");
     API_URL6 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://www.terminalhire.com";
   }
 });
@@ -13428,14 +13698,14 @@ var jpi_save_exports = {};
 __export(jpi_save_exports, {
   run: () => run19
 });
-import { readFileSync as readFileSync23, existsSync as existsSync19 } from "fs";
-import { join as join25 } from "path";
-import { homedir as homedir23 } from "os";
+import { readFileSync as readFileSync24, existsSync as existsSync20 } from "fs";
+import { join as join26 } from "path";
+import { homedir as homedir24 } from "os";
 import { fileURLToPath as fileURLToPath6 } from "url";
 function findJobInCache(jobId) {
   try {
-    if (!existsSync19(INDEX_CACHE_FILE7)) return null;
-    const raw = readFileSync23(INDEX_CACHE_FILE7, "utf8");
+    if (!existsSync20(INDEX_CACHE_FILE7)) return null;
+    const raw = readFileSync24(INDEX_CACHE_FILE7, "utf8");
     const entry = JSON.parse(raw);
     const jobs = entry?.index?.jobs ?? [];
     return jobs.find((j) => j.id === jobId) ?? null;
@@ -13523,31 +13793,31 @@ async function run19() {
     process.exit(1);
   }
 }
-var __dirname5, TERMINALHIRE_DIR15, INDEX_CACHE_FILE7;
+var __dirname5, TERMINALHIRE_DIR16, INDEX_CACHE_FILE7;
 var init_jpi_save = __esm({
   "bin/jpi-save.js"() {
     "use strict";
     __dirname5 = fileURLToPath6(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR15 = join25(homedir23(), ".terminalhire");
-    INDEX_CACHE_FILE7 = join25(TERMINALHIRE_DIR15, "index-cache.json");
+    TERMINALHIRE_DIR16 = join26(homedir24(), ".terminalhire");
+    INDEX_CACHE_FILE7 = join26(TERMINALHIRE_DIR16, "index-cache.json");
   }
 });
 
 // bin/jpi-dispatch.js
 import { fileURLToPath as fileURLToPath7 } from "url";
-import { join as join26, dirname as dirname2 } from "path";
-import { existsSync as existsSync20, readFileSync as readFileSync24 } from "fs";
+import { join as join27, dirname as dirname3 } from "path";
+import { existsSync as existsSync21, readFileSync as readFileSync25 } from "fs";
 import { createRequire } from "module";
 var __dirname6 = fileURLToPath7(new URL(".", import.meta.url));
 function readPackageVersion() {
   try {
     const candidates = [
-      join26(__dirname6, "..", "..", "package.json"),
-      join26(__dirname6, "..", "package.json")
+      join27(__dirname6, "..", "..", "package.json"),
+      join27(__dirname6, "..", "package.json")
     ];
     for (const p of candidates) {
-      if (existsSync20(p)) {
-        const pkg = JSON.parse(readFileSync24(p, "utf8"));
+      if (existsSync21(p)) {
+        const pkg = JSON.parse(readFileSync25(p, "utf8"));
         if (pkg.version) return pkg.version;
       }
     }
@@ -13559,7 +13829,7 @@ var SUBCOMMANDS = ["jobs", "devs", "project", "bounties", "claim", "trajectory",
 var firstArg = process.argv[2];
 if (!firstArg && !process.stdin.isTTY) {
   const { default: childProcess } = await import("child_process");
-  const nudgeScript = join26(__dirname6, "jpi.js");
+  const nudgeScript = join27(__dirname6, "jpi.js");
   const child = childProcess.spawnSync(process.execPath, [nudgeScript], {
     stdio: ["inherit", "inherit", "inherit"]
   });
@@ -13590,7 +13860,11 @@ if (!firstArg || firstArg === "help" || firstArg === "--help" || firstArg === "-
   console.log("  terminalhire logout                         Clear stored GitHub token");
   console.log("  terminalhire jobs                           Fetch job index, match locally, browse roles");
   console.log("  terminalhire jobs --limit N                 Show top N results (default: 10)");
+  console.log("  terminalhire jobs --all                     Page through the WHOLE ranked list (not just the top 10)");
+  console.log("  terminalhire jobs --page N                  Show page N of the ranked list (page size = --limit)");
+  console.log("  terminalhire jobs --status <s>              Filter: applied|saved|dismissed|clicked|unactioned");
   console.log("  terminalhire jobs --remote-only             Filter to remote roles only");
+  console.log("  terminalhire jobs mark <id> <status>        Track your funnel locally: applied|saved|dismissed");
   console.log("  terminalhire devs                           Rank opted-in builders & projects locally (dev\u2194dev)");
   console.log("  terminalhire devs --as-project              Rank builders against your declared project (founder side)");
   console.log('  terminalhire project "<title>: <skills>"    Declare a project locally (never sent) to rank builders for');

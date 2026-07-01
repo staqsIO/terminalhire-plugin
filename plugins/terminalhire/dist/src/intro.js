@@ -756,6 +756,13 @@ var init_chatCrypto = __esm({
   }
 });
 
+// ../../packages/core/src/job-status.ts
+var init_job_status = __esm({
+  "../../packages/core/src/job-status.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/index.ts
 var init_src = __esm({
   "../../packages/core/src/index.ts"() {
@@ -770,6 +777,7 @@ var init_src = __esm({
     init_intro();
     init_directoryThreshold();
     init_chatCrypto();
+    init_job_status();
   }
 });
 

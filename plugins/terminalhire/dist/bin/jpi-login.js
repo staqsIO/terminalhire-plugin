@@ -6086,6 +6086,53 @@ var init_chatCrypto = __esm({
   }
 });
 
+// ../../packages/core/src/job-status.ts
+function recordClick(map, id) {
+  const prev = map[id];
+  if (prev?.clicked === true) return map;
+  return { ...map, [id]: { ...prev, clicked: true } };
+}
+function setStatus(map, id, s, markedAt = (/* @__PURE__ */ new Date()).toISOString()) {
+  const prev = map[id];
+  return { ...map, [id]: { ...prev, status: s, markedAt } };
+}
+function funnelCounts(map) {
+  const counts = { clicked: 0, applied: 0, saved: 0, dismissed: 0 };
+  for (const key of Object.keys(map)) {
+    const rec = map[key];
+    if (rec.clicked === true) counts.clicked++;
+    if (rec.status) counts[rec.status]++;
+  }
+  return counts;
+}
+function pageMatches(items, page, limit) {
+  const lim = Math.max(1, Math.floor(limit));
+  const total = items.length;
+  const totalPages = Math.max(1, Math.ceil(total / lim));
+  const clamped = Math.min(Math.max(1, Math.floor(page)), totalPages);
+  const start = (clamped - 1) * lim;
+  return {
+    items: items.slice(start, start + lim),
+    page: clamped,
+    limit: lim,
+    total,
+    totalPages,
+    hasPrev: clamped > 1,
+    hasNext: clamped < totalPages
+  };
+}
+function decorate(matches, statusMap) {
+  return matches.map((m) => {
+    const rec = statusMap[m.job.id];
+    return rec ? { ...m, jobStatus: rec } : { ...m };
+  });
+}
+var init_job_status = __esm({
+  "../../packages/core/src/job-status.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/index.ts
 var src_exports = {};
 __export(src_exports, {
@@ -6127,6 +6174,7 @@ __export(src_exports, {
   computeAcceptanceCredential: () => computeAcceptanceCredential,
   computeAcceptanceCredentialPublic: () => computeAcceptanceCredentialPublic,
   coreTagsFromTitle: () => coreTagsFromTitle,
+  decorate: () => decorate,
   decryptMessage: () => decryptMessage,
   deriveResumeTrend: () => deriveResumeTrend,
   deriveSharedKey: () => deriveSharedKey,
@@ -6137,6 +6185,7 @@ __export(src_exports, {
   fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
   fetchRepoRecency: () => fetchRepoRecency,
   flattenTiers: () => flattenTiers,
+  funnelCounts: () => funnelCounts,
   generateIdentityKeypair: () => generateIdentityKeypair,
   getBuyer: () => getBuyer,
   githubBounties: () => githubBounties,
@@ -6155,12 +6204,15 @@ __export(src_exports, {
   match: () => match,
   normalize: () => normalize,
   opire: () => opire,
+  pageMatches: () => pageMatches,
   passesMaturityGate: () => passesMaturityGate,
   personCardToJob: () => personCardToJob,
   projectCardToJob: () => projectCardToJob,
+  recordClick: () => recordClick,
   rejectExtraIntroFields: () => rejectExtraIntroFields,
   revealIntroContacts: () => revealIntroContacts,
   safetyNumber: () => safetyNumber,
+  setStatus: () => setStatus,
   tokenize: () => tokenize,
   validateGraph: () => validateGraph,
   validateIntroPayload: () => validateIntroPayload,
@@ -6181,6 +6233,7 @@ var init_src = __esm({
     init_intro();
     init_directoryThreshold();
     init_chatCrypto();
+    init_job_status();
   }
 });
 

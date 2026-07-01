@@ -5840,6 +5840,53 @@ var init_chatCrypto = __esm({
   }
 });
 
+// ../../packages/core/src/job-status.ts
+function recordClick(map, id) {
+  const prev = map[id];
+  if (prev?.clicked === true) return map;
+  return { ...map, [id]: { ...prev, clicked: true } };
+}
+function setStatus(map, id, s, markedAt = (/* @__PURE__ */ new Date()).toISOString()) {
+  const prev = map[id];
+  return { ...map, [id]: { ...prev, status: s, markedAt } };
+}
+function funnelCounts(map) {
+  const counts = { clicked: 0, applied: 0, saved: 0, dismissed: 0 };
+  for (const key of Object.keys(map)) {
+    const rec = map[key];
+    if (rec.clicked === true) counts.clicked++;
+    if (rec.status) counts[rec.status]++;
+  }
+  return counts;
+}
+function pageMatches(items, page, limit) {
+  const lim = Math.max(1, Math.floor(limit));
+  const total = items.length;
+  const totalPages = Math.max(1, Math.ceil(total / lim));
+  const clamped = Math.min(Math.max(1, Math.floor(page)), totalPages);
+  const start = (clamped - 1) * lim;
+  return {
+    items: items.slice(start, start + lim),
+    page: clamped,
+    limit: lim,
+    total,
+    totalPages,
+    hasPrev: clamped > 1,
+    hasNext: clamped < totalPages
+  };
+}
+function decorate(matches, statusMap) {
+  return matches.map((m) => {
+    const rec = statusMap[m.job.id];
+    return rec ? { ...m, jobStatus: rec } : { ...m };
+  });
+}
+var init_job_status = __esm({
+  "../../packages/core/src/job-status.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/index.ts
 var src_exports = {};
 __export(src_exports, {
@@ -5881,6 +5928,7 @@ __export(src_exports, {
   computeAcceptanceCredential: () => computeAcceptanceCredential,
   computeAcceptanceCredentialPublic: () => computeAcceptanceCredentialPublic,
   coreTagsFromTitle: () => coreTagsFromTitle,
+  decorate: () => decorate,
   decryptMessage: () => decryptMessage,
   deriveResumeTrend: () => deriveResumeTrend,
   deriveSharedKey: () => deriveSharedKey,
@@ -5891,6 +5939,7 @@ __export(src_exports, {
   fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
   fetchRepoRecency: () => fetchRepoRecency,
   flattenTiers: () => flattenTiers,
+  funnelCounts: () => funnelCounts,
   generateIdentityKeypair: () => generateIdentityKeypair,
   getBuyer: () => getBuyer,
   githubBounties: () => githubBounties,
@@ -5909,12 +5958,15 @@ __export(src_exports, {
   match: () => match,
   normalize: () => normalize,
   opire: () => opire,
+  pageMatches: () => pageMatches,
   passesMaturityGate: () => passesMaturityGate,
   personCardToJob: () => personCardToJob,
   projectCardToJob: () => projectCardToJob,
+  recordClick: () => recordClick,
   rejectExtraIntroFields: () => rejectExtraIntroFields,
   revealIntroContacts: () => revealIntroContacts,
   safetyNumber: () => safetyNumber,
+  setStatus: () => setStatus,
   tokenize: () => tokenize,
   validateGraph: () => validateGraph,
   validateIntroPayload: () => validateIntroPayload,
@@ -5935,6 +5987,7 @@ var init_src = __esm({
     init_intro();
     init_directoryThreshold();
     init_chatCrypto();
+    init_job_status();
   }
 });
 
@@ -5958,13 +6011,13 @@ import {
   randomBytes as randomBytes3
 } from "crypto";
 import {
-  readFileSync as readFileSync2,
-  writeFileSync,
-  mkdirSync,
-  existsSync
+  readFileSync as readFileSync3,
+  writeFileSync as writeFileSync2,
+  mkdirSync as mkdirSync2,
+  existsSync as existsSync2
 } from "fs";
-import { join as join2 } from "path";
-import { homedir } from "os";
+import { join as join3 } from "path";
+import { homedir as homedir2 } from "os";
 async function loadKey() {
   try {
     const kt = await import("keytar");
@@ -5977,12 +6030,12 @@ async function loadKey() {
     return key2;
   } catch {
   }
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
-  if (existsSync(KEY_FILE)) {
-    return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");
+  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
+  if (existsSync2(KEY_FILE)) {
+    return Buffer.from(readFileSync3(KEY_FILE, "utf8").trim(), "hex");
   }
   const key = randomBytes3(KEY_BYTES);
-  writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  writeFileSync2(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
   return key;
 }
 function encrypt(plaintext, key) {
@@ -6040,10 +6093,10 @@ function migrateTagWeights(profile) {
   }
 }
 async function readProfile() {
-  if (!existsSync(PROFILE_FILE)) return blankProfile();
+  if (!existsSync2(PROFILE_FILE)) return blankProfile();
   try {
     const key = await loadKey();
-    const raw = readFileSync2(PROFILE_FILE, "utf8");
+    const raw = readFileSync3(PROFILE_FILE, "utf8");
     const blob = JSON.parse(raw);
     const plaintext = decrypt(blob, key);
     const parsed = JSON.parse(plaintext);
@@ -6054,12 +6107,12 @@ async function readProfile() {
   }
 }
 async function writeProfile(profile) {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
   const key = await loadKey();
   profile.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
   profile.skillTags = deriveSkillTags(profile.tagWeights);
   const blob = encrypt(JSON.stringify(profile), key);
-  writeFileSync(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+  writeFileSync2(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 function accumulateSession(profile, tags, isEmployerContext, inferredSeniority, seniorityIsAuthoritative = false) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -6143,14 +6196,14 @@ function profileToFingerprint(profile) {
     }
   };
 }
-var TERMINALHIRE_DIR, PROFILE_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var TERMINALHIRE_DIR2, PROFILE_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
 var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
     init_src();
-    TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");
-    PROFILE_FILE = join2(TERMINALHIRE_DIR, "profile.enc");
-    KEY_FILE = join2(TERMINALHIRE_DIR, "key");
+    TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
+    PROFILE_FILE = join3(TERMINALHIRE_DIR2, "profile.enc");
+    KEY_FILE = join3(TERMINALHIRE_DIR2, "key");
     ALGO = "aes-256-gcm";
     KEY_BYTES = 32;
     IV_BYTES = 12;
@@ -6179,14 +6232,122 @@ var init_profile = __esm({
 });
 
 // bin/jpi-jobs.js
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, existsSync as existsSync2 } from "fs";
-import { join as join3 } from "path";
-import { homedir as homedir2 } from "os";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync as existsSync3 } from "fs";
+import { join as join4 } from "path";
+import { homedir as homedir3 } from "os";
 import { createInterface } from "readline";
 import { fileURLToPath as fileURLToPath2 } from "url";
+
+// bin/job-status-store.js
+init_src();
+import {
+  readFileSync as readFileSync2,
+  writeFileSync,
+  renameSync,
+  mkdirSync,
+  existsSync,
+  copyFileSync,
+  openSync,
+  closeSync,
+  unlinkSync
+} from "fs";
+import { join as join2, dirname } from "path";
+import { homedir } from "os";
+var TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");
+var STATUS_FILE = join2(TERMINALHIRE_DIR, "job-status.json");
+var LOCK_FILE = `${STATUS_FILE}.lock`;
+var BAK_FILE = `${STATUS_FILE}.bak`;
+function atomicWriteJson(path, obj) {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  renameSync(tmp, path);
+}
+function sleepMs(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+    }
+  }
+}
+function withLock(fn) {
+  const deadline = Date.now() + 2e3;
+  for (; ; ) {
+    let fd;
+    try {
+      mkdirSync(dirname(LOCK_FILE), { recursive: true });
+      fd = openSync(LOCK_FILE, "wx");
+    } catch (err) {
+      if (err && err.code === "EEXIST") {
+        if (Date.now() > deadline) {
+          try {
+            unlinkSync(LOCK_FILE);
+          } catch {
+          }
+          continue;
+        }
+        sleepMs(5);
+        continue;
+      }
+      throw err;
+    }
+    try {
+      return fn();
+    } finally {
+      try {
+        closeSync(fd);
+      } catch {
+      }
+      try {
+        unlinkSync(LOCK_FILE);
+      } catch {
+      }
+    }
+  }
+}
+function readStatusMap() {
+  if (!existsSync(STATUS_FILE)) return {};
+  let raw;
+  try {
+    raw = readFileSync2(STATUS_FILE, "utf8");
+  } catch {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    throw new Error("status store is not an object");
+  } catch {
+    try {
+      copyFileSync(STATUS_FILE, BAK_FILE);
+    } catch {
+    }
+    return {};
+  }
+}
+function markStatus(id, status) {
+  return withLock(() => {
+    const current = readStatusMap();
+    const next = setStatus(current, id, status);
+    atomicWriteJson(STATUS_FILE, next);
+    return next[id];
+  });
+}
+function markClicked(id) {
+  return withLock(() => {
+    const current = readStatusMap();
+    const next = recordClick(current, id);
+    atomicWriteJson(STATUS_FILE, next);
+    return next[id];
+  });
+}
+
+// bin/jpi-jobs.js
 var __dirname = fileURLToPath2(new URL(".", import.meta.url));
-var TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
-var INDEX_CACHE_FILE = join3(TERMINALHIRE_DIR2, "index-cache.json");
+var TERMINALHIRE_DIR3 = join4(homedir3(), ".terminalhire");
+var INDEX_CACHE_FILE = join4(TERMINALHIRE_DIR3, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
 var DEFAULT_LIMIT = 10;
@@ -6195,9 +6356,47 @@ var limitArg = args.indexOf("--limit");
 var LIMIT = limitArg !== -1 ? parseInt(args[limitArg + 1] ?? "10", 10) : DEFAULT_LIMIT;
 var REMOTE_ONLY = args.includes("--remote-only");
 var SHOW_ALL = args.includes("--all");
+var pageArg = args.indexOf("--page");
+var PAGE = pageArg !== -1 ? parseInt(args[pageArg + 1] ?? "1", 10) : null;
+var statusArg = args.indexOf("--status");
+var STATUS_FILTER = statusArg !== -1 ? args[statusArg + 1] ?? "" : null;
+var VALID_STATUS_FILTERS = ["applied", "saved", "dismissed", "clicked", "unactioned"];
+function applyStatusView(decorated, filter) {
+  if (!filter) return decorated.filter((d) => d.jobStatus?.status !== "dismissed");
+  switch (filter) {
+    case "applied":
+    case "saved":
+    case "dismissed":
+      return decorated.filter((d) => d.jobStatus?.status === filter);
+    case "clicked":
+      return decorated.filter((d) => d.jobStatus?.clicked === true);
+    case "unactioned":
+      return decorated.filter(
+        (d) => !d.jobStatus || !d.jobStatus.clicked && !d.jobStatus.status
+      );
+    default:
+      return decorated;
+  }
+}
+function statusLabel(rec) {
+  if (!rec) return "";
+  if (rec.status) return ` [${rec.status}]`;
+  if (rec.clicked) return " [clicked]";
+  return "";
+}
+function appliedThisWeek(statusMap, now = Date.now()) {
+  const weekAgo = now - 7 * 24 * 60 * 60 * 1e3;
+  let n = 0;
+  for (const rec of Object.values(statusMap)) {
+    if (rec && rec.status === "applied" && rec.markedAt && Date.parse(rec.markedAt) >= weekAgo) {
+      n++;
+    }
+  }
+  return n;
+}
 function readIndexCache() {
   try {
-    const raw = readFileSync3(INDEX_CACHE_FILE, "utf8");
+    const raw = readFileSync4(INDEX_CACHE_FILE, "utf8");
     const entry = JSON.parse(raw);
     if (Date.now() - entry.ts < INDEX_TTL_MS) return entry.index;
     return null;
@@ -6206,8 +6405,8 @@ function readIndexCache() {
   }
 }
 function writeIndexCache(index) {
-  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
-  writeFileSync2(INDEX_CACHE_FILE, JSON.stringify({ ts: Date.now(), index }), "utf8");
+  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
+  writeFileSync3(INDEX_CACHE_FILE, JSON.stringify({ ts: Date.now(), index }), "utf8");
 }
 async function fetchIndex() {
   const cached = readIndexCache();
@@ -6302,8 +6501,9 @@ function printResult(i, result) {
   const compStr = comp ? ` \xB7 ${comp}` : "";
   const mode = job.applyMode === "buyer-lead" ? " [COASTAL LEAD]" : "";
   const titleStr = linkTitle(job.title, job.url);
+  const label = statusLabel(result.jobStatus);
   console.log(`
-${i + 1}. ${titleStr} \u2014 ${job.company}${mode}`);
+${i + 1}. ${titleStr} \u2014 ${job.company}${mode}${label}`);
   console.log(`   id: ${job.id}`);
   console.log(`   ${remote}${compStr} \xB7 ${job.roleType} \xB7 score: ${formatScore(score)}`);
   console.log(`   ${reason}`);
@@ -6346,10 +6546,39 @@ async function handleBuyerLead(job, profile) {
   }
   console.log("Lead sent. Coastal Recruiting LLC will be in touch if there is a match.");
 }
+function handleMark() {
+  const id = args[1];
+  const status = args[2];
+  const VALID = ["applied", "saved", "dismissed"];
+  if (!id || !id.includes(":")) {
+    console.error(
+      "terminalhire jobs mark: expected a job id like 'greenhouse:acme-123' (shown as `id:` in `jobs` output)."
+    );
+    process.exit(1);
+  }
+  if (!VALID.includes(status)) {
+    console.error(
+      `terminalhire jobs mark: status must be one of ${VALID.join(", ")} (got '${status ?? ""}').`
+    );
+    process.exit(1);
+  }
+  markStatus(id, status);
+  console.log(`Marked ${id} as ${status}.`);
+}
 async function run() {
   try {
+    if (args[0] === "mark") {
+      handleMark();
+      return;
+    }
+    if (STATUS_FILTER !== null && !VALID_STATUS_FILTERS.includes(STATUS_FILTER)) {
+      console.error(
+        `terminalhire jobs: --status must be one of ${VALID_STATUS_FILTERS.join(", ")} (got '${STATUS_FILTER}').`
+      );
+      process.exit(1);
+    }
     const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-    const { match: match2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+    const { match: match2, decorate: decorate2, pageMatches: pageMatches2, funnelCounts: funnelCounts2 } = await Promise.resolve().then(() => (init_src(), src_exports));
     const profile = await readProfile2();
     if (profile.skillTags.length === 0) {
       console.log("\u2726 terminalhire jobs: no skill tags in local profile yet.");
@@ -6368,26 +6597,54 @@ async function run() {
     }
     const fp = profileToFingerprint2(profile);
     if (REMOTE_ONLY) fp.prefs = { ...fp.prefs, remoteOnly: true };
-    const results = match2(fp, jobs, SHOW_ALL ? jobs.length : LIMIT, Date.now(), {
+    const ranked = match2(fp, jobs, jobs.length, Date.now(), {
       acceptance: profile.acceptance
     });
     try {
-      const cacheRaw = readFileSync3(INDEX_CACHE_FILE, "utf8");
+      const cacheRaw = readFileSync4(INDEX_CACHE_FILE, "utf8");
       const cacheEntry = JSON.parse(cacheRaw);
-      cacheEntry.matchCount = results.length;
-      writeFileSync2(INDEX_CACHE_FILE, JSON.stringify(cacheEntry), "utf8");
+      cacheEntry.matchCount = ranked.length;
+      writeFileSync3(INDEX_CACHE_FILE, JSON.stringify(cacheEntry), "utf8");
     } catch {
     }
-    if (results.length === 0) {
+    if (ranked.length === 0) {
       console.log("No matching roles found for your current profile.");
       console.log("  Your tags: " + profile.skillTags.join(", "));
       return;
     }
-    console.log(`
-\u2726 ${results.length} role${results.length === 1 ? "" : "s"} matching your profile (local match \u2014 no data sent)
-`);
-    for (let i = 0; i < results.length; i++) {
-      printResult(i, results[i]);
+    const statusMap = readStatusMap();
+    const decorated = decorate2(ranked, statusMap);
+    const view = applyStatusView(decorated, STATUS_FILTER);
+    const pageSize = SHOW_ALL ? Math.max(1, view.length) : LIMIT;
+    const pageNum = SHOW_ALL ? 1 : PAGE ?? 1;
+    const pageInfo = pageMatches2(view, pageNum, pageSize);
+    const shown = pageInfo.items;
+    const filterNote = STATUS_FILTER ? ` (--status ${STATUS_FILTER})` : "";
+    console.log(
+      `
+\u2726 ${ranked.length} role${ranked.length === 1 ? "" : "s"} matching your profile (local match \u2014 no data sent)${filterNote}
+`
+    );
+    if (shown.length === 0) {
+      console.log(
+        STATUS_FILTER ? `  No roles with status "${STATUS_FILTER}".` : "  Nothing to show on this page."
+      );
+    }
+    for (let i = 0; i < shown.length; i++) {
+      printResult((pageInfo.page - 1) * pageInfo.limit + i, shown[i]);
+    }
+    if (pageInfo.hasNext) {
+      console.log(
+        `
+\u2026 page ${pageInfo.page}/${pageInfo.totalPages} \u2014 next: terminalhire jobs --page ${pageInfo.page + 1}${STATUS_FILTER ? " --status " + STATUS_FILTER : ""}  (or --all for the whole list)`
+      );
+    }
+    const counts = funnelCounts2(statusMap);
+    if (counts.applied + counts.saved + counts.dismissed + counts.clicked > 0) {
+      console.log(
+        `
+\u{1F4CA} Funnel (local only): applied ${appliedThisWeek(statusMap)} this week \xB7 ${counts.applied} applied \xB7 ${counts.saved} saved \xB7 ${counts.clicked} clicked \xB7 ${counts.dismissed} dismissed`
+      );
     }
     if (bountyCount > 0) {
       console.log(
@@ -6399,19 +6656,23 @@ async function run() {
       return;
     }
     console.log("\n" + "\u2500".repeat(70));
+    console.log("  Tip: terminalhire jobs mark <id> applied|saved|dismissed  to track your funnel.");
     const pick = await prompt(
       `
 Enter a number to act on a role, or press Enter to exit: `
     );
-    const idx = parseInt(pick, 10) - 1;
-    if (isNaN(idx) || idx < 0 || idx >= results.length) {
+    const absIdx = parseInt(pick, 10) - 1;
+    const localIdx = absIdx - (pageInfo.page - 1) * pageInfo.limit;
+    if (isNaN(absIdx) || localIdx < 0 || localIdx >= shown.length) {
       return;
     }
-    const chosen = results[idx];
+    const chosen = shown[localIdx];
     if (chosen.job.applyMode === "direct") {
+      markClicked(chosen.job.id);
       console.log(`
 Open this URL to apply directly (no data shared):
   ${chosen.job.url}`);
+      console.log(`  (marked "clicked" locally \u2014 mark it applied with: terminalhire jobs mark ${chosen.job.id} applied)`);
     } else if (chosen.job.applyMode === "buyer-lead") {
       await handleBuyerLead(chosen.job, profile);
     }
@@ -6421,7 +6682,11 @@ Open this URL to apply directly (no data shared):
   }
 }
 export {
-  run
+  VALID_STATUS_FILTERS,
+  appliedThisWeek,
+  applyStatusView,
+  run,
+  statusLabel
 };
 /*! Bundled license information:
 
