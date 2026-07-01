@@ -13351,6 +13351,13 @@ function resolveInstallJs() {
   if (existsSync18(fromBin)) return fromBin;
   return fromBin;
 }
+function resolveStatuslineInstallJs() {
+  const fromDist = resolve(join24(__dirname3, "..", "..", "statusline-install.js"));
+  const fromBin = resolve(join24(__dirname3, "..", "statusline-install.js"));
+  if (existsSync18(fromDist)) return fromDist;
+  if (existsSync18(fromBin)) return fromBin;
+  return fromBin;
+}
 async function run17() {
   console.log("");
   console.log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
@@ -13363,10 +13370,12 @@ async function run17() {
   console.log("  2. Seed your local job cache (anonymous index download)");
   console.log("  3. Enable the ambient spinner job surface in ~/.claude/settings.json");
   console.log("     (with backup + your explicit consent before any file is touched)");
+  console.log("  4. Optionally show connection notifications in your statusLine");
+  console.log("     (\u{1F4AC} unread + intro requests only \u2014 never job ads; separate consent)");
   console.log("");
   console.log('You can stop at any step. Nothing is changed until you say "yes".');
   console.log("");
-  console.log("Step 1/3 \u2014 GitHub sign-in (optional but recommended)");
+  console.log("Step 1/4 \u2014 GitHub sign-in (optional but recommended)");
   console.log("");
   console.log("  Scope: read:user \u2014 public profile + public repos only.");
   console.log("  Your token is encrypted at ~/.terminalhire/github-token.enc.");
@@ -13394,7 +13403,7 @@ async function run17() {
     console.log("  Sign in any time with: terminalhire login");
   }
   console.log("");
-  console.log("Step 2/3 \u2014 Seeding local job cache");
+  console.log("Step 2/4 \u2014 Seeding local job cache");
   console.log("");
   console.log("  Fetching anonymous job index (no dev data sent)...");
   const jobsScript = resolveScript("jpi-jobs");
@@ -13414,7 +13423,7 @@ async function run17() {
     console.log("  Run `terminalhire jobs` after a few Claude Code sessions to populate it.");
   }
   console.log("");
-  console.log("Step 3/3 \u2014 Enable the ambient spinner job surface in ~/.claude/settings.json");
+  console.log("Step 3/4 \u2014 Enable the ambient spinner job surface in ~/.claude/settings.json");
   console.log("");
   console.log("  This is the only step that modifies a system file.");
   console.log("  A timestamped backup is created before any change.");
@@ -13428,6 +13437,24 @@ async function run17() {
   if (installChild.status !== 0) {
     console.log("");
     console.log("  Hook installation did not complete. Run manually: node install.js");
+  }
+  console.log("");
+  console.log("Step 4/4 \u2014 Connection notifications in your statusLine (optional)");
+  console.log("");
+  console.log("  A statusLine that shows ONLY personal connection signals \u2014 \u{1F4AC} unread");
+  console.log("  messages and inbound intro requests. Never job ads (those stay in the");
+  console.log("  spinner). Local cache read, zero network. Separate consent + backup;");
+  console.log("  it stays current across plugin updates and preserves any existing");
+  console.log("  statusLine you have. Remove any time: node statusline-install.js --uninstall");
+  console.log("");
+  const statuslineInstallJs = resolveStatuslineInstallJs();
+  const statuslineChild = spawnSync(process.execPath, [statuslineInstallJs], {
+    stdio: ["inherit", "inherit", "inherit"],
+    env: process.env
+  });
+  if (statuslineChild.status !== 0) {
+    console.log("");
+    console.log("  statusLine setup did not complete. Run manually: node statusline-install.js");
   }
   console.log("");
   console.log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");

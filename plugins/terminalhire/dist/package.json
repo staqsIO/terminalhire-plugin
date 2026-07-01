@@ -1,6 +1,6 @@
 {
   "name": "terminalhire",
-  "version": "0.11.1",
+  "version": "0.12.0",
   "description": "Local-first job matching for developers — ambient job matches in the Claude Code spinner. Matching runs on your machine; your profile never leaves it.",
   "repository": {
     "type": "git",
@@ -22,13 +22,14 @@
     "dist",
     "fixtures",
     "install.js",
+    "statusline-install.js",
     "postinstall.js",
     "README.md"
   ],
   "scripts": {
     "test": "for f in test/*.test.js; do echo \"# $f\"; node \"$f\" || exit 1; done",
     "build": "tsup",
-    "bundle:plugin": "npm run build && rm -rf ../../plugins/terminalhire/dist && cp -R dist ../../plugins/terminalhire/dist && cp package.json ../../plugins/terminalhire/dist/package.json && cp install.js ../../plugins/terminalhire/dist/install.js && cp postinstall.js ../../plugins/terminalhire/dist/postinstall.js",
+    "bundle:plugin": "npm run build && rm -rf ../../plugins/terminalhire/dist && cp -R dist ../../plugins/terminalhire/dist && cp package.json ../../plugins/terminalhire/dist/package.json && cp install.js ../../plugins/terminalhire/dist/install.js && cp statusline-install.js ../../plugins/terminalhire/dist/statusline-install.js && cp postinstall.js ../../plugins/terminalhire/dist/postinstall.js",
     "prepublishOnly": "npm run build",
     "install-hook": "node install.js",
     "postinstall": "node ./postinstall.js"
