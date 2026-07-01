@@ -4278,6 +4278,35 @@ async function defaultListPendingInvites(deps = {}) {
   const invites = listed.intros.filter((it) => it && it.role === "incoming" && it.status === "pending" && it.counterpartyLogin).map((it) => ({ login: it.counterpartyLogin }));
   return { status: "ok", invites };
 }
+function relativeTime(then, now = /* @__PURE__ */ new Date()) {
+  const t = new Date(then).getTime();
+  if (Number.isNaN(t)) return "";
+  const deltaMs = Math.max(0, now.getTime() - t);
+  const sec = Math.floor(deltaMs / 1e3);
+  if (sec < 60) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${Math.max(1, min)}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}d ago`;
+  const wk = Math.floor(day / 7);
+  if (wk < 5) return `${wk}w ago`;
+  return "a while ago";
+}
+function formatPresence(presence, now = /* @__PURE__ */ new Date()) {
+  if (!presence) return "\u25CB not on chat yet";
+  const share = presence.shareActivity === true;
+  const seenMs = share && presence.lastSeen ? new Date(presence.lastSeen).getTime() : NaN;
+  const hasSeen = !Number.isNaN(seenMs);
+  const fresh = hasSeen && now.getTime() - seenMs <= ACTIVE_WINDOW_MS;
+  if (share && presence.optin === true && fresh) return "\u25CF active now";
+  if (share && hasSeen) {
+    const rel = relativeTime(presence.lastSeen, now);
+    return rel ? `\u25D0 reachable \xB7 seen ${rel}` : "\u25D0 reachable";
+  }
+  return "\u25D0 reachable";
+}
 var CHAT_BASE2, GH_SESSION_COOKIE2, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, ACTIVE_WINDOW_MS;
 var init_jpi_chat = __esm({
   "bin/jpi-chat.js"() {
@@ -4404,7 +4433,7 @@ function renderInbox(items, invites = []) {
     lines.push("  (no accepted connections yet \u2014 request one: terminalhire intro <login>)");
   } else {
     for (const it of items) {
-      const dot = it.online ? "\u25CF" : "\u25CB";
+      const dot = formatPresence(it.presence).charAt(0);
       const unread = it.unread > 0 ? `\u2709 ${it.unread}` : "\u2014";
       const login = `@${sanitizeLine(it.login)}`;
       const stamp = sanitizeLine(it.lastStamp || "");
@@ -4419,13 +4448,12 @@ function renderInbox(items, invites = []) {
   return lines.join("\n") + "\n";
 }
 function renderThread(state) {
-  const { peerLogin, online, safety, messages, total } = state;
+  const { peerLogin, presence, safety, messages, total } = state;
   const safePeer = sanitizeLine(peerLogin);
-  const dot = online ? "\u25CF" : "\u25CB";
-  const presence = online ? "online" : "offline";
+  const status = formatPresence(presence);
   const lines = [];
   lines.push(
-    `  @${safePeer}  ${dot} ${presence}` + (safety ? `  \xB7 safety# ${sanitizeLine(safety)}` : "")
+    `  @${safePeer}  ${status}` + (safety ? `  \xB7 safety# ${sanitizeLine(safety)}` : "")
   );
   lines.push("  " + "\u2500".repeat(64));
   if (!messages || messages.length === 0) {
@@ -4475,21 +4503,6 @@ function writeProblem(output, result, target) {
       return "error";
   }
 }
-async function readPresence(client, peerLogin) {
-  if (typeof client.getPeerPresence !== "function") return false;
-  try {
-    return await client.getPeerPresence(peerLogin) != null;
-  } catch {
-    return false;
-  }
-}
-async function clearPresence(client) {
-  if (typeof client.heartbeat !== "function") return;
-  try {
-    await client.heartbeat(false);
-  } catch {
-  }
-}
 async function gateDisclosure(ensureDisclosure, input, output) {
   const ack = await ensureDisclosure({ input, output });
   if (!ack.acknowledged) {
@@ -4537,16 +4550,14 @@ async function runInbox(opts = {}) {
       (m) => m.senderLogin === conn.peerLogin && (!cursor || m.createdAt > cursor)
     ).length;
     const last = messages.length > 0 ? messages[messages.length - 1] : null;
-    const online = await readPresence(client, conn.peerLogin);
     items.push({
       login: conn.peerLogin,
-      online,
+      presence: REACHABLE_DISPLAY,
       unread,
       lastStamp: last ? formatStamp(last.createdAt) : "",
       preview: last ? last.plaintext : ""
     });
   }
-  await clearPresence(client);
   output.write(renderInbox(items, invites));
   return { ok: true, count: items.length, invites: invites.length };
 }
@@ -4589,7 +4600,6 @@ async function runReadThread(opts = {}) {
   }
   const total = messages.length;
   const shownMessages = all ? messages : messages.slice(Math.max(0, total - limit));
-  const online = await readPresence(client, peerLogin);
   let safety = "";
   if (typeof client.getSafetyNumber === "function") {
     try {
@@ -4598,8 +4608,7 @@ async function runReadThread(opts = {}) {
       safety = "";
     }
   }
-  await clearPresence(client);
-  output.write(renderThread({ peerLogin, online, safety, messages: shownMessages, total }));
+  output.write(renderThread({ peerLogin, presence: REACHABLE_DISPLAY, safety, messages: shownMessages, total }));
   if (total > 0) {
     const newest = messages[total - 1];
     if (newest && newest.createdAt) {
@@ -4672,7 +4681,7 @@ async function runSend(opts = {}) {
   );
   return { ok: true };
 }
-var CHAT_BASE3, GH_SESSION_COOKIE3, TERMINALHIRE_DIR5, READS_FILE, INDEX_CACHE_FILE;
+var CHAT_BASE3, GH_SESSION_COOKIE3, TERMINALHIRE_DIR5, READS_FILE, INDEX_CACHE_FILE, REACHABLE_DISPLAY;
 var init_jpi_chat_read = __esm({
   "bin/jpi-chat-read.js"() {
     init_chat_client();
@@ -4683,6 +4692,7 @@ var init_jpi_chat_read = __esm({
     TERMINALHIRE_DIR5 = join8(homedir7(), ".terminalhire");
     READS_FILE = join8(TERMINALHIRE_DIR5, "chat-reads.json");
     INDEX_CACHE_FILE = join8(TERMINALHIRE_DIR5, "index-cache.json");
+    REACHABLE_DISPLAY = { shareActivity: false, optin: false, lastSeen: null };
   }
 });
 init_jpi_chat_read();
