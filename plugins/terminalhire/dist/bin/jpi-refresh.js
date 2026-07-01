@@ -6449,6 +6449,7 @@ __export(spinner_exports, {
   buildContextVerbs: () => buildContextVerbs,
   buildIncomingIntroLine: () => buildIncomingIntroLine,
   buildPeerLine: () => buildPeerLine,
+  buildSessionStaleLine: () => buildSessionStaleLine,
   buildSpinnerPool: () => buildSpinnerPool,
   buildTips: () => buildTips,
   clearSpinnerTips: () => clearSpinnerTips,
@@ -6575,20 +6576,25 @@ function buildIncomingIntroLine(incomingPending) {
   if (n < 1) return null;
   return n === 1 ? `\u2198 someone wants to connect \xB7 terminalhire intro --list` : `\u2198 ${n} people want to connect \xB7 terminalhire intro --list`;
 }
+function buildSessionStaleLine(sessionStale) {
+  return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
+}
 function buildSpinnerPool(topMatches, max = 6, opts = {}) {
-  const { sessionTags, frequency = "always", topPeers, incomingPending } = opts;
+  const { sessionTags, frequency = "always", topPeers, incomingPending, sessionStale } = opts;
+  const staleLine = buildSessionStaleLine(sessionStale);
+  const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
   const introLine = buildIncomingIntroLine(incomingPending);
   const ranked = rankBySessionTags(topMatches, sessionTags);
   if (!Array.isArray(ranked) || ranked.length === 0) {
-    if (introLine) return [introLine];
+    if (introLine) return withStale([introLine]);
     const peerLine = buildPeerLine(topPeers);
-    return peerLine ? [peerLine] : [];
+    return withStale(peerLine ? [peerLine] : []);
   }
   const headers = buildContextVerbs(ranked, sessionTags);
   const cap = Math.max(1, verbCountForFrequency(frequency, headers.length));
   const pool = [...headers.slice(0, cap), ctaVerb()];
   if (introLine) pool.push(introLine);
-  return pool;
+  return withStale(pool);
 }
 function readState() {
   return readJson(SPINNER_STATE_FILE, { verbs: [], mode: "replace" });
@@ -6927,6 +6933,7 @@ var DEFAULT_CONFIG = {
   peerConnectPrompted: false,
   resumePublishPrompted: false,
   chatDisclosureAck: false,
+  chatShareActivity: false,
   inboundNudgeMuted: false,
   inboundNudgeDisclosed: false
 };
@@ -7153,7 +7160,7 @@ async function run() {
         } catch {
         }
         const ranked = rankBySessionTags2(topMatches, sessionTags);
-        const verbs = buildSpinnerPool2(ranked, sc.max, { sessionTags, frequency: sc.frequency, topPeers, incomingPending });
+        const verbs = buildSpinnerPool2(ranked, sc.max, { sessionTags, frequency: sc.frequency, topPeers, incomingPending, sessionStale });
         if (verbs.length > 0) applySpinnerVerbs2(verbs, sc.mode);
         else clearSpinnerVerbs2();
         const tips = buildTips2(ranked, API_URL2, 8);

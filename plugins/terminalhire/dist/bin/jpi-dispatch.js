@@ -136,6 +136,7 @@ var init_config = __esm({
       peerConnectPrompted: false,
       resumePublishPrompted: false,
       chatDisclosureAck: false,
+      chatShareActivity: false,
       inboundNudgeMuted: false,
       inboundNudgeDisclosed: false
     };
@@ -6780,11 +6781,11 @@ async function runLogin() {
     if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
       const { createRequire: createRequire2 } = await import("module");
       const { fileURLToPath: fileURLToPath8 } = await import("url");
-      const { join: join26, dirname: dirname3 } = await import("path");
+      const { join: join27, dirname: dirname3 } = await import("path");
       const __dirname7 = fileURLToPath8(new URL(".", import.meta.url));
-      const fixturePath = join26(__dirname7, "../../fixtures/github-sample.json");
-      const { readFileSync: readFileSync24 } = await import("fs");
-      ghProfile = JSON.parse(readFileSync24(fixturePath, "utf8"));
+      const fixturePath = join27(__dirname7, "../../fixtures/github-sample.json");
+      const { readFileSync: readFileSync25 } = await import("fs");
+      ghProfile = JSON.parse(readFileSync25(fixturePath, "utf8"));
     } else {
       ghProfile = await fetchGitHubProfile2(login, token);
     }
@@ -8560,7 +8561,7 @@ function finalize(build) {
   };
 }
 function reconstruct(files, opts = {}) {
-  const join26 = opts.joinSidechains !== false;
+  const join27 = opts.joinSidechains !== false;
   const mains = [];
   const sidechains = [];
   for (const file of files) {
@@ -8585,7 +8586,7 @@ function reconstruct(files, opts = {}) {
   }
   const orphanedSidechainPaths = [];
   const joinedPaths = /* @__PURE__ */ new Set();
-  if (join26) {
+  if (join27) {
     const sidechainsBySession = /* @__PURE__ */ new Map();
     for (const sc of sidechains) {
       const acc = sidechainsBySession.get(sc.sessionId) ?? [];
@@ -10204,7 +10205,21 @@ function createChatClient(overrides) {
     const data = await res.json();
     const presence = data.presence ?? null;
     if (!presence) return null;
-    return { login: presence.login, lastSeen: presence.lastSeen };
+    return {
+      login: presence.login,
+      lastSeen: presence.lastSeen ?? null,
+      optin: presence.optin === true,
+      shareActivity: presence.shareActivity === true
+    };
+  }
+  async function setActivitySharing(share) {
+    const res = await authedFetch("/api/chat/activity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ share })
+    });
+    if (!res.ok) throw new ChatRequestError("/api/chat/activity", res.status);
+    await res.json();
   }
   async function applyBlock(login, action) {
     const target = login.trim();
@@ -10228,6 +10243,7 @@ function createChatClient(overrides) {
     pollMessages,
     heartbeat,
     getPeerPresence,
+    setActivitySharing,
     blockPeer: (login) => applyBlock(login, "block"),
     unblock: (login) => applyBlock(login, "unblock"),
     getSafetyNumber
@@ -10620,7 +10636,10 @@ async function runSend(opts = {}) {
     input = process.stdin,
     client = createChatClient(),
     resolveConnection = defaultResolveConnection,
-    ensureDisclosure = ensureChatDisclosure
+    ensureDisclosure = ensureChatDisclosure,
+    writeCursor = writeReadCursor,
+    syncCursor = postReadCursor,
+    syncBadge = syncUnreadBadge
   } = opts;
   const target = String(login ?? "").replace(/^@/, "").trim();
   const body = String(text ?? "").trim();
@@ -10645,6 +10664,19 @@ async function runSend(opts = {}) {
 
 `);
     return { ok: false, reason: "error" };
+  }
+  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+  try {
+    writeCursor(peerLogin, nowIso);
+  } catch {
+  }
+  await syncCursor(peerLogin, nowIso);
+  await syncBadge();
+  if (typeof client.heartbeat === "function") {
+    try {
+      await client.heartbeat(false);
+    } catch {
+    }
   }
   output.write(
     `
@@ -10681,13 +10713,20 @@ __export(jpi_chat_exports, {
   defaultListPendingInvites: () => defaultListPendingInvites,
   defaultResolveConnection: () => defaultResolveConnection,
   ensureChatDisclosure: () => ensureChatDisclosure,
+  formatPresence: () => formatPresence,
   formatThread: () => formatThread,
+  readCachedSessionStale: () => readCachedSessionStale,
+  relativeTime: () => relativeTime2,
   run: () => run9,
   runBlockCommand: () => runBlockCommand,
   runChatPane: () => runChatPane,
+  runShareActivityCommand: () => runShareActivityCommand,
   sanitizeLine: () => sanitizeLine
 });
 import { createInterface as createInterface7 } from "readline";
+import { existsSync as existsSync13, readFileSync as readFileSync17 } from "fs";
+import { homedir as homedir16 } from "os";
+import { join as join17 } from "path";
 function sanitizeLine(text) {
   return String(text).replace(ANSI_CSI, "").replace(ANSI_OSC, "").replace(ANSI_OTHER, "").replace(C0_C1_DEL, "");
 }
@@ -10780,13 +10819,49 @@ async function defaultListPendingInvites(deps = {}) {
   const invites = listed.intros.filter((it) => it && it.role === "incoming" && it.status === "pending" && it.counterpartyLogin).map((it) => ({ login: it.counterpartyLogin }));
   return { status: "ok", invites };
 }
+function relativeTime2(then, now = /* @__PURE__ */ new Date()) {
+  const t = new Date(then).getTime();
+  if (Number.isNaN(t)) return "";
+  const deltaMs = Math.max(0, now.getTime() - t);
+  const sec = Math.floor(deltaMs / 1e3);
+  if (sec < 60) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${Math.max(1, min)}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}d ago`;
+  const wk = Math.floor(day / 7);
+  if (wk < 5) return `${wk}w ago`;
+  return "a while ago";
+}
+function formatPresence(presence, now = /* @__PURE__ */ new Date()) {
+  if (!presence) return "\u25CB not on chat yet";
+  const share = presence.shareActivity === true;
+  const seenMs = share && presence.lastSeen ? new Date(presence.lastSeen).getTime() : NaN;
+  const hasSeen = !Number.isNaN(seenMs);
+  const fresh = hasSeen && now.getTime() - seenMs <= ACTIVE_WINDOW_MS;
+  if (share && presence.optin === true && fresh) return "\u25CF active now";
+  if (share && hasSeen) {
+    const rel = relativeTime2(presence.lastSeen, now);
+    return rel ? `\u25D0 reachable \xB7 seen ${rel}` : "\u25D0 reachable";
+  }
+  return "\u25D0 reachable";
+}
 function formatThread(state) {
-  const { peerLogin, online, messages, inputBuffer, banner } = state;
+  const { peerLogin, presence, self, messages, inputBuffer, banner } = state;
   const safePeer = sanitizeLine(peerLogin);
-  const dot = online ? "\u25CF" : "\u25CB";
-  const presence = online ? "online" : "offline";
+  const status = formatPresence(presence);
   const lines = [];
-  lines.push(`  chat with @${safePeer}   ${dot} ${presence}`);
+  lines.push(`  chat with @${safePeer}   ${status}`);
+  if (self && (self.login || self.expired)) {
+    if (self.expired) {
+      lines.push("  \u26A0 your linked session expired \u2014 run: terminalhire login");
+    } else {
+      const activity = self.shareActivity === true ? "visible" : "hidden";
+      lines.push(`  you: @${sanitizeLine(self.login)} \xB7 connected \xB7 activity: ${activity}`);
+    }
+  }
   lines.push("  " + "\u2500".repeat(56));
   if (!messages || messages.length === 0) {
     lines.push("  (no messages yet \u2014 say hi)");
@@ -10815,6 +10890,16 @@ function mergeMessages(existing, incoming) {
     }
   }
   return out;
+}
+function readCachedSessionStale() {
+  try {
+    const p = join17(homedir16(), ".terminalhire", "index-cache.json");
+    if (!existsSync13(p)) return false;
+    const cache = JSON.parse(readFileSync17(p, "utf8"));
+    return cache?.sessionStale === true;
+  } catch {
+    return false;
+  }
 }
 async function runChatPane(opts = {}) {
   const {
@@ -10925,10 +11010,22 @@ async function runChatPane(opts = {}) {
       return { entered: false, reason: "error" };
     }
   }
+  let selfLogin;
+  try {
+    const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+    selfLogin = (await readProfile2())?.github?.login;
+  } catch {
+  }
+  let selfExpired = readCachedSessionStale();
+  let selfShareActivity = false;
+  try {
+    selfShareActivity = readConfig().chatShareActivity === true;
+  } catch {
+  }
   return await new Promise((resolve2) => {
     let messages = [];
     let inputBuffer = "";
-    let online = false;
+    let presence = null;
     let banner = "";
     let lastSeen;
     let timer = null;
@@ -10936,7 +11033,16 @@ async function runChatPane(opts = {}) {
     let cleaned = false;
     let exitReason = "quit";
     function repaint() {
-      output.write(formatThread({ peerLogin, online, messages, inputBuffer, banner }));
+      output.write(
+        formatThread({
+          peerLogin,
+          presence,
+          self: { login: selfLogin, expired: selfExpired, shareActivity: selfShareActivity },
+          messages,
+          inputBuffer,
+          banner
+        })
+      );
     }
     function cleanup() {
       if (cleaned) return;
@@ -10996,10 +11102,9 @@ async function runChatPane(opts = {}) {
           if (banner && !banner.startsWith("\u26A0")) banner = "";
         }
         try {
-          const presence = await client.getPeerPresence(peerLogin);
-          online = presence !== null && presence !== void 0;
+          presence = await client.getPeerPresence(peerLogin);
         } catch {
-          online = false;
+          presence = null;
         }
         if (!cleaned) repaint();
       } catch (err) {
@@ -11226,6 +11331,52 @@ async function runBlockCommand(opts = {}) {
     return { ok: false, reason: "error" };
   }
 }
+async function runShareActivityCommand(opts = {}) {
+  const {
+    value,
+    client = createChatClient(),
+    output = process.stdout,
+    writeCfg = writeConfig
+  } = opts;
+  const v = String(value ?? "").trim().toLowerCase();
+  if (v !== "on" && v !== "off") {
+    output.write("\n  Usage: terminalhire chat --share-activity on|off\n\n");
+    return { ok: false, reason: "usage" };
+  }
+  const share = v === "on";
+  try {
+    await client.setActivitySharing(share);
+  } catch (err) {
+    if (err instanceof ChatSessionExpiredError || err instanceof ChatNotLinkedError) {
+      output.write(`
+  ${err.message}
+
+`);
+      return { ok: false, reason: "session" };
+    }
+    output.write(
+      `
+  Could not update activity sharing: ${err instanceof Error ? err.message : String(err)}
+
+`
+    );
+    return { ok: false, reason: "error" };
+  }
+  try {
+    writeCfg({ chatShareActivity: share });
+  } catch {
+  }
+  if (share) {
+    output.write(
+      '\n  \u2713 Connections can now see your activity \u2014 when you were last active (e.g. "seen 2h ago").\n  Turn off anytime:  terminalhire chat --share-activity off\n\n'
+    );
+  } else {
+    output.write(
+      "\n  \u2713 Your activity is now hidden. Connections see only that you're reachable.\n\n"
+    );
+  }
+  return { ok: true, share };
+}
 async function run9() {
   const args5 = process.argv.slice(2);
   let login;
@@ -11236,6 +11387,7 @@ async function run9() {
   let wantRead = false;
   let wantBlock = false;
   let wantUnblock = false;
+  let shareActivityValue;
   for (let i = 0; i < args5.length; i++) {
     const a = args5[i];
     if (a === "--inbox") wantInbox = true;
@@ -11243,6 +11395,7 @@ async function run9() {
     else if (a === "--all") wantAll = true;
     else if (a === "--block") wantBlock = true;
     else if (a === "--unblock") wantUnblock = true;
+    else if (a === "--share-activity") shareActivityValue = args5[++i];
     else if (a === "--send") sendText = args5[++i];
     else if (a === "-n") {
       const v = parseInt(args5[++i], 10);
@@ -11252,7 +11405,12 @@ async function run9() {
     }
   }
   const wantSend = sendText !== void 0;
+  const wantShareActivity = shareActivityValue !== void 0;
   try {
+    if (wantShareActivity) {
+      await runShareActivityCommand({ value: shareActivityValue });
+      process.exit(0);
+    }
     if (wantSend) {
       const mod2 = await Promise.resolve().then(() => (init_jpi_chat_read(), jpi_chat_read_exports));
       await mod2.runSend({ login, text: sendText });
@@ -11290,7 +11448,7 @@ async function run9() {
     process.exit(1);
   }
 }
-var CHAT_BASE3, GH_SESSION_COOKIE5, HIDE_CURSOR, SHOW_CURSOR, ENTER_ALT, EXIT_ALT, CLEAR, KEY_CTRL_C, KEY_CTRL_S, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, MAX_INPUT_LEN, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA;
+var CHAT_BASE3, GH_SESSION_COOKIE5, HIDE_CURSOR, SHOW_CURSOR, ENTER_ALT, EXIT_ALT, CLEAR, KEY_CTRL_C, KEY_CTRL_S, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, MAX_INPUT_LEN, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA, ACTIVE_WINDOW_MS;
 var init_jpi_chat = __esm({
   "bin/jpi-chat.js"() {
     "use strict";
@@ -11320,6 +11478,7 @@ var init_jpi_chat = __esm({
     CHAT_CODE_OF_CONDUCT = "Code of conduct: keep it professional \u2014 harassment, spam, or abuse gets you blocked and removed.";
     CHAT_MIN_AGE = "You must be at least 13 years old to use connections chat.";
     DEPOSIT_CTA = "\n  Keep building together \u2014 publish your r\xE9sum\xE9 so more builders find you:\n    https://www.terminalhire.com/dashboard\n\n";
+    ACTIVE_WINDOW_MS = 2 * 60 * 1e3;
   }
 });
 
@@ -11658,9 +11817,9 @@ var signal_exports = {};
 __export(signal_exports, {
   extractFingerprint: () => extractFingerprint
 });
-import { readFileSync as readFileSync17, readdirSync as readdirSync2 } from "fs";
+import { readFileSync as readFileSync18, readdirSync as readdirSync2 } from "fs";
 import { execFileSync } from "child_process";
-import { join as join17 } from "path";
+import { join as join18 } from "path";
 function safeGit(args5, cwd) {
   try {
     return execFileSync("git", ["-C", cwd, ...args5], {
@@ -11688,20 +11847,20 @@ function isEmployerContext(cwd) {
 }
 function readJsonSafe(path) {
   try {
-    return JSON.parse(readFileSync17(path, "utf8"));
+    return JSON.parse(readFileSync18(path, "utf8"));
   } catch {
     return null;
   }
 }
 function readFileSafe(path) {
   try {
-    return readFileSync17(path, "utf8");
+    return readFileSync18(path, "utf8");
   } catch {
     return "";
   }
 }
 function tokensFromPackageJson(cwd) {
-  const pkg = readJsonSafe(join17(cwd, "package.json"));
+  const pkg = readJsonSafe(join18(cwd, "package.json"));
   if (!pkg || typeof pkg !== "object") return [];
   const p = pkg;
   const deps = {
@@ -11715,9 +11874,9 @@ function workspaceMemberDirs(cwd) {
   const dirs = [cwd];
   for (const group of ["apps", "packages"]) {
     try {
-      const groupDir = join17(cwd, group);
+      const groupDir = join18(cwd, group);
       for (const e of readdirSync2(groupDir, { withFileTypes: true })) {
-        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join17(groupDir, e.name));
+        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join18(groupDir, e.name));
       }
     } catch {
     }
@@ -11725,18 +11884,18 @@ function workspaceMemberDirs(cwd) {
   return dirs;
 }
 function tokensFromRequirementsTxt(cwd) {
-  const content = readFileSafe(join17(cwd, "requirements.txt"));
+  const content = readFileSafe(join18(cwd, "requirements.txt"));
   if (!content) return [];
   return content.split("\n").map((l) => l.trim().split(/[>=<!\[;]/)[0].trim().toLowerCase()).filter(Boolean);
 }
 function tokensFromGoMod(cwd) {
-  const content = readFileSafe(join17(cwd, "go.mod"));
+  const content = readFileSafe(join18(cwd, "go.mod"));
   if (!content) return [];
   const requires = Array.from(content.matchAll(/^\s+([^\s]+)\s+v/gm)).map((m) => m[1].split("/").pop() ?? "").filter(Boolean);
   return ["go", ...requires];
 }
 function tokensFromCargoToml(cwd) {
-  const content = readFileSafe(join17(cwd, "Cargo.toml"));
+  const content = readFileSafe(join18(cwd, "Cargo.toml"));
   if (!content) return [];
   const deps = [];
   let inDeps = false;
@@ -11757,7 +11916,7 @@ function tokensFromFileExtensions(cwd) {
   const tokens = [];
   const scanDirs = [cwd];
   try {
-    const srcDir = join17(cwd, "src");
+    const srcDir = join18(cwd, "src");
     readdirSync2(srcDir);
     scanDirs.push(srcDir);
   } catch {
@@ -11957,8 +12116,8 @@ var jpi_config_exports = {};
 __export(jpi_config_exports, {
   run: () => run14
 });
-import { join as join18 } from "path";
-import { homedir as homedir16 } from "os";
+import { join as join19 } from "path";
+import { homedir as homedir17 } from "os";
 function parseNudgeMode2(raw) {
   if (raw === "session" || raw === "always") return raw;
   const m = /^every:(\d+)$/.exec(raw);
@@ -12031,8 +12190,8 @@ var init_jpi_config = __esm({
   "bin/jpi-config.js"() {
     "use strict";
     init_config();
-    TERMINALHIRE_DIR13 = join18(homedir16(), ".terminalhire");
-    CONFIG_FILE2 = join18(TERMINALHIRE_DIR13, "config.json");
+    TERMINALHIRE_DIR13 = join19(homedir17(), ".terminalhire");
+    CONFIG_FILE2 = join19(TERMINALHIRE_DIR13, "config.json");
   }
 });
 
@@ -12045,6 +12204,7 @@ __export(spinner_exports, {
   buildContextVerbs: () => buildContextVerbs,
   buildIncomingIntroLine: () => buildIncomingIntroLine,
   buildPeerLine: () => buildPeerLine,
+  buildSessionStaleLine: () => buildSessionStaleLine,
   buildSpinnerPool: () => buildSpinnerPool,
   buildTips: () => buildTips,
   clearSpinnerTips: () => clearSpinnerTips,
@@ -12056,17 +12216,17 @@ __export(spinner_exports, {
   readSpinnerConfig: () => readSpinnerConfig
 });
 import {
-  readFileSync as readFileSync18,
+  readFileSync as readFileSync19,
   writeFileSync as writeFileSync14,
-  existsSync as existsSync13,
+  existsSync as existsSync14,
   mkdirSync as mkdirSync14,
   renameSync as renameSync2
 } from "fs";
-import { join as join19, dirname } from "path";
-import { homedir as homedir17 } from "os";
+import { join as join20, dirname } from "path";
+import { homedir as homedir18 } from "os";
 function readJson(path, fallback) {
   try {
-    return existsSync13(path) ? JSON.parse(readFileSync18(path, "utf8")) : fallback;
+    return existsSync14(path) ? JSON.parse(readFileSync19(path, "utf8")) : fallback;
   } catch {
     return fallback;
   }
@@ -12171,20 +12331,25 @@ function buildIncomingIntroLine(incomingPending) {
   if (n < 1) return null;
   return n === 1 ? `\u2198 someone wants to connect \xB7 terminalhire intro --list` : `\u2198 ${n} people want to connect \xB7 terminalhire intro --list`;
 }
+function buildSessionStaleLine(sessionStale) {
+  return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
+}
 function buildSpinnerPool(topMatches, max = 6, opts = {}) {
-  const { sessionTags, frequency = "always", topPeers, incomingPending } = opts;
+  const { sessionTags, frequency = "always", topPeers, incomingPending, sessionStale } = opts;
+  const staleLine = buildSessionStaleLine(sessionStale);
+  const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
   const introLine = buildIncomingIntroLine(incomingPending);
   const ranked = rankBySessionTags(topMatches, sessionTags);
   if (!Array.isArray(ranked) || ranked.length === 0) {
-    if (introLine) return [introLine];
+    if (introLine) return withStale([introLine]);
     const peerLine = buildPeerLine(topPeers);
-    return peerLine ? [peerLine] : [];
+    return withStale(peerLine ? [peerLine] : []);
   }
   const headers = buildContextVerbs(ranked, sessionTags);
   const cap = Math.max(1, verbCountForFrequency(frequency, headers.length));
   const pool = [...headers.slice(0, cap), ctaVerb()];
   if (introLine) pool.push(introLine);
-  return pool;
+  return withStale(pool);
 }
 function readState() {
   return readJson(SPINNER_STATE_FILE, { verbs: [], mode: "replace" });
@@ -12343,10 +12508,10 @@ var TH_DIR, CLAUDE_SETTINGS, CONFIG_FILE3, SPINNER_STATE_FILE, SPINNER_DEFAULTS,
 var init_spinner = __esm({
   "bin/spinner.js"() {
     "use strict";
-    TH_DIR = process.env["TERMINALHIRE_DIR"] || join19(homedir17(), ".terminalhire");
-    CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join19(homedir17(), ".claude", "settings.json");
-    CONFIG_FILE3 = join19(TH_DIR, "config.json");
-    SPINNER_STATE_FILE = join19(TH_DIR, "spinner-state.json");
+    TH_DIR = process.env["TERMINALHIRE_DIR"] || join20(homedir18(), ".terminalhire");
+    CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join20(homedir18(), ".claude", "settings.json");
+    CONFIG_FILE3 = join20(TH_DIR, "config.json");
+    SPINNER_STATE_FILE = join20(TH_DIR, "spinner-state.json");
     SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
     VERB_INTROS = ["Matched:", "You\u2019d fit:", "Worth a look:", "On your radar:", "Fits your stack:"];
   }
@@ -12358,18 +12523,18 @@ __export(jpi_spinner_exports, {
   run: () => run15
 });
 import {
-  readFileSync as readFileSync19,
+  readFileSync as readFileSync20,
   writeFileSync as writeFileSync15,
   copyFileSync,
-  existsSync as existsSync14,
+  existsSync as existsSync15,
   mkdirSync as mkdirSync15
 } from "fs";
-import { join as join20 } from "path";
-import { homedir as homedir18 } from "os";
+import { join as join21 } from "path";
+import { homedir as homedir19 } from "os";
 import { createInterface as createInterface9 } from "readline";
 function readConfig2() {
   try {
-    return existsSync14(CONFIG_FILE4) ? JSON.parse(readFileSync19(CONFIG_FILE4, "utf8")) : {};
+    return existsSync15(CONFIG_FILE4) ? JSON.parse(readFileSync20(CONFIG_FILE4, "utf8")) : {};
   } catch {
     return {};
   }
@@ -12380,7 +12545,7 @@ function writeConfig2(patch) {
   writeFileSync15(CONFIG_FILE4, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function backupSettings() {
-  if (!existsSync14(SETTINGS_PATH)) return null;
+  if (!existsSync15(SETTINGS_PATH)) return null;
   const ts = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
   const backupPath = `${SETTINGS_PATH}.terminalhire-backup-${ts}`;
   copyFileSync(SETTINGS_PATH, backupPath);
@@ -12397,7 +12562,7 @@ function ask(question) {
 }
 function readTopMatches() {
   try {
-    const c = JSON.parse(readFileSync19(CACHE_FILE, "utf8"));
+    const c = JSON.parse(readFileSync20(CACHE_FILE, "utf8"));
     return Array.isArray(c.topMatches) ? c.topMatches : [];
   } catch {
     return [];
@@ -12540,10 +12705,10 @@ var init_jpi_spinner = __esm({
   "bin/jpi-spinner.js"() {
     "use strict";
     init_spinner();
-    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join20(homedir18(), ".terminalhire");
-    CONFIG_FILE4 = join20(TH_DIR2, "config.json");
-    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join20(homedir18(), ".claude", "settings.json");
-    CACHE_FILE = join20(TH_DIR2, "index-cache.json");
+    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join21(homedir19(), ".terminalhire");
+    CONFIG_FILE4 = join21(TH_DIR2, "config.json");
+    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join21(homedir19(), ".claude", "settings.json");
+    CACHE_FILE = join21(TH_DIR2, "index-cache.json");
   }
 });
 
@@ -12552,9 +12717,9 @@ var jpi_sync_exports = {};
 __export(jpi_sync_exports, {
   run: () => run16
 });
-import { readFileSync as readFileSync20, writeFileSync as writeFileSync16, mkdirSync as mkdirSync16, existsSync as existsSync15, rmSync as rmSync4 } from "fs";
-import { join as join21 } from "path";
-import { homedir as homedir19, hostname as osHostname } from "os";
+import { readFileSync as readFileSync21, writeFileSync as writeFileSync16, mkdirSync as mkdirSync16, existsSync as existsSync16, rmSync as rmSync4 } from "fs";
+import { join as join22 } from "path";
+import { homedir as homedir20, hostname as osHostname } from "os";
 import { createInterface as createInterface10 } from "readline";
 function ask2(question) {
   const rl = createInterface10({ input: process.stdin, output: process.stdout });
@@ -12567,7 +12732,7 @@ function ask2(question) {
 }
 function readMarker() {
   try {
-    return existsSync15(TIER1_MARKER) ? JSON.parse(readFileSync20(TIER1_MARKER, "utf8")) : null;
+    return existsSync16(TIER1_MARKER) ? JSON.parse(readFileSync21(TIER1_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
@@ -12893,8 +13058,8 @@ var init_jpi_sync = __esm({
   "bin/jpi-sync.js"() {
     "use strict";
     init_open_url();
-    TH_DIR3 = process.env["TERMINALHIRE_DIR"] || join21(homedir19(), ".terminalhire");
-    TIER1_MARKER = join21(TH_DIR3, "tier1.json");
+    TH_DIR3 = process.env["TERMINALHIRE_DIR"] || join22(homedir20(), ".terminalhire");
+    TIER1_MARKER = join22(TH_DIR3, "tier1.json");
     API_URL5 = process.env["TERMINALHIRE_API_URL"] || process.env["JPI_API_URL"] || "https://terminalhire.com";
     SYNC_BASE = "https://www.terminalhire.com";
     POLL_INTERVAL_MS = 2e3;
@@ -12908,12 +13073,12 @@ var jpi_init_exports = {};
 __export(jpi_init_exports, {
   run: () => run17
 });
-import { existsSync as existsSync16 } from "fs";
-import { join as join22, resolve } from "path";
+import { existsSync as existsSync17 } from "fs";
+import { join as join23, resolve } from "path";
 import { fileURLToPath as fileURLToPath4 } from "url";
 import { createInterface as createInterface11 } from "readline";
 import { spawnSync, spawn as spawn2 } from "child_process";
-import { homedir as homedir20 } from "os";
+import { homedir as homedir21 } from "os";
 function ask3(question) {
   const rl = createInterface11({ input: process.stdin, output: process.stdout });
   return new Promise((resolve2) => {
@@ -12924,15 +13089,15 @@ function ask3(question) {
   });
 }
 function resolveScript(name) {
-  const distPath = resolve(join22(__dirname3, "..", "..", "dist", "bin", `${name}.js`));
-  const legacyPath = resolve(join22(__dirname3, `${name}.js`));
-  return existsSync16(distPath) ? distPath : legacyPath;
+  const distPath = resolve(join23(__dirname3, "..", "..", "dist", "bin", `${name}.js`));
+  const legacyPath = resolve(join23(__dirname3, `${name}.js`));
+  return existsSync17(distPath) ? distPath : legacyPath;
 }
 function resolveInstallJs() {
-  const fromDist = resolve(join22(__dirname3, "..", "..", "install.js"));
-  const fromBin = resolve(join22(__dirname3, "..", "install.js"));
-  if (existsSync16(fromDist)) return fromDist;
-  if (existsSync16(fromBin)) return fromBin;
+  const fromDist = resolve(join23(__dirname3, "..", "..", "install.js"));
+  const fromBin = resolve(join23(__dirname3, "..", "install.js"));
+  if (existsSync17(fromDist)) return fromDist;
+  if (existsSync17(fromBin)) return fromBin;
   return fromBin;
 }
 async function run17() {
@@ -13040,9 +13205,9 @@ var jpi_refresh_exports = {};
 __export(jpi_refresh_exports, {
   run: () => run18
 });
-import { readFileSync as readFileSync21, writeFileSync as writeFileSync17, existsSync as existsSync17, mkdirSync as mkdirSync17 } from "fs";
-import { join as join23 } from "path";
-import { homedir as homedir21 } from "os";
+import { readFileSync as readFileSync22, writeFileSync as writeFileSync17, existsSync as existsSync18, mkdirSync as mkdirSync17 } from "fs";
+import { join as join24 } from "path";
+import { homedir as homedir22 } from "os";
 import { fileURLToPath as fileURLToPath5 } from "url";
 async function run18() {
   try {
@@ -13216,7 +13381,7 @@ async function run18() {
         } catch {
         }
         const ranked = rankBySessionTags2(topMatches, sessionTags);
-        const verbs = buildSpinnerPool2(ranked, sc.max, { sessionTags, frequency: sc.frequency, topPeers, incomingPending });
+        const verbs = buildSpinnerPool2(ranked, sc.max, { sessionTags, frequency: sc.frequency, topPeers, incomingPending, sessionStale });
         if (verbs.length > 0) applySpinnerVerbs2(verbs, sc.mode);
         else clearSpinnerVerbs2();
         const tips = buildTips2(ranked, API_URL6, 8);
@@ -13252,8 +13417,8 @@ var init_jpi_refresh = __esm({
     init_web_session();
     GH_SESSION_COOKIE7 = "__jpi_gh_session";
     __dirname4 = fileURLToPath5(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR14 = join23(homedir21(), ".terminalhire");
-    INDEX_CACHE_FILE6 = join23(TERMINALHIRE_DIR14, "index-cache.json");
+    TERMINALHIRE_DIR14 = join24(homedir22(), ".terminalhire");
+    INDEX_CACHE_FILE6 = join24(TERMINALHIRE_DIR14, "index-cache.json");
     API_URL6 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://www.terminalhire.com";
   }
 });
@@ -13263,14 +13428,14 @@ var jpi_save_exports = {};
 __export(jpi_save_exports, {
   run: () => run19
 });
-import { readFileSync as readFileSync22, existsSync as existsSync18 } from "fs";
-import { join as join24 } from "path";
-import { homedir as homedir22 } from "os";
+import { readFileSync as readFileSync23, existsSync as existsSync19 } from "fs";
+import { join as join25 } from "path";
+import { homedir as homedir23 } from "os";
 import { fileURLToPath as fileURLToPath6 } from "url";
 function findJobInCache(jobId) {
   try {
-    if (!existsSync18(INDEX_CACHE_FILE7)) return null;
-    const raw = readFileSync22(INDEX_CACHE_FILE7, "utf8");
+    if (!existsSync19(INDEX_CACHE_FILE7)) return null;
+    const raw = readFileSync23(INDEX_CACHE_FILE7, "utf8");
     const entry = JSON.parse(raw);
     const jobs = entry?.index?.jobs ?? [];
     return jobs.find((j) => j.id === jobId) ?? null;
@@ -13363,26 +13528,26 @@ var init_jpi_save = __esm({
   "bin/jpi-save.js"() {
     "use strict";
     __dirname5 = fileURLToPath6(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR15 = join24(homedir22(), ".terminalhire");
-    INDEX_CACHE_FILE7 = join24(TERMINALHIRE_DIR15, "index-cache.json");
+    TERMINALHIRE_DIR15 = join25(homedir23(), ".terminalhire");
+    INDEX_CACHE_FILE7 = join25(TERMINALHIRE_DIR15, "index-cache.json");
   }
 });
 
 // bin/jpi-dispatch.js
 import { fileURLToPath as fileURLToPath7 } from "url";
-import { join as join25, dirname as dirname2 } from "path";
-import { existsSync as existsSync19, readFileSync as readFileSync23 } from "fs";
+import { join as join26, dirname as dirname2 } from "path";
+import { existsSync as existsSync20, readFileSync as readFileSync24 } from "fs";
 import { createRequire } from "module";
 var __dirname6 = fileURLToPath7(new URL(".", import.meta.url));
 function readPackageVersion() {
   try {
     const candidates = [
-      join25(__dirname6, "..", "..", "package.json"),
-      join25(__dirname6, "..", "package.json")
+      join26(__dirname6, "..", "..", "package.json"),
+      join26(__dirname6, "..", "package.json")
     ];
     for (const p of candidates) {
-      if (existsSync19(p)) {
-        const pkg = JSON.parse(readFileSync23(p, "utf8"));
+      if (existsSync20(p)) {
+        const pkg = JSON.parse(readFileSync24(p, "utf8"));
         if (pkg.version) return pkg.version;
       }
     }
@@ -13394,7 +13559,7 @@ var SUBCOMMANDS = ["jobs", "devs", "project", "bounties", "claim", "trajectory",
 var firstArg = process.argv[2];
 if (!firstArg && !process.stdin.isTTY) {
   const { default: childProcess } = await import("child_process");
-  const nudgeScript = join25(__dirname6, "jpi.js");
+  const nudgeScript = join26(__dirname6, "jpi.js");
   const child = childProcess.spawnSync(process.execPath, [nudgeScript], {
     stdio: ["inherit", "inherit", "inherit"]
   });

@@ -3672,7 +3672,21 @@ function createChatClient(overrides) {
     const data = await res.json();
     const presence = data.presence ?? null;
     if (!presence) return null;
-    return { login: presence.login, lastSeen: presence.lastSeen };
+    return {
+      login: presence.login,
+      lastSeen: presence.lastSeen ?? null,
+      optin: presence.optin === true,
+      shareActivity: presence.shareActivity === true
+    };
+  }
+  async function setActivitySharing(share) {
+    const res = await authedFetch("/api/chat/activity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ share })
+    });
+    if (!res.ok) throw new ChatRequestError("/api/chat/activity", res.status);
+    await res.json();
   }
   async function applyBlock(login, action) {
     const target = login.trim();
@@ -3696,6 +3710,7 @@ function createChatClient(overrides) {
     pollMessages,
     heartbeat,
     getPeerPresence,
+    setActivitySharing,
     blockPeer: (login) => applyBlock(login, "block"),
     unblock: (login) => applyBlock(login, "unblock"),
     getSafetyNumber

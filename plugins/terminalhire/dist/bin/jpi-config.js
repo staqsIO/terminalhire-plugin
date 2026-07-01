@@ -16,6 +16,7 @@ var DEFAULT_CONFIG = {
   peerConnectPrompted: false,
   resumePublishPrompted: false,
   chatDisclosureAck: false,
+  chatShareActivity: false,
   inboundNudgeMuted: false,
   inboundNudgeDisclosed: false
 };

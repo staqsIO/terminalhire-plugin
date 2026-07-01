@@ -372,6 +372,19 @@ var init_idf_background = __esm({
 });
 
 // ../../packages/core/src/vocab/index.ts
+function normalize(tokens) {
+  const result = /* @__PURE__ */ new Set();
+  for (const raw of tokens) {
+    const lower = raw.toLowerCase().trim();
+    if (GRAPH.ids.has(lower)) {
+      result.add(lower);
+      continue;
+    }
+    const mapped = GRAPH.synonyms.get(lower);
+    if (mapped) result.add(mapped);
+  }
+  return Array.from(result);
+}
 var GRAPH, VOCABULARY, SYNONYMS;
 var init_vocab = __esm({
   "../../packages/core/src/vocab/index.ts"() {
@@ -2267,7 +2280,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   });
   const { prehash } = eddsaOpts;
   const { BASE, Fp: Fp2, Fn: Fn2 } = Point;
-  const randomBytes4 = eddsaOpts.randomBytes || randomBytes;
+  const randomBytes5 = eddsaOpts.randomBytes || randomBytes;
   const adjustScalarBytes2 = eddsaOpts.adjustScalarBytes || ((bytes) => bytes);
   const domain = eddsaOpts.domain || ((data, ctx, phflag) => {
     _abool2(phflag, "phflag");
@@ -2349,7 +2362,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
     signature: 2 * _size,
     seed: _size
   };
-  function randomSecretKey(seed = randomBytes4(lengths.seed)) {
+  function randomSecretKey(seed = randomBytes5(lengths.seed)) {
     return _abytes2(seed, lengths.seed, "seed");
   }
   function keygen(seed) {
@@ -4044,7 +4057,21 @@ function createChatClient(overrides) {
     const data = await res.json();
     const presence = data.presence ?? null;
     if (!presence) return null;
-    return { login: presence.login, lastSeen: presence.lastSeen };
+    return {
+      login: presence.login,
+      lastSeen: presence.lastSeen ?? null,
+      optin: presence.optin === true,
+      shareActivity: presence.shareActivity === true
+    };
+  }
+  async function setActivitySharing(share) {
+    const res = await authedFetch("/api/chat/activity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ share })
+    });
+    if (!res.ok) throw new ChatRequestError("/api/chat/activity", res.status);
+    await res.json();
   }
   async function applyBlock(login, action) {
     const target = login.trim();
@@ -4068,6 +4095,7 @@ function createChatClient(overrides) {
     pollMessages,
     heartbeat,
     getPeerPresence,
+    setActivitySharing,
     blockPeer: (login) => applyBlock(login, "block"),
     unblock: (login) => applyBlock(login, "unblock"),
     getSafetyNumber
@@ -4156,9 +4184,250 @@ var init_config = __esm({
       peerConnectPrompted: false,
       resumePublishPrompted: false,
       chatDisclosureAck: false,
+      chatShareActivity: false,
       inboundNudgeMuted: false,
       inboundNudgeDisclosed: false
     };
+  }
+});
+
+// src/profile.ts
+var profile_exports = {};
+__export(profile_exports, {
+  accumulateGitHubTags: () => accumulateGitHubTags,
+  accumulateSession: () => accumulateSession,
+  accumulateTags: () => accumulateTags,
+  addSavedJob: () => addSavedJob,
+  deleteProfile: () => deleteProfile,
+  listSavedJobs: () => listSavedJobs,
+  profileToFingerprint: () => profileToFingerprint,
+  readProfile: () => readProfile,
+  removeSavedJob: () => removeSavedJob,
+  writeProfile: () => writeProfile
+});
+import {
+  createCipheriv as createCipheriv2,
+  createDecipheriv as createDecipheriv2,
+  randomBytes as randomBytes4
+} from "crypto";
+import {
+  readFileSync as readFileSync7,
+  writeFileSync as writeFileSync6,
+  mkdirSync as mkdirSync6,
+  existsSync as existsSync6
+} from "fs";
+import { join as join7 } from "path";
+import { homedir as homedir6 } from "os";
+async function loadKey2() {
+  try {
+    const kt = await import("keytar");
+    const stored = await kt.getPassword("terminalhire", "profile-key");
+    if (stored) {
+      return Buffer.from(stored, "hex");
+    }
+    const key2 = randomBytes4(KEY_BYTES2);
+    await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
+    return key2;
+  } catch {
+  }
+  mkdirSync6(TERMINALHIRE_DIR5, { recursive: true });
+  if (existsSync6(KEY_FILE2)) {
+    return Buffer.from(readFileSync7(KEY_FILE2, "utf8").trim(), "hex");
+  }
+  const key = randomBytes4(KEY_BYTES2);
+  writeFileSync6(KEY_FILE2, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  return key;
+}
+function encrypt2(plaintext, key) {
+  const iv = randomBytes4(IV_BYTES2);
+  const cipher = createCipheriv2(ALGO2, key, iv);
+  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return {
+    iv: iv.toString("hex"),
+    tag: tag.toString("hex"),
+    ciphertext: ct.toString("hex")
+  };
+}
+function decrypt2(blob, key) {
+  const decipher = createDecipheriv2(
+    ALGO2,
+    key,
+    Buffer.from(blob.iv, "hex")
+  );
+  decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
+  const plain = Buffer.concat([
+    decipher.update(Buffer.from(blob.ciphertext, "hex")),
+    decipher.final()
+  ]);
+  return plain.toString("utf8");
+}
+function blankProfile() {
+  return {
+    version: 3,
+    skillTags: [],
+    tagWeights: {},
+    hasEmployerSessions: false,
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+function recencyDecay(lastSeen) {
+  const ageMs = Date.now() - new Date(lastSeen).getTime();
+  return Math.pow(0.5, ageMs / DECAY_HALF_LIFE_MS);
+}
+function tagScore(w) {
+  return w.count * recencyDecay(w.lastSeen);
+}
+function deriveSkillTags(tagWeights) {
+  return Object.entries(tagWeights).filter(([, w]) => w.count >= 1).sort(([, a], [, b]) => tagScore(b) - tagScore(a)).map(([tag]) => tag);
+}
+function migrateTagWeights(profile) {
+  if (!profile.tagWeights) {
+    profile.tagWeights = {};
+  }
+  const seed = profile.updatedAt ?? (/* @__PURE__ */ new Date()).toISOString();
+  for (const tag of profile.skillTags) {
+    if (!profile.tagWeights[tag]) {
+      profile.tagWeights[tag] = { count: 1, firstSeen: seed, lastSeen: seed, sessions: 1 };
+    }
+  }
+}
+async function readProfile() {
+  if (!existsSync6(PROFILE_FILE)) return blankProfile();
+  try {
+    const key = await loadKey2();
+    const raw = readFileSync7(PROFILE_FILE, "utf8");
+    const blob = JSON.parse(raw);
+    const plaintext = decrypt2(blob, key);
+    const parsed = JSON.parse(plaintext);
+    migrateTagWeights(parsed);
+    return parsed;
+  } catch {
+    return blankProfile();
+  }
+}
+async function writeProfile(profile) {
+  mkdirSync6(TERMINALHIRE_DIR5, { recursive: true });
+  const key = await loadKey2();
+  profile.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+  profile.skillTags = deriveSkillTags(profile.tagWeights);
+  const blob = encrypt2(JSON.stringify(profile), key);
+  writeFileSync6(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+}
+function accumulateSession(profile, tags, isEmployerContext, inferredSeniority, seniorityIsAuthoritative = false) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  let filtered = normalize(tags);
+  if (isEmployerContext) {
+    filtered = filtered.filter((t) => LANGUAGE_TAGS.has(t));
+    profile.hasEmployerSessions = true;
+  }
+  for (const tag of filtered) {
+    const existing = profile.tagWeights[tag];
+    if (existing) {
+      existing.count += 1;
+      existing.sessions += 1;
+      existing.lastSeen = now;
+    } else {
+      profile.tagWeights[tag] = { count: 1, firstSeen: now, lastSeen: now, sessions: 1 };
+    }
+  }
+  if (inferredSeniority && !isEmployerContext) {
+    if (seniorityIsAuthoritative || !profile.github) {
+      profile.seniority = inferredSeniority;
+    }
+  }
+}
+async function accumulateTags(rawTokens, isEmployerContext, inferredSeniority) {
+  const profile = await readProfile();
+  accumulateSession(profile, rawTokens, isEmployerContext, inferredSeniority);
+  await writeProfile(profile);
+}
+function accumulateGitHubTags(profile, tags, inferredSeniority) {
+  accumulateSession(
+    profile,
+    tags,
+    /* isEmployerContext */
+    false,
+    inferredSeniority,
+    true
+  );
+}
+async function listSavedJobs() {
+  const profile = await readProfile();
+  return profile.savedJobs ?? [];
+}
+async function addSavedJob(job) {
+  const profile = await readProfile();
+  const existing = profile.savedJobs ?? [];
+  const filtered = existing.filter((j) => j.id !== job.id);
+  profile.savedJobs = [...filtered, { ...job, savedAt: (/* @__PURE__ */ new Date()).toISOString() }];
+  await writeProfile(profile);
+}
+async function removeSavedJob(id) {
+  const profile = await readProfile();
+  const existing = profile.savedJobs ?? [];
+  const filtered = existing.filter((j) => j.id !== id);
+  if (filtered.length === existing.length) return false;
+  profile.savedJobs = filtered;
+  await writeProfile(profile);
+  return true;
+}
+async function deleteProfile() {
+  const { rmSync: rmSync4 } = await import("fs");
+  try {
+    rmSync4(PROFILE_FILE);
+  } catch {
+  }
+  try {
+    rmSync4(KEY_FILE2);
+  } catch {
+  }
+}
+function profileToFingerprint(profile) {
+  const rankedTags = Object.entries(profile.tagWeights).map(([tag, w]) => ({ tag, score: tagScore(w) })).filter(({ score }) => score >= MIN_FINGERPRINT_SCORE).sort((a, b) => b.score - a.score).map(({ tag }) => tag);
+  const skillTags = rankedTags.length > 0 ? rankedTags : profile.skillTags;
+  return {
+    skillTags,
+    seniorityBand: profile.seniority,
+    prefs: {
+      roleTypes: profile.roleTypes,
+      remoteOnly: profile.remoteOnly,
+      compFloorUsd: profile.compFloorUsd
+    }
+  };
+}
+var TERMINALHIRE_DIR5, PROFILE_FILE, KEY_FILE2, ALGO2, KEY_BYTES2, IV_BYTES2, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var init_profile = __esm({
+  "src/profile.ts"() {
+    "use strict";
+    init_src();
+    TERMINALHIRE_DIR5 = join7(homedir6(), ".terminalhire");
+    PROFILE_FILE = join7(TERMINALHIRE_DIR5, "profile.enc");
+    KEY_FILE2 = join7(TERMINALHIRE_DIR5, "key");
+    ALGO2 = "aes-256-gcm";
+    KEY_BYTES2 = 32;
+    IV_BYTES2 = 12;
+    DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
+    LANGUAGE_TAGS = /* @__PURE__ */ new Set([
+      "typescript",
+      "javascript",
+      "python",
+      "go",
+      "rust",
+      "java",
+      "ruby",
+      "elixir",
+      "scala",
+      "kotlin",
+      "swift",
+      "cpp",
+      "csharp",
+      "php",
+      "haskell",
+      "clojure",
+      "r"
+    ]);
+    MIN_FINGERPRINT_SCORE = 0.05;
   }
 });
 
@@ -4177,16 +4446,16 @@ __export(jpi_chat_read_exports, {
   syncUnreadBadge: () => syncUnreadBadge,
   writeReadCursor: () => writeReadCursor
 });
-import { existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "fs";
-import { homedir as homedir6 } from "os";
-import { join as join7 } from "path";
+import { existsSync as existsSync7, mkdirSync as mkdirSync7, readFileSync as readFileSync8, writeFileSync as writeFileSync7 } from "fs";
+import { homedir as homedir7 } from "os";
+import { join as join8 } from "path";
 async function syncUnreadBadge(deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   const cacheFile = deps.cacheFile ?? INDEX_CACHE_FILE;
   try {
     const cookie = readCookie();
-    if (!cookie || !existsSync6(cacheFile)) return;
+    if (!cookie || !existsSync7(cacheFile)) return;
     const res = await fetchImpl(`${CHAT_BASE2}/api/chat/inbox`, {
       method: "GET",
       headers: { Cookie: `${GH_SESSION_COOKIE2}=${cookie}` },
@@ -4199,16 +4468,16 @@ async function syncUnreadBadge(deps = {}) {
       (sum, it) => sum + (it && typeof it.unreadCount === "number" && it.unreadCount > 0 ? it.unreadCount : 0),
       0
     );
-    const entry = JSON.parse(readFileSync7(cacheFile, "utf8"));
+    const entry = JSON.parse(readFileSync8(cacheFile, "utf8"));
     entry.unreadChat = { count: total };
-    writeFileSync6(cacheFile, JSON.stringify(entry), "utf8");
+    writeFileSync7(cacheFile, JSON.stringify(entry), "utf8");
   } catch {
   }
 }
 function readReadCursors() {
   try {
-    if (!existsSync6(READS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync7(READS_FILE, "utf8"));
+    if (!existsSync7(READS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync8(READS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, iso] of Object.entries(parsed)) {
@@ -4223,8 +4492,8 @@ function writeReadCursor(login, iso, deps = {}) {
   const read = deps.readReadCursors ?? readReadCursors;
   const cursors = read();
   cursors[login] = iso;
-  mkdirSync6(TERMINALHIRE_DIR5, { recursive: true });
-  writeFileSync6(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
+  mkdirSync7(TERMINALHIRE_DIR6, { recursive: true });
+  writeFileSync7(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
 }
 async function postReadCursor(peerLogin, lastReadAt, deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
@@ -4498,7 +4767,10 @@ async function runSend(opts = {}) {
     input = process.stdin,
     client = createChatClient(),
     resolveConnection = defaultResolveConnection,
-    ensureDisclosure = ensureChatDisclosure
+    ensureDisclosure = ensureChatDisclosure,
+    writeCursor = writeReadCursor,
+    syncCursor = postReadCursor,
+    syncBadge = syncUnreadBadge
   } = opts;
   const target = String(login ?? "").replace(/^@/, "").trim();
   const body = String(text ?? "").trim();
@@ -4524,6 +4796,19 @@ async function runSend(opts = {}) {
 `);
     return { ok: false, reason: "error" };
   }
+  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+  try {
+    writeCursor(peerLogin, nowIso);
+  } catch {
+  }
+  await syncCursor(peerLogin, nowIso);
+  await syncBadge();
+  if (typeof client.heartbeat === "function") {
+    try {
+      await client.heartbeat(false);
+    } catch {
+    }
+  }
   output.write(
     `
   Sent to @${sanitizeLine(peerLogin)}: ${sanitizeLine(body)}
@@ -4533,7 +4818,7 @@ async function runSend(opts = {}) {
   );
   return { ok: true };
 }
-var CHAT_BASE2, GH_SESSION_COOKIE2, TERMINALHIRE_DIR5, READS_FILE, INDEX_CACHE_FILE;
+var CHAT_BASE2, GH_SESSION_COOKIE2, TERMINALHIRE_DIR6, READS_FILE, INDEX_CACHE_FILE;
 var init_jpi_chat_read = __esm({
   "bin/jpi-chat-read.js"() {
     "use strict";
@@ -4542,14 +4827,17 @@ var init_jpi_chat_read = __esm({
     init_jpi_chat();
     CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
     GH_SESSION_COOKIE2 = "__jpi_gh_session";
-    TERMINALHIRE_DIR5 = join7(homedir6(), ".terminalhire");
-    READS_FILE = join7(TERMINALHIRE_DIR5, "chat-reads.json");
-    INDEX_CACHE_FILE = join7(TERMINALHIRE_DIR5, "index-cache.json");
+    TERMINALHIRE_DIR6 = join8(homedir7(), ".terminalhire");
+    READS_FILE = join8(TERMINALHIRE_DIR6, "chat-reads.json");
+    INDEX_CACHE_FILE = join8(TERMINALHIRE_DIR6, "index-cache.json");
   }
 });
 
 // bin/jpi-chat.js
 import { createInterface } from "readline";
+import { existsSync as existsSync8, readFileSync as readFileSync9 } from "fs";
+import { homedir as homedir8 } from "os";
+import { join as join9 } from "path";
 function sanitizeLine(text) {
   return String(text).replace(ANSI_CSI, "").replace(ANSI_OSC, "").replace(ANSI_OTHER, "").replace(C0_C1_DEL, "");
 }
@@ -4642,13 +4930,49 @@ async function defaultListPendingInvites(deps = {}) {
   const invites = listed.intros.filter((it) => it && it.role === "incoming" && it.status === "pending" && it.counterpartyLogin).map((it) => ({ login: it.counterpartyLogin }));
   return { status: "ok", invites };
 }
+function relativeTime(then, now = /* @__PURE__ */ new Date()) {
+  const t = new Date(then).getTime();
+  if (Number.isNaN(t)) return "";
+  const deltaMs = Math.max(0, now.getTime() - t);
+  const sec = Math.floor(deltaMs / 1e3);
+  if (sec < 60) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${Math.max(1, min)}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}d ago`;
+  const wk = Math.floor(day / 7);
+  if (wk < 5) return `${wk}w ago`;
+  return "a while ago";
+}
+function formatPresence(presence, now = /* @__PURE__ */ new Date()) {
+  if (!presence) return "\u25CB not on chat yet";
+  const share = presence.shareActivity === true;
+  const seenMs = share && presence.lastSeen ? new Date(presence.lastSeen).getTime() : NaN;
+  const hasSeen = !Number.isNaN(seenMs);
+  const fresh = hasSeen && now.getTime() - seenMs <= ACTIVE_WINDOW_MS;
+  if (share && presence.optin === true && fresh) return "\u25CF active now";
+  if (share && hasSeen) {
+    const rel = relativeTime(presence.lastSeen, now);
+    return rel ? `\u25D0 reachable \xB7 seen ${rel}` : "\u25D0 reachable";
+  }
+  return "\u25D0 reachable";
+}
 function formatThread(state) {
-  const { peerLogin, online, messages, inputBuffer, banner } = state;
+  const { peerLogin, presence, self, messages, inputBuffer, banner } = state;
   const safePeer = sanitizeLine(peerLogin);
-  const dot = online ? "\u25CF" : "\u25CB";
-  const presence = online ? "online" : "offline";
+  const status = formatPresence(presence);
   const lines = [];
-  lines.push(`  chat with @${safePeer}   ${dot} ${presence}`);
+  lines.push(`  chat with @${safePeer}   ${status}`);
+  if (self && (self.login || self.expired)) {
+    if (self.expired) {
+      lines.push("  \u26A0 your linked session expired \u2014 run: terminalhire login");
+    } else {
+      const activity = self.shareActivity === true ? "visible" : "hidden";
+      lines.push(`  you: @${sanitizeLine(self.login)} \xB7 connected \xB7 activity: ${activity}`);
+    }
+  }
   lines.push("  " + "\u2500".repeat(56));
   if (!messages || messages.length === 0) {
     lines.push("  (no messages yet \u2014 say hi)");
@@ -4677,6 +5001,16 @@ function mergeMessages(existing, incoming) {
     }
   }
   return out;
+}
+function readCachedSessionStale() {
+  try {
+    const p = join9(homedir8(), ".terminalhire", "index-cache.json");
+    if (!existsSync8(p)) return false;
+    const cache = JSON.parse(readFileSync9(p, "utf8"));
+    return cache?.sessionStale === true;
+  } catch {
+    return false;
+  }
 }
 async function runChatPane(opts = {}) {
   const {
@@ -4787,10 +5121,22 @@ async function runChatPane(opts = {}) {
       return { entered: false, reason: "error" };
     }
   }
+  let selfLogin;
+  try {
+    const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+    selfLogin = (await readProfile2())?.github?.login;
+  } catch {
+  }
+  let selfExpired = readCachedSessionStale();
+  let selfShareActivity = false;
+  try {
+    selfShareActivity = readConfig().chatShareActivity === true;
+  } catch {
+  }
   return await new Promise((resolve) => {
     let messages = [];
     let inputBuffer = "";
-    let online = false;
+    let presence = null;
     let banner = "";
     let lastSeen;
     let timer = null;
@@ -4798,7 +5144,16 @@ async function runChatPane(opts = {}) {
     let cleaned = false;
     let exitReason = "quit";
     function repaint() {
-      output.write(formatThread({ peerLogin, online, messages, inputBuffer, banner }));
+      output.write(
+        formatThread({
+          peerLogin,
+          presence,
+          self: { login: selfLogin, expired: selfExpired, shareActivity: selfShareActivity },
+          messages,
+          inputBuffer,
+          banner
+        })
+      );
     }
     function cleanup() {
       if (cleaned) return;
@@ -4858,10 +5213,9 @@ async function runChatPane(opts = {}) {
           if (banner && !banner.startsWith("\u26A0")) banner = "";
         }
         try {
-          const presence = await client.getPeerPresence(peerLogin);
-          online = presence !== null && presence !== void 0;
+          presence = await client.getPeerPresence(peerLogin);
         } catch {
-          online = false;
+          presence = null;
         }
         if (!cleaned) repaint();
       } catch (err) {
@@ -5088,6 +5442,52 @@ async function runBlockCommand(opts = {}) {
     return { ok: false, reason: "error" };
   }
 }
+async function runShareActivityCommand(opts = {}) {
+  const {
+    value,
+    client = createChatClient(),
+    output = process.stdout,
+    writeCfg = writeConfig
+  } = opts;
+  const v = String(value ?? "").trim().toLowerCase();
+  if (v !== "on" && v !== "off") {
+    output.write("\n  Usage: terminalhire chat --share-activity on|off\n\n");
+    return { ok: false, reason: "usage" };
+  }
+  const share = v === "on";
+  try {
+    await client.setActivitySharing(share);
+  } catch (err) {
+    if (err instanceof ChatSessionExpiredError || err instanceof ChatNotLinkedError) {
+      output.write(`
+  ${err.message}
+
+`);
+      return { ok: false, reason: "session" };
+    }
+    output.write(
+      `
+  Could not update activity sharing: ${err instanceof Error ? err.message : String(err)}
+
+`
+    );
+    return { ok: false, reason: "error" };
+  }
+  try {
+    writeCfg({ chatShareActivity: share });
+  } catch {
+  }
+  if (share) {
+    output.write(
+      '\n  \u2713 Connections can now see your activity \u2014 when you were last active (e.g. "seen 2h ago").\n  Turn off anytime:  terminalhire chat --share-activity off\n\n'
+    );
+  } else {
+    output.write(
+      "\n  \u2713 Your activity is now hidden. Connections see only that you're reachable.\n\n"
+    );
+  }
+  return { ok: true, share };
+}
 async function run() {
   const args = process.argv.slice(2);
   let login;
@@ -5098,6 +5498,7 @@ async function run() {
   let wantRead = false;
   let wantBlock = false;
   let wantUnblock = false;
+  let shareActivityValue;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "--inbox") wantInbox = true;
@@ -5105,6 +5506,7 @@ async function run() {
     else if (a === "--all") wantAll = true;
     else if (a === "--block") wantBlock = true;
     else if (a === "--unblock") wantUnblock = true;
+    else if (a === "--share-activity") shareActivityValue = args[++i];
     else if (a === "--send") sendText = args[++i];
     else if (a === "-n") {
       const v = parseInt(args[++i], 10);
@@ -5114,7 +5516,12 @@ async function run() {
     }
   }
   const wantSend = sendText !== void 0;
+  const wantShareActivity = shareActivityValue !== void 0;
   try {
+    if (wantShareActivity) {
+      await runShareActivityCommand({ value: shareActivityValue });
+      process.exit(0);
+    }
     if (wantSend) {
       const mod2 = await Promise.resolve().then(() => (init_jpi_chat_read(), jpi_chat_read_exports));
       await mod2.runSend({ login, text: sendText });
@@ -5152,7 +5559,7 @@ async function run() {
     process.exit(1);
   }
 }
-var CHAT_BASE3, GH_SESSION_COOKIE3, HIDE_CURSOR, SHOW_CURSOR, ENTER_ALT, EXIT_ALT, CLEAR, KEY_CTRL_C, KEY_CTRL_S, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, MAX_INPUT_LEN, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA;
+var CHAT_BASE3, GH_SESSION_COOKIE3, HIDE_CURSOR, SHOW_CURSOR, ENTER_ALT, EXIT_ALT, CLEAR, KEY_CTRL_C, KEY_CTRL_S, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, MAX_INPUT_LEN, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA, ACTIVE_WINDOW_MS;
 var init_jpi_chat = __esm({
   "bin/jpi-chat.js"() {
     init_chat_client();
@@ -5181,6 +5588,7 @@ var init_jpi_chat = __esm({
     CHAT_CODE_OF_CONDUCT = "Code of conduct: keep it professional \u2014 harassment, spam, or abuse gets you blocked and removed.";
     CHAT_MIN_AGE = "You must be at least 13 years old to use connections chat.";
     DEPOSIT_CTA = "\n  Keep building together \u2014 publish your r\xE9sum\xE9 so more builders find you:\n    https://www.terminalhire.com/dashboard\n\n";
+    ACTIVE_WINDOW_MS = 2 * 60 * 1e3;
   }
 });
 init_jpi_chat();
@@ -5193,10 +5601,14 @@ export {
   defaultListPendingInvites,
   defaultResolveConnection,
   ensureChatDisclosure,
+  formatPresence,
   formatThread,
+  readCachedSessionStale,
+  relativeTime,
   run,
   runBlockCommand,
   runChatPane,
+  runShareActivityCommand,
   sanitizeLine
 };
 /*! Bundled license information:

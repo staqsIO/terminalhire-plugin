@@ -89,6 +89,7 @@ var init_config = __esm({
       peerConnectPrompted: false,
       resumePublishPrompted: false,
       chatDisclosureAck: false,
+      chatShareActivity: false,
       inboundNudgeMuted: false,
       inboundNudgeDisclosed: false
     };

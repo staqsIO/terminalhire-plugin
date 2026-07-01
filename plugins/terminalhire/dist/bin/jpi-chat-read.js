@@ -4039,7 +4039,21 @@ function createChatClient(overrides) {
     const data = await res.json();
     const presence = data.presence ?? null;
     if (!presence) return null;
-    return { login: presence.login, lastSeen: presence.lastSeen };
+    return {
+      login: presence.login,
+      lastSeen: presence.lastSeen ?? null,
+      optin: presence.optin === true,
+      shareActivity: presence.shareActivity === true
+    };
+  }
+  async function setActivitySharing(share) {
+    const res = await authedFetch("/api/chat/activity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ share })
+    });
+    if (!res.ok) throw new ChatRequestError("/api/chat/activity", res.status);
+    await res.json();
   }
   async function applyBlock(login, action) {
     const target = login.trim();
@@ -4063,6 +4077,7 @@ function createChatClient(overrides) {
     pollMessages,
     heartbeat,
     getPeerPresence,
+    setActivitySharing,
     blockPeer: (login) => applyBlock(login, "block"),
     unblock: (login) => applyBlock(login, "unblock"),
     getSafetyNumber
@@ -4151,6 +4166,7 @@ var init_config = __esm({
       peerConnectPrompted: false,
       resumePublishPrompted: false,
       chatDisclosureAck: false,
+      chatShareActivity: false,
       inboundNudgeMuted: false,
       inboundNudgeDisclosed: false
     };
@@ -4159,6 +4175,9 @@ var init_config = __esm({
 
 // bin/jpi-chat.js
 import { createInterface } from "readline";
+import { existsSync as existsSync6, readFileSync as readFileSync7 } from "fs";
+import { homedir as homedir6 } from "os";
+import { join as join7 } from "path";
 function sanitizeLine(text) {
   return String(text).replace(ANSI_CSI, "").replace(ANSI_OSC, "").replace(ANSI_OTHER, "").replace(C0_C1_DEL, "");
 }
@@ -4251,7 +4270,7 @@ async function defaultListPendingInvites(deps = {}) {
   const invites = listed.intros.filter((it) => it && it.role === "incoming" && it.status === "pending" && it.counterpartyLogin).map((it) => ({ login: it.counterpartyLogin }));
   return { status: "ok", invites };
 }
-var CHAT_BASE2, GH_SESSION_COOKIE2, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE;
+var CHAT_BASE2, GH_SESSION_COOKIE2, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, ACTIVE_WINDOW_MS;
 var init_jpi_chat = __esm({
   "bin/jpi-chat.js"() {
     "use strict";
@@ -4268,20 +4287,21 @@ var init_jpi_chat = __esm({
     CHAT_AT_REST = "Your private key is encrypted against casual access, not full machine compromise.";
     CHAT_CODE_OF_CONDUCT = "Code of conduct: keep it professional \u2014 harassment, spam, or abuse gets you blocked and removed.";
     CHAT_MIN_AGE = "You must be at least 13 years old to use connections chat.";
+    ACTIVE_WINDOW_MS = 2 * 60 * 1e3;
   }
 });
 
 // bin/jpi-chat-read.js
-import { existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "fs";
-import { homedir as homedir6 } from "os";
-import { join as join7 } from "path";
+import { existsSync as existsSync7, mkdirSync as mkdirSync6, readFileSync as readFileSync8, writeFileSync as writeFileSync6 } from "fs";
+import { homedir as homedir7 } from "os";
+import { join as join8 } from "path";
 async function syncUnreadBadge(deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   const cacheFile = deps.cacheFile ?? INDEX_CACHE_FILE;
   try {
     const cookie = readCookie();
-    if (!cookie || !existsSync6(cacheFile)) return;
+    if (!cookie || !existsSync7(cacheFile)) return;
     const res = await fetchImpl(`${CHAT_BASE3}/api/chat/inbox`, {
       method: "GET",
       headers: { Cookie: `${GH_SESSION_COOKIE3}=${cookie}` },
@@ -4294,7 +4314,7 @@ async function syncUnreadBadge(deps = {}) {
       (sum, it) => sum + (it && typeof it.unreadCount === "number" && it.unreadCount > 0 ? it.unreadCount : 0),
       0
     );
-    const entry = JSON.parse(readFileSync7(cacheFile, "utf8"));
+    const entry = JSON.parse(readFileSync8(cacheFile, "utf8"));
     entry.unreadChat = { count: total };
     writeFileSync6(cacheFile, JSON.stringify(entry), "utf8");
   } catch {
@@ -4302,8 +4322,8 @@ async function syncUnreadBadge(deps = {}) {
 }
 function readReadCursors() {
   try {
-    if (!existsSync6(READS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync7(READS_FILE, "utf8"));
+    if (!existsSync7(READS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync8(READS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, iso] of Object.entries(parsed)) {
@@ -4593,7 +4613,10 @@ async function runSend(opts = {}) {
     input = process.stdin,
     client = createChatClient(),
     resolveConnection = defaultResolveConnection,
-    ensureDisclosure = ensureChatDisclosure
+    ensureDisclosure = ensureChatDisclosure,
+    writeCursor = writeReadCursor,
+    syncCursor = postReadCursor,
+    syncBadge = syncUnreadBadge
   } = opts;
   const target = String(login ?? "").replace(/^@/, "").trim();
   const body = String(text ?? "").trim();
@@ -4619,6 +4642,19 @@ async function runSend(opts = {}) {
 `);
     return { ok: false, reason: "error" };
   }
+  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+  try {
+    writeCursor(peerLogin, nowIso);
+  } catch {
+  }
+  await syncCursor(peerLogin, nowIso);
+  await syncBadge();
+  if (typeof client.heartbeat === "function") {
+    try {
+      await client.heartbeat(false);
+    } catch {
+    }
+  }
   output.write(
     `
   Sent to @${sanitizeLine(peerLogin)}: ${sanitizeLine(body)}
@@ -4636,9 +4672,9 @@ var init_jpi_chat_read = __esm({
     init_jpi_chat();
     CHAT_BASE3 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
     GH_SESSION_COOKIE3 = "__jpi_gh_session";
-    TERMINALHIRE_DIR5 = join7(homedir6(), ".terminalhire");
-    READS_FILE = join7(TERMINALHIRE_DIR5, "chat-reads.json");
-    INDEX_CACHE_FILE = join7(TERMINALHIRE_DIR5, "index-cache.json");
+    TERMINALHIRE_DIR5 = join8(homedir7(), ".terminalhire");
+    READS_FILE = join8(TERMINALHIRE_DIR5, "chat-reads.json");
+    INDEX_CACHE_FILE = join8(TERMINALHIRE_DIR5, "index-cache.json");
   }
 });
 init_jpi_chat_read();
