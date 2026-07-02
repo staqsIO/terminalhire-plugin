@@ -1308,6 +1308,19 @@ async function runIntroRequest(args, overrides) {
     deps.exit(1);
     return;
   }
+  if (res.status === 409) {
+    let reason = "an intro between you two already exists \u2014 check `terminalhire intro --list`.";
+    try {
+      const data = await res.json();
+      if (typeof data.error === "string" && data.error) reason = data.error;
+    } catch {
+    }
+    deps.log(`
+  ${reason}
+`);
+    deps.exit(1);
+    return;
+  }
   if (!res.ok) {
     deps.errorLog(`
   Request failed: /api/intro/request returned ${res.status}.
@@ -1316,12 +1329,18 @@ async function runIntroRequest(args, overrides) {
     return;
   }
   let notified = false;
+  let deduped = false;
   try {
     const data = await res.json();
     notified = data.notified === true;
+    deduped = data.deduped === true;
   } catch {
   }
-  if (notified) {
+  if (deduped) {
+    deps.log(`
+  You already have a pending intro request to @${targetLogin} \u2014 nothing new was sent.`);
+    deps.log("  They can accept it any time from `terminalhire intro --list` or their dashboard.\n");
+  } else if (notified) {
     deps.log(`
   Intro request sent to @${targetLogin}. They will see only your public login`);
     deps.log("  until they accept; your contact is shared only if they do.\n");

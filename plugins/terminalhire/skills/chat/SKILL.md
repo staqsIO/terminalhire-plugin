@@ -22,6 +22,7 @@ When the user opens chat or asks about messages/connections/invitations:
    - **`Open @<login>`** — a read connection → `chat <login> --read`.
    - Include a plain escape option (e.g. "Just print the inbox" / "Nothing now").
 3. After the pick, run the matching command and report the result. For a reply, ask for the line, then `chat <login> --send "…"`. You may chain (e.g. accept → then offer "say hi").
+4. If the user wants to browse/manage everything themselves, mention `terminalhire inbox` — the interactive full-screen inbox (navigate conversations, open threads, accept/decline invitations, mark read). It's for THEM to run in their own terminal; never launch it from a skill (it's a raw-mode TUI).
 
 Accept an invitation via the bundled engine:
 

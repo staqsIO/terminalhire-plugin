@@ -4597,29 +4597,14 @@ async function gateDisclosure(ensureDisclosure, input, output) {
   }
   return true;
 }
-async function runInbox(opts = {}) {
+async function buildInboxItems(deps = {}) {
   const {
-    output = process.stdout,
-    input = process.stdin,
     client = createChatClient(),
     listConnections = defaultListConnections,
-    listInvites = defaultListPendingInvites,
-    readCursors = readReadCursors,
-    ensureDisclosure = ensureChatDisclosure
-  } = opts;
-  if (!await gateDisclosure(ensureDisclosure, input, output)) {
-    return { ok: false, reason: "not-acknowledged" };
-  }
+    readCursors = readReadCursors
+  } = deps;
   const listed = await listConnections();
-  if (listed.status !== "ok") {
-    return { ok: false, reason: writeProblem(output, listed, "") };
-  }
-  let invites = [];
-  try {
-    const inv = await listInvites();
-    if (inv && inv.status === "ok") invites = inv.invites;
-  } catch {
-  }
+  if (listed.status !== "ok") return listed;
   const cursors = readCursors();
   const items = [];
   for (const conn of listed.connections) {
@@ -4639,11 +4624,39 @@ async function runInbox(opts = {}) {
       presence: REACHABLE_DISPLAY,
       unread,
       lastStamp: last ? formatStamp(last.createdAt) : "",
+      // Raw ISO of the newest message — the TUI's `r` key marks the thread read at
+      // this exact watermark (postReadCursor). The formatted lastStamp is display-only.
+      lastStampIso: last ? last.createdAt : null,
       preview: last ? last.plaintext : ""
     });
   }
-  output.write(renderInbox(items, invites));
-  return { ok: true, count: items.length, invites: invites.length };
+  return { status: "ok", items };
+}
+async function runInbox(opts = {}) {
+  const {
+    output = process.stdout,
+    input = process.stdin,
+    client = createChatClient(),
+    listConnections = defaultListConnections,
+    listInvites = defaultListPendingInvites,
+    readCursors = readReadCursors,
+    ensureDisclosure = ensureChatDisclosure
+  } = opts;
+  if (!await gateDisclosure(ensureDisclosure, input, output)) {
+    return { ok: false, reason: "not-acknowledged" };
+  }
+  const built = await buildInboxItems({ client, listConnections, readCursors });
+  if (built.status !== "ok") {
+    return { ok: false, reason: writeProblem(output, built, "") };
+  }
+  let invites = [];
+  try {
+    const inv = await listInvites();
+    if (inv && inv.status === "ok") invites = inv.invites;
+  } catch {
+  }
+  output.write(renderInbox(built.items, invites));
+  return { ok: true, count: built.items.length, invites: invites.length };
 }
 async function runReadThread(opts = {}) {
   const {
@@ -4781,6 +4794,7 @@ var init_jpi_chat_read = __esm({
 });
 init_jpi_chat_read();
 export {
+  buildInboxItems,
   formatClock,
   formatStamp,
   postReadCursor,

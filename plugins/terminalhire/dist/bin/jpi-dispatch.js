@@ -2202,14 +2202,14 @@ async function mapWithConcurrency(items, limit, fn) {
   if (items.length === 0) return results;
   const workers = Math.max(1, Math.min(Math.floor(limit) || 1, items.length));
   let next = 0;
-  async function run21() {
+  async function run22() {
     for (; ; ) {
       const i = next++;
       if (i >= items.length) return;
       results[i] = await fn(items[i], i);
     }
   }
-  await Promise.all(Array.from({ length: workers }, run21));
+  await Promise.all(Array.from({ length: workers }, run22));
   return results;
 }
 var init_concurrency = __esm({
@@ -9918,12 +9918,12 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
       continue;
     }
     spansConsidered++;
-    let run21 = 0;
+    let run22 = 0;
     const closeChain = () => {
-      if (run21 > 0) {
+      if (run22 > 0) {
         recoveryChains++;
-        totalDepth += run21;
-        run21 = 0;
+        totalDepth += run22;
+        run22 = 0;
       }
     };
     for (const uuid of episode.mainNodeUuids) {
@@ -9932,9 +9932,9 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
         continue;
       }
       if (node.kind === "tool_result" /* ToolResult */ && node.isError) {
-        run21++;
-        if (run21 > maxConsecutiveErrors) {
-          maxConsecutiveErrors = run21;
+        run22++;
+        if (run22 > maxConsecutiveErrors) {
+          maxConsecutiveErrors = run22;
         }
       } else if (node.kind === "tool_result" /* ToolResult */ && !node.isError) {
         closeChain();
@@ -10599,6 +10599,19 @@ async function runIntroRequest(args5, overrides) {
     deps.exit(1);
     return;
   }
+  if (res.status === 409) {
+    let reason = "an intro between you two already exists \u2014 check `terminalhire intro --list`.";
+    try {
+      const data = await res.json();
+      if (typeof data.error === "string" && data.error) reason = data.error;
+    } catch {
+    }
+    deps.log(`
+  ${reason}
+`);
+    deps.exit(1);
+    return;
+  }
   if (!res.ok) {
     deps.errorLog(`
   Request failed: /api/intro/request returned ${res.status}.
@@ -10607,12 +10620,18 @@ async function runIntroRequest(args5, overrides) {
     return;
   }
   let notified = false;
+  let deduped = false;
   try {
     const data = await res.json();
     notified = data.notified === true;
+    deduped = data.deduped === true;
   } catch {
   }
-  if (notified) {
+  if (deduped) {
+    deps.log(`
+  You already have a pending intro request to @${targetLogin} \u2014 nothing new was sent.`);
+    deps.log("  They can accept it any time from `terminalhire intro --list` or their dashboard.\n");
+  } else if (notified) {
     deps.log(`
   Intro request sent to @${targetLogin}. They will see only your public login`);
     deps.log("  until they accept; your contact is shared only if they do.\n");
@@ -11148,6 +11167,7 @@ var init_chat_client = __esm({
 // bin/jpi-chat-read.js
 var jpi_chat_read_exports = {};
 __export(jpi_chat_read_exports, {
+  buildInboxItems: () => buildInboxItems,
   formatClock: () => formatClock,
   formatStamp: () => formatStamp,
   postReadCursor: () => postReadCursor,
@@ -11346,29 +11366,14 @@ async function gateDisclosure(ensureDisclosure, input, output) {
   }
   return true;
 }
-async function runInbox(opts = {}) {
+async function buildInboxItems(deps = {}) {
   const {
-    output = process.stdout,
-    input = process.stdin,
     client = createChatClient(),
     listConnections = defaultListConnections,
-    listInvites = defaultListPendingInvites,
-    readCursors = readReadCursors,
-    ensureDisclosure = ensureChatDisclosure
-  } = opts;
-  if (!await gateDisclosure(ensureDisclosure, input, output)) {
-    return { ok: false, reason: "not-acknowledged" };
-  }
+    readCursors = readReadCursors
+  } = deps;
   const listed = await listConnections();
-  if (listed.status !== "ok") {
-    return { ok: false, reason: writeProblem(output, listed, "") };
-  }
-  let invites = [];
-  try {
-    const inv = await listInvites();
-    if (inv && inv.status === "ok") invites = inv.invites;
-  } catch {
-  }
+  if (listed.status !== "ok") return listed;
   const cursors = readCursors();
   const items = [];
   for (const conn of listed.connections) {
@@ -11388,11 +11393,39 @@ async function runInbox(opts = {}) {
       presence: REACHABLE_DISPLAY,
       unread,
       lastStamp: last ? formatStamp(last.createdAt) : "",
+      // Raw ISO of the newest message — the TUI's `r` key marks the thread read at
+      // this exact watermark (postReadCursor). The formatted lastStamp is display-only.
+      lastStampIso: last ? last.createdAt : null,
       preview: last ? last.plaintext : ""
     });
   }
-  output.write(renderInbox(items, invites));
-  return { ok: true, count: items.length, invites: invites.length };
+  return { status: "ok", items };
+}
+async function runInbox(opts = {}) {
+  const {
+    output = process.stdout,
+    input = process.stdin,
+    client = createChatClient(),
+    listConnections = defaultListConnections,
+    listInvites = defaultListPendingInvites,
+    readCursors = readReadCursors,
+    ensureDisclosure = ensureChatDisclosure
+  } = opts;
+  if (!await gateDisclosure(ensureDisclosure, input, output)) {
+    return { ok: false, reason: "not-acknowledged" };
+  }
+  const built = await buildInboxItems({ client, listConnections, readCursors });
+  if (built.status !== "ok") {
+    return { ok: false, reason: writeProblem(output, built, "") };
+  }
+  let invites = [];
+  try {
+    const inv = await listInvites();
+    if (inv && inv.status === "ok") invites = inv.invites;
+  } catch {
+  }
+  output.write(renderInbox(built.items, invites));
+  return { ok: true, count: built.items.length, invites: invites.length };
 }
 async function runReadThread(opts = {}) {
   const {
@@ -11530,6 +11563,520 @@ var init_jpi_chat_read = __esm({
   }
 });
 
+// bin/jpi-inbox.js
+var jpi_inbox_exports = {};
+__export(jpi_inbox_exports, {
+  defaultDecideIntro: () => defaultDecideIntro,
+  formatInbox: () => formatInbox,
+  run: () => run10,
+  runInboxPane: () => runInboxPane,
+  runInboxTui: () => runInboxTui,
+  sortConversations: () => sortConversations
+});
+async function defaultDecideIntro(req, overrides = {}) {
+  const { runIntroDecision: runIntroDecision2 } = await Promise.resolve().then(() => (init_intro2(), intro_exports));
+  let exited = false;
+  let errReason = "";
+  const logLines = [];
+  const args5 = { id: `@${req.login}`, action: req.action };
+  if (req.action === "accept" && req.contact) args5.contact = req.contact;
+  await runIntroDecision2(args5, {
+    prompt: async () => "yes",
+    exit: () => {
+      exited = true;
+    },
+    log: (msg) => {
+      const t = typeof msg === "string" ? msg.trim() : "";
+      if (t) logLines.push(t);
+    },
+    errorLog: (msg) => {
+      const t = typeof msg === "string" ? msg.trim() : "";
+      if (t && !errReason) errReason = t;
+    },
+    // Overrides last so tests can stub the engine's own IO (fetchImpl,
+    // sessionCookie, readGithubLogin) — but never the capture handlers above…
+    ...(() => {
+      const { prompt: prompt5, exit, log, errorLog, ...safe } = overrides;
+      return safe;
+    })()
+  });
+  const reason = exited ? errReason || logLines.slice(-2).join(" ") : "";
+  return { ok: !exited, reason };
+}
+function sortConversations(items) {
+  return items.slice().sort((a, b) => {
+    if (b.unread !== a.unread) return b.unread - a.unread;
+    const at = a.lastStampIso || "";
+    const bt = b.lastStampIso || "";
+    if (at === bt) return 0;
+    return at > bt ? -1 : 1;
+  });
+}
+function formatInbox(state) {
+  const { rows, selected, mode, inputBuffer, activeLogin, banner, inviteCount, loading } = state;
+  const lines = [];
+  lines.push("  inbox \xB7 terminalhire chat");
+  lines.push("  " + "\u2500".repeat(64));
+  if (!rows || rows.length === 0) {
+    lines.push(
+      loading ? "  \u2726 loading your conversations\u2026" : "  (no connections yet \u2014 request one: terminalhire intro <login>)"
+    );
+  } else {
+    let printedInviteHeader = false;
+    let printedConvSep = false;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const sel = i === selected;
+      if (row.type === "invite") {
+        if (!printedInviteHeader) {
+          lines.push(`  PENDING INVITATIONS (${inviteCount})`);
+          printedInviteHeader = true;
+        }
+        const handle = `@${sanitizeLine(row.login)}`;
+        const text = `  \u2198 ${handle.padEnd(18)} wants to connect`;
+        lines.push(sel ? INVERSE + text + RESET : text);
+      } else {
+        if (inviteCount > 0 && !printedConvSep) {
+          lines.push("  " + "\u2500".repeat(64));
+          printedConvSep = true;
+        }
+        const dot = formatPresence(row.presence).charAt(0);
+        const login = `@${sanitizeLine(row.login)}`;
+        const badgeVisible = row.unread > 0 ? `\u2709 ${row.unread}` : "\u2014";
+        const badgeCell = badgeVisible.padEnd(5);
+        const badge = row.unread > 0 ? BOLD + badgeCell + BOLD_OFF : badgeCell;
+        const stamp = sanitizeLine(row.lastStamp || "").padStart(6);
+        const preview = row.preview ? truncate2(sanitizeLine(row.preview), 34) : "";
+        const text = `  ${dot} ${login.padEnd(18)} ${badge} ${stamp}  ${preview}`;
+        lines.push(sel ? INVERSE + text + RESET : text);
+      }
+    }
+  }
+  lines.push("  " + "\u2500".repeat(64));
+  if (mode === "input") {
+    lines.push(
+      `  contact to share with @${sanitizeLine(activeLogin)} (blank = share your @handle): ${inputBuffer}\u258A`
+    );
+    lines.push("  Enter accept \xB7 Esc cancel");
+  } else if (mode === "confirm") {
+    lines.push(`  Decline @${sanitizeLine(activeLogin)}? Declining is permanent.`);
+    lines.push("  y decline \xB7 n cancel");
+  } else {
+    const cur = rows && rows.length > 0 ? rows[selected] : null;
+    if (cur && cur.type === "invite") {
+      lines.push("  \u2191/\u2193 move \xB7 Enter/a accept \xB7 d decline \xB7 R refresh \xB7 q quit");
+    } else {
+      lines.push("  \u2191/\u2193 move \xB7 Enter open \xB7 r read \xB7 R refresh \xB7 q quit");
+    }
+  }
+  if (banner) {
+    lines.push("  " + "\u2500".repeat(64));
+    lines.push(`  ${banner}`);
+  }
+  return CLEAR + lines.join("\n") + "\n";
+}
+function truncate2(s, n) {
+  const t = String(s);
+  return t.length <= n ? t : `${t.slice(0, n - 1)}\u2026`;
+}
+async function runInboxPane(opts = {}) {
+  const {
+    input = process.stdin,
+    output = process.stdout,
+    signals = process,
+    client = createChatClient(),
+    listConnections = defaultListConnections,
+    readCursors = readReadCursors,
+    buildItems = () => buildInboxItems({ client, listConnections, readCursors }),
+    listInvites = defaultListPendingInvites,
+    decideIntro = defaultDecideIntro,
+    writeCursor = writeReadCursor,
+    postReadCursor: postCursor = postReadCursor,
+    syncUnreadBadge: syncBadge = syncUnreadBadge,
+    setTimer = (fn, ms) => setInterval(fn, ms),
+    clearTimer = (t) => clearInterval(t),
+    refreshMs = DEFAULT_REFRESH_MS
+  } = opts;
+  return await new Promise((resolve2) => {
+    let rows = [];
+    let inviteCount = 0;
+    let selected = 0;
+    let mode = "list";
+    let inputBuffer = "";
+    let activeLogin = "";
+    let banner = "";
+    let selectedLogin = "";
+    let busy = false;
+    let fetching = false;
+    let marking = false;
+    let loading = true;
+    let timer = null;
+    let cleaned = false;
+    function repaint() {
+      if (cleaned) return;
+      output.write(
+        formatInbox({ rows, selected, mode, inputBuffer, activeLogin, banner, inviteCount, loading })
+      );
+    }
+    function setRows(items, invites) {
+      const inviteRows = (invites || []).map((iv) => ({ type: "invite", login: iv.login }));
+      const convRows = sortConversations(items || []).map((it) => ({ type: "conv", ...it }));
+      rows = [...inviteRows, ...convRows];
+      inviteCount = inviteRows.length;
+      if (rows.length === 0) {
+        selected = 0;
+        return;
+      }
+      const idx = selectedLogin ? rows.findIndex((r) => r.login === selectedLogin) : -1;
+      selected = idx >= 0 ? idx : Math.min(selected, rows.length - 1);
+      selectedLogin = rows[selected].login;
+    }
+    async function refetch() {
+      if (fetching) return;
+      fetching = true;
+      try {
+        const built = await buildItems();
+        const items = built && built.status === "ok" ? built.items : [];
+        let invites = [];
+        try {
+          const inv = await listInvites();
+          if (inv && inv.status === "ok") invites = inv.invites;
+        } catch {
+        }
+        setRows(items, invites);
+        loading = false;
+      } catch {
+      } finally {
+        fetching = false;
+      }
+      if (!cleaned) repaint();
+    }
+    function moveSelection(delta) {
+      if (rows.length === 0) return;
+      selected = Math.max(0, Math.min(rows.length - 1, selected + delta));
+      selectedLogin = rows[selected].login;
+      repaint();
+    }
+    function beginAccept(row) {
+      mode = "input";
+      inputBuffer = "";
+      activeLogin = row.login;
+      banner = "";
+      repaint();
+    }
+    function beginDecline(row) {
+      mode = "confirm";
+      activeLogin = row.login;
+      banner = "";
+      repaint();
+    }
+    function cancelMode() {
+      mode = "list";
+      inputBuffer = "";
+      banner = "";
+      repaint();
+    }
+    async function submitDecision(action, contact) {
+      if (busy) return;
+      busy = true;
+      const login = activeLogin;
+      mode = "list";
+      inputBuffer = "";
+      banner = action === "accept" ? `accepting @${login}\u2026` : `declining @${login}\u2026`;
+      repaint();
+      let ok = false;
+      let reason = "";
+      try {
+        const req = action === "accept" && contact ? { login, action, contact } : { login, action };
+        const res = await decideIntro(req);
+        ok = !!(res && res.ok);
+        if (!ok && res && typeof res.reason === "string") reason = res.reason;
+      } catch {
+        ok = false;
+      }
+      const why = sanitizeLine(reason).slice(0, 64);
+      banner = ok ? action === "accept" ? `\u2713 connected with @${login}` : `\u2713 declined @${login}` : `\u26A0 could not ${action} @${login} \u2014 ${why || "try again"}`;
+      if (ok) {
+        try {
+          await refetch();
+        } catch {
+        }
+      }
+      busy = false;
+      repaint();
+    }
+    async function markRowRead(row) {
+      if (busy || marking || !row || row.type !== "conv" || !row.lastStampIso) return;
+      marking = true;
+      row.unread = 0;
+      repaint();
+      try {
+        writeCursor(row.login, row.lastStampIso);
+      } catch {
+      }
+      try {
+        await postCursor(row.login, row.lastStampIso);
+      } catch {
+      }
+      try {
+        await syncBadge();
+      } catch {
+      }
+      marking = false;
+    }
+    function activateRow() {
+      const row = rows[selected];
+      if (!row) return;
+      if (row.type === "invite") {
+        beginAccept(row);
+        return;
+      }
+      finish({ action: "open", login: row.login });
+    }
+    function handleListChar(ch) {
+      if (busy) return;
+      const row = rows[selected];
+      switch (ch) {
+        case "j":
+          moveSelection(1);
+          break;
+        case "k":
+          moveSelection(-1);
+          break;
+        case "q":
+          finish({ action: "quit" });
+          break;
+        case KEY_ENTER_A:
+        case KEY_ENTER_B:
+          activateRow();
+          break;
+        case "a":
+          if (row && row.type === "invite") beginAccept(row);
+          break;
+        case "d":
+          if (row && row.type === "invite") beginDecline(row);
+          break;
+        case "r":
+          if (row && row.type === "conv") void markRowRead(row);
+          break;
+        case "R":
+          if (!busy) void refetch();
+          break;
+        default:
+          break;
+      }
+    }
+    function handleInputChunk(s) {
+      if (s === KEY_ENTER_A || s === KEY_ENTER_B || s === "\r\n") {
+        void submitDecision("accept", inputBuffer.trim());
+        return;
+      }
+      if (s === KEY_BACKSPACE_A || s === KEY_BACKSPACE_B) {
+        inputBuffer = inputBuffer.slice(0, -1);
+        repaint();
+        return;
+      }
+      for (const ch of s) {
+        if (ch === KEY_BACKSPACE_A || ch === KEY_BACKSPACE_B) {
+          inputBuffer = inputBuffer.slice(0, -1);
+        } else if (ch >= " " && inputBuffer.length < MAX_CONTACT_LEN) {
+          inputBuffer += ch;
+        }
+      }
+      repaint();
+    }
+    function handleConfirmChar(ch) {
+      if (ch === "y" || ch === "Y") {
+        void submitDecision("decline");
+        return;
+      }
+      if (ch === "n" || ch === "N") {
+        cancelMode();
+      }
+    }
+    function onData(chunk) {
+      if (cleaned) return;
+      const s = chunk.toString("utf8");
+      if (s === KEY_CTRL_C) {
+        finish({ action: "quit" });
+        return;
+      }
+      if (s === KEY_ESC) {
+        if (mode === "input" || mode === "confirm") cancelMode();
+        else finish({ action: "quit" });
+        return;
+      }
+      if (s.charCodeAt(0) === 27) {
+        if (mode === "list" && !busy) {
+          if (s === KEY_UP) moveSelection(-1);
+          else if (s === KEY_DOWN) moveSelection(1);
+        }
+        return;
+      }
+      if (mode === "input") {
+        handleInputChunk(s);
+        return;
+      }
+      for (const ch of s) {
+        if (mode === "confirm") handleConfirmChar(ch);
+        else handleListChar(ch);
+      }
+    }
+    function onResize() {
+      if (!cleaned) repaint();
+    }
+    function cleanup() {
+      if (cleaned) return;
+      cleaned = true;
+      if (timer) {
+        try {
+          clearTimer(timer);
+        } catch {
+        }
+        timer = null;
+      }
+      try {
+        if (typeof input.setRawMode === "function") input.setRawMode(false);
+      } catch {
+      }
+      try {
+        input.removeListener("data", onData);
+      } catch {
+      }
+      try {
+        if (typeof input.pause === "function") input.pause();
+      } catch {
+      }
+      try {
+        if (typeof output.removeListener === "function") output.removeListener("resize", onResize);
+      } catch {
+      }
+      try {
+        signals.removeListener("SIGINT", onSignal);
+        signals.removeListener("SIGTERM", onTerm);
+        signals.removeListener("SIGHUP", onTerm);
+        signals.removeListener("uncaughtException", onUncaught);
+        signals.removeListener("unhandledRejection", onUncaught);
+        signals.removeListener("exit", onExit);
+      } catch {
+      }
+      output.write(SHOW_CURSOR + EXIT_ALT);
+    }
+    function finish(result) {
+      if (cleaned) return;
+      cleanup();
+      resolve2(result);
+    }
+    function onSignal() {
+      finish({ action: "quit" });
+    }
+    function onTerm() {
+      finish({ action: "quit" });
+    }
+    function onUncaught(err) {
+      cleanup();
+      throw err;
+    }
+    function onExit() {
+      cleanup();
+    }
+    try {
+      if (typeof input.setRawMode === "function") input.setRawMode(true);
+      if (typeof input.resume === "function") input.resume();
+      output.write(ENTER_ALT + HIDE_CURSOR);
+      input.on("data", onData);
+      if (typeof output.on === "function") output.on("resize", onResize);
+      signals.on("SIGINT", onSignal);
+      signals.on("SIGTERM", onTerm);
+      signals.on("SIGHUP", onTerm);
+      signals.on("uncaughtException", onUncaught);
+      signals.on("unhandledRejection", onUncaught);
+      signals.on("exit", onExit);
+      repaint();
+      void refetch();
+      timer = setTimer(() => {
+        if (mode === "list" && !busy) void refetch();
+      }, refreshMs);
+    } catch (err) {
+      cleanup();
+      output.write(`
+  Inbox error: ${err instanceof Error ? err.message : String(err)}
+
+`);
+      resolve2({ action: "quit" });
+    }
+  });
+}
+async function runInboxTui(deps = {}) {
+  const {
+    input = process.stdin,
+    output = process.stdout,
+    ensureDisclosure = ensureChatDisclosure,
+    openChatPane = runChatPane,
+    ...paneDeps
+  } = deps;
+  const ack = await ensureDisclosure({ input, output });
+  if (!ack.acknowledged) {
+    output.write(
+      "\n  Chat needs you to acknowledge the privacy notice above first. Re-run when ready.\n\n"
+    );
+    return { ok: false, reason: "not-acknowledged" };
+  }
+  for (; ; ) {
+    const sel = await runInboxPane({ input, output, ...paneDeps });
+    if (!sel || sel.action === "quit") break;
+    if (sel.action === "open" && sel.login) {
+      await openChatPane({ login: sel.login, input, output });
+    }
+  }
+  return { ok: true };
+}
+async function run10(opts = {}) {
+  const {
+    isTTY = process.stdout.isTTY,
+    input = process.stdin,
+    output = process.stdout,
+    runTui = runInboxTui,
+    runStatic = null
+  } = opts;
+  if (isTTY) {
+    await runTui({ input, output });
+  } else if (runStatic) {
+    await runStatic({});
+  } else {
+    const mod2 = await Promise.resolve().then(() => (init_jpi_chat_read(), jpi_chat_read_exports));
+    await mod2.runInbox({});
+  }
+}
+var HIDE_CURSOR, SHOW_CURSOR, ENTER_ALT, EXIT_ALT, CLEAR, INVERSE, RESET, BOLD, BOLD_OFF, KEY_CTRL_C, KEY_ESC, KEY_UP, KEY_DOWN, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, MAX_CONTACT_LEN, DEFAULT_REFRESH_MS;
+var init_jpi_inbox = __esm({
+  "bin/jpi-inbox.js"() {
+    "use strict";
+    init_chat_client();
+    init_jpi_chat();
+    init_jpi_chat_read();
+    HIDE_CURSOR = "\x1B[?25l";
+    SHOW_CURSOR = "\x1B[?25h";
+    ENTER_ALT = "\x1B[?1049h";
+    EXIT_ALT = "\x1B[?1049l";
+    CLEAR = "\x1B[2J\x1B[H";
+    INVERSE = "\x1B[7m";
+    RESET = "\x1B[0m";
+    BOLD = "\x1B[1m";
+    BOLD_OFF = "\x1B[22m";
+    KEY_CTRL_C = "";
+    KEY_ESC = "\x1B";
+    KEY_UP = "\x1B[A";
+    KEY_DOWN = "\x1B[B";
+    KEY_ENTER_A = "\r";
+    KEY_ENTER_B = "\n";
+    KEY_BACKSPACE_A = "\x7F";
+    KEY_BACKSPACE_B = "\b";
+    MAX_CONTACT_LEN = 200;
+    DEFAULT_REFRESH_MS = 4e3;
+  }
+});
+
 // bin/jpi-chat.js
 var jpi_chat_exports = {};
 __export(jpi_chat_exports, {
@@ -11545,7 +12092,7 @@ __export(jpi_chat_exports, {
   formatThread: () => formatThread,
   readCachedSessionStale: () => readCachedSessionStale,
   relativeTime: () => relativeTime2,
-  run: () => run10,
+  run: () => run11,
   runBlockCommand: () => runBlockCommand,
   runChatPane: () => runChatPane,
   runShareActivityCommand: () => runShareActivityCommand,
@@ -11706,7 +12253,7 @@ function formatThread(state) {
   lines.push("  " + "\u2500".repeat(56));
   lines.push(`  > ${inputBuffer}`);
   lines.push("  Enter send \xB7 Ctrl-S safety number \xB7 /safety \xB7 /block \xB7 q quit");
-  return CLEAR + lines.join("\n") + "\n";
+  return CLEAR2 + lines.join("\n") + "\n";
 }
 function mergeMessages(existing, incoming) {
   const seen = new Set(existing.map((m) => m.id));
@@ -11916,10 +12463,11 @@ async function runChatPane(opts = {}) {
         signals.removeListener("SIGTERM", onTerm);
         signals.removeListener("SIGHUP", onTerm);
         signals.removeListener("uncaughtException", onUncaught);
+        signals.removeListener("unhandledRejection", onUncaught);
         signals.removeListener("exit", onExit);
       } catch {
       }
-      output.write(SHOW_CURSOR + EXIT_ALT);
+      output.write(SHOW_CURSOR2 + EXIT_ALT2);
     }
     function finish(reason) {
       if (cleaned) return;
@@ -12071,7 +12619,7 @@ async function runChatPane(opts = {}) {
       if (cleaned) return;
       const s = chunk.toString("utf8");
       for (const ch of s) {
-        if (ch === KEY_CTRL_C) {
+        if (ch === KEY_CTRL_C2) {
           finish("sigint");
           return;
         }
@@ -12079,14 +12627,14 @@ async function runChatPane(opts = {}) {
           void showSafetyNumber();
           continue;
         }
-        if (ch === KEY_ENTER_A || ch === KEY_ENTER_B) {
+        if (ch === KEY_ENTER_A2 || ch === KEY_ENTER_B2) {
           const line = inputBuffer;
           inputBuffer = "";
           repaint();
           void submitLine(line);
           continue;
         }
-        if (ch === KEY_BACKSPACE_A || ch === KEY_BACKSPACE_B) {
+        if (ch === KEY_BACKSPACE_A2 || ch === KEY_BACKSPACE_B2) {
           inputBuffer = inputBuffer.slice(0, -1);
           repaint();
           continue;
@@ -12118,12 +12666,13 @@ async function runChatPane(opts = {}) {
     try {
       if (typeof input.setRawMode === "function") input.setRawMode(true);
       if (typeof input.resume === "function") input.resume();
-      output.write(ENTER_ALT + HIDE_CURSOR);
+      output.write(ENTER_ALT2 + HIDE_CURSOR2);
       input.on("data", onData);
       signals.on("SIGINT", onSignal);
       signals.on("SIGTERM", onTerm);
       signals.on("SIGHUP", onTerm);
       signals.on("uncaughtException", onUncaught);
+      signals.on("unhandledRejection", onUncaught);
       signals.on("exit", onExit);
       repaint();
       void doPoll();
@@ -12229,7 +12778,7 @@ async function runShareActivityCommand(opts = {}) {
   }
   return { ok: true, share };
 }
-async function run10() {
+async function run11() {
   const args5 = process.argv.slice(2);
   let login;
   let limit = 8;
@@ -12273,9 +12822,19 @@ async function run10() {
       await mod2.runReadThread({ login, all: wantAll, limit });
       process.exit(0);
     }
-    if (wantInbox || !login && !wantBlock && !wantUnblock) {
+    if (wantInbox) {
       const mod2 = await Promise.resolve().then(() => (init_jpi_chat_read(), jpi_chat_read_exports));
       await mod2.runInbox({});
+      process.exit(0);
+    }
+    if (!login && !wantBlock && !wantUnblock) {
+      if (process.stdout.isTTY) {
+        const mod2 = await Promise.resolve().then(() => (init_jpi_inbox(), jpi_inbox_exports));
+        await mod2.run();
+      } else {
+        const mod2 = await Promise.resolve().then(() => (init_jpi_chat_read(), jpi_chat_read_exports));
+        await mod2.runInbox({});
+      }
       process.exit(0);
     }
     const disclosure = await ensureChatDisclosure({ input: process.stdin, output: process.stdout });
@@ -12293,14 +12852,14 @@ async function run10() {
     process.exit(0);
   } catch (err) {
     try {
-      process.stdout.write(SHOW_CURSOR + EXIT_ALT);
+      process.stdout.write(SHOW_CURSOR2 + EXIT_ALT2);
     } catch {
     }
     console.error("terminalhire chat error:", err instanceof Error ? err.message : err);
     process.exit(1);
   }
 }
-var CHAT_BASE3, GH_SESSION_COOKIE5, HIDE_CURSOR, SHOW_CURSOR, ENTER_ALT, EXIT_ALT, CLEAR, KEY_CTRL_C, KEY_CTRL_S, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, MAX_INPUT_LEN, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA, ACTIVE_WINDOW_MS;
+var CHAT_BASE3, GH_SESSION_COOKIE5, HIDE_CURSOR2, SHOW_CURSOR2, ENTER_ALT2, EXIT_ALT2, CLEAR2, KEY_CTRL_C2, KEY_CTRL_S, KEY_ENTER_A2, KEY_ENTER_B2, KEY_BACKSPACE_A2, KEY_BACKSPACE_B2, MAX_INPUT_LEN, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA, ACTIVE_WINDOW_MS;
 var init_jpi_chat = __esm({
   "bin/jpi-chat.js"() {
     "use strict";
@@ -12309,17 +12868,17 @@ var init_jpi_chat = __esm({
     init_web_session();
     CHAT_BASE3 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
     GH_SESSION_COOKIE5 = "__jpi_gh_session";
-    HIDE_CURSOR = "\x1B[?25l";
-    SHOW_CURSOR = "\x1B[?25h";
-    ENTER_ALT = "\x1B[?1049h";
-    EXIT_ALT = "\x1B[?1049l";
-    CLEAR = "\x1B[2J\x1B[H";
-    KEY_CTRL_C = "";
+    HIDE_CURSOR2 = "\x1B[?25l";
+    SHOW_CURSOR2 = "\x1B[?25h";
+    ENTER_ALT2 = "\x1B[?1049h";
+    EXIT_ALT2 = "\x1B[?1049l";
+    CLEAR2 = "\x1B[2J\x1B[H";
+    KEY_CTRL_C2 = "";
     KEY_CTRL_S = "";
-    KEY_ENTER_A = "\r";
-    KEY_ENTER_B = "\n";
-    KEY_BACKSPACE_A = "\x7F";
-    KEY_BACKSPACE_B = "\b";
+    KEY_ENTER_A2 = "\r";
+    KEY_ENTER_B2 = "\n";
+    KEY_BACKSPACE_A2 = "\x7F";
+    KEY_BACKSPACE_B2 = "\b";
     MAX_INPUT_LEN = 2e3;
     ANSI_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
     ANSI_OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
@@ -12337,9 +12896,9 @@ var init_jpi_chat = __esm({
 // bin/jpi-connect.js
 var jpi_connect_exports = {};
 __export(jpi_connect_exports, {
-  run: () => run11
+  run: () => run12
 });
-async function run11() {
+async function run12() {
   const args5 = process.argv.slice(2).filter((a) => a !== "connect");
   if (args5.includes("--mute")) {
     writeConfig({ inboundNudgeMuted: true });
@@ -12558,9 +13117,9 @@ var init_link = __esm({
 // bin/jpi-link.js
 var jpi_link_exports = {};
 __export(jpi_link_exports, {
-  run: () => run12
+  run: () => run13
 });
-async function run12() {
+async function run13() {
   try {
     const args5 = process.argv.slice(2);
     if (args5.includes("--logout")) {
@@ -12584,7 +13143,7 @@ var init_jpi_link = __esm({
 // bin/jpi-profile.js
 var jpi_profile_exports = {};
 __export(jpi_profile_exports, {
-  run: () => run13
+  run: () => run14
 });
 import { createInterface as createInterface9 } from "readline";
 function prompt4(question) {
@@ -12596,7 +13155,7 @@ function prompt4(question) {
     });
   });
 }
-async function run13() {
+async function run14() {
   const { readProfile: readProfile2, writeProfile: writeProfile2, deleteProfile: deleteProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
   const args5 = process.argv.slice(2);
   if (args5.includes("--show")) {
@@ -12929,9 +13488,9 @@ var init_signal = __esm({
 // bin/jpi-learn.js
 var jpi_learn_exports = {};
 __export(jpi_learn_exports, {
-  run: () => run14
+  run: () => run15
 });
-async function run14() {
+async function run15() {
   try {
     const args5 = process.argv.slice(2);
     const cwdIdx = args5.indexOf("--cwd");
@@ -12958,7 +13517,7 @@ var init_jpi_learn = __esm({
     "use strict";
     isMain = process.argv[1]?.endsWith("jpi-learn.js") || process.argv[1]?.endsWith("jpi-learn");
     if (isMain) {
-      run14();
+      run15();
     }
   }
 });
@@ -12966,7 +13525,7 @@ var init_jpi_learn = __esm({
 // bin/jpi-config.js
 var jpi_config_exports = {};
 __export(jpi_config_exports, {
-  run: () => run15
+  run: () => run16
 });
 import { join as join21 } from "path";
 import { homedir as homedir19 } from "os";
@@ -12976,7 +13535,7 @@ function parseNudgeMode2(raw) {
   if (m && parseInt(m[1], 10) >= 1) return raw;
   return null;
 }
-async function run15() {
+async function run16() {
   const args5 = process.argv.slice(2);
   const filtered = args5[0] === "config" ? args5.slice(1) : args5;
   if (filtered.includes("--show") || filtered.length === 0) {
@@ -13665,7 +14224,7 @@ var init_spinner = __esm({
 // bin/jpi-spinner.js
 var jpi_spinner_exports = {};
 __export(jpi_spinner_exports, {
-  run: () => run16
+  run: () => run17
 });
 import {
   readFileSync as readFileSync23,
@@ -13713,7 +14272,7 @@ function readTopMatches() {
     return [];
   }
 }
-async function run16() {
+async function run17() {
   const args5 = process.argv.slice(2).filter((a) => a !== "spinner");
   const has = (f) => args5.includes(f);
   const val = (f) => {
@@ -13860,7 +14419,7 @@ var init_jpi_spinner = __esm({
 // bin/jpi-sync.js
 var jpi_sync_exports = {};
 __export(jpi_sync_exports, {
-  run: () => run17
+  run: () => run18
 });
 import { readFileSync as readFileSync24, writeFileSync as writeFileSync19, mkdirSync as mkdirSync19, existsSync as existsSync16, rmSync as rmSync4 } from "fs";
 import { join as join26 } from "path";
@@ -14172,7 +14731,7 @@ async function runDelete() {
   clearMarker();
   console.log("\n  Synced profile deleted and local marker cleared.\n");
 }
-async function run17() {
+async function run18() {
   const args5 = process.argv.slice(2).filter((a) => a !== "sync");
   const has = (f) => args5.includes(f);
   if (has("--push") || has("--enable")) {
@@ -14216,7 +14775,7 @@ var init_jpi_sync = __esm({
 // bin/jpi-init.js
 var jpi_init_exports = {};
 __export(jpi_init_exports, {
-  run: () => run18
+  run: () => run19
 });
 import { existsSync as existsSync17 } from "fs";
 import { join as join27, resolve } from "path";
@@ -14247,7 +14806,7 @@ function resolveStatuslineInstallJs() {
   if (existsSync17(fromBin)) return fromBin;
   return fromBin;
 }
-async function run18() {
+async function run19() {
   const rl = createInterface12({ input: process.stdin, output: process.stdout });
   const ask3 = (question) => new Promise((resolve2) => {
     let answered = false;
@@ -14408,13 +14967,13 @@ var init_jpi_init = __esm({
 // bin/jpi-refresh.js
 var jpi_refresh_exports = {};
 __export(jpi_refresh_exports, {
-  run: () => run19
+  run: () => run20
 });
 import { writeFileSync as writeFileSync20, mkdirSync as mkdirSync20 } from "fs";
 import { join as join28 } from "path";
 import { homedir as homedir24 } from "os";
 import { fileURLToPath as fileURLToPath5 } from "url";
-async function run19() {
+async function run20() {
   try {
     let index;
     for (let attempt = 1; ; attempt++) {
@@ -14662,7 +15221,7 @@ var init_jpi_refresh = __esm({
 // bin/jpi-save.js
 var jpi_save_exports = {};
 __export(jpi_save_exports, {
-  run: () => run20
+  run: () => run21
 });
 import { readFileSync as readFileSync25, existsSync as existsSync18 } from "fs";
 import { join as join29 } from "path";
@@ -14740,7 +15299,7 @@ async function cmdUnsave(jobId) {
     process.exit(1);
   }
 }
-async function run20() {
+async function run21() {
   const verb = process.argv[2];
   const jobId = process.argv[3];
   try {
@@ -14790,7 +15349,7 @@ function readPackageVersion() {
   }
   return "0.1.1";
 }
-var SUBCOMMANDS = ["jobs", "devs", "project", "bounties", "contribute", "claim", "trajectory", "mirror", "intro", "chat", "connect", "link", "profile", "login", "logout", "learn", "config", "spinner", "statusline", "sync", "init", "refresh", "save", "saved", "unsave", "help", "--help", "-h", "--version", "-v"];
+var SUBCOMMANDS = ["jobs", "devs", "project", "bounties", "contribute", "claim", "trajectory", "mirror", "intro", "chat", "inbox", "connect", "link", "profile", "login", "logout", "learn", "config", "spinner", "statusline", "sync", "init", "refresh", "save", "saved", "unsave", "help", "--help", "-h", "--version", "-v"];
 var firstArg = process.argv[2];
 if (!firstArg && !process.stdin.isTTY) {
   const { default: childProcess } = await import("child_process");
@@ -14852,6 +15411,7 @@ if (!firstArg || firstArg === "help" || firstArg === "--help" || firstArg === "-
   console.log("  terminalhire chat <github-login> --read     Read a thread inline (last 8; -n N / --all for depth)");
   console.log('  terminalhire chat <github-login> --send "\u2026" Send one line to a connection (E2E encrypted)');
   console.log("  terminalhire chat <github-login>            Open the live E2E chat pane with an accepted connection");
+  console.log("  terminalhire inbox                          Interactive inbox: navigate conversations, open/read, act on invites");
   console.log("  terminalhire connect <github-login>         Request a consented intro (alias for `intro`)");
   console.log("  terminalhire connect                        Connect family overview + inbound-nudge state");
   console.log("  terminalhire connect --mute                 Stop surfacing incoming connection requests in the spinner");
@@ -14961,6 +15521,18 @@ if (firstArg === "chat") {
   process.argv.splice(2, 1);
   const mod2 = await Promise.resolve().then(() => (init_jpi_chat(), jpi_chat_exports));
   await mod2.run();
+  process.exit(0);
+}
+if (firstArg === "inbox") {
+  process.argv.splice(2, 1);
+  const mod2 = await Promise.resolve().then(() => (init_jpi_inbox(), jpi_inbox_exports));
+  try {
+    await mod2.run();
+  } catch (err) {
+    process.stdout.write("\x1B[?25h\x1B[?1049l");
+    console.error(`inbox error: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
   process.exit(0);
 }
 if (firstArg === "connect") {

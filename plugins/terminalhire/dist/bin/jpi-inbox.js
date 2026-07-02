@@ -4931,942 +4931,6 @@ var init_profile = __esm({
   }
 });
 
-// src/open-url.js
-var open_url_exports = {};
-__export(open_url_exports, {
-  openInBrowser: () => openInBrowser
-});
-import { spawn } from "child_process";
-function openInBrowser(url) {
-  let cmd;
-  let args;
-  if (process.platform === "darwin") {
-    cmd = "open";
-    args = [url];
-  } else if (process.platform === "win32") {
-    cmd = "cmd";
-    args = ["/c", "start", "", url];
-  } else {
-    cmd = "xdg-open";
-    args = [url];
-  }
-  try {
-    const child = spawn(cmd, args, { stdio: "ignore", detached: true });
-    child.on("error", () => {
-    });
-    child.unref();
-  } catch {
-  }
-}
-var init_open_url = __esm({
-  "src/open-url.js"() {
-    "use strict";
-  }
-});
-
-// src/intro.ts
-var intro_exports = {};
-__export(intro_exports, {
-  runIntroDecision: () => runIntroDecision,
-  runIntroList: () => runIntroList,
-  runIntroRequest: () => runIntroRequest
-});
-function defaultIntroDeps() {
-  return {
-    readGithubLogin: async () => {
-      try {
-        const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-        const profile = await readProfile2();
-        return profile?.github?.login ?? null;
-      } catch {
-        return null;
-      }
-    },
-    readProfileContact: async () => {
-      try {
-        const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-        const profile = await readProfile2();
-        return { displayName: profile?.displayName };
-      } catch {
-        return {};
-      }
-    },
-    prompt: async (question) => {
-      const { createInterface: createInterface2 } = await import("readline");
-      const rl = createInterface2({ input: process.stdin, output: process.stdout });
-      return new Promise((res) => {
-        rl.question(question, (answer) => {
-          rl.close();
-          res(answer.trim().toLowerCase());
-        });
-      });
-    },
-    fetchImpl: (...args) => globalThis.fetch(...args),
-    openBrowser: (url) => {
-      void Promise.resolve().then(() => (init_open_url(), open_url_exports)).then((m) => m.openInBrowser(url)).catch(() => {
-      });
-    },
-    // Session source priority: persisted file (`terminalhire link`) FIRST, then the
-    // legacy TERMINALHIRE_WEB_SESSION env, then none.
-    sessionCookie: () => readWebSessionCookie(),
-    log: (msg) => console.log(msg),
-    errorLog: (msg) => console.error(msg),
-    exit: (code) => process.exit(code)
-  };
-}
-function renderConsentCard(payload, deps) {
-  const { log } = deps;
-  log("");
-  log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
-  log("\u2502   terminalhire \u2014 request an intro (opt-in)                    \u2502");
-  log("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518");
-  log("");
-  log("  This sends the following \u2014 and ONLY the following \u2014 to terminalhire,");
-  log(`  to ask @${payload.targetLogin} for an intro:`);
-  log("");
-  log(`    Your GitHub login   : @${payload.requesterLogin}`);
-  log(`    Your display name   : ${payload.requesterDisplayName}`);
-  log(`    Your contact        : ${payload.requesterContact}`);
-  log(`    Note                : ${payload.note ?? "(none)"}`);
-  log(`    To developer        : @${payload.targetLogin}`);
-  log("");
-  log("  What is NEVER sent: your fingerprint, trajectory, repos, or any other");
-  log("  profile field. @" + payload.targetLogin + " sees only your public login");
-  log("  until they accept \u2014 your contact is shared only on their acceptance.");
-  log("");
-}
-async function runIntroRequest(args, overrides) {
-  const deps = { ...defaultIntroDeps(), ...overrides };
-  const targetLogin = args.targetLogin?.trim().replace(/^@/, "");
-  if (!targetLogin) {
-    deps.errorLog('\n  Usage: terminalhire intro <github-login> [--note "..."] [--contact <email>] [--name "..."]\n');
-    deps.exit(1);
-    return;
-  }
-  const requesterLogin = await deps.readGithubLogin();
-  if (!requesterLogin) {
-    deps.log("\n  Not signed in. Run `terminalhire login` first, then re-run this command.\n");
-    deps.exit(1);
-    return;
-  }
-  if (targetLogin.toLowerCase() === requesterLogin.toLowerCase()) {
-    deps.errorLog("\n  You cannot request an intro to yourself.\n");
-    deps.exit(1);
-    return;
-  }
-  const profile = await deps.readProfileContact();
-  const displayName = (args.name ?? profile.displayName ?? requesterLogin).trim();
-  const explicitContact = (args.contact ?? "").trim();
-  const contact = explicitContact || `@${requesterLogin}`;
-  const payload = buildIntroPayload({
-    requesterLogin,
-    requesterDisplayName: displayName,
-    requesterContact: contact,
-    targetLogin,
-    note: args.note
-  });
-  renderConsentCard(payload, deps);
-  const answer = await deps.prompt('  Type "yes" to send this intro request (anything else cancels): ');
-  if (answer !== "yes") {
-    deps.log("\n  Cancelled \u2014 nothing was sent.\n");
-    deps.exit(0);
-    return;
-  }
-  const cookie = deps.sessionCookie();
-  if (!cookie) {
-    deps.log("\n  No linked web session found on this machine.");
-    deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
-    deps.exit(0);
-    return;
-  }
-  let res;
-  try {
-    res = await deps.fetchImpl(`${LINK_BASE}/api/intro/request`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: `${GH_SESSION_COOKIE3}=${cookie}` },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(1e4)
-    });
-  } catch (err) {
-    deps.errorLog(`
-  Request failed: ${err instanceof Error ? err.message : String(err)}
-`);
-    deps.exit(1);
-    return;
-  }
-  if (res.status === 401) {
-    deps.log("\n  Your linked web session expired.");
-    deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
-    deps.exit(1);
-    return;
-  }
-  if (res.status === 429) {
-    deps.errorLog("\n  Too many intro requests right now \u2014 please try again later.\n");
-    deps.exit(1);
-    return;
-  }
-  if (res.status === 409) {
-    let reason = "an intro between you two already exists \u2014 check `terminalhire intro --list`.";
-    try {
-      const data = await res.json();
-      if (typeof data.error === "string" && data.error) reason = data.error;
-    } catch {
-    }
-    deps.log(`
-  ${reason}
-`);
-    deps.exit(1);
-    return;
-  }
-  if (!res.ok) {
-    deps.errorLog(`
-  Request failed: /api/intro/request returned ${res.status}.
-`);
-    deps.exit(1);
-    return;
-  }
-  let notified = false;
-  let deduped = false;
-  try {
-    const data = await res.json();
-    notified = data.notified === true;
-    deduped = data.deduped === true;
-  } catch {
-  }
-  if (deduped) {
-    deps.log(`
-  You already have a pending intro request to @${targetLogin} \u2014 nothing new was sent.`);
-    deps.log("  They can accept it any time from `terminalhire intro --list` or their dashboard.\n");
-  } else if (notified) {
-    deps.log(`
-  Intro request sent to @${targetLogin}. They will see only your public login`);
-    deps.log("  until they accept; your contact is shared only if they do.\n");
-  } else {
-    deps.log(`
-  Intro request recorded for @${targetLogin} \u2014 but we couldn't email them`);
-    deps.log("  automatically (no public email on file). Send it to them yourself: they can run");
-    deps.log("  `terminalhire intro --list` (or open their dashboard) to see and accept it.");
-    deps.log("  They will see only your public login until they accept; your contact is");
-    deps.log("  shared only if they do.\n");
-  }
-}
-async function fetchIntros(deps, cookie) {
-  const res = await deps.fetchImpl(`${LINK_BASE}/api/intro/list`, {
-    method: "GET",
-    headers: { Cookie: `${GH_SESSION_COOKIE3}=${cookie}` },
-    signal: AbortSignal.timeout(1e4)
-  });
-  if (!res.ok) throw new Error(`/api/intro/list returned ${res.status}`);
-  const data = await res.json().catch(() => ({}));
-  return data.intros ?? [];
-}
-async function runIntroDecision(args, overrides) {
-  const deps = { ...defaultIntroDeps(), ...overrides };
-  let id = args.id?.trim() ?? "";
-  if (!id) {
-    deps.errorLog("\n  Usage: terminalhire intro --accept <@handle|id> | --decline <@handle|id>\n");
-    deps.exit(1);
-    return;
-  }
-  const cookie = deps.sessionCookie();
-  if (!cookie) {
-    deps.log("\n  No linked web session found on this machine.");
-    deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
-    deps.exit(0);
-    return;
-  }
-  if (!UUID_RE.test(id)) {
-    const handle = id.replace(/^@/, "").toLowerCase();
-    let intros;
-    try {
-      intros = await fetchIntros(deps, cookie);
-    } catch (err) {
-      deps.errorLog(`
-  Could not look up the request: ${err instanceof Error ? err.message : String(err)}
-`);
-      deps.exit(1);
-      return;
-    }
-    const matches = intros.filter(
-      (it) => it.role === "incoming" && it.status === "pending" && it.counterpartyLogin.toLowerCase() === handle
-    );
-    if (matches.length === 0) {
-      deps.errorLog(`
-  No pending connection request from @${handle}.`);
-      deps.errorLog("  See your requests with `terminalhire intro --list`.\n");
-      deps.exit(1);
-      return;
-    }
-    if (matches.length > 1) {
-      deps.errorLog(`
-  ${matches.length} pending requests from @${handle} \u2014 ${args.action === "accept" ? "accepting" : "declining"} one (the rest are redundant duplicates).`);
-    }
-    id = matches[0].id;
-  }
-  let contact = "";
-  let shareHandle = false;
-  if (args.action === "accept") {
-    contact = (args.contact ?? "").trim();
-    shareHandle = contact.length === 0;
-    let shareLabel = contact;
-    if (shareHandle) {
-      const login = await deps.readGithubLogin().catch(() => null);
-      shareLabel = login ? `your GitHub handle (@${login})` : "your GitHub handle";
-    }
-    deps.log("");
-    deps.log("  Accepting shares a contact with the requester so they can reach you:");
-    deps.log(`    Your contact : ${shareLabel}`);
-    if (shareHandle) {
-      deps.log("    (share an email/handle instead with `--contact <email-or-handle>`)");
-    }
-    deps.log("  Nothing else is shared. Declining shares nothing.");
-    deps.log("");
-    const answer = await deps.prompt('  Type "yes" to accept and share your contact (anything else cancels): ');
-    if (answer !== "yes") {
-      deps.log("\n  Cancelled \u2014 nothing was sent.\n");
-      deps.exit(0);
-      return;
-    }
-  }
-  const body = args.action === "accept" ? shareHandle ? { introId: id, action: "accept" } : { introId: id, action: "accept", targetContact: contact } : { introId: id, action: "decline" };
-  let res;
-  try {
-    res = await deps.fetchImpl(`${LINK_BASE}/api/intro/accept`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: `${GH_SESSION_COOKIE3}=${cookie}` },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(1e4)
-    });
-  } catch (err) {
-    deps.errorLog(`
-  Request failed: ${err instanceof Error ? err.message : String(err)}
-`);
-    deps.exit(1);
-    return;
-  }
-  if (res.status === 401) {
-    deps.log("\n  Your linked web session expired.");
-    deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
-    deps.exit(1);
-    return;
-  }
-  if (res.status === 403) {
-    deps.errorLog("\n  You are not the developer this intro was sent to.\n");
-    deps.exit(1);
-    return;
-  }
-  if (res.status === 404) {
-    deps.errorLog("\n  Intro not found.\n");
-    deps.exit(1);
-    return;
-  }
-  if (!res.ok) {
-    deps.errorLog(`
-  Request failed: /api/intro/accept returned ${res.status}.
-`);
-    deps.exit(1);
-    return;
-  }
-  let data = {};
-  try {
-    data = await res.json();
-  } catch {
-  }
-  if (args.action === "decline") {
-    deps.log("\n  Declined \u2014 no contact was shared.\n");
-    return;
-  }
-  const peer = data.counterpartyLogin;
-  deps.log(`
-  \u2713 Connected${peer ? ` with @${peer}` : ""}.`);
-  if (peer) deps.log(`  Message them any time:  terminalhire chat @${peer}`);
-  if (data.contact) deps.log(`  They also shared: ${data.contact}`);
-  deps.log("");
-}
-async function runIntroList(overrides) {
-  const deps = { ...defaultIntroDeps(), ...overrides };
-  const cookie = deps.sessionCookie();
-  if (!cookie) {
-    deps.log("\n  No linked web session found on this machine.");
-    deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
-    deps.exit(0);
-    return;
-  }
-  let res;
-  try {
-    res = await deps.fetchImpl(`${LINK_BASE}/api/intro/list`, {
-      method: "GET",
-      headers: { Cookie: `${GH_SESSION_COOKIE3}=${cookie}` },
-      signal: AbortSignal.timeout(1e4)
-    });
-  } catch (err) {
-    deps.errorLog(`
-  Request failed: ${err instanceof Error ? err.message : String(err)}
-`);
-    deps.exit(1);
-    return;
-  }
-  if (res.status === 401) {
-    deps.log("\n  Your linked web session expired.");
-    deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
-    deps.exit(1);
-    return;
-  }
-  if (!res.ok) {
-    deps.errorLog(`
-  Request failed: /api/intro/list returned ${res.status}.
-`);
-    deps.exit(1);
-    return;
-  }
-  let data = {};
-  try {
-    data = await res.json();
-  } catch {
-  }
-  const intros = data.intros ?? [];
-  if (intros.length === 0) {
-    deps.log("\n  No intros yet.\n");
-    return;
-  }
-  deps.log("");
-  for (const it of intros) {
-    const dir = it.role === "incoming" ? "from" : "to";
-    deps.log(`  [${it.status}] ${dir} @${it.counterpartyLogin}`);
-    if (it.note) deps.log(`      note: ${it.note}`);
-    if (it.contact) deps.log(`      contact: ${it.contact}`);
-    else if (it.role === "incoming" && it.status === "pending") {
-      deps.log(`      \u2192 accept: terminalhire intro --accept @${it.counterpartyLogin}`);
-    }
-  }
-  deps.log("");
-}
-var LINK_BASE, GH_SESSION_COOKIE3, UUID_RE;
-var init_intro2 = __esm({
-  "src/intro.ts"() {
-    "use strict";
-    init_src();
-    init_web_session();
-    LINK_BASE = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
-    GH_SESSION_COOKIE3 = "__jpi_gh_session";
-    UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  }
-});
-
-// bin/jpi-inbox.js
-var jpi_inbox_exports = {};
-__export(jpi_inbox_exports, {
-  defaultDecideIntro: () => defaultDecideIntro,
-  formatInbox: () => formatInbox,
-  run: () => run,
-  runInboxPane: () => runInboxPane,
-  runInboxTui: () => runInboxTui,
-  sortConversations: () => sortConversations
-});
-async function defaultDecideIntro(req, overrides = {}) {
-  const { runIntroDecision: runIntroDecision2 } = await Promise.resolve().then(() => (init_intro2(), intro_exports));
-  let exited = false;
-  let errReason = "";
-  const logLines = [];
-  const args = { id: `@${req.login}`, action: req.action };
-  if (req.action === "accept" && req.contact) args.contact = req.contact;
-  await runIntroDecision2(args, {
-    prompt: async () => "yes",
-    exit: () => {
-      exited = true;
-    },
-    log: (msg) => {
-      const t = typeof msg === "string" ? msg.trim() : "";
-      if (t) logLines.push(t);
-    },
-    errorLog: (msg) => {
-      const t = typeof msg === "string" ? msg.trim() : "";
-      if (t && !errReason) errReason = t;
-    },
-    // Overrides last so tests can stub the engine's own IO (fetchImpl,
-    // sessionCookie, readGithubLogin) — but never the capture handlers above…
-    ...(() => {
-      const { prompt, exit, log, errorLog, ...safe } = overrides;
-      return safe;
-    })()
-  });
-  const reason = exited ? errReason || logLines.slice(-2).join(" ") : "";
-  return { ok: !exited, reason };
-}
-function sortConversations(items) {
-  return items.slice().sort((a, b) => {
-    if (b.unread !== a.unread) return b.unread - a.unread;
-    const at = a.lastStampIso || "";
-    const bt = b.lastStampIso || "";
-    if (at === bt) return 0;
-    return at > bt ? -1 : 1;
-  });
-}
-function formatInbox(state) {
-  const { rows, selected, mode, inputBuffer, activeLogin, banner, inviteCount, loading } = state;
-  const lines = [];
-  lines.push("  inbox \xB7 terminalhire chat");
-  lines.push("  " + "\u2500".repeat(64));
-  if (!rows || rows.length === 0) {
-    lines.push(
-      loading ? "  \u2726 loading your conversations\u2026" : "  (no connections yet \u2014 request one: terminalhire intro <login>)"
-    );
-  } else {
-    let printedInviteHeader = false;
-    let printedConvSep = false;
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const sel = i === selected;
-      if (row.type === "invite") {
-        if (!printedInviteHeader) {
-          lines.push(`  PENDING INVITATIONS (${inviteCount})`);
-          printedInviteHeader = true;
-        }
-        const handle = `@${sanitizeLine(row.login)}`;
-        const text = `  \u2198 ${handle.padEnd(18)} wants to connect`;
-        lines.push(sel ? INVERSE + text + RESET : text);
-      } else {
-        if (inviteCount > 0 && !printedConvSep) {
-          lines.push("  " + "\u2500".repeat(64));
-          printedConvSep = true;
-        }
-        const dot = formatPresence(row.presence).charAt(0);
-        const login = `@${sanitizeLine(row.login)}`;
-        const badgeVisible = row.unread > 0 ? `\u2709 ${row.unread}` : "\u2014";
-        const badgeCell = badgeVisible.padEnd(5);
-        const badge = row.unread > 0 ? BOLD + badgeCell + BOLD_OFF : badgeCell;
-        const stamp = sanitizeLine(row.lastStamp || "").padStart(6);
-        const preview = row.preview ? truncate2(sanitizeLine(row.preview), 34) : "";
-        const text = `  ${dot} ${login.padEnd(18)} ${badge} ${stamp}  ${preview}`;
-        lines.push(sel ? INVERSE + text + RESET : text);
-      }
-    }
-  }
-  lines.push("  " + "\u2500".repeat(64));
-  if (mode === "input") {
-    lines.push(
-      `  contact to share with @${sanitizeLine(activeLogin)} (blank = share your @handle): ${inputBuffer}\u258A`
-    );
-    lines.push("  Enter accept \xB7 Esc cancel");
-  } else if (mode === "confirm") {
-    lines.push(`  Decline @${sanitizeLine(activeLogin)}? Declining is permanent.`);
-    lines.push("  y decline \xB7 n cancel");
-  } else {
-    const cur = rows && rows.length > 0 ? rows[selected] : null;
-    if (cur && cur.type === "invite") {
-      lines.push("  \u2191/\u2193 move \xB7 Enter/a accept \xB7 d decline \xB7 R refresh \xB7 q quit");
-    } else {
-      lines.push("  \u2191/\u2193 move \xB7 Enter open \xB7 r read \xB7 R refresh \xB7 q quit");
-    }
-  }
-  if (banner) {
-    lines.push("  " + "\u2500".repeat(64));
-    lines.push(`  ${banner}`);
-  }
-  return CLEAR + lines.join("\n") + "\n";
-}
-function truncate2(s, n) {
-  const t = String(s);
-  return t.length <= n ? t : `${t.slice(0, n - 1)}\u2026`;
-}
-async function runInboxPane(opts = {}) {
-  const {
-    input = process.stdin,
-    output = process.stdout,
-    signals = process,
-    client = createChatClient(),
-    listConnections = defaultListConnections,
-    readCursors = readReadCursors,
-    buildItems = () => buildInboxItems({ client, listConnections, readCursors }),
-    listInvites = defaultListPendingInvites,
-    decideIntro = defaultDecideIntro,
-    writeCursor = writeReadCursor,
-    postReadCursor: postCursor = postReadCursor,
-    syncUnreadBadge: syncBadge = syncUnreadBadge,
-    setTimer = (fn, ms) => setInterval(fn, ms),
-    clearTimer = (t) => clearInterval(t),
-    refreshMs = DEFAULT_REFRESH_MS
-  } = opts;
-  return await new Promise((resolve) => {
-    let rows = [];
-    let inviteCount = 0;
-    let selected = 0;
-    let mode = "list";
-    let inputBuffer = "";
-    let activeLogin = "";
-    let banner = "";
-    let selectedLogin = "";
-    let busy = false;
-    let fetching = false;
-    let marking = false;
-    let loading = true;
-    let timer = null;
-    let cleaned = false;
-    function repaint() {
-      if (cleaned) return;
-      output.write(
-        formatInbox({ rows, selected, mode, inputBuffer, activeLogin, banner, inviteCount, loading })
-      );
-    }
-    function setRows(items, invites) {
-      const inviteRows = (invites || []).map((iv) => ({ type: "invite", login: iv.login }));
-      const convRows = sortConversations(items || []).map((it) => ({ type: "conv", ...it }));
-      rows = [...inviteRows, ...convRows];
-      inviteCount = inviteRows.length;
-      if (rows.length === 0) {
-        selected = 0;
-        return;
-      }
-      const idx = selectedLogin ? rows.findIndex((r) => r.login === selectedLogin) : -1;
-      selected = idx >= 0 ? idx : Math.min(selected, rows.length - 1);
-      selectedLogin = rows[selected].login;
-    }
-    async function refetch() {
-      if (fetching) return;
-      fetching = true;
-      try {
-        const built = await buildItems();
-        const items = built && built.status === "ok" ? built.items : [];
-        let invites = [];
-        try {
-          const inv = await listInvites();
-          if (inv && inv.status === "ok") invites = inv.invites;
-        } catch {
-        }
-        setRows(items, invites);
-        loading = false;
-      } catch {
-      } finally {
-        fetching = false;
-      }
-      if (!cleaned) repaint();
-    }
-    function moveSelection(delta) {
-      if (rows.length === 0) return;
-      selected = Math.max(0, Math.min(rows.length - 1, selected + delta));
-      selectedLogin = rows[selected].login;
-      repaint();
-    }
-    function beginAccept(row) {
-      mode = "input";
-      inputBuffer = "";
-      activeLogin = row.login;
-      banner = "";
-      repaint();
-    }
-    function beginDecline(row) {
-      mode = "confirm";
-      activeLogin = row.login;
-      banner = "";
-      repaint();
-    }
-    function cancelMode() {
-      mode = "list";
-      inputBuffer = "";
-      banner = "";
-      repaint();
-    }
-    async function submitDecision(action, contact) {
-      if (busy) return;
-      busy = true;
-      const login = activeLogin;
-      mode = "list";
-      inputBuffer = "";
-      banner = action === "accept" ? `accepting @${login}\u2026` : `declining @${login}\u2026`;
-      repaint();
-      let ok = false;
-      let reason = "";
-      try {
-        const req = action === "accept" && contact ? { login, action, contact } : { login, action };
-        const res = await decideIntro(req);
-        ok = !!(res && res.ok);
-        if (!ok && res && typeof res.reason === "string") reason = res.reason;
-      } catch {
-        ok = false;
-      }
-      const why = sanitizeLine(reason).slice(0, 64);
-      banner = ok ? action === "accept" ? `\u2713 connected with @${login}` : `\u2713 declined @${login}` : `\u26A0 could not ${action} @${login} \u2014 ${why || "try again"}`;
-      if (ok) {
-        try {
-          await refetch();
-        } catch {
-        }
-      }
-      busy = false;
-      repaint();
-    }
-    async function markRowRead(row) {
-      if (busy || marking || !row || row.type !== "conv" || !row.lastStampIso) return;
-      marking = true;
-      row.unread = 0;
-      repaint();
-      try {
-        writeCursor(row.login, row.lastStampIso);
-      } catch {
-      }
-      try {
-        await postCursor(row.login, row.lastStampIso);
-      } catch {
-      }
-      try {
-        await syncBadge();
-      } catch {
-      }
-      marking = false;
-    }
-    function activateRow() {
-      const row = rows[selected];
-      if (!row) return;
-      if (row.type === "invite") {
-        beginAccept(row);
-        return;
-      }
-      finish({ action: "open", login: row.login });
-    }
-    function handleListChar(ch) {
-      if (busy) return;
-      const row = rows[selected];
-      switch (ch) {
-        case "j":
-          moveSelection(1);
-          break;
-        case "k":
-          moveSelection(-1);
-          break;
-        case "q":
-          finish({ action: "quit" });
-          break;
-        case KEY_ENTER_A:
-        case KEY_ENTER_B:
-          activateRow();
-          break;
-        case "a":
-          if (row && row.type === "invite") beginAccept(row);
-          break;
-        case "d":
-          if (row && row.type === "invite") beginDecline(row);
-          break;
-        case "r":
-          if (row && row.type === "conv") void markRowRead(row);
-          break;
-        case "R":
-          if (!busy) void refetch();
-          break;
-        default:
-          break;
-      }
-    }
-    function handleInputChunk(s) {
-      if (s === KEY_ENTER_A || s === KEY_ENTER_B || s === "\r\n") {
-        void submitDecision("accept", inputBuffer.trim());
-        return;
-      }
-      if (s === KEY_BACKSPACE_A || s === KEY_BACKSPACE_B) {
-        inputBuffer = inputBuffer.slice(0, -1);
-        repaint();
-        return;
-      }
-      for (const ch of s) {
-        if (ch === KEY_BACKSPACE_A || ch === KEY_BACKSPACE_B) {
-          inputBuffer = inputBuffer.slice(0, -1);
-        } else if (ch >= " " && inputBuffer.length < MAX_CONTACT_LEN) {
-          inputBuffer += ch;
-        }
-      }
-      repaint();
-    }
-    function handleConfirmChar(ch) {
-      if (ch === "y" || ch === "Y") {
-        void submitDecision("decline");
-        return;
-      }
-      if (ch === "n" || ch === "N") {
-        cancelMode();
-      }
-    }
-    function onData(chunk) {
-      if (cleaned) return;
-      const s = chunk.toString("utf8");
-      if (s === KEY_CTRL_C) {
-        finish({ action: "quit" });
-        return;
-      }
-      if (s === KEY_ESC) {
-        if (mode === "input" || mode === "confirm") cancelMode();
-        else finish({ action: "quit" });
-        return;
-      }
-      if (s.charCodeAt(0) === 27) {
-        if (mode === "list" && !busy) {
-          if (s === KEY_UP) moveSelection(-1);
-          else if (s === KEY_DOWN) moveSelection(1);
-        }
-        return;
-      }
-      if (mode === "input") {
-        handleInputChunk(s);
-        return;
-      }
-      for (const ch of s) {
-        if (mode === "confirm") handleConfirmChar(ch);
-        else handleListChar(ch);
-      }
-    }
-    function onResize() {
-      if (!cleaned) repaint();
-    }
-    function cleanup() {
-      if (cleaned) return;
-      cleaned = true;
-      if (timer) {
-        try {
-          clearTimer(timer);
-        } catch {
-        }
-        timer = null;
-      }
-      try {
-        if (typeof input.setRawMode === "function") input.setRawMode(false);
-      } catch {
-      }
-      try {
-        input.removeListener("data", onData);
-      } catch {
-      }
-      try {
-        if (typeof input.pause === "function") input.pause();
-      } catch {
-      }
-      try {
-        if (typeof output.removeListener === "function") output.removeListener("resize", onResize);
-      } catch {
-      }
-      try {
-        signals.removeListener("SIGINT", onSignal);
-        signals.removeListener("SIGTERM", onTerm);
-        signals.removeListener("SIGHUP", onTerm);
-        signals.removeListener("uncaughtException", onUncaught);
-        signals.removeListener("unhandledRejection", onUncaught);
-        signals.removeListener("exit", onExit);
-      } catch {
-      }
-      output.write(SHOW_CURSOR + EXIT_ALT);
-    }
-    function finish(result) {
-      if (cleaned) return;
-      cleanup();
-      resolve(result);
-    }
-    function onSignal() {
-      finish({ action: "quit" });
-    }
-    function onTerm() {
-      finish({ action: "quit" });
-    }
-    function onUncaught(err) {
-      cleanup();
-      throw err;
-    }
-    function onExit() {
-      cleanup();
-    }
-    try {
-      if (typeof input.setRawMode === "function") input.setRawMode(true);
-      if (typeof input.resume === "function") input.resume();
-      output.write(ENTER_ALT + HIDE_CURSOR);
-      input.on("data", onData);
-      if (typeof output.on === "function") output.on("resize", onResize);
-      signals.on("SIGINT", onSignal);
-      signals.on("SIGTERM", onTerm);
-      signals.on("SIGHUP", onTerm);
-      signals.on("uncaughtException", onUncaught);
-      signals.on("unhandledRejection", onUncaught);
-      signals.on("exit", onExit);
-      repaint();
-      void refetch();
-      timer = setTimer(() => {
-        if (mode === "list" && !busy) void refetch();
-      }, refreshMs);
-    } catch (err) {
-      cleanup();
-      output.write(`
-  Inbox error: ${err instanceof Error ? err.message : String(err)}
-
-`);
-      resolve({ action: "quit" });
-    }
-  });
-}
-async function runInboxTui(deps = {}) {
-  const {
-    input = process.stdin,
-    output = process.stdout,
-    ensureDisclosure = ensureChatDisclosure,
-    openChatPane = runChatPane,
-    ...paneDeps
-  } = deps;
-  const ack = await ensureDisclosure({ input, output });
-  if (!ack.acknowledged) {
-    output.write(
-      "\n  Chat needs you to acknowledge the privacy notice above first. Re-run when ready.\n\n"
-    );
-    return { ok: false, reason: "not-acknowledged" };
-  }
-  for (; ; ) {
-    const sel = await runInboxPane({ input, output, ...paneDeps });
-    if (!sel || sel.action === "quit") break;
-    if (sel.action === "open" && sel.login) {
-      await openChatPane({ login: sel.login, input, output });
-    }
-  }
-  return { ok: true };
-}
-async function run(opts = {}) {
-  const {
-    isTTY = process.stdout.isTTY,
-    input = process.stdin,
-    output = process.stdout,
-    runTui = runInboxTui,
-    runStatic = null
-  } = opts;
-  if (isTTY) {
-    await runTui({ input, output });
-  } else if (runStatic) {
-    await runStatic({});
-  } else {
-    const mod2 = await Promise.resolve().then(() => (init_jpi_chat_read(), jpi_chat_read_exports));
-    await mod2.runInbox({});
-  }
-}
-var HIDE_CURSOR, SHOW_CURSOR, ENTER_ALT, EXIT_ALT, CLEAR, INVERSE, RESET, BOLD, BOLD_OFF, KEY_CTRL_C, KEY_ESC, KEY_UP, KEY_DOWN, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, MAX_CONTACT_LEN, DEFAULT_REFRESH_MS;
-var init_jpi_inbox = __esm({
-  "bin/jpi-inbox.js"() {
-    "use strict";
-    init_chat_client();
-    init_jpi_chat();
-    init_jpi_chat_read();
-    HIDE_CURSOR = "\x1B[?25l";
-    SHOW_CURSOR = "\x1B[?25h";
-    ENTER_ALT = "\x1B[?1049h";
-    EXIT_ALT = "\x1B[?1049l";
-    CLEAR = "\x1B[2J\x1B[H";
-    INVERSE = "\x1B[7m";
-    RESET = "\x1B[0m";
-    BOLD = "\x1B[1m";
-    BOLD_OFF = "\x1B[22m";
-    KEY_CTRL_C = "";
-    KEY_ESC = "\x1B";
-    KEY_UP = "\x1B[A";
-    KEY_DOWN = "\x1B[B";
-    KEY_ENTER_A = "\r";
-    KEY_ENTER_B = "\n";
-    KEY_BACKSPACE_A = "\x7F";
-    KEY_BACKSPACE_B = "\b";
-    MAX_CONTACT_LEN = 200;
-    DEFAULT_REFRESH_MS = 4e3;
-  }
-});
-
 // bin/jpi-chat.js
 import { createInterface } from "readline";
 import { existsSync as existsSync8, readFileSync as readFileSync9 } from "fs";
@@ -5926,7 +4990,7 @@ async function fetchIntroList(deps = {}) {
   try {
     res = await fetchImpl(`${CHAT_BASE3}/api/intro/list`, {
       method: "GET",
-      headers: { Cookie: `${GH_SESSION_COOKIE4}=${cookie}` },
+      headers: { Cookie: `${GH_SESSION_COOKIE3}=${cookie}` },
       signal: AbortSignal.timeout(1e4)
     });
   } catch (err) {
@@ -6023,7 +5087,7 @@ function formatThread(state) {
   lines.push("  " + "\u2500".repeat(56));
   lines.push(`  > ${inputBuffer}`);
   lines.push("  Enter send \xB7 Ctrl-S safety number \xB7 /safety \xB7 /block \xB7 q quit");
-  return CLEAR2 + lines.join("\n") + "\n";
+  return CLEAR + lines.join("\n") + "\n";
 }
 function mergeMessages(existing, incoming) {
   const seen = new Set(existing.map((m) => m.id));
@@ -6237,7 +5301,7 @@ async function runChatPane(opts = {}) {
         signals.removeListener("exit", onExit);
       } catch {
       }
-      output.write(SHOW_CURSOR2 + EXIT_ALT2);
+      output.write(SHOW_CURSOR + EXIT_ALT);
     }
     function finish(reason) {
       if (cleaned) return;
@@ -6389,7 +5453,7 @@ async function runChatPane(opts = {}) {
       if (cleaned) return;
       const s = chunk.toString("utf8");
       for (const ch of s) {
-        if (ch === KEY_CTRL_C2) {
+        if (ch === KEY_CTRL_C) {
           finish("sigint");
           return;
         }
@@ -6397,14 +5461,14 @@ async function runChatPane(opts = {}) {
           void showSafetyNumber();
           continue;
         }
-        if (ch === KEY_ENTER_A2 || ch === KEY_ENTER_B2) {
+        if (ch === KEY_ENTER_A || ch === KEY_ENTER_B) {
           const line = inputBuffer;
           inputBuffer = "";
           repaint();
           void submitLine(line);
           continue;
         }
-        if (ch === KEY_BACKSPACE_A2 || ch === KEY_BACKSPACE_B2) {
+        if (ch === KEY_BACKSPACE_A || ch === KEY_BACKSPACE_B) {
           inputBuffer = inputBuffer.slice(0, -1);
           repaint();
           continue;
@@ -6436,7 +5500,7 @@ async function runChatPane(opts = {}) {
     try {
       if (typeof input.setRawMode === "function") input.setRawMode(true);
       if (typeof input.resume === "function") input.resume();
-      output.write(ENTER_ALT2 + HIDE_CURSOR2);
+      output.write(ENTER_ALT + HIDE_CURSOR);
       input.on("data", onData);
       signals.on("SIGINT", onSignal);
       signals.on("SIGTERM", onTerm);
@@ -6459,195 +5523,26 @@ async function runChatPane(opts = {}) {
     }
   });
 }
-async function runBlockCommand(opts = {}) {
-  const { login, action, client = createChatClient(), output = process.stdout } = opts;
-  const target = String(login ?? "").replace(/^@/, "").trim();
-  if (!target) {
-    output.write("\n  Usage: terminalhire chat <github-login> --block|--unblock\n\n");
-    return { ok: false, reason: "no-login" };
-  }
-  try {
-    if (action === "block") {
-      await client.blockPeer(target);
-      output.write(
-        `
-  Blocked @${target}. They can no longer message you, fetch your key, or see
-  your presence \u2014 and you can't chat with them until you unblock.
-  Unblock anytime:  terminalhire chat ${target} --unblock
-
-`
-      );
-    } else {
-      await client.unblock(target);
-      output.write(
-        `
-  Unblocked @${target}. You can chat again:  terminalhire chat ${target}
-
-`
-      );
-    }
-    return { ok: true, action, login: target };
-  } catch (err) {
-    if (err instanceof ChatSessionExpiredError || err instanceof ChatNotLinkedError) {
-      output.write(`
-  ${err.message}
-
-`);
-      return { ok: false, reason: "session" };
-    }
-    output.write(`
-  Could not ${action} @${target}: ${err instanceof Error ? err.message : String(err)}
-
-`);
-    return { ok: false, reason: "error" };
-  }
-}
-async function runShareActivityCommand(opts = {}) {
-  const {
-    value,
-    client = createChatClient(),
-    output = process.stdout,
-    writeCfg = writeConfig
-  } = opts;
-  const v = String(value ?? "").trim().toLowerCase();
-  if (v !== "on" && v !== "off") {
-    output.write("\n  Usage: terminalhire chat --share-activity on|off\n\n");
-    return { ok: false, reason: "usage" };
-  }
-  const share = v === "on";
-  try {
-    await client.setActivitySharing(share);
-  } catch (err) {
-    if (err instanceof ChatSessionExpiredError || err instanceof ChatNotLinkedError) {
-      output.write(`
-  ${err.message}
-
-`);
-      return { ok: false, reason: "session" };
-    }
-    output.write(
-      `
-  Could not update activity sharing: ${err instanceof Error ? err.message : String(err)}
-
-`
-    );
-    return { ok: false, reason: "error" };
-  }
-  try {
-    writeCfg({ chatShareActivity: share });
-  } catch {
-  }
-  if (share) {
-    output.write(
-      '\n  \u2713 Connections can now see your activity \u2014 when you were last active (e.g. "seen 2h ago").\n  Turn off anytime:  terminalhire chat --share-activity off\n\n'
-    );
-  } else {
-    output.write(
-      "\n  \u2713 Your activity is now hidden. Connections see only that you're reachable.\n\n"
-    );
-  }
-  return { ok: true, share };
-}
-async function run2() {
-  const args = process.argv.slice(2);
-  let login;
-  let limit = 8;
-  let sendText;
-  let wantAll = false;
-  let wantInbox = false;
-  let wantRead = false;
-  let wantBlock = false;
-  let wantUnblock = false;
-  let shareActivityValue;
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === "--inbox") wantInbox = true;
-    else if (a === "--read") wantRead = true;
-    else if (a === "--all") wantAll = true;
-    else if (a === "--block") wantBlock = true;
-    else if (a === "--unblock") wantUnblock = true;
-    else if (a === "--share-activity") shareActivityValue = args[++i];
-    else if (a === "--send") sendText = args[++i];
-    else if (a === "-n") {
-      const v = parseInt(args[++i], 10);
-      if (Number.isFinite(v) && v > 0) limit = v;
-    } else if (!a.startsWith("-")) {
-      if (login === void 0) login = a;
-    }
-  }
-  const wantSend = sendText !== void 0;
-  const wantShareActivity = shareActivityValue !== void 0;
-  try {
-    if (wantShareActivity) {
-      await runShareActivityCommand({ value: shareActivityValue });
-      process.exit(0);
-    }
-    if (wantSend) {
-      const mod2 = await Promise.resolve().then(() => (init_jpi_chat_read(), jpi_chat_read_exports));
-      await mod2.runSend({ login, text: sendText });
-      process.exit(0);
-    }
-    if (wantRead) {
-      const mod2 = await Promise.resolve().then(() => (init_jpi_chat_read(), jpi_chat_read_exports));
-      await mod2.runReadThread({ login, all: wantAll, limit });
-      process.exit(0);
-    }
-    if (wantInbox) {
-      const mod2 = await Promise.resolve().then(() => (init_jpi_chat_read(), jpi_chat_read_exports));
-      await mod2.runInbox({});
-      process.exit(0);
-    }
-    if (!login && !wantBlock && !wantUnblock) {
-      if (process.stdout.isTTY) {
-        const mod2 = await Promise.resolve().then(() => (init_jpi_inbox(), jpi_inbox_exports));
-        await mod2.run();
-      } else {
-        const mod2 = await Promise.resolve().then(() => (init_jpi_chat_read(), jpi_chat_read_exports));
-        await mod2.runInbox({});
-      }
-      process.exit(0);
-    }
-    const disclosure = await ensureChatDisclosure({ input: process.stdin, output: process.stdout });
-    if (!disclosure.acknowledged) {
-      process.stdout.write(
-        "\n  Chat needs you to acknowledge the privacy notice above first. Re-run when ready.\n\n"
-      );
-      process.exit(0);
-    }
-    if (wantBlock || wantUnblock) {
-      await runBlockCommand({ login, action: wantBlock ? "block" : "unblock" });
-      process.exit(0);
-    }
-    await runChatPane({ login });
-    process.exit(0);
-  } catch (err) {
-    try {
-      process.stdout.write(SHOW_CURSOR2 + EXIT_ALT2);
-    } catch {
-    }
-    console.error("terminalhire chat error:", err instanceof Error ? err.message : err);
-    process.exit(1);
-  }
-}
-var CHAT_BASE3, GH_SESSION_COOKIE4, HIDE_CURSOR2, SHOW_CURSOR2, ENTER_ALT2, EXIT_ALT2, CLEAR2, KEY_CTRL_C2, KEY_CTRL_S, KEY_ENTER_A2, KEY_ENTER_B2, KEY_BACKSPACE_A2, KEY_BACKSPACE_B2, MAX_INPUT_LEN, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA, ACTIVE_WINDOW_MS;
+var CHAT_BASE3, GH_SESSION_COOKIE3, HIDE_CURSOR, SHOW_CURSOR, ENTER_ALT, EXIT_ALT, CLEAR, KEY_CTRL_C, KEY_CTRL_S, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, MAX_INPUT_LEN, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA, ACTIVE_WINDOW_MS;
 var init_jpi_chat = __esm({
   "bin/jpi-chat.js"() {
+    "use strict";
     init_chat_client();
     init_config();
     init_web_session();
     CHAT_BASE3 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
-    GH_SESSION_COOKIE4 = "__jpi_gh_session";
-    HIDE_CURSOR2 = "\x1B[?25l";
-    SHOW_CURSOR2 = "\x1B[?25h";
-    ENTER_ALT2 = "\x1B[?1049h";
-    EXIT_ALT2 = "\x1B[?1049l";
-    CLEAR2 = "\x1B[2J\x1B[H";
-    KEY_CTRL_C2 = "";
+    GH_SESSION_COOKIE3 = "__jpi_gh_session";
+    HIDE_CURSOR = "\x1B[?25l";
+    SHOW_CURSOR = "\x1B[?25h";
+    ENTER_ALT = "\x1B[?1049h";
+    EXIT_ALT = "\x1B[?1049l";
+    CLEAR = "\x1B[2J\x1B[H";
+    KEY_CTRL_C = "";
     KEY_CTRL_S = "";
-    KEY_ENTER_A2 = "\r";
-    KEY_ENTER_B2 = "\n";
-    KEY_BACKSPACE_A2 = "\x7F";
-    KEY_BACKSPACE_B2 = "\b";
+    KEY_ENTER_A = "\r";
+    KEY_ENTER_B = "\n";
+    KEY_BACKSPACE_A = "\x7F";
+    KEY_BACKSPACE_B = "\b";
     MAX_INPUT_LEN = 2e3;
     ANSI_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
     ANSI_OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
@@ -6661,25 +5556,940 @@ var init_jpi_chat = __esm({
     ACTIVE_WINDOW_MS = 2 * 60 * 1e3;
   }
 });
-init_jpi_chat();
+
+// src/open-url.js
+var open_url_exports = {};
+__export(open_url_exports, {
+  openInBrowser: () => openInBrowser
+});
+import { spawn } from "child_process";
+function openInBrowser(url) {
+  let cmd;
+  let args;
+  if (process.platform === "darwin") {
+    cmd = "open";
+    args = [url];
+  } else if (process.platform === "win32") {
+    cmd = "cmd";
+    args = ["/c", "start", "", url];
+  } else {
+    cmd = "xdg-open";
+    args = [url];
+  }
+  try {
+    const child = spawn(cmd, args, { stdio: "ignore", detached: true });
+    child.on("error", () => {
+    });
+    child.unref();
+  } catch {
+  }
+}
+var init_open_url = __esm({
+  "src/open-url.js"() {
+    "use strict";
+  }
+});
+
+// src/intro.ts
+var intro_exports = {};
+__export(intro_exports, {
+  runIntroDecision: () => runIntroDecision,
+  runIntroList: () => runIntroList,
+  runIntroRequest: () => runIntroRequest
+});
+function defaultIntroDeps() {
+  return {
+    readGithubLogin: async () => {
+      try {
+        const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+        const profile = await readProfile2();
+        return profile?.github?.login ?? null;
+      } catch {
+        return null;
+      }
+    },
+    readProfileContact: async () => {
+      try {
+        const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+        const profile = await readProfile2();
+        return { displayName: profile?.displayName };
+      } catch {
+        return {};
+      }
+    },
+    prompt: async (question) => {
+      const { createInterface: createInterface2 } = await import("readline");
+      const rl = createInterface2({ input: process.stdin, output: process.stdout });
+      return new Promise((res) => {
+        rl.question(question, (answer) => {
+          rl.close();
+          res(answer.trim().toLowerCase());
+        });
+      });
+    },
+    fetchImpl: (...args) => globalThis.fetch(...args),
+    openBrowser: (url) => {
+      void Promise.resolve().then(() => (init_open_url(), open_url_exports)).then((m) => m.openInBrowser(url)).catch(() => {
+      });
+    },
+    // Session source priority: persisted file (`terminalhire link`) FIRST, then the
+    // legacy TERMINALHIRE_WEB_SESSION env, then none.
+    sessionCookie: () => readWebSessionCookie(),
+    log: (msg) => console.log(msg),
+    errorLog: (msg) => console.error(msg),
+    exit: (code) => process.exit(code)
+  };
+}
+function renderConsentCard(payload, deps) {
+  const { log } = deps;
+  log("");
+  log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
+  log("\u2502   terminalhire \u2014 request an intro (opt-in)                    \u2502");
+  log("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518");
+  log("");
+  log("  This sends the following \u2014 and ONLY the following \u2014 to terminalhire,");
+  log(`  to ask @${payload.targetLogin} for an intro:`);
+  log("");
+  log(`    Your GitHub login   : @${payload.requesterLogin}`);
+  log(`    Your display name   : ${payload.requesterDisplayName}`);
+  log(`    Your contact        : ${payload.requesterContact}`);
+  log(`    Note                : ${payload.note ?? "(none)"}`);
+  log(`    To developer        : @${payload.targetLogin}`);
+  log("");
+  log("  What is NEVER sent: your fingerprint, trajectory, repos, or any other");
+  log("  profile field. @" + payload.targetLogin + " sees only your public login");
+  log("  until they accept \u2014 your contact is shared only on their acceptance.");
+  log("");
+}
+async function runIntroRequest(args, overrides) {
+  const deps = { ...defaultIntroDeps(), ...overrides };
+  const targetLogin = args.targetLogin?.trim().replace(/^@/, "");
+  if (!targetLogin) {
+    deps.errorLog('\n  Usage: terminalhire intro <github-login> [--note "..."] [--contact <email>] [--name "..."]\n');
+    deps.exit(1);
+    return;
+  }
+  const requesterLogin = await deps.readGithubLogin();
+  if (!requesterLogin) {
+    deps.log("\n  Not signed in. Run `terminalhire login` first, then re-run this command.\n");
+    deps.exit(1);
+    return;
+  }
+  if (targetLogin.toLowerCase() === requesterLogin.toLowerCase()) {
+    deps.errorLog("\n  You cannot request an intro to yourself.\n");
+    deps.exit(1);
+    return;
+  }
+  const profile = await deps.readProfileContact();
+  const displayName = (args.name ?? profile.displayName ?? requesterLogin).trim();
+  const explicitContact = (args.contact ?? "").trim();
+  const contact = explicitContact || `@${requesterLogin}`;
+  const payload = buildIntroPayload({
+    requesterLogin,
+    requesterDisplayName: displayName,
+    requesterContact: contact,
+    targetLogin,
+    note: args.note
+  });
+  renderConsentCard(payload, deps);
+  const answer = await deps.prompt('  Type "yes" to send this intro request (anything else cancels): ');
+  if (answer !== "yes") {
+    deps.log("\n  Cancelled \u2014 nothing was sent.\n");
+    deps.exit(0);
+    return;
+  }
+  const cookie = deps.sessionCookie();
+  if (!cookie) {
+    deps.log("\n  No linked web session found on this machine.");
+    deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
+    deps.exit(0);
+    return;
+  }
+  let res;
+  try {
+    res = await deps.fetchImpl(`${LINK_BASE}/api/intro/request`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: `${GH_SESSION_COOKIE4}=${cookie}` },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(1e4)
+    });
+  } catch (err) {
+    deps.errorLog(`
+  Request failed: ${err instanceof Error ? err.message : String(err)}
+`);
+    deps.exit(1);
+    return;
+  }
+  if (res.status === 401) {
+    deps.log("\n  Your linked web session expired.");
+    deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
+    deps.exit(1);
+    return;
+  }
+  if (res.status === 429) {
+    deps.errorLog("\n  Too many intro requests right now \u2014 please try again later.\n");
+    deps.exit(1);
+    return;
+  }
+  if (res.status === 409) {
+    let reason = "an intro between you two already exists \u2014 check `terminalhire intro --list`.";
+    try {
+      const data = await res.json();
+      if (typeof data.error === "string" && data.error) reason = data.error;
+    } catch {
+    }
+    deps.log(`
+  ${reason}
+`);
+    deps.exit(1);
+    return;
+  }
+  if (!res.ok) {
+    deps.errorLog(`
+  Request failed: /api/intro/request returned ${res.status}.
+`);
+    deps.exit(1);
+    return;
+  }
+  let notified = false;
+  let deduped = false;
+  try {
+    const data = await res.json();
+    notified = data.notified === true;
+    deduped = data.deduped === true;
+  } catch {
+  }
+  if (deduped) {
+    deps.log(`
+  You already have a pending intro request to @${targetLogin} \u2014 nothing new was sent.`);
+    deps.log("  They can accept it any time from `terminalhire intro --list` or their dashboard.\n");
+  } else if (notified) {
+    deps.log(`
+  Intro request sent to @${targetLogin}. They will see only your public login`);
+    deps.log("  until they accept; your contact is shared only if they do.\n");
+  } else {
+    deps.log(`
+  Intro request recorded for @${targetLogin} \u2014 but we couldn't email them`);
+    deps.log("  automatically (no public email on file). Send it to them yourself: they can run");
+    deps.log("  `terminalhire intro --list` (or open their dashboard) to see and accept it.");
+    deps.log("  They will see only your public login until they accept; your contact is");
+    deps.log("  shared only if they do.\n");
+  }
+}
+async function fetchIntros(deps, cookie) {
+  const res = await deps.fetchImpl(`${LINK_BASE}/api/intro/list`, {
+    method: "GET",
+    headers: { Cookie: `${GH_SESSION_COOKIE4}=${cookie}` },
+    signal: AbortSignal.timeout(1e4)
+  });
+  if (!res.ok) throw new Error(`/api/intro/list returned ${res.status}`);
+  const data = await res.json().catch(() => ({}));
+  return data.intros ?? [];
+}
+async function runIntroDecision(args, overrides) {
+  const deps = { ...defaultIntroDeps(), ...overrides };
+  let id = args.id?.trim() ?? "";
+  if (!id) {
+    deps.errorLog("\n  Usage: terminalhire intro --accept <@handle|id> | --decline <@handle|id>\n");
+    deps.exit(1);
+    return;
+  }
+  const cookie = deps.sessionCookie();
+  if (!cookie) {
+    deps.log("\n  No linked web session found on this machine.");
+    deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
+    deps.exit(0);
+    return;
+  }
+  if (!UUID_RE.test(id)) {
+    const handle = id.replace(/^@/, "").toLowerCase();
+    let intros;
+    try {
+      intros = await fetchIntros(deps, cookie);
+    } catch (err) {
+      deps.errorLog(`
+  Could not look up the request: ${err instanceof Error ? err.message : String(err)}
+`);
+      deps.exit(1);
+      return;
+    }
+    const matches = intros.filter(
+      (it) => it.role === "incoming" && it.status === "pending" && it.counterpartyLogin.toLowerCase() === handle
+    );
+    if (matches.length === 0) {
+      deps.errorLog(`
+  No pending connection request from @${handle}.`);
+      deps.errorLog("  See your requests with `terminalhire intro --list`.\n");
+      deps.exit(1);
+      return;
+    }
+    if (matches.length > 1) {
+      deps.errorLog(`
+  ${matches.length} pending requests from @${handle} \u2014 ${args.action === "accept" ? "accepting" : "declining"} one (the rest are redundant duplicates).`);
+    }
+    id = matches[0].id;
+  }
+  let contact = "";
+  let shareHandle = false;
+  if (args.action === "accept") {
+    contact = (args.contact ?? "").trim();
+    shareHandle = contact.length === 0;
+    let shareLabel = contact;
+    if (shareHandle) {
+      const login = await deps.readGithubLogin().catch(() => null);
+      shareLabel = login ? `your GitHub handle (@${login})` : "your GitHub handle";
+    }
+    deps.log("");
+    deps.log("  Accepting shares a contact with the requester so they can reach you:");
+    deps.log(`    Your contact : ${shareLabel}`);
+    if (shareHandle) {
+      deps.log("    (share an email/handle instead with `--contact <email-or-handle>`)");
+    }
+    deps.log("  Nothing else is shared. Declining shares nothing.");
+    deps.log("");
+    const answer = await deps.prompt('  Type "yes" to accept and share your contact (anything else cancels): ');
+    if (answer !== "yes") {
+      deps.log("\n  Cancelled \u2014 nothing was sent.\n");
+      deps.exit(0);
+      return;
+    }
+  }
+  const body = args.action === "accept" ? shareHandle ? { introId: id, action: "accept" } : { introId: id, action: "accept", targetContact: contact } : { introId: id, action: "decline" };
+  let res;
+  try {
+    res = await deps.fetchImpl(`${LINK_BASE}/api/intro/accept`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: `${GH_SESSION_COOKIE4}=${cookie}` },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(1e4)
+    });
+  } catch (err) {
+    deps.errorLog(`
+  Request failed: ${err instanceof Error ? err.message : String(err)}
+`);
+    deps.exit(1);
+    return;
+  }
+  if (res.status === 401) {
+    deps.log("\n  Your linked web session expired.");
+    deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
+    deps.exit(1);
+    return;
+  }
+  if (res.status === 403) {
+    deps.errorLog("\n  You are not the developer this intro was sent to.\n");
+    deps.exit(1);
+    return;
+  }
+  if (res.status === 404) {
+    deps.errorLog("\n  Intro not found.\n");
+    deps.exit(1);
+    return;
+  }
+  if (!res.ok) {
+    deps.errorLog(`
+  Request failed: /api/intro/accept returned ${res.status}.
+`);
+    deps.exit(1);
+    return;
+  }
+  let data = {};
+  try {
+    data = await res.json();
+  } catch {
+  }
+  if (args.action === "decline") {
+    deps.log("\n  Declined \u2014 no contact was shared.\n");
+    return;
+  }
+  const peer = data.counterpartyLogin;
+  deps.log(`
+  \u2713 Connected${peer ? ` with @${peer}` : ""}.`);
+  if (peer) deps.log(`  Message them any time:  terminalhire chat @${peer}`);
+  if (data.contact) deps.log(`  They also shared: ${data.contact}`);
+  deps.log("");
+}
+async function runIntroList(overrides) {
+  const deps = { ...defaultIntroDeps(), ...overrides };
+  const cookie = deps.sessionCookie();
+  if (!cookie) {
+    deps.log("\n  No linked web session found on this machine.");
+    deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
+    deps.exit(0);
+    return;
+  }
+  let res;
+  try {
+    res = await deps.fetchImpl(`${LINK_BASE}/api/intro/list`, {
+      method: "GET",
+      headers: { Cookie: `${GH_SESSION_COOKIE4}=${cookie}` },
+      signal: AbortSignal.timeout(1e4)
+    });
+  } catch (err) {
+    deps.errorLog(`
+  Request failed: ${err instanceof Error ? err.message : String(err)}
+`);
+    deps.exit(1);
+    return;
+  }
+  if (res.status === 401) {
+    deps.log("\n  Your linked web session expired.");
+    deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
+    deps.exit(1);
+    return;
+  }
+  if (!res.ok) {
+    deps.errorLog(`
+  Request failed: /api/intro/list returned ${res.status}.
+`);
+    deps.exit(1);
+    return;
+  }
+  let data = {};
+  try {
+    data = await res.json();
+  } catch {
+  }
+  const intros = data.intros ?? [];
+  if (intros.length === 0) {
+    deps.log("\n  No intros yet.\n");
+    return;
+  }
+  deps.log("");
+  for (const it of intros) {
+    const dir = it.role === "incoming" ? "from" : "to";
+    deps.log(`  [${it.status}] ${dir} @${it.counterpartyLogin}`);
+    if (it.note) deps.log(`      note: ${it.note}`);
+    if (it.contact) deps.log(`      contact: ${it.contact}`);
+    else if (it.role === "incoming" && it.status === "pending") {
+      deps.log(`      \u2192 accept: terminalhire intro --accept @${it.counterpartyLogin}`);
+    }
+  }
+  deps.log("");
+}
+var LINK_BASE, GH_SESSION_COOKIE4, UUID_RE;
+var init_intro2 = __esm({
+  "src/intro.ts"() {
+    "use strict";
+    init_src();
+    init_web_session();
+    LINK_BASE = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
+    GH_SESSION_COOKIE4 = "__jpi_gh_session";
+    UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  }
+});
+
+// bin/jpi-inbox.js
+async function defaultDecideIntro(req, overrides = {}) {
+  const { runIntroDecision: runIntroDecision2 } = await Promise.resolve().then(() => (init_intro2(), intro_exports));
+  let exited = false;
+  let errReason = "";
+  const logLines = [];
+  const args = { id: `@${req.login}`, action: req.action };
+  if (req.action === "accept" && req.contact) args.contact = req.contact;
+  await runIntroDecision2(args, {
+    prompt: async () => "yes",
+    exit: () => {
+      exited = true;
+    },
+    log: (msg) => {
+      const t = typeof msg === "string" ? msg.trim() : "";
+      if (t) logLines.push(t);
+    },
+    errorLog: (msg) => {
+      const t = typeof msg === "string" ? msg.trim() : "";
+      if (t && !errReason) errReason = t;
+    },
+    // Overrides last so tests can stub the engine's own IO (fetchImpl,
+    // sessionCookie, readGithubLogin) — but never the capture handlers above…
+    ...(() => {
+      const { prompt, exit, log, errorLog, ...safe } = overrides;
+      return safe;
+    })()
+  });
+  const reason = exited ? errReason || logLines.slice(-2).join(" ") : "";
+  return { ok: !exited, reason };
+}
+function sortConversations(items) {
+  return items.slice().sort((a, b) => {
+    if (b.unread !== a.unread) return b.unread - a.unread;
+    const at = a.lastStampIso || "";
+    const bt = b.lastStampIso || "";
+    if (at === bt) return 0;
+    return at > bt ? -1 : 1;
+  });
+}
+function formatInbox(state) {
+  const { rows, selected, mode, inputBuffer, activeLogin, banner, inviteCount, loading } = state;
+  const lines = [];
+  lines.push("  inbox \xB7 terminalhire chat");
+  lines.push("  " + "\u2500".repeat(64));
+  if (!rows || rows.length === 0) {
+    lines.push(
+      loading ? "  \u2726 loading your conversations\u2026" : "  (no connections yet \u2014 request one: terminalhire intro <login>)"
+    );
+  } else {
+    let printedInviteHeader = false;
+    let printedConvSep = false;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const sel = i === selected;
+      if (row.type === "invite") {
+        if (!printedInviteHeader) {
+          lines.push(`  PENDING INVITATIONS (${inviteCount})`);
+          printedInviteHeader = true;
+        }
+        const handle = `@${sanitizeLine(row.login)}`;
+        const text = `  \u2198 ${handle.padEnd(18)} wants to connect`;
+        lines.push(sel ? INVERSE + text + RESET : text);
+      } else {
+        if (inviteCount > 0 && !printedConvSep) {
+          lines.push("  " + "\u2500".repeat(64));
+          printedConvSep = true;
+        }
+        const dot = formatPresence(row.presence).charAt(0);
+        const login = `@${sanitizeLine(row.login)}`;
+        const badgeVisible = row.unread > 0 ? `\u2709 ${row.unread}` : "\u2014";
+        const badgeCell = badgeVisible.padEnd(5);
+        const badge = row.unread > 0 ? BOLD + badgeCell + BOLD_OFF : badgeCell;
+        const stamp = sanitizeLine(row.lastStamp || "").padStart(6);
+        const preview = row.preview ? truncate2(sanitizeLine(row.preview), 34) : "";
+        const text = `  ${dot} ${login.padEnd(18)} ${badge} ${stamp}  ${preview}`;
+        lines.push(sel ? INVERSE + text + RESET : text);
+      }
+    }
+  }
+  lines.push("  " + "\u2500".repeat(64));
+  if (mode === "input") {
+    lines.push(
+      `  contact to share with @${sanitizeLine(activeLogin)} (blank = share your @handle): ${inputBuffer}\u258A`
+    );
+    lines.push("  Enter accept \xB7 Esc cancel");
+  } else if (mode === "confirm") {
+    lines.push(`  Decline @${sanitizeLine(activeLogin)}? Declining is permanent.`);
+    lines.push("  y decline \xB7 n cancel");
+  } else {
+    const cur = rows && rows.length > 0 ? rows[selected] : null;
+    if (cur && cur.type === "invite") {
+      lines.push("  \u2191/\u2193 move \xB7 Enter/a accept \xB7 d decline \xB7 R refresh \xB7 q quit");
+    } else {
+      lines.push("  \u2191/\u2193 move \xB7 Enter open \xB7 r read \xB7 R refresh \xB7 q quit");
+    }
+  }
+  if (banner) {
+    lines.push("  " + "\u2500".repeat(64));
+    lines.push(`  ${banner}`);
+  }
+  return CLEAR2 + lines.join("\n") + "\n";
+}
+function truncate2(s, n) {
+  const t = String(s);
+  return t.length <= n ? t : `${t.slice(0, n - 1)}\u2026`;
+}
+async function runInboxPane(opts = {}) {
+  const {
+    input = process.stdin,
+    output = process.stdout,
+    signals = process,
+    client = createChatClient(),
+    listConnections = defaultListConnections,
+    readCursors = readReadCursors,
+    buildItems = () => buildInboxItems({ client, listConnections, readCursors }),
+    listInvites = defaultListPendingInvites,
+    decideIntro = defaultDecideIntro,
+    writeCursor = writeReadCursor,
+    postReadCursor: postCursor = postReadCursor,
+    syncUnreadBadge: syncBadge = syncUnreadBadge,
+    setTimer = (fn, ms) => setInterval(fn, ms),
+    clearTimer = (t) => clearInterval(t),
+    refreshMs = DEFAULT_REFRESH_MS
+  } = opts;
+  return await new Promise((resolve) => {
+    let rows = [];
+    let inviteCount = 0;
+    let selected = 0;
+    let mode = "list";
+    let inputBuffer = "";
+    let activeLogin = "";
+    let banner = "";
+    let selectedLogin = "";
+    let busy = false;
+    let fetching = false;
+    let marking = false;
+    let loading = true;
+    let timer = null;
+    let cleaned = false;
+    function repaint() {
+      if (cleaned) return;
+      output.write(
+        formatInbox({ rows, selected, mode, inputBuffer, activeLogin, banner, inviteCount, loading })
+      );
+    }
+    function setRows(items, invites) {
+      const inviteRows = (invites || []).map((iv) => ({ type: "invite", login: iv.login }));
+      const convRows = sortConversations(items || []).map((it) => ({ type: "conv", ...it }));
+      rows = [...inviteRows, ...convRows];
+      inviteCount = inviteRows.length;
+      if (rows.length === 0) {
+        selected = 0;
+        return;
+      }
+      const idx = selectedLogin ? rows.findIndex((r) => r.login === selectedLogin) : -1;
+      selected = idx >= 0 ? idx : Math.min(selected, rows.length - 1);
+      selectedLogin = rows[selected].login;
+    }
+    async function refetch() {
+      if (fetching) return;
+      fetching = true;
+      try {
+        const built = await buildItems();
+        const items = built && built.status === "ok" ? built.items : [];
+        let invites = [];
+        try {
+          const inv = await listInvites();
+          if (inv && inv.status === "ok") invites = inv.invites;
+        } catch {
+        }
+        setRows(items, invites);
+        loading = false;
+      } catch {
+      } finally {
+        fetching = false;
+      }
+      if (!cleaned) repaint();
+    }
+    function moveSelection(delta) {
+      if (rows.length === 0) return;
+      selected = Math.max(0, Math.min(rows.length - 1, selected + delta));
+      selectedLogin = rows[selected].login;
+      repaint();
+    }
+    function beginAccept(row) {
+      mode = "input";
+      inputBuffer = "";
+      activeLogin = row.login;
+      banner = "";
+      repaint();
+    }
+    function beginDecline(row) {
+      mode = "confirm";
+      activeLogin = row.login;
+      banner = "";
+      repaint();
+    }
+    function cancelMode() {
+      mode = "list";
+      inputBuffer = "";
+      banner = "";
+      repaint();
+    }
+    async function submitDecision(action, contact) {
+      if (busy) return;
+      busy = true;
+      const login = activeLogin;
+      mode = "list";
+      inputBuffer = "";
+      banner = action === "accept" ? `accepting @${login}\u2026` : `declining @${login}\u2026`;
+      repaint();
+      let ok = false;
+      let reason = "";
+      try {
+        const req = action === "accept" && contact ? { login, action, contact } : { login, action };
+        const res = await decideIntro(req);
+        ok = !!(res && res.ok);
+        if (!ok && res && typeof res.reason === "string") reason = res.reason;
+      } catch {
+        ok = false;
+      }
+      const why = sanitizeLine(reason).slice(0, 64);
+      banner = ok ? action === "accept" ? `\u2713 connected with @${login}` : `\u2713 declined @${login}` : `\u26A0 could not ${action} @${login} \u2014 ${why || "try again"}`;
+      if (ok) {
+        try {
+          await refetch();
+        } catch {
+        }
+      }
+      busy = false;
+      repaint();
+    }
+    async function markRowRead(row) {
+      if (busy || marking || !row || row.type !== "conv" || !row.lastStampIso) return;
+      marking = true;
+      row.unread = 0;
+      repaint();
+      try {
+        writeCursor(row.login, row.lastStampIso);
+      } catch {
+      }
+      try {
+        await postCursor(row.login, row.lastStampIso);
+      } catch {
+      }
+      try {
+        await syncBadge();
+      } catch {
+      }
+      marking = false;
+    }
+    function activateRow() {
+      const row = rows[selected];
+      if (!row) return;
+      if (row.type === "invite") {
+        beginAccept(row);
+        return;
+      }
+      finish({ action: "open", login: row.login });
+    }
+    function handleListChar(ch) {
+      if (busy) return;
+      const row = rows[selected];
+      switch (ch) {
+        case "j":
+          moveSelection(1);
+          break;
+        case "k":
+          moveSelection(-1);
+          break;
+        case "q":
+          finish({ action: "quit" });
+          break;
+        case KEY_ENTER_A2:
+        case KEY_ENTER_B2:
+          activateRow();
+          break;
+        case "a":
+          if (row && row.type === "invite") beginAccept(row);
+          break;
+        case "d":
+          if (row && row.type === "invite") beginDecline(row);
+          break;
+        case "r":
+          if (row && row.type === "conv") void markRowRead(row);
+          break;
+        case "R":
+          if (!busy) void refetch();
+          break;
+        default:
+          break;
+      }
+    }
+    function handleInputChunk(s) {
+      if (s === KEY_ENTER_A2 || s === KEY_ENTER_B2 || s === "\r\n") {
+        void submitDecision("accept", inputBuffer.trim());
+        return;
+      }
+      if (s === KEY_BACKSPACE_A2 || s === KEY_BACKSPACE_B2) {
+        inputBuffer = inputBuffer.slice(0, -1);
+        repaint();
+        return;
+      }
+      for (const ch of s) {
+        if (ch === KEY_BACKSPACE_A2 || ch === KEY_BACKSPACE_B2) {
+          inputBuffer = inputBuffer.slice(0, -1);
+        } else if (ch >= " " && inputBuffer.length < MAX_CONTACT_LEN) {
+          inputBuffer += ch;
+        }
+      }
+      repaint();
+    }
+    function handleConfirmChar(ch) {
+      if (ch === "y" || ch === "Y") {
+        void submitDecision("decline");
+        return;
+      }
+      if (ch === "n" || ch === "N") {
+        cancelMode();
+      }
+    }
+    function onData(chunk) {
+      if (cleaned) return;
+      const s = chunk.toString("utf8");
+      if (s === KEY_CTRL_C2) {
+        finish({ action: "quit" });
+        return;
+      }
+      if (s === KEY_ESC) {
+        if (mode === "input" || mode === "confirm") cancelMode();
+        else finish({ action: "quit" });
+        return;
+      }
+      if (s.charCodeAt(0) === 27) {
+        if (mode === "list" && !busy) {
+          if (s === KEY_UP) moveSelection(-1);
+          else if (s === KEY_DOWN) moveSelection(1);
+        }
+        return;
+      }
+      if (mode === "input") {
+        handleInputChunk(s);
+        return;
+      }
+      for (const ch of s) {
+        if (mode === "confirm") handleConfirmChar(ch);
+        else handleListChar(ch);
+      }
+    }
+    function onResize() {
+      if (!cleaned) repaint();
+    }
+    function cleanup() {
+      if (cleaned) return;
+      cleaned = true;
+      if (timer) {
+        try {
+          clearTimer(timer);
+        } catch {
+        }
+        timer = null;
+      }
+      try {
+        if (typeof input.setRawMode === "function") input.setRawMode(false);
+      } catch {
+      }
+      try {
+        input.removeListener("data", onData);
+      } catch {
+      }
+      try {
+        if (typeof input.pause === "function") input.pause();
+      } catch {
+      }
+      try {
+        if (typeof output.removeListener === "function") output.removeListener("resize", onResize);
+      } catch {
+      }
+      try {
+        signals.removeListener("SIGINT", onSignal);
+        signals.removeListener("SIGTERM", onTerm);
+        signals.removeListener("SIGHUP", onTerm);
+        signals.removeListener("uncaughtException", onUncaught);
+        signals.removeListener("unhandledRejection", onUncaught);
+        signals.removeListener("exit", onExit);
+      } catch {
+      }
+      output.write(SHOW_CURSOR2 + EXIT_ALT2);
+    }
+    function finish(result) {
+      if (cleaned) return;
+      cleanup();
+      resolve(result);
+    }
+    function onSignal() {
+      finish({ action: "quit" });
+    }
+    function onTerm() {
+      finish({ action: "quit" });
+    }
+    function onUncaught(err) {
+      cleanup();
+      throw err;
+    }
+    function onExit() {
+      cleanup();
+    }
+    try {
+      if (typeof input.setRawMode === "function") input.setRawMode(true);
+      if (typeof input.resume === "function") input.resume();
+      output.write(ENTER_ALT2 + HIDE_CURSOR2);
+      input.on("data", onData);
+      if (typeof output.on === "function") output.on("resize", onResize);
+      signals.on("SIGINT", onSignal);
+      signals.on("SIGTERM", onTerm);
+      signals.on("SIGHUP", onTerm);
+      signals.on("uncaughtException", onUncaught);
+      signals.on("unhandledRejection", onUncaught);
+      signals.on("exit", onExit);
+      repaint();
+      void refetch();
+      timer = setTimer(() => {
+        if (mode === "list" && !busy) void refetch();
+      }, refreshMs);
+    } catch (err) {
+      cleanup();
+      output.write(`
+  Inbox error: ${err instanceof Error ? err.message : String(err)}
+
+`);
+      resolve({ action: "quit" });
+    }
+  });
+}
+async function runInboxTui(deps = {}) {
+  const {
+    input = process.stdin,
+    output = process.stdout,
+    ensureDisclosure = ensureChatDisclosure,
+    openChatPane = runChatPane,
+    ...paneDeps
+  } = deps;
+  const ack = await ensureDisclosure({ input, output });
+  if (!ack.acknowledged) {
+    output.write(
+      "\n  Chat needs you to acknowledge the privacy notice above first. Re-run when ready.\n\n"
+    );
+    return { ok: false, reason: "not-acknowledged" };
+  }
+  for (; ; ) {
+    const sel = await runInboxPane({ input, output, ...paneDeps });
+    if (!sel || sel.action === "quit") break;
+    if (sel.action === "open" && sel.login) {
+      await openChatPane({ login: sel.login, input, output });
+    }
+  }
+  return { ok: true };
+}
+async function run(opts = {}) {
+  const {
+    isTTY = process.stdout.isTTY,
+    input = process.stdin,
+    output = process.stdout,
+    runTui = runInboxTui,
+    runStatic = null
+  } = opts;
+  if (isTTY) {
+    await runTui({ input, output });
+  } else if (runStatic) {
+    await runStatic({});
+  } else {
+    const mod2 = await Promise.resolve().then(() => (init_jpi_chat_read(), jpi_chat_read_exports));
+    await mod2.runInbox({});
+  }
+}
+var HIDE_CURSOR2, SHOW_CURSOR2, ENTER_ALT2, EXIT_ALT2, CLEAR2, INVERSE, RESET, BOLD, BOLD_OFF, KEY_CTRL_C2, KEY_ESC, KEY_UP, KEY_DOWN, KEY_ENTER_A2, KEY_ENTER_B2, KEY_BACKSPACE_A2, KEY_BACKSPACE_B2, MAX_CONTACT_LEN, DEFAULT_REFRESH_MS;
+var init_jpi_inbox = __esm({
+  "bin/jpi-inbox.js"() {
+    init_chat_client();
+    init_jpi_chat();
+    init_jpi_chat_read();
+    HIDE_CURSOR2 = "\x1B[?25l";
+    SHOW_CURSOR2 = "\x1B[?25h";
+    ENTER_ALT2 = "\x1B[?1049h";
+    EXIT_ALT2 = "\x1B[?1049l";
+    CLEAR2 = "\x1B[2J\x1B[H";
+    INVERSE = "\x1B[7m";
+    RESET = "\x1B[0m";
+    BOLD = "\x1B[1m";
+    BOLD_OFF = "\x1B[22m";
+    KEY_CTRL_C2 = "";
+    KEY_ESC = "\x1B";
+    KEY_UP = "\x1B[A";
+    KEY_DOWN = "\x1B[B";
+    KEY_ENTER_A2 = "\r";
+    KEY_ENTER_B2 = "\n";
+    KEY_BACKSPACE_A2 = "\x7F";
+    KEY_BACKSPACE_B2 = "\b";
+    MAX_CONTACT_LEN = 200;
+    DEFAULT_REFRESH_MS = 4e3;
+  }
+});
+init_jpi_inbox();
 export {
-  CHAT_AT_REST,
-  CHAT_CODE_OF_CONDUCT,
-  CHAT_DISCLOSURE,
-  CHAT_MIN_AGE,
-  defaultListConnections,
-  defaultListPendingInvites,
-  defaultResolveConnection,
-  ensureChatDisclosure,
-  formatPresence,
-  formatThread,
-  readCachedSessionStale,
-  relativeTime,
-  run2 as run,
-  runBlockCommand,
-  runChatPane,
-  runShareActivityCommand,
-  sanitizeLine
+  defaultDecideIntro,
+  formatInbox,
+  run,
+  runInboxPane,
+  runInboxTui,
+  sortConversations
 };
 /*! Bundled license information:
 
