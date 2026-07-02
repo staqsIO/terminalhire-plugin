@@ -2953,10 +2953,13 @@ You control whether this connects \u2014 no contact details are shared unless yo
   return { subject, text };
 }
 function introActorRole(intro, actorLogin) {
-  const a = actorLogin.trim().toLowerCase();
-  if (a && a === intro.targetLogin.trim().toLowerCase()) return "target";
-  if (a && a === intro.requesterLogin.trim().toLowerCase()) return "requester";
+  if (sameLogin(actorLogin, intro.targetLogin)) return "target";
+  if (sameLogin(actorLogin, intro.requesterLogin)) return "requester";
   return "other";
+}
+function sameLogin(a, b) {
+  const an = a.trim().toLowerCase();
+  return an.length > 0 && an === b.trim().toLowerCase();
 }
 function authorizeIntroDecision(intro, actorLogin) {
   const role = introActorRole(intro, actorLogin);
@@ -6399,6 +6402,7 @@ __export(src_exports, {
   rejectExtraIntroFields: () => rejectExtraIntroFields,
   revealIntroContacts: () => revealIntroContacts,
   safetyNumber: () => safetyNumber,
+  sameLogin: () => sameLogin,
   setStatus: () => setStatus,
   tokenize: () => tokenize,
   validateGraph: () => validateGraph,
@@ -6953,7 +6957,7 @@ function seenFilePath() {
 function atomicWriteJson(path, obj) {
   mkdirSync5(dirname(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync5(tmp, JSON.stringify(obj) + "\n", "utf8");
+  writeFileSync5(tmp, JSON.stringify(obj) + "\n", { encoding: "utf8", mode: 384 });
   renameSync(tmp, path);
 }
 function emptyHistory() {
@@ -7021,31 +7025,7 @@ var init_spinner_seen = __esm({
   }
 });
 
-// bin/spinner.js
-var spinner_exports = {};
-__export(spinner_exports, {
-  SPINNER_DEFAULTS: () => SPINNER_DEFAULTS,
-  applySpinnerTips: () => applySpinnerTips,
-  applySpinnerVerbs: () => applySpinnerVerbs,
-  buildContextVerbs: () => buildContextVerbs,
-  buildIncomingIntroLine: () => buildIncomingIntroLine,
-  buildPeerLine: () => buildPeerLine,
-  buildSessionStaleLine: () => buildSessionStaleLine,
-  buildSpinnerPool: () => buildSpinnerPool,
-  buildTips: () => buildTips,
-  buildTipsDetailed: () => buildTipsDetailed,
-  clearSpinnerTips: () => clearSpinnerTips,
-  clearSpinnerVerbs: () => clearSpinnerVerbs,
-  ctaVerb: () => ctaVerb,
-  filterFreshMatches: () => filterFreshMatches,
-  formatVerbs: () => formatVerbs,
-  interleaveBySource: () => interleaveBySource,
-  partitionFreshMatches: () => partitionFreshMatches,
-  rankBySessionTags: () => rankBySessionTags,
-  readSpinnerConfig: () => readSpinnerConfig,
-  renderRefreshSurface: () => renderRefreshSurface,
-  widenFreshCandidates: () => widenFreshCandidates
-});
+// bin/spinner-io.js
 import {
   readFileSync as readFileSync8,
   writeFileSync as writeFileSync6,
@@ -7055,6 +7035,15 @@ import {
 } from "fs";
 import { join as join8, dirname as dirname2 } from "path";
 import { homedir as homedir6 } from "os";
+function thDir() {
+  return process.env["TERMINALHIRE_DIR"] || join8(homedir6(), ".terminalhire");
+}
+function claudeSettingsPath() {
+  return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join8(homedir6(), ".claude", "settings.json");
+}
+function spinnerStateFilePath() {
+  return join8(thDir(), "spinner-state.json");
+}
 function readJson(path, fallback) {
   try {
     return existsSync4(path) ? JSON.parse(readFileSync8(path, "utf8")) : fallback;
@@ -7068,10 +7057,106 @@ function atomicWriteJson2(path, obj) {
   writeFileSync6(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
   renameSync2(tmp, path);
 }
-function titleCase(s) {
-  return String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
+function readState() {
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  return readJson(SPINNER_STATE_FILE, { verbs: [], mode: "replace" });
+}
+function applySpinnerVerbs(ourVerbs, mode = "replace") {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const verbs = (Array.isArray(ourVerbs) ? ourVerbs : []).filter(Boolean);
+  if (verbs.length === 0) return clearSpinnerVerbs();
+  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
+  const existing = settings.spinnerVerbs && typeof settings.spinnerVerbs === "object" ? settings.spinnerVerbs : null;
+  const prevOurs = new Set(readState().verbs || []);
+  const userVerbs = existing && Array.isArray(existing.verbs) ? existing.verbs.filter((v) => !prevOurs.has(v)) : [];
+  const newVerbs = [...verbs, ...userVerbs];
+  settings.spinnerVerbs = { mode: mode === "append" ? "append" : "replace", verbs: newVerbs };
+  atomicWriteJson2(CLAUDE_SETTINGS, settings);
+  const st = readState();
+  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
+  return { applied: verbs.length, total: newVerbs.length };
+}
+function clearSpinnerVerbs() {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const settings = readJson(CLAUDE_SETTINGS, null);
+  const prevOurs = new Set(readState().verbs || []);
+  let keptUserVerbs = 0;
+  if (settings && settings.spinnerVerbs && Array.isArray(settings.spinnerVerbs.verbs)) {
+    const userVerbs = settings.spinnerVerbs.verbs.filter((v) => !prevOurs.has(v));
+    keptUserVerbs = userVerbs.length;
+    if (userVerbs.length > 0) {
+      settings.spinnerVerbs = {
+        mode: settings.spinnerVerbs.mode === "append" ? "append" : "replace",
+        verbs: userVerbs
+      };
+    } else {
+      delete settings.spinnerVerbs;
+    }
+    atomicWriteJson2(CLAUDE_SETTINGS, settings);
+  }
+  try {
+    const st = readState();
+    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
+  } catch {
+  }
+  return { cleared: true, keptUserVerbs };
+}
+function applySpinnerTips(ourTips) {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const tips = (Array.isArray(ourTips) ? ourTips : []).filter(Boolean);
+  if (tips.length === 0) return clearSpinnerTips();
+  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
+  const existing = settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips) ? settings.spinnerTipsOverride.tips : [];
+  const prevOurs = new Set(readState().tips || []);
+  const userTips = existing.filter((t) => !prevOurs.has(t));
+  settings.spinnerTipsEnabled = true;
+  settings.spinnerTipsOverride = { excludeDefault: true, tips: [...tips, ...userTips] };
+  atomicWriteJson2(CLAUDE_SETTINGS, settings);
+  const st = readState();
+  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
+  return { applied: tips.length };
+}
+function clearSpinnerTips() {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const settings = readJson(CLAUDE_SETTINGS, null);
+  const prevOurs = new Set(readState().tips || []);
+  if (settings && settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips)) {
+    const userTips = settings.spinnerTipsOverride.tips.filter((t) => !prevOurs.has(t));
+    if (userTips.length > 0) {
+      settings.spinnerTipsOverride = {
+        excludeDefault: settings.spinnerTipsOverride.excludeDefault === true,
+        tips: userTips
+      };
+    } else {
+      delete settings.spinnerTipsOverride;
+      delete settings.spinnerTipsEnabled;
+    }
+    atomicWriteJson2(CLAUDE_SETTINGS, settings);
+  }
+  try {
+    const st = readState();
+    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
+  } catch {
+  }
+  return { cleared: true };
+}
+var init_spinner_io = __esm({
+  "bin/spinner-io.js"() {
+    "use strict";
+  }
+});
+
+// bin/spinner-config.js
+import { join as join9 } from "path";
+function configFilePath() {
+  return join9(thDir(), "config.json");
 }
 function readSpinnerConfig() {
+  const CONFIG_FILE2 = configFilePath();
   const cfg = readJson(CONFIG_FILE2, {});
   const spinner = cfg && typeof cfg.spinner === "object" ? cfg.spinner : {};
   const merged = { ...SPINNER_DEFAULTS, ...spinner };
@@ -7082,6 +7167,78 @@ function readSpinnerConfig() {
     merged.frequency = SPINNER_DEFAULTS.frequency;
   }
   return merged;
+}
+var SPINNER_DEFAULTS;
+var init_spinner_config = __esm({
+  "bin/spinner-config.js"() {
+    "use strict";
+    init_spinner_io();
+    SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
+  }
+});
+
+// bin/spinner-select.js
+function filterFreshMatches(matches, history) {
+  const { eligible, suppressed } = partitionFreshMatches(matches, history);
+  return suppressed.length === 0 ? matches : [...eligible, ...suppressed];
+}
+function partitionFreshMatches(matches, history) {
+  const list = Array.isArray(matches) ? matches : [];
+  if (!history || !history.entries || Object.keys(history.entries).length === 0) {
+    return { eligible: list, suppressed: [] };
+  }
+  const eligible = [];
+  const suppressed = [];
+  for (const m of list) {
+    if (m && m.id != null && isSuppressed(String(m.id), history)) suppressed.push(m);
+    else eligible.push(m);
+  }
+  const stamp = (m) => history.entries[String(m.id)].lastSurface;
+  suppressed.sort((a, b) => stamp(a) - stamp(b));
+  return { eligible, suppressed };
+}
+function widenFreshCandidates(matches, history, need, widen) {
+  const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
+  if (!(need > 0)) return [];
+  if (!widen || !Array.isArray(widen.reserve) || typeof widen.getAdjacent !== "function") return [];
+  const suppressed = (m) => !!history && !!history.entries && m.id != null && isSuppressed(String(m.id), history);
+  const counts = /* @__PURE__ */ new Map();
+  for (const m of list) {
+    for (const t of Array.isArray(m.matchedTags) ? m.matchedTags : []) {
+      const tag = String(t).toLowerCase();
+      counts.set(tag, (counts.get(tag) || 0) + 1);
+    }
+  }
+  const maxCount = Math.max(0, ...counts.values());
+  if (maxCount === 0) return [];
+  const dominant = [...counts.entries()].filter(([, c]) => c === maxCount).map(([t]) => t);
+  const inPool = new Set(list.map((m) => String(m.id)));
+  const fresh = (m) => m && m.id != null && !inPool.has(String(m.id)) && !suppressed(m);
+  const tagged = (m, adj) => (Array.isArray(m.matchedTags) ? m.matchedTags : []).some((t) => adj.has(String(t).toLowerCase()));
+  const ringCandidates = (hops) => {
+    const adj = new Set(dominant.flatMap((d) => widen.getAdjacent(d, hops)));
+    if (adj.size === 0) return [];
+    return widen.reserve.filter((m) => fresh(m) && tagged(m, adj));
+  };
+  let widened = ringCandidates(1);
+  if (widened.length === 0) widened = ringCandidates(2);
+  if (widened.length === 0) {
+    widened = widen.reserve.filter(
+      (m) => fresh(m) && (m.source === "bounty" || m.source === "contribute")
+    );
+  }
+  return widened.slice(0, need);
+}
+var init_spinner_select = __esm({
+  "bin/spinner-select.js"() {
+    "use strict";
+    init_spinner_seen();
+  }
+});
+
+// bin/spinner-verbs.js
+function titleCase(s) {
+  return String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 function ctaVerb() {
   return "\u2605 jobs that fit you \xB7 run: terminalhire jobs";
@@ -7165,60 +7322,7 @@ function buildIncomingIntroLine(incomingPending) {
 function buildSessionStaleLine(sessionStale) {
   return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
 }
-function filterFreshMatches(matches, history) {
-  const { eligible, suppressed } = partitionFreshMatches(matches, history);
-  return suppressed.length === 0 ? matches : [...eligible, ...suppressed];
-}
-function partitionFreshMatches(matches, history) {
-  const list = Array.isArray(matches) ? matches : [];
-  if (!history || !history.entries || Object.keys(history.entries).length === 0) {
-    return { eligible: list, suppressed: [] };
-  }
-  const eligible = [];
-  const suppressed = [];
-  for (const m of list) {
-    if (m && m.id != null && isSuppressed(String(m.id), history)) suppressed.push(m);
-    else eligible.push(m);
-  }
-  const stamp = (m) => history.entries[String(m.id)].lastSurface;
-  suppressed.sort((a, b) => stamp(a) - stamp(b));
-  return { eligible, suppressed };
-}
-function widenFreshCandidates(matches, history, capacity, widen) {
-  const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
-  if (!widen || !Array.isArray(widen.reserve) || typeof widen.getAdjacent !== "function") return [];
-  const suppressed = (m) => !!history && !!history.entries && m.id != null && isSuppressed(String(m.id), history);
-  const eligibleCount = list.filter((m) => !suppressed(m)).length;
-  const need = capacity - eligibleCount;
-  if (need <= 0) return [];
-  const counts = /* @__PURE__ */ new Map();
-  for (const m of list) {
-    for (const t of Array.isArray(m.matchedTags) ? m.matchedTags : []) {
-      const tag = String(t).toLowerCase();
-      counts.set(tag, (counts.get(tag) || 0) + 1);
-    }
-  }
-  const maxCount = Math.max(0, ...counts.values());
-  if (maxCount === 0) return [];
-  const dominant = [...counts.entries()].filter(([, c]) => c === maxCount).map(([t]) => t);
-  const inPool = new Set(list.map((m) => String(m.id)));
-  const fresh = (m) => m && m.id != null && !inPool.has(String(m.id)) && !suppressed(m);
-  const tagged = (m, adj) => (Array.isArray(m.matchedTags) ? m.matchedTags : []).some((t) => adj.has(String(t).toLowerCase()));
-  const ringCandidates = (hops) => {
-    const adj = new Set(dominant.flatMap((d) => widen.getAdjacent(d, hops)));
-    if (adj.size === 0) return [];
-    return widen.reserve.filter((m) => fresh(m) && tagged(m, adj));
-  };
-  let widened = ringCandidates(1);
-  if (widened.length === 0) widened = ringCandidates(2);
-  if (widened.length === 0) {
-    widened = widen.reserve.filter(
-      (m) => fresh(m) && (m.source === "bounty" || m.source === "contribute")
-    );
-  }
-  return widened.slice(0, need);
-}
-function buildSpinnerPool(topMatches, max = 6, opts = {}) {
+function buildSpinnerPool(topMatches, _max = 6, opts = {}) {
   const { sessionTags, frequency = "always", topPeers, incomingPending, sessionStale, seenHistory } = opts;
   const staleLine = buildSessionStaleLine(sessionStale);
   const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
@@ -7235,47 +7339,16 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   if (introLine) pool.push(introLine);
   return withStale(pool);
 }
-function readState() {
-  return readJson(SPINNER_STATE_FILE, { verbs: [], mode: "replace" });
-}
-function applySpinnerVerbs(ourVerbs, mode = "replace") {
-  const verbs = (Array.isArray(ourVerbs) ? ourVerbs : []).filter(Boolean);
-  if (verbs.length === 0) return clearSpinnerVerbs();
-  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
-  const existing = settings.spinnerVerbs && typeof settings.spinnerVerbs === "object" ? settings.spinnerVerbs : null;
-  const prevOurs = new Set(readState().verbs || []);
-  const userVerbs = existing && Array.isArray(existing.verbs) ? existing.verbs.filter((v) => !prevOurs.has(v)) : [];
-  const newVerbs = [...verbs, ...userVerbs];
-  settings.spinnerVerbs = { mode: mode === "append" ? "append" : "replace", verbs: newVerbs };
-  atomicWriteJson2(CLAUDE_SETTINGS, settings);
-  const st = readState();
-  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
-  return { applied: verbs.length, total: newVerbs.length };
-}
-function clearSpinnerVerbs() {
-  const settings = readJson(CLAUDE_SETTINGS, null);
-  const prevOurs = new Set(readState().verbs || []);
-  let keptUserVerbs = 0;
-  if (settings && settings.spinnerVerbs && Array.isArray(settings.spinnerVerbs.verbs)) {
-    const userVerbs = settings.spinnerVerbs.verbs.filter((v) => !prevOurs.has(v));
-    keptUserVerbs = userVerbs.length;
-    if (userVerbs.length > 0) {
-      settings.spinnerVerbs = {
-        mode: settings.spinnerVerbs.mode === "append" ? "append" : "replace",
-        verbs: userVerbs
-      };
-    } else {
-      delete settings.spinnerVerbs;
-    }
-    atomicWriteJson2(CLAUDE_SETTINGS, settings);
+var VERB_INTROS;
+var init_spinner_verbs = __esm({
+  "bin/spinner-verbs.js"() {
+    "use strict";
+    init_spinner_select();
+    VERB_INTROS = ["Matched:", "You\u2019d fit:", "Worth a look:", "On your radar:", "Fits your stack:"];
   }
-  try {
-    const st = readState();
-    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
-  } catch {
-  }
-  return { cleared: true, keptUserVerbs };
-}
+});
+
+// bin/spinner-render.js
 function interleaveBySource(topMatches) {
   if (!Array.isArray(topMatches) || topMatches.length === 0) return topMatches;
   const buckets = /* @__PURE__ */ new Map();
@@ -7369,48 +7442,20 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
     }
   };
   emit(eligible);
+  if (out.length < max && opts.widen) {
+    const widened = widenFreshCandidates(
+      Array.isArray(topMatches) ? topMatches : [],
+      opts.seenHistory,
+      max - out.length,
+      opts.widen
+    );
+    if (widened.length > 0) emit(widened);
+  }
   if (out.length < max) emit(suppressed);
   return { tips: out, surfacedIds };
 }
 function buildTips(topMatches, baseUrl, max = 8, opts = {}) {
   return buildTipsDetailed(topMatches, baseUrl, max, opts).tips;
-}
-function applySpinnerTips(ourTips) {
-  const tips = (Array.isArray(ourTips) ? ourTips : []).filter(Boolean);
-  if (tips.length === 0) return clearSpinnerTips();
-  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
-  const existing = settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips) ? settings.spinnerTipsOverride.tips : [];
-  const prevOurs = new Set(readState().tips || []);
-  const userTips = existing.filter((t) => !prevOurs.has(t));
-  settings.spinnerTipsEnabled = true;
-  settings.spinnerTipsOverride = { excludeDefault: true, tips: [...tips, ...userTips] };
-  atomicWriteJson2(CLAUDE_SETTINGS, settings);
-  const st = readState();
-  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
-  return { applied: tips.length };
-}
-function clearSpinnerTips() {
-  const settings = readJson(CLAUDE_SETTINGS, null);
-  const prevOurs = new Set(readState().tips || []);
-  if (settings && settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips)) {
-    const userTips = settings.spinnerTipsOverride.tips.filter((t) => !prevOurs.has(t));
-    if (userTips.length > 0) {
-      settings.spinnerTipsOverride = {
-        excludeDefault: settings.spinnerTipsOverride.excludeDefault === true,
-        tips: userTips
-      };
-    } else {
-      delete settings.spinnerTipsOverride;
-      delete settings.spinnerTipsEnabled;
-    }
-    atomicWriteJson2(CLAUDE_SETTINGS, settings);
-  }
-  try {
-    const st = readState();
-    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
-  } catch {
-  }
-  return { cleared: true };
 }
 function renderRefreshSurface(topMatches, sc, opts = {}) {
   if (!sc || sc.enabled !== true) {
@@ -7419,9 +7464,7 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
     return { verbs: [], tips: [], surfacedIds: [] };
   }
   const seenHistory = opts.seenHistory || loadSeenHistory();
-  let ranked = rankBySessionTags(topMatches, opts.sessionTags);
-  const widened = widenFreshCandidates(ranked, seenHistory, 8, opts.widen);
-  if (widened.length > 0) ranked = [...ranked, ...widened];
+  const ranked = rankBySessionTags(topMatches, opts.sessionTags);
   const verbs = buildSpinnerPool(ranked, sc.max, {
     sessionTags: opts.sessionTags,
     frequency: sc.frequency,
@@ -7432,23 +7475,74 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
   });
   if (verbs.length > 0) applySpinnerVerbs(verbs, sc.mode);
   else clearSpinnerVerbs();
-  const { tips, surfacedIds } = buildTipsDetailed(ranked, opts.baseUrl, 8, { seenHistory });
+  const { tips, surfacedIds } = buildTipsDetailed(ranked, opts.baseUrl, 8, {
+    seenHistory,
+    widen: opts.widen
+  });
   if (tips.length > 0) applySpinnerTips(tips);
   else clearSpinnerTips();
   if (verbs.length > 0 || tips.length > 0) recordSurface(surfacedIds);
   return { verbs, tips, surfacedIds };
 }
-var TH_DIR, CLAUDE_SETTINGS, CONFIG_FILE2, SPINNER_STATE_FILE, SPINNER_DEFAULTS, VERB_INTROS;
+var init_spinner_render = __esm({
+  "bin/spinner-render.js"() {
+    "use strict";
+    init_spinner_select();
+    init_spinner_verbs();
+    init_spinner_seen();
+    init_spinner_io();
+  }
+});
+
+// bin/spinner.js
+var spinner_exports = {};
+__export(spinner_exports, {
+  SPINNER_DEFAULTS: () => SPINNER_DEFAULTS,
+  applySpinnerTips: () => applySpinnerTips,
+  applySpinnerVerbs: () => applySpinnerVerbs,
+  buildContextVerbs: () => buildContextVerbs,
+  buildIncomingIntroLine: () => buildIncomingIntroLine,
+  buildPeerLine: () => buildPeerLine,
+  buildSessionStaleLine: () => buildSessionStaleLine,
+  buildSpinnerPool: () => buildSpinnerPool,
+  buildTips: () => buildTips,
+  buildTipsDetailed: () => buildTipsDetailed,
+  clearSpinnerTips: () => clearSpinnerTips,
+  clearSpinnerVerbs: () => clearSpinnerVerbs,
+  ctaVerb: () => ctaVerb,
+  filterFreshMatches: () => filterFreshMatches,
+  formatVerbs: () => formatVerbs,
+  interleaveBySource: () => interleaveBySource,
+  partitionFreshMatches: () => partitionFreshMatches,
+  rankBySessionTags: () => rankBySessionTags,
+  readSpinnerConfig: () => readSpinnerConfig,
+  renderRefreshSurface: () => renderRefreshSurface,
+  widenFreshCandidates: () => widenFreshCandidates
+});
 var init_spinner = __esm({
   "bin/spinner.js"() {
     "use strict";
-    init_spinner_seen();
-    TH_DIR = process.env["TERMINALHIRE_DIR"] || join8(homedir6(), ".terminalhire");
-    CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join8(homedir6(), ".claude", "settings.json");
-    CONFIG_FILE2 = join8(TH_DIR, "config.json");
-    SPINNER_STATE_FILE = join8(TH_DIR, "spinner-state.json");
-    SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
-    VERB_INTROS = ["Matched:", "You\u2019d fit:", "Worth a look:", "On your radar:", "Fits your stack:"];
+    init_spinner_config();
+    init_spinner_config();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_select();
+    init_spinner_select();
+    init_spinner_select();
+    init_spinner_io();
+    init_spinner_io();
+    init_spinner_io();
+    init_spinner_io();
+    init_spinner_render();
+    init_spinner_render();
+    init_spinner_render();
+    init_spinner_render();
   }
 });
 
@@ -7463,7 +7557,7 @@ __export(version_nudge_exports, {
   readLocalVersion: () => readLocalVersion
 });
 import { readFileSync as readFileSync9, existsSync as existsSync5 } from "fs";
-import { join as join9 } from "path";
+import { join as join10 } from "path";
 import { homedir as homedir7 } from "os";
 import { fileURLToPath as fileURLToPath2 } from "url";
 function parseVersion(v) {
@@ -7489,8 +7583,8 @@ function buildStaleNudge(local, latest) {
 function readLocalVersion() {
   try {
     const candidates = [
-      join9(__dirname, "..", "..", "package.json"),
-      join9(__dirname, "..", "package.json")
+      join10(__dirname, "..", "..", "package.json"),
+      join10(__dirname, "..", "package.json")
     ];
     for (const p of candidates) {
       if (existsSync5(p)) {
@@ -7521,13 +7615,13 @@ var init_version_nudge = __esm({
   "bin/version-nudge.js"() {
     "use strict";
     __dirname = fileURLToPath2(new URL(".", import.meta.url));
-    INDEX_CACHE_FILE = join9(homedir7(), ".terminalhire", "index-cache.json");
+    INDEX_CACHE_FILE = join10(process.env.TERMINALHIRE_DIR || join10(homedir7(), ".terminalhire"), "index-cache.json");
   }
 });
 
 // bin/jpi-refresh.js
-import { readFileSync as readFileSync10, writeFileSync as writeFileSync7, existsSync as existsSync6, mkdirSync as mkdirSync7 } from "fs";
-import { join as join10 } from "path";
+import { writeFileSync as writeFileSync7, mkdirSync as mkdirSync7 } from "fs";
+import { join as join11 } from "path";
 import { homedir as homedir8 } from "os";
 import { fileURLToPath as fileURLToPath3 } from "url";
 
@@ -7535,7 +7629,7 @@ import { fileURLToPath as fileURLToPath3 } from "url";
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-var TERMINALHIRE_DIR = join(homedir(), ".terminalhire");
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
 var DIRECTORY_CACHE_FILE = join(TERMINALHIRE_DIR, "directory-cache.json");
 var PROJECT_FILE = join(TERMINALHIRE_DIR, "project.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
@@ -7680,28 +7774,35 @@ function readWebSessionFile() {
 // bin/jpi-refresh.js
 var GH_SESSION_COOKIE = "__jpi_gh_session";
 var __dirname2 = fileURLToPath3(new URL(".", import.meta.url));
-var TERMINALHIRE_DIR4 = join10(homedir8(), ".terminalhire");
-var INDEX_CACHE_FILE2 = join10(TERMINALHIRE_DIR4, "index-cache.json");
+var TERMINALHIRE_DIR4 = process.env["TERMINALHIRE_DIR"] || join11(homedir8(), ".terminalhire");
+var INDEX_CACHE_FILE2 = join11(TERMINALHIRE_DIR4, "index-cache.json");
 var API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://www.terminalhire.com";
 async function run() {
   try {
     let index;
-    try {
-      const res = await fetch(`${API_URL2}/api/index`, {
-        signal: AbortSignal.timeout(15e3),
-        headers: { "Accept": "application/json" }
-      });
-      if (!res.ok) {
-        process.stderr.write(`terminalhire refresh: index fetch failed (HTTP ${res.status})
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const res = await fetch(`${API_URL2}/api/index`, {
+          signal: AbortSignal.timeout(15e3),
+          headers: { "Accept": "application/json" }
+        });
+        if (!res.ok) {
+          process.stderr.write(`terminalhire refresh: index fetch failed (HTTP ${res.status})
 `);
-        process.exit(1);
+          process.exit(1);
+        }
+        index = await res.json();
+        break;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (attempt >= 2) {
+          process.stderr.write(`terminalhire refresh: fetch error \u2014 ${msg}
+`);
+          process.exit(1);
+        }
+        process.stderr.write(`terminalhire refresh: fetch error \u2014 ${msg} (retrying once)
+`);
       }
-      index = await res.json();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`terminalhire refresh: fetch error \u2014 ${msg}
-`);
-      process.exit(1);
     }
     const jobs = index?.jobs ?? [];
     const contribute = isContributeEnabled() && Array.isArray(index?.contribute) ? index.contribute : [];

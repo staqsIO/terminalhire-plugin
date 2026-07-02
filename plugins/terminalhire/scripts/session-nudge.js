@@ -32,7 +32,7 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-const TERMINALHIRE_DIR = join(homedir(), '.terminalhire');
+const TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), '.terminalhire');
 const NUDGE_FILE = join(TERMINALHIRE_DIR, 'nudged.json');
 const CONFIG_FILE = join(TERMINALHIRE_DIR, 'config.json');
 const ENGINE_POINTER_FILE = join(TERMINALHIRE_DIR, 'engine-path');

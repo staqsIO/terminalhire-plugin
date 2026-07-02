@@ -8,7 +8,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
-var TERMINALHIRE_DIR = join(homedir(), ".terminalhire");
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
 var INDEX_CACHE_FILE = join(TERMINALHIRE_DIR, "index-cache.json");
 var NUDGE_FILE = join(TERMINALHIRE_DIR, "nudged.json");
 var NUDGE_COUNTER_FILE = join(TERMINALHIRE_DIR, "nudge-counter.json");

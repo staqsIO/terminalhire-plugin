@@ -1455,7 +1455,7 @@ function isContributeEnabled() {
 }
 
 // bin/jpi-contribute.js
-var TERMINALHIRE_DIR3 = join4(homedir3(), ".terminalhire");
+var TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
 var INDEX_CACHE_FILE = join4(TERMINALHIRE_DIR3, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";

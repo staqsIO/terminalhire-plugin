@@ -109,7 +109,7 @@ import { homedir as homedir2 } from "os";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { createInterface } from "readline";
-var TERMINALHIRE_DIR2 = join2(homedir2(), ".terminalhire");
+var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
 var INDEX_CACHE_FILE = join2(TERMINALHIRE_DIR2, "index-cache.json");
 var GH_API = "https://api.github.com";
 var GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };

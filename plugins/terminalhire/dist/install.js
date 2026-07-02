@@ -29,14 +29,13 @@ import {
   readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 const SETTINGS_PATH = join(homedir(), '.claude', 'settings.json');
-const SETTINGS_DIR = dirname(SETTINGS_PATH);
 const TERMINALHIRE_DIR = join(homedir(), '.terminalhire');
 const CONFIG_FILE = join(TERMINALHIRE_DIR, 'config.json');
 

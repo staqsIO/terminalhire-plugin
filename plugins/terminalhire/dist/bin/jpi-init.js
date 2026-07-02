@@ -5,8 +5,7 @@ import { existsSync } from "fs";
 import { join, resolve } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { createInterface } from "readline";
-import { spawnSync, spawn } from "child_process";
-import { homedir } from "os";
+import { spawnSync } from "child_process";
 var __dirname = fileURLToPath(new URL(".", import.meta.url));
 function resolveScript(name) {
   const distPath = resolve(join(__dirname, "..", "..", "dist", "bin", `${name}.js`));

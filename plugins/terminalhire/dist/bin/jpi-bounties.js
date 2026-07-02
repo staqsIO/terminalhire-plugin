@@ -2953,10 +2953,13 @@ You control whether this connects \u2014 no contact details are shared unless yo
   return { subject, text };
 }
 function introActorRole(intro, actorLogin) {
-  const a = actorLogin.trim().toLowerCase();
-  if (a && a === intro.targetLogin.trim().toLowerCase()) return "target";
-  if (a && a === intro.requesterLogin.trim().toLowerCase()) return "requester";
+  if (sameLogin(actorLogin, intro.targetLogin)) return "target";
+  if (sameLogin(actorLogin, intro.requesterLogin)) return "requester";
   return "other";
+}
+function sameLogin(a, b) {
+  const an = a.trim().toLowerCase();
+  return an.length > 0 && an === b.trim().toLowerCase();
 }
 function authorizeIntroDecision(intro, actorLogin) {
   const role = introActorRole(intro, actorLogin);
@@ -6399,6 +6402,7 @@ __export(src_exports, {
   rejectExtraIntroFields: () => rejectExtraIntroFields,
   revealIntroContacts: () => revealIntroContacts,
   safetyNumber: () => safetyNumber,
+  sameLogin: () => sameLogin,
   setStatus: () => setStatus,
   tokenize: () => tokenize,
   validateGraph: () => validateGraph,
@@ -6670,7 +6674,7 @@ import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, mkdirSy
 import { join as join3 } from "path";
 import { homedir as homedir2 } from "os";
 import { createInterface } from "readline";
-var TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
+var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
 var INDEX_CACHE_FILE = join3(TERMINALHIRE_DIR2, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";

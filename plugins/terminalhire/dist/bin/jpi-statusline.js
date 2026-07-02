@@ -5,7 +5,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { pathToFileURL } from "url";
-var INDEX_CACHE_FILE = join(homedir(), ".terminalhire", "index-cache.json");
+var INDEX_CACHE_FILE = join(process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire"), "index-cache.json");
 var INDEX_CACHE_TTL_MS = 15 * 60 * 1e3;
 function readFreshCache() {
   try {

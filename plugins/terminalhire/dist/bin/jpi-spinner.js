@@ -8,62 +8,125 @@ import {
   existsSync as existsSync2,
   mkdirSync as mkdirSync3
 } from "fs";
-import { join as join3 } from "path";
+import { join as join4 } from "path";
 import { homedir as homedir3 } from "os";
 import { createInterface } from "readline";
 
-// bin/spinner.js
-import {
-  readFileSync as readFileSync2,
-  writeFileSync as writeFileSync2,
-  existsSync,
-  mkdirSync as mkdirSync2,
-  renameSync as renameSync2
-} from "fs";
-import { join as join2, dirname as dirname2 } from "path";
-import { homedir as homedir2 } from "os";
+// bin/spinner-config.js
+import { join as join2 } from "path";
 
-// bin/spinner-seen.js
+// bin/spinner-io.js
 import {
   readFileSync,
   writeFileSync,
-  renameSync,
-  mkdirSync
+  existsSync,
+  mkdirSync,
+  renameSync
 } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
-var SEEN_WINDOW_SURFACES = 10;
-var SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
-function isSuppressed(id, history) {
-  const e = history.entries[id];
-  if (!e) return false;
-  return history.surface - e.lastSurface < SEEN_WINDOW_SURFACES;
+function thDir() {
+  return process.env["TERMINALHIRE_DIR"] || join(homedir(), ".terminalhire");
 }
-
-// bin/spinner.js
-var TH_DIR = process.env["TERMINALHIRE_DIR"] || join2(homedir2(), ".terminalhire");
-var CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join2(homedir2(), ".claude", "settings.json");
-var CONFIG_FILE = join2(TH_DIR, "config.json");
-var SPINNER_STATE_FILE = join2(TH_DIR, "spinner-state.json");
-var SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
+function claudeSettingsPath() {
+  return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join(homedir(), ".claude", "settings.json");
+}
+function spinnerStateFilePath() {
+  return join(thDir(), "spinner-state.json");
+}
 function readJson(path, fallback) {
   try {
-    return existsSync(path) ? JSON.parse(readFileSync2(path, "utf8")) : fallback;
+    return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : fallback;
   } catch {
     return fallback;
   }
 }
 function atomicWriteJson(path, obj) {
-  mkdirSync2(dirname2(path), { recursive: true });
+  mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync2(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
-  renameSync2(tmp, path);
+  writeFileSync(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  renameSync(tmp, path);
 }
-function titleCase(s) {
-  return String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
+function readState() {
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  return readJson(SPINNER_STATE_FILE, { verbs: [], mode: "replace" });
 }
+function applySpinnerVerbs(ourVerbs, mode = "replace") {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const verbs = (Array.isArray(ourVerbs) ? ourVerbs : []).filter(Boolean);
+  if (verbs.length === 0) return clearSpinnerVerbs();
+  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
+  const existing = settings.spinnerVerbs && typeof settings.spinnerVerbs === "object" ? settings.spinnerVerbs : null;
+  const prevOurs = new Set(readState().verbs || []);
+  const userVerbs = existing && Array.isArray(existing.verbs) ? existing.verbs.filter((v) => !prevOurs.has(v)) : [];
+  const newVerbs = [...verbs, ...userVerbs];
+  settings.spinnerVerbs = { mode: mode === "append" ? "append" : "replace", verbs: newVerbs };
+  atomicWriteJson(CLAUDE_SETTINGS, settings);
+  const st = readState();
+  atomicWriteJson(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
+  return { applied: verbs.length, total: newVerbs.length };
+}
+function clearSpinnerVerbs() {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const settings = readJson(CLAUDE_SETTINGS, null);
+  const prevOurs = new Set(readState().verbs || []);
+  let keptUserVerbs = 0;
+  if (settings && settings.spinnerVerbs && Array.isArray(settings.spinnerVerbs.verbs)) {
+    const userVerbs = settings.spinnerVerbs.verbs.filter((v) => !prevOurs.has(v));
+    keptUserVerbs = userVerbs.length;
+    if (userVerbs.length > 0) {
+      settings.spinnerVerbs = {
+        mode: settings.spinnerVerbs.mode === "append" ? "append" : "replace",
+        verbs: userVerbs
+      };
+    } else {
+      delete settings.spinnerVerbs;
+    }
+    atomicWriteJson(CLAUDE_SETTINGS, settings);
+  }
+  try {
+    const st = readState();
+    atomicWriteJson(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
+  } catch {
+  }
+  return { cleared: true, keptUserVerbs };
+}
+function clearSpinnerTips() {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const settings = readJson(CLAUDE_SETTINGS, null);
+  const prevOurs = new Set(readState().tips || []);
+  if (settings && settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips)) {
+    const userTips = settings.spinnerTipsOverride.tips.filter((t) => !prevOurs.has(t));
+    if (userTips.length > 0) {
+      settings.spinnerTipsOverride = {
+        excludeDefault: settings.spinnerTipsOverride.excludeDefault === true,
+        tips: userTips
+      };
+    } else {
+      delete settings.spinnerTipsOverride;
+      delete settings.spinnerTipsEnabled;
+    }
+    atomicWriteJson(CLAUDE_SETTINGS, settings);
+  }
+  try {
+    const st = readState();
+    atomicWriteJson(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
+  } catch {
+  }
+  return { cleared: true };
+}
+
+// bin/spinner-config.js
+function configFilePath() {
+  return join2(thDir(), "config.json");
+}
+var SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
 function readSpinnerConfig() {
-  const cfg = readJson(CONFIG_FILE, {});
+  const CONFIG_FILE2 = configFilePath();
+  const cfg = readJson(CONFIG_FILE2, {});
   const spinner = cfg && typeof cfg.spinner === "object" ? cfg.spinner : {};
   const merged = { ...SPINNER_DEFAULTS, ...spinner };
   if (merged.mode !== "append" && merged.mode !== "replace") merged.mode = SPINNER_DEFAULTS.mode;
@@ -73,6 +136,49 @@ function readSpinnerConfig() {
     merged.frequency = SPINNER_DEFAULTS.frequency;
   }
   return merged;
+}
+
+// bin/spinner-seen.js
+import {
+  readFileSync as readFileSync2,
+  writeFileSync as writeFileSync2,
+  renameSync as renameSync2,
+  mkdirSync as mkdirSync2
+} from "fs";
+import { join as join3, dirname as dirname2 } from "path";
+import { homedir as homedir2 } from "os";
+var SEEN_WINDOW_SURFACES = 10;
+var SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
+function isSuppressed(id, history) {
+  const e = history.entries[id];
+  if (!e) return false;
+  return history.surface - e.lastSurface < SEEN_WINDOW_SURFACES;
+}
+
+// bin/spinner-select.js
+function filterFreshMatches(matches, history) {
+  const { eligible, suppressed } = partitionFreshMatches(matches, history);
+  return suppressed.length === 0 ? matches : [...eligible, ...suppressed];
+}
+function partitionFreshMatches(matches, history) {
+  const list = Array.isArray(matches) ? matches : [];
+  if (!history || !history.entries || Object.keys(history.entries).length === 0) {
+    return { eligible: list, suppressed: [] };
+  }
+  const eligible = [];
+  const suppressed = [];
+  for (const m of list) {
+    if (m && m.id != null && isSuppressed(String(m.id), history)) suppressed.push(m);
+    else eligible.push(m);
+  }
+  const stamp = (m) => history.entries[String(m.id)].lastSurface;
+  suppressed.sort((a, b) => stamp(a) - stamp(b));
+  return { eligible, suppressed };
+}
+
+// bin/spinner-verbs.js
+function titleCase(s) {
+  return String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 function ctaVerb() {
   return "\u2605 jobs that fit you \xB7 run: terminalhire jobs";
@@ -138,26 +244,7 @@ function buildIncomingIntroLine(incomingPending) {
 function buildSessionStaleLine(sessionStale) {
   return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
 }
-function filterFreshMatches(matches, history) {
-  const { eligible, suppressed } = partitionFreshMatches(matches, history);
-  return suppressed.length === 0 ? matches : [...eligible, ...suppressed];
-}
-function partitionFreshMatches(matches, history) {
-  const list = Array.isArray(matches) ? matches : [];
-  if (!history || !history.entries || Object.keys(history.entries).length === 0) {
-    return { eligible: list, suppressed: [] };
-  }
-  const eligible = [];
-  const suppressed = [];
-  for (const m of list) {
-    if (m && m.id != null && isSuppressed(String(m.id), history)) suppressed.push(m);
-    else eligible.push(m);
-  }
-  const stamp = (m) => history.entries[String(m.id)].lastSurface;
-  suppressed.sort((a, b) => stamp(a) - stamp(b));
-  return { eligible, suppressed };
-}
-function buildSpinnerPool(topMatches, max = 6, opts = {}) {
+function buildSpinnerPool(topMatches, _max = 6, opts = {}) {
   const { sessionTags, frequency = "always", topPeers, incomingPending, sessionStale, seenHistory } = opts;
   const staleLine = buildSessionStaleLine(sessionStale);
   const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
@@ -174,87 +261,23 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   if (introLine) pool.push(introLine);
   return withStale(pool);
 }
-function readState() {
-  return readJson(SPINNER_STATE_FILE, { verbs: [], mode: "replace" });
-}
-function applySpinnerVerbs(ourVerbs, mode = "replace") {
-  const verbs = (Array.isArray(ourVerbs) ? ourVerbs : []).filter(Boolean);
-  if (verbs.length === 0) return clearSpinnerVerbs();
-  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
-  const existing = settings.spinnerVerbs && typeof settings.spinnerVerbs === "object" ? settings.spinnerVerbs : null;
-  const prevOurs = new Set(readState().verbs || []);
-  const userVerbs = existing && Array.isArray(existing.verbs) ? existing.verbs.filter((v) => !prevOurs.has(v)) : [];
-  const newVerbs = [...verbs, ...userVerbs];
-  settings.spinnerVerbs = { mode: mode === "append" ? "append" : "replace", verbs: newVerbs };
-  atomicWriteJson(CLAUDE_SETTINGS, settings);
-  const st = readState();
-  atomicWriteJson(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
-  return { applied: verbs.length, total: newVerbs.length };
-}
-function clearSpinnerVerbs() {
-  const settings = readJson(CLAUDE_SETTINGS, null);
-  const prevOurs = new Set(readState().verbs || []);
-  let keptUserVerbs = 0;
-  if (settings && settings.spinnerVerbs && Array.isArray(settings.spinnerVerbs.verbs)) {
-    const userVerbs = settings.spinnerVerbs.verbs.filter((v) => !prevOurs.has(v));
-    keptUserVerbs = userVerbs.length;
-    if (userVerbs.length > 0) {
-      settings.spinnerVerbs = {
-        mode: settings.spinnerVerbs.mode === "append" ? "append" : "replace",
-        verbs: userVerbs
-      };
-    } else {
-      delete settings.spinnerVerbs;
-    }
-    atomicWriteJson(CLAUDE_SETTINGS, settings);
-  }
-  try {
-    const st = readState();
-    atomicWriteJson(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
-  } catch {
-  }
-  return { cleared: true, keptUserVerbs };
-}
-function clearSpinnerTips() {
-  const settings = readJson(CLAUDE_SETTINGS, null);
-  const prevOurs = new Set(readState().tips || []);
-  if (settings && settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips)) {
-    const userTips = settings.spinnerTipsOverride.tips.filter((t) => !prevOurs.has(t));
-    if (userTips.length > 0) {
-      settings.spinnerTipsOverride = {
-        excludeDefault: settings.spinnerTipsOverride.excludeDefault === true,
-        tips: userTips
-      };
-    } else {
-      delete settings.spinnerTipsOverride;
-      delete settings.spinnerTipsEnabled;
-    }
-    atomicWriteJson(CLAUDE_SETTINGS, settings);
-  }
-  try {
-    const st = readState();
-    atomicWriteJson(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
-  } catch {
-  }
-  return { cleared: true };
-}
 
 // bin/jpi-spinner.js
-var TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join3(homedir3(), ".terminalhire");
-var CONFIG_FILE2 = join3(TH_DIR2, "config.json");
-var SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join3(homedir3(), ".claude", "settings.json");
-var CACHE_FILE = join3(TH_DIR2, "index-cache.json");
+var TH_DIR = process.env["TERMINALHIRE_DIR"] || join4(homedir3(), ".terminalhire");
+var CONFIG_FILE = join4(TH_DIR, "config.json");
+var SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join4(homedir3(), ".claude", "settings.json");
+var CACHE_FILE = join4(TH_DIR, "index-cache.json");
 function readConfig() {
   try {
-    return existsSync2(CONFIG_FILE2) ? JSON.parse(readFileSync3(CONFIG_FILE2, "utf8")) : {};
+    return existsSync2(CONFIG_FILE) ? JSON.parse(readFileSync3(CONFIG_FILE, "utf8")) : {};
   } catch {
     return {};
   }
 }
 function writeConfig(patch) {
-  mkdirSync3(TH_DIR2, { recursive: true });
+  mkdirSync3(TH_DIR, { recursive: true });
   const merged = { ...readConfig(), ...patch };
-  writeFileSync3(CONFIG_FILE2, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  writeFileSync3(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function backupSettings() {
   if (!existsSync2(SETTINGS_PATH)) return null;

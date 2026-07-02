@@ -1,37 +1,168 @@
 #!/usr/bin/env node
 
-// bin/spinner.js
-import {
-  readFileSync as readFileSync2,
-  writeFileSync as writeFileSync2,
-  existsSync,
-  mkdirSync as mkdirSync2,
-  renameSync as renameSync2
-} from "fs";
-import { join as join2, dirname as dirname2 } from "path";
-import { homedir as homedir2 } from "os";
+// bin/spinner-config.js
+import { join as join2 } from "path";
 
-// bin/spinner-seen.js
+// bin/spinner-io.js
 import {
   readFileSync,
   writeFileSync,
-  renameSync,
-  mkdirSync
+  existsSync,
+  mkdirSync,
+  renameSync
 } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
-var SEEN_WINDOW_SURFACES = 10;
-var SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
-var SEEN_MAX_ENTRIES = 500;
-function seenFilePath() {
-  const dir = process.env["TERMINALHIRE_DIR"] || join(homedir(), ".terminalhire");
-  return join(dir, "seen-history.json");
+function thDir() {
+  return process.env["TERMINALHIRE_DIR"] || join(homedir(), ".terminalhire");
+}
+function claudeSettingsPath() {
+  return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join(homedir(), ".claude", "settings.json");
+}
+function spinnerStateFilePath() {
+  return join(thDir(), "spinner-state.json");
+}
+function readJson(path, fallback) {
+  try {
+    return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : fallback;
+  } catch {
+    return fallback;
+  }
 }
 function atomicWriteJson(path, obj) {
   mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync(tmp, JSON.stringify(obj) + "\n", "utf8");
+  writeFileSync(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
   renameSync(tmp, path);
+}
+function readState() {
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  return readJson(SPINNER_STATE_FILE, { verbs: [], mode: "replace" });
+}
+function applySpinnerVerbs(ourVerbs, mode = "replace") {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const verbs = (Array.isArray(ourVerbs) ? ourVerbs : []).filter(Boolean);
+  if (verbs.length === 0) return clearSpinnerVerbs();
+  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
+  const existing = settings.spinnerVerbs && typeof settings.spinnerVerbs === "object" ? settings.spinnerVerbs : null;
+  const prevOurs = new Set(readState().verbs || []);
+  const userVerbs = existing && Array.isArray(existing.verbs) ? existing.verbs.filter((v) => !prevOurs.has(v)) : [];
+  const newVerbs = [...verbs, ...userVerbs];
+  settings.spinnerVerbs = { mode: mode === "append" ? "append" : "replace", verbs: newVerbs };
+  atomicWriteJson(CLAUDE_SETTINGS, settings);
+  const st = readState();
+  atomicWriteJson(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
+  return { applied: verbs.length, total: newVerbs.length };
+}
+function clearSpinnerVerbs() {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const settings = readJson(CLAUDE_SETTINGS, null);
+  const prevOurs = new Set(readState().verbs || []);
+  let keptUserVerbs = 0;
+  if (settings && settings.spinnerVerbs && Array.isArray(settings.spinnerVerbs.verbs)) {
+    const userVerbs = settings.spinnerVerbs.verbs.filter((v) => !prevOurs.has(v));
+    keptUserVerbs = userVerbs.length;
+    if (userVerbs.length > 0) {
+      settings.spinnerVerbs = {
+        mode: settings.spinnerVerbs.mode === "append" ? "append" : "replace",
+        verbs: userVerbs
+      };
+    } else {
+      delete settings.spinnerVerbs;
+    }
+    atomicWriteJson(CLAUDE_SETTINGS, settings);
+  }
+  try {
+    const st = readState();
+    atomicWriteJson(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
+  } catch {
+  }
+  return { cleared: true, keptUserVerbs };
+}
+function applySpinnerTips(ourTips) {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const tips = (Array.isArray(ourTips) ? ourTips : []).filter(Boolean);
+  if (tips.length === 0) return clearSpinnerTips();
+  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
+  const existing = settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips) ? settings.spinnerTipsOverride.tips : [];
+  const prevOurs = new Set(readState().tips || []);
+  const userTips = existing.filter((t) => !prevOurs.has(t));
+  settings.spinnerTipsEnabled = true;
+  settings.spinnerTipsOverride = { excludeDefault: true, tips: [...tips, ...userTips] };
+  atomicWriteJson(CLAUDE_SETTINGS, settings);
+  const st = readState();
+  atomicWriteJson(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
+  return { applied: tips.length };
+}
+function clearSpinnerTips() {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const settings = readJson(CLAUDE_SETTINGS, null);
+  const prevOurs = new Set(readState().tips || []);
+  if (settings && settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips)) {
+    const userTips = settings.spinnerTipsOverride.tips.filter((t) => !prevOurs.has(t));
+    if (userTips.length > 0) {
+      settings.spinnerTipsOverride = {
+        excludeDefault: settings.spinnerTipsOverride.excludeDefault === true,
+        tips: userTips
+      };
+    } else {
+      delete settings.spinnerTipsOverride;
+      delete settings.spinnerTipsEnabled;
+    }
+    atomicWriteJson(CLAUDE_SETTINGS, settings);
+  }
+  try {
+    const st = readState();
+    atomicWriteJson(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
+  } catch {
+  }
+  return { cleared: true };
+}
+
+// bin/spinner-config.js
+function configFilePath() {
+  return join2(thDir(), "config.json");
+}
+var SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
+function readSpinnerConfig() {
+  const CONFIG_FILE = configFilePath();
+  const cfg = readJson(CONFIG_FILE, {});
+  const spinner = cfg && typeof cfg.spinner === "object" ? cfg.spinner : {};
+  const merged = { ...SPINNER_DEFAULTS, ...spinner };
+  if (merged.mode !== "append" && merged.mode !== "replace") merged.mode = SPINNER_DEFAULTS.mode;
+  merged.max = Math.max(1, Math.min(12, Number(merged.max) || SPINNER_DEFAULTS.max));
+  merged.enabled = merged.enabled === true;
+  if (!["always", "sometimes", "rare"].includes(merged.frequency)) {
+    merged.frequency = SPINNER_DEFAULTS.frequency;
+  }
+  return merged;
+}
+
+// bin/spinner-seen.js
+import {
+  readFileSync as readFileSync2,
+  writeFileSync as writeFileSync2,
+  renameSync as renameSync2,
+  mkdirSync as mkdirSync2
+} from "fs";
+import { join as join3, dirname as dirname2 } from "path";
+import { homedir as homedir2 } from "os";
+var SEEN_WINDOW_SURFACES = 10;
+var SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
+var SEEN_MAX_ENTRIES = 500;
+function seenFilePath() {
+  const dir = process.env["TERMINALHIRE_DIR"] || join3(homedir2(), ".terminalhire");
+  return join3(dir, "seen-history.json");
+}
+function atomicWriteJson2(path, obj) {
+  mkdirSync2(dirname2(path), { recursive: true });
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync2(tmp, JSON.stringify(obj) + "\n", { encoding: "utf8", mode: 384 });
+  renameSync2(tmp, path);
 }
 function emptyHistory() {
   return { surface: 0, entries: {} };
@@ -59,7 +190,7 @@ function capEntries(entries) {
 function loadSeenHistory(now = Date.now()) {
   let raw;
   try {
-    raw = JSON.parse(readFileSync(seenFilePath(), "utf8"));
+    raw = JSON.parse(readFileSync2(seenFilePath(), "utf8"));
   } catch {
     return emptyHistory();
   }
@@ -83,45 +214,68 @@ function recordSurface(ids, now = Date.now()) {
   }
   const next = { surface, entries: capEntries(pruneEntries(entries, now)) };
   try {
-    atomicWriteJson(seenFilePath(), next);
+    atomicWriteJson2(seenFilePath(), next);
   } catch {
   }
   return next;
 }
 
-// bin/spinner.js
-var TH_DIR = process.env["TERMINALHIRE_DIR"] || join2(homedir2(), ".terminalhire");
-var CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join2(homedir2(), ".claude", "settings.json");
-var CONFIG_FILE = join2(TH_DIR, "config.json");
-var SPINNER_STATE_FILE = join2(TH_DIR, "spinner-state.json");
-var SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
-function readJson(path, fallback) {
-  try {
-    return existsSync(path) ? JSON.parse(readFileSync2(path, "utf8")) : fallback;
-  } catch {
-    return fallback;
+// bin/spinner-select.js
+function filterFreshMatches(matches, history) {
+  const { eligible, suppressed } = partitionFreshMatches(matches, history);
+  return suppressed.length === 0 ? matches : [...eligible, ...suppressed];
+}
+function partitionFreshMatches(matches, history) {
+  const list = Array.isArray(matches) ? matches : [];
+  if (!history || !history.entries || Object.keys(history.entries).length === 0) {
+    return { eligible: list, suppressed: [] };
   }
+  const eligible = [];
+  const suppressed = [];
+  for (const m of list) {
+    if (m && m.id != null && isSuppressed(String(m.id), history)) suppressed.push(m);
+    else eligible.push(m);
+  }
+  const stamp = (m) => history.entries[String(m.id)].lastSurface;
+  suppressed.sort((a, b) => stamp(a) - stamp(b));
+  return { eligible, suppressed };
 }
-function atomicWriteJson2(path, obj) {
-  mkdirSync2(dirname2(path), { recursive: true });
-  const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync2(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
-  renameSync2(tmp, path);
+function widenFreshCandidates(matches, history, need, widen) {
+  const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
+  if (!(need > 0)) return [];
+  if (!widen || !Array.isArray(widen.reserve) || typeof widen.getAdjacent !== "function") return [];
+  const suppressed = (m) => !!history && !!history.entries && m.id != null && isSuppressed(String(m.id), history);
+  const counts = /* @__PURE__ */ new Map();
+  for (const m of list) {
+    for (const t of Array.isArray(m.matchedTags) ? m.matchedTags : []) {
+      const tag = String(t).toLowerCase();
+      counts.set(tag, (counts.get(tag) || 0) + 1);
+    }
+  }
+  const maxCount = Math.max(0, ...counts.values());
+  if (maxCount === 0) return [];
+  const dominant = [...counts.entries()].filter(([, c]) => c === maxCount).map(([t]) => t);
+  const inPool = new Set(list.map((m) => String(m.id)));
+  const fresh = (m) => m && m.id != null && !inPool.has(String(m.id)) && !suppressed(m);
+  const tagged = (m, adj) => (Array.isArray(m.matchedTags) ? m.matchedTags : []).some((t) => adj.has(String(t).toLowerCase()));
+  const ringCandidates = (hops) => {
+    const adj = new Set(dominant.flatMap((d) => widen.getAdjacent(d, hops)));
+    if (adj.size === 0) return [];
+    return widen.reserve.filter((m) => fresh(m) && tagged(m, adj));
+  };
+  let widened = ringCandidates(1);
+  if (widened.length === 0) widened = ringCandidates(2);
+  if (widened.length === 0) {
+    widened = widen.reserve.filter(
+      (m) => fresh(m) && (m.source === "bounty" || m.source === "contribute")
+    );
+  }
+  return widened.slice(0, need);
 }
+
+// bin/spinner-verbs.js
 function titleCase(s) {
   return String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-function readSpinnerConfig() {
-  const cfg = readJson(CONFIG_FILE, {});
-  const spinner = cfg && typeof cfg.spinner === "object" ? cfg.spinner : {};
-  const merged = { ...SPINNER_DEFAULTS, ...spinner };
-  if (merged.mode !== "append" && merged.mode !== "replace") merged.mode = SPINNER_DEFAULTS.mode;
-  merged.max = Math.max(1, Math.min(12, Number(merged.max) || SPINNER_DEFAULTS.max));
-  merged.enabled = merged.enabled === true;
-  if (!["always", "sometimes", "rare"].includes(merged.frequency)) {
-    merged.frequency = SPINNER_DEFAULTS.frequency;
-  }
-  return merged;
 }
 var VERB_INTROS = ["Matched:", "You\u2019d fit:", "Worth a look:", "On your radar:", "Fits your stack:"];
 function ctaVerb() {
@@ -206,60 +360,7 @@ function buildIncomingIntroLine(incomingPending) {
 function buildSessionStaleLine(sessionStale) {
   return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
 }
-function filterFreshMatches(matches, history) {
-  const { eligible, suppressed } = partitionFreshMatches(matches, history);
-  return suppressed.length === 0 ? matches : [...eligible, ...suppressed];
-}
-function partitionFreshMatches(matches, history) {
-  const list = Array.isArray(matches) ? matches : [];
-  if (!history || !history.entries || Object.keys(history.entries).length === 0) {
-    return { eligible: list, suppressed: [] };
-  }
-  const eligible = [];
-  const suppressed = [];
-  for (const m of list) {
-    if (m && m.id != null && isSuppressed(String(m.id), history)) suppressed.push(m);
-    else eligible.push(m);
-  }
-  const stamp = (m) => history.entries[String(m.id)].lastSurface;
-  suppressed.sort((a, b) => stamp(a) - stamp(b));
-  return { eligible, suppressed };
-}
-function widenFreshCandidates(matches, history, capacity, widen) {
-  const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
-  if (!widen || !Array.isArray(widen.reserve) || typeof widen.getAdjacent !== "function") return [];
-  const suppressed = (m) => !!history && !!history.entries && m.id != null && isSuppressed(String(m.id), history);
-  const eligibleCount = list.filter((m) => !suppressed(m)).length;
-  const need = capacity - eligibleCount;
-  if (need <= 0) return [];
-  const counts = /* @__PURE__ */ new Map();
-  for (const m of list) {
-    for (const t of Array.isArray(m.matchedTags) ? m.matchedTags : []) {
-      const tag = String(t).toLowerCase();
-      counts.set(tag, (counts.get(tag) || 0) + 1);
-    }
-  }
-  const maxCount = Math.max(0, ...counts.values());
-  if (maxCount === 0) return [];
-  const dominant = [...counts.entries()].filter(([, c]) => c === maxCount).map(([t]) => t);
-  const inPool = new Set(list.map((m) => String(m.id)));
-  const fresh = (m) => m && m.id != null && !inPool.has(String(m.id)) && !suppressed(m);
-  const tagged = (m, adj) => (Array.isArray(m.matchedTags) ? m.matchedTags : []).some((t) => adj.has(String(t).toLowerCase()));
-  const ringCandidates = (hops) => {
-    const adj = new Set(dominant.flatMap((d) => widen.getAdjacent(d, hops)));
-    if (adj.size === 0) return [];
-    return widen.reserve.filter((m) => fresh(m) && tagged(m, adj));
-  };
-  let widened = ringCandidates(1);
-  if (widened.length === 0) widened = ringCandidates(2);
-  if (widened.length === 0) {
-    widened = widen.reserve.filter(
-      (m) => fresh(m) && (m.source === "bounty" || m.source === "contribute")
-    );
-  }
-  return widened.slice(0, need);
-}
-function buildSpinnerPool(topMatches, max = 6, opts = {}) {
+function buildSpinnerPool(topMatches, _max = 6, opts = {}) {
   const { sessionTags, frequency = "always", topPeers, incomingPending, sessionStale, seenHistory } = opts;
   const staleLine = buildSessionStaleLine(sessionStale);
   const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
@@ -276,47 +377,8 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   if (introLine) pool.push(introLine);
   return withStale(pool);
 }
-function readState() {
-  return readJson(SPINNER_STATE_FILE, { verbs: [], mode: "replace" });
-}
-function applySpinnerVerbs(ourVerbs, mode = "replace") {
-  const verbs = (Array.isArray(ourVerbs) ? ourVerbs : []).filter(Boolean);
-  if (verbs.length === 0) return clearSpinnerVerbs();
-  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
-  const existing = settings.spinnerVerbs && typeof settings.spinnerVerbs === "object" ? settings.spinnerVerbs : null;
-  const prevOurs = new Set(readState().verbs || []);
-  const userVerbs = existing && Array.isArray(existing.verbs) ? existing.verbs.filter((v) => !prevOurs.has(v)) : [];
-  const newVerbs = [...verbs, ...userVerbs];
-  settings.spinnerVerbs = { mode: mode === "append" ? "append" : "replace", verbs: newVerbs };
-  atomicWriteJson2(CLAUDE_SETTINGS, settings);
-  const st = readState();
-  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
-  return { applied: verbs.length, total: newVerbs.length };
-}
-function clearSpinnerVerbs() {
-  const settings = readJson(CLAUDE_SETTINGS, null);
-  const prevOurs = new Set(readState().verbs || []);
-  let keptUserVerbs = 0;
-  if (settings && settings.spinnerVerbs && Array.isArray(settings.spinnerVerbs.verbs)) {
-    const userVerbs = settings.spinnerVerbs.verbs.filter((v) => !prevOurs.has(v));
-    keptUserVerbs = userVerbs.length;
-    if (userVerbs.length > 0) {
-      settings.spinnerVerbs = {
-        mode: settings.spinnerVerbs.mode === "append" ? "append" : "replace",
-        verbs: userVerbs
-      };
-    } else {
-      delete settings.spinnerVerbs;
-    }
-    atomicWriteJson2(CLAUDE_SETTINGS, settings);
-  }
-  try {
-    const st = readState();
-    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
-  } catch {
-  }
-  return { cleared: true, keptUserVerbs };
-}
+
+// bin/spinner-render.js
 function interleaveBySource(topMatches) {
   if (!Array.isArray(topMatches) || topMatches.length === 0) return topMatches;
   const buckets = /* @__PURE__ */ new Map();
@@ -410,48 +472,20 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
     }
   };
   emit(eligible);
+  if (out.length < max && opts.widen) {
+    const widened = widenFreshCandidates(
+      Array.isArray(topMatches) ? topMatches : [],
+      opts.seenHistory,
+      max - out.length,
+      opts.widen
+    );
+    if (widened.length > 0) emit(widened);
+  }
   if (out.length < max) emit(suppressed);
   return { tips: out, surfacedIds };
 }
 function buildTips(topMatches, baseUrl, max = 8, opts = {}) {
   return buildTipsDetailed(topMatches, baseUrl, max, opts).tips;
-}
-function applySpinnerTips(ourTips) {
-  const tips = (Array.isArray(ourTips) ? ourTips : []).filter(Boolean);
-  if (tips.length === 0) return clearSpinnerTips();
-  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
-  const existing = settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips) ? settings.spinnerTipsOverride.tips : [];
-  const prevOurs = new Set(readState().tips || []);
-  const userTips = existing.filter((t) => !prevOurs.has(t));
-  settings.spinnerTipsEnabled = true;
-  settings.spinnerTipsOverride = { excludeDefault: true, tips: [...tips, ...userTips] };
-  atomicWriteJson2(CLAUDE_SETTINGS, settings);
-  const st = readState();
-  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
-  return { applied: tips.length };
-}
-function clearSpinnerTips() {
-  const settings = readJson(CLAUDE_SETTINGS, null);
-  const prevOurs = new Set(readState().tips || []);
-  if (settings && settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips)) {
-    const userTips = settings.spinnerTipsOverride.tips.filter((t) => !prevOurs.has(t));
-    if (userTips.length > 0) {
-      settings.spinnerTipsOverride = {
-        excludeDefault: settings.spinnerTipsOverride.excludeDefault === true,
-        tips: userTips
-      };
-    } else {
-      delete settings.spinnerTipsOverride;
-      delete settings.spinnerTipsEnabled;
-    }
-    atomicWriteJson2(CLAUDE_SETTINGS, settings);
-  }
-  try {
-    const st = readState();
-    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
-  } catch {
-  }
-  return { cleared: true };
 }
 function renderRefreshSurface(topMatches, sc, opts = {}) {
   if (!sc || sc.enabled !== true) {
@@ -460,9 +494,7 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
     return { verbs: [], tips: [], surfacedIds: [] };
   }
   const seenHistory = opts.seenHistory || loadSeenHistory();
-  let ranked = rankBySessionTags(topMatches, opts.sessionTags);
-  const widened = widenFreshCandidates(ranked, seenHistory, 8, opts.widen);
-  if (widened.length > 0) ranked = [...ranked, ...widened];
+  const ranked = rankBySessionTags(topMatches, opts.sessionTags);
   const verbs = buildSpinnerPool(ranked, sc.max, {
     sessionTags: opts.sessionTags,
     frequency: sc.frequency,
@@ -473,7 +505,10 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
   });
   if (verbs.length > 0) applySpinnerVerbs(verbs, sc.mode);
   else clearSpinnerVerbs();
-  const { tips, surfacedIds } = buildTipsDetailed(ranked, opts.baseUrl, 8, { seenHistory });
+  const { tips, surfacedIds } = buildTipsDetailed(ranked, opts.baseUrl, 8, {
+    seenHistory,
+    widen: opts.widen
+  });
   if (tips.length > 0) applySpinnerTips(tips);
   else clearSpinnerTips();
   if (verbs.length > 0 || tips.length > 0) recordSurface(surfacedIds);

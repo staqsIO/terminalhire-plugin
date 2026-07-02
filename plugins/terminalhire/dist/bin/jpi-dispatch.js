@@ -218,7 +218,7 @@ var init_version_nudge = __esm({
   "bin/version-nudge.js"() {
     "use strict";
     __dirname = fileURLToPath(new URL(".", import.meta.url));
-    INDEX_CACHE_FILE = join3(homedir3(), ".terminalhire", "index-cache.json");
+    INDEX_CACHE_FILE = join3(process.env.TERMINALHIRE_DIR || join3(homedir3(), ".terminalhire"), "index-cache.json");
   }
 });
 
@@ -3416,10 +3416,13 @@ You control whether this connects \u2014 no contact details are shared unless yo
   return { subject, text };
 }
 function introActorRole(intro, actorLogin) {
-  const a = actorLogin.trim().toLowerCase();
-  if (a && a === intro.targetLogin.trim().toLowerCase()) return "target";
-  if (a && a === intro.requesterLogin.trim().toLowerCase()) return "requester";
+  if (sameLogin(actorLogin, intro.targetLogin)) return "target";
+  if (sameLogin(actorLogin, intro.requesterLogin)) return "requester";
   return "other";
+}
+function sameLogin(a, b) {
+  const an = a.trim().toLowerCase();
+  return an.length > 0 && an === b.trim().toLowerCase();
 }
 function authorizeIntroDecision(intro, actorLogin) {
   const role = introActorRole(intro, actorLogin);
@@ -7154,6 +7157,7 @@ __export(src_exports, {
   rejectExtraIntroFields: () => rejectExtraIntroFields,
   revealIntroContacts: () => revealIntroContacts,
   safetyNumber: () => safetyNumber,
+  sameLogin: () => sameLogin,
   setStatus: () => setStatus,
   tokenize: () => tokenize,
   validateGraph: () => validateGraph,
@@ -7563,13 +7567,12 @@ async function runLogin() {
   Fetching public profile for @${login}...`);
     let ghProfile;
     if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
-      const { createRequire: createRequire2 } = await import("module");
       const { fileURLToPath: fileURLToPath8 } = await import("url");
-      const { join: join30, dirname: dirname5 } = await import("path");
+      const { join: join31 } = await import("path");
       const __dirname7 = fileURLToPath8(new URL(".", import.meta.url));
-      const fixturePath = join30(__dirname7, "../../fixtures/github-sample.json");
-      const { readFileSync: readFileSync28 } = await import("fs");
-      ghProfile = JSON.parse(readFileSync28(fixturePath, "utf8"));
+      const fixturePath = join31(__dirname7, "../../fixtures/github-sample.json");
+      const { readFileSync: readFileSync27 } = await import("fs");
+      ghProfile = JSON.parse(readFileSync27(fixturePath, "utf8"));
     } else {
       ghProfile = await fetchGitHubProfile2(login, token);
     }
@@ -7791,7 +7794,7 @@ var init_job_status_store = __esm({
   "bin/job-status-store.js"() {
     "use strict";
     init_src();
-    TERMINALHIRE_DIR4 = join7(homedir6(), ".terminalhire");
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join7(homedir6(), ".terminalhire");
     STATUS_FILE = join7(TERMINALHIRE_DIR4, "job-status.json");
     LOCK_FILE = `${STATUS_FILE}.lock`;
     BAK_FILE = `${STATUS_FILE}.bak`;
@@ -7807,7 +7810,7 @@ __export(jpi_jobs_exports, {
   run: () => run2,
   statusLabel: () => statusLabel
 });
-import { readFileSync as readFileSync8, writeFileSync as writeFileSync6, mkdirSync as mkdirSync6, existsSync as existsSync7 } from "fs";
+import { readFileSync as readFileSync8, writeFileSync as writeFileSync6, mkdirSync as mkdirSync6 } from "fs";
 import { join as join8 } from "path";
 import { homedir as homedir7 } from "os";
 import { createInterface as createInterface2 } from "readline";
@@ -8138,7 +8141,7 @@ var init_jpi_jobs = __esm({
     "use strict";
     init_job_status_store();
     __dirname2 = fileURLToPath3(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR5 = join8(homedir7(), ".terminalhire");
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join8(homedir7(), ".terminalhire");
     INDEX_CACHE_FILE2 = join8(TERMINALHIRE_DIR5, "index-cache.json");
     INDEX_TTL_MS = 15 * 60 * 1e3;
     API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
@@ -8234,7 +8237,7 @@ var TERMINALHIRE_DIR6, DIRECTORY_CACHE_FILE, PROJECT_FILE, INDEX_TTL_MS2, API_UR
 var init_directory2 = __esm({
   "bin/directory.js"() {
     "use strict";
-    TERMINALHIRE_DIR6 = join9(homedir8(), ".terminalhire");
+    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join9(homedir8(), ".terminalhire");
     DIRECTORY_CACHE_FILE = join9(TERMINALHIRE_DIR6, "directory-cache.json");
     PROJECT_FILE = join9(TERMINALHIRE_DIR6, "project.json");
     INDEX_TTL_MS2 = 15 * 60 * 1e3;
@@ -8470,7 +8473,7 @@ var TERMINALHIRE_DIR7, PROJECT_FILE2, args3, SHOW, declarationArg;
 var init_jpi_project = __esm({
   "bin/jpi-project.js"() {
     "use strict";
-    TERMINALHIRE_DIR7 = join10(homedir9(), ".terminalhire");
+    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join10(homedir9(), ".terminalhire");
     PROJECT_FILE2 = join10(TERMINALHIRE_DIR7, "project.json");
     args3 = process.argv.slice(2);
     SHOW = args3.includes("--show");
@@ -8606,7 +8609,7 @@ var TERMINALHIRE_DIR8, INDEX_CACHE_FILE3, INDEX_TTL_MS3, API_URL4, DEFAULT_LIMIT
 var init_jpi_bounties = __esm({
   "bin/jpi-bounties.js"() {
     "use strict";
-    TERMINALHIRE_DIR8 = join11(homedir10(), ".terminalhire");
+    TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join11(homedir10(), ".terminalhire");
     INDEX_CACHE_FILE3 = join11(TERMINALHIRE_DIR8, "index-cache.json");
     INDEX_TTL_MS3 = 15 * 60 * 1e3;
     API_URL4 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
@@ -8747,7 +8750,7 @@ var init_jpi_contribute = __esm({
     "use strict";
     init_src();
     init_config();
-    TERMINALHIRE_DIR9 = join12(homedir11(), ".terminalhire");
+    TERMINALHIRE_DIR9 = process.env.TERMINALHIRE_DIR || join12(homedir11(), ".terminalhire");
     INDEX_CACHE_FILE4 = join12(TERMINALHIRE_DIR9, "index-cache.json");
     INDEX_TTL_MS4 = 15 * 60 * 1e3;
     API_URL5 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
@@ -8806,7 +8809,7 @@ __export(claims_exports, {
   removeClaim: () => removeClaim,
   updateClaim: () => updateClaim
 });
-import { readFileSync as readFileSync13, writeFileSync as writeFileSync11, mkdirSync as mkdirSync11, renameSync as renameSync2, existsSync as existsSync8 } from "fs";
+import { readFileSync as readFileSync13, writeFileSync as writeFileSync11, mkdirSync as mkdirSync11, renameSync as renameSync2, existsSync as existsSync7 } from "fs";
 import { join as join13 } from "path";
 import { homedir as homedir12 } from "os";
 function nowISO() {
@@ -8814,7 +8817,7 @@ function nowISO() {
 }
 function readClaims() {
   try {
-    if (!existsSync8(CLAIMS_FILE)) return [];
+    if (!existsSync7(CLAIMS_FILE)) return [];
     const data = JSON.parse(readFileSync13(CLAIMS_FILE, "utf8"));
     return Array.isArray(data?.claims) ? data.claims : [];
   } catch {
@@ -8893,7 +8896,7 @@ var jpi_claim_exports = {};
 __export(jpi_claim_exports, {
   run: () => run7
 });
-import { readFileSync as readFileSync14, existsSync as existsSync9 } from "fs";
+import { readFileSync as readFileSync14, existsSync as existsSync8 } from "fs";
 import { join as join14 } from "path";
 import { homedir as homedir13 } from "os";
 import { execFile } from "child_process";
@@ -8942,7 +8945,7 @@ function parseRepoFromRemote(url) {
 }
 function findBountyInCache(bountyId) {
   try {
-    if (!existsSync9(INDEX_CACHE_FILE5)) return null;
+    if (!existsSync8(INDEX_CACHE_FILE5)) return null;
     const entry = JSON.parse(readFileSync14(INDEX_CACHE_FILE5, "utf8"));
     const jobs = entry?.index?.jobs ?? [];
     const job = jobs.find((j) => j.id === bountyId && j.source === "bounty");
@@ -9451,7 +9454,7 @@ var TERMINALHIRE_DIR11, INDEX_CACHE_FILE5, GH_API, GH_HEADERS, pExecFile, VALUE_
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
-    TERMINALHIRE_DIR11 = join14(homedir13(), ".terminalhire");
+    TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join14(homedir13(), ".terminalhire");
     INDEX_CACHE_FILE5 = join14(TERMINALHIRE_DIR11, "index-cache.json");
     GH_API = "https://api.github.com";
     GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
@@ -9620,7 +9623,7 @@ function finalize(build) {
   };
 }
 function reconstruct(files, opts = {}) {
-  const join30 = opts.joinSidechains !== false;
+  const join31 = opts.joinSidechains !== false;
   const mains = [];
   const sidechains = [];
   for (const file of files) {
@@ -9645,7 +9648,7 @@ function reconstruct(files, opts = {}) {
   }
   const orphanedSidechainPaths = [];
   const joinedPaths = /* @__PURE__ */ new Set();
-  if (join30) {
+  if (join31) {
     const sidechainsBySession = /* @__PURE__ */ new Map();
     for (const sc of sidechains) {
       const acc = sidechainsBySession.get(sc.sessionId) ?? [];
@@ -9982,7 +9985,7 @@ __export(trajectory_exports, {
   runTrajectoryPush: () => runTrajectoryPush
 });
 import {
-  existsSync as existsSync10,
+  existsSync as existsSync9,
   mkdirSync as mkdirSync12,
   readFileSync as readFileSync15,
   readdirSync,
@@ -10159,7 +10162,7 @@ function renderInward(allNodes, view, files) {
 }
 function buildTrajectory() {
   const projectsDir = join15(homedir14(), ".claude", "projects");
-  if (!existsSync10(projectsDir)) return null;
+  if (!existsSync9(projectsDir)) return null;
   const paths = findJsonlFiles(projectsDir);
   if (paths.length === 0) return null;
   const files = loadCorpus(paths);
@@ -10876,12 +10879,12 @@ var init_jpi_intro = __esm({
 });
 
 // src/chat-keystore.ts
-import { existsSync as existsSync11, mkdirSync as mkdirSync13, readFileSync as readFileSync16, writeFileSync as writeFileSync13, rmSync as rmSync3 } from "fs";
+import { existsSync as existsSync10, mkdirSync as mkdirSync13, readFileSync as readFileSync16, writeFileSync as writeFileSync13, rmSync as rmSync3 } from "fs";
 import { homedir as homedir15 } from "os";
 import { join as join16 } from "path";
 async function loadOrCreateIdentity() {
   const key = await loadKey();
-  if (existsSync11(IDENTITY_FILE)) {
+  if (existsSync10(IDENTITY_FILE)) {
     const blob2 = JSON.parse(readFileSync16(IDENTITY_FILE, "utf8"));
     return JSON.parse(decrypt(blob2, key));
   }
@@ -10903,12 +10906,12 @@ var init_chat_keystore = __esm({
 });
 
 // src/chat-client.ts
-import { existsSync as existsSync12, mkdirSync as mkdirSync14, readFileSync as readFileSync17, writeFileSync as writeFileSync14 } from "fs";
+import { existsSync as existsSync11, mkdirSync as mkdirSync14, readFileSync as readFileSync17, writeFileSync as writeFileSync14 } from "fs";
 import { homedir as homedir16 } from "os";
 import { join as join17 } from "path";
 function defaultReadPeerPins() {
   try {
-    if (!existsSync12(PEERS_FILE)) return {};
+    if (!existsSync11(PEERS_FILE)) return {};
     const parsed = JSON.parse(readFileSync17(PEERS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
@@ -11157,7 +11160,7 @@ __export(jpi_chat_read_exports, {
   syncUnreadBadge: () => syncUnreadBadge,
   writeReadCursor: () => writeReadCursor
 });
-import { existsSync as existsSync13, mkdirSync as mkdirSync15, readFileSync as readFileSync18, writeFileSync as writeFileSync15 } from "fs";
+import { existsSync as existsSync12, mkdirSync as mkdirSync15, readFileSync as readFileSync18, writeFileSync as writeFileSync15 } from "fs";
 import { homedir as homedir17 } from "os";
 import { join as join18 } from "path";
 async function syncUnreadBadge(deps = {}) {
@@ -11166,7 +11169,7 @@ async function syncUnreadBadge(deps = {}) {
   const cacheFile = deps.cacheFile ?? INDEX_CACHE_FILE6;
   try {
     const cookie = readCookie();
-    if (!cookie || !existsSync13(cacheFile)) return;
+    if (!cookie || !existsSync12(cacheFile)) return;
     const res = await fetchImpl(`${CHAT_BASE2}/api/chat/inbox`, {
       method: "GET",
       headers: { Cookie: `${GH_SESSION_COOKIE4}=${cookie}` },
@@ -11187,7 +11190,7 @@ async function syncUnreadBadge(deps = {}) {
 }
 function readReadCursors() {
   try {
-    if (!existsSync13(READS_FILE)) return {};
+    if (!existsSync12(READS_FILE)) return {};
     const parsed = JSON.parse(readFileSync18(READS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
@@ -11202,6 +11205,8 @@ function readReadCursors() {
 function writeReadCursor(login, iso, deps = {}) {
   const read = deps.readReadCursors ?? readReadCursors;
   const cursors = read();
+  const prev = cursors[login];
+  if (prev && iso <= prev) return;
   cursors[login] = iso;
   mkdirSync15(TERMINALHIRE_DIR14, { recursive: true });
   writeFileSync15(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
@@ -11518,7 +11523,7 @@ var init_jpi_chat_read = __esm({
     init_jpi_chat();
     CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
     GH_SESSION_COOKIE4 = "__jpi_gh_session";
-    TERMINALHIRE_DIR14 = join18(homedir17(), ".terminalhire");
+    TERMINALHIRE_DIR14 = process.env.TERMINALHIRE_DIR || join18(homedir17(), ".terminalhire");
     READS_FILE = join18(TERMINALHIRE_DIR14, "chat-reads.json");
     INDEX_CACHE_FILE6 = join18(TERMINALHIRE_DIR14, "index-cache.json");
     REACHABLE_DISPLAY = { shareActivity: false, optin: false, lastSeen: null };
@@ -11547,7 +11552,7 @@ __export(jpi_chat_exports, {
   sanitizeLine: () => sanitizeLine
 });
 import { createInterface as createInterface8 } from "readline";
-import { existsSync as existsSync14, readFileSync as readFileSync19 } from "fs";
+import { existsSync as existsSync13, readFileSync as readFileSync19 } from "fs";
 import { homedir as homedir18 } from "os";
 import { join as join19 } from "path";
 function sanitizeLine(text) {
@@ -11716,13 +11721,21 @@ function mergeMessages(existing, incoming) {
 }
 function readCachedSessionStale() {
   try {
-    const p = join19(homedir18(), ".terminalhire", "index-cache.json");
-    if (!existsSync14(p)) return false;
+    const p = join19(process.env.TERMINALHIRE_DIR || join19(homedir18(), ".terminalhire"), "index-cache.json");
+    if (!existsSync13(p)) return false;
     const cache = JSON.parse(readFileSync19(p, "utf8"));
     return cache?.sessionStale === true;
   } catch {
     return false;
   }
+}
+async function defaultMarkThreadRead(peerLogin, iso) {
+  const { writeReadCursor: writeReadCursor2, postReadCursor: postReadCursor2, syncUnreadBadge: syncUnreadBadge2 } = await Promise.resolve().then(() => (init_jpi_chat_read(), jpi_chat_read_exports));
+  writeReadCursor2(peerLogin, iso);
+  await syncUnreadBadge2().catch(() => {
+  });
+  await postReadCursor2(peerLogin, iso).catch(() => {
+  });
 }
 async function runChatPane(opts = {}) {
   const {
@@ -11734,7 +11747,8 @@ async function runChatPane(opts = {}) {
     signals = process,
     pollIntervalMs = 1500,
     setTimer = (fn, ms) => setInterval(fn, ms),
-    clearTimer = (t) => clearInterval(t)
+    clearTimer = (t) => clearInterval(t),
+    markRead = defaultMarkThreadRead
   } = opts;
   const target = String(login ?? "").replace(/^@/, "").trim();
   if (!target) {
@@ -11851,6 +11865,7 @@ async function runChatPane(opts = {}) {
     let presence = null;
     let banner = "";
     let lastSeen;
+    let lastReadMarked;
     let timer = null;
     let polling = false;
     let cleaned = false;
@@ -11922,6 +11937,20 @@ async function runChatPane(opts = {}) {
           messages = mergeMessages(messages, fresh);
           const newest = fresh[fresh.length - 1];
           if (newest && newest.createdAt) lastSeen = newest.createdAt;
+          let newestIncoming;
+          for (const m of fresh) {
+            if (m && m.senderLogin === peerLogin && m.createdAt && (!newestIncoming || m.createdAt > newestIncoming)) {
+              newestIncoming = m.createdAt;
+            }
+          }
+          if (newestIncoming && (!lastReadMarked || newestIncoming > lastReadMarked)) {
+            lastReadMarked = newestIncoming;
+            try {
+              void Promise.resolve(markRead(peerLogin, newestIncoming)).catch(() => {
+              });
+            } catch {
+            }
+          }
           if (banner && !banner.startsWith("\u26A0")) banner = "";
         }
         try {
@@ -13013,8 +13042,160 @@ var init_jpi_config = __esm({
   "bin/jpi-config.js"() {
     "use strict";
     init_config();
-    TERMINALHIRE_DIR15 = join21(homedir19(), ".terminalhire");
+    TERMINALHIRE_DIR15 = process.env.TERMINALHIRE_DIR || join21(homedir19(), ".terminalhire");
     CONFIG_FILE2 = join21(TERMINALHIRE_DIR15, "config.json");
+  }
+});
+
+// bin/spinner-io.js
+import {
+  readFileSync as readFileSync21,
+  writeFileSync as writeFileSync16,
+  existsSync as existsSync14,
+  mkdirSync as mkdirSync16,
+  renameSync as renameSync3
+} from "fs";
+import { join as join22, dirname as dirname2 } from "path";
+import { homedir as homedir20 } from "os";
+function thDir() {
+  return process.env["TERMINALHIRE_DIR"] || join22(homedir20(), ".terminalhire");
+}
+function claudeSettingsPath() {
+  return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join22(homedir20(), ".claude", "settings.json");
+}
+function spinnerStateFilePath() {
+  return join22(thDir(), "spinner-state.json");
+}
+function readJson(path, fallback) {
+  try {
+    return existsSync14(path) ? JSON.parse(readFileSync21(path, "utf8")) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function atomicWriteJson2(path, obj) {
+  mkdirSync16(dirname2(path), { recursive: true });
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync16(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  renameSync3(tmp, path);
+}
+function readState() {
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  return readJson(SPINNER_STATE_FILE, { verbs: [], mode: "replace" });
+}
+function applySpinnerVerbs(ourVerbs, mode = "replace") {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const verbs = (Array.isArray(ourVerbs) ? ourVerbs : []).filter(Boolean);
+  if (verbs.length === 0) return clearSpinnerVerbs();
+  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
+  const existing = settings.spinnerVerbs && typeof settings.spinnerVerbs === "object" ? settings.spinnerVerbs : null;
+  const prevOurs = new Set(readState().verbs || []);
+  const userVerbs = existing && Array.isArray(existing.verbs) ? existing.verbs.filter((v) => !prevOurs.has(v)) : [];
+  const newVerbs = [...verbs, ...userVerbs];
+  settings.spinnerVerbs = { mode: mode === "append" ? "append" : "replace", verbs: newVerbs };
+  atomicWriteJson2(CLAUDE_SETTINGS, settings);
+  const st = readState();
+  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
+  return { applied: verbs.length, total: newVerbs.length };
+}
+function clearSpinnerVerbs() {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const settings = readJson(CLAUDE_SETTINGS, null);
+  const prevOurs = new Set(readState().verbs || []);
+  let keptUserVerbs = 0;
+  if (settings && settings.spinnerVerbs && Array.isArray(settings.spinnerVerbs.verbs)) {
+    const userVerbs = settings.spinnerVerbs.verbs.filter((v) => !prevOurs.has(v));
+    keptUserVerbs = userVerbs.length;
+    if (userVerbs.length > 0) {
+      settings.spinnerVerbs = {
+        mode: settings.spinnerVerbs.mode === "append" ? "append" : "replace",
+        verbs: userVerbs
+      };
+    } else {
+      delete settings.spinnerVerbs;
+    }
+    atomicWriteJson2(CLAUDE_SETTINGS, settings);
+  }
+  try {
+    const st = readState();
+    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
+  } catch {
+  }
+  return { cleared: true, keptUserVerbs };
+}
+function applySpinnerTips(ourTips) {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const tips = (Array.isArray(ourTips) ? ourTips : []).filter(Boolean);
+  if (tips.length === 0) return clearSpinnerTips();
+  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
+  const existing = settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips) ? settings.spinnerTipsOverride.tips : [];
+  const prevOurs = new Set(readState().tips || []);
+  const userTips = existing.filter((t) => !prevOurs.has(t));
+  settings.spinnerTipsEnabled = true;
+  settings.spinnerTipsOverride = { excludeDefault: true, tips: [...tips, ...userTips] };
+  atomicWriteJson2(CLAUDE_SETTINGS, settings);
+  const st = readState();
+  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
+  return { applied: tips.length };
+}
+function clearSpinnerTips() {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const settings = readJson(CLAUDE_SETTINGS, null);
+  const prevOurs = new Set(readState().tips || []);
+  if (settings && settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips)) {
+    const userTips = settings.spinnerTipsOverride.tips.filter((t) => !prevOurs.has(t));
+    if (userTips.length > 0) {
+      settings.spinnerTipsOverride = {
+        excludeDefault: settings.spinnerTipsOverride.excludeDefault === true,
+        tips: userTips
+      };
+    } else {
+      delete settings.spinnerTipsOverride;
+      delete settings.spinnerTipsEnabled;
+    }
+    atomicWriteJson2(CLAUDE_SETTINGS, settings);
+  }
+  try {
+    const st = readState();
+    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
+  } catch {
+  }
+  return { cleared: true };
+}
+var init_spinner_io = __esm({
+  "bin/spinner-io.js"() {
+    "use strict";
+  }
+});
+
+// bin/spinner-config.js
+import { join as join23 } from "path";
+function configFilePath() {
+  return join23(thDir(), "config.json");
+}
+function readSpinnerConfig() {
+  const CONFIG_FILE4 = configFilePath();
+  const cfg = readJson(CONFIG_FILE4, {});
+  const spinner = cfg && typeof cfg.spinner === "object" ? cfg.spinner : {};
+  const merged = { ...SPINNER_DEFAULTS, ...spinner };
+  if (merged.mode !== "append" && merged.mode !== "replace") merged.mode = SPINNER_DEFAULTS.mode;
+  merged.max = Math.max(1, Math.min(12, Number(merged.max) || SPINNER_DEFAULTS.max));
+  merged.enabled = merged.enabled === true;
+  if (!["always", "sometimes", "rare"].includes(merged.frequency)) {
+    merged.frequency = SPINNER_DEFAULTS.frequency;
+  }
+  return merged;
+}
+var SPINNER_DEFAULTS;
+var init_spinner_config = __esm({
+  "bin/spinner-config.js"() {
+    "use strict";
+    init_spinner_io();
+    SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
   }
 });
 
@@ -13030,22 +13211,22 @@ __export(spinner_seen_exports, {
   seenFilePath: () => seenFilePath
 });
 import {
-  readFileSync as readFileSync21,
-  writeFileSync as writeFileSync16,
-  renameSync as renameSync3,
-  mkdirSync as mkdirSync16
+  readFileSync as readFileSync22,
+  writeFileSync as writeFileSync17,
+  renameSync as renameSync4,
+  mkdirSync as mkdirSync17
 } from "fs";
-import { join as join22, dirname as dirname2 } from "path";
-import { homedir as homedir20 } from "os";
+import { join as join24, dirname as dirname3 } from "path";
+import { homedir as homedir21 } from "os";
 function seenFilePath() {
-  const dir = process.env["TERMINALHIRE_DIR"] || join22(homedir20(), ".terminalhire");
-  return join22(dir, "seen-history.json");
+  const dir = process.env["TERMINALHIRE_DIR"] || join24(homedir21(), ".terminalhire");
+  return join24(dir, "seen-history.json");
 }
-function atomicWriteJson2(path, obj) {
-  mkdirSync16(dirname2(path), { recursive: true });
+function atomicWriteJson3(path, obj) {
+  mkdirSync17(dirname3(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync16(tmp, JSON.stringify(obj) + "\n", "utf8");
-  renameSync3(tmp, path);
+  writeFileSync17(tmp, JSON.stringify(obj) + "\n", { encoding: "utf8", mode: 384 });
+  renameSync4(tmp, path);
 }
 function emptyHistory() {
   return { surface: 0, entries: {} };
@@ -13073,7 +13254,7 @@ function capEntries(entries) {
 function loadSeenHistory(now = Date.now()) {
   let raw;
   try {
-    raw = JSON.parse(readFileSync21(seenFilePath(), "utf8"));
+    raw = JSON.parse(readFileSync22(seenFilePath(), "utf8"));
   } catch {
     return emptyHistory();
   }
@@ -13097,7 +13278,7 @@ function recordSurface(ids, now = Date.now()) {
   }
   const next = { surface, entries: capEntries(pruneEntries(entries, now)) };
   try {
-    atomicWriteJson2(seenFilePath(), next);
+    atomicWriteJson3(seenFilePath(), next);
   } catch {
   }
   return next;
@@ -13112,67 +13293,68 @@ var init_spinner_seen = __esm({
   }
 });
 
-// bin/spinner.js
-var spinner_exports = {};
-__export(spinner_exports, {
-  SPINNER_DEFAULTS: () => SPINNER_DEFAULTS,
-  applySpinnerTips: () => applySpinnerTips,
-  applySpinnerVerbs: () => applySpinnerVerbs,
-  buildContextVerbs: () => buildContextVerbs,
-  buildIncomingIntroLine: () => buildIncomingIntroLine,
-  buildPeerLine: () => buildPeerLine,
-  buildSessionStaleLine: () => buildSessionStaleLine,
-  buildSpinnerPool: () => buildSpinnerPool,
-  buildTips: () => buildTips,
-  buildTipsDetailed: () => buildTipsDetailed,
-  clearSpinnerTips: () => clearSpinnerTips,
-  clearSpinnerVerbs: () => clearSpinnerVerbs,
-  ctaVerb: () => ctaVerb,
-  filterFreshMatches: () => filterFreshMatches,
-  formatVerbs: () => formatVerbs,
-  interleaveBySource: () => interleaveBySource,
-  partitionFreshMatches: () => partitionFreshMatches,
-  rankBySessionTags: () => rankBySessionTags,
-  readSpinnerConfig: () => readSpinnerConfig,
-  renderRefreshSurface: () => renderRefreshSurface,
-  widenFreshCandidates: () => widenFreshCandidates
-});
-import {
-  readFileSync as readFileSync22,
-  writeFileSync as writeFileSync17,
-  existsSync as existsSync15,
-  mkdirSync as mkdirSync17,
-  renameSync as renameSync4
-} from "fs";
-import { join as join23, dirname as dirname3 } from "path";
-import { homedir as homedir21 } from "os";
-function readJson(path, fallback) {
-  try {
-    return existsSync15(path) ? JSON.parse(readFileSync22(path, "utf8")) : fallback;
-  } catch {
-    return fallback;
+// bin/spinner-select.js
+function filterFreshMatches(matches, history) {
+  const { eligible, suppressed } = partitionFreshMatches(matches, history);
+  return suppressed.length === 0 ? matches : [...eligible, ...suppressed];
+}
+function partitionFreshMatches(matches, history) {
+  const list = Array.isArray(matches) ? matches : [];
+  if (!history || !history.entries || Object.keys(history.entries).length === 0) {
+    return { eligible: list, suppressed: [] };
   }
+  const eligible = [];
+  const suppressed = [];
+  for (const m of list) {
+    if (m && m.id != null && isSuppressed(String(m.id), history)) suppressed.push(m);
+    else eligible.push(m);
+  }
+  const stamp = (m) => history.entries[String(m.id)].lastSurface;
+  suppressed.sort((a, b) => stamp(a) - stamp(b));
+  return { eligible, suppressed };
 }
-function atomicWriteJson3(path, obj) {
-  mkdirSync17(dirname3(path), { recursive: true });
-  const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync17(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
-  renameSync4(tmp, path);
+function widenFreshCandidates(matches, history, need, widen) {
+  const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
+  if (!(need > 0)) return [];
+  if (!widen || !Array.isArray(widen.reserve) || typeof widen.getAdjacent !== "function") return [];
+  const suppressed = (m) => !!history && !!history.entries && m.id != null && isSuppressed(String(m.id), history);
+  const counts = /* @__PURE__ */ new Map();
+  for (const m of list) {
+    for (const t of Array.isArray(m.matchedTags) ? m.matchedTags : []) {
+      const tag = String(t).toLowerCase();
+      counts.set(tag, (counts.get(tag) || 0) + 1);
+    }
+  }
+  const maxCount = Math.max(0, ...counts.values());
+  if (maxCount === 0) return [];
+  const dominant = [...counts.entries()].filter(([, c]) => c === maxCount).map(([t]) => t);
+  const inPool = new Set(list.map((m) => String(m.id)));
+  const fresh = (m) => m && m.id != null && !inPool.has(String(m.id)) && !suppressed(m);
+  const tagged = (m, adj) => (Array.isArray(m.matchedTags) ? m.matchedTags : []).some((t) => adj.has(String(t).toLowerCase()));
+  const ringCandidates = (hops) => {
+    const adj = new Set(dominant.flatMap((d) => widen.getAdjacent(d, hops)));
+    if (adj.size === 0) return [];
+    return widen.reserve.filter((m) => fresh(m) && tagged(m, adj));
+  };
+  let widened = ringCandidates(1);
+  if (widened.length === 0) widened = ringCandidates(2);
+  if (widened.length === 0) {
+    widened = widen.reserve.filter(
+      (m) => fresh(m) && (m.source === "bounty" || m.source === "contribute")
+    );
+  }
+  return widened.slice(0, need);
 }
+var init_spinner_select = __esm({
+  "bin/spinner-select.js"() {
+    "use strict";
+    init_spinner_seen();
+  }
+});
+
+// bin/spinner-verbs.js
 function titleCase(s) {
   return String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-function readSpinnerConfig() {
-  const cfg = readJson(CONFIG_FILE3, {});
-  const spinner = cfg && typeof cfg.spinner === "object" ? cfg.spinner : {};
-  const merged = { ...SPINNER_DEFAULTS, ...spinner };
-  if (merged.mode !== "append" && merged.mode !== "replace") merged.mode = SPINNER_DEFAULTS.mode;
-  merged.max = Math.max(1, Math.min(12, Number(merged.max) || SPINNER_DEFAULTS.max));
-  merged.enabled = merged.enabled === true;
-  if (!["always", "sometimes", "rare"].includes(merged.frequency)) {
-    merged.frequency = SPINNER_DEFAULTS.frequency;
-  }
-  return merged;
 }
 function ctaVerb() {
   return "\u2605 jobs that fit you \xB7 run: terminalhire jobs";
@@ -13256,60 +13438,7 @@ function buildIncomingIntroLine(incomingPending) {
 function buildSessionStaleLine(sessionStale) {
   return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
 }
-function filterFreshMatches(matches, history) {
-  const { eligible, suppressed } = partitionFreshMatches(matches, history);
-  return suppressed.length === 0 ? matches : [...eligible, ...suppressed];
-}
-function partitionFreshMatches(matches, history) {
-  const list = Array.isArray(matches) ? matches : [];
-  if (!history || !history.entries || Object.keys(history.entries).length === 0) {
-    return { eligible: list, suppressed: [] };
-  }
-  const eligible = [];
-  const suppressed = [];
-  for (const m of list) {
-    if (m && m.id != null && isSuppressed(String(m.id), history)) suppressed.push(m);
-    else eligible.push(m);
-  }
-  const stamp = (m) => history.entries[String(m.id)].lastSurface;
-  suppressed.sort((a, b) => stamp(a) - stamp(b));
-  return { eligible, suppressed };
-}
-function widenFreshCandidates(matches, history, capacity, widen) {
-  const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
-  if (!widen || !Array.isArray(widen.reserve) || typeof widen.getAdjacent !== "function") return [];
-  const suppressed = (m) => !!history && !!history.entries && m.id != null && isSuppressed(String(m.id), history);
-  const eligibleCount = list.filter((m) => !suppressed(m)).length;
-  const need = capacity - eligibleCount;
-  if (need <= 0) return [];
-  const counts = /* @__PURE__ */ new Map();
-  for (const m of list) {
-    for (const t of Array.isArray(m.matchedTags) ? m.matchedTags : []) {
-      const tag = String(t).toLowerCase();
-      counts.set(tag, (counts.get(tag) || 0) + 1);
-    }
-  }
-  const maxCount = Math.max(0, ...counts.values());
-  if (maxCount === 0) return [];
-  const dominant = [...counts.entries()].filter(([, c]) => c === maxCount).map(([t]) => t);
-  const inPool = new Set(list.map((m) => String(m.id)));
-  const fresh = (m) => m && m.id != null && !inPool.has(String(m.id)) && !suppressed(m);
-  const tagged = (m, adj) => (Array.isArray(m.matchedTags) ? m.matchedTags : []).some((t) => adj.has(String(t).toLowerCase()));
-  const ringCandidates = (hops) => {
-    const adj = new Set(dominant.flatMap((d) => widen.getAdjacent(d, hops)));
-    if (adj.size === 0) return [];
-    return widen.reserve.filter((m) => fresh(m) && tagged(m, adj));
-  };
-  let widened = ringCandidates(1);
-  if (widened.length === 0) widened = ringCandidates(2);
-  if (widened.length === 0) {
-    widened = widen.reserve.filter(
-      (m) => fresh(m) && (m.source === "bounty" || m.source === "contribute")
-    );
-  }
-  return widened.slice(0, need);
-}
-function buildSpinnerPool(topMatches, max = 6, opts = {}) {
+function buildSpinnerPool(topMatches, _max = 6, opts = {}) {
   const { sessionTags, frequency = "always", topPeers, incomingPending, sessionStale, seenHistory } = opts;
   const staleLine = buildSessionStaleLine(sessionStale);
   const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
@@ -13326,47 +13455,16 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   if (introLine) pool.push(introLine);
   return withStale(pool);
 }
-function readState() {
-  return readJson(SPINNER_STATE_FILE, { verbs: [], mode: "replace" });
-}
-function applySpinnerVerbs(ourVerbs, mode = "replace") {
-  const verbs = (Array.isArray(ourVerbs) ? ourVerbs : []).filter(Boolean);
-  if (verbs.length === 0) return clearSpinnerVerbs();
-  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
-  const existing = settings.spinnerVerbs && typeof settings.spinnerVerbs === "object" ? settings.spinnerVerbs : null;
-  const prevOurs = new Set(readState().verbs || []);
-  const userVerbs = existing && Array.isArray(existing.verbs) ? existing.verbs.filter((v) => !prevOurs.has(v)) : [];
-  const newVerbs = [...verbs, ...userVerbs];
-  settings.spinnerVerbs = { mode: mode === "append" ? "append" : "replace", verbs: newVerbs };
-  atomicWriteJson3(CLAUDE_SETTINGS, settings);
-  const st = readState();
-  atomicWriteJson3(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
-  return { applied: verbs.length, total: newVerbs.length };
-}
-function clearSpinnerVerbs() {
-  const settings = readJson(CLAUDE_SETTINGS, null);
-  const prevOurs = new Set(readState().verbs || []);
-  let keptUserVerbs = 0;
-  if (settings && settings.spinnerVerbs && Array.isArray(settings.spinnerVerbs.verbs)) {
-    const userVerbs = settings.spinnerVerbs.verbs.filter((v) => !prevOurs.has(v));
-    keptUserVerbs = userVerbs.length;
-    if (userVerbs.length > 0) {
-      settings.spinnerVerbs = {
-        mode: settings.spinnerVerbs.mode === "append" ? "append" : "replace",
-        verbs: userVerbs
-      };
-    } else {
-      delete settings.spinnerVerbs;
-    }
-    atomicWriteJson3(CLAUDE_SETTINGS, settings);
+var VERB_INTROS;
+var init_spinner_verbs = __esm({
+  "bin/spinner-verbs.js"() {
+    "use strict";
+    init_spinner_select();
+    VERB_INTROS = ["Matched:", "You\u2019d fit:", "Worth a look:", "On your radar:", "Fits your stack:"];
   }
-  try {
-    const st = readState();
-    atomicWriteJson3(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
-  } catch {
-  }
-  return { cleared: true, keptUserVerbs };
-}
+});
+
+// bin/spinner-render.js
 function interleaveBySource(topMatches) {
   if (!Array.isArray(topMatches) || topMatches.length === 0) return topMatches;
   const buckets = /* @__PURE__ */ new Map();
@@ -13460,48 +13558,20 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
     }
   };
   emit(eligible);
+  if (out.length < max && opts.widen) {
+    const widened = widenFreshCandidates(
+      Array.isArray(topMatches) ? topMatches : [],
+      opts.seenHistory,
+      max - out.length,
+      opts.widen
+    );
+    if (widened.length > 0) emit(widened);
+  }
   if (out.length < max) emit(suppressed);
   return { tips: out, surfacedIds };
 }
 function buildTips(topMatches, baseUrl, max = 8, opts = {}) {
   return buildTipsDetailed(topMatches, baseUrl, max, opts).tips;
-}
-function applySpinnerTips(ourTips) {
-  const tips = (Array.isArray(ourTips) ? ourTips : []).filter(Boolean);
-  if (tips.length === 0) return clearSpinnerTips();
-  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
-  const existing = settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips) ? settings.spinnerTipsOverride.tips : [];
-  const prevOurs = new Set(readState().tips || []);
-  const userTips = existing.filter((t) => !prevOurs.has(t));
-  settings.spinnerTipsEnabled = true;
-  settings.spinnerTipsOverride = { excludeDefault: true, tips: [...tips, ...userTips] };
-  atomicWriteJson3(CLAUDE_SETTINGS, settings);
-  const st = readState();
-  atomicWriteJson3(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
-  return { applied: tips.length };
-}
-function clearSpinnerTips() {
-  const settings = readJson(CLAUDE_SETTINGS, null);
-  const prevOurs = new Set(readState().tips || []);
-  if (settings && settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips)) {
-    const userTips = settings.spinnerTipsOverride.tips.filter((t) => !prevOurs.has(t));
-    if (userTips.length > 0) {
-      settings.spinnerTipsOverride = {
-        excludeDefault: settings.spinnerTipsOverride.excludeDefault === true,
-        tips: userTips
-      };
-    } else {
-      delete settings.spinnerTipsOverride;
-      delete settings.spinnerTipsEnabled;
-    }
-    atomicWriteJson3(CLAUDE_SETTINGS, settings);
-  }
-  try {
-    const st = readState();
-    atomicWriteJson3(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
-  } catch {
-  }
-  return { cleared: true };
 }
 function renderRefreshSurface(topMatches, sc, opts = {}) {
   if (!sc || sc.enabled !== true) {
@@ -13510,9 +13580,7 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
     return { verbs: [], tips: [], surfacedIds: [] };
   }
   const seenHistory = opts.seenHistory || loadSeenHistory();
-  let ranked = rankBySessionTags(topMatches, opts.sessionTags);
-  const widened = widenFreshCandidates(ranked, seenHistory, 8, opts.widen);
-  if (widened.length > 0) ranked = [...ranked, ...widened];
+  const ranked = rankBySessionTags(topMatches, opts.sessionTags);
   const verbs = buildSpinnerPool(ranked, sc.max, {
     sessionTags: opts.sessionTags,
     frequency: sc.frequency,
@@ -13523,23 +13591,74 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
   });
   if (verbs.length > 0) applySpinnerVerbs(verbs, sc.mode);
   else clearSpinnerVerbs();
-  const { tips, surfacedIds } = buildTipsDetailed(ranked, opts.baseUrl, 8, { seenHistory });
+  const { tips, surfacedIds } = buildTipsDetailed(ranked, opts.baseUrl, 8, {
+    seenHistory,
+    widen: opts.widen
+  });
   if (tips.length > 0) applySpinnerTips(tips);
   else clearSpinnerTips();
   if (verbs.length > 0 || tips.length > 0) recordSurface(surfacedIds);
   return { verbs, tips, surfacedIds };
 }
-var TH_DIR, CLAUDE_SETTINGS, CONFIG_FILE3, SPINNER_STATE_FILE, SPINNER_DEFAULTS, VERB_INTROS;
+var init_spinner_render = __esm({
+  "bin/spinner-render.js"() {
+    "use strict";
+    init_spinner_select();
+    init_spinner_verbs();
+    init_spinner_seen();
+    init_spinner_io();
+  }
+});
+
+// bin/spinner.js
+var spinner_exports = {};
+__export(spinner_exports, {
+  SPINNER_DEFAULTS: () => SPINNER_DEFAULTS,
+  applySpinnerTips: () => applySpinnerTips,
+  applySpinnerVerbs: () => applySpinnerVerbs,
+  buildContextVerbs: () => buildContextVerbs,
+  buildIncomingIntroLine: () => buildIncomingIntroLine,
+  buildPeerLine: () => buildPeerLine,
+  buildSessionStaleLine: () => buildSessionStaleLine,
+  buildSpinnerPool: () => buildSpinnerPool,
+  buildTips: () => buildTips,
+  buildTipsDetailed: () => buildTipsDetailed,
+  clearSpinnerTips: () => clearSpinnerTips,
+  clearSpinnerVerbs: () => clearSpinnerVerbs,
+  ctaVerb: () => ctaVerb,
+  filterFreshMatches: () => filterFreshMatches,
+  formatVerbs: () => formatVerbs,
+  interleaveBySource: () => interleaveBySource,
+  partitionFreshMatches: () => partitionFreshMatches,
+  rankBySessionTags: () => rankBySessionTags,
+  readSpinnerConfig: () => readSpinnerConfig,
+  renderRefreshSurface: () => renderRefreshSurface,
+  widenFreshCandidates: () => widenFreshCandidates
+});
 var init_spinner = __esm({
   "bin/spinner.js"() {
     "use strict";
-    init_spinner_seen();
-    TH_DIR = process.env["TERMINALHIRE_DIR"] || join23(homedir21(), ".terminalhire");
-    CLAUDE_SETTINGS = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join23(homedir21(), ".claude", "settings.json");
-    CONFIG_FILE3 = join23(TH_DIR, "config.json");
-    SPINNER_STATE_FILE = join23(TH_DIR, "spinner-state.json");
-    SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
-    VERB_INTROS = ["Matched:", "You\u2019d fit:", "Worth a look:", "On your radar:", "Fits your stack:"];
+    init_spinner_config();
+    init_spinner_config();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_select();
+    init_spinner_select();
+    init_spinner_select();
+    init_spinner_io();
+    init_spinner_io();
+    init_spinner_io();
+    init_spinner_io();
+    init_spinner_render();
+    init_spinner_render();
+    init_spinner_render();
+    init_spinner_render();
   }
 });
 
@@ -13552,26 +13671,26 @@ import {
   readFileSync as readFileSync23,
   writeFileSync as writeFileSync18,
   copyFileSync as copyFileSync2,
-  existsSync as existsSync16,
+  existsSync as existsSync15,
   mkdirSync as mkdirSync18
 } from "fs";
-import { join as join24 } from "path";
+import { join as join25 } from "path";
 import { homedir as homedir22 } from "os";
 import { createInterface as createInterface10 } from "readline";
 function readConfig2() {
   try {
-    return existsSync16(CONFIG_FILE4) ? JSON.parse(readFileSync23(CONFIG_FILE4, "utf8")) : {};
+    return existsSync15(CONFIG_FILE3) ? JSON.parse(readFileSync23(CONFIG_FILE3, "utf8")) : {};
   } catch {
     return {};
   }
 }
 function writeConfig2(patch) {
-  mkdirSync18(TH_DIR2, { recursive: true });
+  mkdirSync18(TH_DIR, { recursive: true });
   const merged = { ...readConfig2(), ...patch };
-  writeFileSync18(CONFIG_FILE4, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  writeFileSync18(CONFIG_FILE3, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function backupSettings() {
-  if (!existsSync16(SETTINGS_PATH)) return null;
+  if (!existsSync15(SETTINGS_PATH)) return null;
   const ts = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
   const backupPath = `${SETTINGS_PATH}.terminalhire-backup-${ts}`;
   copyFileSync2(SETTINGS_PATH, backupPath);
@@ -13726,15 +13845,15 @@ async function run16() {
   console.error("Usage: terminalhire spinner --on | --off | --show | --mode <append|replace> | --max N | --frequency <always|sometimes|rare>");
   process.exit(1);
 }
-var TH_DIR2, CONFIG_FILE4, SETTINGS_PATH, CACHE_FILE;
+var TH_DIR, CONFIG_FILE3, SETTINGS_PATH, CACHE_FILE;
 var init_jpi_spinner = __esm({
   "bin/jpi-spinner.js"() {
     "use strict";
     init_spinner();
-    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join24(homedir22(), ".terminalhire");
-    CONFIG_FILE4 = join24(TH_DIR2, "config.json");
-    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join24(homedir22(), ".claude", "settings.json");
-    CACHE_FILE = join24(TH_DIR2, "index-cache.json");
+    TH_DIR = process.env["TERMINALHIRE_DIR"] || join25(homedir22(), ".terminalhire");
+    CONFIG_FILE3 = join25(TH_DIR, "config.json");
+    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join25(homedir22(), ".claude", "settings.json");
+    CACHE_FILE = join25(TH_DIR, "index-cache.json");
   }
 });
 
@@ -13743,8 +13862,8 @@ var jpi_sync_exports = {};
 __export(jpi_sync_exports, {
   run: () => run17
 });
-import { readFileSync as readFileSync24, writeFileSync as writeFileSync19, mkdirSync as mkdirSync19, existsSync as existsSync17, rmSync as rmSync4 } from "fs";
-import { join as join25 } from "path";
+import { readFileSync as readFileSync24, writeFileSync as writeFileSync19, mkdirSync as mkdirSync19, existsSync as existsSync16, rmSync as rmSync4 } from "fs";
+import { join as join26 } from "path";
 import { homedir as homedir23, hostname as osHostname } from "os";
 import { createInterface as createInterface11 } from "readline";
 function ask2(question) {
@@ -13758,13 +13877,13 @@ function ask2(question) {
 }
 function readMarker() {
   try {
-    return existsSync17(TIER1_MARKER) ? JSON.parse(readFileSync24(TIER1_MARKER, "utf8")) : null;
+    return existsSync16(TIER1_MARKER) ? JSON.parse(readFileSync24(TIER1_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
 }
 function writeMarker(marker) {
-  mkdirSync19(TH_DIR3, { recursive: true });
+  mkdirSync19(TH_DIR2, { recursive: true });
   writeFileSync19(TIER1_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearMarker() {
@@ -14079,13 +14198,13 @@ async function run17() {
   console.log("  This is NOT required to use terminalhire.");
   console.log("");
 }
-var TH_DIR3, TIER1_MARKER, API_URL6, SYNC_BASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS, CONSENT_VERSION;
+var TH_DIR2, TIER1_MARKER, API_URL6, SYNC_BASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS, CONSENT_VERSION;
 var init_jpi_sync = __esm({
   "bin/jpi-sync.js"() {
     "use strict";
     init_open_url();
-    TH_DIR3 = process.env["TERMINALHIRE_DIR"] || join25(homedir23(), ".terminalhire");
-    TIER1_MARKER = join25(TH_DIR3, "tier1.json");
+    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join26(homedir23(), ".terminalhire");
+    TIER1_MARKER = join26(TH_DIR2, "tier1.json");
     API_URL6 = process.env["TERMINALHIRE_API_URL"] || process.env["JPI_API_URL"] || "https://terminalhire.com";
     SYNC_BASE = "https://www.terminalhire.com";
     POLL_INTERVAL_MS = 2e3;
@@ -14099,34 +14218,33 @@ var jpi_init_exports = {};
 __export(jpi_init_exports, {
   run: () => run18
 });
-import { existsSync as existsSync18 } from "fs";
-import { join as join26, resolve } from "path";
+import { existsSync as existsSync17 } from "fs";
+import { join as join27, resolve } from "path";
 import { fileURLToPath as fileURLToPath4, pathToFileURL } from "url";
 import { createInterface as createInterface12 } from "readline";
-import { spawnSync, spawn as spawn2 } from "child_process";
-import { homedir as homedir24 } from "os";
+import { spawnSync } from "child_process";
 function resolveScript(name) {
-  const distPath = resolve(join26(__dirname3, "..", "..", "dist", "bin", `${name}.js`));
-  const legacyPath = resolve(join26(__dirname3, `${name}.js`));
-  return existsSync18(distPath) ? distPath : legacyPath;
+  const distPath = resolve(join27(__dirname3, "..", "..", "dist", "bin", `${name}.js`));
+  const legacyPath = resolve(join27(__dirname3, `${name}.js`));
+  return existsSync17(distPath) ? distPath : legacyPath;
 }
 function resolveSrc(name) {
-  const distPath = resolve(join26(__dirname3, "..", "..", "dist", "src", `${name}.js`));
-  const legacyPath = resolve(join26(__dirname3, "..", "src", `${name}.js`));
-  return existsSync18(distPath) ? distPath : legacyPath;
+  const distPath = resolve(join27(__dirname3, "..", "..", "dist", "src", `${name}.js`));
+  const legacyPath = resolve(join27(__dirname3, "..", "src", `${name}.js`));
+  return existsSync17(distPath) ? distPath : legacyPath;
 }
 function resolveInstallJs() {
-  const fromDist = resolve(join26(__dirname3, "..", "..", "install.js"));
-  const fromBin = resolve(join26(__dirname3, "..", "install.js"));
-  if (existsSync18(fromDist)) return fromDist;
-  if (existsSync18(fromBin)) return fromBin;
+  const fromDist = resolve(join27(__dirname3, "..", "..", "install.js"));
+  const fromBin = resolve(join27(__dirname3, "..", "install.js"));
+  if (existsSync17(fromDist)) return fromDist;
+  if (existsSync17(fromBin)) return fromBin;
   return fromBin;
 }
 function resolveStatuslineInstallJs() {
-  const fromDist = resolve(join26(__dirname3, "..", "..", "statusline-install.js"));
-  const fromBin = resolve(join26(__dirname3, "..", "statusline-install.js"));
-  if (existsSync18(fromDist)) return fromDist;
-  if (existsSync18(fromBin)) return fromBin;
+  const fromDist = resolve(join27(__dirname3, "..", "..", "statusline-install.js"));
+  const fromBin = resolve(join27(__dirname3, "..", "statusline-install.js"));
+  if (existsSync17(fromDist)) return fromDist;
+  if (existsSync17(fromBin)) return fromBin;
   return fromBin;
 }
 async function run18() {
@@ -14292,29 +14410,36 @@ var jpi_refresh_exports = {};
 __export(jpi_refresh_exports, {
   run: () => run19
 });
-import { readFileSync as readFileSync25, writeFileSync as writeFileSync20, existsSync as existsSync19, mkdirSync as mkdirSync20 } from "fs";
-import { join as join27 } from "path";
-import { homedir as homedir25 } from "os";
+import { writeFileSync as writeFileSync20, mkdirSync as mkdirSync20 } from "fs";
+import { join as join28 } from "path";
+import { homedir as homedir24 } from "os";
 import { fileURLToPath as fileURLToPath5 } from "url";
 async function run19() {
   try {
     let index;
-    try {
-      const res = await fetch(`${API_URL7}/api/index`, {
-        signal: AbortSignal.timeout(15e3),
-        headers: { "Accept": "application/json" }
-      });
-      if (!res.ok) {
-        process.stderr.write(`terminalhire refresh: index fetch failed (HTTP ${res.status})
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const res = await fetch(`${API_URL7}/api/index`, {
+          signal: AbortSignal.timeout(15e3),
+          headers: { "Accept": "application/json" }
+        });
+        if (!res.ok) {
+          process.stderr.write(`terminalhire refresh: index fetch failed (HTTP ${res.status})
 `);
-        process.exit(1);
+          process.exit(1);
+        }
+        index = await res.json();
+        break;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (attempt >= 2) {
+          process.stderr.write(`terminalhire refresh: fetch error \u2014 ${msg}
+`);
+          process.exit(1);
+        }
+        process.stderr.write(`terminalhire refresh: fetch error \u2014 ${msg} (retrying once)
+`);
       }
-      index = await res.json();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`terminalhire refresh: fetch error \u2014 ${msg}
-`);
-      process.exit(1);
     }
     const jobs = index?.jobs ?? [];
     const contribute = isContributeEnabled() && Array.isArray(index?.contribute) ? index.contribute : [];
@@ -14528,8 +14653,8 @@ var init_jpi_refresh = __esm({
     init_web_session();
     GH_SESSION_COOKIE7 = "__jpi_gh_session";
     __dirname4 = fileURLToPath5(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR16 = join27(homedir25(), ".terminalhire");
-    INDEX_CACHE_FILE7 = join27(TERMINALHIRE_DIR16, "index-cache.json");
+    TERMINALHIRE_DIR16 = process.env["TERMINALHIRE_DIR"] || join28(homedir24(), ".terminalhire");
+    INDEX_CACHE_FILE7 = join28(TERMINALHIRE_DIR16, "index-cache.json");
     API_URL7 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://www.terminalhire.com";
   }
 });
@@ -14539,14 +14664,14 @@ var jpi_save_exports = {};
 __export(jpi_save_exports, {
   run: () => run20
 });
-import { readFileSync as readFileSync26, existsSync as existsSync20 } from "fs";
-import { join as join28 } from "path";
-import { homedir as homedir26 } from "os";
+import { readFileSync as readFileSync25, existsSync as existsSync18 } from "fs";
+import { join as join29 } from "path";
+import { homedir as homedir25 } from "os";
 import { fileURLToPath as fileURLToPath6 } from "url";
 function findJobInCache(jobId) {
   try {
-    if (!existsSync20(INDEX_CACHE_FILE8)) return null;
-    const raw = readFileSync26(INDEX_CACHE_FILE8, "utf8");
+    if (!existsSync18(INDEX_CACHE_FILE8)) return null;
+    const raw = readFileSync25(INDEX_CACHE_FILE8, "utf8");
     const entry = JSON.parse(raw);
     const jobs = entry?.index?.jobs ?? [];
     return jobs.find((j) => j.id === jobId) ?? null;
@@ -14639,26 +14764,25 @@ var init_jpi_save = __esm({
   "bin/jpi-save.js"() {
     "use strict";
     __dirname5 = fileURLToPath6(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR17 = join28(homedir26(), ".terminalhire");
-    INDEX_CACHE_FILE8 = join28(TERMINALHIRE_DIR17, "index-cache.json");
+    TERMINALHIRE_DIR17 = process.env.TERMINALHIRE_DIR || join29(homedir25(), ".terminalhire");
+    INDEX_CACHE_FILE8 = join29(TERMINALHIRE_DIR17, "index-cache.json");
   }
 });
 
 // bin/jpi-dispatch.js
 import { fileURLToPath as fileURLToPath7 } from "url";
-import { join as join29, dirname as dirname4 } from "path";
-import { existsSync as existsSync21, readFileSync as readFileSync27 } from "fs";
-import { createRequire } from "module";
+import { join as join30 } from "path";
+import { existsSync as existsSync19, readFileSync as readFileSync26 } from "fs";
 var __dirname6 = fileURLToPath7(new URL(".", import.meta.url));
 function readPackageVersion() {
   try {
     const candidates = [
-      join29(__dirname6, "..", "..", "package.json"),
-      join29(__dirname6, "..", "package.json")
+      join30(__dirname6, "..", "..", "package.json"),
+      join30(__dirname6, "..", "package.json")
     ];
     for (const p of candidates) {
-      if (existsSync21(p)) {
-        const pkg = JSON.parse(readFileSync27(p, "utf8"));
+      if (existsSync19(p)) {
+        const pkg = JSON.parse(readFileSync26(p, "utf8"));
         if (pkg.version) return pkg.version;
       }
     }
@@ -14670,7 +14794,7 @@ var SUBCOMMANDS = ["jobs", "devs", "project", "bounties", "contribute", "claim",
 var firstArg = process.argv[2];
 if (!firstArg && !process.stdin.isTTY) {
   const { default: childProcess } = await import("child_process");
-  const nudgeScript = join29(__dirname6, "jpi.js");
+  const nudgeScript = join30(__dirname6, "jpi.js");
   const child = childProcess.spawnSync(process.execPath, [nudgeScript], {
     stdio: ["inherit", "inherit", "inherit"]
   });
@@ -14886,9 +15010,9 @@ if (firstArg === "statusline") {
     console.error("Usage: terminalhire statusline --on | --off");
     process.exit(1);
   }
-  const fromDist = join29(__dirname6, "..", "..", "statusline-install.js");
-  const fromBin = join29(__dirname6, "..", "statusline-install.js");
-  const installer = existsSync21(fromDist) ? fromDist : fromBin;
+  const fromDist = join30(__dirname6, "..", "..", "statusline-install.js");
+  const fromBin = join30(__dirname6, "..", "statusline-install.js");
+  const installer = existsSync19(fromDist) ? fromDist : fromBin;
   const { spawnSync: spawnSync2 } = await import("child_process");
   const child = spawnSync2(
     process.execPath,

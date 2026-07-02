@@ -4456,6 +4456,8 @@ function readReadCursors() {
 function writeReadCursor(login, iso, deps = {}) {
   const read = deps.readReadCursors ?? readReadCursors;
   const cursors = read();
+  const prev = cursors[login];
+  if (prev && iso <= prev) return;
   cursors[login] = iso;
   mkdirSync6(TERMINALHIRE_DIR5, { recursive: true });
   writeFileSync6(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
@@ -4771,7 +4773,7 @@ var init_jpi_chat_read = __esm({
     init_jpi_chat();
     CHAT_BASE3 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
     GH_SESSION_COOKIE3 = "__jpi_gh_session";
-    TERMINALHIRE_DIR5 = join8(homedir7(), ".terminalhire");
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join8(homedir7(), ".terminalhire");
     READS_FILE = join8(TERMINALHIRE_DIR5, "chat-reads.json");
     INDEX_CACHE_FILE = join8(TERMINALHIRE_DIR5, "index-cache.json");
     REACHABLE_DISPLAY = { shareActivity: false, optin: false, lastSeen: null };

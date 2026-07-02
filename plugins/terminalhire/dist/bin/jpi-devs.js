@@ -2953,10 +2953,13 @@ You control whether this connects \u2014 no contact details are shared unless yo
   return { subject, text };
 }
 function introActorRole(intro, actorLogin) {
-  const a = actorLogin.trim().toLowerCase();
-  if (a && a === intro.targetLogin.trim().toLowerCase()) return "target";
-  if (a && a === intro.requesterLogin.trim().toLowerCase()) return "requester";
+  if (sameLogin(actorLogin, intro.targetLogin)) return "target";
+  if (sameLogin(actorLogin, intro.requesterLogin)) return "requester";
   return "other";
+}
+function sameLogin(a, b) {
+  const an = a.trim().toLowerCase();
+  return an.length > 0 && an === b.trim().toLowerCase();
 }
 function authorizeIntroDecision(intro, actorLogin) {
   const role = introActorRole(intro, actorLogin);
@@ -6399,6 +6402,7 @@ __export(src_exports, {
   rejectExtraIntroFields: () => rejectExtraIntroFields,
   revealIntroContacts: () => revealIntroContacts,
   safetyNumber: () => safetyNumber,
+  sameLogin: () => sameLogin,
   setStatus: () => setStatus,
   tokenize: () => tokenize,
   validateGraph: () => validateGraph,
@@ -6672,7 +6676,7 @@ import { createInterface } from "readline";
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-var TERMINALHIRE_DIR = join(homedir(), ".terminalhire");
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
 var DIRECTORY_CACHE_FILE = join(TERMINALHIRE_DIR, "directory-cache.json");
 var PROJECT_FILE = join(TERMINALHIRE_DIR, "project.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;

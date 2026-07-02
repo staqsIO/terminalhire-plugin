@@ -4,7 +4,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
 var __dirname = fileURLToPath(new URL(".", import.meta.url));
-var INDEX_CACHE_FILE = join(homedir(), ".terminalhire", "index-cache.json");
+var INDEX_CACHE_FILE = join(process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire"), "index-cache.json");
 function parseVersion(v) {
   if (typeof v !== "string") return null;
   const m = v.trim().replace(/^v/, "").match(/^(\d+)\.(\d+)\.(\d+)/);

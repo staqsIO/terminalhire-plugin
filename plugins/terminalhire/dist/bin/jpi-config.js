@@ -40,7 +40,7 @@ function writeConfig(config) {
 }
 
 // bin/jpi-config.js
-var TERMINALHIRE_DIR2 = join2(homedir2(), ".terminalhire");
+var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
 var CONFIG_FILE2 = join2(TERMINALHIRE_DIR2, "config.json");
 function parseNudgeMode(raw) {
   if (raw === "session" || raw === "always") return raw;

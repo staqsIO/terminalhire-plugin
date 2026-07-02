@@ -1097,7 +1097,7 @@ import { join as join3 } from "path";
 import { homedir as homedir2 } from "os";
 import { fileURLToPath as fileURLToPath2 } from "url";
 var __dirname = fileURLToPath2(new URL(".", import.meta.url));
-var TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
+var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
 var INDEX_CACHE_FILE = join3(TERMINALHIRE_DIR2, "index-cache.json");
 function findJobInCache(jobId) {
   try {

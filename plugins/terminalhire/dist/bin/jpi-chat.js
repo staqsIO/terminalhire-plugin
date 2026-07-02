@@ -4281,246 +4281,6 @@ var init_config = __esm({
   }
 });
 
-// src/profile.ts
-var profile_exports = {};
-__export(profile_exports, {
-  accumulateGitHubTags: () => accumulateGitHubTags,
-  accumulateSession: () => accumulateSession,
-  accumulateTags: () => accumulateTags,
-  addSavedJob: () => addSavedJob,
-  deleteProfile: () => deleteProfile,
-  listSavedJobs: () => listSavedJobs,
-  profileToFingerprint: () => profileToFingerprint,
-  readProfile: () => readProfile,
-  removeSavedJob: () => removeSavedJob,
-  writeProfile: () => writeProfile
-});
-import {
-  createCipheriv as createCipheriv2,
-  createDecipheriv as createDecipheriv2,
-  randomBytes as randomBytes4
-} from "crypto";
-import {
-  readFileSync as readFileSync7,
-  writeFileSync as writeFileSync6,
-  mkdirSync as mkdirSync6,
-  existsSync as existsSync6
-} from "fs";
-import { join as join7 } from "path";
-import { homedir as homedir6 } from "os";
-async function loadKey2() {
-  try {
-    const kt = await import("keytar");
-    const stored = await kt.getPassword("terminalhire", "profile-key");
-    if (stored) {
-      return Buffer.from(stored, "hex");
-    }
-    const key2 = randomBytes4(KEY_BYTES2);
-    await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
-    return key2;
-  } catch {
-  }
-  mkdirSync6(TERMINALHIRE_DIR5, { recursive: true });
-  if (existsSync6(KEY_FILE2)) {
-    return Buffer.from(readFileSync7(KEY_FILE2, "utf8").trim(), "hex");
-  }
-  const key = randomBytes4(KEY_BYTES2);
-  writeFileSync6(KEY_FILE2, key.toString("hex"), { mode: 384, encoding: "utf8" });
-  return key;
-}
-function encrypt2(plaintext, key) {
-  const iv = randomBytes4(IV_BYTES2);
-  const cipher = createCipheriv2(ALGO2, key, iv);
-  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return {
-    iv: iv.toString("hex"),
-    tag: tag.toString("hex"),
-    ciphertext: ct.toString("hex")
-  };
-}
-function decrypt2(blob, key) {
-  const decipher = createDecipheriv2(
-    ALGO2,
-    key,
-    Buffer.from(blob.iv, "hex")
-  );
-  decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
-  const plain = Buffer.concat([
-    decipher.update(Buffer.from(blob.ciphertext, "hex")),
-    decipher.final()
-  ]);
-  return plain.toString("utf8");
-}
-function blankProfile() {
-  return {
-    version: 3,
-    skillTags: [],
-    tagWeights: {},
-    hasEmployerSessions: false,
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-  };
-}
-function recencyDecay(lastSeen) {
-  const ageMs = Date.now() - new Date(lastSeen).getTime();
-  return Math.pow(0.5, ageMs / DECAY_HALF_LIFE_MS);
-}
-function tagScore(w) {
-  return w.count * recencyDecay(w.lastSeen);
-}
-function deriveSkillTags(tagWeights) {
-  return Object.entries(tagWeights).filter(([, w]) => w.count >= 1).sort(([, a], [, b]) => tagScore(b) - tagScore(a)).map(([tag]) => tag);
-}
-function migrateTagWeights(profile) {
-  if (!profile.tagWeights) {
-    profile.tagWeights = {};
-  }
-  const seed = profile.updatedAt ?? (/* @__PURE__ */ new Date()).toISOString();
-  for (const tag of profile.skillTags) {
-    if (!profile.tagWeights[tag]) {
-      profile.tagWeights[tag] = { count: 1, firstSeen: seed, lastSeen: seed, sessions: 1 };
-    }
-  }
-}
-async function readProfile() {
-  if (!existsSync6(PROFILE_FILE)) return blankProfile();
-  try {
-    const key = await loadKey2();
-    const raw = readFileSync7(PROFILE_FILE, "utf8");
-    const blob = JSON.parse(raw);
-    const plaintext = decrypt2(blob, key);
-    const parsed = JSON.parse(plaintext);
-    migrateTagWeights(parsed);
-    return parsed;
-  } catch {
-    return blankProfile();
-  }
-}
-async function writeProfile(profile) {
-  mkdirSync6(TERMINALHIRE_DIR5, { recursive: true });
-  const key = await loadKey2();
-  profile.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-  profile.skillTags = deriveSkillTags(profile.tagWeights);
-  const blob = encrypt2(JSON.stringify(profile), key);
-  writeFileSync6(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
-}
-function accumulateSession(profile, tags, isEmployerContext, inferredSeniority, seniorityIsAuthoritative = false) {
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  let filtered = normalize(tags);
-  if (isEmployerContext) {
-    filtered = filtered.filter((t) => LANGUAGE_TAGS.has(t));
-    profile.hasEmployerSessions = true;
-  }
-  for (const tag of filtered) {
-    const existing = profile.tagWeights[tag];
-    if (existing) {
-      existing.count += 1;
-      existing.sessions += 1;
-      existing.lastSeen = now;
-    } else {
-      profile.tagWeights[tag] = { count: 1, firstSeen: now, lastSeen: now, sessions: 1 };
-    }
-  }
-  if (inferredSeniority && !isEmployerContext) {
-    if (seniorityIsAuthoritative || !profile.github) {
-      profile.seniority = inferredSeniority;
-    }
-  }
-}
-async function accumulateTags(rawTokens, isEmployerContext, inferredSeniority) {
-  const profile = await readProfile();
-  accumulateSession(profile, rawTokens, isEmployerContext, inferredSeniority);
-  await writeProfile(profile);
-}
-function accumulateGitHubTags(profile, tags, inferredSeniority) {
-  accumulateSession(
-    profile,
-    tags,
-    /* isEmployerContext */
-    false,
-    inferredSeniority,
-    true
-  );
-}
-async function listSavedJobs() {
-  const profile = await readProfile();
-  return profile.savedJobs ?? [];
-}
-async function addSavedJob(job) {
-  const profile = await readProfile();
-  const existing = profile.savedJobs ?? [];
-  const filtered = existing.filter((j) => j.id !== job.id);
-  profile.savedJobs = [...filtered, { ...job, savedAt: (/* @__PURE__ */ new Date()).toISOString() }];
-  await writeProfile(profile);
-}
-async function removeSavedJob(id) {
-  const profile = await readProfile();
-  const existing = profile.savedJobs ?? [];
-  const filtered = existing.filter((j) => j.id !== id);
-  if (filtered.length === existing.length) return false;
-  profile.savedJobs = filtered;
-  await writeProfile(profile);
-  return true;
-}
-async function deleteProfile() {
-  const { rmSync: rmSync4 } = await import("fs");
-  try {
-    rmSync4(PROFILE_FILE);
-  } catch {
-  }
-  try {
-    rmSync4(KEY_FILE2);
-  } catch {
-  }
-}
-function profileToFingerprint(profile) {
-  const rankedTags = Object.entries(profile.tagWeights).map(([tag, w]) => ({ tag, score: tagScore(w) })).filter(({ score }) => score >= MIN_FINGERPRINT_SCORE).sort((a, b) => b.score - a.score).map(({ tag }) => tag);
-  const skillTags = rankedTags.length > 0 ? rankedTags : profile.skillTags;
-  return {
-    skillTags,
-    seniorityBand: profile.seniority,
-    prefs: {
-      roleTypes: profile.roleTypes,
-      remoteOnly: profile.remoteOnly,
-      compFloorUsd: profile.compFloorUsd
-    }
-  };
-}
-var TERMINALHIRE_DIR5, PROFILE_FILE, KEY_FILE2, ALGO2, KEY_BYTES2, IV_BYTES2, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
-var init_profile = __esm({
-  "src/profile.ts"() {
-    "use strict";
-    init_src();
-    TERMINALHIRE_DIR5 = join7(homedir6(), ".terminalhire");
-    PROFILE_FILE = join7(TERMINALHIRE_DIR5, "profile.enc");
-    KEY_FILE2 = join7(TERMINALHIRE_DIR5, "key");
-    ALGO2 = "aes-256-gcm";
-    KEY_BYTES2 = 32;
-    IV_BYTES2 = 12;
-    DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
-    LANGUAGE_TAGS = /* @__PURE__ */ new Set([
-      "typescript",
-      "javascript",
-      "python",
-      "go",
-      "rust",
-      "java",
-      "ruby",
-      "elixir",
-      "scala",
-      "kotlin",
-      "swift",
-      "cpp",
-      "csharp",
-      "php",
-      "haskell",
-      "clojure",
-      "r"
-    ]);
-    MIN_FINGERPRINT_SCORE = 0.05;
-  }
-});
-
 // bin/jpi-chat-read.js
 var jpi_chat_read_exports = {};
 __export(jpi_chat_read_exports, {
@@ -4536,16 +4296,16 @@ __export(jpi_chat_read_exports, {
   syncUnreadBadge: () => syncUnreadBadge,
   writeReadCursor: () => writeReadCursor
 });
-import { existsSync as existsSync7, mkdirSync as mkdirSync7, readFileSync as readFileSync8, writeFileSync as writeFileSync7 } from "fs";
-import { homedir as homedir7 } from "os";
-import { join as join8 } from "path";
+import { existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "fs";
+import { homedir as homedir6 } from "os";
+import { join as join7 } from "path";
 async function syncUnreadBadge(deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   const cacheFile = deps.cacheFile ?? INDEX_CACHE_FILE;
   try {
     const cookie = readCookie();
-    if (!cookie || !existsSync7(cacheFile)) return;
+    if (!cookie || !existsSync6(cacheFile)) return;
     const res = await fetchImpl(`${CHAT_BASE2}/api/chat/inbox`, {
       method: "GET",
       headers: { Cookie: `${GH_SESSION_COOKIE2}=${cookie}` },
@@ -4558,16 +4318,16 @@ async function syncUnreadBadge(deps = {}) {
       (sum, it) => sum + (it && typeof it.unreadCount === "number" && it.unreadCount > 0 ? it.unreadCount : 0),
       0
     );
-    const entry = JSON.parse(readFileSync8(cacheFile, "utf8"));
+    const entry = JSON.parse(readFileSync7(cacheFile, "utf8"));
     entry.unreadChat = { count: total };
-    writeFileSync7(cacheFile, JSON.stringify(entry), "utf8");
+    writeFileSync6(cacheFile, JSON.stringify(entry), "utf8");
   } catch {
   }
 }
 function readReadCursors() {
   try {
-    if (!existsSync7(READS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync8(READS_FILE, "utf8"));
+    if (!existsSync6(READS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync7(READS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, iso] of Object.entries(parsed)) {
@@ -4581,9 +4341,11 @@ function readReadCursors() {
 function writeReadCursor(login, iso, deps = {}) {
   const read = deps.readReadCursors ?? readReadCursors;
   const cursors = read();
+  const prev = cursors[login];
+  if (prev && iso <= prev) return;
   cursors[login] = iso;
-  mkdirSync7(TERMINALHIRE_DIR6, { recursive: true });
-  writeFileSync7(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
+  mkdirSync6(TERMINALHIRE_DIR5, { recursive: true });
+  writeFileSync6(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
 }
 async function postReadCursor(peerLogin, lastReadAt, deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
@@ -4888,7 +4650,7 @@ async function runSend(opts = {}) {
   );
   return { ok: true };
 }
-var CHAT_BASE2, GH_SESSION_COOKIE2, TERMINALHIRE_DIR6, READS_FILE, INDEX_CACHE_FILE, REACHABLE_DISPLAY;
+var CHAT_BASE2, GH_SESSION_COOKIE2, TERMINALHIRE_DIR5, READS_FILE, INDEX_CACHE_FILE, REACHABLE_DISPLAY;
 var init_jpi_chat_read = __esm({
   "bin/jpi-chat-read.js"() {
     "use strict";
@@ -4897,10 +4659,250 @@ var init_jpi_chat_read = __esm({
     init_jpi_chat();
     CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
     GH_SESSION_COOKIE2 = "__jpi_gh_session";
-    TERMINALHIRE_DIR6 = join8(homedir7(), ".terminalhire");
-    READS_FILE = join8(TERMINALHIRE_DIR6, "chat-reads.json");
-    INDEX_CACHE_FILE = join8(TERMINALHIRE_DIR6, "index-cache.json");
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join7(homedir6(), ".terminalhire");
+    READS_FILE = join7(TERMINALHIRE_DIR5, "chat-reads.json");
+    INDEX_CACHE_FILE = join7(TERMINALHIRE_DIR5, "index-cache.json");
     REACHABLE_DISPLAY = { shareActivity: false, optin: false, lastSeen: null };
+  }
+});
+
+// src/profile.ts
+var profile_exports = {};
+__export(profile_exports, {
+  accumulateGitHubTags: () => accumulateGitHubTags,
+  accumulateSession: () => accumulateSession,
+  accumulateTags: () => accumulateTags,
+  addSavedJob: () => addSavedJob,
+  deleteProfile: () => deleteProfile,
+  listSavedJobs: () => listSavedJobs,
+  profileToFingerprint: () => profileToFingerprint,
+  readProfile: () => readProfile,
+  removeSavedJob: () => removeSavedJob,
+  writeProfile: () => writeProfile
+});
+import {
+  createCipheriv as createCipheriv2,
+  createDecipheriv as createDecipheriv2,
+  randomBytes as randomBytes4
+} from "crypto";
+import {
+  readFileSync as readFileSync8,
+  writeFileSync as writeFileSync7,
+  mkdirSync as mkdirSync7,
+  existsSync as existsSync7
+} from "fs";
+import { join as join8 } from "path";
+import { homedir as homedir7 } from "os";
+async function loadKey2() {
+  try {
+    const kt = await import("keytar");
+    const stored = await kt.getPassword("terminalhire", "profile-key");
+    if (stored) {
+      return Buffer.from(stored, "hex");
+    }
+    const key2 = randomBytes4(KEY_BYTES2);
+    await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
+    return key2;
+  } catch {
+  }
+  mkdirSync7(TERMINALHIRE_DIR6, { recursive: true });
+  if (existsSync7(KEY_FILE2)) {
+    return Buffer.from(readFileSync8(KEY_FILE2, "utf8").trim(), "hex");
+  }
+  const key = randomBytes4(KEY_BYTES2);
+  writeFileSync7(KEY_FILE2, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  return key;
+}
+function encrypt2(plaintext, key) {
+  const iv = randomBytes4(IV_BYTES2);
+  const cipher = createCipheriv2(ALGO2, key, iv);
+  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return {
+    iv: iv.toString("hex"),
+    tag: tag.toString("hex"),
+    ciphertext: ct.toString("hex")
+  };
+}
+function decrypt2(blob, key) {
+  const decipher = createDecipheriv2(
+    ALGO2,
+    key,
+    Buffer.from(blob.iv, "hex")
+  );
+  decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
+  const plain = Buffer.concat([
+    decipher.update(Buffer.from(blob.ciphertext, "hex")),
+    decipher.final()
+  ]);
+  return plain.toString("utf8");
+}
+function blankProfile() {
+  return {
+    version: 3,
+    skillTags: [],
+    tagWeights: {},
+    hasEmployerSessions: false,
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+function recencyDecay(lastSeen) {
+  const ageMs = Date.now() - new Date(lastSeen).getTime();
+  return Math.pow(0.5, ageMs / DECAY_HALF_LIFE_MS);
+}
+function tagScore(w) {
+  return w.count * recencyDecay(w.lastSeen);
+}
+function deriveSkillTags(tagWeights) {
+  return Object.entries(tagWeights).filter(([, w]) => w.count >= 1).sort(([, a], [, b]) => tagScore(b) - tagScore(a)).map(([tag]) => tag);
+}
+function migrateTagWeights(profile) {
+  if (!profile.tagWeights) {
+    profile.tagWeights = {};
+  }
+  const seed = profile.updatedAt ?? (/* @__PURE__ */ new Date()).toISOString();
+  for (const tag of profile.skillTags) {
+    if (!profile.tagWeights[tag]) {
+      profile.tagWeights[tag] = { count: 1, firstSeen: seed, lastSeen: seed, sessions: 1 };
+    }
+  }
+}
+async function readProfile() {
+  if (!existsSync7(PROFILE_FILE)) return blankProfile();
+  try {
+    const key = await loadKey2();
+    const raw = readFileSync8(PROFILE_FILE, "utf8");
+    const blob = JSON.parse(raw);
+    const plaintext = decrypt2(blob, key);
+    const parsed = JSON.parse(plaintext);
+    migrateTagWeights(parsed);
+    return parsed;
+  } catch {
+    return blankProfile();
+  }
+}
+async function writeProfile(profile) {
+  mkdirSync7(TERMINALHIRE_DIR6, { recursive: true });
+  const key = await loadKey2();
+  profile.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+  profile.skillTags = deriveSkillTags(profile.tagWeights);
+  const blob = encrypt2(JSON.stringify(profile), key);
+  writeFileSync7(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+}
+function accumulateSession(profile, tags, isEmployerContext, inferredSeniority, seniorityIsAuthoritative = false) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  let filtered = normalize(tags);
+  if (isEmployerContext) {
+    filtered = filtered.filter((t) => LANGUAGE_TAGS.has(t));
+    profile.hasEmployerSessions = true;
+  }
+  for (const tag of filtered) {
+    const existing = profile.tagWeights[tag];
+    if (existing) {
+      existing.count += 1;
+      existing.sessions += 1;
+      existing.lastSeen = now;
+    } else {
+      profile.tagWeights[tag] = { count: 1, firstSeen: now, lastSeen: now, sessions: 1 };
+    }
+  }
+  if (inferredSeniority && !isEmployerContext) {
+    if (seniorityIsAuthoritative || !profile.github) {
+      profile.seniority = inferredSeniority;
+    }
+  }
+}
+async function accumulateTags(rawTokens, isEmployerContext, inferredSeniority) {
+  const profile = await readProfile();
+  accumulateSession(profile, rawTokens, isEmployerContext, inferredSeniority);
+  await writeProfile(profile);
+}
+function accumulateGitHubTags(profile, tags, inferredSeniority) {
+  accumulateSession(
+    profile,
+    tags,
+    /* isEmployerContext */
+    false,
+    inferredSeniority,
+    true
+  );
+}
+async function listSavedJobs() {
+  const profile = await readProfile();
+  return profile.savedJobs ?? [];
+}
+async function addSavedJob(job) {
+  const profile = await readProfile();
+  const existing = profile.savedJobs ?? [];
+  const filtered = existing.filter((j) => j.id !== job.id);
+  profile.savedJobs = [...filtered, { ...job, savedAt: (/* @__PURE__ */ new Date()).toISOString() }];
+  await writeProfile(profile);
+}
+async function removeSavedJob(id) {
+  const profile = await readProfile();
+  const existing = profile.savedJobs ?? [];
+  const filtered = existing.filter((j) => j.id !== id);
+  if (filtered.length === existing.length) return false;
+  profile.savedJobs = filtered;
+  await writeProfile(profile);
+  return true;
+}
+async function deleteProfile() {
+  const { rmSync: rmSync4 } = await import("fs");
+  try {
+    rmSync4(PROFILE_FILE);
+  } catch {
+  }
+  try {
+    rmSync4(KEY_FILE2);
+  } catch {
+  }
+}
+function profileToFingerprint(profile) {
+  const rankedTags = Object.entries(profile.tagWeights).map(([tag, w]) => ({ tag, score: tagScore(w) })).filter(({ score }) => score >= MIN_FINGERPRINT_SCORE).sort((a, b) => b.score - a.score).map(({ tag }) => tag);
+  const skillTags = rankedTags.length > 0 ? rankedTags : profile.skillTags;
+  return {
+    skillTags,
+    seniorityBand: profile.seniority,
+    prefs: {
+      roleTypes: profile.roleTypes,
+      remoteOnly: profile.remoteOnly,
+      compFloorUsd: profile.compFloorUsd
+    }
+  };
+}
+var TERMINALHIRE_DIR6, PROFILE_FILE, KEY_FILE2, ALGO2, KEY_BYTES2, IV_BYTES2, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var init_profile = __esm({
+  "src/profile.ts"() {
+    "use strict";
+    init_src();
+    TERMINALHIRE_DIR6 = join8(homedir7(), ".terminalhire");
+    PROFILE_FILE = join8(TERMINALHIRE_DIR6, "profile.enc");
+    KEY_FILE2 = join8(TERMINALHIRE_DIR6, "key");
+    ALGO2 = "aes-256-gcm";
+    KEY_BYTES2 = 32;
+    IV_BYTES2 = 12;
+    DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
+    LANGUAGE_TAGS = /* @__PURE__ */ new Set([
+      "typescript",
+      "javascript",
+      "python",
+      "go",
+      "rust",
+      "java",
+      "ruby",
+      "elixir",
+      "scala",
+      "kotlin",
+      "swift",
+      "cpp",
+      "csharp",
+      "php",
+      "haskell",
+      "clojure",
+      "r"
+    ]);
+    MIN_FINGERPRINT_SCORE = 0.05;
   }
 });
 
@@ -5075,13 +5077,21 @@ function mergeMessages(existing, incoming) {
 }
 function readCachedSessionStale() {
   try {
-    const p = join9(homedir8(), ".terminalhire", "index-cache.json");
+    const p = join9(process.env.TERMINALHIRE_DIR || join9(homedir8(), ".terminalhire"), "index-cache.json");
     if (!existsSync8(p)) return false;
     const cache = JSON.parse(readFileSync9(p, "utf8"));
     return cache?.sessionStale === true;
   } catch {
     return false;
   }
+}
+async function defaultMarkThreadRead(peerLogin, iso) {
+  const { writeReadCursor: writeReadCursor2, postReadCursor: postReadCursor2, syncUnreadBadge: syncUnreadBadge2 } = await Promise.resolve().then(() => (init_jpi_chat_read(), jpi_chat_read_exports));
+  writeReadCursor2(peerLogin, iso);
+  await syncUnreadBadge2().catch(() => {
+  });
+  await postReadCursor2(peerLogin, iso).catch(() => {
+  });
 }
 async function runChatPane(opts = {}) {
   const {
@@ -5093,7 +5103,8 @@ async function runChatPane(opts = {}) {
     signals = process,
     pollIntervalMs = 1500,
     setTimer = (fn, ms) => setInterval(fn, ms),
-    clearTimer = (t) => clearInterval(t)
+    clearTimer = (t) => clearInterval(t),
+    markRead = defaultMarkThreadRead
   } = opts;
   const target = String(login ?? "").replace(/^@/, "").trim();
   if (!target) {
@@ -5210,6 +5221,7 @@ async function runChatPane(opts = {}) {
     let presence = null;
     let banner = "";
     let lastSeen;
+    let lastReadMarked;
     let timer = null;
     let polling = false;
     let cleaned = false;
@@ -5281,6 +5293,20 @@ async function runChatPane(opts = {}) {
           messages = mergeMessages(messages, fresh);
           const newest = fresh[fresh.length - 1];
           if (newest && newest.createdAt) lastSeen = newest.createdAt;
+          let newestIncoming;
+          for (const m of fresh) {
+            if (m && m.senderLogin === peerLogin && m.createdAt && (!newestIncoming || m.createdAt > newestIncoming)) {
+              newestIncoming = m.createdAt;
+            }
+          }
+          if (newestIncoming && (!lastReadMarked || newestIncoming > lastReadMarked)) {
+            lastReadMarked = newestIncoming;
+            try {
+              void Promise.resolve(markRead(peerLogin, newestIncoming)).catch(() => {
+              });
+            } catch {
+            }
+          }
           if (banner && !banner.startsWith("\u26A0")) banner = "";
         }
         try {

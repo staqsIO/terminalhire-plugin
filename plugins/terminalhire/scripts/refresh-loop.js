@@ -88,31 +88,137 @@ function readOwner() {
 }
 
 /**
- * True ONLY if the lock holds a valid terminalhire-refresh marker whose PID is live.
- * A dead PID, or any lock that isn't our marker (legacy bare-int, corrupt, foreign
- * file whose tag ≠ OWNER_TAG) → not a live owner ⇒ reclaimable. This closes the
- * common recurrence vectors (concurrent double-acquire, version-accumulated zombies,
- * bare-int locks).
+ * HEARTBEAT (closes the 2026-07-01 accepted PID-reuse residual): the owner
+ * rewrites its marker with a fresh `lastBeat` every tick, so a marker whose
+ * beat is older than 3 loop intervals is stale EVEN IF its PID reads alive —
+ * that's exactly the kill -9 + PID-wraparound case (an unrelated live process
+ * recycled the dead monitor's pid) that used to hold "zero monitors" forever.
+ * 3× the interval tolerates one slow tick (beat cadence = interval + tick
+ * duration under the non-overlapping recursive setTimeout) without expiring a
+ * legitimately long-lived monitor the way a plain startedAt TTL would.
  *
- * ACCEPTED RESIDUAL (see Linus 2026-07-01): one narrow window remains. If OUR OWN
- * monitor dies UNCLEANLY (kill -9 / crash — no releaseLock) leaving a valid marker
- * on disk, and the OS later recycles that EXACT pid onto an unrelated LIVE process,
- * isAlive() reads true and this lock is treated as live until that unrelated process
- * exits → "zero monitors" until then. Requires PID-space wraparound onto the precise
- * stale value, so it is low-probability but non-zero over long uptimes. `startedAt`
- * is written for the proper future fix: a HEARTBEAT (rewrite the marker each tick;
- * treat as stale if now - lastBeat > ~3× the loop interval) — NOT a plain startedAt
- * TTL, which would expire a legitimately long-lived monitor and spawn a second one.
- * Deferred to keep this fix focused; documented rather than silently accepted.
+ * COMPAT: markers written by pre-heartbeat versions carry no `lastBeat` and
+ * are never rewritten — for those, keep pure PID-liveness semantics rather
+ * than declaring every old-version live monitor stale (which would double-run
+ * it). Old markers age out as monitors restart on plugin update.
+ */
+const STALE_BEAT_MS = 3 * SLEEP_SECONDS * 1000;
+
+function markerIsStale(marker) {
+  return typeof marker.lastBeat === 'number' && Date.now() - marker.lastBeat > STALE_BEAT_MS;
+}
+
+/**
+ * True ONLY if the lock holds a valid terminalhire-refresh marker whose PID is
+ * live AND whose heartbeat (when present) is fresh. A dead PID, a stale beat,
+ * or any lock that isn't our marker (legacy bare-int, corrupt, foreign file
+ * whose tag ≠ OWNER_TAG) → not a live owner ⇒ reclaimable. This closes the
+ * recurrence vectors: concurrent double-acquire, version-accumulated zombies,
+ * bare-int locks, and (via the heartbeat) PID reuse after an unclean death.
  */
 function ownerIsLive() {
   const marker = readOwner();
-  return !!(marker && isAlive(marker.pid));
+  return !!(marker && isAlive(marker.pid) && !markerIsStale(marker));
+}
+
+/**
+ * This monitor's plugin version — from the bundled dist package.json (the
+ * lockstep-synced site that ships inside the plugin). Fail-soft '0.0.0': a
+ * version we can't read must never block the loop, and as the lowest version
+ * it can never steal a lock from a readable one.
+ */
+function readOwnVersion() {
+  try {
+    return JSON.parse(readFileSync(join(PLUGIN_ROOT, 'dist', 'package.json'), 'utf8')).version || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+const OWN_VERSION = readOwnVersion();
+
+/** Numeric dot-segment version compare → -1|0|1. Missing/garbage reads as 0.0.0. */
+function versionCmp(a, b) {
+  const pa = String(a || '0').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || '0').split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d !== 0) return d < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+/** Synchronous sleep without a busy spin. */
+function sleepMs(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    const end = Date.now() + ms;
+    while (Date.now() < end) { /* fallback spin */ }
+  }
+}
+
+/**
+ * VERSION HANDOVER (closes the "plugin update never activates" bug, found live
+ * 2026-07-02: a 0.13.0 monitor survived Claude Code restarts, held this lock,
+ * and the freshly-installed 0.14.0 monitor dutifully exited — the new engine
+ * never ran until a manual kill). A newer-version monitor SIGTERMs a live
+ * OLDER-version owner: every monitor since v0.12.1 has a SIGTERM handler that
+ * releases the lock and exits cleanly. Markers WITHOUT a version field predate
+ * the field entirely (≤0.14.0) and therefore read as older by construction.
+ * We wait for the old owner to die (bounded) before reclaiming.
+ *
+ * ACCEPTED RESIDUAL (same class as beat()/releaseLock, documented not silent):
+ * SIGTERM to a PID that was recycled onto an unrelated process. Bounded by the
+ * marker tag (the pid provably belonged to a terminalhire monitor when the
+ * marker was written) and, for ≥0.15 markers, by heartbeat staleness having
+ * already reclaimed dead owners without any signal.
+ */
+function supersedeOwner(pid) {
+  try {
+    process.kill(pid); // SIGTERM — the old monitor shuts down + releases
+  } catch {
+    return; // ESRCH etc. — already gone
+  }
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline && isAlive(pid)) sleepMs(50);
 }
 
 /** This process's owner marker payload. */
 function ownerPayload() {
-  return JSON.stringify({ pid: process.pid, startedAt: Date.now(), tag: OWNER_TAG });
+  return JSON.stringify({
+    pid: process.pid,
+    startedAt: Date.now(),
+    lastBeat: Date.now(),
+    version: OWN_VERSION,
+    tag: OWNER_TAG,
+  });
+}
+
+/**
+ * Refresh our marker's heartbeat. Best-effort and ownership-checked: if a racer
+ * reclaimed the lock (we lost ownership), do NOT clobber their marker — the
+ * same stance as releaseLock. A failed beat never breaks the loop; the worst
+ * case is our marker going stale and a new monitor taking over (fail-open).
+ *
+ * ACCEPTED RESIDUAL (Linus 2026-07-01, same convention as the PID-reuse
+ * residual this heartbeat replaced): the ownership check-then-write below is
+ * not atomic. If another monitor's acquireLock() reclaim (unlink + wx-create)
+ * lands in the microseconds between our readOwner() and our writeFileSync,
+ * this beat stomps the new owner's marker with our identity — a transient
+ * split-brain that self-heals (worst case a temporary double-run, i.e. the
+ * pre-heartbeat status quo; never corruption, and the next stale-beat cycle
+ * reconverges to one owner). releaseLock() carries the identical pre-existing
+ * window. A true fix needs a real file lock, which is disproportionate here.
+ */
+function beat() {
+  try {
+    const marker = readOwner();
+    if (marker && marker.pid === process.pid) {
+      writeFileSync(LOCK_FILE, JSON.stringify({ ...marker, lastBeat: Date.now() }));
+    }
+  } catch {
+    /* best-effort */
+  }
 }
 
 /**
@@ -141,13 +247,19 @@ function acquireLock() {
         // Unexpected FS error → fail OPEN rather than block the monitor entirely.
         return true;
       }
-      // Someone holds the path. A live owner wins → we skip. A stale/foreign lock is
-      // reclaimed (unlink) and we retry the exclusive create.
-      if (ownerIsLive()) return false;
+      // Someone holds the path. A live owner of OUR version or newer wins → we
+      // skip. A live OLDER-version owner is superseded (SIGTERM + bounded wait
+      // — see supersedeOwner: this is how a plugin update actually activates).
+      // A stale/foreign lock is reclaimed (unlink) and we retry the create.
+      const owner = readOwner();
+      if (owner && isAlive(owner.pid) && !markerIsStale(owner)) {
+        if (versionCmp(owner.version, OWN_VERSION) >= 0) return false;
+        supersedeOwner(owner.pid);
+      }
       try {
         unlinkSync(LOCK_FILE);
       } catch {
-        /* another racer may have reclaimed it first — just retry the create */
+        /* the old owner's clean shutdown (or a racer) may have unlinked first */
       }
     }
   }
@@ -201,8 +313,11 @@ function main() {
   function loop() {
     // A ref'd timer keeps the monitor process alive between ticks (the loop is the
     // whole point). Recursive setTimeout (not setInterval) so a slow tick never
-    // overlaps the next one.
+    // overlaps the next one. beat() BEFORE the tick: the heartbeat proves the
+    // loop is alive even when a tick runs long, and a wedged tick eventually
+    // reads as a stale beat (takeover) instead of a live-forever lock.
     timer = setTimeout(() => {
+      beat();
       runTick();
       loop();
     }, SLEEP_SECONDS * 1000);
@@ -217,4 +332,7 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { acquireLock, releaseLock, ownerIsLive, readOwner, isAlive, OWNER_TAG };
+module.exports = {
+  acquireLock, releaseLock, ownerIsLive, readOwner, isAlive, beat,
+  OWNER_TAG, STALE_BEAT_MS,
+};

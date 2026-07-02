@@ -6,7 +6,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { spawnSync } from "child_process";
 import { pathToFileURL } from "url";
-var TH_DIR = join(homedir(), ".terminalhire");
+var TH_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
 var POINTER = join(TH_DIR, "engine-path");
 var FOREIGN = join(TH_DIR, "statusline-foreign.json");
 function firstLine(buf) {
