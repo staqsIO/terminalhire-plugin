@@ -59,9 +59,13 @@ function isInboundNudgeMuted() {
 function isContributeEnabled() {
   return readConfig().contributeEnabled === true;
 }
+function isContributePrompted() {
+  return readConfig().contributePrompted === true;
+}
 export {
   getNudgeMode,
   isContributeEnabled,
+  isContributePrompted,
   isInboundNudgeMuted,
   isPeerConnectEnabled,
   parseNudgeMode,

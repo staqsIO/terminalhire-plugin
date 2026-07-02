@@ -264,17 +264,17 @@ try {
   let line;
   if (haveRoles) {
     const plural = matchCount === 1 ? "role" : "roles";
-    line = `\u2726 ${matchCount} ${plural} match your current work \u2014 run: terminalhire jobs`;
+    line = `\u2726 ${matchCount} ${plural} match your current work \u2014 run: th jobs`;
     if (incomingCount > 0) line += `  \xB7  \u2709 ${incomingCount} intro request${incomingCount === 1 ? "" : "s"}`;
     if (unreadChatCount > 0) line += `  \xB7  \u{1F4AC} ${unreadChatCount} unread`;
-    if (sessionStale) line += `  \xB7  \u26A0 session expired \u2014 run: terminalhire link`;
+    if (sessionStale) line += `  \xB7  \u26A0 session expired \u2014 run: th link`;
   } else if (incomingCount > 0) {
-    line = `\u2709 ${incomingCount} intro request${incomingCount === 1 ? "" : "s"} \u2014 run: terminalhire intro --list`;
+    line = `\u2709 ${incomingCount} intro request${incomingCount === 1 ? "" : "s"} \u2014 run: th inbox`;
     if (unreadChatCount > 0) line += `  \xB7  \u{1F4AC} ${unreadChatCount} unread`;
   } else if (unreadChatCount > 0) {
-    line = `\u{1F4AC} ${unreadChatCount} unread \u2014 run: terminalhire chat`;
+    line = `\u{1F4AC} ${unreadChatCount} unread \u2014 run: th inbox`;
   } else {
-    line = `\u26A0 terminalhire session expired \u2014 run: terminalhire link to restore your connection signals`;
+    line = `\u26A0 terminalhire session expired \u2014 run: th link to restore your connection signals`;
   }
   process.stdout.write(line + "\n");
   if (haveRoles && nudgeMode === "session") {

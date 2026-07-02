@@ -5816,7 +5816,7 @@ async function runInboxTui(deps = {}) {
     const sel = await runInboxPane({ input, output, ...paneDeps });
     if (!sel || sel.action === "quit") break;
     if (sel.action === "open" && sel.login) {
-      await openChatPane({ login: sel.login, input, output });
+      await openChatPane({ login: sel.login, input, output, backHint: "inbox" });
     }
   }
   return { ok: true };
@@ -5994,7 +5994,7 @@ function formatPresence(presence, now = /* @__PURE__ */ new Date()) {
   return "\u25D0 reachable";
 }
 function formatThread(state) {
-  const { peerLogin, presence, self, messages, inputBuffer, banner } = state;
+  const { peerLogin, presence, self, messages, inputBuffer, banner, backHint } = state;
   const safePeer = sanitizeLine(peerLogin);
   const status = formatPresence(presence);
   const lines = [];
@@ -6022,7 +6022,9 @@ function formatThread(state) {
   }
   lines.push("  " + "\u2500".repeat(56));
   lines.push(`  > ${inputBuffer}`);
-  lines.push("  Enter send \xB7 Ctrl-S safety number \xB7 /safety \xB7 /block \xB7 q quit");
+  lines.push(
+    backHint ? `  Esc back to ${sanitizeLine(backHint)} \xB7 Enter send \xB7 Ctrl-S safety number \xB7 /safety \xB7 /block \xB7 q quit` : "  Enter send \xB7 Ctrl-S safety number \xB7 /safety \xB7 /block \xB7 q quit"
+  );
   return CLEAR2 + lines.join("\n") + "\n";
 }
 function mergeMessages(existing, incoming) {
@@ -6065,7 +6067,10 @@ async function runChatPane(opts = {}) {
     pollIntervalMs = 1500,
     setTimer = (fn, ms) => setInterval(fn, ms),
     clearTimer = (t) => clearInterval(t),
-    markRead = defaultMarkThreadRead
+    markRead = defaultMarkThreadRead,
+    // Where Esc returns to, when opened from a parent surface (the inbox TUI
+    // passes 'inbox'). Copy-only — the caller's loop does the actual returning.
+    backHint = null
   } = opts;
   const target = String(login ?? "").replace(/^@/, "").trim();
   if (!target) {
@@ -6195,7 +6200,8 @@ async function runChatPane(opts = {}) {
           self: { login: selfLogin, expired: selfExpired, shareActivity: selfShareActivity },
           messages,
           inputBuffer,
-          banner
+          banner,
+          backHint
         })
       );
     }
@@ -6388,6 +6394,11 @@ async function runChatPane(opts = {}) {
     function onData(chunk) {
       if (cleaned) return;
       const s = chunk.toString("utf8");
+      if (s === KEY_ESC2) {
+        finish("back");
+        return;
+      }
+      if (s.charCodeAt(0) === 27) return;
       for (const ch of s) {
         if (ch === KEY_CTRL_C2) {
           finish("sigint");
@@ -6629,7 +6640,7 @@ async function run2() {
     process.exit(1);
   }
 }
-var CHAT_BASE3, GH_SESSION_COOKIE4, HIDE_CURSOR2, SHOW_CURSOR2, ENTER_ALT2, EXIT_ALT2, CLEAR2, KEY_CTRL_C2, KEY_CTRL_S, KEY_ENTER_A2, KEY_ENTER_B2, KEY_BACKSPACE_A2, KEY_BACKSPACE_B2, MAX_INPUT_LEN, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA, ACTIVE_WINDOW_MS;
+var CHAT_BASE3, GH_SESSION_COOKIE4, HIDE_CURSOR2, SHOW_CURSOR2, ENTER_ALT2, EXIT_ALT2, CLEAR2, KEY_CTRL_C2, KEY_ESC2, KEY_CTRL_S, KEY_ENTER_A2, KEY_ENTER_B2, KEY_BACKSPACE_A2, KEY_BACKSPACE_B2, MAX_INPUT_LEN, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA, ACTIVE_WINDOW_MS;
 var init_jpi_chat = __esm({
   "bin/jpi-chat.js"() {
     init_chat_client();
@@ -6643,6 +6654,7 @@ var init_jpi_chat = __esm({
     EXIT_ALT2 = "\x1B[?1049l";
     CLEAR2 = "\x1B[2J\x1B[H";
     KEY_CTRL_C2 = "";
+    KEY_ESC2 = "\x1B";
     KEY_CTRL_S = "";
     KEY_ENTER_A2 = "\r";
     KEY_ENTER_B2 = "\n";

@@ -76,6 +76,7 @@ var config_exports = {};
 __export(config_exports, {
   getNudgeMode: () => getNudgeMode,
   isContributeEnabled: () => isContributeEnabled,
+  isContributePrompted: () => isContributePrompted,
   isInboundNudgeMuted: () => isInboundNudgeMuted,
   isPeerConnectEnabled: () => isPeerConnectEnabled,
   parseNudgeMode: () => parseNudgeMode,
@@ -127,6 +128,9 @@ function isInboundNudgeMuted() {
 }
 function isContributeEnabled() {
   return readConfig().contributeEnabled === true;
+}
+function isContributePrompted() {
+  return readConfig().contributePrompted === true;
 }
 var TERMINALHIRE_DIR, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
@@ -12026,7 +12030,7 @@ async function runInboxTui(deps = {}) {
     const sel = await runInboxPane({ input, output, ...paneDeps });
     if (!sel || sel.action === "quit") break;
     if (sel.action === "open" && sel.login) {
-      await openChatPane({ login: sel.login, input, output });
+      await openChatPane({ login: sel.login, input, output, backHint: "inbox" });
     }
   }
   return { ok: true };
@@ -12224,7 +12228,7 @@ function formatPresence(presence, now = /* @__PURE__ */ new Date()) {
   return "\u25D0 reachable";
 }
 function formatThread(state) {
-  const { peerLogin, presence, self, messages, inputBuffer, banner } = state;
+  const { peerLogin, presence, self, messages, inputBuffer, banner, backHint } = state;
   const safePeer = sanitizeLine(peerLogin);
   const status = formatPresence(presence);
   const lines = [];
@@ -12252,7 +12256,9 @@ function formatThread(state) {
   }
   lines.push("  " + "\u2500".repeat(56));
   lines.push(`  > ${inputBuffer}`);
-  lines.push("  Enter send \xB7 Ctrl-S safety number \xB7 /safety \xB7 /block \xB7 q quit");
+  lines.push(
+    backHint ? `  Esc back to ${sanitizeLine(backHint)} \xB7 Enter send \xB7 Ctrl-S safety number \xB7 /safety \xB7 /block \xB7 q quit` : "  Enter send \xB7 Ctrl-S safety number \xB7 /safety \xB7 /block \xB7 q quit"
+  );
   return CLEAR2 + lines.join("\n") + "\n";
 }
 function mergeMessages(existing, incoming) {
@@ -12295,7 +12301,10 @@ async function runChatPane(opts = {}) {
     pollIntervalMs = 1500,
     setTimer = (fn, ms) => setInterval(fn, ms),
     clearTimer = (t) => clearInterval(t),
-    markRead = defaultMarkThreadRead
+    markRead = defaultMarkThreadRead,
+    // Where Esc returns to, when opened from a parent surface (the inbox TUI
+    // passes 'inbox'). Copy-only — the caller's loop does the actual returning.
+    backHint = null
   } = opts;
   const target = String(login ?? "").replace(/^@/, "").trim();
   if (!target) {
@@ -12425,7 +12434,8 @@ async function runChatPane(opts = {}) {
           self: { login: selfLogin, expired: selfExpired, shareActivity: selfShareActivity },
           messages,
           inputBuffer,
-          banner
+          banner,
+          backHint
         })
       );
     }
@@ -12618,6 +12628,11 @@ async function runChatPane(opts = {}) {
     function onData(chunk) {
       if (cleaned) return;
       const s = chunk.toString("utf8");
+      if (s === KEY_ESC2) {
+        finish("back");
+        return;
+      }
+      if (s.charCodeAt(0) === 27) return;
       for (const ch of s) {
         if (ch === KEY_CTRL_C2) {
           finish("sigint");
@@ -12859,7 +12874,7 @@ async function run11() {
     process.exit(1);
   }
 }
-var CHAT_BASE3, GH_SESSION_COOKIE5, HIDE_CURSOR2, SHOW_CURSOR2, ENTER_ALT2, EXIT_ALT2, CLEAR2, KEY_CTRL_C2, KEY_CTRL_S, KEY_ENTER_A2, KEY_ENTER_B2, KEY_BACKSPACE_A2, KEY_BACKSPACE_B2, MAX_INPUT_LEN, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA, ACTIVE_WINDOW_MS;
+var CHAT_BASE3, GH_SESSION_COOKIE5, HIDE_CURSOR2, SHOW_CURSOR2, ENTER_ALT2, EXIT_ALT2, CLEAR2, KEY_CTRL_C2, KEY_ESC2, KEY_CTRL_S, KEY_ENTER_A2, KEY_ENTER_B2, KEY_BACKSPACE_A2, KEY_BACKSPACE_B2, MAX_INPUT_LEN, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA, ACTIVE_WINDOW_MS;
 var init_jpi_chat = __esm({
   "bin/jpi-chat.js"() {
     "use strict";
@@ -12874,6 +12889,7 @@ var init_jpi_chat = __esm({
     EXIT_ALT2 = "\x1B[?1049l";
     CLEAR2 = "\x1B[2J\x1B[H";
     KEY_CTRL_C2 = "";
+    KEY_ESC2 = "\x1B";
     KEY_CTRL_S = "";
     KEY_ENTER_A2 = "\r";
     KEY_ENTER_B2 = "\n";
@@ -13994,17 +14010,32 @@ function buildIncomingIntroLine(incomingPending) {
   if (n < 1) return null;
   return n === 1 ? `\u2198 someone wants to connect \xB7 terminalhire intro --list` : `\u2198 ${n} people want to connect \xB7 terminalhire intro --list`;
 }
+function buildContributeNudgeLine(contributeNudge) {
+  const n = contributeNudge && typeof contributeNudge.count === "number" ? contributeNudge.count : 0;
+  if (n < 1) return null;
+  return n === 1 ? "\u2726 an open-source issue that counts toward your r\xE9sum\xE9 \xB7 terminalhire contribute" : `\u2726 ${n} open-source issues that count toward your r\xE9sum\xE9 \xB7 terminalhire contribute`;
+}
 function buildSessionStaleLine(sessionStale) {
   return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
 }
 function buildSpinnerPool(topMatches, _max = 6, opts = {}) {
-  const { sessionTags, frequency = "always", topPeers, incomingPending, sessionStale, seenHistory } = opts;
+  const {
+    sessionTags,
+    frequency = "always",
+    topPeers,
+    incomingPending,
+    sessionStale,
+    contributeNudge,
+    seenHistory
+  } = opts;
   const staleLine = buildSessionStaleLine(sessionStale);
   const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
   const introLine = buildIncomingIntroLine(incomingPending);
+  const contributeLine = buildContributeNudgeLine(contributeNudge);
   const ranked = filterFreshMatches(rankBySessionTags(topMatches, sessionTags), seenHistory);
   if (!Array.isArray(ranked) || ranked.length === 0) {
     if (introLine) return withStale([introLine]);
+    if (contributeLine) return withStale([contributeLine]);
     const peerLine = buildPeerLine(topPeers);
     return withStale(peerLine ? [peerLine] : []);
   }
@@ -14012,6 +14043,7 @@ function buildSpinnerPool(topMatches, _max = 6, opts = {}) {
   const cap = Math.max(1, verbCountForFrequency(frequency, headers.length));
   const pool = [...headers.slice(0, cap), ctaVerb()];
   if (introLine) pool.push(introLine);
+  if (contributeLine) pool.push(contributeLine);
   return withStale(pool);
 }
 var VERB_INTROS;
@@ -14146,6 +14178,7 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
     topPeers: opts.topPeers,
     incomingPending: opts.incomingPending,
     sessionStale: opts.sessionStale,
+    contributeNudge: opts.contributeNudge,
     seenHistory
   });
   if (verbs.length > 0) applySpinnerVerbs(verbs, sc.mode);
@@ -14176,6 +14209,7 @@ __export(spinner_exports, {
   applySpinnerTips: () => applySpinnerTips,
   applySpinnerVerbs: () => applySpinnerVerbs,
   buildContextVerbs: () => buildContextVerbs,
+  buildContributeNudgeLine: () => buildContributeNudgeLine,
   buildIncomingIntroLine: () => buildIncomingIntroLine,
   buildPeerLine: () => buildPeerLine,
   buildSessionStaleLine: () => buildSessionStaleLine,
@@ -14199,6 +14233,7 @@ var init_spinner = __esm({
     "use strict";
     init_spinner_config();
     init_spinner_config();
+    init_spinner_verbs();
     init_spinner_verbs();
     init_spinner_verbs();
     init_spinner_verbs();
@@ -15002,6 +15037,7 @@ async function run20() {
     }
     const jobs = index?.jobs ?? [];
     const contribute = isContributeEnabled() && Array.isArray(index?.contribute) ? index.contribute : [];
+    const contributeNudge = !isContributeEnabled() && !isContributePrompted() && Array.isArray(index?.contribute) && index.contribute.length > 0 ? { count: index.contribute.length } : null;
     let matchCount = 0;
     let topMatches = [];
     let widenReserve = [];
@@ -15152,7 +15188,12 @@ async function run20() {
       topPeers,
       incomingPending,
       unreadChat,
-      sessionStale
+      sessionStale,
+      // In-process-only despite being persisted: the render pass receives it as
+      // a function argument below. A future cache READER must not gate on this
+      // field without re-checking isContributeEnabled/isContributePrompted at
+      // read time — the persisted copy can be stale relative to the answer.
+      contributeNudge
     };
     writeFileSync20(INDEX_CACHE_FILE7, JSON.stringify(cacheEntry), "utf8");
     try {
@@ -15182,6 +15223,7 @@ async function run20() {
         topPeers,
         incomingPending,
         sessionStale,
+        contributeNudge,
         baseUrl: API_URL7,
         seenHistory,
         widen

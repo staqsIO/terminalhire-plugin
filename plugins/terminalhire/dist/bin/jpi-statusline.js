@@ -39,11 +39,11 @@ function render() {
     if (incoming > 0) parts.push(`\u2709 ${incoming} intro request${incoming === 1 ? "" : "s"}`);
     if (parts.length > 0) {
       let line = parts.join("  \xB7  ");
-      line += unread > 0 ? " \u2014 run: terminalhire chat" : " \u2014 run: terminalhire intro --list";
+      line += " \u2014 run: th inbox";
       return line;
     }
     if (stale) {
-      return "\u26A0 terminalhire session expired \u2014 run: terminalhire link";
+      return "\u26A0 terminalhire session expired \u2014 run: th link";
     }
     return "";
   } catch {

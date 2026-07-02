@@ -7319,17 +7319,32 @@ function buildIncomingIntroLine(incomingPending) {
   if (n < 1) return null;
   return n === 1 ? `\u2198 someone wants to connect \xB7 terminalhire intro --list` : `\u2198 ${n} people want to connect \xB7 terminalhire intro --list`;
 }
+function buildContributeNudgeLine(contributeNudge) {
+  const n = contributeNudge && typeof contributeNudge.count === "number" ? contributeNudge.count : 0;
+  if (n < 1) return null;
+  return n === 1 ? "\u2726 an open-source issue that counts toward your r\xE9sum\xE9 \xB7 terminalhire contribute" : `\u2726 ${n} open-source issues that count toward your r\xE9sum\xE9 \xB7 terminalhire contribute`;
+}
 function buildSessionStaleLine(sessionStale) {
   return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
 }
 function buildSpinnerPool(topMatches, _max = 6, opts = {}) {
-  const { sessionTags, frequency = "always", topPeers, incomingPending, sessionStale, seenHistory } = opts;
+  const {
+    sessionTags,
+    frequency = "always",
+    topPeers,
+    incomingPending,
+    sessionStale,
+    contributeNudge,
+    seenHistory
+  } = opts;
   const staleLine = buildSessionStaleLine(sessionStale);
   const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
   const introLine = buildIncomingIntroLine(incomingPending);
+  const contributeLine = buildContributeNudgeLine(contributeNudge);
   const ranked = filterFreshMatches(rankBySessionTags(topMatches, sessionTags), seenHistory);
   if (!Array.isArray(ranked) || ranked.length === 0) {
     if (introLine) return withStale([introLine]);
+    if (contributeLine) return withStale([contributeLine]);
     const peerLine = buildPeerLine(topPeers);
     return withStale(peerLine ? [peerLine] : []);
   }
@@ -7337,6 +7352,7 @@ function buildSpinnerPool(topMatches, _max = 6, opts = {}) {
   const cap = Math.max(1, verbCountForFrequency(frequency, headers.length));
   const pool = [...headers.slice(0, cap), ctaVerb()];
   if (introLine) pool.push(introLine);
+  if (contributeLine) pool.push(contributeLine);
   return withStale(pool);
 }
 var VERB_INTROS;
@@ -7471,6 +7487,7 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
     topPeers: opts.topPeers,
     incomingPending: opts.incomingPending,
     sessionStale: opts.sessionStale,
+    contributeNudge: opts.contributeNudge,
     seenHistory
   });
   if (verbs.length > 0) applySpinnerVerbs(verbs, sc.mode);
@@ -7501,6 +7518,7 @@ __export(spinner_exports, {
   applySpinnerTips: () => applySpinnerTips,
   applySpinnerVerbs: () => applySpinnerVerbs,
   buildContextVerbs: () => buildContextVerbs,
+  buildContributeNudgeLine: () => buildContributeNudgeLine,
   buildIncomingIntroLine: () => buildIncomingIntroLine,
   buildPeerLine: () => buildPeerLine,
   buildSessionStaleLine: () => buildSessionStaleLine,
@@ -7524,6 +7542,7 @@ var init_spinner = __esm({
     "use strict";
     init_spinner_config();
     init_spinner_config();
+    init_spinner_verbs();
     init_spinner_verbs();
     init_spinner_verbs();
     init_spinner_verbs();
@@ -7742,6 +7761,9 @@ function isInboundNudgeMuted() {
 function isContributeEnabled() {
   return readConfig().contributeEnabled === true;
 }
+function isContributePrompted() {
+  return readConfig().contributePrompted === true;
+}
 
 // src/web-session.ts
 import {
@@ -7806,6 +7828,7 @@ async function run() {
     }
     const jobs = index?.jobs ?? [];
     const contribute = isContributeEnabled() && Array.isArray(index?.contribute) ? index.contribute : [];
+    const contributeNudge = !isContributeEnabled() && !isContributePrompted() && Array.isArray(index?.contribute) && index.contribute.length > 0 ? { count: index.contribute.length } : null;
     let matchCount = 0;
     let topMatches = [];
     let widenReserve = [];
@@ -7956,7 +7979,12 @@ async function run() {
       topPeers,
       incomingPending,
       unreadChat,
-      sessionStale
+      sessionStale,
+      // In-process-only despite being persisted: the render pass receives it as
+      // a function argument below. A future cache READER must not gate on this
+      // field without re-checking isContributeEnabled/isContributePrompted at
+      // read time — the persisted copy can be stale relative to the answer.
+      contributeNudge
     };
     writeFileSync7(INDEX_CACHE_FILE2, JSON.stringify(cacheEntry), "utf8");
     try {
@@ -7986,6 +8014,7 @@ async function run() {
         topPeers,
         incomingPending,
         sessionStale,
+        contributeNudge,
         baseUrl: API_URL2,
         seenHistory,
         widen
