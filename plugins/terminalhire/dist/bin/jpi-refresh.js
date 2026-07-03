@@ -6345,6 +6345,17 @@ var init_legible = __esm({
   }
 });
 
+// ../../packages/core/src/short-token.ts
+import { createHash as createHash2 } from "crypto";
+function contributeShortToken(id) {
+  return createHash2("sha256").update(id, "utf8").digest("base64url").slice(0, 8);
+}
+var init_short_token = __esm({
+  "../../packages/core/src/short-token.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/index.ts
 var src_exports = {};
 __export(src_exports, {
@@ -6388,6 +6399,7 @@ __export(src_exports, {
   composeIntroEmail: () => composeIntroEmail,
   computeAcceptanceCredential: () => computeAcceptanceCredential,
   computeAcceptanceCredentialPublic: () => computeAcceptanceCredentialPublic,
+  contributeShortToken: () => contributeShortToken,
   coreTagsFromTitle: () => coreTagsFromTitle,
   decorate: () => decorate,
   decryptMessage: () => decryptMessage,
@@ -6455,6 +6467,7 @@ var init_src = __esm({
     init_chatCrypto();
     init_job_status();
     init_legible();
+    init_short_token();
   }
 });
 
@@ -6466,9 +6479,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/3ffac25b-ca95-4a86-9e17-a4cf326551de/scratchpad/rel/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/3ffac25b-ca95-4a86-9e17-a4cf326551de/scratchpad/rel/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -7537,9 +7550,12 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
         const repo = m.repo || companyRaw;
         out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct}% \u2014 ${url}`);
       } else if (source === "contribute") {
-        const repo = m.repo || companyRaw;
+        const repoFull = m.repo || companyRaw;
+        const slashIdx = repoFull.indexOf("/");
+        const repoName = slashIdx >= 0 ? repoFull.slice(slashIdx + 1) : repoFull;
         const num = m.issueNumber != null ? ` #${m.issueNumber}` : "";
-        out.push(`\u2197 contribute \xB7 ${repo}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${pct}%`);
+        const shortUrl = `${base}/c/${contributeShortToken(String(m.id))}`;
+        out.push(`\u2197 contribute \xB7 ${repoName}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${pct}% \u2014 ${shortUrl}`);
       } else {
         out.push(`\u2197 ${title} @ ${company} \xB7 ${pct}% \u2014 ${url}`);
       }
@@ -7597,6 +7613,7 @@ var init_spinner_render = __esm({
     init_spinner_verbs();
     init_spinner_seen();
     init_spinner_io();
+    init_src();
   }
 });
 
@@ -7912,7 +7929,7 @@ function readWebSessionFile() {
 // bin/jpi-refresh.js
 var GH_SESSION_COOKIE = "__jpi_gh_session";
 var __dirname2 = fileURLToPath3(new URL(".", import.meta.url));
-var API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://www.terminalhire.com";
+var API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
 async function run() {
   try {
     let index;

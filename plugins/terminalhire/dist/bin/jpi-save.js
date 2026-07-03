@@ -861,6 +861,14 @@ var init_legible = __esm({
   }
 });
 
+// ../../packages/core/src/short-token.ts
+import { createHash as createHash2 } from "crypto";
+var init_short_token = __esm({
+  "../../packages/core/src/short-token.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/index.ts
 var init_src = __esm({
   "../../packages/core/src/index.ts"() {
@@ -877,6 +885,7 @@ var init_src = __esm({
     init_chatCrypto();
     init_job_status();
     init_legible();
+    init_short_token();
   }
 });
 
@@ -888,9 +897,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/3ffac25b-ca95-4a86-9e17-a4cf326551de/scratchpad/rel/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/3ffac25b-ca95-4a86-9e17-a4cf326551de/scratchpad/rel/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {

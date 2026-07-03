@@ -496,6 +496,9 @@ var INTRO_ACCEPTED_TTL_MS = 365 * 24 * 60 * 60 * 1e3;
 import { hkdfSync, createHash, randomBytes } from "crypto";
 var KDF_INFO = Buffer.from("terminalhire-chat-v1");
 
+// ../../packages/core/src/short-token.ts
+import { createHash as createHash2 } from "crypto";
+
 // src/signal.ts
 var LANGUAGE_TAGS = /* @__PURE__ */ new Set([
   "typescript",

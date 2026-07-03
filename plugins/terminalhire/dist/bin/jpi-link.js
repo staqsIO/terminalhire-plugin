@@ -296,7 +296,7 @@ var init_link = __esm({
     "use strict";
     init_web_session();
     init_config();
-    LINK_BASE = "https://www.terminalhire.com";
+    LINK_BASE = "https://terminalhire.com";
     GH_SESSION_COOKIE = "__jpi_gh_session";
     LINK_TIMEOUT_MS = 12e4;
     LINKED_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>terminalhire</title></head>

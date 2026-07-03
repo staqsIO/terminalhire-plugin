@@ -3865,6 +3865,14 @@ var init_legible = __esm({
   }
 });
 
+// ../../packages/core/src/short-token.ts
+import { createHash as createHash2 } from "crypto";
+var init_short_token = __esm({
+  "../../packages/core/src/short-token.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/index.ts
 var init_src = __esm({
   "../../packages/core/src/index.ts"() {
@@ -3881,6 +3889,7 @@ var init_src = __esm({
     init_chatCrypto();
     init_job_status();
     init_legible();
+    init_short_token();
   }
 });
 
@@ -3892,9 +3901,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/3ffac25b-ca95-4a86-9e17-a4cf326551de/scratchpad/rel/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/3ffac25b-ca95-4a86-9e17-a4cf326551de/scratchpad/rel/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -4267,7 +4276,7 @@ var init_chat_client = __esm({
     init_src();
     init_chat_keystore();
     init_web_session();
-    CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
+    CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE = "__jpi_gh_session";
     TERMINALHIRE_DIR3 = join5(homedir4(), ".terminalhire");
     PEERS_FILE = join5(TERMINALHIRE_DIR3, "chat-peers.json");
@@ -4485,7 +4494,7 @@ var init_jpi_chat = __esm({
     init_chat_client();
     init_config();
     init_web_session();
-    CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
+    CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE2 = "__jpi_gh_session";
     ANSI_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
     ANSI_OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
@@ -4873,7 +4882,7 @@ var init_jpi_chat_read = __esm({
     init_chat_client();
     init_web_session();
     init_jpi_chat();
-    CHAT_BASE3 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
+    CHAT_BASE3 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE3 = "__jpi_gh_session";
     TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join8(homedir7(), ".terminalhire");
     READS_FILE = join8(TERMINALHIRE_DIR5, "chat-reads.json");

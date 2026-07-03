@@ -124,7 +124,7 @@ function writeConfig(config) {
 }
 
 // src/link.ts
-var LINK_BASE = "https://www.terminalhire.com";
+var LINK_BASE = "https://terminalhire.com";
 var GH_SESSION_COOKIE = "__jpi_gh_session";
 var LINK_TIMEOUT_MS = 12e4;
 function resolveLoopbackRequest(rawUrl, expectedNonce) {

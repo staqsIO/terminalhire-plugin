@@ -41,9 +41,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/3ffac25b-ca95-4a86-9e17-a4cf326551de/scratchpad/rel/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/3ffac25b-ca95-4a86-9e17-a4cf326551de/scratchpad/rel/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -3479,6 +3479,9 @@ function safetyNumber(pubA, pubB) {
   return groups.join(" ");
 }
 
+// ../../packages/core/src/short-token.ts
+import { createHash as createHash2 } from "crypto";
+
 // src/chat-keystore.ts
 import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync3, writeFileSync as writeFileSync2, rmSync as rmSync2 } from "fs";
 import { homedir as homedir2 } from "os";
@@ -3591,7 +3594,7 @@ function readWebSessionCookie() {
 }
 
 // src/chat-client.ts
-var CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
+var CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
 var GH_SESSION_COOKIE = "__jpi_gh_session";
 var TERMINALHIRE_DIR3 = join5(homedir4(), ".terminalhire");
 var PEERS_FILE = join5(TERMINALHIRE_DIR3, "chat-peers.json");

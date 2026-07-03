@@ -872,6 +872,14 @@ var init_legible = __esm({
   }
 });
 
+// ../../packages/core/src/short-token.ts
+import { createHash as createHash2 } from "crypto";
+var init_short_token = __esm({
+  "../../packages/core/src/short-token.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/index.ts
 var init_src = __esm({
   "../../packages/core/src/index.ts"() {
@@ -888,6 +896,7 @@ var init_src = __esm({
     init_chatCrypto();
     init_job_status();
     init_legible();
+    init_short_token();
   }
 });
 
@@ -938,9 +947,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/3ffac25b-ca95-4a86-9e17-a4cf326551de/scratchpad/rel/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/3ffac25b-ca95-4a86-9e17-a4cf326551de/scratchpad/rel/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -1645,7 +1654,7 @@ var init_intro2 = __esm({
     "use strict";
     init_src();
     init_web_session();
-    LINK_BASE = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
+    LINK_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE = "__jpi_gh_session";
     UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   }

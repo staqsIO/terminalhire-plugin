@@ -41,9 +41,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/3ffac25b-ca95-4a86-9e17-a4cf326551de/scratchpad/rel/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/3ffac25b-ca95-4a86-9e17-a4cf326551de/scratchpad/rel/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -599,6 +599,9 @@ var INTRO_ACCEPTED_TTL_MS = 365 * 24 * 60 * 60 * 1e3;
 // ../../packages/core/src/chatCrypto.ts
 import { hkdfSync, createHash, randomBytes } from "crypto";
 var KDF_INFO = Buffer.from("terminalhire-chat-v1");
+
+// ../../packages/core/src/short-token.ts
+import { createHash as createHash2 } from "crypto";
 
 // src/profile.ts
 var TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");

@@ -63,7 +63,7 @@ function openInBrowser(url) {
 }
 
 // bin/peer-connect-prompt.js
-var OAUTH_BASE = "https://www.terminalhire.com";
+var OAUTH_BASE = "https://terminalhire.com";
 var PROMPT = [
   "",
   "  Connect with other builders?",

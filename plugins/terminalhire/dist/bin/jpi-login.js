@@ -75,9 +75,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/3ffac25b-ca95-4a86-9e17-a4cf326551de/scratchpad/rel/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/3ffac25b-ca95-4a86-9e17-a4cf326551de/scratchpad/rel/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -6650,6 +6650,17 @@ var init_legible = __esm({
   }
 });
 
+// ../../packages/core/src/short-token.ts
+import { createHash as createHash2 } from "crypto";
+function contributeShortToken(id) {
+  return createHash2("sha256").update(id, "utf8").digest("base64url").slice(0, 8);
+}
+var init_short_token = __esm({
+  "../../packages/core/src/short-token.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/index.ts
 var src_exports = {};
 __export(src_exports, {
@@ -6693,6 +6704,7 @@ __export(src_exports, {
   composeIntroEmail: () => composeIntroEmail,
   computeAcceptanceCredential: () => computeAcceptanceCredential,
   computeAcceptanceCredentialPublic: () => computeAcceptanceCredentialPublic,
+  contributeShortToken: () => contributeShortToken,
   coreTagsFromTitle: () => coreTagsFromTitle,
   decorate: () => decorate,
   decryptMessage: () => decryptMessage,
@@ -6760,6 +6772,7 @@ var init_src = __esm({
     init_chatCrypto();
     init_job_status();
     init_legible();
+    init_short_token();
   }
 });
 
@@ -7139,7 +7152,7 @@ var init_peer_connect_prompt = __esm({
     "use strict";
     init_config();
     init_open_url();
-    OAUTH_BASE = "https://www.terminalhire.com";
+    OAUTH_BASE = "https://terminalhire.com";
     PROMPT = [
       "",
       "  Connect with other builders?",
@@ -7243,7 +7256,7 @@ async function runLogin() {
     const skipWeb = process.argv.includes("--no-web");
     if (!isMock && !skipWeb) {
       try {
-        const OAUTH_BASE2 = "https://www.terminalhire.com";
+        const OAUTH_BASE2 = "https://terminalhire.com";
         const webUrl = `${OAUTH_BASE2}/api/auth/github?next=/dashboard`;
         console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
         console.log("  Your web profile & r\xE9sum\xE9 \u2014 public GitHub data only,");

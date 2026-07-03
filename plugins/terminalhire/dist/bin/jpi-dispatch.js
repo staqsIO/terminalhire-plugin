@@ -296,9 +296,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/3ffac25b-ca95-4a86-9e17-a4cf326551de/scratchpad/rel/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/3ffac25b-ca95-4a86-9e17-a4cf326551de/scratchpad/rel/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -7163,6 +7163,17 @@ var init_legible = __esm({
   }
 });
 
+// ../../packages/core/src/short-token.ts
+import { createHash as createHash2 } from "crypto";
+function contributeShortToken(id) {
+  return createHash2("sha256").update(id, "utf8").digest("base64url").slice(0, 8);
+}
+var init_short_token = __esm({
+  "../../packages/core/src/short-token.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/index.ts
 var src_exports = {};
 __export(src_exports, {
@@ -7206,6 +7217,7 @@ __export(src_exports, {
   composeIntroEmail: () => composeIntroEmail,
   computeAcceptanceCredential: () => computeAcceptanceCredential,
   computeAcceptanceCredentialPublic: () => computeAcceptanceCredentialPublic,
+  contributeShortToken: () => contributeShortToken,
   coreTagsFromTitle: () => coreTagsFromTitle,
   decorate: () => decorate,
   decryptMessage: () => decryptMessage,
@@ -7273,6 +7285,7 @@ var init_src = __esm({
     init_chatCrypto();
     init_job_status();
     init_legible();
+    init_short_token();
   }
 });
 
@@ -7611,7 +7624,7 @@ var init_peer_connect_prompt = __esm({
     "use strict";
     init_config();
     init_open_url();
-    OAUTH_BASE = "https://www.terminalhire.com";
+    OAUTH_BASE = "https://terminalhire.com";
     PROMPT = [
       "",
       "  Connect with other builders?",
@@ -7718,7 +7731,7 @@ async function runLogin() {
     const skipWeb = process.argv.includes("--no-web");
     if (!isMock && !skipWeb) {
       try {
-        const OAUTH_BASE3 = "https://www.terminalhire.com";
+        const OAUTH_BASE3 = "https://terminalhire.com";
         const webUrl = `${OAUTH_BASE3}/api/auth/github?next=/dashboard`;
         console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
         console.log("  Your web profile & r\xE9sum\xE9 \u2014 public GitHub data only,");
@@ -10547,8 +10560,8 @@ var init_trajectory = __esm({
       "cap:agentic-workflow": "Agent orchestration",
       "mcp:custom": "Private integrations"
     };
-    LINK_BASE = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
-    OAUTH_BASE2 = "https://www.terminalhire.com";
+    LINK_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
+    OAUTH_BASE2 = "https://terminalhire.com";
     GH_SESSION_COOKIE = "__jpi_gh_session";
     PUSH_DENYLIST = ["rework", "recovery", "within_session", "fatigue", "vector", "mcp__"];
   }
@@ -10966,7 +10979,7 @@ var init_intro2 = __esm({
     "use strict";
     init_src();
     init_web_session();
-    LINK_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
+    LINK_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE2 = "__jpi_gh_session";
     UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   }
@@ -11245,7 +11258,7 @@ var init_chat_client = __esm({
     init_src();
     init_chat_keystore();
     init_web_session();
-    CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
+    CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE3 = "__jpi_gh_session";
     TERMINALHIRE_DIR14 = join18(homedir17(), ".terminalhire");
     PEERS_FILE = join18(TERMINALHIRE_DIR14, "chat-peers.json");
@@ -11679,7 +11692,7 @@ var init_jpi_chat_read = __esm({
     init_chat_client();
     init_web_session();
     init_jpi_chat();
-    CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
+    CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE4 = "__jpi_gh_session";
     TERMINALHIRE_DIR15 = process.env.TERMINALHIRE_DIR || join19(homedir18(), ".terminalhire");
     READS_FILE = join19(TERMINALHIRE_DIR15, "chat-reads.json");
@@ -13002,7 +13015,7 @@ var init_jpi_chat = __esm({
     init_chat_client();
     init_config();
     init_web_session();
-    CHAT_BASE3 = process.env["TERMINALHIRE_API_URL"] || "https://www.terminalhire.com";
+    CHAT_BASE3 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE5 = "__jpi_gh_session";
     HIDE_CURSOR2 = "\x1B[?25l";
     SHOW_CURSOR2 = "\x1B[?25h";
@@ -13025,7 +13038,7 @@ var init_jpi_chat = __esm({
     CHAT_AT_REST = "Your private key is encrypted against casual access, not full machine compromise.";
     CHAT_CODE_OF_CONDUCT = "Code of conduct: keep it professional \u2014 harassment, spam, or abuse gets you blocked and removed.";
     CHAT_MIN_AGE = "You must be at least 13 years old to use connections chat.";
-    DEPOSIT_CTA = "\n  Keep building together \u2014 publish your r\xE9sum\xE9 so more builders find you:\n    https://www.terminalhire.com/dashboard\n\n";
+    DEPOSIT_CTA = "\n  Keep building together \u2014 publish your r\xE9sum\xE9 so more builders find you:\n    https://terminalhire.com/dashboard\n\n";
     ACTIVE_WINDOW_MS = 2 * 60 * 1e3;
   }
 });
@@ -35722,7 +35735,7 @@ var init_link = __esm({
     "use strict";
     init_web_session();
     init_config();
-    LINK_BASE3 = "https://www.terminalhire.com";
+    LINK_BASE3 = "https://terminalhire.com";
     GH_SESSION_COOKIE6 = "__jpi_gh_session";
     LINK_TIMEOUT_MS = 12e4;
     LINKED_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>terminalhire</title></head>
@@ -36749,9 +36762,12 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
         const repo = m.repo || companyRaw;
         out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct2}% \u2014 ${url}`);
       } else if (source === "contribute") {
-        const repo = m.repo || companyRaw;
+        const repoFull = m.repo || companyRaw;
+        const slashIdx = repoFull.indexOf("/");
+        const repoName = slashIdx >= 0 ? repoFull.slice(slashIdx + 1) : repoFull;
         const num = m.issueNumber != null ? ` #${m.issueNumber}` : "";
-        out.push(`\u2197 contribute \xB7 ${repo}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${pct2}%`);
+        const shortUrl = `${base}/c/${contributeShortToken(String(m.id))}`;
+        out.push(`\u2197 contribute \xB7 ${repoName}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${pct2}% \u2014 ${shortUrl}`);
       } else {
         out.push(`\u2197 ${title} @ ${company} \xB7 ${pct2}% \u2014 ${url}`);
       }
@@ -36809,6 +36825,7 @@ var init_spinner_render = __esm({
     init_spinner_verbs();
     init_spinner_seen();
     init_spinner_io();
+    init_src();
   }
 });
 
@@ -37410,7 +37427,7 @@ var init_jpi_sync = __esm({
     TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join28(homedir25(), ".terminalhire");
     TIER1_MARKER = join28(TH_DIR2, "tier1.json");
     API_URL6 = process.env["TERMINALHIRE_API_URL"] || process.env["JPI_API_URL"] || "https://terminalhire.com";
-    SYNC_BASE = "https://www.terminalhire.com";
+    SYNC_BASE = "https://terminalhire.com";
     POLL_INTERVAL_MS = 2e3;
     POLL_TIMEOUT_MS = 10 * 60 * 1e3;
     CONSENT_VERSION = 1;
@@ -37878,7 +37895,7 @@ var init_jpi_refresh = __esm({
     init_web_session();
     GH_SESSION_COOKIE7 = "__jpi_gh_session";
     __dirname4 = fileURLToPath5(new URL(".", import.meta.url));
-    API_URL7 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://www.terminalhire.com";
+    API_URL7 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
   }
 });
 
