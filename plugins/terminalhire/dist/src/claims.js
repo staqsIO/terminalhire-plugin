@@ -8,11 +8,15 @@ var TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
 function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
+function normalizeClaim(c) {
+  return { ...c, kind: c.kind ?? "bounty", policy: c.policy ?? null };
+}
 function readClaims() {
   try {
     if (!existsSync(CLAIMS_FILE)) return [];
     const data = JSON.parse(readFileSync(CLAIMS_FILE, "utf8"));
-    return Array.isArray(data?.claims) ? data.claims : [];
+    const claims = Array.isArray(data?.claims) ? data.claims : [];
+    return claims.map(normalizeClaim);
   } catch {
     return [];
   }
@@ -42,6 +46,10 @@ function recordClaim(rec) {
   const ts = nowISO();
   const claim = {
     ...rec,
+    // Defensive default (mirrors normalizeClaim's `kind ?? 'bounty'` pattern):
+    // a caller written before `policy` existed, or a plain-JS caller that skips
+    // it, still produces a valid record instead of `policy: undefined`.
+    policy: rec.policy ?? null,
     state: "claimed",
     worktreePath: null,
     branch: null,

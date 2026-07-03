@@ -205,6 +205,12 @@ function defaultLinkDeps() {
     generateNonce: () => randomBytes(16).toString("hex"),
     persistToken: (token) => writeWebSessionFile(token),
     markNudgeDisclosed: () => writeConfig({ inboundNudgeDisclosed: true }),
+    // No-op by default: the index-cache is a bin-layer concern (statusline/spinner
+    // render), so the real writer (cache-store.updateIndexCache) is injected by
+    // jpi-link.js. src on its own does not reach the cache — worst case the flag
+    // clears on the next background poll, i.e. today's behavior, never worse.
+    clearSessionStale: () => {
+    },
     log: (msg) => console.log(msg),
     errorLog: (msg) => console.error(msg),
     exit: (code) => process.exit(code)
@@ -240,6 +246,10 @@ async function runLink(overrides) {
     return;
   }
   deps.persistToken(outcome.token);
+  try {
+    deps.clearSessionStale();
+  } catch {
+  }
   deps.log("\n  This terminal is now linked to your terminalhire account.");
   deps.log("  Try `terminalhire intro <login>`, `terminalhire chat`, or `terminalhire trajectory --push`.");
   deps.log("  Your spinner will quietly surface incoming connection requests.");

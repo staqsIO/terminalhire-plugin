@@ -207,6 +207,12 @@ function defaultLinkDeps() {
     generateNonce: () => randomBytes(16).toString("hex"),
     persistToken: (token) => writeWebSessionFile(token),
     markNudgeDisclosed: () => writeConfig({ inboundNudgeDisclosed: true }),
+    // No-op by default: the index-cache is a bin-layer concern (statusline/spinner
+    // render), so the real writer (cache-store.updateIndexCache) is injected by
+    // jpi-link.js. src on its own does not reach the cache — worst case the flag
+    // clears on the next background poll, i.e. today's behavior, never worse.
+    clearSessionStale: () => {
+    },
     log: (msg) => console.log(msg),
     errorLog: (msg) => console.error(msg),
     exit: (code) => process.exit(code)
@@ -242,6 +248,10 @@ async function runLink(overrides) {
     return;
   }
   deps.persistToken(outcome.token);
+  try {
+    deps.clearSessionStale();
+  } catch {
+  }
   deps.log("\n  This terminal is now linked to your terminalhire account.");
   deps.log("  Try `terminalhire intro <login>`, `terminalhire chat`, or `terminalhire trajectory --push`.");
   deps.log("  Your spinner will quietly surface incoming connection requests.");
@@ -313,6 +323,47 @@ var init_link = __esm({
   }
 });
 
+// bin/cache-store.js
+var cache_store_exports = {};
+__export(cache_store_exports, {
+  readCacheEntry: () => readCacheEntry,
+  updateIndexCache: () => updateIndexCache
+});
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, renameSync } from "fs";
+import { join as join3 } from "path";
+import { homedir as homedir3 } from "os";
+function readCacheEntry() {
+  try {
+    return JSON.parse(readFileSync3(INDEX_CACHE_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function updateIndexCache(patch) {
+  mkdirSync3(TERMINALHIRE_DIR2, { recursive: true });
+  const existing = readCacheEntry() ?? {};
+  const entry = {
+    ...existing,
+    ...patch,
+    schemaVersion: SCHEMA_VERSION,
+    ts: Date.now()
+  };
+  const tmp = `${INDEX_CACHE_FILE}.${process.pid}.${tmpCounter++}.tmp`;
+  writeFileSync3(tmp, JSON.stringify(entry), "utf8");
+  renameSync(tmp, INDEX_CACHE_FILE);
+  return entry;
+}
+var TERMINALHIRE_DIR2, INDEX_CACHE_FILE, SCHEMA_VERSION, tmpCounter;
+var init_cache_store = __esm({
+  "bin/cache-store.js"() {
+    "use strict";
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir3(), ".terminalhire");
+    INDEX_CACHE_FILE = join3(TERMINALHIRE_DIR2, "index-cache.json");
+    SCHEMA_VERSION = 1;
+    tmpCounter = 0;
+  }
+});
+
 // bin/jpi-link.js
 async function run() {
   try {
@@ -323,7 +374,10 @@ async function run() {
       return;
     }
     const { runLink: runLink2 } = await Promise.resolve().then(() => (init_link(), link_exports));
-    await runLink2();
+    const { updateIndexCache: updateIndexCache2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
+    await runLink2({
+      clearSessionStale: () => updateIndexCache2({ sessionStale: false })
+    });
   } catch (err) {
     console.error("terminalhire link error:", err?.message ?? err);
     process.exit(1);

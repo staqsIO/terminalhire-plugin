@@ -5,7 +5,7 @@ description: Claim a bounty and track it through to a merged PR (runs terminalhi
 
 # terminalhire:claim
 
-The claim→execute→submit loop. Bounties are listed by the `bounties` skill; **claim** records one locally and tracks it through to a merged PR. All state is local (`~/.terminalhire/claims.json`) — claim activity never leaves the machine; the only network is public GitHub reads (open-PR race signal, PR merge state).
+The claim→execute→submit loop. Bounties are listed by the `bounties` skill; **claim** records one locally and tracks it through to a merged PR. All state is local (`~/.terminalhire/claims.json`) — claim activity never leaves the machine; the only network is public GitHub reads (open-PR race signal, PR merge state, and the target repo's contribution-policy docs).
 
 Invoke the bundled engine in a Bash tool call. Pick the subcommand that matches the request:
 
@@ -19,7 +19,7 @@ Invoke the bundled engine in a Bash tool call. Pick the subcommand that matches 
    ```bash
    node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim preview <bountyId|issueUrl> --json
    ```
-   Parse the single JSON line: `{ bountyId, title, amountUSD, repoFullName, issueUrl, issueState, openPRs }`.
+   Parse the single JSON line: `{ bountyId, title, amountUSD, repoFullName, issueUrl, issueState, openPRs, policy: { status, hits } }`. `policy.status` is `"flagged"` (AI-assistance policy language found — `hits` carries `{ file, excerpt }` entries), `"clean"` (no such language), or `"unavailable"` (the repo's CONTRIBUTING/PR-template/AGENTS docs couldn't be read).
 
 2. **Confirm via a styled `AskUserQuestion`.** One question — *"Claim this bounty?"* — with options **"Claim it"** (recommended, listed first) and **"Cancel"**. Put a terminal-styled card in the `preview` field of the **Claim it** option so it renders inline. Build the card from the JSON:
    ```
@@ -49,6 +49,12 @@ Invoke the bundled engine in a Bash tool call. Pick the subcommand that matches 
    ```
    On **Cancel** (or a closed issue), do not record — tell the dev nothing was claimed. `claim record` prints the executor brief and re-checks the live open-PR race at commit time.
 
+   **Policy handshake — when `preview` reported `policy.status` `"flagged"` or `"unavailable"`:** `claim record` will REFUSE (exit 1) unless it is acknowledged, and it will NOT prompt interactively when invoked this way (non-TTY via the Bash tool → the confirm is skipped, the refusal fires). So do your judgment-layer read of the repo's actual CONTRIBUTING / PR-template / AGENTS docs FIRST (see *Doing the work* below — HARD-STOP if the repo prohibits AI-assisted contributions). Only if you've read them and the work is genuinely mergeable, append `--ack-policy` to record it:
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim record <bountyId|issueUrl> --ack-policy
+   ```
+   A `"clean"` status records without the flag. Never pass `--ack-policy` reflexively — it is your attestation that you read the policy and the contribution is allowed.
+
 ### Track claims and the metric
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim list            # all claims + accepted-PR rate
@@ -69,9 +75,17 @@ node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim submit <id>   # run 
 ```
 `submit` pushes the worktree branch to the user's **fork** and opens the PR against the upstream bounty repo, then advances `ready → submitted` with the PR URL attached. It refuses unless the claim is `ready` (and not `revise`), the worktree/branch match what was recorded (see `attach` below), the tree is clean, and `origin` is a fork (never the upstream). It **always asks for explicit confirmation** before pushing and **never force-pushes**. If the push succeeds but PR creation fails, open the PR manually then `claim update <id> submitted <prUrl>`.
 
+`submit` **always** appends a baseline AI-assistance disclosure line to the PR body — there is no flag to disable it. If the target repo's PR template (read during the policy check above) asks for its own disclosure format or a specific section, honor that too — write the PR description to match the repo's template, with the CLI's baseline disclosure alongside it, not instead of it.
+
 ## Doing the work (executor guardrails)
 
 If the user asks you to actually DO a claimed bounty, work it in an **isolated git worktree**, and enforce these guardrails (a slop PR under the user's GitHub identity is permanent and damages their reputation):
+
+**Before writing any code — read the repo's contribution policy.** `claim record` already ran a bounded, deterministic keyword scan (`src/repo-policy.ts`) and printed a `POLICY` section; if it showed excerpts (status `flagged`) or said the docs couldn't be read (status `unavailable`), read the actual CONTRIBUTING.md / PR template / AGENTS.md yourself — fetch them from the repo if you don't already have them — before doing anything else. The CLI scan is a keyword FLAG, not a verdict; you are the judgment layer it can't be:
+- If the repo's policy **prohibits AI-generated/AI-assisted contributions** (e.g. Gentoo/NetBSD-style "tainted code" language, an outright ban on LLM-authored PRs), **HARD-STOP**. Do not clone, do not write a patch, do not open a worktree for it. Tell the user plainly that this repo doesn't accept AI-assisted work and the claim isn't mergeable as-is — do not attempt to route around it (e.g. "write it as if you wrote it yourself"). Suggest they either work it by hand or `terminalhire claim release <id>`.
+- If the policy is silent, permissive, or merely asks for **disclosure**, proceed — and follow whatever disclosure format the repo asks for (see the submit step below; the CLI's baseline note may need to sit alongside a repo-specific tag/section, not replace it).
+- If you can't find or read the policy docs at all, say so and let the user decide whether to proceed — don't silently treat "couldn't check" as "no policy."
+
 - **Record the worktree so `submit` can verify it later** — right after you create the worktree + branch, run:
   ```bash
   node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim attach <id> --worktree <absPath> --branch <branchName>

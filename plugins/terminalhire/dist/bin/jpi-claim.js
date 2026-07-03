@@ -20,17 +20,21 @@ __export(claims_exports, {
   removeClaim: () => removeClaim,
   updateClaim: () => updateClaim
 });
-import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from "fs";
-import { join } from "path";
+import { readFileSync as readFileSync2, writeFileSync, mkdirSync, renameSync, existsSync } from "fs";
+import { join as join2 } from "path";
 import { homedir } from "os";
 function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
+function normalizeClaim(c) {
+  return { ...c, kind: c.kind ?? "bounty", policy: c.policy ?? null };
+}
 function readClaims() {
   try {
     if (!existsSync(CLAIMS_FILE)) return [];
-    const data = JSON.parse(readFileSync(CLAIMS_FILE, "utf8"));
-    return Array.isArray(data?.claims) ? data.claims : [];
+    const data = JSON.parse(readFileSync2(CLAIMS_FILE, "utf8"));
+    const claims = Array.isArray(data?.claims) ? data.claims : [];
+    return claims.map(normalizeClaim);
   } catch {
     return [];
   }
@@ -60,6 +64,10 @@ function recordClaim(rec) {
   const ts = nowISO();
   const claim = {
     ...rec,
+    // Defensive default (mirrors normalizeClaim's `kind ?? 'bounty'` pattern):
+    // a caller written before `policy` existed, or a plain-JS caller that skips
+    // it, still produces a valid record instead of `policy: undefined`.
+    policy: rec.policy ?? null,
     state: "claimed",
     worktreePath: null,
     branch: null,
@@ -96,23 +104,631 @@ var TERMINALHIRE_DIR, CLAIMS_FILE, TERMINAL_STATES;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
-    TERMINALHIRE_DIR = join(homedir(), ".terminalhire");
-    CLAIMS_FILE = join(TERMINALHIRE_DIR, "claims.json");
+    TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");
+    CLAIMS_FILE = join2(TERMINALHIRE_DIR, "claims.json");
     TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
   }
 });
 
+// src/repo-policy.ts
+var repo_policy_exports = {};
+__export(repo_policy_exports, {
+  checkRepoPolicy: () => checkRepoPolicy
+});
+async function fetchContentsFile(fetchImpl, repoFullName, path) {
+  try {
+    const res = await fetchImpl(`${GH_API}/repos/${repoFullName}/contents/${path}`, {
+      headers: GH_HEADERS,
+      signal: AbortSignal.timeout(1e4)
+    });
+    if (res.status === 404) return { ok: true, missing: true, content: null };
+    if (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0") {
+      return { ok: false, missing: false, content: null };
+    }
+    if (!res.ok) return { ok: false, missing: false, content: null };
+    const body = await res.json();
+    if (typeof body.content !== "string") return { ok: false, missing: false, content: null };
+    const decoded = Buffer.from(body.content.replace(/\n/g, ""), "base64").toString("utf8");
+    return { ok: true, missing: false, content: decoded };
+  } catch {
+    return { ok: false, missing: false, content: null };
+  }
+}
+function findHits(file, content) {
+  const lines = content.split("\n");
+  const hits = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!AI_SIGNAL_PATTERNS.some((p) => p.re.test(line))) continue;
+    const start = Math.max(0, i - 2);
+    const end = Math.min(lines.length, i + 3);
+    hits.push({ file, excerpt: lines.slice(start, end).join("\n") });
+  }
+  return hits;
+}
+async function checkRepoPolicy(repoFullName, opts = {}) {
+  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  let requestsUsed = 0;
+  let hadError = false;
+  const hits = [];
+  outer: for (const group of CANDIDATE_GROUPS) {
+    for (const path of group) {
+      if (requestsUsed >= MAX_REQUESTS) break outer;
+      requestsUsed++;
+      const outcome = await fetchContentsFile(fetchImpl, repoFullName, path);
+      if (!outcome.ok) {
+        hadError = true;
+        continue;
+      }
+      if (outcome.missing) continue;
+      if (outcome.content) hits.push(...findHits(path, outcome.content));
+      break;
+    }
+  }
+  if (hits.length > 0) return { status: "flagged", hits };
+  if (hadError) return { status: "unavailable", hits: [] };
+  return { status: "clean", hits: [] };
+}
+var GH_API, GH_HEADERS, MAX_REQUESTS, AI_SIGNAL_PATTERNS, CANDIDATE_GROUPS;
+var init_repo_policy = __esm({
+  "src/repo-policy.ts"() {
+    "use strict";
+    GH_API = "https://api.github.com";
+    GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
+    MAX_REQUESTS = 4;
+    AI_SIGNAL_PATTERNS = [
+      { label: "AI", re: /\bAI\b/i },
+      { label: "artificial intelligence", re: /artificial intelligence/i },
+      { label: "LLM", re: /\bLLMs?\b/i },
+      { label: "language model", re: /language model/i },
+      { label: "Copilot", re: /\bcopilot\b/i },
+      { label: "ChatGPT", re: /\bchatgpt\b/i },
+      { label: "Claude", re: /\bclaude\b/i },
+      { label: "generative", re: /\bgenerative\b/i },
+      { label: "machine-generated", re: /machine[\s-]generated/i }
+    ];
+    CANDIDATE_GROUPS = [
+      ["CONTRIBUTING.md", ".github/CONTRIBUTING.md", "docs/CONTRIBUTING.md"],
+      [".github/PULL_REQUEST_TEMPLATE.md", "PULL_REQUEST_TEMPLATE.md"],
+      ["AGENTS.md"]
+    ];
+  }
+});
+
 // bin/jpi-claim.js
-import { readFileSync as readFileSync2, existsSync as existsSync2 } from "fs";
-import { join as join2 } from "path";
+import { readFileSync as readFileSync3, existsSync as existsSync2 } from "fs";
+import { join as join3 } from "path";
 import { homedir as homedir2 } from "os";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { createInterface } from "readline";
-var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
-var INDEX_CACHE_FILE = join2(TERMINALHIRE_DIR2, "index-cache.json");
-var GH_API = "https://api.github.com";
-var GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
+
+// ../../packages/core/src/vocab/graph.data.ts
+var VOCAB_NODES = [
+  // ── Languages ─────────────────────────────────────────────────────────────
+  { id: "javascript", synonyms: ["js"], related: [{ to: "typescript", w: 0.6 }] },
+  { id: "typescript", parents: ["javascript"], synonyms: ["ts"] },
+  { id: "python", synonyms: ["py"] },
+  { id: "go", synonyms: ["golang"] },
+  { id: "rust" },
+  { id: "java", related: [{ to: "kotlin", w: 0.45 }, { to: "scala", w: 0.4 }] },
+  { id: "ruby" },
+  { id: "elixir" },
+  { id: "scala", related: [{ to: "java", w: 0.4 }] },
+  { id: "kotlin", related: [{ to: "java", w: 0.45 }] },
+  { id: "swift" },
+  { id: "cpp", synonyms: ["c++"] },
+  { id: "csharp", synonyms: ["c#"] },
+  { id: "php" },
+  { id: "haskell" },
+  { id: "clojure" },
+  { id: "r" },
+  { id: "dart" },
+  // ── Frontend ──────────────────────────────────────────────────────────────
+  {
+    id: "react",
+    parents: ["javascript"],
+    synonyms: ["reactjs"],
+    related: [{ to: "nextjs", w: 0.55 }, { to: "vue", w: 0.4 }, { to: "svelte", w: 0.4 }, { to: "solidjs", w: 0.5 }, { to: "angular", w: 0.35 }]
+  },
+  { id: "nextjs", parents: ["react"], synonyms: ["next", "next.js"], related: [{ to: "remix", w: 0.5 }] },
+  { id: "vue", parents: ["javascript"], synonyms: ["vue.js"], related: [{ to: "nuxt", w: 0.6 }] },
+  { id: "nuxt", parents: ["vue"], synonyms: ["nuxt.js"] },
+  { id: "svelte", parents: ["javascript"], related: [{ to: "sveltekit", w: 0.65 }] },
+  { id: "sveltekit", parents: ["svelte"] },
+  { id: "angular", parents: ["typescript"], synonyms: ["angular.js", "angularjs"] },
+  { id: "solidjs", parents: ["javascript"] },
+  { id: "remix", parents: ["react"], synonyms: ["remix.run"] },
+  { id: "astro", parents: ["javascript"], related: [{ to: "nextjs", w: 0.4 }] },
+  { id: "qwik", parents: ["javascript"] },
+  { id: "tailwind", parents: ["css"], synonyms: ["tailwindcss", "tw"] },
+  { id: "css" },
+  { id: "html" },
+  { id: "redux", parents: ["react"] },
+  { id: "vite", parents: ["frontend"] },
+  { id: "webpack", parents: ["frontend"] },
+  { id: "storybook", parents: ["frontend"] },
+  // ── Backend frameworks / runtimes ───────────────────────────────────────────
+  {
+    id: "nodejs",
+    parents: ["javascript"],
+    synonyms: ["node", "node.js"],
+    related: [{ to: "express", w: 0.5 }, { to: "fastify", w: 0.45 }, { to: "nestjs", w: 0.45 }]
+  },
+  { id: "express", parents: ["nodejs"], synonyms: ["express.js", "expressjs"], related: [{ to: "fastify", w: 0.5 }] },
+  { id: "fastify", parents: ["nodejs"] },
+  { id: "nestjs", parents: ["nodejs"], synonyms: ["nest", "nest.js"] },
+  { id: "hono", parents: ["nodejs"] },
+  { id: "deno", parents: ["javascript"], related: [{ to: "nodejs", w: 0.5 }, { to: "bun", w: 0.5 }] },
+  { id: "bun", parents: ["javascript"], related: [{ to: "nodejs", w: 0.5 }] },
+  { id: "django", parents: ["python"], related: [{ to: "flask", w: 0.5 }, { to: "fastapi", w: 0.45 }] },
+  { id: "fastapi", parents: ["python"], related: [{ to: "flask", w: 0.55 }, { to: "django", w: 0.45 }] },
+  { id: "flask", parents: ["python"] },
+  { id: "rails", parents: ["ruby"], synonyms: ["ruby-on-rails", "ror"] },
+  { id: "spring", parents: ["java"], synonyms: ["spring-boot", "springboot"] },
+  { id: "actix", parents: ["rust"] },
+  { id: "gin", parents: ["go"] },
+  { id: "phoenix", parents: ["elixir"] },
+  { id: "laravel", parents: ["php"] },
+  { id: "dotnet", parents: ["csharp"], synonyms: [".net", "asp.net", "dotnet-core"] },
+  // ── Infrastructure & DevOps ─────────────────────────────────────────────────
+  { id: "kubernetes", synonyms: ["k8s", "kube"], related: [{ to: "docker", w: 0.5 }, { to: "helm", w: 0.55 }, { to: "terraform", w: 0.4 }, { to: "argocd", w: 0.45 }] },
+  { id: "docker", parents: ["devops"], related: [{ to: "kubernetes", w: 0.5 }] },
+  { id: "terraform", synonyms: ["tf"], related: [{ to: "pulumi", w: 0.55 }, { to: "ansible", w: 0.4 }, { to: "aws", w: 0.4 }] },
+  { id: "pulumi", related: [{ to: "terraform", w: 0.55 }] },
+  { id: "ansible" },
+  { id: "aws", synonyms: ["amazon-web-services"], related: [{ to: "gcp", w: 0.4 }, { to: "azure", w: 0.4 }] },
+  { id: "gcp", synonyms: ["google-cloud", "google-cloud-platform"], related: [{ to: "aws", w: 0.4 }, { to: "azure", w: 0.4 }] },
+  { id: "azure", synonyms: ["microsoft-azure"], related: [{ to: "aws", w: 0.4 }] },
+  { id: "ci-cd", synonyms: ["cicd", "jenkins", "circleci", "circle-ci", "travis"], related: [{ to: "github-actions", w: 0.6 }, { to: "gitlab-ci", w: 0.6 }] },
+  { id: "github-actions", parents: ["ci-cd"], synonyms: ["github-action"] },
+  { id: "gitlab-ci", parents: ["ci-cd"], synonyms: ["gitlab"] },
+  { id: "linux" },
+  { id: "nginx" },
+  { id: "prometheus", parents: ["observability"], related: [{ to: "grafana", w: 0.6 }] },
+  { id: "grafana", parents: ["observability"] },
+  { id: "datadog", parents: ["observability"] },
+  { id: "opentelemetry", parents: ["observability"], synonyms: ["otel"] },
+  { id: "vercel", related: [{ to: "netlify", w: 0.5 }, { to: "nextjs", w: 0.4 }] },
+  { id: "netlify" },
+  { id: "fly", synonyms: ["fly.io"], related: [{ to: "railway", w: 0.5 }, { to: "render", w: 0.5 }] },
+  { id: "railway", related: [{ to: "render", w: 0.5 }] },
+  { id: "render" },
+  { id: "cloudflare", synonyms: ["cloudflare-workers"] },
+  { id: "helm", parents: ["kubernetes"] },
+  { id: "argocd", parents: ["kubernetes"] },
+  { id: "serverless", parents: ["devops"] },
+  // ── Databases & storage ─────────────────────────────────────────────────────
+  { id: "postgresql", synonyms: ["postgres", "pg"], related: [{ to: "mysql", w: 0.45 }, { to: "sqlite", w: 0.4 }] },
+  { id: "mysql", related: [{ to: "postgresql", w: 0.45 }] },
+  { id: "sqlite" },
+  { id: "mongodb", synonyms: ["mongo"] },
+  { id: "redis", related: [{ to: "caching", w: 0.5 }] },
+  { id: "elasticsearch", synonyms: ["elastic"], related: [{ to: "search", w: 0.55 }] },
+  { id: "kafka", synonyms: ["apache-kafka"], related: [{ to: "rabbitmq", w: 0.5 }, { to: "message-queue", w: 0.55 }] },
+  { id: "rabbitmq", related: [{ to: "message-queue", w: 0.55 }] },
+  { id: "cassandra" },
+  { id: "dynamodb", parents: ["aws"] },
+  { id: "snowflake", parents: ["data-engineering"], related: [{ to: "clickhouse", w: 0.4 }] },
+  { id: "clickhouse", parents: ["data-engineering"], related: [{ to: "duckdb", w: 0.35 }] },
+  { id: "duckdb", parents: ["data-engineering"] },
+  { id: "supabase", related: [{ to: "postgresql", w: 0.5 }, { to: "neon", w: 0.4 }] },
+  { id: "planetscale", related: [{ to: "mysql", w: 0.5 }] },
+  { id: "neon", related: [{ to: "postgresql", w: 0.5 }] },
+  { id: "turso", related: [{ to: "sqlite", w: 0.5 }] },
+  { id: "cockroachdb", related: [{ to: "postgresql", w: 0.45 }] },
+  { id: "prisma", parents: ["backend"], synonyms: ["@prisma/client"], related: [{ to: "drizzle", w: 0.5 }, { to: "typeorm", w: 0.45 }, { to: "sequelize", w: 0.4 }] },
+  { id: "drizzle", synonyms: ["drizzle-orm"], related: [{ to: "prisma", w: 0.5 }] },
+  { id: "sequelize", related: [{ to: "typeorm", w: 0.4 }] },
+  { id: "typeorm", related: [{ to: "prisma", w: 0.45 }] },
+  { id: "sqlalchemy", parents: ["python"] },
+  // ── Data engineering & ML ───────────────────────────────────────────────────
+  { id: "data-engineering", synonyms: ["data-eng"], related: [{ to: "spark", w: 0.5 }, { to: "airflow", w: 0.5 }, { to: "dbt", w: 0.45 }] },
+  { id: "spark", parents: ["data-engineering"], synonyms: ["apache-spark"] },
+  { id: "airflow", parents: ["data-engineering"], synonyms: ["apache-airflow"] },
+  { id: "dbt", parents: ["data-engineering"] },
+  { id: "ml", synonyms: ["machine-learning"], related: [{ to: "pytorch", w: 0.5 }, { to: "tensorflow", w: 0.5 }, { to: "scikit-learn", w: 0.5 }, { to: "data-engineering", w: 0.4 }] },
+  { id: "llm", parents: ["ml"], synonyms: ["llms", "genai", "generative-ai", "gpt"], related: [{ to: "langchain", w: 0.5 }, { to: "rag", w: 0.55 }, { to: "openai", w: 0.45 }, { to: "anthropic", w: 0.45 }] },
+  { id: "pytorch", parents: ["ml"], synonyms: ["torch"], related: [{ to: "tensorflow", w: 0.5 }] },
+  { id: "tensorflow", parents: ["ml"], synonyms: ["keras", "tf-keras"] },
+  { id: "pandas", parents: ["python"], related: [{ to: "numpy", w: 0.6 }, { to: "data-engineering", w: 0.45 }, { to: "spark", w: 0.4 }] },
+  { id: "numpy", parents: ["python"] },
+  { id: "scikit-learn", parents: ["ml"], synonyms: ["sklearn"] },
+  { id: "jupyter", parents: ["python"] },
+  { id: "langchain", parents: ["llm"], synonyms: ["llamaindex"] },
+  { id: "huggingface", parents: ["ml"], synonyms: ["hugging-face"] },
+  { id: "openai", parents: ["llm"] },
+  { id: "anthropic", parents: ["llm"], synonyms: ["claude"] },
+  { id: "rag", parents: ["llm"], synonyms: ["retrieval-augmented-generation"] },
+  { id: "mlops", parents: ["ml"], related: [{ to: "devops", w: 0.4 }] },
+  { id: "agents", parents: ["llm"], synonyms: ["agentic", "ai-agents", "multi-agent"], related: [{ to: "rag", w: 0.4 }] },
+  { id: "mcp", parents: ["agents"], synonyms: ["model-context-protocol"], related: [{ to: "llm", w: 0.45 }] },
+  { id: "inference", parents: ["ml"], synonyms: ["model-inference", "llm-inference", "model-serving"], related: [{ to: "mlops", w: 0.5 }, { to: "llm", w: 0.4 }] },
+  { id: "embeddings", parents: ["ml"], synonyms: ["embedding", "vector-embeddings"], related: [{ to: "rag", w: 0.55 }, { to: "llm", w: 0.45 }] },
+  { id: "prompt-engineering", parents: ["llm"], synonyms: ["prompting", "prompt"] },
+  { id: "fine-tuning", parents: ["ml"], synonyms: ["finetuning", "fine-tune", "rlhf"], related: [{ to: "llm", w: 0.5 }] },
+  { id: "computer-vision", parents: ["ml"], synonyms: ["image-recognition", "object-detection"] },
+  { id: "recsys", parents: ["ml"], synonyms: ["recommender-systems", "recommendation-systems", "recommendation"] },
+  // ── Mobile ──────────────────────────────────────────────────────────────────
+  { id: "mobile", related: [{ to: "ios", w: 0.5 }, { to: "android", w: 0.5 }] },
+  { id: "ios", parents: ["mobile", "swift"], related: [{ to: "android", w: 0.4 }] },
+  { id: "android", parents: ["mobile"], related: [{ to: "kotlin", w: 0.4 }] },
+  { id: "swiftui", parents: ["ios", "swift"] },
+  { id: "react-native", parents: ["mobile", "react"], synonyms: ["reactnative"], related: [{ to: "flutter", w: 0.4 }, { to: "expo", w: 0.6 }] },
+  { id: "flutter", parents: ["mobile", "dart"] },
+  { id: "expo", parents: ["react-native"] },
+  { id: "kotlin-multiplatform", parents: ["mobile", "kotlin"], synonyms: ["kmp"] },
+  // ── Domains / capabilities ──────────────────────────────────────────────────
+  { id: "frontend", related: [{ to: "react", w: 0.4 }, { to: "css", w: 0.3 }] },
+  { id: "backend", related: [{ to: "api-design", w: 0.4 }, { to: "microservices", w: 0.4 }] },
+  { id: "devops", related: [{ to: "kubernetes", w: 0.4 }, { to: "ci-cd", w: 0.4 }, { to: "docker", w: 0.4 }] },
+  { id: "authentication", synonyms: ["auth", "jwt", "saml", "passport", "auth0", "clerk", "nextauth"], related: [{ to: "oauth", w: 0.6 }, { to: "security", w: 0.5 }] },
+  { id: "oauth", parents: ["authentication"], synonyms: ["oauth2", "oidc"], related: [{ to: "security", w: 0.4 }] },
+  { id: "security", related: [{ to: "authentication", w: 0.5 }] },
+  { id: "payments", synonyms: ["stripe", "braintree", "paddle", "lemonsqueezy", "@stripe/stripe-js"], related: [{ to: "billing", w: 0.6 }] },
+  { id: "billing", synonyms: ["recurly", "chargebee"] },
+  { id: "api-design", synonyms: ["rest", "restful", "rest-api"], related: [{ to: "graphql", w: 0.4 }, { to: "grpc", w: 0.4 }, { to: "backend", w: 0.4 }] },
+  { id: "graphql", synonyms: ["gql"], related: [{ to: "trpc", w: 0.4 }] },
+  { id: "trpc", related: [{ to: "graphql", w: 0.4 }] },
+  { id: "grpc", synonyms: ["grpc-web"], related: [{ to: "microservices", w: 0.3 }] },
+  { id: "microservices" },
+  { id: "websockets", synonyms: ["ws", "socket.io"], related: [{ to: "realtime", w: 0.6 }] },
+  { id: "realtime", synonyms: ["real-time"] },
+  { id: "message-queue", synonyms: ["mq"] },
+  { id: "caching", synonyms: ["cache"] },
+  { id: "search", synonyms: ["full-text-search"] },
+  { id: "observability", synonyms: ["o11y"], related: [{ to: "monitoring", w: 0.6 }] },
+  { id: "monitoring", related: [{ to: "prometheus", w: 0.4 }] },
+  { id: "testing", related: [{ to: "unit-testing", w: 0.5 }, { to: "e2e-testing", w: 0.5 }] },
+  { id: "unit-testing", parents: ["testing"] },
+  { id: "e2e-testing", parents: ["testing"], synonyms: ["e2e", "end-to-end-testing"] },
+  { id: "jest", parents: ["testing"], related: [{ to: "vitest", w: 0.6 }, { to: "mocha", w: 0.5 }] },
+  { id: "vitest", parents: ["testing"], related: [{ to: "jest", w: 0.6 }] },
+  { id: "playwright", parents: ["e2e-testing"], related: [{ to: "cypress", w: 0.6 }] },
+  { id: "cypress", parents: ["e2e-testing"] },
+  { id: "mocha", parents: ["testing"] },
+  { id: "pytest", parents: ["testing", "python"] },
+  { id: "accessibility", synonyms: ["a11y"] },
+  { id: "seo" },
+  { id: "performance", synonyms: ["perf", "web-performance"] }
+];
+
+// ../../packages/core/src/vocab/closure.ts
+var PARENT_UP = 0.6;
+var PARENT_DOWN = 0.35;
+var DECAY_FLOOR = 0.25;
+function round3(n) {
+  return Math.round(n * 1e3) / 1e3;
+}
+function validateGraph(nodes) {
+  const ids = /* @__PURE__ */ new Set();
+  for (const n of nodes) {
+    if (ids.has(n.id)) throw new Error(`vocab: duplicate id "${n.id}"`);
+    ids.add(n.id);
+  }
+  const seenAlias = /* @__PURE__ */ new Map();
+  for (const n of nodes) {
+    for (const p of n.parents ?? []) {
+      if (p === n.id) throw new Error(`vocab: "${n.id}" lists itself as a parent`);
+      if (!ids.has(p)) throw new Error(`vocab: "${n.id}" parent "${p}" is not a defined id`);
+    }
+    for (const e of n.related ?? []) {
+      if (e.to === n.id) throw new Error(`vocab: "${n.id}" relates to itself`);
+      if (!ids.has(e.to)) throw new Error(`vocab: "${n.id}" related "${e.to}" is not a defined id`);
+      if (!(e.w > 0 && e.w <= 1)) throw new Error(`vocab: "${n.id}"\u2192"${e.to}" weight ${e.w} out of (0,1]`);
+    }
+    for (const s of n.synonyms ?? []) {
+      const alias = s.toLowerCase();
+      if (ids.has(alias)) throw new Error(`vocab: synonym "${alias}" collides with a canonical id`);
+      const prev = seenAlias.get(alias);
+      if (prev && prev !== n.id) throw new Error(`vocab: synonym "${alias}" maps to both "${prev}" and "${n.id}"`);
+      seenAlias.set(alias, n.id);
+    }
+  }
+  const visiting = /* @__PURE__ */ new Set();
+  const done = /* @__PURE__ */ new Set();
+  const parentMap = new Map(nodes.map((n) => [n.id, n.parents ?? []]));
+  const walk = (id, path) => {
+    if (done.has(id)) return;
+    if (visiting.has(id)) throw new Error(`vocab: parent cycle ${[...path, id].join(" \u2192 ")}`);
+    visiting.add(id);
+    for (const p of parentMap.get(id) ?? []) walk(p, [...path, id]);
+    visiting.delete(id);
+    done.add(id);
+  };
+  for (const n of nodes) walk(n.id, []);
+}
+function buildAdjacency(nodes) {
+  const adj = /* @__PURE__ */ new Map();
+  const add = (from, to, w) => {
+    let m = adj.get(from);
+    if (!m) adj.set(from, m = /* @__PURE__ */ new Map());
+    if (w > (m.get(to) ?? 0)) m.set(to, w);
+  };
+  for (const n of nodes) {
+    for (const p of n.parents ?? []) {
+      add(n.id, p, PARENT_UP);
+      add(p, n.id, PARENT_DOWN);
+    }
+    for (const e of n.related ?? []) {
+      add(n.id, e.to, e.w);
+      add(e.to, n.id, e.w);
+    }
+  }
+  return adj;
+}
+function closureFrom(source, adj) {
+  const best = /* @__PURE__ */ new Map();
+  for (const [t, w] of adj.get(source) ?? []) {
+    if (w >= DECAY_FLOOR) best.set(t, { w: round3(w), via: t });
+  }
+  const settled = /* @__PURE__ */ new Set([source]);
+  while (true) {
+    let u;
+    let uw = 0;
+    for (const [t, e] of best) {
+      if (!settled.has(t) && e.w > uw) {
+        u = t;
+        uw = e.w;
+      }
+    }
+    if (!u) break;
+    settled.add(u);
+    const via = best.get(u).via;
+    for (const [t, we] of adj.get(u) ?? []) {
+      if (settled.has(t)) continue;
+      const cand = round3(uw * we);
+      if (cand >= DECAY_FLOOR && cand > (best.get(t)?.w ?? 0)) {
+        best.set(t, { w: cand, via });
+      }
+    }
+  }
+  best.delete(source);
+  return best;
+}
+function buildGraph(nodes) {
+  validateGraph(nodes);
+  const ids = new Set(nodes.map((n) => n.id));
+  const synonyms = /* @__PURE__ */ new Map();
+  for (const n of nodes) {
+    for (const s of n.synonyms ?? []) synonyms.set(s.toLowerCase(), n.id);
+  }
+  const adj = buildAdjacency(nodes);
+  const closure = /* @__PURE__ */ new Map();
+  for (const n of nodes) closure.set(n.id, closureFrom(n.id, adj));
+  return { ids, synonyms, closure };
+}
+
+// ../../packages/core/src/vocab/extract.ts
+var SOFT_DOMAIN = /* @__PURE__ */ new Set([
+  "frontend",
+  "backend",
+  "devops",
+  "security",
+  "payments",
+  "billing",
+  "microservices",
+  "caching",
+  "search",
+  "observability",
+  "monitoring",
+  "testing",
+  "accessibility",
+  "seo",
+  "performance",
+  "realtime",
+  "authentication",
+  "api-design"
+]);
+var SYNONYM_ONLY = /* @__PURE__ */ new Set(["performance", "security", "seo"]);
+for (const id of SYNONYM_ONLY) {
+  if (!SOFT_DOMAIN.has(id)) throw new Error(`extract: SYNONYM_ONLY "${id}" not in SOFT_DOMAIN`);
+}
+
+// ../../packages/core/src/vocab/index.ts
+var GRAPH = buildGraph(VOCAB_NODES);
+var VOCABULARY = [...GRAPH.ids];
+var SYNONYMS = Object.fromEntries(GRAPH.synonyms);
+
+// ../../packages/core/src/feeds/bounty-gate.ts
+var BOUNTY_REPO_DENYLIST = [
+  "SecureBananaLabs/bug-bounty",
+  // Meta-farm: a bounty PLATFORM whose own issues are an assignment-gated
+  // contributor queue ("please assign me, my chief") — an unsolicited PR won't
+  // merge, so it's not a real claimable bounty. Not structurally derivable from
+  // any fetched field, so it's a manual entry (also dropped from the allowlist).
+  "boundlessfi/boundless"
+];
+var DENYLIST_LC = new Set(BOUNTY_REPO_DENYLIST.map((r) => r.toLowerCase()));
+var AI_BAN_DENYLIST = [
+  // Gentoo Council voted 6-0 (2024-04-14) to ban AI/ML-generated contributions
+  // project-wide. https://wiki.gentoo.org/wiki/Project:Council/AI_policy
+  "gentoo",
+  // NetBSD Commit Guidelines: code generated by an LLM/similar technology is
+  // "presumed to be tainted code, and must not be committed without prior
+  // written approval by core". https://www.netbsd.org/developers/commit-guidelines.html
+  "NetBSD"
+  // NOT listed (checked, deliberately excluded): QEMU's blanket AI-contribution
+  // ban is IN FLUX as of 2026-05 — a patch replacing it with a disclosure-based
+  // policy ("AI-used-for:" tag) was posted to qemu-devel and appears to have
+  // developer buy-in, so it is no longer a clean/current ban to key a hard
+  // supply-side drop on. https://www.theregister.com/ai-and-ml/2026/05/29/qemu-mulls-relaxing-ai-contribution-ban/
+];
+var AI_BAN_LC = new Set(AI_BAN_DENYLIST.map((g) => g.toLowerCase()));
+
+// ../../packages/core/src/github.ts
+var RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
+
+// ../../packages/core/src/feeds/index.ts
+var GREENHOUSE_SLUGS_BY_TIER = {
+  bigco: [
+    "stripe",
+    "anthropic",
+    "figma",
+    "discord",
+    "brex",
+    "mercury",
+    "plaid",
+    "gusto",
+    "scale",
+    "databricks",
+    "coinbase",
+    "robinhood",
+    "doordash",
+    "airbnb",
+    "dropbox",
+    "datadog",
+    "cloudflare",
+    "reddit",
+    "lyft",
+    "instacart"
+  ],
+  scaleup: [
+    "samsara",
+    "verkada",
+    "affirm",
+    "gitlab",
+    "asana",
+    "flexport",
+    "faire",
+    "twitch",
+    "airtable",
+    "retool"
+  ],
+  startup: [
+    "watershed"
+  ]
+};
+var ASHBY_SLUGS_BY_TIER = {
+  bigco: [
+    "openai"
+  ],
+  scaleup: [
+    "harvey",
+    "elevenlabs",
+    "notion",
+    "sierra",
+    "cohere",
+    "ramp",
+    "vanta",
+    "decagon",
+    "cursor",
+    "replit",
+    "perplexity",
+    "baseten",
+    "drata",
+    "writer",
+    "temporal",
+    "supabase"
+  ],
+  startup: [
+    "suno",
+    "attio",
+    "modal",
+    "workos",
+    "linear",
+    "render",
+    "warp",
+    "plain",
+    "posthog",
+    "pylon",
+    "resend",
+    "langfuse",
+    "railway",
+    "mintlify",
+    "neon",
+    "browserbase",
+    "knock",
+    "speakeasy",
+    "stytch",
+    "runway",
+    "doppler",
+    "inngest",
+    "hightouch",
+    "zed"
+  ]
+};
+var LEVER_SLUGS_BY_TIER = {
+  bigco: [
+    "palantir",
+    "spotify"
+  ],
+  scaleup: [
+    "mistral",
+    "ro",
+    "secureframe"
+  ],
+  startup: [
+    "anyscale"
+  ]
+};
+function flattenTiers(t) {
+  return [.../* @__PURE__ */ new Set([...t.bigco, ...t.scaleup, ...t.startup])];
+}
+var DEFAULT_GREENHOUSE_SLUGS = flattenTiers(GREENHOUSE_SLUGS_BY_TIER);
+var DEFAULT_ASHBY_SLUGS = flattenTiers(ASHBY_SLUGS_BY_TIER);
+var DEFAULT_LEVER_SLUGS = flattenTiers(LEVER_SLUGS_BY_TIER);
+
+// ../../packages/core/src/partners.ts
+import { readFileSync } from "fs";
+import { join } from "path";
+import { fileURLToPath } from "url";
+var EXAMPLE_BUYER = {
+  id: "northstar",
+  legalName: "Northstar Talent Partners",
+  matchCriteria: { roleTypes: ["full_time"] }
+};
+var BUYER_REGISTRY = {
+  [EXAMPLE_BUYER.id]: EXAMPLE_BUYER
+};
+
+// ../../packages/core/src/intro.ts
+var INTRO_ALLOWED_FIELDS = [
+  "requesterLogin",
+  "requesterDisplayName",
+  "requesterContact",
+  "note",
+  "targetLogin"
+];
+var INTRO_ALLOWED_SET = new Set(INTRO_ALLOWED_FIELDS);
+var INTRO_PENDING_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
+var INTRO_ACCEPTED_TTL_MS = 365 * 24 * 60 * 60 * 1e3;
+
+// ../../packages/core/src/chatCrypto.ts
+import { hkdfSync, createHash, randomBytes } from "crypto";
+var KDF_INFO = Buffer.from("terminalhire-chat-v1");
+
+// ../../packages/core/src/short-token.ts
+import { createHash as createHash2 } from "crypto";
+function opportunityShortToken(id) {
+  return createHash2("sha256").update(id, "utf8").digest("base64url").slice(0, 8);
+}
+
+// bin/jpi-claim.js
+var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
+var INDEX_CACHE_FILE = join3(TERMINALHIRE_DIR2, "index-cache.json");
+var GH_API2 = "https://api.github.com";
+var GH_HEADERS2 = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
+var AI_DISCLOSURE_NOTE = "---\nThis contribution was developed with AI assistance via [terminalhire](https://terminalhire.com). The author has reviewed the change and takes responsibility for its content.";
+function buildSubmitBody(issueNumber) {
+  const closesLine = issueNumber ? `Closes #${issueNumber}
+
+` : "";
+  return `${closesLine}${AI_DISCLOSURE_NOTE}`;
+}
+function printPolicySection(policy) {
+  if (policy.status === "flagged") {
+    console.log("\n  POLICY: \u26A0 possible AI-assistance policy language found \u2014 READ BEFORE WORKING:");
+    for (const hit of policy.hits) {
+      console.log(`    [${hit.file}]`);
+      for (const line of hit.excerpt.split("\n")) console.log(`      ${line}`);
+    }
+  } else if (policy.status === "unavailable") {
+    console.log("\n  POLICY: could not read this repo's CONTRIBUTING/PR-template/AGENTS docs (rate-limited or unreachable) \u2014 read them yourself before working.");
+  } else {
+    console.log("  policy: no AI-assistance policy language detected in CONTRIBUTING/PR-template/AGENTS docs");
+  }
+}
 var pExecFile = promisify(execFile);
 async function sh(cmd, args, opts = {}) {
   const { stdout } = await pExecFile(cmd, args, { ...opts, shell: false, maxBuffer: 16 * 1024 * 1024 });
@@ -156,16 +772,51 @@ function parseRepoFromRemote(url) {
   const m = String(url ?? "").trim().match(/github\.com[:/]+([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
   return m ? `${m[1]}/${m[2]}` : null;
 }
-function findBountyInCache(bountyId) {
+function readClaimablePool() {
+  if (!existsSync2(INDEX_CACHE_FILE)) return [];
+  const entry = JSON.parse(readFileSync3(INDEX_CACHE_FILE, "utf8"));
+  const bounties = (entry?.index?.jobs ?? []).filter((j) => j.source === "bounty");
+  const contributions = (entry?.index?.contribute ?? []).filter((j) => j.source === "contribute");
+  return [...bounties, ...contributions];
+}
+function findClaimableInCache(id) {
   try {
-    if (!existsSync2(INDEX_CACHE_FILE)) return null;
-    const entry = JSON.parse(readFileSync2(INDEX_CACHE_FILE, "utf8"));
-    const jobs = entry?.index?.jobs ?? [];
-    const job = jobs.find((j) => j.id === bountyId && j.source === "bounty");
-    return job ?? null;
+    return readClaimablePool().find((j) => j.id === id) ?? null;
   } catch {
     return null;
   }
+}
+function looksLikeShortRef(arg) {
+  return typeof arg === "string" && /^[A-Za-z0-9_-]{8}$/.test(arg);
+}
+function findClaimableByShortRef(ref) {
+  try {
+    return readClaimablePool().find((j) => opportunityShortToken(j.id) === ref) ?? null;
+  } catch {
+    return null;
+  }
+}
+function extractClaimableFields(job) {
+  if (job.source === "contribute") {
+    const c = job.contribution ?? {};
+    return {
+      bountyId: job.id,
+      title: job.title,
+      repoFullName: c.repoFullName ?? job.company ?? "",
+      issueUrl: c.issueUrl ?? job.url ?? "",
+      amountUSD: null,
+      source: "contribute"
+    };
+  }
+  const b = job.bounty ?? {};
+  return {
+    bountyId: job.id,
+    title: job.title,
+    repoFullName: b.repoFullName ?? job.company ?? "",
+    issueUrl: b.claimUrl ?? job.url ?? "",
+    amountUSD: b.amountUSD ?? null,
+    source: "bounty"
+  };
 }
 function parseGitHubUrl(url) {
   const m = String(url ?? "").match(/github\.com\/([^/]+)\/([^/]+)\/(?:issues|pull)\/(\d+)/);
@@ -174,8 +825,8 @@ function parseGitHubUrl(url) {
 }
 async function countOpenPRsReferencingIssue(repoFullName, issueNumber) {
   try {
-    const res = await fetch(`${GH_API}/repos/${repoFullName}/pulls?state=open&per_page=100`, {
-      headers: GH_HEADERS,
+    const res = await fetch(`${GH_API2}/repos/${repoFullName}/pulls?state=open&per_page=100`, {
+      headers: GH_HEADERS2,
       signal: AbortSignal.timeout(1e4)
     });
     if (!res.ok) return null;
@@ -191,8 +842,8 @@ ${p.body ?? ""}`)).length;
 }
 async function fetchIssue(repoFullName, issueNumber) {
   try {
-    const res = await fetch(`${GH_API}/repos/${repoFullName}/issues/${issueNumber}`, {
-      headers: GH_HEADERS,
+    const res = await fetch(`${GH_API2}/repos/${repoFullName}/issues/${issueNumber}`, {
+      headers: GH_HEADERS2,
       signal: AbortSignal.timeout(1e4)
     });
     if (!res.ok) return null;
@@ -207,8 +858,8 @@ async function pollPR(prUrl) {
   const p = parseGitHubUrl(prUrl);
   if (!p) return null;
   try {
-    const res = await fetch(`${GH_API}/repos/${p.repoFullName}/pulls/${p.number}`, {
-      headers: GH_HEADERS,
+    const res = await fetch(`${GH_API2}/repos/${p.repoFullName}/pulls/${p.number}`, {
+      headers: GH_HEADERS2,
       signal: AbortSignal.timeout(1e4)
     });
     if (!res.ok) return null;
@@ -221,21 +872,19 @@ async function pollPR(prUrl) {
 function fmtAmount(a) {
   return a != null ? "$" + a.toLocaleString() : "$\u2014";
 }
+function fmtClaimAmount(c) {
+  return c.kind === "contribution" ? "contribution" : fmtAmount(c.amountUSD);
+}
 function printMetric(rate) {
   const pct = Math.round(rate.rate * 100);
   console.log(`
 \u{1F4CA} Accepted-PR rate: ${rate.merged}/${rate.total} claims merged (${pct}%)`);
 }
 async function resolveBounty(arg) {
-  let bountyId, title, repoFullName, issueUrl, amountUSD;
-  const job = findBountyInCache(arg);
+  let bountyId, title, repoFullName, issueUrl, amountUSD, source;
+  const job = findClaimableInCache(arg) ?? (looksLikeShortRef(arg) ? findClaimableByShortRef(arg) : null);
   if (job) {
-    const b = job.bounty ?? {};
-    bountyId = job.id;
-    title = job.title;
-    repoFullName = b.repoFullName ?? job.company ?? "";
-    issueUrl = b.claimUrl ?? job.url ?? "";
-    amountUSD = b.amountUSD ?? null;
+    ({ bountyId, title, repoFullName, issueUrl, amountUSD, source } = extractClaimableFields(job));
   } else {
     const parsed = parseGitHubUrl(arg);
     if (!parsed) return null;
@@ -244,6 +893,7 @@ async function resolveBounty(arg) {
     repoFullName = parsed.repoFullName;
     issueUrl = arg;
     amountUSD = null;
+    source = "bounty";
   }
   const ghIssue = parseGitHubUrl(issueUrl);
   const [issue, openPRs] = ghIssue ? await Promise.all([
@@ -258,15 +908,16 @@ async function resolveBounty(arg) {
     repoFullName,
     issueUrl,
     amountUSD,
+    source,
     issueState,
     openPRs,
     issueNumber: ghIssue ? ghIssue.number : null
   };
 }
-async function cmdRecord(arg) {
+async function cmdRecord(arg, flags = {}) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
   if (!arg) {
-    console.error("Usage: terminalhire claim record <bountyId|issueUrl>");
+    console.error("Usage: terminalhire claim record <bountyId|issueUrl> [--ack-policy]");
     console.error("  Run `terminalhire bounties` first to populate the local index cache,");
     console.error("  then pass the id shown in its output \u2014 or pass a GitHub issue URL directly.");
     process.exit(1);
@@ -285,9 +936,43 @@ async function cmdRecord(arg) {
     );
     process.exit(1);
   }
+  const { checkRepoPolicy: checkRepoPolicy2 } = await Promise.resolve().then(() => (init_repo_policy(), repo_policy_exports));
+  const policy = await checkRepoPolicy2(b.repoFullName);
+  printPolicySection(policy);
+  let ackedAt = null;
+  if (policy.status === "flagged" || policy.status === "unavailable") {
+    const reason = policy.status === "flagged" ? "This repo may prohibit AI-generated contributions" : "This repo's contribution policy could not be checked";
+    let acked = Boolean(flags["ack-policy"]);
+    if (!acked && process.stdin.isTTY) {
+      acked = await confirm(`
+  ${reason} \u2014 read it before working. Acknowledge and proceed? (y/N) `);
+    }
+    if (!acked) {
+      console.error(
+        `
+terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribution policy first.
+  Re-run with --ack-policy once you have (or confirm interactively).`
+      );
+      process.exit(1);
+    }
+    ackedAt = (/* @__PURE__ */ new Date()).toISOString();
+  } else {
+    console.log("  (default AI-assistance disclosure still applies at submit)");
+  }
+  const kind = b.source === "contribute" ? "contribution" : "bounty";
   let claim;
   try {
-    claim = claims.recordClaim({ id: b.bountyId, bountyId: b.bountyId, title: b.title, repoFullName: b.repoFullName, issueUrl: b.issueUrl, amountUSD: b.amountUSD, openPRsAtClaim: b.openPRs });
+    claim = claims.recordClaim({
+      id: b.bountyId,
+      bountyId: b.bountyId,
+      title: b.title,
+      repoFullName: b.repoFullName,
+      issueUrl: b.issueUrl,
+      amountUSD: b.amountUSD,
+      openPRsAtClaim: b.openPRs,
+      kind,
+      policy: { status: policy.status, ackedAt }
+    });
   } catch (err) {
     console.error(`terminalhire claim: ${err.message ?? err}`);
     process.exit(1);
@@ -326,6 +1011,8 @@ async function cmdPreview(arg, { json } = {}) {
     console.error("  Run `terminalhire bounties` to populate the cache, or pass a full issue URL.");
     process.exit(1);
   }
+  const { checkRepoPolicy: checkRepoPolicy2 } = await Promise.resolve().then(() => (init_repo_policy(), repo_policy_exports));
+  const policy = await checkRepoPolicy2(b.repoFullName);
   if (json) {
     process.stdout.write(
       JSON.stringify({
@@ -335,7 +1022,8 @@ async function cmdPreview(arg, { json } = {}) {
         repoFullName: b.repoFullName,
         issueUrl: b.issueUrl,
         issueState: b.issueState,
-        openPRs: b.openPRs
+        openPRs: b.openPRs,
+        policy: { status: policy.status, hits: policy.hits }
       }) + "\n"
     );
     return;
@@ -356,6 +1044,7 @@ async function cmdPreview(arg, { json } = {}) {
   } else {
     console.log("  open PRs referencing this issue: 0");
   }
+  printPolicySection(policy);
   console.log("\n  Preview only \u2014 NOT claimed. Run `terminalhire claim record " + arg + "` to claim it.");
 }
 async function cmdList(active) {
@@ -370,7 +1059,7 @@ ${list.length} ${active ? "active " : ""}claim${list.length === 1 ? "" : "s"}:
 `);
   for (const c of list) {
     const pr = c.prUrl ? ` \xB7 ${c.prUrl}` : "";
-    console.log(`  [${c.state}] ${fmtAmount(c.amountUSD)} \xB7 ${c.title}`);
+    console.log(`  [${c.state}] ${fmtClaimAmount(c)} \xB7 ${c.title}`);
     console.log(`    id: ${c.id}${pr}`);
   }
   printMetric(claims.acceptedPRRate());
@@ -604,7 +1293,7 @@ async function cmdSubmit(id, worktreeOverride) {
   }
   if (!prUrl) {
     const issueNum = (parseGitHubUrl(claim.issueUrl) || {}).number;
-    const body = issueNum ? `Closes #${issueNum}` : "";
+    const body = buildSubmitBody(issueNum);
     try {
       const out = await sh("gh", ["pr", "create", "--repo", upstream, "--head", head, "--title", claim.title, "--body", body]);
       prUrl = out.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("https://github.com/")).pop() || null;
@@ -634,7 +1323,7 @@ async function run() {
         await cmdPreview(positional[0], { json });
         break;
       case "record":
-        await cmdRecord(positional[0]);
+        await cmdRecord(positional[0], flags);
         break;
       case "list":
         await cmdList(active);
@@ -664,5 +1353,11 @@ async function run() {
   }
 }
 export {
+  AI_DISCLOSURE_NOTE,
+  buildSubmitBody,
+  cmdRecord,
+  findClaimableByShortRef,
+  findClaimableInCache,
+  resolveBounty,
   run
 };
