@@ -1,13 +1,42 @@
 #!/usr/bin/env node
+var __create = Object.create;
 var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
+  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
+}) : x)(function(x) {
+  if (typeof require !== "undefined") return require.apply(this, arguments);
+  throw Error('Dynamic require of "' + x + '" is not supported');
+});
 var __esm = (fn, res) => function __init() {
   return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __commonJS = (cb, mod2) => function __require2() {
+  return mod2 || (0, cb[__getOwnPropNames(cb)[0]])((mod2 = { exports: {} }).exports, mod2), mod2.exports;
 };
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__getProtoOf(mod2)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod2 || !mod2.__esModule ? __defProp(target, "default", { value: mod2, enumerable: true }) : target,
+  mod2
+));
 
 // ../../packages/core/src/types.ts
 function isBounty(job) {
@@ -2790,21 +2819,21 @@ var init_contributions = __esm({
 });
 
 // ../../packages/core/src/partners.ts
-import { readFileSync } from "fs";
-import { join } from "path";
+import { readFileSync as readFileSync2 } from "fs";
+import { join as join2 } from "path";
 import { fileURLToPath } from "url";
 function resolveDataPath() {
   try {
     const dir = fileURLToPath(new URL("../../../data", import.meta.url));
-    return join(dir, "partner-roles.json");
+    return join2(dir, "partner-roles.json");
   } catch {
-    return join(process.cwd(), "data", "partner-roles.json");
+    return join2(process.cwd(), "data", "partner-roles.json");
   }
 }
 function loadPartnerRoles() {
   const filePath = resolveDataPath();
   try {
-    const raw = readFileSync(filePath, "utf-8");
+    const raw = readFileSync2(filePath, "utf-8");
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
       console.warn("[partners] partner-roles.json is not an array \u2014 skipping");
@@ -6429,6 +6458,65 @@ var init_src = __esm({
   }
 });
 
+// ../../node_modules/keytar/build/Release/keytar.node
+var keytar_default;
+var init_keytar = __esm({
+  "../../node_modules/keytar/build/Release/keytar.node"() {
+    keytar_default = "../keytar-KOAAH267.node";
+  }
+});
+
+// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+var require_keytar = __commonJS({
+  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+    "use strict";
+    init_keytar();
+    try {
+      module.exports = __require(keytar_default);
+    } catch {
+    }
+  }
+});
+
+// ../../node_modules/keytar/lib/keytar.js
+var require_keytar2 = __commonJS({
+  "../../node_modules/keytar/lib/keytar.js"(exports, module) {
+    "use strict";
+    var keytar = require_keytar();
+    function checkRequired(val, name) {
+      if (!val || val.length <= 0) {
+        throw new Error(name + " is required.");
+      }
+    }
+    module.exports = {
+      getPassword: function(service, account) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        return keytar.getPassword(service, account);
+      },
+      setPassword: function(service, account, password) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        checkRequired(password, "Password");
+        return keytar.setPassword(service, account, password);
+      },
+      deletePassword: function(service, account) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        return keytar.deletePassword(service, account);
+      },
+      findPassword: function(service) {
+        checkRequired(service, "Service");
+        return keytar.findPassword(service);
+      },
+      findCredentials: function(service) {
+        checkRequired(service, "Service");
+        return keytar.findCredentials(service);
+      }
+    };
+  }
+});
+
 // src/profile.ts
 var profile_exports = {};
 __export(profile_exports, {
@@ -6449,16 +6537,16 @@ import {
   randomBytes as randomBytes3
 } from "crypto";
 import {
-  readFileSync as readFileSync2,
-  writeFileSync,
-  mkdirSync,
+  readFileSync as readFileSync3,
+  writeFileSync as writeFileSync2,
+  mkdirSync as mkdirSync2,
   existsSync
 } from "fs";
-import { join as join2 } from "path";
-import { homedir } from "os";
+import { join as join3 } from "path";
+import { homedir as homedir2 } from "os";
 async function loadKey() {
   try {
-    const kt = await import("keytar");
+    const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
     const stored = await kt.getPassword("terminalhire", "profile-key");
     if (stored) {
       return Buffer.from(stored, "hex");
@@ -6468,12 +6556,12 @@ async function loadKey() {
     return key2;
   } catch {
   }
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
   if (existsSync(KEY_FILE)) {
-    return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");
+    return Buffer.from(readFileSync3(KEY_FILE, "utf8").trim(), "hex");
   }
   const key = randomBytes3(KEY_BYTES);
-  writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  writeFileSync2(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
   return key;
 }
 function encrypt(plaintext, key) {
@@ -6534,7 +6622,7 @@ async function readProfile() {
   if (!existsSync(PROFILE_FILE)) return blankProfile();
   try {
     const key = await loadKey();
-    const raw = readFileSync2(PROFILE_FILE, "utf8");
+    const raw = readFileSync3(PROFILE_FILE, "utf8");
     const blob = JSON.parse(raw);
     const plaintext = decrypt(blob, key);
     const parsed = JSON.parse(plaintext);
@@ -6545,12 +6633,12 @@ async function readProfile() {
   }
 }
 async function writeProfile(profile) {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
   const key = await loadKey();
   profile.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
   profile.skillTags = deriveSkillTags(profile.tagWeights);
   const blob = encrypt(JSON.stringify(profile), key);
-  writeFileSync(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+  writeFileSync2(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 function accumulateSession(profile, tags, isEmployerContext, inferredSeniority, seniorityIsAuthoritative = false) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -6634,14 +6722,14 @@ function profileToFingerprint(profile) {
     }
   };
 }
-var TERMINALHIRE_DIR, PROFILE_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var TERMINALHIRE_DIR2, PROFILE_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
 var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
     init_src();
-    TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");
-    PROFILE_FILE = join2(TERMINALHIRE_DIR, "profile.enc");
-    KEY_FILE = join2(TERMINALHIRE_DIR, "key");
+    TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
+    PROFILE_FILE = join3(TERMINALHIRE_DIR2, "profile.enc");
+    KEY_FILE = join3(TERMINALHIRE_DIR2, "key");
     ALGO = "aes-256-gcm";
     KEY_BYTES = 32;
     IV_BYTES = 12;
@@ -6670,12 +6758,44 @@ var init_profile = __esm({
 });
 
 // bin/jpi-bounties.js
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2 } from "fs";
-import { join as join3 } from "path";
-import { homedir as homedir2 } from "os";
+import { readFileSync as readFileSync4 } from "fs";
+import { join as join4 } from "path";
+import { homedir as homedir3 } from "os";
 import { createInterface } from "readline";
-var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
-var INDEX_CACHE_FILE = join3(TERMINALHIRE_DIR2, "index-cache.json");
+
+// bin/cache-store.js
+import { readFileSync, writeFileSync, mkdirSync, renameSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
+var INDEX_CACHE_FILE = join(TERMINALHIRE_DIR, "index-cache.json");
+var SCHEMA_VERSION = 1;
+var tmpCounter = 0;
+function readCacheEntry() {
+  try {
+    return JSON.parse(readFileSync(INDEX_CACHE_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function updateIndexCache(patch) {
+  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  const existing = readCacheEntry() ?? {};
+  const entry = {
+    ...existing,
+    ...patch,
+    schemaVersion: SCHEMA_VERSION,
+    ts: Date.now()
+  };
+  const tmp = `${INDEX_CACHE_FILE}.${process.pid}.${tmpCounter++}.tmp`;
+  writeFileSync(tmp, JSON.stringify(entry), "utf8");
+  renameSync(tmp, INDEX_CACHE_FILE);
+  return entry;
+}
+
+// bin/jpi-bounties.js
+var TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
+var INDEX_CACHE_FILE2 = join4(TERMINALHIRE_DIR3, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
 var DEFAULT_LIMIT = 15;
@@ -6687,7 +6807,7 @@ var SHOW_ALL = args.includes("--all");
 var WINNABLE_ONLY = args.includes("--winnable");
 function readIndexCache() {
   try {
-    const entry = JSON.parse(readFileSync3(INDEX_CACHE_FILE, "utf8"));
+    const entry = JSON.parse(readFileSync4(INDEX_CACHE_FILE2, "utf8"));
     if (Date.now() - entry.ts < INDEX_TTL_MS) return entry.index;
     return null;
   } catch {
@@ -6695,8 +6815,7 @@ function readIndexCache() {
   }
 }
 function writeIndexCache(index) {
-  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
-  writeFileSync2(INDEX_CACHE_FILE, JSON.stringify({ ts: Date.now(), index }), "utf8");
+  updateIndexCache({ index });
 }
 async function fetchIndex() {
   const cached = readIndexCache();

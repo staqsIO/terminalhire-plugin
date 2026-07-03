@@ -1,13 +1,42 @@
 #!/usr/bin/env node
+var __create = Object.create;
 var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
+  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
+}) : x)(function(x) {
+  if (typeof require !== "undefined") return require.apply(this, arguments);
+  throw Error('Dynamic require of "' + x + '" is not supported');
+});
 var __esm = (fn, res) => function __init() {
   return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __commonJS = (cb, mod2) => function __require2() {
+  return mod2 || (0, cb[__getOwnPropNames(cb)[0]])((mod2 = { exports: {} }).exports, mod2), mod2.exports;
 };
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__getProtoOf(mod2)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod2 || !mod2.__esModule ? __defProp(target, "default", { value: mod2, enumerable: true }) : target,
+  mod2
+));
 
 // ../../packages/core/src/types.ts
 function isBounty(job) {
@@ -2790,21 +2819,21 @@ var init_contributions = __esm({
 });
 
 // ../../packages/core/src/partners.ts
-import { readFileSync as readFileSync4 } from "fs";
-import { join as join4 } from "path";
+import { readFileSync as readFileSync5 } from "fs";
+import { join as join5 } from "path";
 import { fileURLToPath } from "url";
 function resolveDataPath() {
   try {
     const dir = fileURLToPath(new URL("../../../data", import.meta.url));
-    return join4(dir, "partner-roles.json");
+    return join5(dir, "partner-roles.json");
   } catch {
-    return join4(process.cwd(), "data", "partner-roles.json");
+    return join5(process.cwd(), "data", "partner-roles.json");
   }
 }
 function loadPartnerRoles() {
   const filePath = resolveDataPath();
   try {
-    const raw = readFileSync4(filePath, "utf-8");
+    const raw = readFileSync5(filePath, "utf-8");
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
       console.warn("[partners] partner-roles.json is not an array \u2014 skipping");
@@ -6429,6 +6458,65 @@ var init_src = __esm({
   }
 });
 
+// ../../node_modules/keytar/build/Release/keytar.node
+var keytar_default;
+var init_keytar = __esm({
+  "../../node_modules/keytar/build/Release/keytar.node"() {
+    keytar_default = "../keytar-KOAAH267.node";
+  }
+});
+
+// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+var require_keytar = __commonJS({
+  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+    "use strict";
+    init_keytar();
+    try {
+      module.exports = __require(keytar_default);
+    } catch {
+    }
+  }
+});
+
+// ../../node_modules/keytar/lib/keytar.js
+var require_keytar2 = __commonJS({
+  "../../node_modules/keytar/lib/keytar.js"(exports, module) {
+    "use strict";
+    var keytar = require_keytar();
+    function checkRequired(val, name) {
+      if (!val || val.length <= 0) {
+        throw new Error(name + " is required.");
+      }
+    }
+    module.exports = {
+      getPassword: function(service, account) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        return keytar.getPassword(service, account);
+      },
+      setPassword: function(service, account, password) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        checkRequired(password, "Password");
+        return keytar.setPassword(service, account, password);
+      },
+      deletePassword: function(service, account) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        return keytar.deletePassword(service, account);
+      },
+      findPassword: function(service) {
+        checkRequired(service, "Service");
+        return keytar.findPassword(service);
+      },
+      findCredentials: function(service) {
+        checkRequired(service, "Service");
+        return keytar.findCredentials(service);
+      }
+    };
+  }
+});
+
 // src/profile.ts
 var profile_exports = {};
 __export(profile_exports, {
@@ -6449,16 +6537,16 @@ import {
   randomBytes as randomBytes3
 } from "crypto";
 import {
-  readFileSync as readFileSync5,
-  writeFileSync as writeFileSync4,
-  mkdirSync as mkdirSync4,
+  readFileSync as readFileSync6,
+  writeFileSync as writeFileSync5,
+  mkdirSync as mkdirSync5,
   existsSync as existsSync3
 } from "fs";
-import { join as join5 } from "path";
-import { homedir as homedir4 } from "os";
+import { join as join6 } from "path";
+import { homedir as homedir5 } from "os";
 async function loadKey() {
   try {
-    const kt = await import("keytar");
+    const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
     const stored = await kt.getPassword("terminalhire", "profile-key");
     if (stored) {
       return Buffer.from(stored, "hex");
@@ -6468,12 +6556,12 @@ async function loadKey() {
     return key2;
   } catch {
   }
-  mkdirSync4(TERMINALHIRE_DIR3, { recursive: true });
+  mkdirSync5(TERMINALHIRE_DIR4, { recursive: true });
   if (existsSync3(KEY_FILE)) {
-    return Buffer.from(readFileSync5(KEY_FILE, "utf8").trim(), "hex");
+    return Buffer.from(readFileSync6(KEY_FILE, "utf8").trim(), "hex");
   }
   const key = randomBytes3(KEY_BYTES);
-  writeFileSync4(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  writeFileSync5(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
   return key;
 }
 function encrypt(plaintext, key) {
@@ -6534,7 +6622,7 @@ async function readProfile() {
   if (!existsSync3(PROFILE_FILE)) return blankProfile();
   try {
     const key = await loadKey();
-    const raw = readFileSync5(PROFILE_FILE, "utf8");
+    const raw = readFileSync6(PROFILE_FILE, "utf8");
     const blob = JSON.parse(raw);
     const plaintext = decrypt(blob, key);
     const parsed = JSON.parse(plaintext);
@@ -6545,12 +6633,12 @@ async function readProfile() {
   }
 }
 async function writeProfile(profile) {
-  mkdirSync4(TERMINALHIRE_DIR3, { recursive: true });
+  mkdirSync5(TERMINALHIRE_DIR4, { recursive: true });
   const key = await loadKey();
   profile.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
   profile.skillTags = deriveSkillTags(profile.tagWeights);
   const blob = encrypt(JSON.stringify(profile), key);
-  writeFileSync4(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+  writeFileSync5(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 function accumulateSession(profile, tags, isEmployerContext2, inferredSeniority, seniorityIsAuthoritative = false) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -6634,14 +6722,14 @@ function profileToFingerprint(profile) {
     }
   };
 }
-var TERMINALHIRE_DIR3, PROFILE_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var TERMINALHIRE_DIR4, PROFILE_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
 var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
     init_src();
-    TERMINALHIRE_DIR3 = join5(homedir4(), ".terminalhire");
-    PROFILE_FILE = join5(TERMINALHIRE_DIR3, "profile.enc");
-    KEY_FILE = join5(TERMINALHIRE_DIR3, "key");
+    TERMINALHIRE_DIR4 = join6(homedir5(), ".terminalhire");
+    PROFILE_FILE = join6(TERMINALHIRE_DIR4, "profile.enc");
+    KEY_FILE = join6(TERMINALHIRE_DIR4, "key");
     ALGO = "aes-256-gcm";
     KEY_BYTES = 32;
     IV_BYTES = 12;
@@ -6674,9 +6762,9 @@ var signal_exports = {};
 __export(signal_exports, {
   extractFingerprint: () => extractFingerprint
 });
-import { readFileSync as readFileSync6, readdirSync } from "fs";
+import { readFileSync as readFileSync7, readdirSync } from "fs";
 import { execFileSync } from "child_process";
-import { join as join6 } from "path";
+import { join as join7 } from "path";
 function safeGit(args, cwd) {
   try {
     return execFileSync("git", ["-C", cwd, ...args], {
@@ -6704,20 +6792,20 @@ function isEmployerContext(cwd) {
 }
 function readJsonSafe(path) {
   try {
-    return JSON.parse(readFileSync6(path, "utf8"));
+    return JSON.parse(readFileSync7(path, "utf8"));
   } catch {
     return null;
   }
 }
 function readFileSafe(path) {
   try {
-    return readFileSync6(path, "utf8");
+    return readFileSync7(path, "utf8");
   } catch {
     return "";
   }
 }
 function tokensFromPackageJson(cwd) {
-  const pkg = readJsonSafe(join6(cwd, "package.json"));
+  const pkg = readJsonSafe(join7(cwd, "package.json"));
   if (!pkg || typeof pkg !== "object") return [];
   const p = pkg;
   const deps = {
@@ -6731,9 +6819,9 @@ function workspaceMemberDirs(cwd) {
   const dirs = [cwd];
   for (const group of ["apps", "packages"]) {
     try {
-      const groupDir = join6(cwd, group);
+      const groupDir = join7(cwd, group);
       for (const e of readdirSync(groupDir, { withFileTypes: true })) {
-        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join6(groupDir, e.name));
+        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join7(groupDir, e.name));
       }
     } catch {
     }
@@ -6741,18 +6829,18 @@ function workspaceMemberDirs(cwd) {
   return dirs;
 }
 function tokensFromRequirementsTxt(cwd) {
-  const content = readFileSafe(join6(cwd, "requirements.txt"));
+  const content = readFileSafe(join7(cwd, "requirements.txt"));
   if (!content) return [];
   return content.split("\n").map((l) => l.trim().split(/[>=<!\[;]/)[0].trim().toLowerCase()).filter(Boolean);
 }
 function tokensFromGoMod(cwd) {
-  const content = readFileSafe(join6(cwd, "go.mod"));
+  const content = readFileSafe(join7(cwd, "go.mod"));
   if (!content) return [];
   const requires = Array.from(content.matchAll(/^\s+([^\s]+)\s+v/gm)).map((m) => m[1].split("/").pop() ?? "").filter(Boolean);
   return ["go", ...requires];
 }
 function tokensFromCargoToml(cwd) {
-  const content = readFileSafe(join6(cwd, "Cargo.toml"));
+  const content = readFileSafe(join7(cwd, "Cargo.toml"));
   if (!content) return [];
   const deps = [];
   let inDeps = false;
@@ -6773,7 +6861,7 @@ function tokensFromFileExtensions(cwd) {
   const tokens = [];
   const scanDirs = [cwd];
   try {
-    const srcDir = join6(cwd, "src");
+    const srcDir = join7(cwd, "src");
     readdirSync(srcDir);
     scanDirs.push(srcDir);
   } catch {
@@ -6943,22 +7031,22 @@ __export(spinner_seen_exports, {
   seenFilePath: () => seenFilePath
 });
 import {
-  readFileSync as readFileSync7,
-  writeFileSync as writeFileSync5,
-  renameSync,
-  mkdirSync as mkdirSync5
+  readFileSync as readFileSync8,
+  writeFileSync as writeFileSync6,
+  renameSync as renameSync2,
+  mkdirSync as mkdirSync6
 } from "fs";
-import { join as join7, dirname } from "path";
-import { homedir as homedir5 } from "os";
+import { join as join8, dirname } from "path";
+import { homedir as homedir6 } from "os";
 function seenFilePath() {
-  const dir = process.env["TERMINALHIRE_DIR"] || join7(homedir5(), ".terminalhire");
-  return join7(dir, "seen-history.json");
+  const dir = process.env["TERMINALHIRE_DIR"] || join8(homedir6(), ".terminalhire");
+  return join8(dir, "seen-history.json");
 }
 function atomicWriteJson(path, obj) {
-  mkdirSync5(dirname(path), { recursive: true });
+  mkdirSync6(dirname(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync5(tmp, JSON.stringify(obj) + "\n", { encoding: "utf8", mode: 384 });
-  renameSync(tmp, path);
+  writeFileSync6(tmp, JSON.stringify(obj) + "\n", { encoding: "utf8", mode: 384 });
+  renameSync2(tmp, path);
 }
 function emptyHistory() {
   return { surface: 0, entries: {} };
@@ -6986,7 +7074,7 @@ function capEntries(entries) {
 function loadSeenHistory(now = Date.now()) {
   let raw;
   try {
-    raw = JSON.parse(readFileSync7(seenFilePath(), "utf8"));
+    raw = JSON.parse(readFileSync8(seenFilePath(), "utf8"));
   } catch {
     return emptyHistory();
   }
@@ -7027,35 +7115,35 @@ var init_spinner_seen = __esm({
 
 // bin/spinner-io.js
 import {
-  readFileSync as readFileSync8,
-  writeFileSync as writeFileSync6,
+  readFileSync as readFileSync9,
+  writeFileSync as writeFileSync7,
   existsSync as existsSync4,
-  mkdirSync as mkdirSync6,
-  renameSync as renameSync2
+  mkdirSync as mkdirSync7,
+  renameSync as renameSync3
 } from "fs";
-import { join as join8, dirname as dirname2 } from "path";
-import { homedir as homedir6 } from "os";
+import { join as join9, dirname as dirname2 } from "path";
+import { homedir as homedir7 } from "os";
 function thDir() {
-  return process.env["TERMINALHIRE_DIR"] || join8(homedir6(), ".terminalhire");
+  return process.env["TERMINALHIRE_DIR"] || join9(homedir7(), ".terminalhire");
 }
 function claudeSettingsPath() {
-  return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join8(homedir6(), ".claude", "settings.json");
+  return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join9(homedir7(), ".claude", "settings.json");
 }
 function spinnerStateFilePath() {
-  return join8(thDir(), "spinner-state.json");
+  return join9(thDir(), "spinner-state.json");
 }
 function readJson(path, fallback) {
   try {
-    return existsSync4(path) ? JSON.parse(readFileSync8(path, "utf8")) : fallback;
+    return existsSync4(path) ? JSON.parse(readFileSync9(path, "utf8")) : fallback;
   } catch {
     return fallback;
   }
 }
 function atomicWriteJson2(path, obj) {
-  mkdirSync6(dirname2(path), { recursive: true });
+  mkdirSync7(dirname2(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync6(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
-  renameSync2(tmp, path);
+  writeFileSync7(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  renameSync3(tmp, path);
 }
 function readState() {
   const SPINNER_STATE_FILE = spinnerStateFilePath();
@@ -7151,9 +7239,9 @@ var init_spinner_io = __esm({
 });
 
 // bin/spinner-config.js
-import { join as join9 } from "path";
+import { join as join10 } from "path";
 function configFilePath() {
-  return join9(thDir(), "config.json");
+  return join10(thDir(), "config.json");
 }
 function readSpinnerConfig() {
   const CONFIG_FILE2 = configFilePath();
@@ -7327,7 +7415,7 @@ function buildContributeNudgeLine(contributeNudge) {
 function buildSessionStaleLine(sessionStale) {
   return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
 }
-function buildSpinnerPool(topMatches, _max = 6, opts = {}) {
+function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   const {
     sessionTags,
     frequency = "always",
@@ -7349,7 +7437,8 @@ function buildSpinnerPool(topMatches, _max = 6, opts = {}) {
     return withStale(peerLine ? [peerLine] : []);
   }
   const headers = buildContextVerbs(ranked, sessionTags);
-  const cap = Math.max(1, verbCountForFrequency(frequency, headers.length));
+  const ceiling = Math.min(headers.length, Math.max(1, Number(max) || 6));
+  const cap = Math.max(1, verbCountForFrequency(frequency, ceiling));
   const pool = [...headers.slice(0, cap), ctaVerb()];
   if (introLine) pool.push(introLine);
   if (contributeLine) pool.push(contributeLine);
@@ -7575,9 +7664,9 @@ __export(version_nudge_exports, {
   readLatestVersionFromCache: () => readLatestVersionFromCache,
   readLocalVersion: () => readLocalVersion
 });
-import { readFileSync as readFileSync9, existsSync as existsSync5 } from "fs";
-import { join as join10 } from "path";
-import { homedir as homedir7 } from "os";
+import { readFileSync as readFileSync10, existsSync as existsSync5 } from "fs";
+import { join as join11 } from "path";
+import { homedir as homedir8 } from "os";
 import { fileURLToPath as fileURLToPath2 } from "url";
 function parseVersion(v) {
   if (typeof v !== "string") return null;
@@ -7602,12 +7691,12 @@ function buildStaleNudge(local, latest) {
 function readLocalVersion() {
   try {
     const candidates = [
-      join10(__dirname, "..", "..", "package.json"),
-      join10(__dirname, "..", "package.json")
+      join11(__dirname, "..", "..", "package.json"),
+      join11(__dirname, "..", "package.json")
     ];
     for (const p of candidates) {
       if (existsSync5(p)) {
-        const pkg = JSON.parse(readFileSync9(p, "utf8"));
+        const pkg = JSON.parse(readFileSync10(p, "utf8"));
         if (pkg.version) return pkg.version;
       }
     }
@@ -7617,7 +7706,7 @@ function readLocalVersion() {
 }
 function readLatestVersionFromCache() {
   try {
-    const cache = JSON.parse(readFileSync9(INDEX_CACHE_FILE, "utf8"));
+    const cache = JSON.parse(readFileSync10(INDEX_CACHE_FILE2, "utf8"));
     const v = cache?.index?.cliVersion;
     return typeof v === "string" ? v : null;
   } catch {
@@ -7629,19 +7718,16 @@ function cachedStaleNudge(localVersion) {
   if (!local) return null;
   return buildStaleNudge(local, readLatestVersionFromCache());
 }
-var __dirname, INDEX_CACHE_FILE;
+var __dirname, INDEX_CACHE_FILE2;
 var init_version_nudge = __esm({
   "bin/version-nudge.js"() {
     "use strict";
     __dirname = fileURLToPath2(new URL(".", import.meta.url));
-    INDEX_CACHE_FILE = join10(process.env.TERMINALHIRE_DIR || join10(homedir7(), ".terminalhire"), "index-cache.json");
+    INDEX_CACHE_FILE2 = join11(process.env.TERMINALHIRE_DIR || join11(homedir8(), ".terminalhire"), "index-cache.json");
   }
 });
 
 // bin/jpi-refresh.js
-import { writeFileSync as writeFileSync7, mkdirSync as mkdirSync7 } from "fs";
-import { join as join11 } from "path";
-import { homedir as homedir8 } from "os";
 import { fileURLToPath as fileURLToPath3 } from "url";
 
 // bin/directory.js
@@ -7724,12 +7810,42 @@ function excludeOwnCard(results, ownLogin) {
   });
 }
 
-// src/config.ts
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, existsSync } from "fs";
+// bin/cache-store.js
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, renameSync } from "fs";
 import { join as join2 } from "path";
 import { homedir as homedir2 } from "os";
-var TERMINALHIRE_DIR2 = join2(homedir2(), ".terminalhire");
-var CONFIG_FILE = join2(TERMINALHIRE_DIR2, "config.json");
+var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
+var INDEX_CACHE_FILE = join2(TERMINALHIRE_DIR2, "index-cache.json");
+var SCHEMA_VERSION = 1;
+var tmpCounter = 0;
+function readCacheEntry() {
+  try {
+    return JSON.parse(readFileSync2(INDEX_CACHE_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function updateIndexCache(patch) {
+  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
+  const existing = readCacheEntry() ?? {};
+  const entry = {
+    ...existing,
+    ...patch,
+    schemaVersion: SCHEMA_VERSION,
+    ts: Date.now()
+  };
+  const tmp = `${INDEX_CACHE_FILE}.${process.pid}.${tmpCounter++}.tmp`;
+  writeFileSync2(tmp, JSON.stringify(entry), "utf8");
+  renameSync(tmp, INDEX_CACHE_FILE);
+  return entry;
+}
+
+// src/config.ts
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync } from "fs";
+import { join as join3 } from "path";
+import { homedir as homedir3 } from "os";
+var TERMINALHIRE_DIR3 = join3(homedir3(), ".terminalhire");
+var CONFIG_FILE = join3(TERMINALHIRE_DIR3, "config.json");
 var DEFAULT_CONFIG = {
   nudge: "session",
   peerConnect: false,
@@ -7745,7 +7861,7 @@ var DEFAULT_CONFIG = {
 function readConfig() {
   try {
     if (!existsSync(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
-    const raw = readFileSync2(CONFIG_FILE, "utf8");
+    const raw = readFileSync3(CONFIG_FILE, "utf8");
     const parsed = JSON.parse(raw);
     return { ...DEFAULT_CONFIG, ...parsed };
   } catch {
@@ -7769,24 +7885,24 @@ function isContributePrompted() {
 import {
   chmodSync,
   existsSync as existsSync2,
-  mkdirSync as mkdirSync3,
-  readFileSync as readFileSync3,
+  mkdirSync as mkdirSync4,
+  readFileSync as readFileSync4,
   rmSync,
-  writeFileSync as writeFileSync3
+  writeFileSync as writeFileSync4
 } from "fs";
-import { homedir as homedir3 } from "os";
-import { join as join3 } from "path";
+import { homedir as homedir4 } from "os";
+import { join as join4 } from "path";
 function terminalhireDir() {
-  return join3(homedir3(), ".terminalhire");
+  return join4(homedir4(), ".terminalhire");
 }
 function webSessionFilePath() {
-  return join3(terminalhireDir(), "web-session");
+  return join4(terminalhireDir(), "web-session");
 }
 function readWebSessionFile() {
   try {
     const path = webSessionFilePath();
     if (!existsSync2(path)) return null;
-    const v = readFileSync3(path, "utf8").trim();
+    const v = readFileSync4(path, "utf8").trim();
     return v.length > 0 ? v : null;
   } catch {
     return null;
@@ -7796,8 +7912,6 @@ function readWebSessionFile() {
 // bin/jpi-refresh.js
 var GH_SESSION_COOKIE = "__jpi_gh_session";
 var __dirname2 = fileURLToPath3(new URL(".", import.meta.url));
-var TERMINALHIRE_DIR4 = process.env["TERMINALHIRE_DIR"] || join11(homedir8(), ".terminalhire");
-var INDEX_CACHE_FILE2 = join11(TERMINALHIRE_DIR4, "index-cache.json");
 var API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://www.terminalhire.com";
 async function run() {
   try {
@@ -7970,9 +8084,7 @@ async function run() {
       topMatches = filterFreshMatches2(topMatches, seenHistory);
     } catch {
     }
-    mkdirSync7(TERMINALHIRE_DIR4, { recursive: true });
     const cacheEntry = {
-      ts: Date.now(),
       index,
       matchCount,
       topMatches,
@@ -7986,7 +8098,7 @@ async function run() {
       // read time — the persisted copy can be stale relative to the answer.
       contributeNudge
     };
-    writeFileSync7(INDEX_CACHE_FILE2, JSON.stringify(cacheEntry), "utf8");
+    updateIndexCache(cacheEntry);
     try {
       const { readSpinnerConfig: readSpinnerConfig2, renderRefreshSurface: renderRefreshSurface2 } = await Promise.resolve().then(() => (init_spinner(), spinner_exports));
       const sc = readSpinnerConfig2();

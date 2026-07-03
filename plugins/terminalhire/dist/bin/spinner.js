@@ -365,7 +365,7 @@ function buildContributeNudgeLine(contributeNudge) {
 function buildSessionStaleLine(sessionStale) {
   return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
 }
-function buildSpinnerPool(topMatches, _max = 6, opts = {}) {
+function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   const {
     sessionTags,
     frequency = "always",
@@ -387,7 +387,8 @@ function buildSpinnerPool(topMatches, _max = 6, opts = {}) {
     return withStale(peerLine ? [peerLine] : []);
   }
   const headers = buildContextVerbs(ranked, sessionTags);
-  const cap = Math.max(1, verbCountForFrequency(frequency, headers.length));
+  const ceiling = Math.min(headers.length, Math.max(1, Number(max) || 6));
+  const cap = Math.max(1, verbCountForFrequency(frequency, ceiling));
   const pool = [...headers.slice(0, cap), ctaVerb()];
   if (introLine) pool.push(introLine);
   if (contributeLine) pool.push(contributeLine);

@@ -1,3 +1,97 @@
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
+  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
+}) : x)(function(x) {
+  if (typeof require !== "undefined") return require.apply(this, arguments);
+  throw Error('Dynamic require of "' + x + '" is not supported');
+});
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __commonJS = (cb, mod2) => function __require2() {
+  return mod2 || (0, cb[__getOwnPropNames(cb)[0]])((mod2 = { exports: {} }).exports, mod2), mod2.exports;
+};
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__getProtoOf(mod2)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod2 || !mod2.__esModule ? __defProp(target, "default", { value: mod2, enumerable: true }) : target,
+  mod2
+));
+
+// ../../node_modules/keytar/build/Release/keytar.node
+var keytar_default;
+var init_keytar = __esm({
+  "../../node_modules/keytar/build/Release/keytar.node"() {
+    keytar_default = "../keytar-KOAAH267.node";
+  }
+});
+
+// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+var require_keytar = __commonJS({
+  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+    "use strict";
+    init_keytar();
+    try {
+      module.exports = __require(keytar_default);
+    } catch {
+    }
+  }
+});
+
+// ../../node_modules/keytar/lib/keytar.js
+var require_keytar2 = __commonJS({
+  "../../node_modules/keytar/lib/keytar.js"(exports, module) {
+    "use strict";
+    var keytar = require_keytar();
+    function checkRequired(val, name) {
+      if (!val || val.length <= 0) {
+        throw new Error(name + " is required.");
+      }
+    }
+    module.exports = {
+      getPassword: function(service, account) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        return keytar.getPassword(service, account);
+      },
+      setPassword: function(service, account, password) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        checkRequired(password, "Password");
+        return keytar.setPassword(service, account, password);
+      },
+      deletePassword: function(service, account) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        return keytar.deletePassword(service, account);
+      },
+      findPassword: function(service) {
+        checkRequired(service, "Service");
+        return keytar.findPassword(service);
+      },
+      findCredentials: function(service) {
+        checkRequired(service, "Service");
+        return keytar.findCredentials(service);
+      }
+    };
+  }
+});
+
 // src/chat-keystore.ts
 import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync3, writeFileSync as writeFileSync2, rmSync as rmSync2 } from "fs";
 import { homedir as homedir2 } from "os";
@@ -2610,7 +2704,7 @@ var KEY_BYTES = 32;
 var IV_BYTES = 12;
 async function loadKey() {
   try {
-    const kt = await import("keytar");
+    const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
     const stored = await kt.getPassword("terminalhire", "profile-key");
     if (stored) return Buffer.from(stored, "hex");
     const key2 = randomBytes3(KEY_BYTES);
