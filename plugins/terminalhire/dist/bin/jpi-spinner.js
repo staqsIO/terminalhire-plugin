@@ -244,6 +244,9 @@ function buildIncomingIntroLine(incomingPending) {
 function buildContributeNudgeLine(contributeNudge) {
   const n = contributeNudge && typeof contributeNudge.count === "number" ? contributeNudge.count : 0;
   if (n < 1) return null;
+  if (contributeNudge.onRamp === true) {
+    return n === 1 ? "\u2726 Build your Proof of Work \u2014 1 credential-building issue matched to your stack \xB7 terminalhire contribute" : `\u2726 Build your Proof of Work \u2014 ${n} credential-building issues matched to your stack \xB7 terminalhire contribute`;
+  }
   return n === 1 ? "\u2726 an open-source issue that counts toward your r\xE9sum\xE9 \xB7 terminalhire contribute" : `\u2726 ${n} open-source issues that count toward your r\xE9sum\xE9 \xB7 terminalhire contribute`;
 }
 function buildSessionStaleLine(sessionStale) {

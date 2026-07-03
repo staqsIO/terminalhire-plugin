@@ -6600,9 +6600,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/3ffac25b-ca95-4a86-9e17-a4cf326551de/scratchpad/rel2/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/rel-0180/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/3ffac25b-ca95-4a86-9e17-a4cf326551de/scratchpad/rel2/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/rel-0180/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -7544,6 +7544,9 @@ function buildIncomingIntroLine(incomingPending) {
 function buildContributeNudgeLine(contributeNudge) {
   const n = contributeNudge && typeof contributeNudge.count === "number" ? contributeNudge.count : 0;
   if (n < 1) return null;
+  if (contributeNudge.onRamp === true) {
+    return n === 1 ? "\u2726 Build your Proof of Work \u2014 1 credential-building issue matched to your stack \xB7 terminalhire contribute" : `\u2726 Build your Proof of Work \u2014 ${n} credential-building issues matched to your stack \xB7 terminalhire contribute`;
+  }
   return n === 1 ? "\u2726 an open-source issue that counts toward your r\xE9sum\xE9 \xB7 terminalhire contribute" : `\u2726 ${n} open-source issues that count toward your r\xE9sum\xE9 \xB7 terminalhire contribute`;
 }
 function buildSessionStaleLine(sessionStale) {
@@ -7978,6 +7981,44 @@ function updateIndexCache(patch) {
   return entry;
 }
 
+// bin/match-slots.js
+var TOTAL_SLOTS = 25;
+var BOUNTY_SLOTS = 5;
+var CONTRIBUTE_SLOTS = 5;
+var CONTRIBUTE_SLOTS_THIN = 8;
+var ROLE_STABLE_MAX = 8;
+var ROLE_ROTATE_WINDOW = 60;
+var ROTATE_WINDOW_MS = 5 * 60 * 1e3;
+function rotate(list, now) {
+  if (!Array.isArray(list) || list.length === 0) return [];
+  const idx = Math.floor(now / ROTATE_WINDOW_MS) % list.length;
+  return [...list.slice(idx), ...list.slice(0, idx)];
+}
+function budgetSlots(results, opts = {}) {
+  const {
+    thinProfile = false,
+    contributeEnabled = true,
+    totalSlots = TOTAL_SLOTS,
+    now = Date.now()
+  } = opts;
+  const list = Array.isArray(results) ? results : [];
+  const bountyMatches = list.filter((r) => r && r.job && r.job.source === "bounty");
+  const bountyTop = rotate(bountyMatches, now).slice(0, BOUNTY_SLOTS);
+  const contributeMatches = list.filter((r) => r && r.job && r.job.source === "contribute");
+  const contributeCap = thinProfile && contributeEnabled ? CONTRIBUTE_SLOTS_THIN : CONTRIBUTE_SLOTS;
+  const contributeTop = rotate(contributeMatches, now).slice(0, contributeCap);
+  const roleSlots = totalSlots - bountyTop.length - contributeTop.length;
+  const roleMatches = list.filter(
+    (r) => r && r.job && r.job.source !== "bounty" && r.job.source !== "contribute"
+  );
+  const roleStable = Math.min(ROLE_STABLE_MAX, roleSlots);
+  const stableRoles = roleMatches.slice(0, roleStable);
+  const rotableRoles = roleMatches.slice(roleStable, roleStable + ROLE_ROTATE_WINDOW);
+  const rotatedRoles = rotate(rotableRoles, now);
+  const roleTop = [...stableRoles, ...rotatedRoles].slice(0, roleSlots);
+  return { roleTop, bountyTop, contributeTop };
+}
+
 // src/config.ts
 import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync } from "fs";
 import { join as join3 } from "path";
@@ -8090,27 +8131,17 @@ async function run() {
       const profile = await readProfile2();
       if (profile.skillTags.length > 0 && jobs.length > 0) {
         const fp = profileToFingerprint2(profile);
+        const thinProfile = fp?.seniorityBand === "junior";
+        if (contributeNudge && thinProfile) {
+          contributeNudge.onRamp = true;
+        }
         const pool = contribute.length > 0 ? [...jobs, ...contribute] : jobs;
         const results = match2(fp, pool, pool.length);
         matchCount = results.length;
-        const BOUNTY_SLOTS = 5;
-        const bountyMatches = results.filter((r) => r.job.source === "bounty");
-        const rot = bountyMatches.length > 0 ? Math.floor(Date.now() / (5 * 60 * 1e3)) % bountyMatches.length : 0;
-        const bountyTop = [...bountyMatches.slice(rot), ...bountyMatches.slice(0, rot)].slice(0, BOUNTY_SLOTS);
-        const CONTRIBUTE_SLOTS = 5;
-        const contributeMatches = results.filter((r) => r.job.source === "contribute");
-        const cRot = contributeMatches.length > 0 ? Math.floor(Date.now() / (5 * 60 * 1e3)) % contributeMatches.length : 0;
-        const contributeTop = [...contributeMatches.slice(cRot), ...contributeMatches.slice(0, cRot)].slice(0, CONTRIBUTE_SLOTS);
-        const roleSlots = 25 - bountyTop.length - contributeTop.length;
-        const roleMatches = results.filter(
-          (r) => r.job.source !== "bounty" && r.job.source !== "contribute"
-        );
-        const ROLE_STABLE = Math.min(8, roleSlots);
-        const stableRoles = roleMatches.slice(0, ROLE_STABLE);
-        const rotableRoles = roleMatches.slice(ROLE_STABLE, ROLE_STABLE + 60);
-        const rRot = rotableRoles.length > 0 ? Math.floor(Date.now() / (5 * 60 * 1e3)) % rotableRoles.length : 0;
-        const rotatedRoles = [...rotableRoles.slice(rRot), ...rotableRoles.slice(0, rRot)];
-        const roleTop = [...stableRoles, ...rotatedRoles].slice(0, roleSlots);
+        const { roleTop, bountyTop, contributeTop } = budgetSlots(results, {
+          thinProfile,
+          contributeEnabled: isContributeEnabled()
+        });
         const toCard = (r) => ({
           id: r.job.id,
           title: r.job.title,
