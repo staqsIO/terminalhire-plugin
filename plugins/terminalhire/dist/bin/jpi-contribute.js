@@ -894,6 +894,13 @@ var init_concurrency = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/effort.ts
+var init_effort = __esm({
+  "../../packages/core/src/feeds/effort.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/feeds/github-bounties.ts
 var init_github_bounties = __esm({
   "../../packages/core/src/feeds/github-bounties.ts"() {
@@ -903,6 +910,7 @@ var init_github_bounties = __esm({
     init_bounty_gate();
     init_http();
     init_concurrency();
+    init_effort();
   }
 });
 
@@ -914,6 +922,7 @@ var init_opire = __esm({
     init_bounty_gate();
     init_github_bounties();
     init_http();
+    init_effort();
   }
 });
 
@@ -1242,9 +1251,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/rel-0180/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/rel-0180/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -1608,6 +1617,37 @@ function isContributeEnabled() {
   return readConfig().contributeEnabled === true;
 }
 
+// bin/sanitize.js
+var CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
+function sanitizeText(s) {
+  if (s == null) return "";
+  return String(s).replace(CONTROL_CHARS, "");
+}
+function safeHttpUrl(url) {
+  if (url == null) return null;
+  const raw = String(url);
+  CONTROL_CHARS.lastIndex = 0;
+  if (CONTROL_CHARS.test(raw)) return null;
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  return parsed.href;
+}
+function linkTitle(title, url) {
+  const safeTitle = sanitizeText(title);
+  const href = safeHttpUrl(url);
+  const isTTY = process.stdout.isTTY;
+  const noColor = process.env["NO_COLOR"] !== void 0;
+  if (isTTY && !noColor && href) {
+    return `\x1B]8;;${href}\x1B\\${safeTitle}\x1B]8;;\x1B\\`;
+  }
+  return href ? `${safeTitle} (${href})` : safeTitle;
+}
+
 // bin/jpi-contribute.js
 var TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
 var INDEX_CACHE_FILE2 = join5(TERMINALHIRE_DIR4, "index-cache.json");
@@ -1709,19 +1749,13 @@ function displayLanguage(job) {
   const tag = (job.tags ?? []).find((t) => LANGUAGES.has(String(t).toLowerCase()));
   return tag ?? "\u2014";
 }
-function linkTitle(title, url) {
-  const isTTY = process.stdout.isTTY;
-  const noColor = process.env["NO_COLOR"] !== void 0;
-  if (isTTY && !noColor && url) return `\x1B]8;;${url}\x1B\\${title}\x1B]8;;\x1B\\`;
-  return url ? `${title} (${url})` : title;
-}
 function renderRow(i, result) {
   const job = result.job;
   const c = job.contribution ?? {};
-  const repo = c.repoFullName ?? job.company ?? "";
+  const repo = sanitizeText(c.repoFullName ?? job.company ?? "");
   const num = c.issueNumber != null ? `#${c.issueNumber}` : "";
-  const label = c.labels && c.labels.length ? c.labels[0] : "\u2014";
-  const lang = displayLanguage(job);
+  const label = c.labels && c.labels.length ? sanitizeText(c.labels[0]) : "\u2014";
+  const lang = sanitizeText(displayLanguage(job));
   const scorePct = `match ${Math.round((result.score ?? 0) * 100)}%`;
   const ref = opportunityShortToken(job.id);
   const line1 = `${i + 1}. ${linkTitle(job.title, c.issueUrl ?? job.url)} [${ref}]`;

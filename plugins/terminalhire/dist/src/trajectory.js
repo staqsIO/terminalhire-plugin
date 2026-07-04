@@ -908,6 +908,13 @@ var init_concurrency = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/effort.ts
+var init_effort = __esm({
+  "../../packages/core/src/feeds/effort.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/feeds/github-bounties.ts
 var init_github_bounties = __esm({
   "../../packages/core/src/feeds/github-bounties.ts"() {
@@ -917,6 +924,7 @@ var init_github_bounties = __esm({
     init_bounty_gate();
     init_http();
     init_concurrency();
+    init_effort();
   }
 });
 
@@ -928,6 +936,7 @@ var init_opire = __esm({
     init_bounty_gate();
     init_github_bounties();
     init_http();
+    init_effort();
   }
 });
 
@@ -1247,9 +1256,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/rel-0180/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/rel-0180/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {

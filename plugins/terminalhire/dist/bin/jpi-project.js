@@ -892,6 +892,7 @@ async function fetchRepoMeta(owner, name, token, cache) {
       stars: r.stargazers_count ?? 0,
       archived: !!r.archived,
       fork: !!r.fork,
+      private: !!r.private,
       language: r.language ?? null,
       topics: r.topics ?? [],
       contributors
@@ -924,7 +925,7 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
   const loginLc = login.toLowerCase();
   let items;
   try {
-    const q = encodeURIComponent(`type:pr is:merged author:${login} -user:${login} sort:updated`);
+    const q = encodeURIComponent(`type:pr is:merged is:public author:${login} -user:${login} sort:updated`);
     const res = await ghFetch(
       `/search/issues?q=${q}&per_page=${CANDIDATE_PR_PAGE}`,
       token
@@ -937,6 +938,7 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
   }
   const byDomain = {};
   let qualifyingTotal = 0;
+  const qualifyingPRs = [];
   for (const item of items) {
     const repo = parseRepoUrl(item.repository_url);
     if (!repo) continue;
@@ -946,13 +948,22 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
     if (isTrivialPRTitle(item.title)) continue;
     const meta = await fetchRepoMeta(repo.owner, repo.name, token, cache);
     if (!meta) continue;
+    if (meta.private) continue;
     if (meta.archived || meta.fork) continue;
     if (meta.stars < gates.minStars) continue;
     if (meta.contributors !== void 0 && meta.contributors < gates.minContributors) continue;
     qualifyingTotal += 1;
     const mergedAt = item.pull_request?.merged_at ?? item.closed_at ?? item.created_at;
     const rawDomains = [meta.language ?? "", ...meta.topics].filter(Boolean);
-    for (const d of new Set(normalize(rawDomains))) {
+    const domainTags = [...new Set(normalize(rawDomains))];
+    qualifyingPRs.push({
+      url: item.html_url,
+      title: item.title,
+      repo: `${repo.owner}/${repo.name}`,
+      domains: domainTags,
+      mergedAt
+    });
+    for (const d of domainTags) {
       const b = byDomain[d] ?? (byDomain[d] = { mergedPRs: 0, distinctOrgs: 0, lastMergedAt: mergedAt, orgs: /* @__PURE__ */ new Set() });
       b.mergedPRs += 1;
       b.orgs.add(ownerLc);
@@ -967,7 +978,7 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
       lastMergedAt: b.lastMergedAt
     };
   }
-  return { status: "ok", byDomain: finalDomains, qualifyingTotal, computedAt };
+  return { status: "ok", byDomain: finalDomains, qualifyingTotal, qualifyingPRs, computedAt };
 }
 async function computeAcceptanceCredential(login, token, cache = /* @__PURE__ */ new Map()) {
   if (!token) return emptyCredential("no-token");
@@ -1778,6 +1789,19 @@ var init_concurrency = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/effort.ts
+function effortFromAmount(amount) {
+  if (amount == null) return void 0;
+  if (amount <= 500) return "small";
+  if (amount <= 2e3) return "medium";
+  return "large";
+}
+var init_effort = __esm({
+  "../../packages/core/src/feeds/effort.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/feeds/github-bounties.ts
 function authHeaders() {
   const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
@@ -1799,12 +1823,6 @@ function parseAmountUSD(text) {
   if (m[2]) n *= 1e3;
   if (!Number.isFinite(n) || n <= 0 || n > 1e6) return void 0;
   return Math.round(n);
-}
-function effortFromAmount(amount) {
-  if (amount == null) return void 0;
-  if (amount <= 500) return "small";
-  if (amount <= 2e3) return "medium";
-  return "large";
 }
 function labelNames(issue) {
   return (issue.labels ?? []).map((l) => typeof l === "string" ? l : l.name ?? "").filter(Boolean);
@@ -2053,6 +2071,7 @@ var init_github_bounties = __esm({
     init_bounty_gate();
     init_http();
     init_concurrency();
+    init_effort();
     GITHUB_API = "https://api.github.com";
     BOUNTY_LABEL_RE = /bounty|reward|funded|💎|💰/i;
     SEARCH_QUERIES = [
@@ -2104,12 +2123,6 @@ var init_github_bounties = __esm({
 function tokenize3(text) {
   return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter((w) => w.length > 1);
 }
-function effortFromAmount2(usd) {
-  if (usd == null) return void 0;
-  if (usd < 150) return "small";
-  if (usd < 750) return "medium";
-  return "large";
-}
 function priceToUSD(p) {
   if (!p || typeof p.value !== "number") return void 0;
   if (p.unit === "USD_CENT") return Math.round(p.value) / 100;
@@ -2132,6 +2145,7 @@ var init_opire = __esm({
     init_bounty_gate();
     init_github_bounties();
     init_http();
+    init_effort();
     OPIRE_REWARDS_URL = "https://api.opire.dev/rewards";
     MIN_USD = 25;
     MAX_USD = 25e3;
@@ -2168,7 +2182,7 @@ var init_opire = __esm({
           const tags = normalize([...r.programmingLanguages ?? [], ...tokenize3(title)]);
           const bounty = {
             amountUSD,
-            estimatedEffort: effortFromAmount2(amountUSD),
+            estimatedEffort: effortFromAmount(amountUSD),
             bountySource: "opire",
             claimUrl: r.url,
             repoFullName
@@ -6515,6 +6529,7 @@ __export(src_exports, {
   isBounty: () => isBounty,
   isContribution: () => isContribution,
   isOverIntroLimit: () => isOverIntroLimit,
+  isTrivialPRTitle: () => isTrivialPRTitle,
   joinLabels: () => joinLabels,
   labelFor: () => labelFor,
   lever: () => lever,

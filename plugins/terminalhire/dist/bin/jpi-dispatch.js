@@ -296,9 +296,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/rel-0180/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/rel-0180/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -1447,6 +1447,7 @@ async function fetchRepoMeta(owner, name, token, cache) {
       stars: r.stargazers_count ?? 0,
       archived: !!r.archived,
       fork: !!r.fork,
+      private: !!r.private,
       language: r.language ?? null,
       topics: r.topics ?? [],
       contributors
@@ -1479,7 +1480,7 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
   const loginLc = login.toLowerCase();
   let items;
   try {
-    const q = encodeURIComponent(`type:pr is:merged author:${login} -user:${login} sort:updated`);
+    const q = encodeURIComponent(`type:pr is:merged is:public author:${login} -user:${login} sort:updated`);
     const res = await ghFetch(
       `/search/issues?q=${q}&per_page=${CANDIDATE_PR_PAGE}`,
       token
@@ -1492,6 +1493,7 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
   }
   const byDomain = {};
   let qualifyingTotal = 0;
+  const qualifyingPRs = [];
   for (const item of items) {
     const repo = parseRepoUrl(item.repository_url);
     if (!repo) continue;
@@ -1501,13 +1503,22 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
     if (isTrivialPRTitle(item.title)) continue;
     const meta2 = await fetchRepoMeta(repo.owner, repo.name, token, cache);
     if (!meta2) continue;
+    if (meta2.private) continue;
     if (meta2.archived || meta2.fork) continue;
     if (meta2.stars < gates.minStars) continue;
     if (meta2.contributors !== void 0 && meta2.contributors < gates.minContributors) continue;
     qualifyingTotal += 1;
     const mergedAt = item.pull_request?.merged_at ?? item.closed_at ?? item.created_at;
     const rawDomains = [meta2.language ?? "", ...meta2.topics].filter(Boolean);
-    for (const d of new Set(normalize(rawDomains))) {
+    const domainTags = [...new Set(normalize(rawDomains))];
+    qualifyingPRs.push({
+      url: item.html_url,
+      title: item.title,
+      repo: `${repo.owner}/${repo.name}`,
+      domains: domainTags,
+      mergedAt
+    });
+    for (const d of domainTags) {
       const b = byDomain[d] ?? (byDomain[d] = { mergedPRs: 0, distinctOrgs: 0, lastMergedAt: mergedAt, orgs: /* @__PURE__ */ new Set() });
       b.mergedPRs += 1;
       b.orgs.add(ownerLc);
@@ -1522,7 +1533,7 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
       lastMergedAt: b.lastMergedAt
     };
   }
-  return { status: "ok", byDomain: finalDomains, qualifyingTotal, computedAt };
+  return { status: "ok", byDomain: finalDomains, qualifyingTotal, qualifyingPRs, computedAt };
 }
 async function computeAcceptanceCredential(login, token, cache = /* @__PURE__ */ new Map()) {
   if (!token) return emptyCredential("no-token");
@@ -2333,6 +2344,19 @@ var init_concurrency = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/effort.ts
+function effortFromAmount(amount) {
+  if (amount == null) return void 0;
+  if (amount <= 500) return "small";
+  if (amount <= 2e3) return "medium";
+  return "large";
+}
+var init_effort = __esm({
+  "../../packages/core/src/feeds/effort.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/feeds/github-bounties.ts
 function authHeaders() {
   const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
@@ -2354,12 +2378,6 @@ function parseAmountUSD(text) {
   if (m[2]) n *= 1e3;
   if (!Number.isFinite(n) || n <= 0 || n > 1e6) return void 0;
   return Math.round(n);
-}
-function effortFromAmount(amount) {
-  if (amount == null) return void 0;
-  if (amount <= 500) return "small";
-  if (amount <= 2e3) return "medium";
-  return "large";
 }
 function labelNames(issue2) {
   return (issue2.labels ?? []).map((l) => typeof l === "string" ? l : l.name ?? "").filter(Boolean);
@@ -2608,6 +2626,7 @@ var init_github_bounties = __esm({
     init_bounty_gate();
     init_http();
     init_concurrency();
+    init_effort();
     GITHUB_API = "https://api.github.com";
     BOUNTY_LABEL_RE = /bounty|reward|funded|💎|💰/i;
     SEARCH_QUERIES = [
@@ -2659,12 +2678,6 @@ var init_github_bounties = __esm({
 function tokenize3(text) {
   return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter((w) => w.length > 1);
 }
-function effortFromAmount2(usd) {
-  if (usd == null) return void 0;
-  if (usd < 150) return "small";
-  if (usd < 750) return "medium";
-  return "large";
-}
 function priceToUSD(p) {
   if (!p || typeof p.value !== "number") return void 0;
   if (p.unit === "USD_CENT") return Math.round(p.value) / 100;
@@ -2687,6 +2700,7 @@ var init_opire = __esm({
     init_bounty_gate();
     init_github_bounties();
     init_http();
+    init_effort();
     OPIRE_REWARDS_URL = "https://api.opire.dev/rewards";
     MIN_USD = 25;
     MAX_USD = 25e3;
@@ -2723,7 +2737,7 @@ var init_opire = __esm({
           const tags = normalize([...r.programmingLanguages ?? [], ...tokenize3(title)]);
           const bounty = {
             amountUSD,
-            estimatedEffort: effortFromAmount2(amountUSD),
+            estimatedEffort: effortFromAmount(amountUSD),
             bountySource: "opire",
             claimUrl: r.url,
             repoFullName
@@ -7362,6 +7376,7 @@ __export(src_exports, {
   isBounty: () => isBounty,
   isContribution: () => isContribution,
   isOverIntroLimit: () => isOverIntroLimit,
+  isTrivialPRTitle: () => isTrivialPRTitle,
   joinLabels: () => joinLabels,
   labelFor: () => labelFor,
   lever: () => lever,
@@ -8068,6 +8083,43 @@ var init_cache_store = __esm({
   }
 });
 
+// bin/sanitize.js
+function sanitizeText(s) {
+  if (s == null) return "";
+  return String(s).replace(CONTROL_CHARS, "");
+}
+function safeHttpUrl(url) {
+  if (url == null) return null;
+  const raw = String(url);
+  CONTROL_CHARS.lastIndex = 0;
+  if (CONTROL_CHARS.test(raw)) return null;
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  return parsed.href;
+}
+function linkTitle(title, url) {
+  const safeTitle = sanitizeText(title);
+  const href = safeHttpUrl(url);
+  const isTTY = process.stdout.isTTY;
+  const noColor = process.env["NO_COLOR"] !== void 0;
+  if (isTTY && !noColor && href) {
+    return `\x1B]8;;${href}\x1B\\${safeTitle}\x1B]8;;\x1B\\`;
+  }
+  return href ? `${safeTitle} (${href})` : safeTitle;
+}
+var CONTROL_CHARS;
+var init_sanitize = __esm({
+  "bin/sanitize.js"() {
+    "use strict";
+    CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
+  }
+});
+
 // bin/jpi-jobs.js
 var jpi_jobs_exports = {};
 __export(jpi_jobs_exports, {
@@ -8163,7 +8215,7 @@ function buildConsentText(job, profile) {
   }
   const githubNote = profile.github ? "\nGitHub fields above are public data only (scope: read:user). No private repos.\n" : "";
   return `You are about to share the following information with Coastal Recruiting LLC
-for opportunity: ${job.title} at ${job.company} (${job.id})
+for opportunity: ${sanitizeText(job.title)} at ${sanitizeText(job.company)} (${job.id})
 
 Fields that will be sent:
 ` + fields.map((f) => `  \u2022 ${f}`).join("\n") + "\n" + githubNote + `
@@ -8206,14 +8258,6 @@ function formatComp(job) {
   if (job.compMin) return `$${Math.round(job.compMin / 1e3)}k+`;
   return "";
 }
-function linkTitle(title, url) {
-  const isTTY = process.stdout.isTTY;
-  const noColor = process.env["NO_COLOR"] !== void 0;
-  if (isTTY && !noColor && url) {
-    return `\x1B]8;;${url}\x1B\\${title}\x1B]8;;\x1B\\`;
-  }
-  return url ? `${title} (${url})` : title;
-}
 function printResult(i, result) {
   const { job, score, matchedTags, reason, acceptance } = result;
   const comp = formatComp(job);
@@ -8223,7 +8267,7 @@ function printResult(i, result) {
   const titleStr = linkTitle(job.title, job.url);
   const label = statusLabel(result.jobStatus);
   console.log(`
-${i + 1}. ${titleStr} \u2014 ${job.company}${mode}${label}`);
+${i + 1}. ${titleStr} \u2014 ${sanitizeText(job.company)}${mode}${label}`);
   console.log(`   id: ${job.id}`);
   console.log(`   ${remote}${compStr} \xB7 ${job.roleType} \xB7 score: ${formatScore(score)}`);
   console.log(`   ${reason}`);
@@ -8232,7 +8276,7 @@ ${i + 1}. ${titleStr} \u2014 ${job.company}${mode}${label}`);
     console.log(`   \u2713 proof-of-work: ${acceptance.count} merged PR${acceptance.count === 1 ? "" : "s"} into external ${acceptance.domain} repos`);
   }
   if (job.applyMode === "direct") {
-    console.log(`   Apply: ${job.url}`);
+    console.log(`   Apply: ${sanitizeText(job.url)}`);
   } else {
     console.log(`   Apply: via Coastal Recruiting LLC (consent required)`);
   }
@@ -8388,7 +8432,7 @@ Enter a number to act on a role, or press Enter to exit: `
       markClicked(chosen.job.id);
       console.log(`
 Open this URL to apply directly (no data shared):
-  ${chosen.job.url}`);
+  ${sanitizeText(chosen.job.url)}`);
       console.log(`  (marked "clicked" locally \u2014 mark it applied with: terminalhire jobs mark ${chosen.job.id} applied)`);
     } else if (chosen.job.applyMode === "buyer-lead") {
       await handleBuyerLead(chosen.job, profile);
@@ -8404,6 +8448,7 @@ var init_jpi_jobs = __esm({
     "use strict";
     init_job_status_store();
     init_cache_store();
+    init_sanitize();
     __dirname2 = fileURLToPath3(new URL(".", import.meta.url));
     TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join9(homedir8(), ".terminalhire");
     INDEX_CACHE_FILE3 = join9(TERMINALHIRE_DIR6, "index-cache.json");
@@ -8529,24 +8574,18 @@ function credentialUrl(job) {
   const u = job.url ?? "";
   return u.startsWith("http") ? u : `${API_URL3}${u}`;
 }
-function linkTitle2(title, url) {
-  const isTTY = process.stdout.isTTY;
-  const noColor = process.env["NO_COLOR"] !== void 0;
-  if (isTTY && !noColor && url) return `\x1B]8;;${url}\x1B\\${title}\x1B]8;;\x1B\\`;
-  return url ? `${title} (${url})` : title;
-}
 function printCard(i, result) {
   const { job, score, matchedTags, reason } = result;
   const url = credentialUrl(job);
   const kind = job.source === "project" ? "project" : "developer";
-  const byline = job.source === "project" ? ` \xB7 by @${job.company}` : "";
+  const byline = job.source === "project" ? ` \xB7 by @${sanitizeText(job.company)}` : "";
   const scoreStr = score > 0 ? ` \xB7 match ${Math.round(score * 100)}%` : "";
   console.log(`
-${i + 1}. ${linkTitle2(job.title, url)} \u2014 ${kind}${byline}${scoreStr}`);
+${i + 1}. ${linkTitle(job.title, url)} \u2014 ${kind}${byline}${scoreStr}`);
   console.log(`   id: ${job.id}`);
   if (reason) console.log(`   ${reason}`);
   if (matchedTags && matchedTags.length) console.log(`   Tags matched: ${matchedTags.slice(0, 5).join(", ")}`);
-  console.log(`   Profile: ${url}`);
+  console.log(`   Profile: ${sanitizeText(url)}`);
 }
 async function run3() {
   try {
@@ -8624,6 +8663,7 @@ var init_jpi_devs = __esm({
   "bin/jpi-devs.js"() {
     "use strict";
     init_directory2();
+    init_sanitize();
     API_URL3 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
     DEFAULT_LIMIT2 = 10;
     args2 = process.argv.slice(2);
@@ -8787,12 +8827,6 @@ function prompt3(question) {
 function formatAmount(b) {
   return b.amountUSD != null ? "$" + b.amountUSD.toLocaleString() : "$\u2014";
 }
-function linkTitle3(title, url) {
-  const isTTY = process.stdout.isTTY;
-  const noColor = process.env["NO_COLOR"] !== void 0;
-  if (isTTY && !noColor && url) return `\x1B]8;;${url}\x1B\\${title}\x1B]8;;\x1B\\`;
-  return url ? `${title} (${url})` : title;
-}
 function printBounty(i, job, score, reason, matchedTags) {
   const b = job.bounty ?? {};
   const stars = b.repoStars != null ? ` \xB7 ${b.repoStars}\u2605` : "";
@@ -8802,12 +8836,12 @@ function printBounty(i, job, score, reason, matchedTags) {
   const contend = prs != null && prs > 0 ? ` \xB7 \u26A0 ${prs} PR${prs === 1 ? "" : "s"} in flight` : "";
   const ref = opportunityShortToken(job.id);
   console.log(`
-${i + 1}. ${linkTitle3(job.title, job.url)} [${ref}]`);
-  console.log(`   ${formatAmount(b)}${effort} \xB7 ${b.repoFullName ?? job.company}${stars}${scoreStr}${contend}`);
+${i + 1}. ${linkTitle(job.title, job.url)} [${ref}]`);
+  console.log(`   ${formatAmount(b)}${effort} \xB7 ${sanitizeText(b.repoFullName ?? job.company)}${stars}${scoreStr}${contend}`);
   if (reason) console.log(`   ${reason}`);
   if (matchedTags && matchedTags.length) console.log(`   Tags matched: ${matchedTags.slice(0, 5).join(", ")}`);
   console.log(`   id: ${job.id}`);
-  console.log(`   Claim: ${b.claimUrl ?? job.url}`);
+  console.log(`   Claim: ${sanitizeText(b.claimUrl ?? job.url)}`);
   console.log(`   \u2192 terminalhire claim ${ref}`);
 }
 async function run5() {
@@ -8863,7 +8897,7 @@ Enter a number to open a bounty's claim page, or press Enter to exit: `);
     console.log(
       `
 Open this to claim/work the bounty (you go straight to the source \u2014 we never touch payment):
-  ${chosen.bounty?.claimUrl ?? chosen.url}`
+  ${sanitizeText(chosen.bounty?.claimUrl ?? chosen.url)}`
     );
   } catch (err) {
     console.error("terminalhire bounties error:", err.message ?? err);
@@ -8876,6 +8910,7 @@ var init_jpi_bounties = __esm({
     "use strict";
     init_src();
     init_cache_store();
+    init_sanitize();
     TERMINALHIRE_DIR9 = process.env.TERMINALHIRE_DIR || join12(homedir11(), ".terminalhire");
     INDEX_CACHE_FILE4 = join12(TERMINALHIRE_DIR9, "index-cache.json");
     INDEX_TTL_MS3 = 15 * 60 * 1e3;
@@ -8957,22 +8992,16 @@ function displayLanguage(job) {
   const tag = (job.tags ?? []).find((t) => LANGUAGES.has(String(t).toLowerCase()));
   return tag ?? "\u2014";
 }
-function linkTitle4(title, url) {
-  const isTTY = process.stdout.isTTY;
-  const noColor = process.env["NO_COLOR"] !== void 0;
-  if (isTTY && !noColor && url) return `\x1B]8;;${url}\x1B\\${title}\x1B]8;;\x1B\\`;
-  return url ? `${title} (${url})` : title;
-}
 function renderRow(i, result) {
   const job = result.job;
   const c = job.contribution ?? {};
-  const repo = c.repoFullName ?? job.company ?? "";
+  const repo = sanitizeText(c.repoFullName ?? job.company ?? "");
   const num = c.issueNumber != null ? `#${c.issueNumber}` : "";
-  const label = c.labels && c.labels.length ? c.labels[0] : "\u2014";
-  const lang = displayLanguage(job);
+  const label = c.labels && c.labels.length ? sanitizeText(c.labels[0]) : "\u2014";
+  const lang = sanitizeText(displayLanguage(job));
   const scorePct = `match ${Math.round((result.score ?? 0) * 100)}%`;
   const ref = opportunityShortToken(job.id);
-  const line1 = `${i + 1}. ${linkTitle4(job.title, c.issueUrl ?? job.url)} [${ref}]`;
+  const line1 = `${i + 1}. ${linkTitle(job.title, c.issueUrl ?? job.url)} [${ref}]`;
   const line2 = `   ${repo} \xB7 ${num} \xB7 ${label} \xB7 ${lang} \xB7 ${scorePct}`;
   const line3 = `   \u2192 terminalhire claim ${ref}`;
   return `${line1}
@@ -9020,6 +9049,7 @@ var init_jpi_contribute = __esm({
     init_src();
     init_cache_store();
     init_config();
+    init_sanitize();
     TERMINALHIRE_DIR10 = process.env.TERMINALHIRE_DIR || join13(homedir12(), ".terminalhire");
     INDEX_CACHE_FILE5 = join13(TERMINALHIRE_DIR10, "index-cache.json");
     INDEX_TTL_MS4 = 15 * 60 * 1e3;
