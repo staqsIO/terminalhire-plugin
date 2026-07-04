@@ -391,6 +391,11 @@ ${body}`;
   for (const tok of tokens) {
     const r = resolveToken(tok);
     if (!r) continue;
+    const synGate = AMBIGUOUS_SYNONYM[tok] ?? AMBIGUOUS_SYNONYM[tok.replace(/^[.\-+#]+|[.\-+#]+$/g, "")];
+    if (synGate && r.id === synGate.id) {
+      if (synGate.cue.test(text)) ids.add(r.id);
+      continue;
+    }
     if (NON_EXTRACTABLE.has(r.id)) continue;
     if (SYNONYM_ONLY.has(r.id) && !r.viaSynonym) continue;
     const cue = AMBIGUOUS[r.id];
@@ -408,7 +413,7 @@ ${body}`;
 function coreTagsFromTitle(title) {
   return extractSkillTags(title, "").filter((t) => !SOFT_DOMAIN.has(t));
 }
-var SOFT_DOMAIN, SYNONYM_ONLY, NON_EXTRACTABLE, AMBIGUOUS, ENG_INTENT, NON_ENG_TITLE;
+var SOFT_DOMAIN, SYNONYM_ONLY, NON_EXTRACTABLE, AMBIGUOUS, AMBIGUOUS_SYNONYM, ENG_INTENT, NON_ENG_TITLE;
 var init_extract = __esm({
   "../../packages/core/src/vocab/extract.ts"() {
     "use strict";
@@ -444,6 +449,16 @@ var init_extract = __esm({
       go: /\b(golang|goroutines?|go\.mod|gin framework|gorm)\b|\bgo\b\s+(developer|engineer|programmer|microservices?|backend|services?|lang)|\b(in|with|using|written in|built in|experience (?:in|with)|proficient in|fluent in)\s+go\b/i,
       r: /\b(rstudio|tidyverse|ggplot|shiny|dplyr|cran|r-lang|rlang)\b/i,
       ml: /\b(machine[\s-]?learning|pytorch|tensorflow|scikit|sklearn|keras|neural|model training|deep[\s-]?learning|numpy|pandas|ml\s+(?:engineer|platform|researcher|infrastructure)|(?:ml|ai)\s+research)\b/i
+    };
+    AMBIGUOUS_SYNONYM = {
+      // "prompt" is the LLM skill only in AI context. In raw JD prose it is "prompt
+      // delivery / response / payment / communication / attention". Accept only with
+      // the explicit "prompt engineering" phrase OR an LLM/AI ecosystem cue; the cue
+      // deliberately excludes the bare word "prompt(s)" itself so it can't self-satisfy.
+      prompt: {
+        id: "prompt-engineering",
+        cue: /\bprompt[\s-]?engineer(?:ing|s)?\b|\b(llms?|gpt-?[0-9o]*|claude|gemini|llama|mistral|openai|anthropic|langchain|llama[\s-]?index|rag|retrieval[\s-]?augmented|embeddings?|fine[\s-]?tun(?:e|ed|ing)|vector[\s-]?(?:db|database|store)|agentic|ai agents?|chatbots?|generative ai|gen[\s-]?ai|genai|few[\s-]?shot|zero[\s-]?shot)\b/i
+      }
     };
     ENG_INTENT = /\b(engineer|engineering|developer|dev\b|swe|sde|programmer|architect|full[\s-]?stack|front[\s-]?end|back[\s-]?end|devops|sre|software|coding|codebase|technical staff|tech(?:nical)? lead)\b/i;
     NON_ENG_TITLE = /\b(account executive|account manager|sales (?:rep|representative|development|manager|lead)|sdr|bdr|recruiter|recruiting|talent|marketing|administrative|business partner|billing coordinator|operations (?:administrator|coordinator)|customer success|project finance|controller|bookkeeper|graphic|brand)\b/i;
@@ -6906,14 +6921,136 @@ var init_profile = __esm({
   }
 });
 
+// bin/job-status-store.js
+var job_status_store_exports = {};
+__export(job_status_store_exports, {
+  markClicked: () => markClicked,
+  markStatus: () => markStatus,
+  readStatusMap: () => readStatusMap,
+  statusFilePath: () => statusFilePath
+});
+import {
+  readFileSync as readFileSync7,
+  writeFileSync as writeFileSync6,
+  renameSync as renameSync2,
+  mkdirSync as mkdirSync6,
+  existsSync as existsSync4,
+  copyFileSync,
+  openSync,
+  closeSync,
+  unlinkSync
+} from "fs";
+import { join as join7, dirname } from "path";
+import { homedir as homedir6 } from "os";
+function statusFilePath() {
+  return STATUS_FILE;
+}
+function atomicWriteJson(path, obj) {
+  mkdirSync6(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync6(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  renameSync2(tmp, path);
+}
+function sleepMs(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+    }
+  }
+}
+function withLock(fn) {
+  const deadline = Date.now() + 2e3;
+  for (; ; ) {
+    let fd;
+    try {
+      mkdirSync6(dirname(LOCK_FILE), { recursive: true });
+      fd = openSync(LOCK_FILE, "wx");
+    } catch (err) {
+      if (err && err.code === "EEXIST") {
+        if (Date.now() > deadline) {
+          try {
+            unlinkSync(LOCK_FILE);
+          } catch {
+          }
+          continue;
+        }
+        sleepMs(5);
+        continue;
+      }
+      throw err;
+    }
+    try {
+      return fn();
+    } finally {
+      try {
+        closeSync(fd);
+      } catch {
+      }
+      try {
+        unlinkSync(LOCK_FILE);
+      } catch {
+      }
+    }
+  }
+}
+function readStatusMap() {
+  if (!existsSync4(STATUS_FILE)) return {};
+  let raw;
+  try {
+    raw = readFileSync7(STATUS_FILE, "utf8");
+  } catch {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    throw new Error("status store is not an object");
+  } catch {
+    try {
+      copyFileSync(STATUS_FILE, BAK_FILE);
+    } catch {
+    }
+    return {};
+  }
+}
+function markStatus(id, status) {
+  return withLock(() => {
+    const current = readStatusMap();
+    const next = setStatus(current, id, status);
+    atomicWriteJson(STATUS_FILE, next);
+    return next[id];
+  });
+}
+function markClicked(id) {
+  return withLock(() => {
+    const current = readStatusMap();
+    const next = recordClick(current, id);
+    atomicWriteJson(STATUS_FILE, next);
+    return next[id];
+  });
+}
+var TERMINALHIRE_DIR5, STATUS_FILE, LOCK_FILE, BAK_FILE;
+var init_job_status_store = __esm({
+  "bin/job-status-store.js"() {
+    "use strict";
+    init_src();
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join7(homedir6(), ".terminalhire");
+    STATUS_FILE = join7(TERMINALHIRE_DIR5, "job-status.json");
+    LOCK_FILE = `${STATUS_FILE}.lock`;
+    BAK_FILE = `${STATUS_FILE}.bak`;
+  }
+});
+
 // src/signal.ts
 var signal_exports = {};
 __export(signal_exports, {
   extractFingerprint: () => extractFingerprint
 });
-import { readFileSync as readFileSync7, readdirSync } from "fs";
+import { readFileSync as readFileSync8, readdirSync } from "fs";
 import { execFileSync } from "child_process";
-import { join as join7 } from "path";
+import { join as join8 } from "path";
 function safeGit(args, cwd) {
   try {
     return execFileSync("git", ["-C", cwd, ...args], {
@@ -6941,20 +7078,20 @@ function isEmployerContext(cwd) {
 }
 function readJsonSafe(path) {
   try {
-    return JSON.parse(readFileSync7(path, "utf8"));
+    return JSON.parse(readFileSync8(path, "utf8"));
   } catch {
     return null;
   }
 }
 function readFileSafe(path) {
   try {
-    return readFileSync7(path, "utf8");
+    return readFileSync8(path, "utf8");
   } catch {
     return "";
   }
 }
 function tokensFromPackageJson(cwd) {
-  const pkg = readJsonSafe(join7(cwd, "package.json"));
+  const pkg = readJsonSafe(join8(cwd, "package.json"));
   if (!pkg || typeof pkg !== "object") return [];
   const p = pkg;
   const deps = {
@@ -6968,9 +7105,9 @@ function workspaceMemberDirs(cwd) {
   const dirs = [cwd];
   for (const group of ["apps", "packages"]) {
     try {
-      const groupDir = join7(cwd, group);
+      const groupDir = join8(cwd, group);
       for (const e of readdirSync(groupDir, { withFileTypes: true })) {
-        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join7(groupDir, e.name));
+        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join8(groupDir, e.name));
       }
     } catch {
     }
@@ -6978,18 +7115,18 @@ function workspaceMemberDirs(cwd) {
   return dirs;
 }
 function tokensFromRequirementsTxt(cwd) {
-  const content = readFileSafe(join7(cwd, "requirements.txt"));
+  const content = readFileSafe(join8(cwd, "requirements.txt"));
   if (!content) return [];
   return content.split("\n").map((l) => l.trim().split(/[>=<!\[;]/)[0].trim().toLowerCase()).filter(Boolean);
 }
 function tokensFromGoMod(cwd) {
-  const content = readFileSafe(join7(cwd, "go.mod"));
+  const content = readFileSafe(join8(cwd, "go.mod"));
   if (!content) return [];
   const requires = Array.from(content.matchAll(/^\s+([^\s]+)\s+v/gm)).map((m) => m[1].split("/").pop() ?? "").filter(Boolean);
   return ["go", ...requires];
 }
 function tokensFromCargoToml(cwd) {
-  const content = readFileSafe(join7(cwd, "Cargo.toml"));
+  const content = readFileSafe(join8(cwd, "Cargo.toml"));
   if (!content) return [];
   const deps = [];
   let inDeps = false;
@@ -7010,7 +7147,7 @@ function tokensFromFileExtensions(cwd) {
   const tokens = [];
   const scanDirs = [cwd];
   try {
-    const srcDir = join7(cwd, "src");
+    const srcDir = join8(cwd, "src");
     readdirSync(srcDir);
     scanDirs.push(srcDir);
   } catch {
@@ -7180,22 +7317,22 @@ __export(spinner_seen_exports, {
   seenFilePath: () => seenFilePath
 });
 import {
-  readFileSync as readFileSync8,
-  writeFileSync as writeFileSync6,
-  renameSync as renameSync2,
-  mkdirSync as mkdirSync6
+  readFileSync as readFileSync9,
+  writeFileSync as writeFileSync7,
+  renameSync as renameSync3,
+  mkdirSync as mkdirSync7
 } from "fs";
-import { join as join8, dirname } from "path";
-import { homedir as homedir6 } from "os";
+import { join as join9, dirname as dirname2 } from "path";
+import { homedir as homedir7 } from "os";
 function seenFilePath() {
-  const dir = process.env["TERMINALHIRE_DIR"] || join8(homedir6(), ".terminalhire");
-  return join8(dir, "seen-history.json");
+  const dir = process.env["TERMINALHIRE_DIR"] || join9(homedir7(), ".terminalhire");
+  return join9(dir, "seen-history.json");
 }
-function atomicWriteJson(path, obj) {
-  mkdirSync6(dirname(path), { recursive: true });
+function atomicWriteJson2(path, obj) {
+  mkdirSync7(dirname2(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync6(tmp, JSON.stringify(obj) + "\n", { encoding: "utf8", mode: 384 });
-  renameSync2(tmp, path);
+  writeFileSync7(tmp, JSON.stringify(obj) + "\n", { encoding: "utf8", mode: 384 });
+  renameSync3(tmp, path);
 }
 function emptyHistory() {
   return { surface: 0, entries: {} };
@@ -7223,7 +7360,7 @@ function capEntries(entries) {
 function loadSeenHistory(now = Date.now()) {
   let raw;
   try {
-    raw = JSON.parse(readFileSync8(seenFilePath(), "utf8"));
+    raw = JSON.parse(readFileSync9(seenFilePath(), "utf8"));
   } catch {
     return emptyHistory();
   }
@@ -7247,7 +7384,7 @@ function recordSurface(ids, now = Date.now()) {
   }
   const next = { surface, entries: capEntries(pruneEntries(entries, now)) };
   try {
-    atomicWriteJson(seenFilePath(), next);
+    atomicWriteJson2(seenFilePath(), next);
   } catch {
   }
   return next;
@@ -7264,35 +7401,35 @@ var init_spinner_seen = __esm({
 
 // bin/spinner-io.js
 import {
-  readFileSync as readFileSync9,
-  writeFileSync as writeFileSync7,
-  existsSync as existsSync4,
-  mkdirSync as mkdirSync7,
-  renameSync as renameSync3
+  readFileSync as readFileSync10,
+  writeFileSync as writeFileSync8,
+  existsSync as existsSync5,
+  mkdirSync as mkdirSync8,
+  renameSync as renameSync4
 } from "fs";
-import { join as join9, dirname as dirname2 } from "path";
-import { homedir as homedir7 } from "os";
+import { join as join10, dirname as dirname3 } from "path";
+import { homedir as homedir8 } from "os";
 function thDir() {
-  return process.env["TERMINALHIRE_DIR"] || join9(homedir7(), ".terminalhire");
+  return process.env["TERMINALHIRE_DIR"] || join10(homedir8(), ".terminalhire");
 }
 function claudeSettingsPath() {
-  return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join9(homedir7(), ".claude", "settings.json");
+  return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join10(homedir8(), ".claude", "settings.json");
 }
 function spinnerStateFilePath() {
-  return join9(thDir(), "spinner-state.json");
+  return join10(thDir(), "spinner-state.json");
 }
 function readJson(path, fallback) {
   try {
-    return existsSync4(path) ? JSON.parse(readFileSync9(path, "utf8")) : fallback;
+    return existsSync5(path) ? JSON.parse(readFileSync10(path, "utf8")) : fallback;
   } catch {
     return fallback;
   }
 }
-function atomicWriteJson2(path, obj) {
-  mkdirSync7(dirname2(path), { recursive: true });
+function atomicWriteJson3(path, obj) {
+  mkdirSync8(dirname3(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync7(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
-  renameSync3(tmp, path);
+  writeFileSync8(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  renameSync4(tmp, path);
 }
 function readState() {
   const SPINNER_STATE_FILE = spinnerStateFilePath();
@@ -7309,9 +7446,9 @@ function applySpinnerVerbs(ourVerbs, mode = "replace") {
   const userVerbs = existing && Array.isArray(existing.verbs) ? existing.verbs.filter((v) => !prevOurs.has(v)) : [];
   const newVerbs = [...verbs, ...userVerbs];
   settings.spinnerVerbs = { mode: mode === "append" ? "append" : "replace", verbs: newVerbs };
-  atomicWriteJson2(CLAUDE_SETTINGS, settings);
+  atomicWriteJson3(CLAUDE_SETTINGS, settings);
   const st = readState();
-  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
+  atomicWriteJson3(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
   return { applied: verbs.length, total: newVerbs.length };
 }
 function clearSpinnerVerbs() {
@@ -7331,11 +7468,11 @@ function clearSpinnerVerbs() {
     } else {
       delete settings.spinnerVerbs;
     }
-    atomicWriteJson2(CLAUDE_SETTINGS, settings);
+    atomicWriteJson3(CLAUDE_SETTINGS, settings);
   }
   try {
     const st = readState();
-    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
+    atomicWriteJson3(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
   } catch {
   }
   return { cleared: true, keptUserVerbs };
@@ -7351,9 +7488,9 @@ function applySpinnerTips(ourTips) {
   const userTips = existing.filter((t) => !prevOurs.has(t));
   settings.spinnerTipsEnabled = true;
   settings.spinnerTipsOverride = { excludeDefault: true, tips: [...tips, ...userTips] };
-  atomicWriteJson2(CLAUDE_SETTINGS, settings);
+  atomicWriteJson3(CLAUDE_SETTINGS, settings);
   const st = readState();
-  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
+  atomicWriteJson3(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
   return { applied: tips.length };
 }
 function clearSpinnerTips() {
@@ -7372,11 +7509,11 @@ function clearSpinnerTips() {
       delete settings.spinnerTipsOverride;
       delete settings.spinnerTipsEnabled;
     }
-    atomicWriteJson2(CLAUDE_SETTINGS, settings);
+    atomicWriteJson3(CLAUDE_SETTINGS, settings);
   }
   try {
     const st = readState();
-    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
+    atomicWriteJson3(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
   } catch {
   }
   return { cleared: true };
@@ -7388,9 +7525,9 @@ var init_spinner_io = __esm({
 });
 
 // bin/spinner-config.js
-import { join as join10 } from "path";
+import { join as join11 } from "path";
 function configFilePath() {
-  return join10(thDir(), "config.json");
+  return join11(thDir(), "config.json");
 }
 function readSpinnerConfig() {
   const CONFIG_FILE2 = configFilePath();
@@ -7820,9 +7957,9 @@ __export(version_nudge_exports, {
   readLatestVersionFromCache: () => readLatestVersionFromCache,
   readLocalVersion: () => readLocalVersion
 });
-import { readFileSync as readFileSync10, existsSync as existsSync5 } from "fs";
-import { join as join11 } from "path";
-import { homedir as homedir8 } from "os";
+import { readFileSync as readFileSync11, existsSync as existsSync6 } from "fs";
+import { join as join12 } from "path";
+import { homedir as homedir9 } from "os";
 import { fileURLToPath as fileURLToPath2 } from "url";
 function parseVersion(v) {
   if (typeof v !== "string") return null;
@@ -7847,12 +7984,12 @@ function buildStaleNudge(local, latest) {
 function readLocalVersion() {
   try {
     const candidates = [
-      join11(__dirname, "..", "..", "package.json"),
-      join11(__dirname, "..", "package.json")
+      join12(__dirname, "..", "..", "package.json"),
+      join12(__dirname, "..", "package.json")
     ];
     for (const p of candidates) {
-      if (existsSync5(p)) {
-        const pkg = JSON.parse(readFileSync10(p, "utf8"));
+      if (existsSync6(p)) {
+        const pkg = JSON.parse(readFileSync11(p, "utf8"));
         if (pkg.version) return pkg.version;
       }
     }
@@ -7862,7 +7999,7 @@ function readLocalVersion() {
 }
 function readLatestVersionFromCache() {
   try {
-    const cache = JSON.parse(readFileSync10(INDEX_CACHE_FILE2, "utf8"));
+    const cache = JSON.parse(readFileSync11(INDEX_CACHE_FILE2, "utf8"));
     const v = cache?.index?.cliVersion;
     return typeof v === "string" ? v : null;
   } catch {
@@ -7879,7 +8016,7 @@ var init_version_nudge = __esm({
   "bin/version-nudge.js"() {
     "use strict";
     __dirname = fileURLToPath2(new URL(".", import.meta.url));
-    INDEX_CACHE_FILE2 = join11(process.env.TERMINALHIRE_DIR || join11(homedir8(), ".terminalhire"), "index-cache.json");
+    INDEX_CACHE_FILE2 = join12(process.env.TERMINALHIRE_DIR || join12(homedir9(), ".terminalhire"), "index-cache.json");
   }
 });
 
@@ -8034,6 +8171,18 @@ function budgetSlots(results, opts = {}) {
   return { roleTop, bountyTop, contributeTop };
 }
 
+// bin/job-status-suppress.js
+function isEngaged(rec) {
+  if (!rec) return false;
+  if (rec.status === "applied" || rec.status === "dismissed") return true;
+  if (rec.status === "saved") return false;
+  return rec.clicked === true;
+}
+function suppressEngaged(results, statusMap) {
+  const map = statusMap || {};
+  return results.filter((r) => !isEngaged(map[r?.job?.id]));
+}
+
 // src/config.ts
 import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync } from "fs";
 import { join as join3 } from "path";
@@ -8143,6 +8292,7 @@ async function run() {
     try {
       const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
       const { match: match2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+      const { readStatusMap: readStatusMap2 } = await Promise.resolve().then(() => (init_job_status_store(), job_status_store_exports));
       const profile = await readProfile2();
       if (profile.skillTags.length > 0 && jobs.length > 0) {
         const fp = profileToFingerprint2(profile);
@@ -8151,7 +8301,8 @@ async function run() {
           contributeNudge.onRamp = true;
         }
         const pool = contribute.length > 0 ? [...jobs, ...contribute] : jobs;
-        const results = match2(fp, pool, pool.length);
+        let results = match2(fp, pool, pool.length);
+        results = suppressEngaged(results, readStatusMap2());
         matchCount = results.length;
         const { roleTop, bountyTop, contributeTop } = budgetSlots(results, {
           thinProfile,

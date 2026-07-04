@@ -917,6 +917,11 @@ ${body}`;
   for (const tok of tokens) {
     const r = resolveToken(tok);
     if (!r) continue;
+    const synGate = AMBIGUOUS_SYNONYM[tok] ?? AMBIGUOUS_SYNONYM[tok.replace(/^[.\-+#]+|[.\-+#]+$/g, "")];
+    if (synGate && r.id === synGate.id) {
+      if (synGate.cue.test(text)) ids.add(r.id);
+      continue;
+    }
     if (NON_EXTRACTABLE.has(r.id)) continue;
     if (SYNONYM_ONLY.has(r.id) && !r.viaSynonym) continue;
     const cue = AMBIGUOUS[r.id];
@@ -934,7 +939,7 @@ ${body}`;
 function coreTagsFromTitle(title) {
   return extractSkillTags(title, "").filter((t) => !SOFT_DOMAIN.has(t));
 }
-var SOFT_DOMAIN, SYNONYM_ONLY, NON_EXTRACTABLE, AMBIGUOUS, ENG_INTENT, NON_ENG_TITLE;
+var SOFT_DOMAIN, SYNONYM_ONLY, NON_EXTRACTABLE, AMBIGUOUS, AMBIGUOUS_SYNONYM, ENG_INTENT, NON_ENG_TITLE;
 var init_extract = __esm({
   "../../packages/core/src/vocab/extract.ts"() {
     "use strict";
@@ -970,6 +975,16 @@ var init_extract = __esm({
       go: /\b(golang|goroutines?|go\.mod|gin framework|gorm)\b|\bgo\b\s+(developer|engineer|programmer|microservices?|backend|services?|lang)|\b(in|with|using|written in|built in|experience (?:in|with)|proficient in|fluent in)\s+go\b/i,
       r: /\b(rstudio|tidyverse|ggplot|shiny|dplyr|cran|r-lang|rlang)\b/i,
       ml: /\b(machine[\s-]?learning|pytorch|tensorflow|scikit|sklearn|keras|neural|model training|deep[\s-]?learning|numpy|pandas|ml\s+(?:engineer|platform|researcher|infrastructure)|(?:ml|ai)\s+research)\b/i
+    };
+    AMBIGUOUS_SYNONYM = {
+      // "prompt" is the LLM skill only in AI context. In raw JD prose it is "prompt
+      // delivery / response / payment / communication / attention". Accept only with
+      // the explicit "prompt engineering" phrase OR an LLM/AI ecosystem cue; the cue
+      // deliberately excludes the bare word "prompt(s)" itself so it can't self-satisfy.
+      prompt: {
+        id: "prompt-engineering",
+        cue: /\bprompt[\s-]?engineer(?:ing|s)?\b|\b(llms?|gpt-?[0-9o]*|claude|gemini|llama|mistral|openai|anthropic|langchain|llama[\s-]?index|rag|retrieval[\s-]?augmented|embeddings?|fine[\s-]?tun(?:e|ed|ing)|vector[\s-]?(?:db|database|store)|agentic|ai agents?|chatbots?|generative ai|gen[\s-]?ai|genai|few[\s-]?shot|zero[\s-]?shot)\b/i
+      }
     };
     ENG_INTENT = /\b(engineer|engineering|developer|dev\b|swe|sde|programmer|architect|full[\s-]?stack|front[\s-]?end|back[\s-]?end|devops|sre|software|coding|codebase|technical staff|tech(?:nical)? lead)\b/i;
     NON_ENG_TITLE = /\b(account executive|account manager|sales (?:rep|representative|development|manager|lead)|sdr|bdr|recruiter|recruiting|talent|marketing|administrative|business partner|billing coordinator|operations (?:administrator|coordinator)|customer success|project finance|controller|bookkeeper|graphic|brand)\b/i;
@@ -7931,6 +7946,13 @@ var init_jpi_login = __esm({
 });
 
 // bin/job-status-store.js
+var job_status_store_exports = {};
+__export(job_status_store_exports, {
+  markClicked: () => markClicked,
+  markStatus: () => markStatus,
+  readStatusMap: () => readStatusMap,
+  statusFilePath: () => statusFilePath
+});
 import {
   readFileSync as readFileSync7,
   writeFileSync as writeFileSync5,
@@ -7944,6 +7966,9 @@ import {
 } from "fs";
 import { join as join7, dirname } from "path";
 import { homedir as homedir6 } from "os";
+function statusFilePath() {
+  return STATUS_FILE;
+}
 function atomicWriteJson(path, obj) {
   mkdirSync5(dirname(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
@@ -38044,6 +38069,23 @@ var init_match_slots = __esm({
   }
 });
 
+// bin/job-status-suppress.js
+function isEngaged(rec) {
+  if (!rec) return false;
+  if (rec.status === "applied" || rec.status === "dismissed") return true;
+  if (rec.status === "saved") return false;
+  return rec.clicked === true;
+}
+function suppressEngaged(results, statusMap) {
+  const map = statusMap || {};
+  return results.filter((r) => !isEngaged(map[r?.job?.id]));
+}
+var init_job_status_suppress = __esm({
+  "bin/job-status-suppress.js"() {
+    "use strict";
+  }
+});
+
 // bin/jpi-refresh.js
 var jpi_refresh_exports = {};
 __export(jpi_refresh_exports, {
@@ -38086,6 +38128,7 @@ async function run21() {
     try {
       const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
       const { match: match2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+      const { readStatusMap: readStatusMap2 } = await Promise.resolve().then(() => (init_job_status_store(), job_status_store_exports));
       const profile = await readProfile2();
       if (profile.skillTags.length > 0 && jobs.length > 0) {
         const fp = profileToFingerprint2(profile);
@@ -38094,7 +38137,8 @@ async function run21() {
           contributeNudge.onRamp = true;
         }
         const pool = contribute.length > 0 ? [...jobs, ...contribute] : jobs;
-        const results = match2(fp, pool, pool.length);
+        let results = match2(fp, pool, pool.length);
+        results = suppressEngaged(results, readStatusMap2());
         matchCount = results.length;
         const { roleTop, bountyTop, contributeTop } = budgetSlots(results, {
           thinProfile,
@@ -38282,6 +38326,7 @@ var init_jpi_refresh = __esm({
     init_directory2();
     init_cache_store();
     init_match_slots();
+    init_job_status_suppress();
     init_config();
     init_web_session();
     GH_SESSION_COOKIE7 = "__jpi_gh_session";

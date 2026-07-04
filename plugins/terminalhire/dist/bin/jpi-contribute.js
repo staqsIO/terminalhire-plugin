@@ -385,6 +385,11 @@ ${body}`;
   for (const tok of tokens) {
     const r = resolveToken(tok);
     if (!r) continue;
+    const synGate = AMBIGUOUS_SYNONYM[tok] ?? AMBIGUOUS_SYNONYM[tok.replace(/^[.\-+#]+|[.\-+#]+$/g, "")];
+    if (synGate && r.id === synGate.id) {
+      if (synGate.cue.test(text)) ids.add(r.id);
+      continue;
+    }
     if (NON_EXTRACTABLE.has(r.id)) continue;
     if (SYNONYM_ONLY.has(r.id) && !r.viaSynonym) continue;
     const cue = AMBIGUOUS[r.id];
@@ -402,7 +407,7 @@ ${body}`;
 function coreTagsFromTitle(title) {
   return extractSkillTags(title, "").filter((t) => !SOFT_DOMAIN.has(t));
 }
-var SOFT_DOMAIN, SYNONYM_ONLY, NON_EXTRACTABLE, AMBIGUOUS, ENG_INTENT, NON_ENG_TITLE;
+var SOFT_DOMAIN, SYNONYM_ONLY, NON_EXTRACTABLE, AMBIGUOUS, AMBIGUOUS_SYNONYM, ENG_INTENT, NON_ENG_TITLE;
 var init_extract = __esm({
   "../../packages/core/src/vocab/extract.ts"() {
     "use strict";
@@ -438,6 +443,16 @@ var init_extract = __esm({
       go: /\b(golang|goroutines?|go\.mod|gin framework|gorm)\b|\bgo\b\s+(developer|engineer|programmer|microservices?|backend|services?|lang)|\b(in|with|using|written in|built in|experience (?:in|with)|proficient in|fluent in)\s+go\b/i,
       r: /\b(rstudio|tidyverse|ggplot|shiny|dplyr|cran|r-lang|rlang)\b/i,
       ml: /\b(machine[\s-]?learning|pytorch|tensorflow|scikit|sklearn|keras|neural|model training|deep[\s-]?learning|numpy|pandas|ml\s+(?:engineer|platform|researcher|infrastructure)|(?:ml|ai)\s+research)\b/i
+    };
+    AMBIGUOUS_SYNONYM = {
+      // "prompt" is the LLM skill only in AI context. In raw JD prose it is "prompt
+      // delivery / response / payment / communication / attention". Accept only with
+      // the explicit "prompt engineering" phrase OR an LLM/AI ecosystem cue; the cue
+      // deliberately excludes the bare word "prompt(s)" itself so it can't self-satisfy.
+      prompt: {
+        id: "prompt-engineering",
+        cue: /\bprompt[\s-]?engineer(?:ing|s)?\b|\b(llms?|gpt-?[0-9o]*|claude|gemini|llama|mistral|openai|anthropic|langchain|llama[\s-]?index|rag|retrieval[\s-]?augmented|embeddings?|fine[\s-]?tun(?:e|ed|ing)|vector[\s-]?(?:db|database|store)|agentic|ai agents?|chatbots?|generative ai|gen[\s-]?ai|genai|few[\s-]?shot|zero[\s-]?shot)\b/i
+      }
     };
     ENG_INTENT = /\b(engineer|engineering|developer|dev\b|swe|sde|programmer|architect|full[\s-]?stack|front[\s-]?end|back[\s-]?end|devops|sre|software|coding|codebase|technical staff|tech(?:nical)? lead)\b/i;
     NON_ENG_TITLE = /\b(account executive|account manager|sales (?:rep|representative|development|manager|lead)|sdr|bdr|recruiter|recruiting|talent|marketing|administrative|business partner|billing coordinator|operations (?:administrator|coordinator)|customer success|project finance|controller|bookkeeper|graphic|brand)\b/i;
