@@ -6759,9 +6759,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/release-0192/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/release-0192/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -6992,13 +6992,13 @@ async function removeSavedJob(id) {
   return true;
 }
 async function deleteProfile() {
-  const { rmSync } = await import("fs");
+  const { rmSync: rmSync2 } = await import("fs");
   try {
-    rmSync(PROFILE_FILE);
+    rmSync2(PROFILE_FILE);
   } catch {
   }
   try {
-    rmSync(KEY_FILE);
+    rmSync2(KEY_FILE);
   } catch {
   }
 }
@@ -7050,12 +7050,185 @@ var init_profile = __esm({
   }
 });
 
-// bin/jpi-jobs.js
-import { readFileSync as readFileSync5 } from "fs";
-import { join as join5 } from "path";
+// src/web-session.ts
+import {
+  chmodSync as chmodSync2,
+  existsSync as existsSync3,
+  mkdirSync as mkdirSync4,
+  readFileSync as readFileSync5,
+  rmSync,
+  writeFileSync as writeFileSync4
+} from "fs";
 import { homedir as homedir4 } from "os";
+import { join as join5 } from "path";
+function terminalhireDir() {
+  return join5(homedir4(), ".terminalhire");
+}
+function webSessionFilePath() {
+  return join5(terminalhireDir(), "web-session");
+}
+function readWebSessionFile() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync3(path)) return null;
+    const v = readFileSync5(path, "utf8").trim();
+    return v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+function readWebSessionCookie() {
+  const fromFile = readWebSessionFile();
+  if (fromFile) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return typeof env === "string" && env.length > 0 ? env : null;
+}
+var init_web_session = __esm({
+  "src/web-session.ts"() {
+    "use strict";
+  }
+});
+
+// src/config.ts
+import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, mkdirSync as mkdirSync5, existsSync as existsSync4 } from "fs";
+import { join as join6 } from "path";
+import { homedir as homedir5 } from "os";
+function readConfig() {
+  try {
+    if (!existsSync4(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
+    const raw = readFileSync6(CONFIG_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_CONFIG, ...parsed };
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+}
+function writeConfig(config) {
+  mkdirSync5(TERMINALHIRE_DIR4, { recursive: true });
+  const current = readConfig();
+  const merged = { ...current, ...config };
+  writeFileSync5(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
+}
+var TERMINALHIRE_DIR4, CONFIG_FILE, DEFAULT_CONFIG;
+var init_config = __esm({
+  "src/config.ts"() {
+    "use strict";
+    TERMINALHIRE_DIR4 = join6(homedir5(), ".terminalhire");
+    CONFIG_FILE = join6(TERMINALHIRE_DIR4, "config.json");
+    DEFAULT_CONFIG = {
+      nudge: "session",
+      peerConnect: false,
+      peerConnectPrompted: false,
+      resumePublishPrompted: false,
+      chatDisclosureAck: false,
+      chatShareActivity: false,
+      inboundNudgeMuted: false,
+      inboundNudgeDisclosed: false,
+      contributeEnabled: false,
+      contributePrompted: false,
+      betaOptIn: false,
+      lastFullFeedbackAt: null,
+      lastPulseAskAt: null,
+      pulseDisclosed: false
+    };
+  }
+});
+
+// bin/pulse-prompt.js
+var pulse_prompt_exports = {};
+__export(pulse_prompt_exports, {
+  maybeAskPulse: () => maybeAskPulse
+});
 import { createInterface } from "readline";
+import { readFileSync as readFileSync7, existsSync as existsSync5 } from "fs";
+import { join as join7 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
+function readLocalVersion() {
+  try {
+    for (const p of [join7(__dirname, "..", "..", "package.json"), join7(__dirname, "..", "package.json")]) {
+      if (existsSync5(p)) {
+        const pkg = JSON.parse(readFileSync7(p, "utf8"));
+        if (pkg.version) return pkg.version;
+      }
+    }
+  } catch {
+  }
+  return null;
+}
+async function maybeAskPulse() {
+  if (!(process.stdout.isTTY && process.stdin.isTTY)) return;
+  const config = readConfig();
+  if (config.betaOptIn !== true) return;
+  const cookie = readWebSessionCookie();
+  if (!cookie) return;
+  const last = config.lastPulseAskAt;
+  if (last && Date.now() - Date.parse(last) < PULSE_ASK_INTERVAL_MS) return;
+  if (config.pulseDisclosed !== true) {
+    console.log("");
+    console.log("  \u2726 Heads up: terminalhire will occasionally (max once a day) ask you to");
+    console.log("    rate it 0\u20133. Replying sends ONLY that number + your CLI version/OS;");
+    console.log("    Enter always skips and sends nothing.");
+    writeConfig({ pulseDisclosed: true, lastPulseAskAt: (/* @__PURE__ */ new Date()).toISOString() });
+    return;
+  }
+  writeConfig({ lastPulseAskAt: (/* @__PURE__ */ new Date()).toISOString() });
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const ask = (question) => new Promise((resolve) => {
+    const onClose = () => resolve(null);
+    rl.once("close", onClose);
+    rl.question(question, (answer2) => {
+      rl.removeListener("close", onClose);
+      resolve((answer2 || "").trim());
+    });
+  });
+  const answer = await ask(
+    "  \u2726 Quick pulse \u2014 how's terminalhire? 0\u20133 (Enter skips; a reply sends ONLY the score + CLI version/OS): "
+  );
+  rl.close();
+  if (!/^[0-3]$/.test(answer || "")) {
+    console.log("  (skipped \u2014 nothing sent)");
+    return;
+  }
+  const pulse = Number.parseInt(answer, 10);
+  const cliVersion = readLocalVersion() || "unknown";
+  const os = process.platform;
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/api/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: `${GH_SESSION_COOKIE}=${cookie}` },
+      body: JSON.stringify({ category: "pulse", pulse, cliVersion, os }),
+      signal: AbortSignal.timeout(1e4)
+    });
+  } catch {
+    console.log("  (could not send your pulse just now \u2014 no worries)");
+    return;
+  }
+  if (!res.ok) {
+    console.log("  (could not log your pulse right now \u2014 thanks anyway)");
+    return;
+  }
+  console.log("  \u2713 Thanks \u2014 logged.");
+}
+var __dirname, API_BASE, GH_SESSION_COOKIE, PULSE_ASK_INTERVAL_MS;
+var init_pulse_prompt = __esm({
+  "bin/pulse-prompt.js"() {
+    "use strict";
+    init_web_session();
+    init_config();
+    __dirname = fileURLToPath2(new URL(".", import.meta.url));
+    API_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
+    GH_SESSION_COOKIE = "__jpi_gh_session";
+    PULSE_ASK_INTERVAL_MS = 24 * 60 * 60 * 1e3;
+  }
+});
+
+// bin/jpi-jobs.js
+import { readFileSync as readFileSync8 } from "fs";
+import { join as join8 } from "path";
+import { homedir as homedir6 } from "os";
+import { createInterface as createInterface2 } from "readline";
+import { fileURLToPath as fileURLToPath3 } from "url";
 
 // bin/job-status-store.js
 init_src();
@@ -7225,9 +7398,9 @@ function linkTitle(title, url) {
 }
 
 // bin/jpi-jobs.js
-var __dirname = fileURLToPath2(new URL(".", import.meta.url));
-var TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
-var INDEX_CACHE_FILE2 = join5(TERMINALHIRE_DIR4, "index-cache.json");
+var __dirname2 = fileURLToPath3(new URL(".", import.meta.url));
+var TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join8(homedir6(), ".terminalhire");
+var INDEX_CACHE_FILE2 = join8(TERMINALHIRE_DIR5, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
 var DEFAULT_LIMIT = 10;
@@ -7276,7 +7449,7 @@ function appliedThisWeek(statusMap, now = Date.now()) {
 }
 function readIndexCache() {
   try {
-    const raw = readFileSync5(INDEX_CACHE_FILE2, "utf8");
+    const raw = readFileSync8(INDEX_CACHE_FILE2, "utf8");
     const entry = JSON.parse(raw);
     if (Date.now() - entry.ts < INDEX_TTL_MS) return entry.index;
     return null;
@@ -7299,7 +7472,7 @@ async function fetchIndex() {
   return index;
 }
 function prompt(question) {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const rl = createInterface2({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
     rl.question(question, (answer) => {
       rl.close();
@@ -7531,18 +7704,22 @@ Enter a number to act on a role, or press Enter to exit: `
     );
     const absIdx = parseInt(pick, 10) - 1;
     const localIdx = absIdx - (pageInfo.page - 1) * pageInfo.limit;
-    if (isNaN(absIdx) || localIdx < 0 || localIdx >= shown.length) {
-      return;
-    }
-    const chosen = shown[localIdx];
-    if (chosen.job.applyMode === "direct") {
-      markClicked(chosen.job.id);
-      console.log(`
+    if (!isNaN(absIdx) && localIdx >= 0 && localIdx < shown.length) {
+      const chosen = shown[localIdx];
+      if (chosen.job.applyMode === "direct") {
+        markClicked(chosen.job.id);
+        console.log(`
 Open this URL to apply directly (no data shared):
   ${sanitizeText(chosen.job.url)}`);
-      console.log(`  (marked "clicked" locally \u2014 mark it applied with: terminalhire jobs mark ${chosen.job.id} applied)`);
-    } else if (chosen.job.applyMode === "buyer-lead") {
-      await handleBuyerLead(chosen.job, profile);
+        console.log(`  (marked "clicked" locally \u2014 mark it applied with: terminalhire jobs mark ${chosen.job.id} applied)`);
+      } else if (chosen.job.applyMode === "buyer-lead") {
+        await handleBuyerLead(chosen.job, profile);
+      }
+    }
+    try {
+      const { maybeAskPulse: maybeAskPulse2 } = await Promise.resolve().then(() => (init_pulse_prompt(), pulse_prompt_exports));
+      await maybeAskPulse2();
+    } catch {
     }
   } catch (err) {
     console.error("terminalhire jobs error:", err.message ?? err);

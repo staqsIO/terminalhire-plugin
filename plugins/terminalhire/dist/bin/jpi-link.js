@@ -95,7 +95,9 @@ var init_config = __esm({
       contributeEnabled: false,
       contributePrompted: false,
       betaOptIn: false,
-      lastFullFeedbackAt: null
+      lastFullFeedbackAt: null,
+      lastPulseAskAt: null,
+      pulseDisclosed: false
     };
   }
 });

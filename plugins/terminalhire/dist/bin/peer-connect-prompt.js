@@ -21,7 +21,9 @@ var DEFAULT_CONFIG = {
   contributeEnabled: false,
   contributePrompted: false,
   betaOptIn: false,
-  lastFullFeedbackAt: null
+  lastFullFeedbackAt: null,
+  lastPulseAskAt: null,
+  pulseDisclosed: false
 };
 function readConfig() {
   try {
