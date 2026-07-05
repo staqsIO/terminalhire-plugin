@@ -93,7 +93,8 @@ var init_config = __esm({
       inboundNudgeMuted: false,
       inboundNudgeDisclosed: false,
       contributeEnabled: false,
-      contributePrompted: false
+      contributePrompted: false,
+      betaOptIn: false
     };
   }
 });

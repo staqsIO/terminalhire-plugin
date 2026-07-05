@@ -20,7 +20,8 @@ var DEFAULT_CONFIG = {
   inboundNudgeMuted: false,
   inboundNudgeDisclosed: false,
   contributeEnabled: false,
-  contributePrompted: false
+  contributePrompted: false,
+  betaOptIn: false
 };
 function readConfig() {
   try {

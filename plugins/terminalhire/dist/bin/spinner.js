@@ -294,7 +294,8 @@ function formatVerbs(topMatches, max = 6) {
     if (seen.has(key)) continue;
     seen.add(key);
     const intro = VERB_INTROS[out.length % VERB_INTROS.length];
-    out.push(`${intro} ${title} @ ${company} \xB7 ${pct}% match`);
+    const fit = m.interest ? m.interest : `${pct}% match`;
+    out.push(`${intro} ${title} @ ${company} \xB7 ${fit}`);
     if (out.length >= max) break;
   }
   return out;
@@ -989,7 +990,8 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
         const repoName = slashIdx >= 0 ? repoFull.slice(slashIdx + 1) : repoFull;
         const num = m.issueNumber != null ? ` #${m.issueNumber}` : "";
         const shortUrl = `${base}/c/${contributeShortToken(String(m.id))}`;
-        out.push(`\u2197 contribute \xB7 ${repoName}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${pct}% \u2014 ${shortUrl}`);
+        const fit = m.interest ? m.interest : `${pct}%`;
+        out.push(`\u2197 contribute \xB7 ${repoName}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${fit} \u2014 ${shortUrl}`);
       } else {
         out.push(`\u2197 ${title} @ ${company} \xB7 ${pct}% \u2014 ${url}`);
       }

@@ -1,10 +1,18 @@
 // bin/version-nudge.js
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
 var __dirname = fileURLToPath(new URL(".", import.meta.url));
-var INDEX_CACHE_FILE = join(process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire"), "index-cache.json");
+function stateDir() {
+  return process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
+}
+function indexCacheFile() {
+  return join(stateDir(), "index-cache.json");
+}
+function nudgeStateFile() {
+  return join(stateDir(), "version-nudge.json");
+}
 function parseVersion(v) {
   if (typeof v !== "string") return null;
   const m = v.trim().replace(/^v/, "").match(/^(\d+)\.(\d+)\.(\d+)/);
@@ -43,7 +51,7 @@ function readLocalVersion() {
 }
 function readLatestVersionFromCache() {
   try {
-    const cache = JSON.parse(readFileSync(INDEX_CACHE_FILE, "utf8"));
+    const cache = JSON.parse(readFileSync(indexCacheFile(), "utf8"));
     const v = cache?.index?.cliVersion;
     return typeof v === "string" ? v : null;
   } catch {
@@ -55,11 +63,45 @@ function cachedStaleNudge(localVersion) {
   if (!local) return null;
   return buildStaleNudge(local, readLatestVersionFromCache());
 }
+var NAG_INTERVAL_MS = 24 * 60 * 60 * 1e3;
+function shouldNag(now = Date.now()) {
+  try {
+    const state = JSON.parse(readFileSync(nudgeStateFile(), "utf8"));
+    const last = state?.lastNaggedAt;
+    if (typeof last !== "number" || !Number.isFinite(last)) return true;
+    return now - last >= NAG_INTERVAL_MS;
+  } catch {
+    return true;
+  }
+}
+function recordNag(now = Date.now()) {
+  try {
+    mkdirSync(stateDir(), { recursive: true });
+    writeFileSync(nudgeStateFile(), JSON.stringify({ lastNaggedAt: now }) + "\n", "utf8");
+  } catch {
+  }
+}
+function emitInteractiveNudge({ now = Date.now(), stream = process.stderr, localVersion } = {}) {
+  try {
+    const nudge = cachedStaleNudge(localVersion);
+    if (!nudge) return false;
+    if (!shouldNag(now)) return false;
+    stream.write(`${nudge}
+`);
+    recordNag(now);
+    return true;
+  } catch {
+    return false;
+  }
+}
 export {
   buildStaleNudge,
   cachedStaleNudge,
   compareVersions,
+  emitInteractiveNudge,
   parseVersion,
   readLatestVersionFromCache,
-  readLocalVersion
+  readLocalVersion,
+  recordNag,
+  shouldNag
 };

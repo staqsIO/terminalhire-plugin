@@ -1486,9 +1486,26 @@ function harmonicMean(a, b) {
   if (a <= 0 || b <= 0) return 0;
   return 2 * a * b / (a + b);
 }
+function mergeSoftCoverage(covMap, softTags, cap) {
+  for (const st of softTags) {
+    const w = Math.max(0, Math.min(1, st.weight)) * cap;
+    for (const [tag, hit] of expandWeighted([st.tag])) {
+      const scaled = hit.weight * w;
+      const existing = covMap.get(tag);
+      if (!existing || scaled > existing.weight) {
+        covMap.set(tag, {
+          weight: existing ? Math.max(existing.weight, scaled) : scaled,
+          via: existing?.via ?? st.tag
+        });
+      }
+    }
+  }
+  return covMap;
+}
 function match(fp, jobs, limit = 5, now = Date.now(), opts = {}) {
   const idfOf = backgroundIdf;
   const expanded = expandWeighted(fp.skillTags);
+  const covMap = opts.softTags && opts.softTags.length > 0 ? mergeSoftCoverage(new Map(expanded), opts.softTags, INTEREST_CAP) : expanded;
   const maxDevScore = fp.skillTags.reduce((acc, t) => acc + idfOf(t), 0);
   const candidates = jobs.filter((j) => passesFilters(fp, j));
   const scored = candidates.map((job) => {
@@ -1499,12 +1516,13 @@ function match(fp, jobs, limit = 5, now = Date.now(), opts = {}) {
     for (const tag of job.tags) {
       const w = idfOf(tag);
       jobMaxScore += w;
-      const hit = expanded.get(tag);
-      if (hit) {
-        const credit = Math.pow(hit.weight, SHARPEN);
-        jobMatchScore += w * credit;
-        details.push({ tag, weight: hit.weight, via: hit.via });
-        if (credit > (devCovByTag.get(hit.via) ?? 0)) devCovByTag.set(hit.via, credit);
+      const covHit = covMap.get(tag);
+      if (covHit) jobMatchScore += w * Math.pow(covHit.weight, SHARPEN);
+      const fpHit = expanded.get(tag);
+      if (fpHit) {
+        const credit = Math.pow(fpHit.weight, SHARPEN);
+        details.push({ tag, weight: fpHit.weight, via: fpHit.via });
+        if (credit > (devCovByTag.get(fpHit.via) ?? 0)) devCovByTag.set(fpHit.via, credit);
       }
     }
     let devScore = 0;
@@ -1542,7 +1560,7 @@ function match(fp, jobs, limit = 5, now = Date.now(), opts = {}) {
     return byScore;
   }).slice(0, limit);
 }
-var MIN_SCORE, TIEBREAK_EPS, SHARPEN, CORE_MISS_PENALTY, SENIORITY_RANK, SENIORITY_PATTERNS, ENG_TITLE, UNKNOWN_RECENCY;
+var MIN_SCORE, TIEBREAK_EPS, SHARPEN, CORE_MISS_PENALTY, INTEREST_CAP, SENIORITY_RANK, SENIORITY_PATTERNS, ENG_TITLE, UNKNOWN_RECENCY;
 var init_matcher = __esm({
   "../../packages/core/src/matcher.ts"() {
     "use strict";
@@ -1552,6 +1570,7 @@ var init_matcher = __esm({
     TIEBREAK_EPS = 5e-3;
     SHARPEN = 1.6;
     CORE_MISS_PENALTY = 0.4;
+    INTEREST_CAP = 0.6;
     SENIORITY_RANK = {
       junior: 0,
       mid: 1,
@@ -1566,6 +1585,54 @@ var init_matcher = __esm({
     ];
     ENG_TITLE = /\b(engineer|engineering|developer|dev|swe|sde|programmer|architect)\b/i;
     UNKNOWN_RECENCY = 0.75;
+  }
+});
+
+// ../../packages/core/src/rerank.ts
+function jaccardSim(a, b) {
+  if (a.size === 0 && b.size === 0) return 1;
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  const union = a.size + b.size - inter;
+  return union === 0 ? 1 : inter / union;
+}
+function tagDissimilarity(a, b) {
+  return 1 - jaccardSim(new Set(a.job.tags ?? []), new Set(b.job.tags ?? []));
+}
+function mmrRerank(results, opts = {}) {
+  const lambda = opts.lambda ?? 0.7;
+  const k = opts.k ?? 8;
+  const simOf = opts.simOf ?? tagDissimilarity;
+  if (results.length < 2 || k < 2) return results.slice();
+  let maxScore = 0;
+  for (const r of results) if (r.score > maxScore) maxScore = r.score;
+  const relNorm = (r) => maxScore > 0 ? r.score / maxScore : 0;
+  const remaining = results.slice();
+  const selected = [];
+  const window = Math.min(k, remaining.length);
+  for (let pos = 0; pos < window; pos++) {
+    let bestIdx = 0;
+    let bestObj = -Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const cand = remaining[i];
+      let minDissim = selected.length === 0 ? 0 : Infinity;
+      for (const s of selected) {
+        const d = simOf(cand, s);
+        if (d < minDissim) minDissim = d;
+      }
+      const obj = lambda * relNorm(cand) + (1 - lambda) * minDissim;
+      if (obj > bestObj) {
+        bestObj = obj;
+        bestIdx = i;
+      }
+    }
+    selected.push(remaining.splice(bestIdx, 1)[0]);
+  }
+  return [...selected, ...remaining];
+}
+var init_rerank = __esm({
+  "../../packages/core/src/rerank.ts"() {
+    "use strict";
   }
 });
 
@@ -2980,6 +3047,55 @@ var init_feeds = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/contribution-classify.ts
+function hasStrongCodeSignal(title, body, labels) {
+  if (labels.some((l) => CODE_LABEL_RE.test(l))) return true;
+  const text = `${title}
+${body}`;
+  if (CODE_TERM_RE.test(text)) return true;
+  if (CODE_EXCEPTION_RE.test(text)) return true;
+  if (CODE_FENCE_RE.test(body)) return true;
+  if (FILE_PATH_RE.test(text)) return true;
+  return false;
+}
+function hasContentSignal(title, body, labels) {
+  if (labels.some((l) => CONTENT_LABEL_RE.test(l))) return true;
+  const text = `${title}
+${body}`;
+  if (CONTENT_ADD_RE.test(text)) return true;
+  if (ADD_TO_CORPUS_RE.test(text)) return true;
+  if (TRANSLATE_RE.test(text)) return true;
+  if (TYPO_RE.test(text)) return true;
+  return false;
+}
+function classifyContributionKind(input) {
+  const title = input.title ?? "";
+  const body = input.body ?? "";
+  const labels = input.labels ?? [];
+  if (hasStrongCodeSignal(title, body, labels)) return "code";
+  if (hasContentSignal(title, body, labels)) return "content";
+  return "ambiguous";
+}
+function looksLikeContentTask(input) {
+  return classifyContributionKind(input) === "content";
+}
+var CONTENT_LABEL_RE, CODE_LABEL_RE, CODE_TERM_RE, CODE_EXCEPTION_RE, CODE_FENCE_RE, FILE_PATH_RE, CONTENT_ADD_RE, ADD_TO_CORPUS_RE, TRANSLATE_RE, TYPO_RE;
+var init_contribution_classify = __esm({
+  "../../packages/core/src/feeds/contribution-classify.ts"() {
+    "use strict";
+    CONTENT_LABEL_RE = /\b(content|copy|copywriting|wording|translation|translations|i18n|l10n|localization|localisation|data|dataset|documentation|docs)\b/i;
+    CODE_LABEL_RE = /\b(bug|bugfix|fix|enhancement|feature|refactor|refactoring|test|tests|testing|performance|perf|security|api|backend|frontend|typescript|javascript|golang|rust|python|build|ci)\b/i;
+    CODE_TERM_RE = /\b(bug|crash|crashes|crashing|exception|stack\s?trace|stacktrace|null\s?pointer|npe|segfault|refactor|implement|endpoint|api|component|function|method|class|module|compile|compiler|build\s+(?:error|fail)|runtime|regression|unit\s+test|integration\s+test|test\s+coverage|typecheck|lint|dependency|dependencies|import|async|await|race\s+condition|memory\s+leak|deadlock|parser|serialize|deserialize|schema|migration|websocket|http|json|sql|cli|sdk)\b/i;
+    CODE_EXCEPTION_RE = /exception|stacktrace|segfault|traceback/i;
+    CODE_FENCE_RE = /```|(?:^|\n)\s{4,}\S/;
+    FILE_PATH_RE = /\b[\w./-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|rb|go|rs|java|kt|scala|c|cc|cpp|cxx|h|hpp|cs|php|swift|m|mm|sh|bash|zsh|sql|graphql|proto|css|scss|sass|less|vue|svelte|toml|ini|gradle|dockerfile)\b/i;
+    CONTENT_ADD_RE = /\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:proverbs?|words?|phrases?|sayings?|quotes?|quotations?|translations?|entry|entries|definitions?|terms?|idioms?|synonyms?|antonyms?|acronyms?|abbreviations?)\b/i;
+    ADD_TO_CORPUS_RE = /\badd\b[\s\S]*?\bto\s+(?:the\s+)?(?:word\s?list|dictionary|glossary|phrasebook)\b/i;
+    TRANSLATE_RE = /\b(?:translate|translating|translation|localize|localise|localization|localisation)\b/i;
+    TYPO_RE = /\bfix(?:ing)?\s+(?:a\s+|the\s+|some\s+)?typos?\b/i;
+  }
+});
+
 // ../../packages/core/src/feeds/contributions.ts
 function authHeaders2() {
   const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
@@ -3036,11 +3152,11 @@ async function contributorCount(client, fullName) {
   }
 }
 async function openPRIssueRefs(client, fullName) {
-  const refs = /* @__PURE__ */ new Set();
   const prs = await client.json(
     `/repos/${fullName}/pulls?state=open&per_page=100`
   );
-  if (!Array.isArray(prs)) return refs;
+  if (!Array.isArray(prs)) return null;
+  const refs = /* @__PURE__ */ new Set();
   for (const pr of prs) {
     for (const m of `${pr.title ?? ""}
 ${pr.body ?? ""}`.matchAll(/#(\d+)\b/g)) {
@@ -3085,8 +3201,7 @@ async function aggregateContributions(opts = {}) {
     return n;
   }
   async function repoPRRefs(fullName) {
-    const hit = prRefsCache.get(fullName);
-    if (hit !== void 0) return hit;
+    if (prRefsCache.has(fullName)) return prRefsCache.get(fullName) ?? null;
     const refs = await openPRIssueRefs(client, fullName);
     prRefsCache.set(fullName, refs);
     return refs;
@@ -3118,10 +3233,12 @@ async function aggregateContributions(opts = {}) {
       continue;
     }
     if (repo.disabled) continue;
-    const prRefs = await repoPRRefs(fullName);
-    if (prRefs.has(issue.number)) continue;
     const body = issue.body ? decodeEntities(issue.body) : "";
     const labels = labelNames2(issue.labels);
+    if (looksLikeContentTask({ title, body, labels })) continue;
+    const prRefs = await repoPRRefs(fullName);
+    if (prRefs && prRefs.has(issue.number)) continue;
+    const openPRsAtDiscovery = prRefs ? 0 : void 0;
     const tags = normalize(
       tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
     );
@@ -3147,7 +3264,14 @@ async function aggregateContributions(opts = {}) {
         issueNumber: issue.number,
         labels,
         issueUrl: issue.html_url,
-        issueBody: body.slice(0, 1e3) || void 0
+        issueBody: body.slice(0, 1e3) || void 0,
+        // Provably 0 open PRs at discovery ONLY when the open-PR check actually
+        // ran and returned a verified-empty/non-matching set (`openPRsAtDiscovery
+        // === 0`). When the check FAILED (rate-limit/error → `prRefs === null`)
+        // this is `undefined`, NOT a fabricated 0 — the claim path then falls
+        // through to a live re-count / honest "unknown" (jpi-claim.js:242-260)
+        // instead of persisting an unverified "0 open PRs" as fact.
+        openPRsAtDiscovery
       },
       raw: issue
     });
@@ -3162,6 +3286,7 @@ var init_contributions = __esm({
     init_entities();
     init_bounty_gate();
     init_contribution_gate();
+    init_contribution_classify();
     init_github_bounties();
     init_http();
     GITHUB_API2 = "https://api.github.com";
@@ -6499,7 +6624,7 @@ function funnelCounts(map) {
   for (const key of Object.keys(map)) {
     const rec = map[key];
     if (rec.clicked === true) counts.clicked++;
-    if (rec.status) counts[rec.status]++;
+    if (rec.status && Object.prototype.hasOwnProperty.call(counts, rec.status)) counts[rec.status]++;
   }
   return counts;
 }
@@ -6816,6 +6941,7 @@ __export(src_exports, {
   GRAPH: () => GRAPH,
   GREENHOUSE_SLUGS_BY_TIER: () => GREENHOUSE_SLUGS_BY_TIER,
   IDF_BACKGROUND: () => IDF_BACKGROUND,
+  INTEREST_CAP: () => INTEREST_CAP,
   INTRO_ACCEPTED_TTL_MS: () => INTRO_ACCEPTED_TTL_MS,
   INTRO_ALLOWED_FIELDS: () => INTRO_ALLOWED_FIELDS,
   INTRO_PENDING_TTL_MS: () => INTRO_PENDING_TTL_MS,
@@ -6885,6 +7011,7 @@ __export(src_exports, {
   loadPartnerRoles: () => loadPartnerRoles,
   looksLikeEngRole: () => looksLikeEngRole,
   match: () => match,
+  mmrRerank: () => mmrRerank,
   normalize: () => normalize,
   opire: () => opire,
   opportunityShortToken: () => opportunityShortToken,
@@ -6900,6 +7027,7 @@ __export(src_exports, {
   sameLogin: () => sameLogin,
   setStatus: () => setStatus,
   signalLabel: () => signalLabel,
+  tagDissimilarity: () => tagDissimilarity,
   tokenize: () => tokenize,
   validateGraph: () => validateGraph,
   validateIntroPayload: () => validateIntroPayload,
@@ -6913,6 +7041,7 @@ var init_src = __esm({
     init_types();
     init_vocabulary();
     init_matcher();
+    init_rerank();
     init_feeds();
     init_indexer();
     init_partners();
@@ -7203,7 +7332,8 @@ var init_config = __esm({
       inboundNudgeMuted: false,
       inboundNudgeDisclosed: false,
       contributeEnabled: false,
-      contributePrompted: false
+      contributePrompted: false,
+      betaOptIn: false
     };
   }
 });

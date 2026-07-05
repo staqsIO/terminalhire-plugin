@@ -749,9 +749,26 @@ function harmonicMean(a, b) {
   if (a <= 0 || b <= 0) return 0;
   return 2 * a * b / (a + b);
 }
+function mergeSoftCoverage(covMap, softTags, cap) {
+  for (const st of softTags) {
+    const w = Math.max(0, Math.min(1, st.weight)) * cap;
+    for (const [tag, hit] of expandWeighted([st.tag])) {
+      const scaled = hit.weight * w;
+      const existing = covMap.get(tag);
+      if (!existing || scaled > existing.weight) {
+        covMap.set(tag, {
+          weight: existing ? Math.max(existing.weight, scaled) : scaled,
+          via: existing?.via ?? st.tag
+        });
+      }
+    }
+  }
+  return covMap;
+}
 function match(fp, jobs, limit = 5, now = Date.now(), opts = {}) {
   const idfOf = backgroundIdf;
   const expanded = expandWeighted(fp.skillTags);
+  const covMap = opts.softTags && opts.softTags.length > 0 ? mergeSoftCoverage(new Map(expanded), opts.softTags, INTEREST_CAP) : expanded;
   const maxDevScore = fp.skillTags.reduce((acc, t) => acc + idfOf(t), 0);
   const candidates = jobs.filter((j) => passesFilters(fp, j));
   const scored = candidates.map((job) => {
@@ -762,12 +779,13 @@ function match(fp, jobs, limit = 5, now = Date.now(), opts = {}) {
     for (const tag of job.tags) {
       const w = idfOf(tag);
       jobMaxScore += w;
-      const hit = expanded.get(tag);
-      if (hit) {
-        const credit = Math.pow(hit.weight, SHARPEN);
-        jobMatchScore += w * credit;
-        details.push({ tag, weight: hit.weight, via: hit.via });
-        if (credit > (devCovByTag.get(hit.via) ?? 0)) devCovByTag.set(hit.via, credit);
+      const covHit = covMap.get(tag);
+      if (covHit) jobMatchScore += w * Math.pow(covHit.weight, SHARPEN);
+      const fpHit = expanded.get(tag);
+      if (fpHit) {
+        const credit = Math.pow(fpHit.weight, SHARPEN);
+        details.push({ tag, weight: fpHit.weight, via: fpHit.via });
+        if (credit > (devCovByTag.get(fpHit.via) ?? 0)) devCovByTag.set(fpHit.via, credit);
       }
     }
     let devScore = 0;
@@ -805,7 +823,7 @@ function match(fp, jobs, limit = 5, now = Date.now(), opts = {}) {
     return byScore;
   }).slice(0, limit);
 }
-var MIN_SCORE, TIEBREAK_EPS, SHARPEN, CORE_MISS_PENALTY, SENIORITY_RANK, SENIORITY_PATTERNS, ENG_TITLE, UNKNOWN_RECENCY;
+var MIN_SCORE, TIEBREAK_EPS, SHARPEN, CORE_MISS_PENALTY, INTEREST_CAP, SENIORITY_RANK, SENIORITY_PATTERNS, ENG_TITLE, UNKNOWN_RECENCY;
 var init_matcher = __esm({
   "../../packages/core/src/matcher.ts"() {
     "use strict";
@@ -815,6 +833,7 @@ var init_matcher = __esm({
     TIEBREAK_EPS = 5e-3;
     SHARPEN = 1.6;
     CORE_MISS_PENALTY = 0.4;
+    INTEREST_CAP = 0.6;
     SENIORITY_RANK = {
       junior: 0,
       mid: 1,
@@ -829,6 +848,13 @@ var init_matcher = __esm({
     ];
     ENG_TITLE = /\b(engineer|engineering|developer|dev|swe|sde|programmer|architect)\b/i;
     UNKNOWN_RECENCY = 0.75;
+  }
+});
+
+// ../../packages/core/src/rerank.ts
+var init_rerank = __esm({
+  "../../packages/core/src/rerank.ts"() {
+    "use strict";
   }
 });
 
@@ -1086,6 +1112,13 @@ var init_feeds = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/contribution-classify.ts
+var init_contribution_classify = __esm({
+  "../../packages/core/src/feeds/contribution-classify.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/feeds/contributions.ts
 var init_contributions = __esm({
   "../../packages/core/src/feeds/contributions.ts"() {
@@ -1094,6 +1127,7 @@ var init_contributions = __esm({
     init_entities();
     init_bounty_gate();
     init_contribution_gate();
+    init_contribution_classify();
     init_github_bounties();
     init_http();
   }
@@ -1244,6 +1278,7 @@ var init_src = __esm({
     init_types();
     init_vocabulary();
     init_matcher();
+    init_rerank();
     init_feeds();
     init_indexer();
     init_partners();
@@ -1610,7 +1645,8 @@ var DEFAULT_CONFIG = {
   inboundNudgeMuted: false,
   inboundNudgeDisclosed: false,
   contributeEnabled: false,
-  contributePrompted: false
+  contributePrompted: false,
+  betaOptIn: false
 };
 function readConfig() {
   try {

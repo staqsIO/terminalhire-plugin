@@ -4,6 +4,17 @@ import { join } from "path";
 import { homedir } from "os";
 var TERMINALHIRE_DIR = join(homedir(), ".terminalhire");
 var CLAIMS_FILE = join(TERMINALHIRE_DIR, "claims.json");
+function toPushedClaim(claim) {
+  return {
+    kind: claim.kind,
+    repoFullName: claim.repoFullName,
+    state: claim.state,
+    prUrl: claim.prUrl,
+    merged: claim.state === "merged",
+    claimedAt: claim.claimedAt,
+    updatedAt: claim.updatedAt
+  };
+}
 var TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
 function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
@@ -89,5 +100,6 @@ export {
   readClaims,
   recordClaim,
   removeClaim,
+  toPushedClaim,
   updateClaim
 };

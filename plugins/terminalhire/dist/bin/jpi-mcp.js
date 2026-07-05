@@ -22100,6 +22100,7 @@ var init_stdio2 = __esm({
 var config_exports = {};
 __export(config_exports, {
   getNudgeMode: () => getNudgeMode,
+  isBetaOptIn: () => isBetaOptIn,
   isContributeEnabled: () => isContributeEnabled,
   isContributePrompted: () => isContributePrompted,
   isInboundNudgeMuted: () => isInboundNudgeMuted,
@@ -22157,6 +22158,9 @@ function isContributeEnabled() {
 function isContributePrompted() {
   return readConfig().contributePrompted === true;
 }
+function isBetaOptIn() {
+  return readConfig().betaOptIn === true;
+}
 var TERMINALHIRE_DIR2, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
@@ -22173,7 +22177,8 @@ var init_config = __esm({
       inboundNudgeMuted: false,
       inboundNudgeDisclosed: false,
       contributeEnabled: false,
-      contributePrompted: false
+      contributePrompted: false,
+      betaOptIn: false
     };
   }
 });

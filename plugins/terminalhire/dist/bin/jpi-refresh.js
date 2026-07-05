@@ -38,6 +38,93 @@ var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__
   mod2
 ));
 
+// src/config.ts
+var config_exports = {};
+__export(config_exports, {
+  getNudgeMode: () => getNudgeMode,
+  isBetaOptIn: () => isBetaOptIn,
+  isContributeEnabled: () => isContributeEnabled,
+  isContributePrompted: () => isContributePrompted,
+  isInboundNudgeMuted: () => isInboundNudgeMuted,
+  isPeerConnectEnabled: () => isPeerConnectEnabled,
+  parseNudgeMode: () => parseNudgeMode,
+  readConfig: () => readConfig,
+  writeConfig: () => writeConfig
+});
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync } from "fs";
+import { join as join3 } from "path";
+import { homedir as homedir3 } from "os";
+function readConfig() {
+  try {
+    if (!existsSync(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
+    const raw = readFileSync3(CONFIG_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_CONFIG, ...parsed };
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+}
+function writeConfig(config) {
+  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
+  const current = readConfig();
+  const merged = { ...current, ...config };
+  writeFileSync3(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
+}
+function parseNudgeMode(raw) {
+  if (raw === "session" || raw === "always") return raw;
+  const m = /^every:(\d+)$/.exec(raw);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    if (n >= 1) return `every:${n}`;
+  }
+  return null;
+}
+function getNudgeMode() {
+  const envVal = process.env["TERMINALHIRE_NUDGE"];
+  if (envVal) {
+    const parsed = parseNudgeMode(envVal);
+    if (parsed) return parsed;
+  }
+  const config = readConfig();
+  return config.nudge ?? "session";
+}
+function isPeerConnectEnabled() {
+  return readConfig().peerConnect === true;
+}
+function isInboundNudgeMuted() {
+  return readConfig().inboundNudgeMuted === true;
+}
+function isContributeEnabled() {
+  return readConfig().contributeEnabled === true;
+}
+function isContributePrompted() {
+  return readConfig().contributePrompted === true;
+}
+function isBetaOptIn() {
+  return readConfig().betaOptIn === true;
+}
+var TERMINALHIRE_DIR3, CONFIG_FILE, DEFAULT_CONFIG;
+var init_config = __esm({
+  "src/config.ts"() {
+    "use strict";
+    TERMINALHIRE_DIR3 = join3(homedir3(), ".terminalhire");
+    CONFIG_FILE = join3(TERMINALHIRE_DIR3, "config.json");
+    DEFAULT_CONFIG = {
+      nudge: "session",
+      peerConnect: false,
+      peerConnectPrompted: false,
+      resumePublishPrompted: false,
+      chatDisclosureAck: false,
+      chatShareActivity: false,
+      inboundNudgeMuted: false,
+      inboundNudgeDisclosed: false,
+      contributeEnabled: false,
+      contributePrompted: false,
+      betaOptIn: false
+    };
+  }
+});
+
 // ../../packages/core/src/types.ts
 function isBounty(job) {
   return job.source === "bounty" && job.bounty != null;
@@ -1181,9 +1268,26 @@ function harmonicMean(a, b) {
   if (a <= 0 || b <= 0) return 0;
   return 2 * a * b / (a + b);
 }
+function mergeSoftCoverage(covMap, softTags, cap) {
+  for (const st of softTags) {
+    const w = Math.max(0, Math.min(1, st.weight)) * cap;
+    for (const [tag, hit] of expandWeighted([st.tag])) {
+      const scaled = hit.weight * w;
+      const existing = covMap.get(tag);
+      if (!existing || scaled > existing.weight) {
+        covMap.set(tag, {
+          weight: existing ? Math.max(existing.weight, scaled) : scaled,
+          via: existing?.via ?? st.tag
+        });
+      }
+    }
+  }
+  return covMap;
+}
 function match(fp, jobs, limit = 5, now = Date.now(), opts = {}) {
   const idfOf = backgroundIdf;
   const expanded = expandWeighted(fp.skillTags);
+  const covMap = opts.softTags && opts.softTags.length > 0 ? mergeSoftCoverage(new Map(expanded), opts.softTags, INTEREST_CAP) : expanded;
   const maxDevScore = fp.skillTags.reduce((acc, t) => acc + idfOf(t), 0);
   const candidates = jobs.filter((j) => passesFilters(fp, j));
   const scored = candidates.map((job) => {
@@ -1194,12 +1298,13 @@ function match(fp, jobs, limit = 5, now = Date.now(), opts = {}) {
     for (const tag of job.tags) {
       const w = idfOf(tag);
       jobMaxScore += w;
-      const hit = expanded.get(tag);
-      if (hit) {
-        const credit = Math.pow(hit.weight, SHARPEN);
-        jobMatchScore += w * credit;
-        details.push({ tag, weight: hit.weight, via: hit.via });
-        if (credit > (devCovByTag.get(hit.via) ?? 0)) devCovByTag.set(hit.via, credit);
+      const covHit = covMap.get(tag);
+      if (covHit) jobMatchScore += w * Math.pow(covHit.weight, SHARPEN);
+      const fpHit = expanded.get(tag);
+      if (fpHit) {
+        const credit = Math.pow(fpHit.weight, SHARPEN);
+        details.push({ tag, weight: fpHit.weight, via: fpHit.via });
+        if (credit > (devCovByTag.get(fpHit.via) ?? 0)) devCovByTag.set(fpHit.via, credit);
       }
     }
     let devScore = 0;
@@ -1237,7 +1342,7 @@ function match(fp, jobs, limit = 5, now = Date.now(), opts = {}) {
     return byScore;
   }).slice(0, limit);
 }
-var MIN_SCORE, TIEBREAK_EPS, SHARPEN, CORE_MISS_PENALTY, SENIORITY_RANK, SENIORITY_PATTERNS, ENG_TITLE, UNKNOWN_RECENCY;
+var MIN_SCORE, TIEBREAK_EPS, SHARPEN, CORE_MISS_PENALTY, INTEREST_CAP, SENIORITY_RANK, SENIORITY_PATTERNS, ENG_TITLE, UNKNOWN_RECENCY;
 var init_matcher = __esm({
   "../../packages/core/src/matcher.ts"() {
     "use strict";
@@ -1247,6 +1352,7 @@ var init_matcher = __esm({
     TIEBREAK_EPS = 5e-3;
     SHARPEN = 1.6;
     CORE_MISS_PENALTY = 0.4;
+    INTEREST_CAP = 0.6;
     SENIORITY_RANK = {
       junior: 0,
       mid: 1,
@@ -1261,6 +1367,54 @@ var init_matcher = __esm({
     ];
     ENG_TITLE = /\b(engineer|engineering|developer|dev|swe|sde|programmer|architect)\b/i;
     UNKNOWN_RECENCY = 0.75;
+  }
+});
+
+// ../../packages/core/src/rerank.ts
+function jaccardSim(a, b) {
+  if (a.size === 0 && b.size === 0) return 1;
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  const union = a.size + b.size - inter;
+  return union === 0 ? 1 : inter / union;
+}
+function tagDissimilarity(a, b) {
+  return 1 - jaccardSim(new Set(a.job.tags ?? []), new Set(b.job.tags ?? []));
+}
+function mmrRerank(results, opts = {}) {
+  const lambda = opts.lambda ?? 0.7;
+  const k = opts.k ?? 8;
+  const simOf = opts.simOf ?? tagDissimilarity;
+  if (results.length < 2 || k < 2) return results.slice();
+  let maxScore = 0;
+  for (const r of results) if (r.score > maxScore) maxScore = r.score;
+  const relNorm = (r) => maxScore > 0 ? r.score / maxScore : 0;
+  const remaining = results.slice();
+  const selected = [];
+  const window = Math.min(k, remaining.length);
+  for (let pos = 0; pos < window; pos++) {
+    let bestIdx = 0;
+    let bestObj = -Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const cand = remaining[i];
+      let minDissim = selected.length === 0 ? 0 : Infinity;
+      for (const s of selected) {
+        const d = simOf(cand, s);
+        if (d < minDissim) minDissim = d;
+      }
+      const obj = lambda * relNorm(cand) + (1 - lambda) * minDissim;
+      if (obj > bestObj) {
+        bestObj = obj;
+        bestIdx = i;
+      }
+    }
+    selected.push(remaining.splice(bestIdx, 1)[0]);
+  }
+  return [...selected, ...remaining];
+}
+var init_rerank = __esm({
+  "../../packages/core/src/rerank.ts"() {
+    "use strict";
   }
 });
 
@@ -2675,6 +2829,55 @@ var init_feeds = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/contribution-classify.ts
+function hasStrongCodeSignal(title, body, labels) {
+  if (labels.some((l) => CODE_LABEL_RE.test(l))) return true;
+  const text = `${title}
+${body}`;
+  if (CODE_TERM_RE.test(text)) return true;
+  if (CODE_EXCEPTION_RE.test(text)) return true;
+  if (CODE_FENCE_RE.test(body)) return true;
+  if (FILE_PATH_RE.test(text)) return true;
+  return false;
+}
+function hasContentSignal(title, body, labels) {
+  if (labels.some((l) => CONTENT_LABEL_RE.test(l))) return true;
+  const text = `${title}
+${body}`;
+  if (CONTENT_ADD_RE.test(text)) return true;
+  if (ADD_TO_CORPUS_RE.test(text)) return true;
+  if (TRANSLATE_RE.test(text)) return true;
+  if (TYPO_RE.test(text)) return true;
+  return false;
+}
+function classifyContributionKind(input) {
+  const title = input.title ?? "";
+  const body = input.body ?? "";
+  const labels = input.labels ?? [];
+  if (hasStrongCodeSignal(title, body, labels)) return "code";
+  if (hasContentSignal(title, body, labels)) return "content";
+  return "ambiguous";
+}
+function looksLikeContentTask(input) {
+  return classifyContributionKind(input) === "content";
+}
+var CONTENT_LABEL_RE, CODE_LABEL_RE, CODE_TERM_RE, CODE_EXCEPTION_RE, CODE_FENCE_RE, FILE_PATH_RE, CONTENT_ADD_RE, ADD_TO_CORPUS_RE, TRANSLATE_RE, TYPO_RE;
+var init_contribution_classify = __esm({
+  "../../packages/core/src/feeds/contribution-classify.ts"() {
+    "use strict";
+    CONTENT_LABEL_RE = /\b(content|copy|copywriting|wording|translation|translations|i18n|l10n|localization|localisation|data|dataset|documentation|docs)\b/i;
+    CODE_LABEL_RE = /\b(bug|bugfix|fix|enhancement|feature|refactor|refactoring|test|tests|testing|performance|perf|security|api|backend|frontend|typescript|javascript|golang|rust|python|build|ci)\b/i;
+    CODE_TERM_RE = /\b(bug|crash|crashes|crashing|exception|stack\s?trace|stacktrace|null\s?pointer|npe|segfault|refactor|implement|endpoint|api|component|function|method|class|module|compile|compiler|build\s+(?:error|fail)|runtime|regression|unit\s+test|integration\s+test|test\s+coverage|typecheck|lint|dependency|dependencies|import|async|await|race\s+condition|memory\s+leak|deadlock|parser|serialize|deserialize|schema|migration|websocket|http|json|sql|cli|sdk)\b/i;
+    CODE_EXCEPTION_RE = /exception|stacktrace|segfault|traceback/i;
+    CODE_FENCE_RE = /```|(?:^|\n)\s{4,}\S/;
+    FILE_PATH_RE = /\b[\w./-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|rb|go|rs|java|kt|scala|c|cc|cpp|cxx|h|hpp|cs|php|swift|m|mm|sh|bash|zsh|sql|graphql|proto|css|scss|sass|less|vue|svelte|toml|ini|gradle|dockerfile)\b/i;
+    CONTENT_ADD_RE = /\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:proverbs?|words?|phrases?|sayings?|quotes?|quotations?|translations?|entry|entries|definitions?|terms?|idioms?|synonyms?|antonyms?|acronyms?|abbreviations?)\b/i;
+    ADD_TO_CORPUS_RE = /\badd\b[\s\S]*?\bto\s+(?:the\s+)?(?:word\s?list|dictionary|glossary|phrasebook)\b/i;
+    TRANSLATE_RE = /\b(?:translate|translating|translation|localize|localise|localization|localisation)\b/i;
+    TYPO_RE = /\bfix(?:ing)?\s+(?:a\s+|the\s+|some\s+)?typos?\b/i;
+  }
+});
+
 // ../../packages/core/src/feeds/contributions.ts
 function authHeaders2() {
   const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
@@ -2731,11 +2934,11 @@ async function contributorCount(client, fullName) {
   }
 }
 async function openPRIssueRefs(client, fullName) {
-  const refs = /* @__PURE__ */ new Set();
   const prs = await client.json(
     `/repos/${fullName}/pulls?state=open&per_page=100`
   );
-  if (!Array.isArray(prs)) return refs;
+  if (!Array.isArray(prs)) return null;
+  const refs = /* @__PURE__ */ new Set();
   for (const pr of prs) {
     for (const m of `${pr.title ?? ""}
 ${pr.body ?? ""}`.matchAll(/#(\d+)\b/g)) {
@@ -2780,8 +2983,7 @@ async function aggregateContributions(opts = {}) {
     return n;
   }
   async function repoPRRefs(fullName) {
-    const hit = prRefsCache.get(fullName);
-    if (hit !== void 0) return hit;
+    if (prRefsCache.has(fullName)) return prRefsCache.get(fullName) ?? null;
     const refs = await openPRIssueRefs(client, fullName);
     prRefsCache.set(fullName, refs);
     return refs;
@@ -2813,10 +3015,12 @@ async function aggregateContributions(opts = {}) {
       continue;
     }
     if (repo.disabled) continue;
-    const prRefs = await repoPRRefs(fullName);
-    if (prRefs.has(issue.number)) continue;
     const body = issue.body ? decodeEntities(issue.body) : "";
     const labels = labelNames2(issue.labels);
+    if (looksLikeContentTask({ title, body, labels })) continue;
+    const prRefs = await repoPRRefs(fullName);
+    if (prRefs && prRefs.has(issue.number)) continue;
+    const openPRsAtDiscovery = prRefs ? 0 : void 0;
     const tags = normalize(
       tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
     );
@@ -2842,7 +3046,14 @@ async function aggregateContributions(opts = {}) {
         issueNumber: issue.number,
         labels,
         issueUrl: issue.html_url,
-        issueBody: body.slice(0, 1e3) || void 0
+        issueBody: body.slice(0, 1e3) || void 0,
+        // Provably 0 open PRs at discovery ONLY when the open-PR check actually
+        // ran and returned a verified-empty/non-matching set (`openPRsAtDiscovery
+        // === 0`). When the check FAILED (rate-limit/error → `prRefs === null`)
+        // this is `undefined`, NOT a fabricated 0 — the claim path then falls
+        // through to a live re-count / honest "unknown" (jpi-claim.js:242-260)
+        // instead of persisting an unverified "0 open PRs" as fact.
+        openPRsAtDiscovery
       },
       raw: issue
     });
@@ -2857,6 +3068,7 @@ var init_contributions = __esm({
     init_entities();
     init_bounty_gate();
     init_contribution_gate();
+    init_contribution_classify();
     init_github_bounties();
     init_http();
     GITHUB_API2 = "https://api.github.com";
@@ -6194,7 +6406,7 @@ function funnelCounts(map) {
   for (const key of Object.keys(map)) {
     const rec = map[key];
     if (rec.clicked === true) counts.clicked++;
-    if (rec.status) counts[rec.status]++;
+    if (rec.status && Object.prototype.hasOwnProperty.call(counts, rec.status)) counts[rec.status]++;
   }
   return counts;
 }
@@ -6511,6 +6723,7 @@ __export(src_exports, {
   GRAPH: () => GRAPH,
   GREENHOUSE_SLUGS_BY_TIER: () => GREENHOUSE_SLUGS_BY_TIER,
   IDF_BACKGROUND: () => IDF_BACKGROUND,
+  INTEREST_CAP: () => INTEREST_CAP,
   INTRO_ACCEPTED_TTL_MS: () => INTRO_ACCEPTED_TTL_MS,
   INTRO_ALLOWED_FIELDS: () => INTRO_ALLOWED_FIELDS,
   INTRO_PENDING_TTL_MS: () => INTRO_PENDING_TTL_MS,
@@ -6580,6 +6793,7 @@ __export(src_exports, {
   loadPartnerRoles: () => loadPartnerRoles,
   looksLikeEngRole: () => looksLikeEngRole,
   match: () => match,
+  mmrRerank: () => mmrRerank,
   normalize: () => normalize,
   opire: () => opire,
   opportunityShortToken: () => opportunityShortToken,
@@ -6595,6 +6809,7 @@ __export(src_exports, {
   sameLogin: () => sameLogin,
   setStatus: () => setStatus,
   signalLabel: () => signalLabel,
+  tagDissimilarity: () => tagDissimilarity,
   tokenize: () => tokenize,
   validateGraph: () => validateGraph,
   validateIntroPayload: () => validateIntroPayload,
@@ -6608,6 +6823,7 @@ var init_src = __esm({
     init_types();
     init_vocabulary();
     init_matcher();
+    init_rerank();
     init_feeds();
     init_indexer();
     init_partners();
@@ -7018,7 +7234,7 @@ function readStatusMap() {
 function markStatus(id, status) {
   return withLock(() => {
     const current = readStatusMap();
-    const next = setStatus(current, id, status);
+    const next = status === "claimed" ? { ...current, [id]: { ...current[id], status: "claimed", markedAt: (/* @__PURE__ */ new Date()).toISOString() } } : setStatus(current, id, status);
     atomicWriteJson(STATUS_FILE, next);
     return next[id];
   });
@@ -7630,7 +7846,8 @@ function formatVerbs(topMatches, max = 6) {
     if (seen.has(key)) continue;
     seen.add(key);
     const intro = VERB_INTROS[out.length % VERB_INTROS.length];
-    out.push(`${intro} ${title} @ ${company} \xB7 ${pct}% match`);
+    const fit = m.interest ? m.interest : `${pct}% match`;
+    out.push(`${intro} ${title} @ ${company} \xB7 ${fit}`);
     if (out.length >= max) break;
   }
   return out;
@@ -7831,7 +8048,8 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
         const repoName = slashIdx >= 0 ? repoFull.slice(slashIdx + 1) : repoFull;
         const num = m.issueNumber != null ? ` #${m.issueNumber}` : "";
         const shortUrl = `${base}/c/${contributeShortToken(String(m.id))}`;
-        out.push(`\u2197 contribute \xB7 ${repoName}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${pct}% \u2014 ${shortUrl}`);
+        const fit = m.interest ? m.interest : `${pct}%`;
+        out.push(`\u2197 contribute \xB7 ${repoName}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${fit} \u2014 ${shortUrl}`);
       } else {
         out.push(`\u2197 ${title} @ ${company} \xB7 ${pct}% \u2014 ${url}`);
       }
@@ -7953,14 +8171,26 @@ __export(version_nudge_exports, {
   buildStaleNudge: () => buildStaleNudge,
   cachedStaleNudge: () => cachedStaleNudge,
   compareVersions: () => compareVersions,
+  emitInteractiveNudge: () => emitInteractiveNudge,
   parseVersion: () => parseVersion,
   readLatestVersionFromCache: () => readLatestVersionFromCache,
-  readLocalVersion: () => readLocalVersion
+  readLocalVersion: () => readLocalVersion,
+  recordNag: () => recordNag,
+  shouldNag: () => shouldNag
 });
-import { readFileSync as readFileSync11, existsSync as existsSync6 } from "fs";
+import { readFileSync as readFileSync11, writeFileSync as writeFileSync9, mkdirSync as mkdirSync9, existsSync as existsSync6 } from "fs";
 import { join as join12 } from "path";
 import { homedir as homedir9 } from "os";
 import { fileURLToPath as fileURLToPath2 } from "url";
+function stateDir() {
+  return process.env.TERMINALHIRE_DIR || join12(homedir9(), ".terminalhire");
+}
+function indexCacheFile() {
+  return join12(stateDir(), "index-cache.json");
+}
+function nudgeStateFile() {
+  return join12(stateDir(), "version-nudge.json");
+}
 function parseVersion(v) {
   if (typeof v !== "string") return null;
   const m = v.trim().replace(/^v/, "").match(/^(\d+)\.(\d+)\.(\d+)/);
@@ -7999,7 +8229,7 @@ function readLocalVersion() {
 }
 function readLatestVersionFromCache() {
   try {
-    const cache = JSON.parse(readFileSync11(INDEX_CACHE_FILE2, "utf8"));
+    const cache = JSON.parse(readFileSync11(indexCacheFile(), "utf8"));
     const v = cache?.index?.cliVersion;
     return typeof v === "string" ? v : null;
   } catch {
@@ -8011,12 +8241,58 @@ function cachedStaleNudge(localVersion) {
   if (!local) return null;
   return buildStaleNudge(local, readLatestVersionFromCache());
 }
-var __dirname, INDEX_CACHE_FILE2;
+function shouldNag(now = Date.now()) {
+  try {
+    const state = JSON.parse(readFileSync11(nudgeStateFile(), "utf8"));
+    const last = state?.lastNaggedAt;
+    if (typeof last !== "number" || !Number.isFinite(last)) return true;
+    return now - last >= NAG_INTERVAL_MS;
+  } catch {
+    return true;
+  }
+}
+function recordNag(now = Date.now()) {
+  try {
+    mkdirSync9(stateDir(), { recursive: true });
+    writeFileSync9(nudgeStateFile(), JSON.stringify({ lastNaggedAt: now }) + "\n", "utf8");
+  } catch {
+  }
+}
+function emitInteractiveNudge({ now = Date.now(), stream = process.stderr, localVersion } = {}) {
+  try {
+    const nudge = cachedStaleNudge(localVersion);
+    if (!nudge) return false;
+    if (!shouldNag(now)) return false;
+    stream.write(`${nudge}
+`);
+    recordNag(now);
+    return true;
+  } catch {
+    return false;
+  }
+}
+var __dirname, NAG_INTERVAL_MS;
 var init_version_nudge = __esm({
   "bin/version-nudge.js"() {
     "use strict";
     __dirname = fileURLToPath2(new URL(".", import.meta.url));
-    INDEX_CACHE_FILE2 = join12(process.env.TERMINALHIRE_DIR || join12(homedir9(), ".terminalhire"), "index-cache.json");
+    NAG_INTERVAL_MS = 24 * 60 * 60 * 1e3;
+  }
+});
+
+// bin/beta-nudge.js
+var beta_nudge_exports = {};
+__export(beta_nudge_exports, {
+  buildBetaNudge: () => buildBetaNudge
+});
+function buildBetaNudge(betaOpen, betaOptIn) {
+  if (betaOpen !== true) return null;
+  if (betaOptIn === true) return null;
+  return "\u{1F9EA} Beta's open \u2014 run `terminalhire beta` to join as a Founding Contributor";
+}
+var init_beta_nudge = __esm({
+  "bin/beta-nudge.js"() {
+    "use strict";
   }
 });
 
@@ -8135,7 +8411,10 @@ function updateIndexCache(patch) {
 
 // bin/match-slots.js
 var TOTAL_SLOTS = 25;
-var BOUNTY_SLOTS = 5;
+var BOUNTY_SLOTS = 3;
+var BOUNTY_MIN_MATCH = 0.5;
+var INTEREST_CONTRIBUTE_SLOTS = 1;
+var INTEREST_SLOT_LABEL = "Exploring";
 var CONTRIBUTE_SLOTS = 5;
 var CONTRIBUTE_SLOTS_THIN = 8;
 var ROLE_STABLE_MAX = 8;
@@ -8151,15 +8430,23 @@ function budgetSlots(results, opts = {}) {
     thinProfile = false,
     contributeEnabled = true,
     totalSlots = TOTAL_SLOTS,
-    now = Date.now()
+    now = Date.now(),
+    interestPicks = []
   } = opts;
   const list = Array.isArray(results) ? results : [];
-  const bountyMatches = list.filter((r) => r && r.job && r.job.source === "bounty");
-  const bountyTop = rotate(bountyMatches, now).slice(0, BOUNTY_SLOTS);
+  const bountyMatches = list.filter(
+    (r) => r && r.job && r.job.source === "bounty" && typeof r.score === "number" && r.score >= BOUNTY_MIN_MATCH
+  );
+  const bountyTop = [...bountyMatches].sort((a, b) => b.score - a.score).slice(0, BOUNTY_SLOTS);
   const contributeMatches = list.filter((r) => r && r.job && r.job.source === "contribute");
   const contributeCap = thinProfile && contributeEnabled ? CONTRIBUTE_SLOTS_THIN : CONTRIBUTE_SLOTS;
   const contributeTop = rotate(contributeMatches, now).slice(0, contributeCap);
-  const roleSlots = totalSlots - bountyTop.length - contributeTop.length;
+  const reservedContributeIds = new Set(contributeTop.map((r) => r.job.id));
+  const interestTop = (Array.isArray(interestPicks) ? interestPicks : []).filter((r) => r && r.job && !reservedContributeIds.has(r.job.id)).slice(0, INTEREST_CONTRIBUTE_SLOTS).map((r) => ({ ...r, interestLabel: INTEREST_SLOT_LABEL }));
+  const roleSlots = Math.max(
+    0,
+    totalSlots - bountyTop.length - contributeTop.length - interestTop.length
+  );
   const roleMatches = list.filter(
     (r) => r && r.job && r.job.source !== "bounty" && r.job.source !== "contribute"
   );
@@ -8168,13 +8455,31 @@ function budgetSlots(results, opts = {}) {
   const rotableRoles = roleMatches.slice(roleStable, roleStable + ROLE_ROTATE_WINDOW);
   const rotatedRoles = rotate(rotableRoles, now);
   const roleTop = [...stableRoles, ...rotatedRoles].slice(0, roleSlots);
-  return { roleTop, bountyTop, contributeTop };
+  return { roleTop, bountyTop, contributeTop, interestTop };
+}
+
+// bin/interest-picks.js
+var INTEREST_PICKS_CAP = 5;
+function selectInterestPicks(contributeSupply, declaredTags, fpSkillTags, cap = INTEREST_PICKS_CAP) {
+  if (!Array.isArray(contributeSupply) || contributeSupply.length === 0) return [];
+  if (!Array.isArray(declaredTags) || declaredTags.length === 0) return [];
+  const declared = new Set(declaredTags.filter((t) => typeof t === "string"));
+  if (declared.size === 0) return [];
+  const fpTags = new Set(Array.isArray(fpSkillTags) ? fpSkillTags : []);
+  return contributeSupply.map((job) => {
+    const tags = Array.isArray(job?.tags) ? job.tags : [];
+    return {
+      job,
+      declaredHits: tags.filter((t) => declared.has(t)).length,
+      fpOverlap: tags.some((t) => fpTags.has(t))
+    };
+  }).filter((x) => x.job && x.job.source === "contribute" && x.declaredHits > 0 && !x.fpOverlap).sort((a, b) => b.declaredHits - a.declaredHits).slice(0, cap).map((x) => ({ job: x.job, score: 0, matchedTags: [] }));
 }
 
 // bin/job-status-suppress.js
 function isEngaged(rec) {
   if (!rec) return false;
-  if (rec.status === "applied" || rec.status === "dismissed") return true;
+  if (rec.status === "applied" || rec.status === "dismissed" || rec.status === "claimed") return true;
   if (rec.status === "saved") return false;
   return rec.clicked === true;
 }
@@ -8183,46 +8488,8 @@ function suppressEngaged(results, statusMap) {
   return results.filter((r) => !isEngaged(map[r?.job?.id]));
 }
 
-// src/config.ts
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync } from "fs";
-import { join as join3 } from "path";
-import { homedir as homedir3 } from "os";
-var TERMINALHIRE_DIR3 = join3(homedir3(), ".terminalhire");
-var CONFIG_FILE = join3(TERMINALHIRE_DIR3, "config.json");
-var DEFAULT_CONFIG = {
-  nudge: "session",
-  peerConnect: false,
-  peerConnectPrompted: false,
-  resumePublishPrompted: false,
-  chatDisclosureAck: false,
-  chatShareActivity: false,
-  inboundNudgeMuted: false,
-  inboundNudgeDisclosed: false,
-  contributeEnabled: false,
-  contributePrompted: false
-};
-function readConfig() {
-  try {
-    if (!existsSync(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
-    const raw = readFileSync3(CONFIG_FILE, "utf8");
-    const parsed = JSON.parse(raw);
-    return { ...DEFAULT_CONFIG, ...parsed };
-  } catch {
-    return { ...DEFAULT_CONFIG };
-  }
-}
-function isPeerConnectEnabled() {
-  return readConfig().peerConnect === true;
-}
-function isInboundNudgeMuted() {
-  return readConfig().inboundNudgeMuted === true;
-}
-function isContributeEnabled() {
-  return readConfig().contributeEnabled === true;
-}
-function isContributePrompted() {
-  return readConfig().contributePrompted === true;
-}
+// bin/jpi-refresh.js
+init_config();
 
 // src/web-session.ts
 import {
@@ -8256,6 +8523,13 @@ function readWebSessionFile() {
 var GH_SESSION_COOKIE = "__jpi_gh_session";
 var __dirname2 = fileURLToPath3(new URL(".", import.meta.url));
 var API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+var CWD_SOFTTAGS_ENABLED = process.env["TH_CWD_SOFTTAGS"] !== "0";
+var CWD_SOFTTAG_WEIGHT = 0.4;
+var PREFS_RANKING_ENABLED = !!process.env["TH_PREFS_RANKING"] && process.env["TH_PREFS_RANKING"] !== "0";
+var DECLARED_SOFTTAG_WEIGHT = 0.6;
+var MMR_RERANK_ENABLED = process.env["TH_MMR_RERANK"] !== "0";
+var MMR_LAMBDA = 0.8;
+var MMR_K = 8;
 async function run() {
   try {
     let index;
@@ -8289,9 +8563,10 @@ async function run() {
     let matchCount = 0;
     let topMatches = [];
     let widenReserve = [];
+    let cwdSignalFp;
     try {
       const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-      const { match: match2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+      const { match: match2, mmrRerank: mmrRerank2 } = await Promise.resolve().then(() => (init_src(), src_exports));
       const { readStatusMap: readStatusMap2 } = await Promise.resolve().then(() => (init_job_status_store(), job_status_store_exports));
       const profile = await readProfile2();
       if (profile.skillTags.length > 0 && jobs.length > 0) {
@@ -8301,12 +8576,50 @@ async function run() {
           contributeNudge.onRamp = true;
         }
         const pool = contribute.length > 0 ? [...jobs, ...contribute] : jobs;
-        let results = match2(fp, pool, pool.length);
-        results = suppressEngaged(results, readStatusMap2());
+        let cwdSoftTags = [];
+        if (CWD_SOFTTAGS_ENABLED) {
+          try {
+            const { extractFingerprint: extractFingerprint2 } = await Promise.resolve().then(() => (init_signal(), signal_exports));
+            cwdSignalFp = extractFingerprint2(process.cwd());
+            const fpTags = new Set(fp.skillTags);
+            cwdSoftTags = (cwdSignalFp.skillTags || []).filter((t) => !fpTags.has(t)).map((tag) => ({ tag, weight: CWD_SOFTTAG_WEIGHT }));
+          } catch {
+          }
+        }
+        let declaredSoftTags = [];
+        let declaredTags = [];
+        if (PREFS_RANKING_ENABLED) {
+          const project = readProject();
+          declaredTags = Array.isArray(project?.skillTags) ? project.skillTags : [];
+          const fpTags = new Set(fp.skillTags);
+          declaredSoftTags = declaredTags.filter((t) => typeof t === "string" && !fpTags.has(t)).map((tag) => ({ tag, weight: DECLARED_SOFTTAG_WEIGHT }));
+        }
+        const softTags = [...cwdSoftTags, ...declaredSoftTags];
+        let results = softTags.length > 0 ? match2(fp, pool, pool.length, Date.now(), { softTags }) : match2(fp, pool, pool.length);
+        const statusMap = readStatusMap2();
+        results = suppressEngaged(results, statusMap);
         matchCount = results.length;
-        const { roleTop, bountyTop, contributeTop } = budgetSlots(results, {
+        if (MMR_RERANK_ENABLED) {
+          const isRoleResult = (r) => r.job.source !== "bounty" && r.job.source !== "contribute";
+          const roleResults = results.filter(isRoleResult);
+          const otherResults = results.filter((r) => !isRoleResult(r));
+          const diversifiedRoles = mmrRerank2(roleResults, {
+            lambda: MMR_LAMBDA,
+            k: MMR_K
+          });
+          results = [...diversifiedRoles, ...otherResults];
+        }
+        let interestPicks = [];
+        if (PREFS_RANKING_ENABLED && declaredTags.length > 0 && contribute.length > 0) {
+          interestPicks = suppressEngaged(
+            selectInterestPicks(contribute, declaredTags, fp.skillTags),
+            statusMap
+          );
+        }
+        const { roleTop, bountyTop, contributeTop, interestTop } = budgetSlots(results, {
           thinProfile,
-          contributeEnabled: isContributeEnabled()
+          contributeEnabled: isContributeEnabled(),
+          interestPicks
         });
         const toCard = (r) => ({
           id: r.job.id,
@@ -8318,9 +8631,13 @@ async function run() {
           source: r.job.source,
           amountUSD: r.job.bounty?.amountUSD,
           repo: r.job.bounty?.repoFullName ?? r.job.contribution?.repoFullName,
-          issueNumber: r.job.contribution?.issueNumber
+          issueNumber: r.job.contribution?.issueNumber,
+          // 037: only the interest slot carries this (spinner renders the label
+          // in place of a meaningless 0-score percentage). Spread-conditional so
+          // every non-interest card keeps its exact pre-037 key set.
+          ...r.interestLabel ? { interest: r.interestLabel } : {}
         });
-        topMatches = [...roleTop, ...bountyTop, ...contributeTop].map(toCard);
+        topMatches = [...roleTop, ...bountyTop, ...contributeTop, ...interestTop].map(toCard);
         const inTop = new Set(topMatches.map((m) => m.id));
         widenReserve = results.filter((r) => !inTop.has(r.job.id)).slice(0, 100).map(toCard);
       }
@@ -8440,8 +8757,11 @@ async function run() {
       let sessionTags;
       try {
         if (sc.enabled) {
-          const { extractFingerprint: extractFingerprint2 } = await Promise.resolve().then(() => (init_signal(), signal_exports));
-          const fp = extractFingerprint2(process.cwd());
+          let fp = cwdSignalFp;
+          if (!fp) {
+            const { extractFingerprint: extractFingerprint2 } = await Promise.resolve().then(() => (init_signal(), signal_exports));
+            fp = extractFingerprint2(process.cwd());
+          }
           if (Array.isArray(fp.skillTags) && fp.skillTags.length > 0) {
             sessionTags = fp.skillTags;
           }
@@ -8471,6 +8791,14 @@ async function run() {
     try {
       const { readLocalVersion: readLocalVersion2, buildStaleNudge: buildStaleNudge2 } = await Promise.resolve().then(() => (init_version_nudge(), version_nudge_exports));
       const nudge = buildStaleNudge2(readLocalVersion2(), index?.cliVersion);
+      if (nudge) process.stderr.write(`${nudge}
+`);
+    } catch {
+    }
+    try {
+      const { buildBetaNudge: buildBetaNudge2 } = await Promise.resolve().then(() => (init_beta_nudge(), beta_nudge_exports));
+      const { isBetaOptIn: isBetaOptIn2 } = await Promise.resolve().then(() => (init_config(), config_exports));
+      const nudge = buildBetaNudge2(index?.betaOpen === true, isBetaOptIn2());
       if (nudge) process.stderr.write(`${nudge}
 `);
     } catch {

@@ -499,6 +499,13 @@ var init_matcher = __esm({
   }
 });
 
+// ../../packages/core/src/rerank.ts
+var init_rerank = __esm({
+  "../../packages/core/src/rerank.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/feeds/http.ts
 var init_http = __esm({
   "../../packages/core/src/feeds/http.ts"() {
@@ -753,6 +760,13 @@ var init_feeds = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/contribution-classify.ts
+var init_contribution_classify = __esm({
+  "../../packages/core/src/feeds/contribution-classify.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/feeds/contributions.ts
 var init_contributions = __esm({
   "../../packages/core/src/feeds/contributions.ts"() {
@@ -761,6 +775,7 @@ var init_contributions = __esm({
     init_entities();
     init_bounty_gate();
     init_contribution_gate();
+    init_contribution_classify();
     init_github_bounties();
     init_http();
   }
@@ -3940,6 +3955,7 @@ var init_src = __esm({
     init_types();
     init_vocabulary();
     init_matcher();
+    init_rerank();
     init_feeds();
     init_indexer();
     init_partners();
@@ -4417,7 +4433,8 @@ var init_config = __esm({
       inboundNudgeMuted: false,
       inboundNudgeDisclosed: false,
       contributeEnabled: false,
-      contributePrompted: false
+      contributePrompted: false,
+      betaOptIn: false
     };
   }
 });

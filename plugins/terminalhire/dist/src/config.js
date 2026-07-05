@@ -14,7 +14,8 @@ var DEFAULT_CONFIG = {
   inboundNudgeMuted: false,
   inboundNudgeDisclosed: false,
   contributeEnabled: false,
-  contributePrompted: false
+  contributePrompted: false,
+  betaOptIn: false
 };
 function readConfig() {
   try {
@@ -62,8 +63,12 @@ function isContributeEnabled() {
 function isContributePrompted() {
   return readConfig().contributePrompted === true;
 }
+function isBetaOptIn() {
+  return readConfig().betaOptIn === true;
+}
 export {
   getNudgeMode,
+  isBetaOptIn,
   isContributeEnabled,
   isContributePrompted,
   isInboundNudgeMuted,
