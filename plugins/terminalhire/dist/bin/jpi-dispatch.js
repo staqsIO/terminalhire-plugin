@@ -182,7 +182,8 @@ var init_config = __esm({
       inboundNudgeDisclosed: false,
       contributeEnabled: false,
       contributePrompted: false,
-      betaOptIn: false
+      betaOptIn: false,
+      lastFullFeedbackAt: null
     };
   }
 });
@@ -38593,7 +38594,7 @@ var init_match_slots = __esm({
     BOUNTY_SLOTS = 3;
     BOUNTY_MIN_MATCH = 0.5;
     INTEREST_CONTRIBUTE_SLOTS = 1;
-    INTEREST_SLOT_LABEL = "Exploring";
+    INTEREST_SLOT_LABEL = "Stretch";
     CONTRIBUTE_SLOTS = 5;
     CONTRIBUTE_SLOTS_THIN = 8;
     ROLE_STABLE_MAX = 8;
@@ -39089,49 +39090,53 @@ import { createInterface as createInterface13 } from "readline";
 async function run23() {
   const rl = createInterface13({ input: process.stdin, output: process.stdout });
   const ask3 = (question) => new Promise((resolve2) => {
-    let answered = false;
+    const onClose = () => resolve2(null);
+    rl.once("close", onClose);
     rl.question(question, (answer) => {
-      answered = true;
+      rl.removeListener("close", onClose);
       resolve2((answer || "").trim());
     });
-    rl.once("close", () => {
-      if (!answered) resolve2(null);
-    });
   });
-  console.log("");
-  console.log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
-  console.log("\u2502   Welcome to the Terminalhire Beta \u2014 Founding Contributor        \u2502");
-  console.log("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518");
-  console.log("");
-  console.log(`  In a world where everyone's suddenly an "AI engineer," Terminalhire is`);
-  console.log("  third-party-verified, hard-to-game proof you're real \u2014 not a r\xE9sum\xE9, a");
-  console.log("  record of contributions accepted by people who don't know you.");
-  console.log("");
-  console.log("  You've been invited to help shape it while the core is still baking.");
-  console.log("");
-  console.log("The deal \u2014 two small asks, four real rewards.");
-  console.log("");
-  console.log("  Two asks:");
-  console.log("    1. Use it on real work and keep it installed \u2014 the honest test of");
-  console.log("       whether it earns its place in your terminal.");
-  console.log("    2. When something breaks or annoys you, tell us: `terminalhire feedback`");
-  console.log("       (2 minutes, goes straight to the founder).");
-  console.log("");
-  console.log("  Four rewards:");
-  console.log("    \u2022 A Founding-Contributor mark on your credential.");
-  console.log("    \u2022 A direct line to the founder \u2014 the person who ships the fix.");
-  console.log("    \u2022 Bounties on the issues your feedback surfaces \u2014 get paid for the");
-  console.log("      rough edges you find.");
-  console.log("    \u2022 A spot on the founding-contributors wall.");
-  console.log("");
-  const join33 = await ask3('  Type "yes" to join the beta as a Founding Contributor (anything else cancels): ');
-  if ((join33 || "").toLowerCase() !== "yes") {
-    console.log("\n  No problem \u2014 nothing was sent. Run `terminalhire beta` any time.\n");
-    rl.close();
-    return;
+  const alreadyActed = readConfig().betaOptIn === true;
+  let listPublicly = false;
+  if (!alreadyActed) {
+    console.log("");
+    console.log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
+    console.log("\u2502   Welcome to the Terminalhire Beta \u2014 Founding Contributor        \u2502");
+    console.log("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518");
+    console.log("");
+    console.log(`  In a world where everyone's suddenly an "AI engineer," Terminalhire is`);
+    console.log("  third-party-verified, hard-to-game proof you're real \u2014 not a r\xE9sum\xE9, a");
+    console.log("  record of contributions accepted by people who don't know you.");
+    console.log("");
+    console.log("  You've been invited to help shape it while the core is still baking.");
+    console.log("");
+    console.log("The deal \u2014 two small asks, four real rewards.");
+    console.log("");
+    console.log("  Two asks:");
+    console.log("    1. Use it on real work and keep it installed \u2014 the honest test of");
+    console.log("       whether it earns its place in your terminal.");
+    console.log("    2. When something breaks or annoys you, tell us: `terminalhire feedback`");
+    console.log("       (2 minutes, goes straight to the founder).");
+    console.log("");
+    console.log("  Four rewards:");
+    console.log("    \u2022 A Founding-Contributor mark on your credential.");
+    console.log("    \u2022 A direct line to the founder \u2014 the person who ships the fix.");
+    console.log("    \u2022 Bounties on the issues your feedback surfaces \u2014 get paid for the");
+    console.log("      rough edges you find.");
+    console.log("    \u2022 A spot on the founding-contributors wall.");
+    console.log("");
+    const join33 = await ask3('  Type "yes" to join the beta as a Founding Contributor (anything else cancels): ');
+    if ((join33 || "").toLowerCase() !== "yes") {
+      console.log("\n  No problem \u2014 nothing was sent. Run `terminalhire beta` any time.\n");
+      rl.close();
+      return;
+    }
+    const listAns = await ask3("  List me publicly as a Founding Contributor? [y/N] (Enter = no): ");
+    listPublicly = ["y", "yes"].includes((listAns || "").toLowerCase());
+  } else {
+    console.log("\n  You've already opted in to the Terminalhire beta \u2014 checking your status\u2026");
   }
-  const listAns = await ask3("  List me publicly as a Founding Contributor? [y/N] (Enter = no): ");
-  const listPublicly = ["y", "yes"].includes((listAns || "").toLowerCase());
   rl.close();
   const cookie = readWebSessionCookie();
   if (!cookie) {
@@ -39144,7 +39149,9 @@ async function run23() {
     res = await fetch(`${API_BASE}/api/beta/join`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: `${GH_SESSION_COOKIE8}=${cookie}` },
-      body: JSON.stringify({ listPublicly }),
+      // First run: the prompt-gathered consent. Re-run: the CONSTANT empty body —
+      // a status re-check that carries no user-authored data (see RERUN_STATUS_BODY).
+      body: JSON.stringify(alreadyActed ? RERUN_STATUS_BODY : { listPublicly }),
       signal: AbortSignal.timeout(1e4)
     });
   } catch (err) {
@@ -39153,34 +39160,39 @@ async function run23() {
 `);
     return;
   }
-  if (res.status === 401) {
-    console.log("\n  Your linked web session expired.");
+  if (res.status === 401 || res.status === 403) {
+    console.log("\n  Your linked web session isn't valid anymore.");
     console.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
     return;
   }
-  if (res.status === 403) {
-    console.log("\n  The beta is invite-only right now \u2014 your GitHub login is not on the");
-    console.log("  Founding-Contributor allowlist yet. Hang tight; it opens wider soon.\n");
-    return;
-  }
-  if (!res.ok) {
+  if (res.status !== 200 && res.status !== 202) {
     console.error(`
   Request failed: /api/beta/join returned ${res.status}.
 `);
     return;
   }
+  let status;
   let memberNo;
   try {
     const data = await res.json();
+    status = typeof data.status === "string" ? data.status : null;
     memberNo = typeof data.memberNo === "number" ? data.memberNo : null;
   } catch {
   }
+  if (status !== "active" && status !== "requested") {
+    status = res.status === 202 ? "requested" : "active";
+  }
   writeConfig({ betaOptIn: true });
+  if (status === "requested") {
+    console.log("\n  \u2713 You're on the list.");
+    console.log("  Invites go out in small batches \u2014 run `terminalhire beta` anytime to check your status.\n");
+    return;
+  }
   console.log(`
   \u2713 Founding Contributor${memberNo !== null && memberNo !== void 0 ? ` #${memberNo}` : ""}`);
   console.log("  Leave feedback any time:  terminalhire feedback\n");
 }
-var API_BASE, GH_SESSION_COOKIE8;
+var API_BASE, GH_SESSION_COOKIE8, RERUN_STATUS_BODY;
 var init_jpi_beta = __esm({
   "bin/jpi-beta.js"() {
     "use strict";
@@ -39188,6 +39200,7 @@ var init_jpi_beta = __esm({
     init_config();
     API_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE8 = "__jpi_gh_session";
+    RERUN_STATUS_BODY = {};
   }
 });
 
@@ -39215,18 +39228,22 @@ function readLocalVersion2() {
 async function run24() {
   const rl = createInterface14({ input: process.stdin, output: process.stdout });
   const ask3 = (question) => new Promise((resolve2) => {
-    let answered = false;
+    const onClose = () => resolve2(null);
+    rl.once("close", onClose);
     rl.question(question, (answer) => {
-      answered = true;
+      rl.removeListener("close", onClose);
       resolve2((answer || "").trim());
     });
-    rl.once("close", () => {
-      if (!answered) resolve2(null);
-    });
   });
+  const lastFull = readConfig().lastFullFeedbackAt;
+  const fullDue = !lastFull || Date.now() - Date.parse(lastFull) >= FULL_FORM_INTERVAL_MS;
+  const fullForm = process.argv.includes("--full") || fullDue;
   console.log("");
   console.log("  terminalhire feedback \u2014 goes straight to the founder. Everything below is");
   console.log("  what YOU type; the only thing auto-attached is your CLI version + OS.");
+  if (!fullForm) {
+    console.log("  (quick form \u2014 run `terminalhire feedback --full` for ratings + the long form)");
+  }
   console.log("");
   console.log("  What is this about?");
   CATEGORY_LABELS.forEach((label, i) => console.log(`    ${i + 1}) ${label}`));
@@ -39240,15 +39257,19 @@ async function run24() {
   const category = CATEGORIES[catIdx - 1];
   const tryingToDo = await ask3("  What were you trying to do? (Enter to skip): ");
   const expectedVsActual = await ask3("  What did you expect vs. what happened? (Enter to skip): ");
-  console.log("  Rate 1\u20135 (Enter to skip any):");
   const ratings = {};
-  for (const key of RATING_KEYS) {
-    const ans = await ask3(`    ${key}: `);
-    const n = Number.parseInt(ans || "", 10);
-    if (n >= 1 && n <= 5) ratings[key] = n;
+  let almostQuit = null;
+  let keepInstalled = null;
+  if (fullForm) {
+    console.log("  Rate 1\u20135 (Enter to skip any):");
+    for (const key of RATING_KEYS) {
+      const ans = await ask3(`    ${key}: `);
+      const n = Number.parseInt(ans || "", 10);
+      if (n >= 1 && n <= 5) ratings[key] = n;
+    }
+    almostQuit = await ask3("  What almost made you quit / uninstall? (Enter to skip): ");
+    keepInstalled = await ask3("  Will you keep it installed? y/n + why (Enter to skip): ");
   }
-  const almostQuit = await ask3("  What almost made you quit / uninstall? (Enter to skip): ");
-  const keepInstalled = await ask3("  Will you keep it installed? y/n + why (Enter to skip): ");
   const payload = { category };
   if (tryingToDo) payload.tryingToDo = tryingToDo;
   if (expectedVsActual) payload.expectedVsActual = expectedVsActual;
@@ -39310,13 +39331,16 @@ async function run24() {
 `);
     return;
   }
+  if (fullForm) writeConfig({ lastFullFeedbackAt: (/* @__PURE__ */ new Date()).toISOString() });
   console.log("\n  \u2713 Sent \u2014 thank you. This goes straight to the founder.\n");
 }
-var __dirname6, API_BASE2, GH_SESSION_COOKIE9, CATEGORIES, CATEGORY_LABELS, RATING_KEYS;
+var FULL_FORM_INTERVAL_MS, __dirname6, API_BASE2, GH_SESSION_COOKIE9, CATEGORIES, CATEGORY_LABELS, RATING_KEYS;
 var init_jpi_feedback = __esm({
   "bin/jpi-feedback.js"() {
     "use strict";
     init_web_session();
+    init_config();
+    FULL_FORM_INTERVAL_MS = 7 * 24 * 60 * 60 * 1e3;
     __dirname6 = fileURLToPath7(new URL(".", import.meta.url));
     API_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE9 = "__jpi_gh_session";

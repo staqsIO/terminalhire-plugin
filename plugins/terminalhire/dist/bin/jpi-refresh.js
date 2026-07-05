@@ -120,7 +120,8 @@ var init_config = __esm({
       inboundNudgeDisclosed: false,
       contributeEnabled: false,
       contributePrompted: false,
-      betaOptIn: false
+      betaOptIn: false,
+      lastFullFeedbackAt: null
     };
   }
 });
@@ -8414,7 +8415,7 @@ var TOTAL_SLOTS = 25;
 var BOUNTY_SLOTS = 3;
 var BOUNTY_MIN_MATCH = 0.5;
 var INTEREST_CONTRIBUTE_SLOTS = 1;
-var INTEREST_SLOT_LABEL = "Exploring";
+var INTEREST_SLOT_LABEL = "Stretch";
 var CONTRIBUTE_SLOTS = 5;
 var CONTRIBUTE_SLOTS_THIN = 8;
 var ROLE_STABLE_MAX = 8;

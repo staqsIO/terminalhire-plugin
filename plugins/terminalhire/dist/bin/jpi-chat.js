@@ -4434,7 +4434,8 @@ var init_config = __esm({
       inboundNudgeDisclosed: false,
       contributeEnabled: false,
       contributePrompted: false,
-      betaOptIn: false
+      betaOptIn: false,
+      lastFullFeedbackAt: null
     };
   }
 });

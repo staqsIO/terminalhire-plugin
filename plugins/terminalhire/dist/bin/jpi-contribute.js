@@ -1646,7 +1646,8 @@ var DEFAULT_CONFIG = {
   inboundNudgeDisclosed: false,
   contributeEnabled: false,
   contributePrompted: false,
-  betaOptIn: false
+  betaOptIn: false,
+  lastFullFeedbackAt: null
 };
 function readConfig() {
   try {
