@@ -1229,7 +1229,7 @@ async function repoContributorCount(owner, name, token) {
     return void 0;
   }
 }
-async function fetchRepoMeta(owner, name, token, cache) {
+async function fetchRepoMeta(owner, name, token, cache, stats) {
   const key = `${owner}/${name}`.toLowerCase();
   const cached = cache.get(key);
   if (cached !== void 0) return cached;
@@ -1246,8 +1246,10 @@ async function fetchRepoMeta(owner, name, token, cache) {
       topics: r.topics ?? [],
       contributors
     };
-  } catch {
+  } catch (err) {
     meta = null;
+    const msg = err instanceof Error ? err.message : String(err);
+    if (stats && TRANSIENT_META_ERROR.test(msg)) stats.transient += 1;
   }
   cache.set(key, meta);
   return meta;
@@ -1286,8 +1288,10 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
     return emptyCredential(/HTTP 403|HTTP 429|rate limit/i.test(msg) ? "rate-limited" : "failed");
   }
   const byDomain = {};
+  const distinctOrgSet = /* @__PURE__ */ new Set();
   let qualifyingTotal = 0;
   const qualifyingPRs = [];
+  const metaStats = { transient: 0 };
   for (const item of items) {
     const repo = parseRepoUrl(item.repository_url);
     if (!repo) continue;
@@ -1295,13 +1299,20 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
     if (ownerLc === loginLc) continue;
     if (ownedOrgs.has(ownerLc)) continue;
     if (isTrivialPRTitle(item.title)) continue;
-    const meta = await fetchRepoMeta(repo.owner, repo.name, token, cache);
+    const meta = await fetchRepoMeta(repo.owner, repo.name, token, cache, metaStats);
+    if (metaStats.transient > 0) {
+      console.warn(
+        `[acceptance] ${login}: per-repo metadata transient failure (${metaStats.transient}) \u2014 degrading to 'rate-limited' rather than a fabricated count`
+      );
+      return emptyCredential("rate-limited");
+    }
     if (!meta) continue;
     if (meta.private) continue;
     if (meta.archived || meta.fork) continue;
     if (meta.stars < gates.minStars) continue;
     if (meta.contributors !== void 0 && meta.contributors < gates.minContributors) continue;
     qualifyingTotal += 1;
+    distinctOrgSet.add(ownerLc);
     const mergedAt = item.pull_request?.merged_at ?? item.closed_at ?? item.created_at;
     const rawDomains = [meta.language ?? "", ...meta.topics].filter(Boolean);
     const domainTags = [...new Set(normalize(rawDomains))];
@@ -1327,7 +1338,14 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
       lastMergedAt: b.lastMergedAt
     };
   }
-  return { status: "ok", byDomain: finalDomains, qualifyingTotal, qualifyingPRs, computedAt };
+  return {
+    status: "ok",
+    byDomain: finalDomains,
+    qualifyingTotal,
+    qualifyingPRs,
+    distinctOrgs: distinctOrgSet.size,
+    computedAt
+  };
 }
 async function computeAcceptanceCredential(login, token, cache = /* @__PURE__ */ new Map()) {
   if (!token) return emptyCredential("no-token");
@@ -1340,6 +1358,61 @@ async function computeAcceptanceCredentialPublic(login, token, cache = /* @__PUR
   for (const org of opts?.includeOrgs ?? []) ownedOrgs.delete(org.toLowerCase());
   const gates = opts?.relaxGates ? { minStars: 0, minContributors: 0 } : void 0;
   return computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates);
+}
+async function fetchOpenExternalPRs(login, token, cache = /* @__PURE__ */ new Map(), gates = {
+  minStars: MIN_STARS,
+  minContributors: MIN_CONTRIBUTORS
+}) {
+  if (!token) return [];
+  const loginLc = login.toLowerCase();
+  let ownedOrgs;
+  try {
+    ownedOrgs = await fetchPublicOrgs(login, token);
+  } catch {
+    return null;
+  }
+  let items;
+  try {
+    const q = encodeURIComponent(`type:pr is:open is:public author:${login} -user:${login} sort:updated`);
+    const res = await ghFetch(
+      `/search/issues?q=${q}&per_page=${OPEN_PR_PAGE}`,
+      token
+    );
+    items = res.items ?? [];
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn("[open-prs] search failed:", msg);
+    return null;
+  }
+  const metaStats = { transient: 0 };
+  const out = [];
+  for (const item of items) {
+    const repo = parseRepoUrl(item.repository_url);
+    if (!repo) continue;
+    const ownerLc = repo.owner.toLowerCase();
+    if (ownerLc === loginLc) continue;
+    if (ownedOrgs.has(ownerLc)) continue;
+    if (isTrivialPRTitle(item.title)) continue;
+    const meta = await fetchRepoMeta(repo.owner, repo.name, token, cache, metaStats);
+    if (metaStats.transient > 0) {
+      console.warn(
+        `[open-prs] ${login}: per-repo metadata transient failure (${metaStats.transient}) \u2014 returning null (keep prior strip)`
+      );
+      return null;
+    }
+    if (!meta) continue;
+    if (meta.private) continue;
+    if (meta.archived || meta.fork) continue;
+    if (meta.stars < gates.minStars) continue;
+    if (meta.contributors !== void 0 && meta.contributors < gates.minContributors) continue;
+    out.push({
+      title: item.title,
+      url: item.html_url,
+      repoFullName: `${repo.owner}/${repo.name}`,
+      openedAt: item.created_at
+    });
+  }
+  return out;
 }
 function acceptanceCountForDomains(cred, domains) {
   if (cred.status !== "ok") return 0;
@@ -1412,7 +1485,7 @@ function deriveResumeTrend(cred, repoRecency, now = Date.now()) {
   }
   return scored.sort((a, b) => b.weight - a.weight).slice(0, 12).map((s) => s.t);
 }
-var TRACTION_TOP_N, CANDIDATE_PR_PAGE, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
+var TRACTION_TOP_N, CANDIDATE_PR_PAGE, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
@@ -1420,6 +1493,8 @@ var init_github = __esm({
     init_contribution_gate();
     TRACTION_TOP_N = 6;
     CANDIDATE_PR_PAGE = 50;
+    OPEN_PR_PAGE = 20;
+    TRANSIENT_META_ERROR = /HTTP 403|HTTP 429|rate limit|HTTP 5\d\d|timeout|network|fetch failed/i;
     RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
     RESUME_MIN_SCORE = 0.05;
   }
@@ -3165,6 +3240,10 @@ ${pr.body ?? ""}`.matchAll(/#(\d+)\b/g)) {
   }
   return refs;
 }
+async function fetchRateLimit(client) {
+  const r = await client.json("/rate_limit");
+  return r?.resources ?? null;
+}
 async function searchContribIssues(client, queries) {
   const byUrl = /* @__PURE__ */ new Map();
   for (const q of queries) {
@@ -3209,6 +3288,9 @@ async function aggregateContributions(opts = {}) {
   const jobs = [];
   const seen = /* @__PURE__ */ new Set();
   const perRepo = /* @__PURE__ */ new Map();
+  let metaNull = 0;
+  let contribUndefined = 0;
+  let prRefsNull = 0;
   for (const issue of issues) {
     if (jobs.length >= MAX_CONTRIB_ITEMS) break;
     const fullName = repoFullNameFromApiUrl2(issue.repository_url);
@@ -3219,9 +3301,13 @@ async function aggregateContributions(opts = {}) {
     if (isAssigned(issue)) continue;
     if ((perRepo.get(fullName) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) continue;
     const repo = await repoMeta(fullName);
-    if (!repo) continue;
+    if (!repo) {
+      metaNull++;
+      continue;
+    }
     const title = decodeEntities(issue.title).trim();
     const contributors = await repoContribCount(fullName);
+    if (contributors === void 0) contribUndefined++;
     if (!passesContributionGate({
       fullName,
       stars: repo.stargazers_count,
@@ -3237,6 +3323,7 @@ async function aggregateContributions(opts = {}) {
     const labels = labelNames2(issue.labels);
     if (looksLikeContentTask({ title, body, labels })) continue;
     const prRefs = await repoPRRefs(fullName);
+    if (prRefs === null) prRefsNull++;
     if (prRefs && prRefs.has(issue.number)) continue;
     const openPRsAtDiscovery = prRefs ? 0 : void 0;
     const tags = normalize(
@@ -3276,9 +3363,18 @@ async function aggregateContributions(opts = {}) {
       raw: issue
     });
   }
+  if (!opts.fetchImpl) {
+    const rl = await fetchRateLimit(client);
+    const core = rl?.core ? `${rl.core.remaining}/${rl.core.limit}` : "n/a";
+    const search = rl?.search ? `${rl.search.remaining}/${rl.search.limit}` : "n/a";
+    const noToken = !(process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"]);
+    console.info(
+      `[contribute] build metrics \u2014 scanned=${issues.length} reposDistinct=${repoCache.size} emitted=${jobs.length} metaNull=${metaNull} contribUndefined=${contribUndefined} prRefsNull=${prRefsNull} core=${core} search=${search}` + (noToken ? " (NO TOKEN \u2192 60/hr)" : "")
+    );
+  }
   return jobs;
 }
-var GITHUB_API2, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, MAX_CONTRIB_ITEMS, MAX_CONTRIB_ISSUES_SCANNED;
+var GITHUB_API2, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, MAX_CONTRIB_ITEMS, MAX_CONTRIB_ISSUES_SCANNED;
 var init_contributions = __esm({
   "../../packages/core/src/feeds/contributions.ts"() {
     "use strict";
@@ -3290,15 +3386,25 @@ var init_contributions = __esm({
     init_github_bounties();
     init_http();
     GITHUB_API2 = "https://api.github.com";
-    CONTRIB_SEARCH_QUERIES = [
+    CONTRIB_LABEL_QUERIES = [
       'label:"good first issue" type:issue state:open',
-      'label:"help wanted" type:issue state:open',
       'label:"good-first-issue" type:issue state:open',
-      'label:"help-wanted" type:issue state:open'
+      'label:"help wanted" type:issue state:open',
+      'label:"help-wanted" type:issue state:open',
+      'label:"up-for-grabs" type:issue state:open'
     ];
+    CONTRIB_LANGUAGE_QUERIES = [
+      ...["rust", "go", "python", "c++", "ruby"].map(
+        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+      ),
+      ...["rust", "go"].map(
+        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+      )
+    ];
+    CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
     SEARCH_PER_PAGE2 = 100;
     MAX_CONTRIB_ITEMS = 150;
-    MAX_CONTRIB_ISSUES_SCANNED = 300;
+    MAX_CONTRIB_ISSUES_SCANNED = 600;
   }
 });
 
@@ -6741,13 +6847,15 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
     daysAgo = Math.max(0, Math.round(ageDays2));
     recencyBadge = { lastMergedAt: mostRecent, state: ageDays2 <= thresholdDays ? "live" : "dormant" };
   }
-  const orgCount = Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
+  const exactOrgCount = typeof credential.distinctOrgs === "number" && credential.distinctOrgs > 0;
+  const orgCount = exactOrgCount ? credential.distinctOrgs : Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
   let proofSentence;
   if (!ok) {
     proofSentence = "Contribution credential unavailable \u2014 could not verify.";
   } else {
     const prs = credential.qualifyingTotal;
-    let s = `${prs} substantive PR${prs === 1 ? "" : "s"} merged into at least ${orgCount} external org${orgCount === 1 ? "" : "s"} (\u2265${MIN_STARS}\u2605, \u2265${MIN_CONTRIBUTORS} contributors)`;
+    const orgPhrase = exactOrgCount ? `${orgCount}` : `at least ${orgCount}`;
+    let s = `${prs} substantive PR${prs === 1 ? "" : "s"} merged into ${orgPhrase} external org${orgCount === 1 ? "" : "s"} (\u2265${MIN_STARS}\u2605, \u2265${MIN_CONTRIBUTORS} contributors)`;
     if (daysAgo !== void 0) s += ` \u2014 most recent ${daysAgo}d ago`;
     proofSentence = `${s}.`;
   }
@@ -6985,6 +7093,7 @@ __export(src_exports, {
   expandWeighted: () => expandWeighted,
   extractSkillTags: () => extractSkillTags,
   fetchGitHubProfile: () => fetchGitHubProfile,
+  fetchOpenExternalPRs: () => fetchOpenExternalPRs,
   fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
   fetchRepoRecency: () => fetchRepoRecency,
   flattenTiers: () => flattenTiers,

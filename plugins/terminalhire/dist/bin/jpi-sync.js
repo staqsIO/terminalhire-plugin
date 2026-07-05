@@ -768,6 +768,7 @@ var init_contribution_classify = __esm({
 });
 
 // ../../packages/core/src/feeds/contributions.ts
+var CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES;
 var init_contributions = __esm({
   "../../packages/core/src/feeds/contributions.ts"() {
     "use strict";
@@ -778,6 +779,22 @@ var init_contributions = __esm({
     init_contribution_classify();
     init_github_bounties();
     init_http();
+    CONTRIB_LABEL_QUERIES = [
+      'label:"good first issue" type:issue state:open',
+      'label:"good-first-issue" type:issue state:open',
+      'label:"help wanted" type:issue state:open',
+      'label:"help-wanted" type:issue state:open',
+      'label:"up-for-grabs" type:issue state:open'
+    ];
+    CONTRIB_LANGUAGE_QUERIES = [
+      ...["rust", "go", "python", "c++", "ruby"].map(
+        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+      ),
+      ...["rust", "go"].map(
+        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+      )
+    ];
+    CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
   }
 });
 

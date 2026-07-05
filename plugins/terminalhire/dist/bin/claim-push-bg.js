@@ -99,6 +99,7 @@ var require_keytar2 = __commonJS({
 // src/claims.ts
 var claims_exports = {};
 __export(claims_exports, {
+  PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
   acceptedPRRate: () => acceptedPRRate,
   findClaim: () => findClaim,
   listClaims: () => listClaims,
@@ -199,12 +200,21 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR2, CLAIMS_FILE, TERMINAL_STATES;
+var TERMINALHIRE_DIR2, CLAIMS_FILE, PUSHED_CLAIM_FIELDS, TERMINAL_STATES;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
-    TERMINALHIRE_DIR2 = join2(homedir2(), ".terminalhire");
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
     CLAIMS_FILE = join2(TERMINALHIRE_DIR2, "claims.json");
+    PUSHED_CLAIM_FIELDS = [
+      "kind",
+      "repoFullName",
+      "state",
+      "prUrl",
+      "merged",
+      "claimedAt",
+      "updatedAt"
+    ];
     TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
   }
 });
@@ -278,7 +288,6 @@ var CLAIM_PUSH_TOKEN_FILE = join3(TERMINALHIRE_DIR3, "claim-push-token.enc");
 var CLAIM_SYNC_BASE = "https://terminalhire.com";
 var AUTO_CONSENT_VERSION = 2;
 var AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
-var CLAIM_PUSH_FIELDS = ["kind", "repoFullName", "state", "prUrl", "merged", "claimedAt", "updatedAt"];
 async function writePushTokenEnc(rawToken) {
   mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
   const key = await loadKey();
@@ -348,7 +357,7 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
     if (!existsSync3(CLAIM_PUSH_AUTO_MARKER) || !existsSync3(CLAIM_PUSH_TOKEN_FILE)) return;
     const marker = readAutoMarker();
     if (!marker || !marker.autoConsentedAt) return;
-    const { listClaims: listClaims2, toPushedClaim: toPushedClaim2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
+    const { listClaims: listClaims2, toPushedClaim: toPushedClaim2, PUSHED_CLAIM_FIELDS: PUSHED_CLAIM_FIELDS2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
     const pushed = listClaims2().map((c) => toPushedClaim2(c));
     const currentHash = computeSnapshotHash(pushed);
     const gate = backgroundPushGate({
@@ -363,15 +372,15 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
     if (!gate.push) return;
     const token = await readPushTokenEnc();
     if (!token) return;
-    const consentToken = {
+    const consentReceipt = {
       consentedAt: marker.autoConsentedAt,
       version: AUTO_CONSENT_VERSION,
-      fields: CLAIM_PUSH_FIELDS
+      fields: PUSHED_CLAIM_FIELDS2
     };
     const res = await fetch(`${CLAIM_SYNC_BASE}/api/claim-sync`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ consentToken, claims: pushed, pushToken: token }),
+      body: JSON.stringify({ consentToken: consentReceipt, claims: pushed, pushToken: token }),
       signal: AbortSignal.timeout(1e4)
     });
     if (!res.ok) return;

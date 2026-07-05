@@ -748,6 +748,24 @@ var DEFAULT_GREENHOUSE_SLUGS = flattenTiers(GREENHOUSE_SLUGS_BY_TIER);
 var DEFAULT_ASHBY_SLUGS = flattenTiers(ASHBY_SLUGS_BY_TIER);
 var DEFAULT_LEVER_SLUGS = flattenTiers(LEVER_SLUGS_BY_TIER);
 
+// ../../packages/core/src/feeds/contributions.ts
+var CONTRIB_LABEL_QUERIES = [
+  'label:"good first issue" type:issue state:open',
+  'label:"good-first-issue" type:issue state:open',
+  'label:"help wanted" type:issue state:open',
+  'label:"help-wanted" type:issue state:open',
+  'label:"up-for-grabs" type:issue state:open'
+];
+var CONTRIB_LANGUAGE_QUERIES = [
+  ...["rust", "go", "python", "c++", "ruby"].map(
+    (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+  ),
+  ...["rust", "go"].map(
+    (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+  )
+];
+var CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
+
 // ../../packages/core/src/partners.ts
 import { readFileSync as readFileSync3 } from "fs";
 import { join as join4 } from "path";

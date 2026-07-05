@@ -2,8 +2,17 @@
 import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-var TERMINALHIRE_DIR = join(homedir(), ".terminalhire");
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
 var CLAIMS_FILE = join(TERMINALHIRE_DIR, "claims.json");
+var PUSHED_CLAIM_FIELDS = [
+  "kind",
+  "repoFullName",
+  "state",
+  "prUrl",
+  "merged",
+  "claimedAt",
+  "updatedAt"
+];
 function toPushedClaim(claim) {
   return {
     kind: claim.kind,
@@ -94,6 +103,7 @@ function acceptedPRRate(claims = readClaims()) {
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
 export {
+  PUSHED_CLAIM_FIELDS,
   acceptedPRRate,
   findClaim,
   listClaims,

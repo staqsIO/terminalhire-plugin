@@ -1500,7 +1500,7 @@ async function repoContributorCount(owner, name, token) {
     return void 0;
   }
 }
-async function fetchRepoMeta(owner, name, token, cache) {
+async function fetchRepoMeta(owner, name, token, cache, stats) {
   const key = `${owner}/${name}`.toLowerCase();
   const cached2 = cache.get(key);
   if (cached2 !== void 0) return cached2;
@@ -1517,8 +1517,10 @@ async function fetchRepoMeta(owner, name, token, cache) {
       topics: r.topics ?? [],
       contributors
     };
-  } catch {
+  } catch (err) {
     meta2 = null;
+    const msg = err instanceof Error ? err.message : String(err);
+    if (stats && TRANSIENT_META_ERROR.test(msg)) stats.transient += 1;
   }
   cache.set(key, meta2);
   return meta2;
@@ -1557,8 +1559,10 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
     return emptyCredential(/HTTP 403|HTTP 429|rate limit/i.test(msg) ? "rate-limited" : "failed");
   }
   const byDomain = {};
+  const distinctOrgSet = /* @__PURE__ */ new Set();
   let qualifyingTotal = 0;
   const qualifyingPRs = [];
+  const metaStats = { transient: 0 };
   for (const item of items) {
     const repo = parseRepoUrl(item.repository_url);
     if (!repo) continue;
@@ -1566,13 +1570,20 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
     if (ownerLc === loginLc) continue;
     if (ownedOrgs.has(ownerLc)) continue;
     if (isTrivialPRTitle(item.title)) continue;
-    const meta2 = await fetchRepoMeta(repo.owner, repo.name, token, cache);
+    const meta2 = await fetchRepoMeta(repo.owner, repo.name, token, cache, metaStats);
+    if (metaStats.transient > 0) {
+      console.warn(
+        `[acceptance] ${login}: per-repo metadata transient failure (${metaStats.transient}) \u2014 degrading to 'rate-limited' rather than a fabricated count`
+      );
+      return emptyCredential("rate-limited");
+    }
     if (!meta2) continue;
     if (meta2.private) continue;
     if (meta2.archived || meta2.fork) continue;
     if (meta2.stars < gates.minStars) continue;
     if (meta2.contributors !== void 0 && meta2.contributors < gates.minContributors) continue;
     qualifyingTotal += 1;
+    distinctOrgSet.add(ownerLc);
     const mergedAt = item.pull_request?.merged_at ?? item.closed_at ?? item.created_at;
     const rawDomains = [meta2.language ?? "", ...meta2.topics].filter(Boolean);
     const domainTags = [...new Set(normalize(rawDomains))];
@@ -1598,7 +1609,14 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
       lastMergedAt: b.lastMergedAt
     };
   }
-  return { status: "ok", byDomain: finalDomains, qualifyingTotal, qualifyingPRs, computedAt };
+  return {
+    status: "ok",
+    byDomain: finalDomains,
+    qualifyingTotal,
+    qualifyingPRs,
+    distinctOrgs: distinctOrgSet.size,
+    computedAt
+  };
 }
 async function computeAcceptanceCredential(login, token, cache = /* @__PURE__ */ new Map()) {
   if (!token) return emptyCredential("no-token");
@@ -1611,6 +1629,61 @@ async function computeAcceptanceCredentialPublic(login, token, cache = /* @__PUR
   for (const org of opts?.includeOrgs ?? []) ownedOrgs.delete(org.toLowerCase());
   const gates = opts?.relaxGates ? { minStars: 0, minContributors: 0 } : void 0;
   return computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates);
+}
+async function fetchOpenExternalPRs(login, token, cache = /* @__PURE__ */ new Map(), gates = {
+  minStars: MIN_STARS,
+  minContributors: MIN_CONTRIBUTORS
+}) {
+  if (!token) return [];
+  const loginLc = login.toLowerCase();
+  let ownedOrgs;
+  try {
+    ownedOrgs = await fetchPublicOrgs(login, token);
+  } catch {
+    return null;
+  }
+  let items;
+  try {
+    const q = encodeURIComponent(`type:pr is:open is:public author:${login} -user:${login} sort:updated`);
+    const res = await ghFetch(
+      `/search/issues?q=${q}&per_page=${OPEN_PR_PAGE}`,
+      token
+    );
+    items = res.items ?? [];
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn("[open-prs] search failed:", msg);
+    return null;
+  }
+  const metaStats = { transient: 0 };
+  const out = [];
+  for (const item of items) {
+    const repo = parseRepoUrl(item.repository_url);
+    if (!repo) continue;
+    const ownerLc = repo.owner.toLowerCase();
+    if (ownerLc === loginLc) continue;
+    if (ownedOrgs.has(ownerLc)) continue;
+    if (isTrivialPRTitle(item.title)) continue;
+    const meta2 = await fetchRepoMeta(repo.owner, repo.name, token, cache, metaStats);
+    if (metaStats.transient > 0) {
+      console.warn(
+        `[open-prs] ${login}: per-repo metadata transient failure (${metaStats.transient}) \u2014 returning null (keep prior strip)`
+      );
+      return null;
+    }
+    if (!meta2) continue;
+    if (meta2.private) continue;
+    if (meta2.archived || meta2.fork) continue;
+    if (meta2.stars < gates.minStars) continue;
+    if (meta2.contributors !== void 0 && meta2.contributors < gates.minContributors) continue;
+    out.push({
+      title: item.title,
+      url: item.html_url,
+      repoFullName: `${repo.owner}/${repo.name}`,
+      openedAt: item.created_at
+    });
+  }
+  return out;
 }
 function acceptanceCountForDomains(cred, domains) {
   if (cred.status !== "ok") return 0;
@@ -1683,7 +1756,7 @@ function deriveResumeTrend(cred, repoRecency, now = Date.now()) {
   }
   return scored.sort((a, b) => b.weight - a.weight).slice(0, 12).map((s) => s.t);
 }
-var TRACTION_TOP_N, CANDIDATE_PR_PAGE, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
+var TRACTION_TOP_N, CANDIDATE_PR_PAGE, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
@@ -1691,6 +1764,8 @@ var init_github = __esm({
     init_contribution_gate();
     TRACTION_TOP_N = 6;
     CANDIDATE_PR_PAGE = 50;
+    OPEN_PR_PAGE = 20;
+    TRANSIENT_META_ERROR = /HTTP 403|HTTP 429|rate limit|HTTP 5\d\d|timeout|network|fetch failed/i;
     RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
     RESUME_MIN_SCORE = 0.05;
   }
@@ -3436,6 +3511,10 @@ ${pr.body ?? ""}`.matchAll(/#(\d+)\b/g)) {
   }
   return refs;
 }
+async function fetchRateLimit(client) {
+  const r = await client.json("/rate_limit");
+  return r?.resources ?? null;
+}
 async function searchContribIssues(client, queries) {
   const byUrl = /* @__PURE__ */ new Map();
   for (const q of queries) {
@@ -3480,6 +3559,9 @@ async function aggregateContributions(opts = {}) {
   const jobs = [];
   const seen = /* @__PURE__ */ new Set();
   const perRepo = /* @__PURE__ */ new Map();
+  let metaNull = 0;
+  let contribUndefined = 0;
+  let prRefsNull = 0;
   for (const issue2 of issues) {
     if (jobs.length >= MAX_CONTRIB_ITEMS) break;
     const fullName = repoFullNameFromApiUrl2(issue2.repository_url);
@@ -3490,9 +3572,13 @@ async function aggregateContributions(opts = {}) {
     if (isAssigned(issue2)) continue;
     if ((perRepo.get(fullName) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) continue;
     const repo = await repoMeta(fullName);
-    if (!repo) continue;
+    if (!repo) {
+      metaNull++;
+      continue;
+    }
     const title = decodeEntities(issue2.title).trim();
     const contributors = await repoContribCount(fullName);
+    if (contributors === void 0) contribUndefined++;
     if (!passesContributionGate({
       fullName,
       stars: repo.stargazers_count,
@@ -3508,6 +3594,7 @@ async function aggregateContributions(opts = {}) {
     const labels = labelNames2(issue2.labels);
     if (looksLikeContentTask({ title, body, labels })) continue;
     const prRefs = await repoPRRefs(fullName);
+    if (prRefs === null) prRefsNull++;
     if (prRefs && prRefs.has(issue2.number)) continue;
     const openPRsAtDiscovery = prRefs ? 0 : void 0;
     const tags = normalize(
@@ -3547,9 +3634,18 @@ async function aggregateContributions(opts = {}) {
       raw: issue2
     });
   }
+  if (!opts.fetchImpl) {
+    const rl = await fetchRateLimit(client);
+    const core = rl?.core ? `${rl.core.remaining}/${rl.core.limit}` : "n/a";
+    const search = rl?.search ? `${rl.search.remaining}/${rl.search.limit}` : "n/a";
+    const noToken = !(process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"]);
+    console.info(
+      `[contribute] build metrics \u2014 scanned=${issues.length} reposDistinct=${repoCache.size} emitted=${jobs.length} metaNull=${metaNull} contribUndefined=${contribUndefined} prRefsNull=${prRefsNull} core=${core} search=${search}` + (noToken ? " (NO TOKEN \u2192 60/hr)" : "")
+    );
+  }
   return jobs;
 }
-var GITHUB_API2, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, MAX_CONTRIB_ITEMS, MAX_CONTRIB_ISSUES_SCANNED;
+var GITHUB_API2, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, MAX_CONTRIB_ITEMS, MAX_CONTRIB_ISSUES_SCANNED;
 var init_contributions = __esm({
   "../../packages/core/src/feeds/contributions.ts"() {
     "use strict";
@@ -3561,15 +3657,25 @@ var init_contributions = __esm({
     init_github_bounties();
     init_http();
     GITHUB_API2 = "https://api.github.com";
-    CONTRIB_SEARCH_QUERIES = [
+    CONTRIB_LABEL_QUERIES = [
       'label:"good first issue" type:issue state:open',
-      'label:"help wanted" type:issue state:open',
       'label:"good-first-issue" type:issue state:open',
-      'label:"help-wanted" type:issue state:open'
+      'label:"help wanted" type:issue state:open',
+      'label:"help-wanted" type:issue state:open',
+      'label:"up-for-grabs" type:issue state:open'
     ];
+    CONTRIB_LANGUAGE_QUERIES = [
+      ...["rust", "go", "python", "c++", "ruby"].map(
+        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+      ),
+      ...["rust", "go"].map(
+        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+      )
+    ];
+    CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
     SEARCH_PER_PAGE2 = 100;
     MAX_CONTRIB_ITEMS = 150;
-    MAX_CONTRIB_ISSUES_SCANNED = 300;
+    MAX_CONTRIB_ISSUES_SCANNED = 600;
   }
 });
 
@@ -7304,13 +7410,15 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
     daysAgo = Math.max(0, Math.round(ageDays2));
     recencyBadge = { lastMergedAt: mostRecent, state: ageDays2 <= thresholdDays ? "live" : "dormant" };
   }
-  const orgCount = Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
+  const exactOrgCount = typeof credential.distinctOrgs === "number" && credential.distinctOrgs > 0;
+  const orgCount = exactOrgCount ? credential.distinctOrgs : Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
   let proofSentence;
   if (!ok) {
     proofSentence = "Contribution credential unavailable \u2014 could not verify.";
   } else {
     const prs = credential.qualifyingTotal;
-    let s = `${prs} substantive PR${prs === 1 ? "" : "s"} merged into at least ${orgCount} external org${orgCount === 1 ? "" : "s"} (\u2265${MIN_STARS}\u2605, \u2265${MIN_CONTRIBUTORS} contributors)`;
+    const orgPhrase = exactOrgCount ? `${orgCount}` : `at least ${orgCount}`;
+    let s = `${prs} substantive PR${prs === 1 ? "" : "s"} merged into ${orgPhrase} external org${orgCount === 1 ? "" : "s"} (\u2265${MIN_STARS}\u2605, \u2265${MIN_CONTRIBUTORS} contributors)`;
     if (daysAgo !== void 0) s += ` \u2014 most recent ${daysAgo}d ago`;
     proofSentence = `${s}.`;
   }
@@ -7548,6 +7656,7 @@ __export(src_exports, {
   expandWeighted: () => expandWeighted,
   extractSkillTags: () => extractSkillTags,
   fetchGitHubProfile: () => fetchGitHubProfile,
+  fetchOpenExternalPRs: () => fetchOpenExternalPRs,
   fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
   fetchRepoRecency: () => fetchRepoRecency,
   flattenTiers: () => flattenTiers,
@@ -8766,7 +8875,7 @@ var init_jpi_jobs = __esm({
 });
 
 // bin/directory.js
-import { readFileSync as readFileSync11, writeFileSync as writeFileSync8, mkdirSync as mkdirSync8 } from "fs";
+import { readFileSync as readFileSync11, writeFileSync as writeFileSync8, mkdirSync as mkdirSync8, renameSync as renameSync3 } from "fs";
 import { join as join11 } from "path";
 import { homedir as homedir9 } from "os";
 function readDirectoryCache() {
@@ -8790,6 +8899,16 @@ function readProject() {
   } catch {
     return null;
   }
+}
+function writeProject(patch) {
+  const existing = readProject() ?? {};
+  const merged = { ...existing, ...patch };
+  if (!merged.createdAt) merged.createdAt = (/* @__PURE__ */ new Date()).toISOString();
+  mkdirSync8(TERMINALHIRE_DIR7, { recursive: true });
+  const tmpFile = `${PROJECT_FILE}.tmp`;
+  writeFileSync8(tmpFile, JSON.stringify(merged, null, 2), "utf8");
+  renameSync3(tmpFile, PROJECT_FILE);
+  return merged;
 }
 function relativeTime(ts) {
   const secs = Math.max(0, Math.round((Date.now() - ts) / 1e3));
@@ -8976,7 +9095,7 @@ var jpi_project_exports = {};
 __export(jpi_project_exports, {
   run: () => run4
 });
-import { readFileSync as readFileSync12, writeFileSync as writeFileSync9, mkdirSync as mkdirSync9 } from "fs";
+import { readFileSync as readFileSync12 } from "fs";
 import { join as join12 } from "path";
 import { homedir as homedir10 } from "os";
 import { createInterface as createInterface5 } from "readline";
@@ -9051,15 +9170,13 @@ async function run4() {
       console.log("  Nothing was saved.");
       return;
     }
-    const project = {
+    writeProject({
       title,
       declaration,
       skillTags,
       prefs: {},
       createdAt: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    mkdirSync9(TERMINALHIRE_DIR8, { recursive: true });
-    writeFileSync9(PROJECT_FILE2, JSON.stringify(project, null, 2), "utf8");
+    });
     console.log(`
 \u2726 Project saved locally (never sent): ${title}`);
     console.log(`  Skills: ${skillTags.join(", ")}`);
@@ -9074,6 +9191,7 @@ var TERMINALHIRE_DIR8, PROJECT_FILE2, args3, SHOW, declarationArg;
 var init_jpi_project = __esm({
   "bin/jpi-project.js"() {
     "use strict";
+    init_directory2();
     TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join12(homedir10(), ".terminalhire");
     PROJECT_FILE2 = join12(TERMINALHIRE_DIR8, "project.json");
     args3 = process.argv.slice(2);
@@ -9398,6 +9516,7 @@ var init_jpi_contribute = __esm({
 // src/claims.ts
 var claims_exports = {};
 __export(claims_exports, {
+  PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
   acceptedPRRate: () => acceptedPRRate,
   findClaim: () => findClaim,
   listClaims: () => listClaims,
@@ -9407,7 +9526,7 @@ __export(claims_exports, {
   toPushedClaim: () => toPushedClaim,
   updateClaim: () => updateClaim
 });
-import { readFileSync as readFileSync15, writeFileSync as writeFileSync10, mkdirSync as mkdirSync10, renameSync as renameSync3, existsSync as existsSync8 } from "fs";
+import { readFileSync as readFileSync15, writeFileSync as writeFileSync9, mkdirSync as mkdirSync9, renameSync as renameSync4, existsSync as existsSync8 } from "fs";
 import { join as join15 } from "path";
 import { homedir as homedir13 } from "os";
 function toPushedClaim(claim) {
@@ -9438,11 +9557,11 @@ function readClaims() {
   }
 }
 function writeClaims(claims) {
-  mkdirSync10(TERMINALHIRE_DIR11, { recursive: true });
+  mkdirSync9(TERMINALHIRE_DIR11, { recursive: true });
   const tmp = `${CLAIMS_FILE}.tmp`;
   const payload = { claims };
-  writeFileSync10(tmp, JSON.stringify(payload, null, 2), "utf8");
-  renameSync3(tmp, CLAIMS_FILE);
+  writeFileSync9(tmp, JSON.stringify(payload, null, 2), "utf8");
+  renameSync4(tmp, CLAIMS_FILE);
 }
 function findClaim(id) {
   return readClaims().find((c) => c.id === id) ?? null;
@@ -9498,12 +9617,21 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR11, CLAIMS_FILE, TERMINAL_STATES;
+var TERMINALHIRE_DIR11, CLAIMS_FILE, PUSHED_CLAIM_FIELDS, TERMINAL_STATES;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
-    TERMINALHIRE_DIR11 = join15(homedir13(), ".terminalhire");
+    TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join15(homedir13(), ".terminalhire");
     CLAIMS_FILE = join15(TERMINALHIRE_DIR11, "claims.json");
+    PUSHED_CLAIM_FIELDS = [
+      "kind",
+      "repoFullName",
+      "state",
+      "prUrl",
+      "merged",
+      "claimedAt",
+      "updatedAt"
+    ];
     TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
   }
 });
@@ -9526,14 +9654,14 @@ __export(claim_push_bg_exports, {
   writePushTokenEnc: () => writePushTokenEnc
 });
 import { createHash as createHash3 } from "crypto";
-import { readFileSync as readFileSync16, writeFileSync as writeFileSync11, mkdirSync as mkdirSync11, existsSync as existsSync9, rmSync as rmSync3 } from "fs";
+import { readFileSync as readFileSync16, writeFileSync as writeFileSync10, mkdirSync as mkdirSync10, existsSync as existsSync9, rmSync as rmSync3 } from "fs";
 import { join as join16 } from "path";
 import { homedir as homedir14 } from "os";
 async function writePushTokenEnc(rawToken) {
-  mkdirSync11(TERMINALHIRE_DIR12, { recursive: true });
+  mkdirSync10(TERMINALHIRE_DIR12, { recursive: true });
   const key = await loadKey();
   const blob = encrypt(rawToken, key);
-  writeFileSync11(CLAIM_PUSH_TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+  writeFileSync10(CLAIM_PUSH_TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 async function readPushTokenEnc() {
   if (!existsSync9(CLAIM_PUSH_TOKEN_FILE)) return void 0;
@@ -9559,8 +9687,8 @@ function readAutoMarker() {
   }
 }
 function writeAutoMarker(marker) {
-  mkdirSync11(TERMINALHIRE_DIR12, { recursive: true });
-  writeFileSync11(CLAIM_PUSH_AUTO_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  mkdirSync10(TERMINALHIRE_DIR12, { recursive: true });
+  writeFileSync10(CLAIM_PUSH_AUTO_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearAutoMarker() {
   try {
@@ -9598,7 +9726,7 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
     if (!existsSync9(CLAIM_PUSH_AUTO_MARKER) || !existsSync9(CLAIM_PUSH_TOKEN_FILE)) return;
     const marker = readAutoMarker();
     if (!marker || !marker.autoConsentedAt) return;
-    const { listClaims: listClaims2, toPushedClaim: toPushedClaim2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
+    const { listClaims: listClaims2, toPushedClaim: toPushedClaim2, PUSHED_CLAIM_FIELDS: PUSHED_CLAIM_FIELDS2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
     const pushed = listClaims2().map((c) => toPushedClaim2(c));
     const currentHash = computeSnapshotHash(pushed);
     const gate = backgroundPushGate({
@@ -9613,15 +9741,15 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
     if (!gate.push) return;
     const token = await readPushTokenEnc();
     if (!token) return;
-    const consentToken = {
+    const consentReceipt = {
       consentedAt: marker.autoConsentedAt,
       version: AUTO_CONSENT_VERSION,
-      fields: CLAIM_PUSH_FIELDS
+      fields: PUSHED_CLAIM_FIELDS2
     };
     const res = await fetch(`${CLAIM_SYNC_BASE}/api/claim-sync`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ consentToken, claims: pushed, pushToken: token }),
+      body: JSON.stringify({ consentToken: consentReceipt, claims: pushed, pushToken: token }),
       signal: AbortSignal.timeout(1e4)
     });
     if (!res.ok) return;
@@ -9633,7 +9761,7 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
   } catch {
   }
 }
-var TERMINALHIRE_DIR12, CLAIM_PUSH_AUTO_MARKER, CLAIM_PUSH_TOKEN_FILE, CLAIM_SYNC_BASE, AUTO_CONSENT_VERSION, AUTO_PUSH_THROTTLE_MS, CLAIM_PUSH_FIELDS;
+var TERMINALHIRE_DIR12, CLAIM_PUSH_AUTO_MARKER, CLAIM_PUSH_TOKEN_FILE, CLAIM_SYNC_BASE, AUTO_CONSENT_VERSION, AUTO_PUSH_THROTTLE_MS;
 var init_claim_push_bg = __esm({
   "bin/claim-push-bg.js"() {
     "use strict";
@@ -9644,7 +9772,6 @@ var init_claim_push_bg = __esm({
     CLAIM_SYNC_BASE = "https://terminalhire.com";
     AUTO_CONSENT_VERSION = 2;
     AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
-    CLAIM_PUSH_FIELDS = ["kind", "repoFullName", "state", "prUrl", "merged", "claimedAt", "updatedAt"];
   }
 });
 
@@ -9738,6 +9865,7 @@ var jpi_claim_exports = {};
 __export(jpi_claim_exports, {
   AI_DISCLOSURE_NOTE: () => AI_DISCLOSURE_NOTE,
   CLAIM_CONSENT_VERSION: () => CLAIM_CONSENT_VERSION,
+  backgroundEnableFailed: () => backgroundEnableFailed,
   buildSubmitBody: () => buildSubmitBody,
   cmdRecord: () => cmdRecord,
   findClaimableByShortRef: () => findClaimableByShortRef,
@@ -9745,9 +9873,10 @@ __export(jpi_claim_exports, {
   fmtContestedWarning: () => fmtContestedWarning,
   isContested: () => isContested,
   resolveBounty: () => resolveBounty,
+  revokeFailureAction: () => revokeFailureAction,
   run: () => run7
 });
-import { readFileSync as readFileSync17, writeFileSync as writeFileSync12, mkdirSync as mkdirSync12, existsSync as existsSync10, rmSync as rmSync4 } from "fs";
+import { readFileSync as readFileSync17, writeFileSync as writeFileSync11, mkdirSync as mkdirSync11, existsSync as existsSync10, rmSync as rmSync4 } from "fs";
 import { join as join17 } from "path";
 import { homedir as homedir15, hostname as osHostname } from "os";
 import { execFile } from "child_process";
@@ -10482,8 +10611,8 @@ function readClaimPushMarker() {
   }
 }
 function writeClaimPushMarker(marker) {
-  mkdirSync12(TERMINALHIRE_DIR13, { recursive: true });
-  writeFileSync12(CLAIM_PUSH_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  mkdirSync11(TERMINALHIRE_DIR13, { recursive: true });
+  writeFileSync11(CLAIM_PUSH_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearClaimPushMarker() {
   try {
@@ -10498,7 +10627,7 @@ function renderClaimConsent(pushed, login) {
   console.log(`  As @${login}, the following SCORE-FREE fields of your ${pushed.length} claim${pushed.length === 1 ? "" : "s"}`);
   console.log("  will be shared with staqs (terminalhire.com) after you confirm in the browser:");
   console.log("");
-  for (const f of CLAIM_PUSH_FIELDS2) console.log(`    - ${f}`);
+  for (const f of PUSHED_CLAIM_FIELDS) console.log(`    - ${f}`);
   console.log("");
   console.log("  What is NEVER sent: your diff-acceptance score, review blockers,");
   console.log("  branch names, worktree paths, repo policy, amounts, or any private data.");
@@ -10519,6 +10648,15 @@ function renderAutoConsent() {
   console.log("  ONLY add/update your OWN dashboard rows \u2014 it can never read or delete.");
   console.log("  Nothing new is sent: the payload is identical to the manual push above.");
   console.log("");
+}
+function backgroundEnableFailed(autoConsent, pushToken) {
+  return Boolean(autoConsent) && !pushToken;
+}
+function revokeFailureAction(status) {
+  if (status === 404) {
+    return { clearLocal: true, exitCode: 0 };
+  }
+  return { clearLocal: false, exitCode: 1 };
 }
 async function cmdPush({ keepUpdated = false } = {}) {
   const claimsMod = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -10619,7 +10757,7 @@ async function cmdPush({ keepUpdated = false } = {}) {
     console.error("  Re-run `terminalhire claim --push` to try again.\n");
     process.exit(1);
   }
-  const consentToken = { consentedAt, version: CLAIM_CONSENT_VERSION, fields: CLAIM_PUSH_FIELDS2 };
+  const consentReceipt = { consentedAt, version: CLAIM_CONSENT_VERSION, fields: PUSHED_CLAIM_FIELDS };
   console.log("\n  Verified. Sharing your claims...");
   let res;
   try {
@@ -10628,7 +10766,7 @@ async function cmdPush({ keepUpdated = false } = {}) {
       headers: { "Content-Type": "application/json" },
       // autoConsent is included ONLY when the dev opted into background updates —
       // the server mints the pushToken in the same push when it is present + valid.
-      body: JSON.stringify({ consentToken, claims: pushed, proofToken, ...autoConsent ? { autoConsent } : {} }),
+      body: JSON.stringify({ consentToken: consentReceipt, claims: pushed, proofToken, ...autoConsent ? { autoConsent } : {} }),
       signal: AbortSignal.timeout(1e4)
     });
   } catch (err) {
@@ -10671,6 +10809,9 @@ async function cmdPush({ keepUpdated = false } = {}) {
       console.log("\n  \u2713 Pushed, but could not enable background updates on this machine.");
       console.log("    Re-run `terminalhire claim --push --keep-updated` to retry.");
     }
+  } else if (backgroundEnableFailed(autoConsent, pushToken)) {
+    console.log("\n  \u2713 Pushed, but background updates could NOT be enabled (server did not issue a token).");
+    console.log("    Re-run `terminalhire claim --push --keep-updated` to retry.");
   }
   console.log("\n  \u2713 Your claims now show on your dashboard: https://terminalhire.com/dashboard");
   console.log("  Delete them any time: terminalhire claim --push --revoke\n");
@@ -10687,6 +10828,8 @@ async function cmdRevoke() {
   const login = marker && marker.login ? marker.login : null;
   const deleteToken = marker && marker.deleteToken ? marker.deleteToken : null;
   if (!login || !deleteToken) {
+    clearPushTokenEnc();
+    clearAutoMarker();
     console.log("\n  No claim-push marker found on this machine.");
     console.log("  Deletion must run from the machine that pushed (the delete token is stored there),");
     console.log('  or use the "delete my pushed claims" button on your dashboard.\n');
@@ -10708,9 +10851,25 @@ async function cmdRevoke() {
     process.exit(1);
   }
   if (!res.ok) {
-    console.error(`
+    const action = revokeFailureAction(res.status);
+    if (action.clearLocal) {
+      clearClaimPushMarker();
+      clearPushTokenEnc();
+      clearAutoMarker();
+      console.log(`
+  Nothing to delete server-side (${res.status}); local marker and background updates cleared.
+`);
+      console.log("  Background updates (if any) have been stopped.\n");
+    } else if (res.status === 401 || res.status === 403) {
+      console.error(`
+  Server refused the delete (${res.status}); local marker NOT cleared \u2014 the pushToken may still be live.`);
+      console.error("  Re-authenticate (terminalhire login) and retry.\n");
+    } else {
+      console.error(`
   Delete failed: /api/claim-sync returned ${res.status}.`);
-    process.exit(1);
+      console.error("  Local marker NOT cleared (server state unknown). Re-run to retry.\n");
+    }
+    process.exit(action.exitCode);
   }
   clearClaimPushMarker();
   clearPushTokenEnc();
@@ -10763,12 +10922,13 @@ async function run7() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR13, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, API_URL6, CLAIM_SYNC_BASE2, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, GH_API2, GH_HEADERS2, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, CLAIM_PUSH_FIELDS2;
+var TERMINALHIRE_DIR13, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, API_URL6, CLAIM_SYNC_BASE2, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, GH_API2, GH_HEADERS2, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
     init_src();
     init_open_url();
+    init_claims();
     init_claim_push_bg();
     TERMINALHIRE_DIR13 = process.env.TERMINALHIRE_DIR || join17(homedir15(), ".terminalhire");
     INDEX_CACHE_FILE5 = join17(TERMINALHIRE_DIR13, "index-cache.json");
@@ -10783,7 +10943,6 @@ var init_jpi_claim = __esm({
     AI_DISCLOSURE_NOTE = "---\nThis contribution was developed with AI assistance via [terminalhire](https://terminalhire.com). The author has reviewed the change and takes responsibility for its content.";
     pExecFile = promisify(execFile);
     VALUE_FLAGS = /* @__PURE__ */ new Set(["worktree", "branch"]);
-    CLAIM_PUSH_FIELDS2 = ["kind", "repoFullName", "state", "prUrl", "merged", "claimedAt", "updatedAt"];
   }
 });
 
@@ -11310,10 +11469,10 @@ __export(trajectory_exports, {
 });
 import {
   existsSync as existsSync11,
-  mkdirSync as mkdirSync13,
+  mkdirSync as mkdirSync12,
   readFileSync as readFileSync18,
   readdirSync,
-  writeFileSync as writeFileSync13
+  writeFileSync as writeFileSync12
 } from "fs";
 import { homedir as homedir16 } from "os";
 import { join as join18 } from "path";
@@ -11456,11 +11615,11 @@ function renderMarkdown(view) {
 }
 function writeExportArtifacts(score, markdown) {
   const dir = join18(homedir16(), ".terminalhire");
-  mkdirSync13(dir, { recursive: true });
+  mkdirSync12(dir, { recursive: true });
   const jsonPath = join18(dir, "trajectory-export.json");
   const mdPath = join18(dir, "trajectory-export.md");
-  writeFileSync13(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
-  writeFileSync13(mdPath, markdown, "utf8");
+  writeFileSync12(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
+  writeFileSync12(mdPath, markdown, "utf8");
   return { jsonPath, mdPath };
 }
 function renderInward(allNodes, view, files) {
@@ -12207,7 +12366,7 @@ var init_jpi_intro = __esm({
 });
 
 // src/chat-keystore.ts
-import { existsSync as existsSync12, mkdirSync as mkdirSync14, readFileSync as readFileSync19, writeFileSync as writeFileSync14, rmSync as rmSync5 } from "fs";
+import { existsSync as existsSync12, mkdirSync as mkdirSync13, readFileSync as readFileSync19, writeFileSync as writeFileSync13, rmSync as rmSync5 } from "fs";
 import { homedir as homedir17 } from "os";
 import { join as join19 } from "path";
 async function loadOrCreateIdentity() {
@@ -12217,9 +12376,9 @@ async function loadOrCreateIdentity() {
     return JSON.parse(decrypt(blob2, key));
   }
   const keypair = generateIdentityKeypair();
-  mkdirSync14(TERMINALHIRE_DIR14, { recursive: true });
+  mkdirSync13(TERMINALHIRE_DIR14, { recursive: true });
   const blob = encrypt(JSON.stringify(keypair), key);
-  writeFileSync14(IDENTITY_FILE, JSON.stringify(blob, null, 2), { mode: 384, encoding: "utf8" });
+  writeFileSync13(IDENTITY_FILE, JSON.stringify(blob, null, 2), { mode: 384, encoding: "utf8" });
   return keypair;
 }
 var TERMINALHIRE_DIR14, IDENTITY_FILE;
@@ -12234,7 +12393,7 @@ var init_chat_keystore = __esm({
 });
 
 // src/chat-client.ts
-import { existsSync as existsSync13, mkdirSync as mkdirSync15, readFileSync as readFileSync20, writeFileSync as writeFileSync15 } from "fs";
+import { existsSync as existsSync13, mkdirSync as mkdirSync14, readFileSync as readFileSync20, writeFileSync as writeFileSync14 } from "fs";
 import { homedir as homedir18 } from "os";
 import { join as join20 } from "path";
 function defaultReadPeerPins() {
@@ -12252,8 +12411,8 @@ function defaultReadPeerPins() {
   }
 }
 function defaultWritePeerPins(pins) {
-  mkdirSync15(TERMINALHIRE_DIR15, { recursive: true });
-  writeFileSync15(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
+  mkdirSync14(TERMINALHIRE_DIR15, { recursive: true });
+  writeFileSync14(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
 }
 function defaultChatClientDeps() {
   return {
@@ -12489,7 +12648,7 @@ __export(jpi_chat_read_exports, {
   syncUnreadBadge: () => syncUnreadBadge,
   writeReadCursor: () => writeReadCursor
 });
-import { existsSync as existsSync14, mkdirSync as mkdirSync16, readFileSync as readFileSync21, writeFileSync as writeFileSync16 } from "fs";
+import { existsSync as existsSync14, mkdirSync as mkdirSync15, readFileSync as readFileSync21, writeFileSync as writeFileSync15 } from "fs";
 import { homedir as homedir19 } from "os";
 import { join as join21 } from "path";
 async function syncUnreadBadge(deps = {}) {
@@ -12513,7 +12672,7 @@ async function syncUnreadBadge(deps = {}) {
     );
     const entry = JSON.parse(readFileSync21(cacheFile, "utf8"));
     entry.unreadChat = { count: total };
-    writeFileSync16(cacheFile, JSON.stringify(entry), "utf8");
+    writeFileSync15(cacheFile, JSON.stringify(entry), "utf8");
   } catch {
   }
 }
@@ -12537,8 +12696,8 @@ function writeReadCursor(login, iso, deps = {}) {
   const prev = cursors[login];
   if (prev && iso <= prev) return;
   cursors[login] = iso;
-  mkdirSync16(TERMINALHIRE_DIR16, { recursive: true });
-  writeFileSync16(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
+  mkdirSync15(TERMINALHIRE_DIR16, { recursive: true });
+  writeFileSync15(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
 }
 async function postReadCursor(peerLogin, lastReadAt, deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
@@ -14233,7 +14392,7 @@ __export(mcp_config_exports, {
 });
 import { homedir as homedir21 } from "os";
 import { join as join23 } from "path";
-import { existsSync as existsSync16, readFileSync as readFileSync23, copyFileSync as copyFileSync2, writeFileSync as writeFileSync17, mkdirSync as mkdirSync17 } from "fs";
+import { existsSync as existsSync16, readFileSync as readFileSync23, copyFileSync as copyFileSync2, writeFileSync as writeFileSync16, mkdirSync as mkdirSync16 } from "fs";
 import { dirname as dirname2 } from "path";
 function serverEntry() {
   return { command: SERVER_COMMAND, args: [...SERVER_ARGS] };
@@ -14336,9 +14495,9 @@ function writeServerToFile(configPath, serversKey, entry = serverEntry()) {
     backupPath = `${configPath}.terminalhire-backup-${ts}`;
     copyFileSync2(configPath, backupPath);
   } else {
-    mkdirSync17(dirname2(configPath), { recursive: true });
+    mkdirSync16(dirname2(configPath), { recursive: true });
   }
-  writeFileSync17(configPath, merged.text, "utf8");
+  writeFileSync16(configPath, merged.text, "utf8");
   return { status: "written", backupPath, added: merged.added };
 }
 async function initMcpStep({
@@ -37431,10 +37590,10 @@ var init_jpi_config = __esm({
 // bin/spinner-io.js
 import {
   readFileSync as readFileSync25,
-  writeFileSync as writeFileSync18,
+  writeFileSync as writeFileSync17,
   existsSync as existsSync17,
-  mkdirSync as mkdirSync18,
-  renameSync as renameSync4
+  mkdirSync as mkdirSync17,
+  renameSync as renameSync5
 } from "fs";
 import { join as join26, dirname as dirname3 } from "path";
 import { homedir as homedir23 } from "os";
@@ -37455,10 +37614,10 @@ function readJson(path, fallback) {
   }
 }
 function atomicWriteJson2(path, obj) {
-  mkdirSync18(dirname3(path), { recursive: true });
+  mkdirSync17(dirname3(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync18(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
-  renameSync4(tmp, path);
+  writeFileSync17(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  renameSync5(tmp, path);
 }
 function readState() {
   const SPINNER_STATE_FILE = spinnerStateFilePath();
@@ -37593,9 +37752,9 @@ __export(spinner_seen_exports, {
 });
 import {
   readFileSync as readFileSync26,
-  writeFileSync as writeFileSync19,
-  renameSync as renameSync5,
-  mkdirSync as mkdirSync19
+  writeFileSync as writeFileSync18,
+  renameSync as renameSync6,
+  mkdirSync as mkdirSync18
 } from "fs";
 import { join as join28, dirname as dirname4 } from "path";
 import { homedir as homedir24 } from "os";
@@ -37604,10 +37763,10 @@ function seenFilePath() {
   return join28(dir, "seen-history.json");
 }
 function atomicWriteJson3(path, obj) {
-  mkdirSync19(dirname4(path), { recursive: true });
+  mkdirSync18(dirname4(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync19(tmp, JSON.stringify(obj) + "\n", { encoding: "utf8", mode: 384 });
-  renameSync5(tmp, path);
+  writeFileSync18(tmp, JSON.stringify(obj) + "\n", { encoding: "utf8", mode: 384 });
+  renameSync6(tmp, path);
 }
 function emptyHistory() {
   return { surface: 0, entries: {} };
@@ -37740,25 +37899,6 @@ function titleCase(s) {
 function ctaVerb() {
   return "\u2605 jobs that fit you \xB7 run: terminalhire jobs";
 }
-function formatVerbs(topMatches, max = 6) {
-  const out = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const m of Array.isArray(topMatches) ? topMatches : []) {
-    if (!m || !m.title || !m.company) continue;
-    let title = String(m.title).trim().replace(/\s+/g, " ");
-    if (title.length > 32) title = title.slice(0, 31).trimEnd() + "\u2026";
-    const company = titleCase(String(m.company).trim().replace(/\s+/g, " "));
-    const pct2 = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
-    const key = `${title.toLowerCase()}@${company.toLowerCase()}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const intro = VERB_INTROS[out.length % VERB_INTROS.length];
-    const fit = m.interest ? m.interest : `${pct2}% match`;
-    out.push(`${intro} ${title} @ ${company} \xB7 ${fit}`);
-    if (out.length >= max) break;
-  }
-  return out;
-}
 function rankBySessionTags(topMatches, sessionTags) {
   const tags = Array.isArray(sessionTags) ? sessionTags.filter(Boolean) : [];
   if (tags.length === 0 || !Array.isArray(topMatches)) return topMatches;
@@ -37857,12 +37997,10 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   if (contributeLine) pool.push(contributeLine);
   return withStale(pool);
 }
-var VERB_INTROS;
 var init_spinner_verbs = __esm({
   "bin/spinner-verbs.js"() {
     "use strict";
     init_spinner_select();
-    VERB_INTROS = ["Matched:", "You\u2019d fit:", "Worth a look:", "On your radar:", "Fits your stack:"];
   }
 });
 
@@ -37958,7 +38096,8 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
         const fit = m.interest ? m.interest : `${pct2}%`;
         out.push(`\u2197 contribute \xB7 ${repoName}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${fit} \u2014 ${shortUrl}`);
       } else {
-        out.push(`\u2197 ${title} @ ${company} \xB7 ${pct2}% \u2014 ${url}`);
+        const fit = m.interest ? m.interest : `${pct2}%`;
+        out.push(`\u2197 ${title} @ ${company} \xB7 ${fit} \u2014 ${url}`);
       }
       surfacedIds.push(String(m.id));
     }
@@ -38036,7 +38175,6 @@ __export(spinner_exports, {
   clearSpinnerVerbs: () => clearSpinnerVerbs,
   ctaVerb: () => ctaVerb,
   filterFreshMatches: () => filterFreshMatches,
-  formatVerbs: () => formatVerbs,
   interleaveBySource: () => interleaveBySource,
   partitionFreshMatches: () => partitionFreshMatches,
   rankBySessionTags: () => rankBySessionTags,
@@ -38049,7 +38187,6 @@ var init_spinner = __esm({
     "use strict";
     init_spinner_config();
     init_spinner_config();
-    init_spinner_verbs();
     init_spinner_verbs();
     init_spinner_verbs();
     init_spinner_verbs();
@@ -38079,10 +38216,10 @@ __export(jpi_spinner_exports, {
 });
 import {
   readFileSync as readFileSync27,
-  writeFileSync as writeFileSync20,
+  writeFileSync as writeFileSync19,
   copyFileSync as copyFileSync3,
   existsSync as existsSync18,
-  mkdirSync as mkdirSync20
+  mkdirSync as mkdirSync19
 } from "fs";
 import { join as join29 } from "path";
 import { homedir as homedir25 } from "os";
@@ -38095,9 +38232,9 @@ function readConfig2() {
   }
 }
 function writeConfig2(patch) {
-  mkdirSync20(TH_DIR, { recursive: true });
+  mkdirSync19(TH_DIR, { recursive: true });
   const merged = { ...readConfig2(), ...patch };
-  writeFileSync20(CONFIG_FILE3, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  writeFileSync19(CONFIG_FILE3, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function backupSettings() {
   if (!existsSync18(SETTINGS_PATH)) return null;
@@ -38272,7 +38409,7 @@ var jpi_sync_exports = {};
 __export(jpi_sync_exports, {
   run: () => run19
 });
-import { readFileSync as readFileSync28, writeFileSync as writeFileSync21, mkdirSync as mkdirSync21, existsSync as existsSync19, rmSync as rmSync6 } from "fs";
+import { readFileSync as readFileSync28, writeFileSync as writeFileSync20, mkdirSync as mkdirSync20, existsSync as existsSync19, rmSync as rmSync6 } from "fs";
 import { join as join30 } from "path";
 import { homedir as homedir26, hostname as osHostname2 } from "os";
 import { createInterface as createInterface12 } from "readline";
@@ -38293,8 +38430,8 @@ function readMarker() {
   }
 }
 function writeMarker(marker) {
-  mkdirSync21(TH_DIR2, { recursive: true });
-  writeFileSync21(TIER1_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  mkdirSync20(TH_DIR2, { recursive: true });
+  writeFileSync20(TIER1_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearMarker() {
   try {
@@ -38657,6 +38794,9 @@ function resolveStatuslineInstallJs() {
   if (existsSync20(fromBin)) return fromBin;
   return fromBin;
 }
+function tokenizeInterest(raw) {
+  return raw.split(/[,/]|\s+/).map((t) => t.trim()).filter(Boolean);
+}
 async function run20() {
   const rl = createInterface13({ input: process.stdin, output: process.stdout });
   const ask3 = (question) => new Promise((resolve2) => {
@@ -38678,16 +38818,18 @@ async function run20() {
   console.log("This will:");
   console.log("  1. Optionally sign you in with GitHub (public profile only, read:user)");
   console.log("  2. Seed your local job cache (anonymous index download)");
-  console.log("  3. Enable the ambient spinner job surface in ~/.claude/settings.json");
+  console.log("  3. Optionally capture a personal interest \u2014 a language/domain you want");
+  console.log("     to grow into (saved locally, never sent; separate from your profile)");
+  console.log("  4. Enable the ambient spinner job surface in ~/.claude/settings.json");
   console.log("     (with backup + your explicit consent before any file is touched)");
-  console.log("  4. Optionally show connection notifications in your statusLine");
+  console.log("  5. Optionally show connection notifications in your statusLine");
   console.log("     (\u{1F4AC} unread + intro requests only \u2014 never job ads; separate consent)");
-  console.log("  5. Optionally register terminalhire as a read-only MCP server for your");
+  console.log("  6. Optionally register terminalhire as a read-only MCP server for your");
   console.log("     editor / CLI (VS Code, Cursor, Codex, Gemini, Claude Code; per-host consent)");
   console.log("");
   console.log('You can stop at any step. Nothing is changed until you say "yes".');
   console.log("");
-  console.log("Step 1/5 \u2014 GitHub sign-in (optional but recommended)");
+  console.log("Step 1/6 \u2014 GitHub sign-in (optional but recommended)");
   console.log("");
   console.log("  Scope: read:user \u2014 public profile + public repos only.");
   console.log("  Your token is encrypted at ~/.terminalhire/github-token.enc.");
@@ -38735,7 +38877,7 @@ async function run20() {
     console.log("  Sign in any time with: terminalhire login");
   }
   console.log("");
-  console.log("Step 2/5 \u2014 Seeding local job cache");
+  console.log("Step 2/6 \u2014 Seeding local job cache");
   console.log("");
   console.log("  Fetching anonymous job index (no dev data sent)...");
   const jobsScript = resolveScript("jpi-jobs");
@@ -38755,7 +38897,27 @@ async function run20() {
     console.log("  Run `terminalhire jobs` after a few Claude Code sessions to populate it.");
   }
   console.log("");
-  console.log("Step 3/5 \u2014 Enable the ambient spinner job surface in ~/.claude/settings.json");
+  console.log("Step 3/6 \u2014 Personal interest (optional)");
+  console.log("");
+  console.log(`  ${INTEREST_PROMPT}`);
+  console.log("");
+  const interestAnswer = await ask3("> ");
+  if (interestAnswer) {
+    try {
+      const { normalize: normalize2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+      const interestTags = normalize2(tokenizeInterest(interestAnswer));
+      if (interestTags.length > 0) {
+        writeProject({ interestTags });
+        console.log(`  Saved locally (never sent): ${interestTags.join(", ")}`);
+      } else {
+        console.log("  No recognized tags in that \u2014 nothing saved.");
+      }
+    } catch {
+      console.log("  Could not save that right now \u2014 skipping.");
+    }
+  }
+  console.log("");
+  console.log("Step 4/6 \u2014 Enable the ambient spinner job surface in ~/.claude/settings.json");
   console.log("");
   console.log("  This is the only step that modifies a system file.");
   console.log("  A timestamped backup is created before any change.");
@@ -38774,7 +38936,7 @@ async function run20() {
     console.log("  Hook installation did not complete. Run manually: node install.js");
   }
   console.log("");
-  console.log("Step 4/5 \u2014 Connection notifications in your statusLine (optional)");
+  console.log("Step 5/6 \u2014 Connection notifications in your statusLine (optional)");
   console.log("");
   console.log("  A statusLine that shows ONLY personal connection signals \u2014 \u{1F4AC} unread");
   console.log("  messages and inbound intro requests. Never job ads (those stay in the");
@@ -38795,7 +38957,7 @@ async function run20() {
     console.log("  statusLine setup did not complete. Run manually: node statusline-install.js");
   }
   console.log("");
-  console.log("Step 5/5 \u2014 Register terminalhire as a read-only MCP server (optional)");
+  console.log("Step 6/6 \u2014 Register terminalhire as a read-only MCP server (optional)");
   console.log("");
   console.log("  Exposes your LOCAL matches (jobs, bounties, contribute, inbox counts) to");
   console.log("  a host LLM \u2014 VS Code, Cursor, Codex, Gemini, Claude Code. Read-only, zero");
@@ -38825,11 +38987,13 @@ async function run20() {
   console.log("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518");
   console.log("");
 }
-var __dirname4;
+var __dirname4, INTEREST_PROMPT;
 var init_jpi_init = __esm({
   "bin/jpi-init.js"() {
     "use strict";
+    init_directory2();
     __dirname4 = fileURLToPath5(new URL(".", import.meta.url));
+    INTEREST_PROMPT = "A language or domain you want to grow into? We'll point you to open-source and stretch roles there. (optional \u2014 press Enter to skip)";
   }
 });
 
@@ -38845,7 +39009,9 @@ function budgetSlots(results, opts = {}) {
     contributeEnabled = true,
     totalSlots = TOTAL_SLOTS,
     now = Date.now(),
-    interestPicks = []
+    interestPicks = [],
+    interestJobPicks = [],
+    interestJobSlots = INTEREST_JOB_SLOTS
   } = opts;
   const list = Array.isArray(results) ? results : [];
   const bountyMatches = list.filter(
@@ -38857,9 +39023,11 @@ function budgetSlots(results, opts = {}) {
   const contributeTop = rotate(contributeMatches, now).slice(0, contributeCap);
   const reservedContributeIds = new Set(contributeTop.map((r) => r.job.id));
   const interestTop = (Array.isArray(interestPicks) ? interestPicks : []).filter((r) => r && r.job && !reservedContributeIds.has(r.job.id)).slice(0, INTEREST_CONTRIBUTE_SLOTS).map((r) => ({ ...r, interestLabel: INTEREST_SLOT_LABEL }));
+  const surfacedIds = new Set(list.map((r) => r?.job?.id).filter(Boolean));
+  const interestJobTop = (Array.isArray(interestJobPicks) ? interestJobPicks : []).filter((r) => r && r.job && !surfacedIds.has(r.job.id)).slice(0, interestJobSlots).map((r) => ({ ...r, interestLabel: INTEREST_SLOT_LABEL }));
   const roleSlots = Math.max(
     0,
-    totalSlots - bountyTop.length - contributeTop.length - interestTop.length
+    totalSlots - bountyTop.length - contributeTop.length - interestTop.length - interestJobTop.length
   );
   const roleMatches = list.filter(
     (r) => r && r.job && r.job.source !== "bounty" && r.job.source !== "contribute"
@@ -38869,9 +39037,9 @@ function budgetSlots(results, opts = {}) {
   const rotableRoles = roleMatches.slice(roleStable, roleStable + ROLE_ROTATE_WINDOW);
   const rotatedRoles = rotate(rotableRoles, now);
   const roleTop = [...stableRoles, ...rotatedRoles].slice(0, roleSlots);
-  return { roleTop, bountyTop, contributeTop, interestTop };
+  return { roleTop, bountyTop, contributeTop, interestTop, interestJobTop };
 }
-var TOTAL_SLOTS, BOUNTY_SLOTS, BOUNTY_MIN_MATCH, INTEREST_CONTRIBUTE_SLOTS, INTEREST_SLOT_LABEL, CONTRIBUTE_SLOTS, CONTRIBUTE_SLOTS_THIN, ROLE_STABLE_MAX, ROLE_ROTATE_WINDOW, ROTATE_WINDOW_MS;
+var TOTAL_SLOTS, BOUNTY_SLOTS, BOUNTY_MIN_MATCH, INTEREST_CONTRIBUTE_SLOTS, INTEREST_JOB_SLOTS, INTEREST_SLOT_LABEL, CONTRIBUTE_SLOTS, CONTRIBUTE_SLOTS_THIN, ROLE_STABLE_MAX, ROLE_ROTATE_WINDOW, ROTATE_WINDOW_MS;
 var init_match_slots = __esm({
   "bin/match-slots.js"() {
     "use strict";
@@ -38879,6 +39047,7 @@ var init_match_slots = __esm({
     BOUNTY_SLOTS = 3;
     BOUNTY_MIN_MATCH = 0.5;
     INTEREST_CONTRIBUTE_SLOTS = 1;
+    INTEREST_JOB_SLOTS = 1;
     INTEREST_SLOT_LABEL = "Stretch";
     CONTRIBUTE_SLOTS = 5;
     CONTRIBUTE_SLOTS_THIN = 8;
@@ -38903,6 +39072,26 @@ function selectInterestPicks(contributeSupply, declaredTags, fpSkillTags, cap = 
       fpOverlap: tags.some((t) => fpTags.has(t))
     };
   }).filter((x) => x.job && x.job.source === "contribute" && x.declaredHits > 0 && !x.fpOverlap).sort((a, b) => b.declaredHits - a.declaredHits).slice(0, cap).map((x) => ({ job: x.job, score: 0, matchedTags: [] }));
+}
+function byRecencyDesc(a, b) {
+  const ta = Date.parse(a?.postedAt ?? "");
+  const tb = Date.parse(b?.postedAt ?? "");
+  return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+}
+function selectInterestJobs(jobs, interestTags, fpSkillTags, cap = INTEREST_PICKS_CAP) {
+  if (!Array.isArray(jobs) || jobs.length === 0) return [];
+  if (!Array.isArray(interestTags) || interestTags.length === 0) return [];
+  const interest = new Set(interestTags.filter((t) => typeof t === "string"));
+  if (interest.size === 0) return [];
+  const fpTags = new Set(Array.isArray(fpSkillTags) ? fpSkillTags : []);
+  return jobs.map((job) => {
+    const tags = Array.isArray(job?.tags) ? job.tags : [];
+    return {
+      job,
+      declaredHits: tags.filter((t) => interest.has(t)).length,
+      fpOverlap: tags.some((t) => fpTags.has(t))
+    };
+  }).filter((x) => x.job && x.declaredHits > 0 && !x.fpOverlap).sort((a, b) => b.declaredHits - a.declaredHits || byRecencyDesc(a.job, b.job)).slice(0, cap).map((x) => ({ job: x.job, score: 0, matchedTags: [] }));
 }
 var INTEREST_PICKS_CAP;
 var init_interest_picks = __esm({
@@ -39009,11 +39198,14 @@ async function run21() {
         }
         let declaredSoftTags = [];
         let declaredTags = [];
-        if (PREFS_RANKING_ENABLED) {
+        if (process.env["TH_PREFS_RANKING"] !== "0") {
           const project = readProject();
-          declaredTags = Array.isArray(project?.skillTags) ? project.skillTags : [];
-          const fpTags = new Set(fp.skillTags);
-          declaredSoftTags = declaredTags.filter((t) => typeof t === "string" && !fpTags.has(t)).map((tag) => ({ tag, weight: DECLARED_SOFTTAG_WEIGHT }));
+          const interestTags = Array.isArray(project?.interestTags) ? project.interestTags : [];
+          if (interestTags.length > 0) {
+            declaredTags = interestTags;
+            const fpTags = new Set(fp.skillTags);
+            declaredSoftTags = declaredTags.filter((t) => typeof t === "string" && !fpTags.has(t)).map((tag) => ({ tag, weight: DECLARED_SOFTTAG_WEIGHT }));
+          }
         }
         const softTags = [...cwdSoftTags, ...declaredSoftTags];
         let results = softTags.length > 0 ? match2(fp, pool, pool.length, Date.now(), { softTags }) : match2(fp, pool, pool.length);
@@ -39031,16 +39223,24 @@ async function run21() {
           results = [...diversifiedRoles, ...otherResults];
         }
         let interestPicks = [];
-        if (PREFS_RANKING_ENABLED && declaredTags.length > 0 && contribute.length > 0) {
+        if (declaredTags.length > 0 && contribute.length > 0) {
           interestPicks = suppressEngaged(
             selectInterestPicks(contribute, declaredTags, fp.skillTags),
             statusMap
           );
         }
-        const { roleTop, bountyTop, contributeTop, interestTop } = budgetSlots(results, {
+        let interestJobPicks = [];
+        if (declaredTags.length > 0 && jobs.length > 0) {
+          interestJobPicks = suppressEngaged(
+            selectInterestJobs(jobs, declaredTags, fp.skillTags),
+            statusMap
+          );
+        }
+        const { roleTop, bountyTop, contributeTop, interestTop, interestJobTop } = budgetSlots(results, {
           thinProfile,
           contributeEnabled: isContributeEnabled(),
-          interestPicks
+          interestPicks,
+          interestJobPicks
         });
         const toCard = (r) => ({
           id: r.job.id,
@@ -39058,7 +39258,7 @@ async function run21() {
           // every non-interest card keeps its exact pre-037 key set.
           ...r.interestLabel ? { interest: r.interestLabel } : {}
         });
-        topMatches = [...roleTop, ...bountyTop, ...contributeTop, ...interestTop].map(toCard);
+        topMatches = [...roleTop, ...bountyTop, ...contributeTop, ...interestTop, ...interestJobTop].map(toCard);
         const inTop = new Set(topMatches.map((m) => m.id));
         widenReserve = results.filter((r) => !inTop.has(r.job.id)).slice(0, 100).map(toCard);
       }
@@ -39237,7 +39437,7 @@ async function run21() {
     process.exit(1);
   }
 }
-var GH_SESSION_COOKIE8, __dirname5, API_URL8, CWD_SOFTTAGS_ENABLED, CWD_SOFTTAG_WEIGHT, PREFS_RANKING_ENABLED, DECLARED_SOFTTAG_WEIGHT, MMR_RERANK_ENABLED, MMR_LAMBDA, MMR_K;
+var GH_SESSION_COOKIE8, __dirname5, API_URL8, CWD_SOFTTAGS_ENABLED, CWD_SOFTTAG_WEIGHT, DECLARED_SOFTTAG_WEIGHT, MMR_RERANK_ENABLED, MMR_LAMBDA, MMR_K;
 var init_jpi_refresh = __esm({
   "bin/jpi-refresh.js"() {
     "use strict";
@@ -39253,7 +39453,6 @@ var init_jpi_refresh = __esm({
     API_URL8 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
     CWD_SOFTTAGS_ENABLED = process.env["TH_CWD_SOFTTAGS"] !== "0";
     CWD_SOFTTAG_WEIGHT = 0.4;
-    PREFS_RANKING_ENABLED = !!process.env["TH_PREFS_RANKING"] && process.env["TH_PREFS_RANKING"] !== "0";
     DECLARED_SOFTTAG_WEIGHT = 0.6;
     MMR_RERANK_ENABLED = process.env["TH_MMR_RERANK"] !== "0";
     MMR_LAMBDA = 0.8;

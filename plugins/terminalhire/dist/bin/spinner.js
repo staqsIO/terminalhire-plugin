@@ -277,28 +277,8 @@ function widenFreshCandidates(matches, history, need, widen) {
 function titleCase(s) {
   return String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
 }
-var VERB_INTROS = ["Matched:", "You\u2019d fit:", "Worth a look:", "On your radar:", "Fits your stack:"];
 function ctaVerb() {
   return "\u2605 jobs that fit you \xB7 run: terminalhire jobs";
-}
-function formatVerbs(topMatches, max = 6) {
-  const out = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const m of Array.isArray(topMatches) ? topMatches : []) {
-    if (!m || !m.title || !m.company) continue;
-    let title = String(m.title).trim().replace(/\s+/g, " ");
-    if (title.length > 32) title = title.slice(0, 31).trimEnd() + "\u2026";
-    const company = titleCase(String(m.company).trim().replace(/\s+/g, " "));
-    const pct = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
-    const key = `${title.toLowerCase()}@${company.toLowerCase()}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const intro = VERB_INTROS[out.length % VERB_INTROS.length];
-    const fit = m.interest ? m.interest : `${pct}% match`;
-    out.push(`${intro} ${title} @ ${company} \xB7 ${fit}`);
-    if (out.length >= max) break;
-  }
-  return out;
 }
 function rankBySessionTags(topMatches, sessionTags) {
   const tags = Array.isArray(sessionTags) ? sessionTags.filter(Boolean) : [];
@@ -865,6 +845,24 @@ var DEFAULT_GREENHOUSE_SLUGS = flattenTiers(GREENHOUSE_SLUGS_BY_TIER);
 var DEFAULT_ASHBY_SLUGS = flattenTiers(ASHBY_SLUGS_BY_TIER);
 var DEFAULT_LEVER_SLUGS = flattenTiers(LEVER_SLUGS_BY_TIER);
 
+// ../../packages/core/src/feeds/contributions.ts
+var CONTRIB_LABEL_QUERIES = [
+  'label:"good first issue" type:issue state:open',
+  'label:"good-first-issue" type:issue state:open',
+  'label:"help wanted" type:issue state:open',
+  'label:"help-wanted" type:issue state:open',
+  'label:"up-for-grabs" type:issue state:open'
+];
+var CONTRIB_LANGUAGE_QUERIES = [
+  ...["rust", "go", "python", "c++", "ruby"].map(
+    (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+  ),
+  ...["rust", "go"].map(
+    (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+  )
+];
+var CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
+
 // ../../packages/core/src/partners.ts
 import { readFileSync as readFileSync3 } from "fs";
 import { join as join4 } from "path";
@@ -993,7 +991,8 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
         const fit = m.interest ? m.interest : `${pct}%`;
         out.push(`\u2197 contribute \xB7 ${repoName}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${fit} \u2014 ${shortUrl}`);
       } else {
-        out.push(`\u2197 ${title} @ ${company} \xB7 ${pct}% \u2014 ${url}`);
+        const fit = m.interest ? m.interest : `${pct}%`;
+        out.push(`\u2197 ${title} @ ${company} \xB7 ${fit} \u2014 ${url}`);
       }
       surfacedIds.push(String(m.id));
     }
@@ -1058,7 +1057,6 @@ export {
   clearSpinnerVerbs,
   ctaVerb,
   filterFreshMatches,
-  formatVerbs,
   interleaveBySource,
   partitionFreshMatches,
   rankBySessionTags,

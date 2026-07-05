@@ -768,6 +768,7 @@ var init_contribution_classify = __esm({
 });
 
 // ../../packages/core/src/feeds/contributions.ts
+var CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES;
 var init_contributions = __esm({
   "../../packages/core/src/feeds/contributions.ts"() {
     "use strict";
@@ -778,6 +779,22 @@ var init_contributions = __esm({
     init_contribution_classify();
     init_github_bounties();
     init_http();
+    CONTRIB_LABEL_QUERIES = [
+      'label:"good first issue" type:issue state:open',
+      'label:"good-first-issue" type:issue state:open',
+      'label:"help wanted" type:issue state:open',
+      'label:"help-wanted" type:issue state:open',
+      'label:"up-for-grabs" type:issue state:open'
+    ];
+    CONTRIB_LANGUAGE_QUERIES = [
+      ...["rust", "go", "python", "c++", "ruby"].map(
+        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+      ),
+      ...["rust", "go"].map(
+        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+      )
+    ];
+    CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
   }
 });
 
@@ -950,68 +967,10 @@ var init_src = __esm({
   }
 });
 
-// ../../node_modules/keytar/build/Release/keytar.node
-var keytar_default;
-var init_keytar = __esm({
-  "../../node_modules/keytar/build/Release/keytar.node"() {
-    keytar_default = "../keytar-KOAAH267.node";
-  }
-});
-
-// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
-var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
-    "use strict";
-    init_keytar();
-    try {
-      module.exports = __require(keytar_default);
-    } catch {
-    }
-  }
-});
-
-// ../../node_modules/keytar/lib/keytar.js
-var require_keytar2 = __commonJS({
-  "../../node_modules/keytar/lib/keytar.js"(exports, module) {
-    "use strict";
-    var keytar = require_keytar();
-    function checkRequired(val, name) {
-      if (!val || val.length <= 0) {
-        throw new Error(name + " is required.");
-      }
-    }
-    module.exports = {
-      getPassword: function(service, account) {
-        checkRequired(service, "Service");
-        checkRequired(account, "Account");
-        return keytar.getPassword(service, account);
-      },
-      setPassword: function(service, account, password) {
-        checkRequired(service, "Service");
-        checkRequired(account, "Account");
-        checkRequired(password, "Password");
-        return keytar.setPassword(service, account, password);
-      },
-      deletePassword: function(service, account) {
-        checkRequired(service, "Service");
-        checkRequired(account, "Account");
-        return keytar.deletePassword(service, account);
-      },
-      findPassword: function(service) {
-        checkRequired(service, "Service");
-        return keytar.findPassword(service);
-      },
-      findCredentials: function(service) {
-        checkRequired(service, "Service");
-        return keytar.findCredentials(service);
-      }
-    };
-  }
-});
-
 // src/claims.ts
 var claims_exports = {};
 __export(claims_exports, {
+  PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
   acceptedPRRate: () => acceptedPRRate,
   findClaim: () => findClaim,
   listClaims: () => listClaims,
@@ -1021,9 +980,9 @@ __export(claims_exports, {
   toPushedClaim: () => toPushedClaim,
   updateClaim: () => updateClaim
 });
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, renameSync, existsSync as existsSync3 } from "fs";
-import { join as join4 } from "path";
-import { homedir as homedir3 } from "os";
+import { readFileSync as readFileSync2, writeFileSync, mkdirSync, renameSync, existsSync } from "fs";
+import { join as join2 } from "path";
+import { homedir } from "os";
 function toPushedClaim(claim) {
   return {
     kind: claim.kind,
@@ -1043,8 +1002,8 @@ function normalizeClaim(c) {
 }
 function readClaims() {
   try {
-    if (!existsSync3(CLAIMS_FILE)) return [];
-    const data = JSON.parse(readFileSync4(CLAIMS_FILE, "utf8"));
+    if (!existsSync(CLAIMS_FILE)) return [];
+    const data = JSON.parse(readFileSync2(CLAIMS_FILE, "utf8"));
     const claims = Array.isArray(data?.claims) ? data.claims : [];
     return claims.map(normalizeClaim);
   } catch {
@@ -1052,10 +1011,10 @@ function readClaims() {
   }
 }
 function writeClaims(claims) {
-  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
+  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
   const tmp = `${CLAIMS_FILE}.tmp`;
   const payload = { claims };
-  writeFileSync3(tmp, JSON.stringify(payload, null, 2), "utf8");
+  writeFileSync(tmp, JSON.stringify(payload, null, 2), "utf8");
   renameSync(tmp, CLAIMS_FILE);
 }
 function findClaim(id) {
@@ -1112,13 +1071,81 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR3, CLAIMS_FILE, TERMINAL_STATES;
+var TERMINALHIRE_DIR, CLAIMS_FILE, PUSHED_CLAIM_FIELDS, TERMINAL_STATES;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
-    TERMINALHIRE_DIR3 = join4(homedir3(), ".terminalhire");
-    CLAIMS_FILE = join4(TERMINALHIRE_DIR3, "claims.json");
+    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
+    CLAIMS_FILE = join2(TERMINALHIRE_DIR, "claims.json");
+    PUSHED_CLAIM_FIELDS = [
+      "kind",
+      "repoFullName",
+      "state",
+      "prUrl",
+      "merged",
+      "claimedAt",
+      "updatedAt"
+    ];
     TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
+  }
+});
+
+// ../../node_modules/keytar/build/Release/keytar.node
+var keytar_default;
+var init_keytar = __esm({
+  "../../node_modules/keytar/build/Release/keytar.node"() {
+    keytar_default = "../keytar-KOAAH267.node";
+  }
+});
+
+// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+var require_keytar = __commonJS({
+  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+    "use strict";
+    init_keytar();
+    try {
+      module.exports = __require(keytar_default);
+    } catch {
+    }
+  }
+});
+
+// ../../node_modules/keytar/lib/keytar.js
+var require_keytar2 = __commonJS({
+  "../../node_modules/keytar/lib/keytar.js"(exports, module) {
+    "use strict";
+    var keytar = require_keytar();
+    function checkRequired(val, name) {
+      if (!val || val.length <= 0) {
+        throw new Error(name + " is required.");
+      }
+    }
+    module.exports = {
+      getPassword: function(service, account) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        return keytar.getPassword(service, account);
+      },
+      setPassword: function(service, account, password) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        checkRequired(password, "Password");
+        return keytar.setPassword(service, account, password);
+      },
+      deletePassword: function(service, account) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        return keytar.deletePassword(service, account);
+      },
+      findPassword: function(service) {
+        checkRequired(service, "Service");
+        return keytar.findPassword(service);
+      },
+      findCredentials: function(service) {
+        checkRequired(service, "Service");
+        return keytar.findCredentials(service);
+      }
+    };
   }
 });
 
@@ -1602,11 +1629,14 @@ function openInBrowser(url) {
   }
 }
 
+// bin/jpi-claim.js
+init_claims();
+
 // bin/claim-push-bg.js
 import { createHash as createHash3 } from "crypto";
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, existsSync as existsSync2, rmSync as rmSync2 } from "fs";
-import { join as join3 } from "path";
-import { homedir as homedir2 } from "os";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync as existsSync3, rmSync as rmSync2 } from "fs";
+import { join as join4 } from "path";
+import { homedir as homedir3 } from "os";
 
 // src/github-auth.ts
 import {
@@ -1615,17 +1645,17 @@ import {
   randomBytes as randomBytes2
 } from "crypto";
 import {
-  readFileSync as readFileSync2,
-  writeFileSync,
-  mkdirSync,
-  existsSync,
+  readFileSync as readFileSync3,
+  writeFileSync as writeFileSync2,
+  mkdirSync as mkdirSync2,
+  existsSync as existsSync2,
   rmSync
 } from "fs";
-import { join as join2 } from "path";
-import { homedir } from "os";
-var TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");
-var TOKEN_FILE = join2(TERMINALHIRE_DIR, "github-token.enc");
-var KEY_FILE = join2(TERMINALHIRE_DIR, "key");
+import { join as join3 } from "path";
+import { homedir as homedir2 } from "os";
+var TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
+var TOKEN_FILE = join3(TERMINALHIRE_DIR2, "github-token.enc");
+var KEY_FILE = join3(TERMINALHIRE_DIR2, "key");
 var ALGO = "aes-256-gcm";
 var KEY_BYTES = 32;
 var IV_BYTES = 12;
@@ -1639,12 +1669,12 @@ async function loadKey() {
     return key2;
   } catch {
   }
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
-  if (existsSync(KEY_FILE)) {
-    return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");
+  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
+  if (existsSync2(KEY_FILE)) {
+    return Buffer.from(readFileSync3(KEY_FILE, "utf8").trim(), "hex");
   }
   const key = randomBytes2(KEY_BYTES);
-  writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  writeFileSync2(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
   return key;
 }
 function encrypt(plaintext, key) {
@@ -1656,16 +1686,16 @@ function encrypt(plaintext, key) {
 }
 
 // bin/claim-push-bg.js
-var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
-var CLAIM_PUSH_AUTO_MARKER = join3(TERMINALHIRE_DIR2, "claim-push-auto.json");
-var CLAIM_PUSH_TOKEN_FILE = join3(TERMINALHIRE_DIR2, "claim-push-token.enc");
+var TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
+var CLAIM_PUSH_AUTO_MARKER = join4(TERMINALHIRE_DIR3, "claim-push-auto.json");
+var CLAIM_PUSH_TOKEN_FILE = join4(TERMINALHIRE_DIR3, "claim-push-token.enc");
 var AUTO_CONSENT_VERSION = 2;
 var AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
 async function writePushTokenEnc(rawToken) {
-  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
+  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
   const key = await loadKey();
   const blob = encrypt(rawToken, key);
-  writeFileSync2(CLAIM_PUSH_TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+  writeFileSync3(CLAIM_PUSH_TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 function clearPushTokenEnc() {
   try {
@@ -1674,8 +1704,8 @@ function clearPushTokenEnc() {
   }
 }
 function writeAutoMarker(marker) {
-  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
-  writeFileSync2(CLAIM_PUSH_AUTO_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
+  writeFileSync3(CLAIM_PUSH_AUTO_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearAutoMarker() {
   try {
@@ -2412,7 +2442,6 @@ async function cmdSubmit(id, worktreeOverride) {
 \u2713 Submitted ${id} \u2192 ${prUrl}`);
   console.log(`  Run 'terminalhire claim status ${id}' after the maintainer acts to fold the merge into your accepted-PR rate.`);
 }
-var CLAIM_PUSH_FIELDS = ["kind", "repoFullName", "state", "prUrl", "merged", "claimedAt", "updatedAt"];
 function askYes(question) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((res) => rl.question(question, (a) => {
@@ -2447,7 +2476,7 @@ function renderClaimConsent(pushed, login) {
   console.log(`  As @${login}, the following SCORE-FREE fields of your ${pushed.length} claim${pushed.length === 1 ? "" : "s"}`);
   console.log("  will be shared with staqs (terminalhire.com) after you confirm in the browser:");
   console.log("");
-  for (const f of CLAIM_PUSH_FIELDS) console.log(`    - ${f}`);
+  for (const f of PUSHED_CLAIM_FIELDS) console.log(`    - ${f}`);
   console.log("");
   console.log("  What is NEVER sent: your diff-acceptance score, review blockers,");
   console.log("  branch names, worktree paths, repo policy, amounts, or any private data.");
@@ -2468,6 +2497,15 @@ function renderAutoConsent() {
   console.log("  ONLY add/update your OWN dashboard rows \u2014 it can never read or delete.");
   console.log("  Nothing new is sent: the payload is identical to the manual push above.");
   console.log("");
+}
+function backgroundEnableFailed(autoConsent, pushToken) {
+  return Boolean(autoConsent) && !pushToken;
+}
+function revokeFailureAction(status) {
+  if (status === 404) {
+    return { clearLocal: true, exitCode: 0 };
+  }
+  return { clearLocal: false, exitCode: 1 };
 }
 async function cmdPush({ keepUpdated = false } = {}) {
   const claimsMod = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -2568,7 +2606,7 @@ async function cmdPush({ keepUpdated = false } = {}) {
     console.error("  Re-run `terminalhire claim --push` to try again.\n");
     process.exit(1);
   }
-  const consentToken = { consentedAt, version: CLAIM_CONSENT_VERSION, fields: CLAIM_PUSH_FIELDS };
+  const consentReceipt = { consentedAt, version: CLAIM_CONSENT_VERSION, fields: PUSHED_CLAIM_FIELDS };
   console.log("\n  Verified. Sharing your claims...");
   let res;
   try {
@@ -2577,7 +2615,7 @@ async function cmdPush({ keepUpdated = false } = {}) {
       headers: { "Content-Type": "application/json" },
       // autoConsent is included ONLY when the dev opted into background updates —
       // the server mints the pushToken in the same push when it is present + valid.
-      body: JSON.stringify({ consentToken, claims: pushed, proofToken, ...autoConsent ? { autoConsent } : {} }),
+      body: JSON.stringify({ consentToken: consentReceipt, claims: pushed, proofToken, ...autoConsent ? { autoConsent } : {} }),
       signal: AbortSignal.timeout(1e4)
     });
   } catch (err) {
@@ -2620,6 +2658,9 @@ async function cmdPush({ keepUpdated = false } = {}) {
       console.log("\n  \u2713 Pushed, but could not enable background updates on this machine.");
       console.log("    Re-run `terminalhire claim --push --keep-updated` to retry.");
     }
+  } else if (backgroundEnableFailed(autoConsent, pushToken)) {
+    console.log("\n  \u2713 Pushed, but background updates could NOT be enabled (server did not issue a token).");
+    console.log("    Re-run `terminalhire claim --push --keep-updated` to retry.");
   }
   console.log("\n  \u2713 Your claims now show on your dashboard: https://terminalhire.com/dashboard");
   console.log("  Delete them any time: terminalhire claim --push --revoke\n");
@@ -2636,6 +2677,8 @@ async function cmdRevoke() {
   const login = marker && marker.login ? marker.login : null;
   const deleteToken = marker && marker.deleteToken ? marker.deleteToken : null;
   if (!login || !deleteToken) {
+    clearPushTokenEnc();
+    clearAutoMarker();
     console.log("\n  No claim-push marker found on this machine.");
     console.log("  Deletion must run from the machine that pushed (the delete token is stored there),");
     console.log('  or use the "delete my pushed claims" button on your dashboard.\n');
@@ -2657,9 +2700,25 @@ async function cmdRevoke() {
     process.exit(1);
   }
   if (!res.ok) {
-    console.error(`
+    const action = revokeFailureAction(res.status);
+    if (action.clearLocal) {
+      clearClaimPushMarker();
+      clearPushTokenEnc();
+      clearAutoMarker();
+      console.log(`
+  Nothing to delete server-side (${res.status}); local marker and background updates cleared.
+`);
+      console.log("  Background updates (if any) have been stopped.\n");
+    } else if (res.status === 401 || res.status === 403) {
+      console.error(`
+  Server refused the delete (${res.status}); local marker NOT cleared \u2014 the pushToken may still be live.`);
+      console.error("  Re-authenticate (terminalhire login) and retry.\n");
+    } else {
+      console.error(`
   Delete failed: /api/claim-sync returned ${res.status}.`);
-    process.exit(1);
+      console.error("  Local marker NOT cleared (server state unknown). Re-run to retry.\n");
+    }
+    process.exit(action.exitCode);
   }
   clearClaimPushMarker();
   clearPushTokenEnc();
@@ -2715,6 +2774,7 @@ async function run() {
 export {
   AI_DISCLOSURE_NOTE,
   CLAIM_CONSENT_VERSION,
+  backgroundEnableFailed,
   buildSubmitBody,
   cmdRecord,
   findClaimableByShortRef,
@@ -2722,5 +2782,6 @@ export {
   fmtContestedWarning,
   isContested,
   resolveBounty,
+  revokeFailureAction,
   run
 };

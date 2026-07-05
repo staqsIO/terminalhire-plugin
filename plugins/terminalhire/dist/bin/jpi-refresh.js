@@ -1014,7 +1014,7 @@ async function repoContributorCount(owner, name, token) {
     return void 0;
   }
 }
-async function fetchRepoMeta(owner, name, token, cache) {
+async function fetchRepoMeta(owner, name, token, cache, stats) {
   const key = `${owner}/${name}`.toLowerCase();
   const cached = cache.get(key);
   if (cached !== void 0) return cached;
@@ -1031,8 +1031,10 @@ async function fetchRepoMeta(owner, name, token, cache) {
       topics: r.topics ?? [],
       contributors
     };
-  } catch {
+  } catch (err) {
     meta = null;
+    const msg = err instanceof Error ? err.message : String(err);
+    if (stats && TRANSIENT_META_ERROR.test(msg)) stats.transient += 1;
   }
   cache.set(key, meta);
   return meta;
@@ -1071,8 +1073,10 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
     return emptyCredential(/HTTP 403|HTTP 429|rate limit/i.test(msg) ? "rate-limited" : "failed");
   }
   const byDomain = {};
+  const distinctOrgSet = /* @__PURE__ */ new Set();
   let qualifyingTotal = 0;
   const qualifyingPRs = [];
+  const metaStats = { transient: 0 };
   for (const item of items) {
     const repo = parseRepoUrl(item.repository_url);
     if (!repo) continue;
@@ -1080,13 +1084,20 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
     if (ownerLc === loginLc) continue;
     if (ownedOrgs.has(ownerLc)) continue;
     if (isTrivialPRTitle(item.title)) continue;
-    const meta = await fetchRepoMeta(repo.owner, repo.name, token, cache);
+    const meta = await fetchRepoMeta(repo.owner, repo.name, token, cache, metaStats);
+    if (metaStats.transient > 0) {
+      console.warn(
+        `[acceptance] ${login}: per-repo metadata transient failure (${metaStats.transient}) \u2014 degrading to 'rate-limited' rather than a fabricated count`
+      );
+      return emptyCredential("rate-limited");
+    }
     if (!meta) continue;
     if (meta.private) continue;
     if (meta.archived || meta.fork) continue;
     if (meta.stars < gates.minStars) continue;
     if (meta.contributors !== void 0 && meta.contributors < gates.minContributors) continue;
     qualifyingTotal += 1;
+    distinctOrgSet.add(ownerLc);
     const mergedAt = item.pull_request?.merged_at ?? item.closed_at ?? item.created_at;
     const rawDomains = [meta.language ?? "", ...meta.topics].filter(Boolean);
     const domainTags = [...new Set(normalize(rawDomains))];
@@ -1112,7 +1123,14 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
       lastMergedAt: b.lastMergedAt
     };
   }
-  return { status: "ok", byDomain: finalDomains, qualifyingTotal, qualifyingPRs, computedAt };
+  return {
+    status: "ok",
+    byDomain: finalDomains,
+    qualifyingTotal,
+    qualifyingPRs,
+    distinctOrgs: distinctOrgSet.size,
+    computedAt
+  };
 }
 async function computeAcceptanceCredential(login, token, cache = /* @__PURE__ */ new Map()) {
   if (!token) return emptyCredential("no-token");
@@ -1125,6 +1143,61 @@ async function computeAcceptanceCredentialPublic(login, token, cache = /* @__PUR
   for (const org of opts?.includeOrgs ?? []) ownedOrgs.delete(org.toLowerCase());
   const gates = opts?.relaxGates ? { minStars: 0, minContributors: 0 } : void 0;
   return computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates);
+}
+async function fetchOpenExternalPRs(login, token, cache = /* @__PURE__ */ new Map(), gates = {
+  minStars: MIN_STARS,
+  minContributors: MIN_CONTRIBUTORS
+}) {
+  if (!token) return [];
+  const loginLc = login.toLowerCase();
+  let ownedOrgs;
+  try {
+    ownedOrgs = await fetchPublicOrgs(login, token);
+  } catch {
+    return null;
+  }
+  let items;
+  try {
+    const q = encodeURIComponent(`type:pr is:open is:public author:${login} -user:${login} sort:updated`);
+    const res = await ghFetch(
+      `/search/issues?q=${q}&per_page=${OPEN_PR_PAGE}`,
+      token
+    );
+    items = res.items ?? [];
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn("[open-prs] search failed:", msg);
+    return null;
+  }
+  const metaStats = { transient: 0 };
+  const out = [];
+  for (const item of items) {
+    const repo = parseRepoUrl(item.repository_url);
+    if (!repo) continue;
+    const ownerLc = repo.owner.toLowerCase();
+    if (ownerLc === loginLc) continue;
+    if (ownedOrgs.has(ownerLc)) continue;
+    if (isTrivialPRTitle(item.title)) continue;
+    const meta = await fetchRepoMeta(repo.owner, repo.name, token, cache, metaStats);
+    if (metaStats.transient > 0) {
+      console.warn(
+        `[open-prs] ${login}: per-repo metadata transient failure (${metaStats.transient}) \u2014 returning null (keep prior strip)`
+      );
+      return null;
+    }
+    if (!meta) continue;
+    if (meta.private) continue;
+    if (meta.archived || meta.fork) continue;
+    if (meta.stars < gates.minStars) continue;
+    if (meta.contributors !== void 0 && meta.contributors < gates.minContributors) continue;
+    out.push({
+      title: item.title,
+      url: item.html_url,
+      repoFullName: `${repo.owner}/${repo.name}`,
+      openedAt: item.created_at
+    });
+  }
+  return out;
 }
 function acceptanceCountForDomains(cred, domains) {
   if (cred.status !== "ok") return 0;
@@ -1197,7 +1270,7 @@ function deriveResumeTrend(cred, repoRecency, now = Date.now()) {
   }
   return scored.sort((a, b) => b.weight - a.weight).slice(0, 12).map((s) => s.t);
 }
-var TRACTION_TOP_N, CANDIDATE_PR_PAGE, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
+var TRACTION_TOP_N, CANDIDATE_PR_PAGE, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
@@ -1205,6 +1278,8 @@ var init_github = __esm({
     init_contribution_gate();
     TRACTION_TOP_N = 6;
     CANDIDATE_PR_PAGE = 50;
+    OPEN_PR_PAGE = 20;
+    TRANSIENT_META_ERROR = /HTTP 403|HTTP 429|rate limit|HTTP 5\d\d|timeout|network|fetch failed/i;
     RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
     RESUME_MIN_SCORE = 0.05;
   }
@@ -2950,6 +3025,10 @@ ${pr.body ?? ""}`.matchAll(/#(\d+)\b/g)) {
   }
   return refs;
 }
+async function fetchRateLimit(client) {
+  const r = await client.json("/rate_limit");
+  return r?.resources ?? null;
+}
 async function searchContribIssues(client, queries) {
   const byUrl = /* @__PURE__ */ new Map();
   for (const q of queries) {
@@ -2994,6 +3073,9 @@ async function aggregateContributions(opts = {}) {
   const jobs = [];
   const seen = /* @__PURE__ */ new Set();
   const perRepo = /* @__PURE__ */ new Map();
+  let metaNull = 0;
+  let contribUndefined = 0;
+  let prRefsNull = 0;
   for (const issue of issues) {
     if (jobs.length >= MAX_CONTRIB_ITEMS) break;
     const fullName = repoFullNameFromApiUrl2(issue.repository_url);
@@ -3004,9 +3086,13 @@ async function aggregateContributions(opts = {}) {
     if (isAssigned(issue)) continue;
     if ((perRepo.get(fullName) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) continue;
     const repo = await repoMeta(fullName);
-    if (!repo) continue;
+    if (!repo) {
+      metaNull++;
+      continue;
+    }
     const title = decodeEntities(issue.title).trim();
     const contributors = await repoContribCount(fullName);
+    if (contributors === void 0) contribUndefined++;
     if (!passesContributionGate({
       fullName,
       stars: repo.stargazers_count,
@@ -3022,6 +3108,7 @@ async function aggregateContributions(opts = {}) {
     const labels = labelNames2(issue.labels);
     if (looksLikeContentTask({ title, body, labels })) continue;
     const prRefs = await repoPRRefs(fullName);
+    if (prRefs === null) prRefsNull++;
     if (prRefs && prRefs.has(issue.number)) continue;
     const openPRsAtDiscovery = prRefs ? 0 : void 0;
     const tags = normalize(
@@ -3061,9 +3148,18 @@ async function aggregateContributions(opts = {}) {
       raw: issue
     });
   }
+  if (!opts.fetchImpl) {
+    const rl = await fetchRateLimit(client);
+    const core = rl?.core ? `${rl.core.remaining}/${rl.core.limit}` : "n/a";
+    const search = rl?.search ? `${rl.search.remaining}/${rl.search.limit}` : "n/a";
+    const noToken = !(process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"]);
+    console.info(
+      `[contribute] build metrics \u2014 scanned=${issues.length} reposDistinct=${repoCache.size} emitted=${jobs.length} metaNull=${metaNull} contribUndefined=${contribUndefined} prRefsNull=${prRefsNull} core=${core} search=${search}` + (noToken ? " (NO TOKEN \u2192 60/hr)" : "")
+    );
+  }
   return jobs;
 }
-var GITHUB_API2, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, MAX_CONTRIB_ITEMS, MAX_CONTRIB_ISSUES_SCANNED;
+var GITHUB_API2, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, MAX_CONTRIB_ITEMS, MAX_CONTRIB_ISSUES_SCANNED;
 var init_contributions = __esm({
   "../../packages/core/src/feeds/contributions.ts"() {
     "use strict";
@@ -3075,15 +3171,25 @@ var init_contributions = __esm({
     init_github_bounties();
     init_http();
     GITHUB_API2 = "https://api.github.com";
-    CONTRIB_SEARCH_QUERIES = [
+    CONTRIB_LABEL_QUERIES = [
       'label:"good first issue" type:issue state:open',
-      'label:"help wanted" type:issue state:open',
       'label:"good-first-issue" type:issue state:open',
-      'label:"help-wanted" type:issue state:open'
+      'label:"help wanted" type:issue state:open',
+      'label:"help-wanted" type:issue state:open',
+      'label:"up-for-grabs" type:issue state:open'
     ];
+    CONTRIB_LANGUAGE_QUERIES = [
+      ...["rust", "go", "python", "c++", "ruby"].map(
+        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+      ),
+      ...["rust", "go"].map(
+        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+      )
+    ];
+    CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
     SEARCH_PER_PAGE2 = 100;
     MAX_CONTRIB_ITEMS = 150;
-    MAX_CONTRIB_ISSUES_SCANNED = 300;
+    MAX_CONTRIB_ISSUES_SCANNED = 600;
   }
 });
 
@@ -6526,13 +6632,15 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
     daysAgo = Math.max(0, Math.round(ageDays2));
     recencyBadge = { lastMergedAt: mostRecent, state: ageDays2 <= thresholdDays ? "live" : "dormant" };
   }
-  const orgCount = Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
+  const exactOrgCount = typeof credential.distinctOrgs === "number" && credential.distinctOrgs > 0;
+  const orgCount = exactOrgCount ? credential.distinctOrgs : Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
   let proofSentence;
   if (!ok) {
     proofSentence = "Contribution credential unavailable \u2014 could not verify.";
   } else {
     const prs = credential.qualifyingTotal;
-    let s = `${prs} substantive PR${prs === 1 ? "" : "s"} merged into at least ${orgCount} external org${orgCount === 1 ? "" : "s"} (\u2265${MIN_STARS}\u2605, \u2265${MIN_CONTRIBUTORS} contributors)`;
+    const orgPhrase = exactOrgCount ? `${orgCount}` : `at least ${orgCount}`;
+    let s = `${prs} substantive PR${prs === 1 ? "" : "s"} merged into ${orgPhrase} external org${orgCount === 1 ? "" : "s"} (\u2265${MIN_STARS}\u2605, \u2265${MIN_CONTRIBUTORS} contributors)`;
     if (daysAgo !== void 0) s += ` \u2014 most recent ${daysAgo}d ago`;
     proofSentence = `${s}.`;
   }
@@ -6770,6 +6878,7 @@ __export(src_exports, {
   expandWeighted: () => expandWeighted,
   extractSkillTags: () => extractSkillTags,
   fetchGitHubProfile: () => fetchGitHubProfile,
+  fetchOpenExternalPRs: () => fetchOpenExternalPRs,
   fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
   fetchRepoRecency: () => fetchRepoRecency,
   flattenTiers: () => flattenTiers,
@@ -7151,7 +7260,7 @@ __export(job_status_store_exports, {
 import {
   readFileSync as readFileSync7,
   writeFileSync as writeFileSync6,
-  renameSync as renameSync2,
+  renameSync as renameSync3,
   mkdirSync as mkdirSync6,
   existsSync as existsSync4,
   copyFileSync,
@@ -7168,7 +7277,7 @@ function atomicWriteJson(path, obj) {
   mkdirSync6(dirname(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
   writeFileSync6(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
-  renameSync2(tmp, path);
+  renameSync3(tmp, path);
 }
 function sleepMs(ms) {
   try {
@@ -7538,7 +7647,7 @@ __export(spinner_seen_exports, {
 import {
   readFileSync as readFileSync9,
   writeFileSync as writeFileSync7,
-  renameSync as renameSync3,
+  renameSync as renameSync4,
   mkdirSync as mkdirSync7
 } from "fs";
 import { join as join9, dirname as dirname2 } from "path";
@@ -7551,7 +7660,7 @@ function atomicWriteJson2(path, obj) {
   mkdirSync7(dirname2(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
   writeFileSync7(tmp, JSON.stringify(obj) + "\n", { encoding: "utf8", mode: 384 });
-  renameSync3(tmp, path);
+  renameSync4(tmp, path);
 }
 function emptyHistory() {
   return { surface: 0, entries: {} };
@@ -7624,7 +7733,7 @@ import {
   writeFileSync as writeFileSync8,
   existsSync as existsSync5,
   mkdirSync as mkdirSync8,
-  renameSync as renameSync4
+  renameSync as renameSync5
 } from "fs";
 import { join as join10, dirname as dirname3 } from "path";
 import { homedir as homedir8 } from "os";
@@ -7648,7 +7757,7 @@ function atomicWriteJson3(path, obj) {
   mkdirSync8(dirname3(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
   writeFileSync8(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
-  renameSync4(tmp, path);
+  renameSync5(tmp, path);
 }
 function readState() {
   const SPINNER_STATE_FILE = spinnerStateFilePath();
@@ -7836,25 +7945,6 @@ function titleCase(s) {
 function ctaVerb() {
   return "\u2605 jobs that fit you \xB7 run: terminalhire jobs";
 }
-function formatVerbs(topMatches, max = 6) {
-  const out = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const m of Array.isArray(topMatches) ? topMatches : []) {
-    if (!m || !m.title || !m.company) continue;
-    let title = String(m.title).trim().replace(/\s+/g, " ");
-    if (title.length > 32) title = title.slice(0, 31).trimEnd() + "\u2026";
-    const company = titleCase(String(m.company).trim().replace(/\s+/g, " "));
-    const pct = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
-    const key = `${title.toLowerCase()}@${company.toLowerCase()}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const intro = VERB_INTROS[out.length % VERB_INTROS.length];
-    const fit = m.interest ? m.interest : `${pct}% match`;
-    out.push(`${intro} ${title} @ ${company} \xB7 ${fit}`);
-    if (out.length >= max) break;
-  }
-  return out;
-}
 function rankBySessionTags(topMatches, sessionTags) {
   const tags = Array.isArray(sessionTags) ? sessionTags.filter(Boolean) : [];
   if (tags.length === 0 || !Array.isArray(topMatches)) return topMatches;
@@ -7953,12 +8043,10 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   if (contributeLine) pool.push(contributeLine);
   return withStale(pool);
 }
-var VERB_INTROS;
 var init_spinner_verbs = __esm({
   "bin/spinner-verbs.js"() {
     "use strict";
     init_spinner_select();
-    VERB_INTROS = ["Matched:", "You\u2019d fit:", "Worth a look:", "On your radar:", "Fits your stack:"];
   }
 });
 
@@ -8054,7 +8142,8 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
         const fit = m.interest ? m.interest : `${pct}%`;
         out.push(`\u2197 contribute \xB7 ${repoName}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${fit} \u2014 ${shortUrl}`);
       } else {
-        out.push(`\u2197 ${title} @ ${company} \xB7 ${pct}% \u2014 ${url}`);
+        const fit = m.interest ? m.interest : `${pct}%`;
+        out.push(`\u2197 ${title} @ ${company} \xB7 ${fit} \u2014 ${url}`);
       }
       surfacedIds.push(String(m.id));
     }
@@ -8132,7 +8221,6 @@ __export(spinner_exports, {
   clearSpinnerVerbs: () => clearSpinnerVerbs,
   ctaVerb: () => ctaVerb,
   filterFreshMatches: () => filterFreshMatches,
-  formatVerbs: () => formatVerbs,
   interleaveBySource: () => interleaveBySource,
   partitionFreshMatches: () => partitionFreshMatches,
   rankBySessionTags: () => rankBySessionTags,
@@ -8145,7 +8233,6 @@ var init_spinner = __esm({
     "use strict";
     init_spinner_config();
     init_spinner_config();
-    init_spinner_verbs();
     init_spinner_verbs();
     init_spinner_verbs();
     init_spinner_verbs();
@@ -8364,6 +8451,7 @@ var init_github_auth = __esm({
 // src/claims.ts
 var claims_exports = {};
 __export(claims_exports, {
+  PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
   acceptedPRRate: () => acceptedPRRate,
   findClaim: () => findClaim,
   listClaims: () => listClaims,
@@ -8373,7 +8461,7 @@ __export(claims_exports, {
   toPushedClaim: () => toPushedClaim,
   updateClaim: () => updateClaim
 });
-import { readFileSync as readFileSync13, writeFileSync as writeFileSync11, mkdirSync as mkdirSync11, renameSync as renameSync5, existsSync as existsSync8 } from "fs";
+import { readFileSync as readFileSync13, writeFileSync as writeFileSync11, mkdirSync as mkdirSync11, renameSync as renameSync6, existsSync as existsSync8 } from "fs";
 import { join as join14 } from "path";
 import { homedir as homedir11 } from "os";
 function toPushedClaim(claim) {
@@ -8408,7 +8496,7 @@ function writeClaims(claims) {
   const tmp = `${CLAIMS_FILE}.tmp`;
   const payload = { claims };
   writeFileSync11(tmp, JSON.stringify(payload, null, 2), "utf8");
-  renameSync5(tmp, CLAIMS_FILE);
+  renameSync6(tmp, CLAIMS_FILE);
 }
 function findClaim(id) {
   return readClaims().find((c) => c.id === id) ?? null;
@@ -8464,12 +8552,21 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR7, CLAIMS_FILE, TERMINAL_STATES;
+var TERMINALHIRE_DIR7, CLAIMS_FILE, PUSHED_CLAIM_FIELDS, TERMINAL_STATES;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
-    TERMINALHIRE_DIR7 = join14(homedir11(), ".terminalhire");
+    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join14(homedir11(), ".terminalhire");
     CLAIMS_FILE = join14(TERMINALHIRE_DIR7, "claims.json");
+    PUSHED_CLAIM_FIELDS = [
+      "kind",
+      "repoFullName",
+      "state",
+      "prUrl",
+      "merged",
+      "claimedAt",
+      "updatedAt"
+    ];
     TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
   }
 });
@@ -8564,7 +8661,7 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
     if (!existsSync9(CLAIM_PUSH_AUTO_MARKER) || !existsSync9(CLAIM_PUSH_TOKEN_FILE)) return;
     const marker = readAutoMarker();
     if (!marker || !marker.autoConsentedAt) return;
-    const { listClaims: listClaims2, toPushedClaim: toPushedClaim2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
+    const { listClaims: listClaims2, toPushedClaim: toPushedClaim2, PUSHED_CLAIM_FIELDS: PUSHED_CLAIM_FIELDS2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
     const pushed = listClaims2().map((c) => toPushedClaim2(c));
     const currentHash = computeSnapshotHash(pushed);
     const gate = backgroundPushGate({
@@ -8579,15 +8676,15 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
     if (!gate.push) return;
     const token = await readPushTokenEnc();
     if (!token) return;
-    const consentToken = {
+    const consentReceipt = {
       consentedAt: marker.autoConsentedAt,
       version: AUTO_CONSENT_VERSION,
-      fields: CLAIM_PUSH_FIELDS
+      fields: PUSHED_CLAIM_FIELDS2
     };
     const res = await fetch(`${CLAIM_SYNC_BASE}/api/claim-sync`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ consentToken, claims: pushed, pushToken: token }),
+      body: JSON.stringify({ consentToken: consentReceipt, claims: pushed, pushToken: token }),
       signal: AbortSignal.timeout(1e4)
     });
     if (!res.ok) return;
@@ -8599,7 +8696,7 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
   } catch {
   }
 }
-var TERMINALHIRE_DIR8, CLAIM_PUSH_AUTO_MARKER, CLAIM_PUSH_TOKEN_FILE, CLAIM_SYNC_BASE, AUTO_CONSENT_VERSION, AUTO_PUSH_THROTTLE_MS, CLAIM_PUSH_FIELDS;
+var TERMINALHIRE_DIR8, CLAIM_PUSH_AUTO_MARKER, CLAIM_PUSH_TOKEN_FILE, CLAIM_SYNC_BASE, AUTO_CONSENT_VERSION, AUTO_PUSH_THROTTLE_MS;
 var init_claim_push_bg = __esm({
   "bin/claim-push-bg.js"() {
     "use strict";
@@ -8610,7 +8707,6 @@ var init_claim_push_bg = __esm({
     CLAIM_SYNC_BASE = "https://terminalhire.com";
     AUTO_CONSENT_VERSION = 2;
     AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
-    CLAIM_PUSH_FIELDS = ["kind", "repoFullName", "state", "prUrl", "merged", "claimedAt", "updatedAt"];
   }
 });
 
@@ -8618,7 +8714,7 @@ var init_claim_push_bg = __esm({
 import { fileURLToPath as fileURLToPath3 } from "url";
 
 // bin/directory.js
-import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, renameSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
@@ -8698,7 +8794,7 @@ function excludeOwnCard(results, ownLogin) {
 }
 
 // bin/cache-store.js
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, renameSync } from "fs";
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, renameSync as renameSync2 } from "fs";
 import { join as join2 } from "path";
 import { homedir as homedir2 } from "os";
 var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
@@ -8723,7 +8819,7 @@ function updateIndexCache(patch) {
   };
   const tmp = `${INDEX_CACHE_FILE}.${process.pid}.${tmpCounter++}.tmp`;
   writeFileSync2(tmp, JSON.stringify(entry), "utf8");
-  renameSync(tmp, INDEX_CACHE_FILE);
+  renameSync2(tmp, INDEX_CACHE_FILE);
   return entry;
 }
 
@@ -8732,6 +8828,7 @@ var TOTAL_SLOTS = 25;
 var BOUNTY_SLOTS = 3;
 var BOUNTY_MIN_MATCH = 0.5;
 var INTEREST_CONTRIBUTE_SLOTS = 1;
+var INTEREST_JOB_SLOTS = 1;
 var INTEREST_SLOT_LABEL = "Stretch";
 var CONTRIBUTE_SLOTS = 5;
 var CONTRIBUTE_SLOTS_THIN = 8;
@@ -8749,7 +8846,9 @@ function budgetSlots(results, opts = {}) {
     contributeEnabled = true,
     totalSlots = TOTAL_SLOTS,
     now = Date.now(),
-    interestPicks = []
+    interestPicks = [],
+    interestJobPicks = [],
+    interestJobSlots = INTEREST_JOB_SLOTS
   } = opts;
   const list = Array.isArray(results) ? results : [];
   const bountyMatches = list.filter(
@@ -8761,9 +8860,11 @@ function budgetSlots(results, opts = {}) {
   const contributeTop = rotate(contributeMatches, now).slice(0, contributeCap);
   const reservedContributeIds = new Set(contributeTop.map((r) => r.job.id));
   const interestTop = (Array.isArray(interestPicks) ? interestPicks : []).filter((r) => r && r.job && !reservedContributeIds.has(r.job.id)).slice(0, INTEREST_CONTRIBUTE_SLOTS).map((r) => ({ ...r, interestLabel: INTEREST_SLOT_LABEL }));
+  const surfacedIds = new Set(list.map((r) => r?.job?.id).filter(Boolean));
+  const interestJobTop = (Array.isArray(interestJobPicks) ? interestJobPicks : []).filter((r) => r && r.job && !surfacedIds.has(r.job.id)).slice(0, interestJobSlots).map((r) => ({ ...r, interestLabel: INTEREST_SLOT_LABEL }));
   const roleSlots = Math.max(
     0,
-    totalSlots - bountyTop.length - contributeTop.length - interestTop.length
+    totalSlots - bountyTop.length - contributeTop.length - interestTop.length - interestJobTop.length
   );
   const roleMatches = list.filter(
     (r) => r && r.job && r.job.source !== "bounty" && r.job.source !== "contribute"
@@ -8773,7 +8874,7 @@ function budgetSlots(results, opts = {}) {
   const rotableRoles = roleMatches.slice(roleStable, roleStable + ROLE_ROTATE_WINDOW);
   const rotatedRoles = rotate(rotableRoles, now);
   const roleTop = [...stableRoles, ...rotatedRoles].slice(0, roleSlots);
-  return { roleTop, bountyTop, contributeTop, interestTop };
+  return { roleTop, bountyTop, contributeTop, interestTop, interestJobTop };
 }
 
 // bin/interest-picks.js
@@ -8792,6 +8893,26 @@ function selectInterestPicks(contributeSupply, declaredTags, fpSkillTags, cap = 
       fpOverlap: tags.some((t) => fpTags.has(t))
     };
   }).filter((x) => x.job && x.job.source === "contribute" && x.declaredHits > 0 && !x.fpOverlap).sort((a, b) => b.declaredHits - a.declaredHits).slice(0, cap).map((x) => ({ job: x.job, score: 0, matchedTags: [] }));
+}
+function byRecencyDesc(a, b) {
+  const ta = Date.parse(a?.postedAt ?? "");
+  const tb = Date.parse(b?.postedAt ?? "");
+  return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+}
+function selectInterestJobs(jobs, interestTags, fpSkillTags, cap = INTEREST_PICKS_CAP) {
+  if (!Array.isArray(jobs) || jobs.length === 0) return [];
+  if (!Array.isArray(interestTags) || interestTags.length === 0) return [];
+  const interest = new Set(interestTags.filter((t) => typeof t === "string"));
+  if (interest.size === 0) return [];
+  const fpTags = new Set(Array.isArray(fpSkillTags) ? fpSkillTags : []);
+  return jobs.map((job) => {
+    const tags = Array.isArray(job?.tags) ? job.tags : [];
+    return {
+      job,
+      declaredHits: tags.filter((t) => interest.has(t)).length,
+      fpOverlap: tags.some((t) => fpTags.has(t))
+    };
+  }).filter((x) => x.job && x.declaredHits > 0 && !x.fpOverlap).sort((a, b) => b.declaredHits - a.declaredHits || byRecencyDesc(a.job, b.job)).slice(0, cap).map((x) => ({ job: x.job, score: 0, matchedTags: [] }));
 }
 
 // bin/job-status-suppress.js
@@ -8843,7 +8964,6 @@ var __dirname2 = fileURLToPath3(new URL(".", import.meta.url));
 var API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
 var CWD_SOFTTAGS_ENABLED = process.env["TH_CWD_SOFTTAGS"] !== "0";
 var CWD_SOFTTAG_WEIGHT = 0.4;
-var PREFS_RANKING_ENABLED = !!process.env["TH_PREFS_RANKING"] && process.env["TH_PREFS_RANKING"] !== "0";
 var DECLARED_SOFTTAG_WEIGHT = 0.6;
 var MMR_RERANK_ENABLED = process.env["TH_MMR_RERANK"] !== "0";
 var MMR_LAMBDA = 0.8;
@@ -8906,11 +9026,14 @@ async function run() {
         }
         let declaredSoftTags = [];
         let declaredTags = [];
-        if (PREFS_RANKING_ENABLED) {
+        if (process.env["TH_PREFS_RANKING"] !== "0") {
           const project = readProject();
-          declaredTags = Array.isArray(project?.skillTags) ? project.skillTags : [];
-          const fpTags = new Set(fp.skillTags);
-          declaredSoftTags = declaredTags.filter((t) => typeof t === "string" && !fpTags.has(t)).map((tag) => ({ tag, weight: DECLARED_SOFTTAG_WEIGHT }));
+          const interestTags = Array.isArray(project?.interestTags) ? project.interestTags : [];
+          if (interestTags.length > 0) {
+            declaredTags = interestTags;
+            const fpTags = new Set(fp.skillTags);
+            declaredSoftTags = declaredTags.filter((t) => typeof t === "string" && !fpTags.has(t)).map((tag) => ({ tag, weight: DECLARED_SOFTTAG_WEIGHT }));
+          }
         }
         const softTags = [...cwdSoftTags, ...declaredSoftTags];
         let results = softTags.length > 0 ? match2(fp, pool, pool.length, Date.now(), { softTags }) : match2(fp, pool, pool.length);
@@ -8928,16 +9051,24 @@ async function run() {
           results = [...diversifiedRoles, ...otherResults];
         }
         let interestPicks = [];
-        if (PREFS_RANKING_ENABLED && declaredTags.length > 0 && contribute.length > 0) {
+        if (declaredTags.length > 0 && contribute.length > 0) {
           interestPicks = suppressEngaged(
             selectInterestPicks(contribute, declaredTags, fp.skillTags),
             statusMap
           );
         }
-        const { roleTop, bountyTop, contributeTop, interestTop } = budgetSlots(results, {
+        let interestJobPicks = [];
+        if (declaredTags.length > 0 && jobs.length > 0) {
+          interestJobPicks = suppressEngaged(
+            selectInterestJobs(jobs, declaredTags, fp.skillTags),
+            statusMap
+          );
+        }
+        const { roleTop, bountyTop, contributeTop, interestTop, interestJobTop } = budgetSlots(results, {
           thinProfile,
           contributeEnabled: isContributeEnabled(),
-          interestPicks
+          interestPicks,
+          interestJobPicks
         });
         const toCard = (r) => ({
           id: r.job.id,
@@ -8955,7 +9086,7 @@ async function run() {
           // every non-interest card keeps its exact pre-037 key set.
           ...r.interestLabel ? { interest: r.interestLabel } : {}
         });
-        topMatches = [...roleTop, ...bountyTop, ...contributeTop, ...interestTop].map(toCard);
+        topMatches = [...roleTop, ...bountyTop, ...contributeTop, ...interestTop, ...interestJobTop].map(toCard);
         const inTop = new Set(topMatches.map((m) => m.id));
         widenReserve = results.filter((r) => !inTop.has(r.job.id)).slice(0, 100).map(toCard);
       }
