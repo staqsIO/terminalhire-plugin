@@ -950,6 +950,65 @@ var init_src = __esm({
   }
 });
 
+// ../../node_modules/keytar/build/Release/keytar.node
+var keytar_default;
+var init_keytar = __esm({
+  "../../node_modules/keytar/build/Release/keytar.node"() {
+    keytar_default = "../keytar-KOAAH267.node";
+  }
+});
+
+// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+var require_keytar = __commonJS({
+  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+    "use strict";
+    init_keytar();
+    try {
+      module.exports = __require(keytar_default);
+    } catch {
+    }
+  }
+});
+
+// ../../node_modules/keytar/lib/keytar.js
+var require_keytar2 = __commonJS({
+  "../../node_modules/keytar/lib/keytar.js"(exports, module) {
+    "use strict";
+    var keytar = require_keytar();
+    function checkRequired(val, name) {
+      if (!val || val.length <= 0) {
+        throw new Error(name + " is required.");
+      }
+    }
+    module.exports = {
+      getPassword: function(service, account) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        return keytar.getPassword(service, account);
+      },
+      setPassword: function(service, account, password) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        checkRequired(password, "Password");
+        return keytar.setPassword(service, account, password);
+      },
+      deletePassword: function(service, account) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        return keytar.deletePassword(service, account);
+      },
+      findPassword: function(service) {
+        checkRequired(service, "Service");
+        return keytar.findPassword(service);
+      },
+      findCredentials: function(service) {
+        checkRequired(service, "Service");
+        return keytar.findCredentials(service);
+      }
+    };
+  }
+});
+
 // src/claims.ts
 var claims_exports = {};
 __export(claims_exports, {
@@ -962,9 +1021,9 @@ __export(claims_exports, {
   toPushedClaim: () => toPushedClaim,
   updateClaim: () => updateClaim
 });
-import { readFileSync as readFileSync2, writeFileSync, mkdirSync, renameSync, existsSync } from "fs";
-import { join as join2 } from "path";
-import { homedir } from "os";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, renameSync, existsSync as existsSync3 } from "fs";
+import { join as join4 } from "path";
+import { homedir as homedir3 } from "os";
 function toPushedClaim(claim) {
   return {
     kind: claim.kind,
@@ -984,8 +1043,8 @@ function normalizeClaim(c) {
 }
 function readClaims() {
   try {
-    if (!existsSync(CLAIMS_FILE)) return [];
-    const data = JSON.parse(readFileSync2(CLAIMS_FILE, "utf8"));
+    if (!existsSync3(CLAIMS_FILE)) return [];
+    const data = JSON.parse(readFileSync4(CLAIMS_FILE, "utf8"));
     const claims = Array.isArray(data?.claims) ? data.claims : [];
     return claims.map(normalizeClaim);
   } catch {
@@ -993,10 +1052,10 @@ function readClaims() {
   }
 }
 function writeClaims(claims) {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
   const tmp = `${CLAIMS_FILE}.tmp`;
   const payload = { claims };
-  writeFileSync(tmp, JSON.stringify(payload, null, 2), "utf8");
+  writeFileSync3(tmp, JSON.stringify(payload, null, 2), "utf8");
   renameSync(tmp, CLAIMS_FILE);
 }
 function findClaim(id) {
@@ -1053,12 +1112,12 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR, CLAIMS_FILE, TERMINAL_STATES;
+var TERMINALHIRE_DIR3, CLAIMS_FILE, TERMINAL_STATES;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
-    TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");
-    CLAIMS_FILE = join2(TERMINALHIRE_DIR, "claims.json");
+    TERMINALHIRE_DIR3 = join4(homedir3(), ".terminalhire");
+    CLAIMS_FILE = join4(TERMINALHIRE_DIR3, "claims.json");
     TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
   }
 });
@@ -1157,25 +1216,25 @@ __export(job_status_store_exports, {
   statusFilePath: () => statusFilePath
 });
 import {
-  readFileSync as readFileSync3,
-  writeFileSync as writeFileSync2,
+  readFileSync as readFileSync5,
+  writeFileSync as writeFileSync4,
   renameSync as renameSync2,
-  mkdirSync as mkdirSync2,
-  existsSync as existsSync2,
+  mkdirSync as mkdirSync4,
+  existsSync as existsSync4,
   copyFileSync,
   openSync,
   closeSync,
   unlinkSync
 } from "fs";
-import { join as join3, dirname } from "path";
-import { homedir as homedir2 } from "os";
+import { join as join5, dirname } from "path";
+import { homedir as homedir4 } from "os";
 function statusFilePath() {
   return STATUS_FILE;
 }
 function atomicWriteJson(path, obj) {
-  mkdirSync2(dirname(path), { recursive: true });
+  mkdirSync4(dirname(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync2(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  writeFileSync4(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
   renameSync2(tmp, path);
 }
 function sleepMs(ms) {
@@ -1192,7 +1251,7 @@ function withLock(fn) {
   for (; ; ) {
     let fd;
     try {
-      mkdirSync2(dirname(LOCK_FILE), { recursive: true });
+      mkdirSync4(dirname(LOCK_FILE), { recursive: true });
       fd = openSync(LOCK_FILE, "wx");
     } catch (err) {
       if (err && err.code === "EEXIST") {
@@ -1223,10 +1282,10 @@ function withLock(fn) {
   }
 }
 function readStatusMap() {
-  if (!existsSync2(STATUS_FILE)) return {};
+  if (!existsSync4(STATUS_FILE)) return {};
   let raw;
   try {
-    raw = readFileSync3(STATUS_FILE, "utf8");
+    raw = readFileSync5(STATUS_FILE, "utf8");
   } catch {
     return {};
   }
@@ -1258,74 +1317,15 @@ function markClicked(id) {
     return next[id];
   });
 }
-var TERMINALHIRE_DIR2, STATUS_FILE, LOCK_FILE, BAK_FILE;
+var TERMINALHIRE_DIR4, STATUS_FILE, LOCK_FILE, BAK_FILE;
 var init_job_status_store = __esm({
   "bin/job-status-store.js"() {
     "use strict";
     init_src();
-    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
-    STATUS_FILE = join3(TERMINALHIRE_DIR2, "job-status.json");
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
+    STATUS_FILE = join5(TERMINALHIRE_DIR4, "job-status.json");
     LOCK_FILE = `${STATUS_FILE}.lock`;
     BAK_FILE = `${STATUS_FILE}.bak`;
-  }
-});
-
-// ../../node_modules/keytar/build/Release/keytar.node
-var keytar_default;
-var init_keytar = __esm({
-  "../../node_modules/keytar/build/Release/keytar.node"() {
-    keytar_default = "../keytar-KOAAH267.node";
-  }
-});
-
-// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/release-0192/node_modules/keytar/build/Release/keytar.node
-var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/release-0192/node_modules/keytar/build/Release/keytar.node"(exports, module) {
-    "use strict";
-    init_keytar();
-    try {
-      module.exports = __require(keytar_default);
-    } catch {
-    }
-  }
-});
-
-// ../../node_modules/keytar/lib/keytar.js
-var require_keytar2 = __commonJS({
-  "../../node_modules/keytar/lib/keytar.js"(exports, module) {
-    "use strict";
-    var keytar = require_keytar();
-    function checkRequired(val, name) {
-      if (!val || val.length <= 0) {
-        throw new Error(name + " is required.");
-      }
-    }
-    module.exports = {
-      getPassword: function(service, account) {
-        checkRequired(service, "Service");
-        checkRequired(account, "Account");
-        return keytar.getPassword(service, account);
-      },
-      setPassword: function(service, account, password) {
-        checkRequired(service, "Service");
-        checkRequired(account, "Account");
-        checkRequired(password, "Password");
-        return keytar.setPassword(service, account, password);
-      },
-      deletePassword: function(service, account) {
-        checkRequired(service, "Service");
-        checkRequired(account, "Account");
-        return keytar.deletePassword(service, account);
-      },
-      findPassword: function(service) {
-        checkRequired(service, "Service");
-        return keytar.findPassword(service);
-      },
-      findCredentials: function(service) {
-        checkRequired(service, "Service");
-        return keytar.findCredentials(service);
-      }
-    };
   }
 });
 
@@ -1344,41 +1344,41 @@ __export(profile_exports, {
   writeProfile: () => writeProfile
 });
 import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes as randomBytes2
+  createCipheriv as createCipheriv2,
+  createDecipheriv as createDecipheriv2,
+  randomBytes as randomBytes3
 } from "crypto";
 import {
-  readFileSync as readFileSync4,
-  writeFileSync as writeFileSync3,
-  mkdirSync as mkdirSync3,
-  existsSync as existsSync3
+  readFileSync as readFileSync6,
+  writeFileSync as writeFileSync5,
+  mkdirSync as mkdirSync5,
+  existsSync as existsSync5
 } from "fs";
-import { join as join4 } from "path";
-import { homedir as homedir3 } from "os";
-async function loadKey() {
+import { join as join6 } from "path";
+import { homedir as homedir5 } from "os";
+async function loadKey2() {
   try {
     const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
     const stored = await kt.getPassword("terminalhire", "profile-key");
     if (stored) {
       return Buffer.from(stored, "hex");
     }
-    const key2 = randomBytes2(KEY_BYTES);
+    const key2 = randomBytes3(KEY_BYTES2);
     await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
     return key2;
   } catch {
   }
-  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
-  if (existsSync3(KEY_FILE)) {
-    return Buffer.from(readFileSync4(KEY_FILE, "utf8").trim(), "hex");
+  mkdirSync5(TERMINALHIRE_DIR5, { recursive: true });
+  if (existsSync5(KEY_FILE2)) {
+    return Buffer.from(readFileSync6(KEY_FILE2, "utf8").trim(), "hex");
   }
-  const key = randomBytes2(KEY_BYTES);
-  writeFileSync3(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  const key = randomBytes3(KEY_BYTES2);
+  writeFileSync5(KEY_FILE2, key.toString("hex"), { mode: 384, encoding: "utf8" });
   return key;
 }
-function encrypt(plaintext, key) {
-  const iv = randomBytes2(IV_BYTES);
-  const cipher = createCipheriv(ALGO, key, iv);
+function encrypt2(plaintext, key) {
+  const iv = randomBytes3(IV_BYTES2);
+  const cipher = createCipheriv2(ALGO2, key, iv);
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return {
@@ -1387,9 +1387,9 @@ function encrypt(plaintext, key) {
     ciphertext: ct.toString("hex")
   };
 }
-function decrypt(blob, key) {
-  const decipher = createDecipheriv(
-    ALGO,
+function decrypt2(blob, key) {
+  const decipher = createDecipheriv2(
+    ALGO2,
     key,
     Buffer.from(blob.iv, "hex")
   );
@@ -1431,12 +1431,12 @@ function migrateTagWeights(profile) {
   }
 }
 async function readProfile() {
-  if (!existsSync3(PROFILE_FILE)) return blankProfile();
+  if (!existsSync5(PROFILE_FILE)) return blankProfile();
   try {
-    const key = await loadKey();
-    const raw = readFileSync4(PROFILE_FILE, "utf8");
+    const key = await loadKey2();
+    const raw = readFileSync6(PROFILE_FILE, "utf8");
     const blob = JSON.parse(raw);
-    const plaintext = decrypt(blob, key);
+    const plaintext = decrypt2(blob, key);
     const parsed = JSON.parse(plaintext);
     migrateTagWeights(parsed);
     return parsed;
@@ -1445,12 +1445,12 @@ async function readProfile() {
   }
 }
 async function writeProfile(profile) {
-  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
-  const key = await loadKey();
+  mkdirSync5(TERMINALHIRE_DIR5, { recursive: true });
+  const key = await loadKey2();
   profile.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
   profile.skillTags = deriveSkillTags(profile.tagWeights);
-  const blob = encrypt(JSON.stringify(profile), key);
-  writeFileSync3(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+  const blob = encrypt2(JSON.stringify(profile), key);
+  writeFileSync5(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 function accumulateSession(profile, tags, isEmployerContext, inferredSeniority, seniorityIsAuthoritative = false) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -1511,13 +1511,13 @@ async function removeSavedJob(id) {
   return true;
 }
 async function deleteProfile() {
-  const { rmSync: rmSync2 } = await import("fs");
+  const { rmSync: rmSync4 } = await import("fs");
   try {
-    rmSync2(PROFILE_FILE);
+    rmSync4(PROFILE_FILE);
   } catch {
   }
   try {
-    rmSync2(KEY_FILE);
+    rmSync4(KEY_FILE2);
   } catch {
   }
 }
@@ -1534,17 +1534,17 @@ function profileToFingerprint(profile) {
     }
   };
 }
-var TERMINALHIRE_DIR3, PROFILE_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var TERMINALHIRE_DIR5, PROFILE_FILE, KEY_FILE2, ALGO2, KEY_BYTES2, IV_BYTES2, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
 var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
     init_src();
-    TERMINALHIRE_DIR3 = join4(homedir3(), ".terminalhire");
-    PROFILE_FILE = join4(TERMINALHIRE_DIR3, "profile.enc");
-    KEY_FILE = join4(TERMINALHIRE_DIR3, "key");
-    ALGO = "aes-256-gcm";
-    KEY_BYTES = 32;
-    IV_BYTES = 12;
+    TERMINALHIRE_DIR5 = join6(homedir5(), ".terminalhire");
+    PROFILE_FILE = join6(TERMINALHIRE_DIR5, "profile.enc");
+    KEY_FILE2 = join6(TERMINALHIRE_DIR5, "key");
+    ALGO2 = "aes-256-gcm";
+    KEY_BYTES2 = 32;
+    IV_BYTES2 = 12;
     DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
     LANGUAGE_TAGS = /* @__PURE__ */ new Set([
       "typescript",
@@ -1571,9 +1571,9 @@ var init_profile = __esm({
 
 // bin/jpi-claim.js
 init_src();
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4, existsSync as existsSync4, rmSync } from "fs";
-import { join as join5 } from "path";
-import { homedir as homedir4, hostname as osHostname } from "os";
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, mkdirSync as mkdirSync6, existsSync as existsSync6, rmSync as rmSync3 } from "fs";
+import { join as join7 } from "path";
+import { homedir as homedir6, hostname as osHostname } from "os";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { createInterface } from "readline";
@@ -1602,10 +1602,95 @@ function openInBrowser(url) {
   }
 }
 
+// bin/claim-push-bg.js
+import { createHash as createHash3 } from "crypto";
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, existsSync as existsSync2, rmSync as rmSync2 } from "fs";
+import { join as join3 } from "path";
+import { homedir as homedir2 } from "os";
+
+// src/github-auth.ts
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes as randomBytes2
+} from "crypto";
+import {
+  readFileSync as readFileSync2,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  rmSync
+} from "fs";
+import { join as join2 } from "path";
+import { homedir } from "os";
+var TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");
+var TOKEN_FILE = join2(TERMINALHIRE_DIR, "github-token.enc");
+var KEY_FILE = join2(TERMINALHIRE_DIR, "key");
+var ALGO = "aes-256-gcm";
+var KEY_BYTES = 32;
+var IV_BYTES = 12;
+async function loadKey() {
+  try {
+    const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
+    const stored = await kt.getPassword("terminalhire", "profile-key");
+    if (stored) return Buffer.from(stored, "hex");
+    const key2 = randomBytes2(KEY_BYTES);
+    await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
+    return key2;
+  } catch {
+  }
+  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  if (existsSync(KEY_FILE)) {
+    return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");
+  }
+  const key = randomBytes2(KEY_BYTES);
+  writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  return key;
+}
+function encrypt(plaintext, key) {
+  const iv = randomBytes2(IV_BYTES);
+  const cipher = createCipheriv(ALGO, key, iv);
+  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return { iv: iv.toString("hex"), tag: tag.toString("hex"), ciphertext: ct.toString("hex") };
+}
+
+// bin/claim-push-bg.js
+var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
+var CLAIM_PUSH_AUTO_MARKER = join3(TERMINALHIRE_DIR2, "claim-push-auto.json");
+var CLAIM_PUSH_TOKEN_FILE = join3(TERMINALHIRE_DIR2, "claim-push-token.enc");
+var AUTO_CONSENT_VERSION = 2;
+var AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
+async function writePushTokenEnc(rawToken) {
+  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
+  const key = await loadKey();
+  const blob = encrypt(rawToken, key);
+  writeFileSync2(CLAIM_PUSH_TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+}
+function clearPushTokenEnc() {
+  try {
+    rmSync2(CLAIM_PUSH_TOKEN_FILE);
+  } catch {
+  }
+}
+function writeAutoMarker(marker) {
+  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
+  writeFileSync2(CLAIM_PUSH_AUTO_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+}
+function clearAutoMarker() {
+  try {
+    rmSync2(CLAIM_PUSH_AUTO_MARKER);
+  } catch {
+  }
+}
+function computeSnapshotHash(pushed) {
+  return createHash3("sha256").update(JSON.stringify(pushed)).digest("hex");
+}
+
 // bin/jpi-claim.js
-var TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
-var INDEX_CACHE_FILE = join5(TERMINALHIRE_DIR4, "index-cache.json");
-var CLAIM_PUSH_MARKER = join5(TERMINALHIRE_DIR4, "claim-push.json");
+var TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join7(homedir6(), ".terminalhire");
+var INDEX_CACHE_FILE = join7(TERMINALHIRE_DIR6, "index-cache.json");
+var CLAIM_PUSH_MARKER = join7(TERMINALHIRE_DIR6, "claim-push.json");
 var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
 var CLAIM_SYNC_BASE = "https://terminalhire.com";
 var CLAIM_CONSENT_VERSION = 1;
@@ -1677,8 +1762,8 @@ function parseRepoFromRemote(url) {
   return m ? `${m[1]}/${m[2]}` : null;
 }
 function readClaimablePool() {
-  if (!existsSync4(INDEX_CACHE_FILE)) return [];
-  const entry = JSON.parse(readFileSync5(INDEX_CACHE_FILE, "utf8"));
+  if (!existsSync6(INDEX_CACHE_FILE)) return [];
+  const entry = JSON.parse(readFileSync7(INDEX_CACHE_FILE, "utf8"));
   const bounties = (entry?.index?.jobs ?? []).filter((j) => j.source === "bounty");
   const contributions = (entry?.index?.contribute ?? []).filter((j) => j.source === "contribute");
   return [...bounties, ...contributions];
@@ -2340,18 +2425,18 @@ function claimSleep(ms) {
 }
 function readClaimPushMarker() {
   try {
-    return existsSync4(CLAIM_PUSH_MARKER) ? JSON.parse(readFileSync5(CLAIM_PUSH_MARKER, "utf8")) : null;
+    return existsSync6(CLAIM_PUSH_MARKER) ? JSON.parse(readFileSync7(CLAIM_PUSH_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
 }
 function writeClaimPushMarker(marker) {
-  mkdirSync4(TERMINALHIRE_DIR4, { recursive: true });
-  writeFileSync4(CLAIM_PUSH_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  mkdirSync6(TERMINALHIRE_DIR6, { recursive: true });
+  writeFileSync6(CLAIM_PUSH_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearClaimPushMarker() {
   try {
-    rmSync(CLAIM_PUSH_MARKER);
+    rmSync3(CLAIM_PUSH_MARKER);
   } catch {
   }
 }
@@ -2371,7 +2456,20 @@ function renderClaimConsent(pushed, login) {
   console.log("  This is NOT required to use terminalhire.");
   console.log("");
 }
-async function cmdPush() {
+function renderAutoConsent() {
+  console.log("");
+  console.log("  keep your dashboard updated in the background (opt-in)");
+  console.log("");
+  console.log("  Terminal Hire will keep your dashboard updated in the background \u2014");
+  console.log("  pushing the SAME score-free fields, at most once/day \u2014 until you run");
+  console.log("  `terminalhire claim --push --revoke`.");
+  console.log("");
+  console.log("  This stores a push-only credential on this machine (encrypted). It can");
+  console.log("  ONLY add/update your OWN dashboard rows \u2014 it can never read or delete.");
+  console.log("  Nothing new is sent: the payload is identical to the manual push above.");
+  console.log("");
+}
+async function cmdPush({ keepUpdated = false } = {}) {
   const claimsMod = await Promise.resolve().then(() => (init_claims(), claims_exports));
   const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
   const profile = await readProfile2();
@@ -2395,6 +2493,16 @@ async function cmdPush() {
     process.exit(0);
   }
   const consentedAt = (/* @__PURE__ */ new Date()).toISOString();
+  let autoConsent = null;
+  if (keepUpdated) {
+    renderAutoConsent();
+    const autoAnswer = await askYes('  Keep it updated in the background? Type "yes" to confirm: ');
+    if (autoAnswer === "yes") {
+      autoConsent = { version: AUTO_CONSENT_VERSION, consentedAt };
+    } else {
+      console.log("\n  Background updates NOT enabled \u2014 doing a one-time push instead.");
+    }
+  }
   console.log("\n  Starting browser verification...");
   let begin;
   try {
@@ -2467,7 +2575,9 @@ async function cmdPush() {
     res = await fetch(`${CLAIM_SYNC_BASE}/api/claim-sync`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ consentToken, claims: pushed, proofToken }),
+      // autoConsent is included ONLY when the dev opted into background updates —
+      // the server mints the pushToken in the same push when it is present + valid.
+      body: JSON.stringify({ consentToken, claims: pushed, proofToken, ...autoConsent ? { autoConsent } : {} }),
       signal: AbortSignal.timeout(1e4)
     });
   } catch (err) {
@@ -2486,11 +2596,31 @@ async function cmdPush() {
     process.exit(1);
   }
   let deleteToken = null;
+  let pushToken = null;
   try {
-    deleteToken = (await res.json())?.deleteToken || null;
+    const body = await res.json();
+    deleteToken = body?.deleteToken || null;
+    pushToken = body?.pushToken || null;
   } catch {
   }
   writeClaimPushMarker({ consentedAt, login, deleteToken });
+  if (autoConsent && pushToken) {
+    try {
+      await writePushTokenEnc(pushToken);
+      writeAutoMarker({
+        autoConsentedAt: consentedAt,
+        version: AUTO_CONSENT_VERSION,
+        login,
+        lastPushedAt: consentedAt,
+        lastSnapshotHash: computeSnapshotHash(pushed)
+      });
+      console.log("\n  \u2713 Background updates enabled \u2014 your dashboard will stay current");
+      console.log("    (at most once/day). Stop any time: terminalhire claim --push --revoke");
+    } catch {
+      console.log("\n  \u2713 Pushed, but could not enable background updates on this machine.");
+      console.log("    Re-run `terminalhire claim --push --keep-updated` to retry.");
+    }
+  }
   console.log("\n  \u2713 Your claims now show on your dashboard: https://terminalhire.com/dashboard");
   console.log("  Delete them any time: terminalhire claim --push --revoke\n");
 }
@@ -2532,7 +2662,10 @@ async function cmdRevoke() {
     process.exit(1);
   }
   clearClaimPushMarker();
+  clearPushTokenEnc();
+  clearAutoMarker();
   console.log("\n  \u2713 Pushed claims deleted and local marker cleared.\n");
+  console.log("  Background updates (if any) have been stopped.\n");
 }
 async function run() {
   const verb = process.argv[2];
@@ -2541,7 +2674,7 @@ async function run() {
   const json = Boolean(flags.json);
   if (verb === "--push") {
     if (flags.revoke) await cmdRevoke();
-    else await cmdPush();
+    else await cmdPush({ keepUpdated: Boolean(flags["keep-updated"]) });
     return;
   }
   try {
@@ -2581,6 +2714,7 @@ async function run() {
 }
 export {
   AI_DISCLOSURE_NOTE,
+  CLAIM_CONSENT_VERSION,
   buildSubmitBody,
   cmdRecord,
   findClaimableByShortRef,

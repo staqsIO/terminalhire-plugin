@@ -4907,7 +4907,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   });
   const { prehash } = eddsaOpts;
   const { BASE, Fp: Fp2, Fn: Fn2 } = Point;
-  const randomBytes4 = eddsaOpts.randomBytes || randomBytes;
+  const randomBytes5 = eddsaOpts.randomBytes || randomBytes;
   const adjustScalarBytes2 = eddsaOpts.adjustScalarBytes || ((bytes) => bytes);
   const domain = eddsaOpts.domain || ((data, ctx, phflag) => {
     _abool2(phflag, "phflag");
@@ -4989,7 +4989,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
     signature: 2 * _size,
     seed: _size
   };
-  function randomSecretKey(seed = randomBytes4(lengths.seed)) {
+  function randomSecretKey(seed = randomBytes5(lengths.seed)) {
     return _abytes2(seed, lengths.seed, "seed");
   }
   function keygen(seed) {
@@ -6849,9 +6849,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/release-0192/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/release-0192/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -7082,13 +7082,13 @@ async function removeSavedJob(id) {
   return true;
 }
 async function deleteProfile() {
-  const { rmSync: rmSync2 } = await import("fs");
+  const { rmSync: rmSync4 } = await import("fs");
   try {
-    rmSync2(PROFILE_FILE);
+    rmSync4(PROFILE_FILE);
   } catch {
   }
   try {
-    rmSync2(KEY_FILE);
+    rmSync4(KEY_FILE);
   } catch {
   }
 }
@@ -8299,6 +8299,321 @@ var init_beta_nudge = __esm({
   }
 });
 
+// src/github-auth.ts
+import {
+  createCipheriv as createCipheriv2,
+  createDecipheriv as createDecipheriv2,
+  randomBytes as randomBytes4
+} from "crypto";
+import {
+  readFileSync as readFileSync12,
+  writeFileSync as writeFileSync10,
+  mkdirSync as mkdirSync10,
+  existsSync as existsSync7,
+  rmSync as rmSync2
+} from "fs";
+import { join as join13 } from "path";
+import { homedir as homedir10 } from "os";
+async function loadKey2() {
+  try {
+    const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
+    const stored = await kt.getPassword("terminalhire", "profile-key");
+    if (stored) return Buffer.from(stored, "hex");
+    const key2 = randomBytes4(KEY_BYTES2);
+    await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
+    return key2;
+  } catch {
+  }
+  mkdirSync10(TERMINALHIRE_DIR6, { recursive: true });
+  if (existsSync7(KEY_FILE2)) {
+    return Buffer.from(readFileSync12(KEY_FILE2, "utf8").trim(), "hex");
+  }
+  const key = randomBytes4(KEY_BYTES2);
+  writeFileSync10(KEY_FILE2, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  return key;
+}
+function encrypt2(plaintext, key) {
+  const iv = randomBytes4(IV_BYTES2);
+  const cipher = createCipheriv2(ALGO2, key, iv);
+  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return { iv: iv.toString("hex"), tag: tag.toString("hex"), ciphertext: ct.toString("hex") };
+}
+function decrypt2(blob, key) {
+  const decipher = createDecipheriv2(ALGO2, key, Buffer.from(blob.iv, "hex"));
+  decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
+  const plain = Buffer.concat([
+    decipher.update(Buffer.from(blob.ciphertext, "hex")),
+    decipher.final()
+  ]);
+  return plain.toString("utf8");
+}
+var TERMINALHIRE_DIR6, TOKEN_FILE, KEY_FILE2, ALGO2, KEY_BYTES2, IV_BYTES2;
+var init_github_auth = __esm({
+  "src/github-auth.ts"() {
+    "use strict";
+    TERMINALHIRE_DIR6 = join13(homedir10(), ".terminalhire");
+    TOKEN_FILE = join13(TERMINALHIRE_DIR6, "github-token.enc");
+    KEY_FILE2 = join13(TERMINALHIRE_DIR6, "key");
+    ALGO2 = "aes-256-gcm";
+    KEY_BYTES2 = 32;
+    IV_BYTES2 = 12;
+  }
+});
+
+// src/claims.ts
+var claims_exports = {};
+__export(claims_exports, {
+  acceptedPRRate: () => acceptedPRRate,
+  findClaim: () => findClaim,
+  listClaims: () => listClaims,
+  readClaims: () => readClaims,
+  recordClaim: () => recordClaim,
+  removeClaim: () => removeClaim,
+  toPushedClaim: () => toPushedClaim,
+  updateClaim: () => updateClaim
+});
+import { readFileSync as readFileSync13, writeFileSync as writeFileSync11, mkdirSync as mkdirSync11, renameSync as renameSync5, existsSync as existsSync8 } from "fs";
+import { join as join14 } from "path";
+import { homedir as homedir11 } from "os";
+function toPushedClaim(claim) {
+  return {
+    kind: claim.kind,
+    repoFullName: claim.repoFullName,
+    state: claim.state,
+    prUrl: claim.prUrl,
+    merged: claim.state === "merged",
+    claimedAt: claim.claimedAt,
+    updatedAt: claim.updatedAt
+  };
+}
+function nowISO() {
+  return (/* @__PURE__ */ new Date()).toISOString();
+}
+function normalizeClaim(c) {
+  return { ...c, kind: c.kind ?? "bounty", policy: c.policy ?? null };
+}
+function readClaims() {
+  try {
+    if (!existsSync8(CLAIMS_FILE)) return [];
+    const data = JSON.parse(readFileSync13(CLAIMS_FILE, "utf8"));
+    const claims = Array.isArray(data?.claims) ? data.claims : [];
+    return claims.map(normalizeClaim);
+  } catch {
+    return [];
+  }
+}
+function writeClaims(claims) {
+  mkdirSync11(TERMINALHIRE_DIR7, { recursive: true });
+  const tmp = `${CLAIMS_FILE}.tmp`;
+  const payload = { claims };
+  writeFileSync11(tmp, JSON.stringify(payload, null, 2), "utf8");
+  renameSync5(tmp, CLAIMS_FILE);
+}
+function findClaim(id) {
+  return readClaims().find((c) => c.id === id) ?? null;
+}
+function listClaims(opts = {}) {
+  const claims = readClaims();
+  if (!opts.active) return claims;
+  return claims.filter((c) => !TERMINAL_STATES.has(c.state));
+}
+function recordClaim(rec) {
+  const claims = readClaims();
+  if (claims.some((c) => c.id === rec.id)) {
+    throw new Error(
+      `claim already exists for '${rec.id}' \u2014 run 'terminalhire claim status ${rec.id}' or 'terminalhire claim release ${rec.id}'`
+    );
+  }
+  const ts = nowISO();
+  const claim = {
+    ...rec,
+    // Defensive default (mirrors normalizeClaim's `kind ?? 'bounty'` pattern):
+    // a caller written before `policy` existed, or a plain-JS caller that skips
+    // it, still produces a valid record instead of `policy: undefined`.
+    policy: rec.policy ?? null,
+    state: "claimed",
+    worktreePath: null,
+    branch: null,
+    prUrl: null,
+    review: null,
+    claimedAt: ts,
+    updatedAt: ts
+  };
+  claims.push(claim);
+  writeClaims(claims);
+  return claim;
+}
+function updateClaim(id, patch) {
+  const claims = readClaims();
+  const idx = claims.findIndex((c) => c.id === id);
+  if (idx === -1) return null;
+  claims[idx] = { ...claims[idx], ...patch, updatedAt: nowISO() };
+  writeClaims(claims);
+  return claims[idx];
+}
+function removeClaim(id) {
+  const claims = readClaims();
+  const next = claims.filter((c) => c.id !== id);
+  if (next.length === claims.length) return false;
+  writeClaims(next);
+  return true;
+}
+function acceptedPRRate(claims = readClaims()) {
+  const total = claims.length;
+  const merged = claims.filter((c) => c.state === "merged").length;
+  return { merged, total, rate: total === 0 ? 0 : merged / total };
+}
+var TERMINALHIRE_DIR7, CLAIMS_FILE, TERMINAL_STATES;
+var init_claims = __esm({
+  "src/claims.ts"() {
+    "use strict";
+    TERMINALHIRE_DIR7 = join14(homedir11(), ".terminalhire");
+    CLAIMS_FILE = join14(TERMINALHIRE_DIR7, "claims.json");
+    TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
+  }
+});
+
+// bin/claim-push-bg.js
+var claim_push_bg_exports = {};
+__export(claim_push_bg_exports, {
+  AUTO_CONSENT_VERSION: () => AUTO_CONSENT_VERSION,
+  AUTO_PUSH_THROTTLE_MS: () => AUTO_PUSH_THROTTLE_MS,
+  CLAIM_PUSH_AUTO_MARKER: () => CLAIM_PUSH_AUTO_MARKER,
+  CLAIM_PUSH_TOKEN_FILE: () => CLAIM_PUSH_TOKEN_FILE,
+  backgroundPushGate: () => backgroundPushGate,
+  clearAutoMarker: () => clearAutoMarker,
+  clearPushTokenEnc: () => clearPushTokenEnc,
+  computeSnapshotHash: () => computeSnapshotHash,
+  readAutoMarker: () => readAutoMarker,
+  readPushTokenEnc: () => readPushTokenEnc,
+  runBackgroundClaimPush: () => runBackgroundClaimPush,
+  writeAutoMarker: () => writeAutoMarker,
+  writePushTokenEnc: () => writePushTokenEnc
+});
+import { createHash as createHash3 } from "crypto";
+import { readFileSync as readFileSync14, writeFileSync as writeFileSync12, mkdirSync as mkdirSync12, existsSync as existsSync9, rmSync as rmSync3 } from "fs";
+import { join as join15 } from "path";
+import { homedir as homedir12 } from "os";
+async function writePushTokenEnc(rawToken) {
+  mkdirSync12(TERMINALHIRE_DIR8, { recursive: true });
+  const key = await loadKey2();
+  const blob = encrypt2(rawToken, key);
+  writeFileSync12(CLAIM_PUSH_TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+}
+async function readPushTokenEnc() {
+  if (!existsSync9(CLAIM_PUSH_TOKEN_FILE)) return void 0;
+  try {
+    const key = await loadKey2();
+    const blob = JSON.parse(readFileSync14(CLAIM_PUSH_TOKEN_FILE, "utf8"));
+    return decrypt2(blob, key);
+  } catch {
+    return void 0;
+  }
+}
+function clearPushTokenEnc() {
+  try {
+    rmSync3(CLAIM_PUSH_TOKEN_FILE);
+  } catch {
+  }
+}
+function readAutoMarker() {
+  try {
+    return existsSync9(CLAIM_PUSH_AUTO_MARKER) ? JSON.parse(readFileSync14(CLAIM_PUSH_AUTO_MARKER, "utf8")) : null;
+  } catch {
+    return null;
+  }
+}
+function writeAutoMarker(marker) {
+  mkdirSync12(TERMINALHIRE_DIR8, { recursive: true });
+  writeFileSync12(CLAIM_PUSH_AUTO_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+}
+function clearAutoMarker() {
+  try {
+    rmSync3(CLAIM_PUSH_AUTO_MARKER);
+  } catch {
+  }
+}
+function computeSnapshotHash(pushed) {
+  return createHash3("sha256").update(JSON.stringify(pushed)).digest("hex");
+}
+function backgroundPushGate(params) {
+  const {
+    autoMarkerExists,
+    tokenFileExists,
+    lastPushedAt,
+    now,
+    throttleMs,
+    currentHash,
+    lastSnapshotHash
+  } = params;
+  if (!autoMarkerExists || !tokenFileExists) {
+    return { push: false, reason: "not-opted-in" };
+  }
+  const last = lastPushedAt ? Date.parse(lastPushedAt) : NaN;
+  if (!Number.isNaN(last) && now - last < throttleMs) {
+    return { push: false, reason: "throttled" };
+  }
+  if (lastSnapshotHash && lastSnapshotHash === currentHash) {
+    return { push: false, reason: "unchanged" };
+  }
+  return { push: true, reason: "ok" };
+}
+async function runBackgroundClaimPush({ now = Date.now() } = {}) {
+  try {
+    if (!existsSync9(CLAIM_PUSH_AUTO_MARKER) || !existsSync9(CLAIM_PUSH_TOKEN_FILE)) return;
+    const marker = readAutoMarker();
+    if (!marker || !marker.autoConsentedAt) return;
+    const { listClaims: listClaims2, toPushedClaim: toPushedClaim2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
+    const pushed = listClaims2().map((c) => toPushedClaim2(c));
+    const currentHash = computeSnapshotHash(pushed);
+    const gate = backgroundPushGate({
+      autoMarkerExists: true,
+      tokenFileExists: true,
+      lastPushedAt: marker.lastPushedAt ?? null,
+      now,
+      throttleMs: AUTO_PUSH_THROTTLE_MS,
+      currentHash,
+      lastSnapshotHash: marker.lastSnapshotHash ?? null
+    });
+    if (!gate.push) return;
+    const token = await readPushTokenEnc();
+    if (!token) return;
+    const consentToken = {
+      consentedAt: marker.autoConsentedAt,
+      version: AUTO_CONSENT_VERSION,
+      fields: CLAIM_PUSH_FIELDS
+    };
+    const res = await fetch(`${CLAIM_SYNC_BASE}/api/claim-sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ consentToken, claims: pushed, pushToken: token }),
+      signal: AbortSignal.timeout(1e4)
+    });
+    if (!res.ok) return;
+    writeAutoMarker({
+      ...marker,
+      lastPushedAt: new Date(now).toISOString(),
+      lastSnapshotHash: currentHash
+    });
+  } catch {
+  }
+}
+var TERMINALHIRE_DIR8, CLAIM_PUSH_AUTO_MARKER, CLAIM_PUSH_TOKEN_FILE, CLAIM_SYNC_BASE, AUTO_CONSENT_VERSION, AUTO_PUSH_THROTTLE_MS, CLAIM_PUSH_FIELDS;
+var init_claim_push_bg = __esm({
+  "bin/claim-push-bg.js"() {
+    "use strict";
+    init_github_auth();
+    TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join15(homedir12(), ".terminalhire");
+    CLAIM_PUSH_AUTO_MARKER = join15(TERMINALHIRE_DIR8, "claim-push-auto.json");
+    CLAIM_PUSH_TOKEN_FILE = join15(TERMINALHIRE_DIR8, "claim-push-token.enc");
+    CLAIM_SYNC_BASE = "https://terminalhire.com";
+    AUTO_CONSENT_VERSION = 2;
+    AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
+    CLAIM_PUSH_FIELDS = ["kind", "repoFullName", "state", "prUrl", "merged", "claimedAt", "updatedAt"];
+  }
+});
+
 // bin/jpi-refresh.js
 import { fileURLToPath as fileURLToPath3 } from "url";
 
@@ -8804,6 +9119,11 @@ async function run() {
       const nudge = buildBetaNudge2(index?.betaOpen === true, isBetaOptIn2());
       if (nudge) process.stderr.write(`${nudge}
 `);
+    } catch {
+    }
+    try {
+      const { runBackgroundClaimPush: runBackgroundClaimPush2 } = await Promise.resolve().then(() => (init_claim_push_bg(), claim_push_bg_exports));
+      await runBackgroundClaimPush2();
     } catch {
     }
     process.exit(0);
