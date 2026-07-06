@@ -193,7 +193,7 @@ var init_graph_data = __esm({
       { id: "anthropic", parents: ["llm"], synonyms: ["claude"] },
       { id: "rag", parents: ["llm"], synonyms: ["retrieval-augmented-generation"] },
       { id: "mlops", parents: ["ml"], related: [{ to: "devops", w: 0.4 }] },
-      { id: "agents", parents: ["llm"], synonyms: ["agentic", "ai-agents", "multi-agent"], related: [{ to: "rag", w: 0.4 }] },
+      { id: "agents", parents: ["llm"], synonyms: ["agentic", "ai-agents", "multi-agent", "agent-orchestration"], related: [{ to: "rag", w: 0.4 }] },
       { id: "mcp", parents: ["agents"], synonyms: ["model-context-protocol"], related: [{ to: "llm", w: 0.45 }] },
       { id: "inference", parents: ["ml"], synonyms: ["model-inference", "llm-inference", "model-serving"], related: [{ to: "mlops", w: 0.5 }, { to: "llm", w: 0.4 }] },
       { id: "embeddings", parents: ["ml"], synonyms: ["embedding", "vector-embeddings"], related: [{ to: "rag", w: 0.55 }, { to: "llm", w: 0.45 }] },
@@ -459,6 +459,14 @@ var init_extract = __esm({
         id: "prompt-engineering",
         cue: /\bprompt[\s-]?engineer(?:ing|s)?\b|\b(llms?|gpt-?[0-9o]*|claude|gemini|llama|mistral|openai|anthropic|langchain|llama[\s-]?index|rag|retrieval[\s-]?augmented|embeddings?|fine[\s-]?tun(?:e|ed|ing)|vector[\s-]?(?:db|database|store)|agentic|ai agents?|chatbots?|generative ai|gen[\s-]?ai|genai|few[\s-]?shot|zero[\s-]?shot)\b/i
       }
+      // Plan-061 note: the AI-eng generic words (orchestration/evals/evaluation/guardrails/
+      // governance) were briefly added as raw agents/llm synonyms, but `normalize()` — the
+      // context-free firewall shared by the declaration path AND the GitHub bounty/
+      // contribution feeds — resolves synonyms with NO cue, so those words false-mined
+      // agents/llm from ordinary infra/SRE prose on every normalize() caller. A cue gate
+      // here only covers extractSkillTags(), not normalize(). Fix: they are NOT graph
+      // synonyms at all (see graph.data.ts) → they fall to the 3-tier SOFT/novel bucket,
+      // which is exactly where ambiguous, uncategorizable words belong. Nothing to gate.
     };
     ENG_INTENT = /\b(engineer|engineering|developer|dev\b|swe|sde|programmer|architect|full[\s-]?stack|front[\s-]?end|back[\s-]?end|devops|sre|software|coding|codebase|technical staff|tech(?:nical)? lead)\b/i;
     NON_ENG_TITLE = /\b(account executive|account manager|sales (?:rep|representative|development|manager|lead)|sdr|bdr|recruiter|recruiting|talent|marketing|administrative|business partner|billing coordinator|operations (?:administrator|coordinator)|customer success|project finance|controller|bookkeeper|graphic|brand)\b/i;
@@ -582,6 +590,69 @@ var init_idf_background = __esm({
   }
 });
 
+// ../../packages/core/src/vocab/classify.ts
+function editDistance(a, b, max) {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  const prev = new Array(b.length + 1);
+  const cur = new Array(b.length + 1);
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    cur[0] = i;
+    let rowMin = cur[0];
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+      if (cur[j] < rowMin) rowMin = cur[j];
+    }
+    if (rowMin > max) return max + 1;
+    for (let j = 0; j <= b.length; j++) prev[j] = cur[j];
+  }
+  return prev[b.length];
+}
+function canonicalOf(surface, graph) {
+  if (graph.ids.has(surface)) return surface;
+  return graph.synonyms.get(surface);
+}
+function nearBudget(len) {
+  if (len <= 3) return 0;
+  if (len <= 6) return 1;
+  return 2;
+}
+function classifyToken(raw, graph = GRAPH) {
+  const token = String(raw ?? "").toLowerCase().trim();
+  const exact = canonicalOf(token, graph);
+  if (exact) return { raw: token, tier: "matched", canonical: exact };
+  const budget = nearBudget(token.length);
+  if (budget > 0) {
+    let bestSurface;
+    let bestDist = budget + 1;
+    const consider = (surface) => {
+      const d = editDistance(token, surface, budget);
+      if (d <= budget && (d < bestDist || d === bestDist && bestSurface !== void 0 && (surface.length < bestSurface.length || surface.length === bestSurface.length && surface < bestSurface))) {
+        bestDist = d;
+        bestSurface = surface;
+      }
+    };
+    for (const id of graph.ids) consider(id);
+    for (const alias of graph.synonyms.keys()) consider(alias);
+    if (bestSurface !== void 0) {
+      const suggestion = canonicalOf(bestSurface, graph);
+      if (suggestion) return { raw: token, tier: "near-miss", suggestion };
+    }
+  }
+  return { raw: token, tier: "novel", soft: token };
+}
+function classifyTokens(raws, graph = GRAPH) {
+  return raws.map((r) => classifyToken(r, graph));
+}
+var init_classify = __esm({
+  "../../packages/core/src/vocab/classify.ts"() {
+    "use strict";
+    init_vocab();
+  }
+});
+
 // ../../packages/core/src/vocab/index.ts
 function normalize(tokens) {
   const result = /* @__PURE__ */ new Set();
@@ -645,6 +716,7 @@ var init_vocab = __esm({
     init_graph_data();
     init_extract();
     init_idf_background();
+    init_classify();
     GRAPH = buildGraph(VOCAB_NODES);
     VOCABULARY = [...GRAPH.ids];
     SYNONYMS = Object.fromEntries(GRAPH.synonyms);
@@ -7062,6 +7134,8 @@ __export(src_exports, {
   buildIntroListItem: () => buildIntroListItem,
   buildIntroPayload: () => buildIntroPayload,
   buildReason: () => buildReason,
+  classifyToken: () => classifyToken,
+  classifyTokens: () => classifyTokens,
   composeIntroAcceptedEmail: () => composeIntroAcceptedEmail,
   composeIntroEmail: () => composeIntroEmail,
   computeAcceptanceCredential: () => computeAcceptanceCredential,
@@ -7288,9 +7362,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline-wt/release-v0240/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline-wt/release-v0240/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {

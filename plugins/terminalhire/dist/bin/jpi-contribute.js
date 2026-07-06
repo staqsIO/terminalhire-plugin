@@ -187,7 +187,7 @@ var init_graph_data = __esm({
       { id: "anthropic", parents: ["llm"], synonyms: ["claude"] },
       { id: "rag", parents: ["llm"], synonyms: ["retrieval-augmented-generation"] },
       { id: "mlops", parents: ["ml"], related: [{ to: "devops", w: 0.4 }] },
-      { id: "agents", parents: ["llm"], synonyms: ["agentic", "ai-agents", "multi-agent"], related: [{ to: "rag", w: 0.4 }] },
+      { id: "agents", parents: ["llm"], synonyms: ["agentic", "ai-agents", "multi-agent", "agent-orchestration"], related: [{ to: "rag", w: 0.4 }] },
       { id: "mcp", parents: ["agents"], synonyms: ["model-context-protocol"], related: [{ to: "llm", w: 0.45 }] },
       { id: "inference", parents: ["ml"], synonyms: ["model-inference", "llm-inference", "model-serving"], related: [{ to: "mlops", w: 0.5 }, { to: "llm", w: 0.4 }] },
       { id: "embeddings", parents: ["ml"], synonyms: ["embedding", "vector-embeddings"], related: [{ to: "rag", w: 0.55 }, { to: "llm", w: 0.45 }] },
@@ -453,6 +453,14 @@ var init_extract = __esm({
         id: "prompt-engineering",
         cue: /\bprompt[\s-]?engineer(?:ing|s)?\b|\b(llms?|gpt-?[0-9o]*|claude|gemini|llama|mistral|openai|anthropic|langchain|llama[\s-]?index|rag|retrieval[\s-]?augmented|embeddings?|fine[\s-]?tun(?:e|ed|ing)|vector[\s-]?(?:db|database|store)|agentic|ai agents?|chatbots?|generative ai|gen[\s-]?ai|genai|few[\s-]?shot|zero[\s-]?shot)\b/i
       }
+      // Plan-061 note: the AI-eng generic words (orchestration/evals/evaluation/guardrails/
+      // governance) were briefly added as raw agents/llm synonyms, but `normalize()` — the
+      // context-free firewall shared by the declaration path AND the GitHub bounty/
+      // contribution feeds — resolves synonyms with NO cue, so those words false-mined
+      // agents/llm from ordinary infra/SRE prose on every normalize() caller. A cue gate
+      // here only covers extractSkillTags(), not normalize(). Fix: they are NOT graph
+      // synonyms at all (see graph.data.ts) → they fall to the 3-tier SOFT/novel bucket,
+      // which is exactly where ambiguous, uncategorizable words belong. Nothing to gate.
     };
     ENG_INTENT = /\b(engineer|engineering|developer|dev\b|swe|sde|programmer|architect|full[\s-]?stack|front[\s-]?end|back[\s-]?end|devops|sre|software|coding|codebase|technical staff|tech(?:nical)? lead)\b/i;
     NON_ENG_TITLE = /\b(account executive|account manager|sales (?:rep|representative|development|manager|lead)|sdr|bdr|recruiter|recruiting|talent|marketing|administrative|business partner|billing coordinator|operations (?:administrator|coordinator)|customer success|project finance|controller|bookkeeper|graphic|brand)\b/i;
@@ -576,6 +584,14 @@ var init_idf_background = __esm({
   }
 });
 
+// ../../packages/core/src/vocab/classify.ts
+var init_classify = __esm({
+  "../../packages/core/src/vocab/classify.ts"() {
+    "use strict";
+    init_vocab();
+  }
+});
+
 // ../../packages/core/src/vocab/index.ts
 function normalize(tokens) {
   const result = /* @__PURE__ */ new Set();
@@ -614,6 +630,7 @@ var init_vocab = __esm({
     init_graph_data();
     init_extract();
     init_idf_background();
+    init_classify();
     GRAPH = buildGraph(VOCAB_NODES);
     VOCABULARY = [...GRAPH.ids];
     SYNONYMS = Object.fromEntries(GRAPH.synonyms);
@@ -1343,9 +1360,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline-wt/release-v0240/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline-wt/release-v0240/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {

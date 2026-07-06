@@ -519,7 +519,7 @@ var init_graph_data = __esm({
       { id: "anthropic", parents: ["llm"], synonyms: ["claude"] },
       { id: "rag", parents: ["llm"], synonyms: ["retrieval-augmented-generation"] },
       { id: "mlops", parents: ["ml"], related: [{ to: "devops", w: 0.4 }] },
-      { id: "agents", parents: ["llm"], synonyms: ["agentic", "ai-agents", "multi-agent"], related: [{ to: "rag", w: 0.4 }] },
+      { id: "agents", parents: ["llm"], synonyms: ["agentic", "ai-agents", "multi-agent", "agent-orchestration"], related: [{ to: "rag", w: 0.4 }] },
       { id: "mcp", parents: ["agents"], synonyms: ["model-context-protocol"], related: [{ to: "llm", w: 0.45 }] },
       { id: "inference", parents: ["ml"], synonyms: ["model-inference", "llm-inference", "model-serving"], related: [{ to: "mlops", w: 0.5 }, { to: "llm", w: 0.4 }] },
       { id: "embeddings", parents: ["ml"], synonyms: ["embedding", "vector-embeddings"], related: [{ to: "rag", w: 0.55 }, { to: "llm", w: 0.45 }] },
@@ -732,6 +732,14 @@ var init_idf_background = __esm({
   }
 });
 
+// ../../packages/core/src/vocab/classify.ts
+var init_classify = __esm({
+  "../../packages/core/src/vocab/classify.ts"() {
+    "use strict";
+    init_vocab();
+  }
+});
+
 // ../../packages/core/src/vocab/index.ts
 function normalize(tokens) {
   const result = /* @__PURE__ */ new Set();
@@ -757,6 +765,7 @@ var init_vocab = __esm({
     init_graph_data();
     init_extract();
     init_idf_background();
+    init_classify();
     GRAPH = buildGraph(VOCAB_NODES);
     VOCABULARY = [...GRAPH.ids];
     SYNONYMS = Object.fromEntries(GRAPH.synonyms);
@@ -1314,9 +1323,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline-wt/release-v0240/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline-wt/release-v0240/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -2213,11 +2222,15 @@ function round(n) {
 function oneDecimal(n) {
   return (Math.round(n * 10) / 10).toFixed(1);
 }
-function coverageLine(view) {
+function coverageLine(view, format) {
+  const humility = `A starting point for a conversation \u2014 not a substitute for one.`;
+  if (format === "terminal") {
+    return `Read from ${view.sessions} session${view.sessions === 1 ? "" : "s"}. Your current stack and what's trending \u2014 not seniority, impact, or judgment. ` + humility;
+  }
   const attr = round(view.coverage.attributedPct);
   const sub = round(view.subagentPct);
   const comp = round(view.coverage.compactedPct);
-  return `Built from ${view.sessions} session${view.sessions === 1 ? "" : "s"}; ${attr}% attributed, ${sub}% in subagent dispatches, ${comp}% compacted. Covers stack currency + trajectory \u2014 not seniority, impact, or judgment. Pair with a conversation.`;
+  return `Built from ${view.sessions} session${view.sessions === 1 ? "" : "s"}; ${attr}% attributed, ${sub}% in subagent dispatches, ${comp}% compacted. Covers stack currency + trajectory \u2014 not seniority, impact, or judgment. ` + humility;
 }
 function renderTerminal(view) {
   const h = view.score.headline;
@@ -2225,6 +2238,7 @@ function renderTerminal(view) {
   const falling = h.falling.map((e) => prettySignal(e.signal)).slice(0, 6);
   console.log("");
   console.log("  Trajectory \u2014 your code is your r\xE9sum\xE9");
+  console.log("  From your Claude Code sessions \xB7 local-only, never uploaded");
   console.log("  " + "\u2500".repeat(68));
   console.log("");
   console.log("  \u258C Trajectory");
@@ -2244,8 +2258,8 @@ function renderTerminal(view) {
   console.log("  \u258C Capabilities (tools & integrations)");
   console.log(`    ${prettyList(liveCaps)}`);
   console.log("");
-  console.log("  \u258C Coverage / scope");
-  console.log(`    ${coverageLine(view)}`);
+  console.log("  \u258C Scope");
+  console.log(`    ${coverageLine(view, "terminal")}`);
   console.log("");
 }
 function renderMarkdown(view) {
@@ -2274,9 +2288,9 @@ function renderMarkdown(view) {
   lines.push("");
   lines.push(`- ${prettyList(view.score.liveStack.filter((s) => !isLang(s)), 64)}`);
   lines.push("");
-  lines.push("## Coverage / scope");
+  lines.push("## Scope");
   lines.push("");
-  lines.push(coverageLine(view));
+  lines.push(coverageLine(view, "markdown"));
   lines.push("");
   return lines.join("\n");
 }

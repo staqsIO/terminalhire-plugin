@@ -187,7 +187,7 @@ var init_graph_data = __esm({
       { id: "anthropic", parents: ["llm"], synonyms: ["claude"] },
       { id: "rag", parents: ["llm"], synonyms: ["retrieval-augmented-generation"] },
       { id: "mlops", parents: ["ml"], related: [{ to: "devops", w: 0.4 }] },
-      { id: "agents", parents: ["llm"], synonyms: ["agentic", "ai-agents", "multi-agent"], related: [{ to: "rag", w: 0.4 }] },
+      { id: "agents", parents: ["llm"], synonyms: ["agentic", "ai-agents", "multi-agent", "agent-orchestration"], related: [{ to: "rag", w: 0.4 }] },
       { id: "mcp", parents: ["agents"], synonyms: ["model-context-protocol"], related: [{ to: "llm", w: 0.45 }] },
       { id: "inference", parents: ["ml"], synonyms: ["model-inference", "llm-inference", "model-serving"], related: [{ to: "mlops", w: 0.5 }, { to: "llm", w: 0.4 }] },
       { id: "embeddings", parents: ["ml"], synonyms: ["embedding", "vector-embeddings"], related: [{ to: "rag", w: 0.55 }, { to: "llm", w: 0.45 }] },
@@ -400,6 +400,14 @@ var init_idf_background = __esm({
   }
 });
 
+// ../../packages/core/src/vocab/classify.ts
+var init_classify = __esm({
+  "../../packages/core/src/vocab/classify.ts"() {
+    "use strict";
+    init_vocab();
+  }
+});
+
 // ../../packages/core/src/vocab/index.ts
 function normalize(tokens) {
   const result = /* @__PURE__ */ new Set();
@@ -425,6 +433,7 @@ var init_vocab = __esm({
     init_graph_data();
     init_extract();
     init_idf_background();
+    init_classify();
     GRAPH = buildGraph(VOCAB_NODES);
     VOCABULARY = [...GRAPH.ids];
     SYNONYMS = Object.fromEntries(GRAPH.synonyms);
@@ -988,9 +997,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline-wt/release-v0240/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline-wt/release-v0240/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
