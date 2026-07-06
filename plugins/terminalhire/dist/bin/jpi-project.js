@@ -732,9 +732,9 @@ function ghHeaders(token) {
   if (token) headers["Authorization"] = `Bearer ${token}`;
   return headers;
 }
-async function ghFetch(path, token) {
+async function ghFetch(path, token, signal) {
   const url = `https://api.github.com${path}`;
-  const res = await fetch(url, { headers: ghHeaders(token) });
+  const res = await fetch(url, { headers: ghHeaders(token), signal });
   if (!res.ok) {
     throw new Error(`GitHub API ${path}: HTTP ${res.status} ${res.statusText}`);
   }
@@ -783,6 +783,7 @@ async function fetchGitHubProfile(login, token) {
   } catch {
   }
   return {
+    id: user.id,
     login: user.login,
     name: user.name ?? void 0,
     publicEmail: user.email ?? void 0,
@@ -859,8 +860,8 @@ async function fetchOwnedRepoTraction(login, token) {
     computedAt
   };
 }
-async function ghFetchRaw(path, token) {
-  return fetch(`https://api.github.com${path}`, { headers: ghHeaders(token) });
+async function ghFetchRaw(path, token, signal) {
+  return fetch(`https://api.github.com${path}`, { headers: ghHeaders(token), signal });
 }
 function parseRepoUrl(repoUrl) {
   const m = repoUrl.match(/\/repos\/([^/]+)\/([^/]+)\/?$/);
@@ -879,11 +880,12 @@ async function fetchOwnedOrgs(token) {
     return /* @__PURE__ */ new Set();
   }
 }
-async function repoContributorCount(owner, name, token) {
+async function repoContributorCount(owner, name, token, signal) {
   try {
     const res = await ghFetchRaw(
       `/repos/${owner}/${name}/contributors?per_page=1&anon=false`,
-      token
+      token,
+      signal
     );
     if (!res.ok) return void 0;
     const link = res.headers.get("link");
@@ -1150,6 +1152,77 @@ function deriveResumeTrend(cred, repoRecency, now = Date.now()) {
     });
   }
   return scored.sort((a, b) => b.weight - a.weight).slice(0, 12).map((s) => s.t);
+}
+function parseGitHubRef(url) {
+  const m = String(url ?? "").match(/github\.com\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)/);
+  if (!m) return null;
+  return { owner: m[1], repo: m[2], number: parseInt(m[4], 10), kind: m[3] === "pull" ? "pull" : "issue" };
+}
+async function ghGraphQL(query, variables, token, signal) {
+  const res = await fetch("https://api.github.com/graphql", {
+    method: "POST",
+    headers: { ...ghHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify({ query, variables }),
+    signal
+  });
+  if (!res.ok) throw new Error(`GitHub GraphQL: HTTP ${res.status}`);
+  const json = await res.json();
+  if (json.errors?.length) throw new Error("GitHub GraphQL errors: " + JSON.stringify(json.errors));
+  return json;
+}
+async function resolveClosingIssues(owner, name, number, body, token, signal) {
+  if (token) {
+    try {
+      const q = `query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){closingIssuesReferences(first:20){nodes{number}}}}}`;
+      const r = await ghGraphQL(q, { o: owner, n: name, p: number }, token, signal);
+      const nodes = r.data?.repository?.pullRequest?.closingIssuesReferences?.nodes ?? [];
+      return { closesIssues: nodes.map((x) => x.number), linkageSource: "graphql" };
+    } catch {
+    }
+  }
+  const nums = /* @__PURE__ */ new Set();
+  const re = /\b(?:clos(?:e|es|ed)|fix(?:es|ed)?|resolv(?:e|es|ed))\s+#(\d+)/gi;
+  let m;
+  while ((m = re.exec(body)) !== null) nums.add(parseInt(m[1], 10));
+  return { closesIssues: [...nums], linkageSource: nums.size ? "body-keyword" : "none" };
+}
+async function fetchPRScoringFacts(prUrl, token, signal) {
+  const ref = parseGitHubRef(prUrl);
+  if (!ref || ref.kind !== "pull") return null;
+  const { owner, repo, number } = ref;
+  const sig = signal ?? AbortSignal.timeout(1e4);
+  let pr;
+  try {
+    pr = await ghFetch(`/repos/${owner}/${repo}/pulls/${number}`, token, sig);
+  } catch {
+    return null;
+  }
+  let repoMeta = null;
+  try {
+    repoMeta = await ghFetch(`/repos/${owner}/${repo}`, token, sig);
+  } catch {
+  }
+  const contributors = await repoContributorCount(owner, repo, token, sig);
+  const { closesIssues, linkageSource } = await resolveClosingIssues(owner, repo, number, pr.body ?? "", token, sig);
+  return {
+    repo: `${owner}/${repo}`,
+    prNumber: number,
+    prUrl: pr.html_url,
+    merged: pr.merged === true,
+    mergedAt: pr.merged_at ?? null,
+    authorId: pr.user?.id ?? null,
+    authorLogin: pr.user?.login ?? null,
+    mergedById: pr.merged_by?.id ?? null,
+    mergedByLogin: pr.merged_by?.login ?? null,
+    closesIssues,
+    linkageSource,
+    repoStars: repoMeta?.stargazers_count ?? null,
+    repoContributors: contributors ?? null,
+    repoArchived: !!repoMeta?.archived,
+    repoFork: !!repoMeta?.fork,
+    repoPrivate: !!repoMeta?.private,
+    fetchedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
 }
 var TRACTION_TOP_N, CANDIDATE_PR_PAGE, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
 var init_github = __esm({
@@ -2838,6 +2911,20 @@ var init_contribution_classify = __esm({
 });
 
 // ../../packages/core/src/feeds/contributions.ts
+function readReqGapMs() {
+  const raw = process.env["CONTRIB_REQ_GAP_MS"];
+  if (raw == null) return DEFAULT_REQ_GAP_MS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_REQ_GAP_MS;
+  return Math.min(Math.max(n, 0), 1e3);
+}
+function readBuildBudgetMs() {
+  const raw = process.env["CONTRIB_BUILD_BUDGET_MS"];
+  if (raw == null) return DEFAULT_BUILD_BUDGET_MS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_BUILD_BUDGET_MS;
+  return Math.min(Math.max(n, MIN_BUILD_BUDGET_MS), MAX_BUILD_BUDGET_MS);
+}
 function authHeaders2() {
   const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
   const h = {
@@ -2858,10 +2945,55 @@ function repoFullNameFromApiUrl2(url) {
   const m = url.match(/\/repos\/([^/]+)\/([^/]+)\/?$/);
   return m ? `${m[1]}/${m[2]}` : null;
 }
-function makeClient(fetchImpl) {
+function makeClient(fetchImpl, cfg) {
+  const startedAt = cfg.now();
+  let lastRequestAt = 0;
+  let pacedMs = 0;
+  let secondaryHits = 0;
+  let aborted = false;
+  let secondaryAborted = false;
+  let budgetAborted = false;
+  let coreHealthyAtStart = false;
+  async function noteAndMaybeBackOff(res) {
+    if (res.status !== 403) return;
+    const remaining = res.headers.get("x-ratelimit-remaining");
+    const retryAfter = res.headers.get("retry-after");
+    const positiveSecondary = retryAfter != null || remaining != null && remaining !== "0";
+    const isSecondary = positiveSecondary || coreHealthyAtStart;
+    if (!isSecondary) return;
+    secondaryHits++;
+    if (secondaryHits >= 2) {
+      aborted = true;
+      secondaryAborted = true;
+      return;
+    }
+    if (cfg.paceEnabled) {
+      const trimmed = (retryAfter ?? "").trim();
+      const parsed = trimmed.length === 0 ? Number.NaN : Number(trimmed);
+      const sec = Number.isNaN(parsed) ? SECONDARY_BACKOFF_CAP_S : Math.min(Math.max(parsed, 0), SECONDARY_BACKOFF_CAP_S);
+      const remaining2 = Math.max(0, cfg.budgetMs - (cfg.now() - startedAt));
+      await cfg.sleep(Math.min(sec * 1e3, remaining2));
+    }
+  }
   async function raw(path) {
+    if (aborted) return null;
+    if (cfg.now() - startedAt > cfg.budgetMs) {
+      aborted = true;
+      budgetAborted = true;
+      return null;
+    }
+    if (cfg.paceEnabled && cfg.gapMs > 0) {
+      const wait = cfg.gapMs - (cfg.now() - lastRequestAt);
+      if (wait > 0) {
+        await cfg.sleep(wait);
+        pacedMs += wait;
+      }
+      lastRequestAt = cfg.now();
+    }
     try {
-      return await fetchImpl(`${GITHUB_API2}${path}`, { headers: authHeaders2() });
+      const res = await fetchImpl(`${GITHUB_API2}${path}`, { headers: authHeaders2() });
+      await noteAndMaybeBackOff(res);
+      return res;
     } catch {
       return null;
     }
@@ -2877,7 +3009,42 @@ function makeClient(fetchImpl) {
       return null;
     }
   }
-  return { raw, json };
+  async function probe(path) {
+    const bound = cfg.probeTimeoutMs;
+    let timer;
+    const fetchP = fetchImpl(`${GITHUB_API2}${path}`, {
+      headers: authHeaders2()
+    }).then(
+      (r) => r,
+      () => null
+    );
+    try {
+      const res = bound == null ? await fetchP : await Promise.race([
+        fetchP,
+        new Promise((resolve) => {
+          timer = setTimeout(() => resolve(null), bound);
+        })
+      ]);
+      if (!res || !res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  function setSecondaryHint(coreHealthy) {
+    coreHealthyAtStart = coreHealthy;
+  }
+  function getStats() {
+    return {
+      pacedMs,
+      secondaryAborted: secondaryAborted ? 1 : 0,
+      budgetAborted: budgetAborted ? 1 : 0,
+      elapsedMs: cfg.now() - startedAt
+    };
+  }
+  return { raw, json, probe, setSecondaryHint, getStats };
 }
 async function contributorCount(client, fullName) {
   const res = await client.raw(`/repos/${fullName}/contributors?per_page=1&anon=false`);
@@ -2907,7 +3074,7 @@ ${pr.body ?? ""}`.matchAll(/#(\d+)\b/g)) {
   return refs;
 }
 async function fetchRateLimit(client) {
-  const r = await client.json("/rate_limit");
+  const r = await client.probe("/rate_limit");
   return r?.resources ?? null;
 }
 async function searchContribIssues(client, queries) {
@@ -2926,8 +3093,21 @@ async function searchContribIssues(client, queries) {
   );
 }
 async function aggregateContributions(opts = {}) {
-  const client = makeClient(opts.fetchImpl ?? fetchWithTimeout);
+  const paceEnabled = opts.paceEnabled ?? !opts.fetchImpl;
+  const client = makeClient(opts.fetchImpl ?? fetchWithTimeout, {
+    paceEnabled,
+    gapMs: readReqGapMs(),
+    budgetMs: readBuildBudgetMs(),
+    sleep: opts.sleepImpl ?? realSleep,
+    now: opts.nowImpl ?? Date.now,
+    // Bound the unguarded probe on the REAL network only; injected-fetch tests get
+    // null so the probe stays deterministic (and its shared spy sleeper untouched).
+    probeTimeoutMs: opts.fetchImpl ? null : PROBE_TIMEOUT_MS
+  });
   const queries = opts.queries ?? CONTRIB_SEARCH_QUERIES;
+  const startRl = await fetchRateLimit(client);
+  const coreHealthyAtStart = (startRl?.core?.remaining ?? 0) >= 500;
+  client.setSecondaryHint(coreHealthyAtStart);
   const issues = (await searchContribIssues(client, queries)).slice(0, MAX_CONTRIB_ISSUES_SCANNED);
   const repoCache = /* @__PURE__ */ new Map();
   const contribCache = /* @__PURE__ */ new Map();
@@ -3034,13 +3214,14 @@ async function aggregateContributions(opts = {}) {
     const core = rl?.core ? `${rl.core.remaining}/${rl.core.limit}` : "n/a";
     const search = rl?.search ? `${rl.search.remaining}/${rl.search.limit}` : "n/a";
     const noToken = !(process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"]);
+    const { pacedMs, secondaryAborted, budgetAborted, elapsedMs } = client.getStats();
     console.info(
-      `[contribute] build metrics \u2014 scanned=${issues.length} reposDistinct=${repoCache.size} emitted=${jobs.length} metaNull=${metaNull} contribUndefined=${contribUndefined} prRefsNull=${prRefsNull} core=${core} search=${search}` + (noToken ? " (NO TOKEN \u2192 60/hr)" : "")
+      `[contribute] build metrics \u2014 scanned=${issues.length} reposDistinct=${repoCache.size} emitted=${jobs.length} metaNull=${metaNull} contribUndefined=${contribUndefined} prRefsNull=${prRefsNull} paced=${pacedMs} secondaryAborted=${secondaryAborted} budgetAborted=${budgetAborted} core=${core} search=${search} elapsed=${elapsedMs}` + (noToken ? " (NO TOKEN \u2192 60/hr)" : "")
     );
   }
   return jobs;
 }
-var GITHUB_API2, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, MAX_CONTRIB_ITEMS, MAX_CONTRIB_ISSUES_SCANNED;
+var GITHUB_API2, DEFAULT_REQ_GAP_MS, SECONDARY_BACKOFF_CAP_S, DEFAULT_BUILD_BUDGET_MS, MIN_BUILD_BUDGET_MS, MAX_BUILD_BUDGET_MS, PROBE_TIMEOUT_MS, realSleep, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, MAX_CONTRIB_ITEMS, MAX_CONTRIB_ISSUES_SCANNED;
 var init_contributions = __esm({
   "../../packages/core/src/feeds/contributions.ts"() {
     "use strict";
@@ -3052,6 +3233,13 @@ var init_contributions = __esm({
     init_github_bounties();
     init_http();
     GITHUB_API2 = "https://api.github.com";
+    DEFAULT_REQ_GAP_MS = 75;
+    SECONDARY_BACKOFF_CAP_S = 30;
+    DEFAULT_BUILD_BUDGET_MS = 9e4;
+    MIN_BUILD_BUDGET_MS = 1e4;
+    MAX_BUILD_BUDGET_MS = 9e4;
+    PROBE_TIMEOUT_MS = 3e3;
+    realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
     CONTRIB_LABEL_QUERIES = [
       'label:"good first issue" type:issue state:open',
       'label:"good-first-issue" type:issue state:open',
@@ -3165,6 +3353,36 @@ var init_indexer = __esm({
     init_feeds();
     init_contributions();
     init_partners();
+  }
+});
+
+// ../../packages/core/src/credit.ts
+function verifyClaimCredit(claim, facts) {
+  const reasons = [];
+  const fail = (code, message) => reasons.push({ code, message });
+  const norm = (r) => r.trim().toLowerCase();
+  if (norm(facts.repo) !== norm(claim.repo))
+    fail("repo-mismatch", `PR is in ${facts.repo}, claim is against ${claim.repo}`);
+  if (!facts.merged) fail("not-merged", `PR #${facts.prNumber} is not merged`);
+  if (facts.authorId == null || facts.authorId !== claim.claimantId)
+    fail("author-mismatch", `PR author id ${facts.authorId} !== claimant id ${claim.claimantId}`);
+  if (facts.merged && facts.mergedById != null && facts.authorId != null && facts.mergedById === facts.authorId)
+    fail("self-merged", `PR was merged by its own author (id ${facts.authorId})`);
+  if (claim.claimedIssueNumber != null) {
+    if (facts.closesIssues.length === 0)
+      fail("issue-linkage-missing", `PR closes no issue; claim names #${claim.claimedIssueNumber}`);
+    else if (!facts.closesIssues.includes(claim.claimedIssueNumber))
+      fail(
+        "issue-linkage-mismatch",
+        `PR closes ${facts.closesIssues.map((n) => "#" + n).join(", ")}; claim names #${claim.claimedIssueNumber}`
+      );
+  }
+  if (reasons.length === 0) reasons.push({ code: "ok", message: "all credit predicates hold" });
+  return { ok: reasons.every((r) => r.code === "ok"), reasons };
+}
+var init_credit = __esm({
+  "../../packages/core/src/credit.ts"() {
+    "use strict";
   }
 });
 
@@ -6761,6 +6979,7 @@ __export(src_exports, {
   fetchGitHubProfile: () => fetchGitHubProfile,
   fetchOpenExternalPRs: () => fetchOpenExternalPRs,
   fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
+  fetchPRScoringFacts: () => fetchPRScoringFacts,
   fetchRepoRecency: () => fetchRepoRecency,
   flattenTiers: () => flattenTiers,
   funnelCounts: () => funnelCounts,
@@ -6791,6 +7010,7 @@ __export(src_exports, {
   opire: () => opire,
   opportunityShortToken: () => opportunityShortToken,
   pageMatches: () => pageMatches,
+  parseGitHubRef: () => parseGitHubRef,
   passesContributionGate: () => passesContributionGate,
   passesMaturityGate: () => passesMaturityGate,
   personCardToJob: () => personCardToJob,
@@ -6807,6 +7027,7 @@ __export(src_exports, {
   validateGraph: () => validateGraph,
   validateIntroPayload: () => validateIntroPayload,
   validateTargetContact: () => validateTargetContact,
+  verifyClaimCredit: () => verifyClaimCredit,
   workable: () => workable,
   wwr: () => wwr
 });
@@ -6821,6 +7042,7 @@ var init_src = __esm({
     init_indexer();
     init_partners();
     init_github();
+    init_credit();
     init_intro();
     init_directoryThreshold();
     init_chatCrypto();

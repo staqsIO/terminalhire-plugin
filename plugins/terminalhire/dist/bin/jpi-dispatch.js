@@ -346,9 +346,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/claim-frictionless/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/claim-frictionless/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -1337,9 +1337,9 @@ function ghHeaders(token) {
   if (token) headers["Authorization"] = `Bearer ${token}`;
   return headers;
 }
-async function ghFetch(path, token) {
+async function ghFetch(path, token, signal) {
   const url = `https://api.github.com${path}`;
-  const res = await fetch(url, { headers: ghHeaders(token) });
+  const res = await fetch(url, { headers: ghHeaders(token), signal });
   if (!res.ok) {
     throw new Error(`GitHub API ${path}: HTTP ${res.status} ${res.statusText}`);
   }
@@ -1388,6 +1388,7 @@ async function fetchGitHubProfile(login, token) {
   } catch {
   }
   return {
+    id: user.id,
     login: user.login,
     name: user.name ?? void 0,
     publicEmail: user.email ?? void 0,
@@ -1464,8 +1465,8 @@ async function fetchOwnedRepoTraction(login, token) {
     computedAt
   };
 }
-async function ghFetchRaw(path, token) {
-  return fetch(`https://api.github.com${path}`, { headers: ghHeaders(token) });
+async function ghFetchRaw(path, token, signal) {
+  return fetch(`https://api.github.com${path}`, { headers: ghHeaders(token), signal });
 }
 function parseRepoUrl(repoUrl) {
   const m = repoUrl.match(/\/repos\/([^/]+)\/([^/]+)\/?$/);
@@ -1484,11 +1485,12 @@ async function fetchOwnedOrgs(token) {
     return /* @__PURE__ */ new Set();
   }
 }
-async function repoContributorCount(owner, name, token) {
+async function repoContributorCount(owner, name, token, signal) {
   try {
     const res = await ghFetchRaw(
       `/repos/${owner}/${name}/contributors?per_page=1&anon=false`,
-      token
+      token,
+      signal
     );
     if (!res.ok) return void 0;
     const link = res.headers.get("link");
@@ -1755,6 +1757,77 @@ function deriveResumeTrend(cred, repoRecency, now = Date.now()) {
     });
   }
   return scored.sort((a, b) => b.weight - a.weight).slice(0, 12).map((s) => s.t);
+}
+function parseGitHubRef(url) {
+  const m = String(url ?? "").match(/github\.com\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)/);
+  if (!m) return null;
+  return { owner: m[1], repo: m[2], number: parseInt(m[4], 10), kind: m[3] === "pull" ? "pull" : "issue" };
+}
+async function ghGraphQL(query, variables, token, signal) {
+  const res = await fetch("https://api.github.com/graphql", {
+    method: "POST",
+    headers: { ...ghHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify({ query, variables }),
+    signal
+  });
+  if (!res.ok) throw new Error(`GitHub GraphQL: HTTP ${res.status}`);
+  const json = await res.json();
+  if (json.errors?.length) throw new Error("GitHub GraphQL errors: " + JSON.stringify(json.errors));
+  return json;
+}
+async function resolveClosingIssues(owner, name, number3, body, token, signal) {
+  if (token) {
+    try {
+      const q = `query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){closingIssuesReferences(first:20){nodes{number}}}}}`;
+      const r = await ghGraphQL(q, { o: owner, n: name, p: number3 }, token, signal);
+      const nodes = r.data?.repository?.pullRequest?.closingIssuesReferences?.nodes ?? [];
+      return { closesIssues: nodes.map((x) => x.number), linkageSource: "graphql" };
+    } catch {
+    }
+  }
+  const nums = /* @__PURE__ */ new Set();
+  const re = /\b(?:clos(?:e|es|ed)|fix(?:es|ed)?|resolv(?:e|es|ed))\s+#(\d+)/gi;
+  let m;
+  while ((m = re.exec(body)) !== null) nums.add(parseInt(m[1], 10));
+  return { closesIssues: [...nums], linkageSource: nums.size ? "body-keyword" : "none" };
+}
+async function fetchPRScoringFacts(prUrl, token, signal) {
+  const ref = parseGitHubRef(prUrl);
+  if (!ref || ref.kind !== "pull") return null;
+  const { owner, repo, number: number3 } = ref;
+  const sig = signal ?? AbortSignal.timeout(1e4);
+  let pr;
+  try {
+    pr = await ghFetch(`/repos/${owner}/${repo}/pulls/${number3}`, token, sig);
+  } catch {
+    return null;
+  }
+  let repoMeta = null;
+  try {
+    repoMeta = await ghFetch(`/repos/${owner}/${repo}`, token, sig);
+  } catch {
+  }
+  const contributors = await repoContributorCount(owner, repo, token, sig);
+  const { closesIssues, linkageSource } = await resolveClosingIssues(owner, repo, number3, pr.body ?? "", token, sig);
+  return {
+    repo: `${owner}/${repo}`,
+    prNumber: number3,
+    prUrl: pr.html_url,
+    merged: pr.merged === true,
+    mergedAt: pr.merged_at ?? null,
+    authorId: pr.user?.id ?? null,
+    authorLogin: pr.user?.login ?? null,
+    mergedById: pr.merged_by?.id ?? null,
+    mergedByLogin: pr.merged_by?.login ?? null,
+    closesIssues,
+    linkageSource,
+    repoStars: repoMeta?.stargazers_count ?? null,
+    repoContributors: contributors ?? null,
+    repoArchived: !!repoMeta?.archived,
+    repoFork: !!repoMeta?.fork,
+    repoPrivate: !!repoMeta?.private,
+    fetchedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
 }
 var TRACTION_TOP_N, CANDIDATE_PR_PAGE, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
 var init_github = __esm({
@@ -3443,6 +3516,20 @@ var init_contribution_classify = __esm({
 });
 
 // ../../packages/core/src/feeds/contributions.ts
+function readReqGapMs() {
+  const raw = process.env["CONTRIB_REQ_GAP_MS"];
+  if (raw == null) return DEFAULT_REQ_GAP_MS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_REQ_GAP_MS;
+  return Math.min(Math.max(n, 0), 1e3);
+}
+function readBuildBudgetMs() {
+  const raw = process.env["CONTRIB_BUILD_BUDGET_MS"];
+  if (raw == null) return DEFAULT_BUILD_BUDGET_MS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_BUILD_BUDGET_MS;
+  return Math.min(Math.max(n, MIN_BUILD_BUDGET_MS), MAX_BUILD_BUDGET_MS);
+}
 function authHeaders2() {
   const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
   const h = {
@@ -3463,10 +3550,55 @@ function repoFullNameFromApiUrl2(url) {
   const m = url.match(/\/repos\/([^/]+)\/([^/]+)\/?$/);
   return m ? `${m[1]}/${m[2]}` : null;
 }
-function makeClient(fetchImpl) {
+function makeClient(fetchImpl, cfg) {
+  const startedAt = cfg.now();
+  let lastRequestAt = 0;
+  let pacedMs = 0;
+  let secondaryHits = 0;
+  let aborted2 = false;
+  let secondaryAborted = false;
+  let budgetAborted = false;
+  let coreHealthyAtStart = false;
+  async function noteAndMaybeBackOff(res) {
+    if (res.status !== 403) return;
+    const remaining = res.headers.get("x-ratelimit-remaining");
+    const retryAfter = res.headers.get("retry-after");
+    const positiveSecondary = retryAfter != null || remaining != null && remaining !== "0";
+    const isSecondary = positiveSecondary || coreHealthyAtStart;
+    if (!isSecondary) return;
+    secondaryHits++;
+    if (secondaryHits >= 2) {
+      aborted2 = true;
+      secondaryAborted = true;
+      return;
+    }
+    if (cfg.paceEnabled) {
+      const trimmed = (retryAfter ?? "").trim();
+      const parsed = trimmed.length === 0 ? Number.NaN : Number(trimmed);
+      const sec = Number.isNaN(parsed) ? SECONDARY_BACKOFF_CAP_S : Math.min(Math.max(parsed, 0), SECONDARY_BACKOFF_CAP_S);
+      const remaining2 = Math.max(0, cfg.budgetMs - (cfg.now() - startedAt));
+      await cfg.sleep(Math.min(sec * 1e3, remaining2));
+    }
+  }
   async function raw(path) {
+    if (aborted2) return null;
+    if (cfg.now() - startedAt > cfg.budgetMs) {
+      aborted2 = true;
+      budgetAborted = true;
+      return null;
+    }
+    if (cfg.paceEnabled && cfg.gapMs > 0) {
+      const wait = cfg.gapMs - (cfg.now() - lastRequestAt);
+      if (wait > 0) {
+        await cfg.sleep(wait);
+        pacedMs += wait;
+      }
+      lastRequestAt = cfg.now();
+    }
     try {
-      return await fetchImpl(`${GITHUB_API2}${path}`, { headers: authHeaders2() });
+      const res = await fetchImpl(`${GITHUB_API2}${path}`, { headers: authHeaders2() });
+      await noteAndMaybeBackOff(res);
+      return res;
     } catch {
       return null;
     }
@@ -3482,7 +3614,42 @@ function makeClient(fetchImpl) {
       return null;
     }
   }
-  return { raw, json };
+  async function probe(path) {
+    const bound = cfg.probeTimeoutMs;
+    let timer;
+    const fetchP = fetchImpl(`${GITHUB_API2}${path}`, {
+      headers: authHeaders2()
+    }).then(
+      (r) => r,
+      () => null
+    );
+    try {
+      const res = bound == null ? await fetchP : await Promise.race([
+        fetchP,
+        new Promise((resolve2) => {
+          timer = setTimeout(() => resolve2(null), bound);
+        })
+      ]);
+      if (!res || !res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  function setSecondaryHint(coreHealthy) {
+    coreHealthyAtStart = coreHealthy;
+  }
+  function getStats() {
+    return {
+      pacedMs,
+      secondaryAborted: secondaryAborted ? 1 : 0,
+      budgetAborted: budgetAborted ? 1 : 0,
+      elapsedMs: cfg.now() - startedAt
+    };
+  }
+  return { raw, json, probe, setSecondaryHint, getStats };
 }
 async function contributorCount(client, fullName) {
   const res = await client.raw(`/repos/${fullName}/contributors?per_page=1&anon=false`);
@@ -3512,7 +3679,7 @@ ${pr.body ?? ""}`.matchAll(/#(\d+)\b/g)) {
   return refs;
 }
 async function fetchRateLimit(client) {
-  const r = await client.json("/rate_limit");
+  const r = await client.probe("/rate_limit");
   return r?.resources ?? null;
 }
 async function searchContribIssues(client, queries) {
@@ -3531,8 +3698,21 @@ async function searchContribIssues(client, queries) {
   );
 }
 async function aggregateContributions(opts = {}) {
-  const client = makeClient(opts.fetchImpl ?? fetchWithTimeout);
+  const paceEnabled = opts.paceEnabled ?? !opts.fetchImpl;
+  const client = makeClient(opts.fetchImpl ?? fetchWithTimeout, {
+    paceEnabled,
+    gapMs: readReqGapMs(),
+    budgetMs: readBuildBudgetMs(),
+    sleep: opts.sleepImpl ?? realSleep,
+    now: opts.nowImpl ?? Date.now,
+    // Bound the unguarded probe on the REAL network only; injected-fetch tests get
+    // null so the probe stays deterministic (and its shared spy sleeper untouched).
+    probeTimeoutMs: opts.fetchImpl ? null : PROBE_TIMEOUT_MS
+  });
   const queries = opts.queries ?? CONTRIB_SEARCH_QUERIES;
+  const startRl = await fetchRateLimit(client);
+  const coreHealthyAtStart = (startRl?.core?.remaining ?? 0) >= 500;
+  client.setSecondaryHint(coreHealthyAtStart);
   const issues = (await searchContribIssues(client, queries)).slice(0, MAX_CONTRIB_ISSUES_SCANNED);
   const repoCache = /* @__PURE__ */ new Map();
   const contribCache = /* @__PURE__ */ new Map();
@@ -3639,13 +3819,14 @@ async function aggregateContributions(opts = {}) {
     const core = rl?.core ? `${rl.core.remaining}/${rl.core.limit}` : "n/a";
     const search = rl?.search ? `${rl.search.remaining}/${rl.search.limit}` : "n/a";
     const noToken = !(process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"]);
+    const { pacedMs, secondaryAborted, budgetAborted, elapsedMs } = client.getStats();
     console.info(
-      `[contribute] build metrics \u2014 scanned=${issues.length} reposDistinct=${repoCache.size} emitted=${jobs.length} metaNull=${metaNull} contribUndefined=${contribUndefined} prRefsNull=${prRefsNull} core=${core} search=${search}` + (noToken ? " (NO TOKEN \u2192 60/hr)" : "")
+      `[contribute] build metrics \u2014 scanned=${issues.length} reposDistinct=${repoCache.size} emitted=${jobs.length} metaNull=${metaNull} contribUndefined=${contribUndefined} prRefsNull=${prRefsNull} paced=${pacedMs} secondaryAborted=${secondaryAborted} budgetAborted=${budgetAborted} core=${core} search=${search} elapsed=${elapsedMs}` + (noToken ? " (NO TOKEN \u2192 60/hr)" : "")
     );
   }
   return jobs;
 }
-var GITHUB_API2, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, MAX_CONTRIB_ITEMS, MAX_CONTRIB_ISSUES_SCANNED;
+var GITHUB_API2, DEFAULT_REQ_GAP_MS, SECONDARY_BACKOFF_CAP_S, DEFAULT_BUILD_BUDGET_MS, MIN_BUILD_BUDGET_MS, MAX_BUILD_BUDGET_MS, PROBE_TIMEOUT_MS, realSleep, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, MAX_CONTRIB_ITEMS, MAX_CONTRIB_ISSUES_SCANNED;
 var init_contributions = __esm({
   "../../packages/core/src/feeds/contributions.ts"() {
     "use strict";
@@ -3657,6 +3838,13 @@ var init_contributions = __esm({
     init_github_bounties();
     init_http();
     GITHUB_API2 = "https://api.github.com";
+    DEFAULT_REQ_GAP_MS = 75;
+    SECONDARY_BACKOFF_CAP_S = 30;
+    DEFAULT_BUILD_BUDGET_MS = 9e4;
+    MIN_BUILD_BUDGET_MS = 1e4;
+    MAX_BUILD_BUDGET_MS = 9e4;
+    PROBE_TIMEOUT_MS = 3e3;
+    realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
     CONTRIB_LABEL_QUERIES = [
       'label:"good first issue" type:issue state:open',
       'label:"good-first-issue" type:issue state:open',
@@ -3770,6 +3958,36 @@ var init_indexer = __esm({
     init_feeds();
     init_contributions();
     init_partners();
+  }
+});
+
+// ../../packages/core/src/credit.ts
+function verifyClaimCredit(claim, facts) {
+  const reasons = [];
+  const fail = (code, message) => reasons.push({ code, message });
+  const norm = (r) => r.trim().toLowerCase();
+  if (norm(facts.repo) !== norm(claim.repo))
+    fail("repo-mismatch", `PR is in ${facts.repo}, claim is against ${claim.repo}`);
+  if (!facts.merged) fail("not-merged", `PR #${facts.prNumber} is not merged`);
+  if (facts.authorId == null || facts.authorId !== claim.claimantId)
+    fail("author-mismatch", `PR author id ${facts.authorId} !== claimant id ${claim.claimantId}`);
+  if (facts.merged && facts.mergedById != null && facts.authorId != null && facts.mergedById === facts.authorId)
+    fail("self-merged", `PR was merged by its own author (id ${facts.authorId})`);
+  if (claim.claimedIssueNumber != null) {
+    if (facts.closesIssues.length === 0)
+      fail("issue-linkage-missing", `PR closes no issue; claim names #${claim.claimedIssueNumber}`);
+    else if (!facts.closesIssues.includes(claim.claimedIssueNumber))
+      fail(
+        "issue-linkage-mismatch",
+        `PR closes ${facts.closesIssues.map((n) => "#" + n).join(", ")}; claim names #${claim.claimedIssueNumber}`
+      );
+  }
+  if (reasons.length === 0) reasons.push({ code: "ok", message: "all credit predicates hold" });
+  return { ok: reasons.every((r) => r.code === "ok"), reasons };
+}
+var init_credit = __esm({
+  "../../packages/core/src/credit.ts"() {
+    "use strict";
   }
 });
 
@@ -7658,6 +7876,7 @@ __export(src_exports, {
   fetchGitHubProfile: () => fetchGitHubProfile,
   fetchOpenExternalPRs: () => fetchOpenExternalPRs,
   fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
+  fetchPRScoringFacts: () => fetchPRScoringFacts,
   fetchRepoRecency: () => fetchRepoRecency,
   flattenTiers: () => flattenTiers,
   funnelCounts: () => funnelCounts,
@@ -7688,6 +7907,7 @@ __export(src_exports, {
   opire: () => opire,
   opportunityShortToken: () => opportunityShortToken,
   pageMatches: () => pageMatches,
+  parseGitHubRef: () => parseGitHubRef,
   passesContributionGate: () => passesContributionGate,
   passesMaturityGate: () => passesMaturityGate,
   personCardToJob: () => personCardToJob,
@@ -7704,6 +7924,7 @@ __export(src_exports, {
   validateGraph: () => validateGraph,
   validateIntroPayload: () => validateIntroPayload,
   validateTargetContact: () => validateTargetContact,
+  verifyClaimCredit: () => verifyClaimCredit,
   workable: () => workable,
   wwr: () => wwr
 });
@@ -7718,6 +7939,7 @@ var init_src = __esm({
     init_indexer();
     init_partners();
     init_github();
+    init_credit();
     init_intro();
     init_directoryThreshold();
     init_chatCrypto();
@@ -9868,13 +10090,22 @@ __export(jpi_claim_exports, {
   backgroundEnableFailed: () => backgroundEnableFailed,
   buildSubmitBody: () => buildSubmitBody,
   cmdRecord: () => cmdRecord,
+  countOpenPRsReferencingIssue: () => countOpenPRsReferencingIssue,
+  diffContention: () => diffContention,
   findClaimableByShortRef: () => findClaimableByShortRef,
   findClaimableInCache: () => findClaimableInCache,
+  fmtAge: () => fmtAge,
   fmtContestedWarning: () => fmtContestedWarning,
   isContested: () => isContested,
+  listOpenPRsReferencingIssue: () => listOpenPRsReferencingIssue,
+  matchReferencingPrs: () => matchReferencingPrs,
+  pickBodySource: () => pickBodySource,
+  pickExistingPr: () => pickExistingPr,
   resolveBounty: () => resolveBounty,
+  resolveSubmitWorktree: () => resolveSubmitWorktree,
   revokeFailureAction: () => revokeFailureAction,
-  run: () => run7
+  run: () => run7,
+  selectPushRemote: () => selectPushRemote
 });
 import { readFileSync as readFileSync17, writeFileSync as writeFileSync11, mkdirSync as mkdirSync11, existsSync as existsSync10, rmSync as rmSync4 } from "fs";
 import { join as join17 } from "path";
@@ -9882,11 +10113,19 @@ import { homedir as homedir15, hostname as osHostname } from "os";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { createInterface as createInterface8 } from "readline";
-function buildSubmitBody(issueNumber) {
-  const closesLine = issueNumber ? `Closes #${issueNumber}
+function buildSubmitBody(issueNumber, opts = {}) {
+  const { bodyText, noCloses } = opts;
+  const closesLine = issueNumber && !noCloses ? `Closes #${issueNumber}
 
 ` : "";
-  return `${closesLine}${AI_DISCLOSURE_NOTE}`;
+  const hasBody = typeof bodyText === "string" && bodyText.length > 0;
+  if (hasBody && bodyText.includes(AI_DISCLOSURE_NOTE)) {
+    return `${closesLine}${bodyText}`;
+  }
+  const main = hasBody ? `${bodyText}
+
+` : "";
+  return `${closesLine}${main}${AI_DISCLOSURE_NOTE}`;
 }
 function printPolicySection(policy) {
   if (policy.status === "flagged") {
@@ -9941,6 +10180,55 @@ function parseArgs(argv) {
 function parseRepoFromRemote(url) {
   const m = String(url ?? "").trim().match(/github\.com[:/]+([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
   return m ? `${m[1]}/${m[2]}` : null;
+}
+function selectPushRemote(remotes, upstreamFullName, ghUser) {
+  const upstream = String(upstreamFullName ?? "").toLowerCase();
+  const list = Array.isArray(remotes) ? remotes : [];
+  const origin = list.find((r) => r && r.name === "origin" && r.repo);
+  if (origin && origin.repo.toLowerCase() !== upstream) return origin;
+  const user = String(ghUser ?? "").toLowerCase();
+  const fork = list.find((r) => {
+    if (!r || !r.repo) return false;
+    const owner = r.repo.split("/")[0];
+    return owner.toLowerCase() === user && r.repo.toLowerCase() !== upstream;
+  });
+  return fork ?? null;
+}
+function resolveSubmitWorktree({ override, cwdToplevel, recorded, recordedIsGit }) {
+  if (override !== void 0) {
+    if (override === recorded) return { wt: recorded };
+    return {
+      error: `worktree mismatch \u2014 refusing to push.
+  expected: ${recorded}
+  found:    ${override ?? "(not a git work tree)"}
+  Run submit from inside the claim's worktree (or pass --worktree <path>).`
+    };
+  }
+  if (cwdToplevel === recorded) return { wt: recorded };
+  if (recordedIsGit) {
+    return {
+      wt: recorded,
+      note: `using recorded worktree: ${recorded} (you are in ${cwdToplevel ?? "a non-git directory"})`
+    };
+  }
+  return {
+    error: `recorded worktree ${recorded} no longer exists \u2014 re-attach:
+  terminalhire claim attach <id> --worktree ${recorded} --branch <branch>`
+  };
+}
+function pickBodySource({ bodyFileFlag, noBody, prBodyExists }) {
+  if (bodyFileFlag) return "body-file";
+  if (!noBody && prBodyExists) return "pr-body";
+  return "none";
+}
+function pickExistingPr(prListJson, ghUser) {
+  if (!Array.isArray(prListJson)) return null;
+  const user = String(ghUser ?? "").toLowerCase();
+  const match2 = prListJson.find((pr) => {
+    const login = pr && pr.headRepositoryOwner && pr.headRepositoryOwner.login;
+    return typeof login === "string" && login.toLowerCase() === user;
+  });
+  return match2 && typeof match2.url === "string" ? match2.url : null;
 }
 function readClaimablePool() {
   if (!existsSync10(INDEX_CACHE_FILE5)) return [];
@@ -10021,7 +10309,25 @@ function parseGitHubUrl(url) {
   if (!m) return null;
   return { owner: m[1], repo: m[2], number: parseInt(m[3], 10), repoFullName: `${m[1]}/${m[2]}` };
 }
-async function countOpenPRsReferencingIssue(repoFullName, issueNumber) {
+function matchReferencingPrs(prs, issueNumber) {
+  if (!Array.isArray(prs)) return [];
+  const needle = new RegExp(`#${issueNumber}\\b`);
+  const matched = [];
+  for (const p of prs) {
+    if (!p) continue;
+    if (needle.test(`${p.title ?? ""}
+${p.body ?? ""}`)) {
+      matched.push({
+        number: p.number,
+        url: p.html_url ?? p.url ?? null,
+        author: p.user && p.user.login || null,
+        createdAt: p.created_at ?? null
+      });
+    }
+  }
+  return matched;
+}
+async function listOpenPRsReferencingIssue(repoFullName, issueNumber) {
   try {
     const res = await fetch(`${GH_API2}/repos/${repoFullName}/pulls?state=open&per_page=100`, {
       headers: GH_HEADERS2,
@@ -10031,12 +10337,35 @@ async function countOpenPRsReferencingIssue(repoFullName, issueNumber) {
     const prs = await res.json();
     if (!Array.isArray(prs)) return null;
     if (prs.length === 100) return null;
-    const needle = new RegExp(`#${issueNumber}\\b`);
-    return prs.filter((p) => needle.test(`${p.title ?? ""}
-${p.body ?? ""}`)).length;
+    const matched = matchReferencingPrs(prs, issueNumber);
+    return { total: matched.length, prs: matched };
   } catch {
     return null;
   }
+}
+async function countOpenPRsReferencingIssue(repoFullName, issueNumber) {
+  return (await listOpenPRsReferencingIssue(repoFullName, issueNumber))?.total ?? null;
+}
+function fmtAge(isoString, nowMs) {
+  const t = Date.parse(isoString);
+  if (Number.isNaN(t)) return "unknown";
+  const mins = Math.floor(Math.max(0, nowMs - t) / 6e4);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+function diffContention(prevNumbers, currentNumbers) {
+  const prev = new Set(Array.isArray(prevNumbers) ? prevNumbers : []);
+  const cur = new Set(Array.isArray(currentNumbers) ? currentNumbers : []);
+  const added = (Array.isArray(currentNumbers) ? currentNumbers : []).filter((n) => !prev.has(n));
+  const removed = (Array.isArray(prevNumbers) ? prevNumbers : []).filter((n) => !cur.has(n));
+  return { added, removed };
+}
+function fmtContentionPr(pr, nowMs, isNew) {
+  const who = pr.author ? `@${pr.author}` : "unknown";
+  const link = pr.url ? ` ${pr.url}` : "";
+  return `    - #${pr.number} by ${who} (opened ${fmtAge(pr.createdAt, nowMs)})${link}${isNew ? " [NEW]" : ""}`;
 }
 async function fetchIssue(repoFullName, issueNumber) {
   try {
@@ -10352,9 +10681,34 @@ async function cmdStatus(id) {
     console.log(id ? `No claim with id '${id}'.` : "No claims to poll.");
     return;
   }
+  const ACTIVE_PRE_SUBMIT = /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"]);
+  const renderContention = (c, result, { excludeNumber } = {}) => {
+    const nowMs = Date.now();
+    const prs = result.prs.filter((p) => p.number !== excludeNumber);
+    const curNumbers = prs.map((p) => p.number);
+    const hadSnapshot = Boolean(c.contention && Array.isArray(c.contention.prNumbers));
+    const { added } = diffContention(hadSnapshot ? c.contention.prNumbers : [], curNumbers);
+    const newSet = hadSnapshot ? new Set(added) : /* @__PURE__ */ new Set();
+    if (prs.length > 0) {
+      const label = excludeNumber ? "other open PR(s) reference" : "open PR(s) reference";
+      console.log(`  \u26A0 contention: ${prs.length} ${label} this issue \u2014 ${c.title}`);
+      for (const pr of prs) console.log(fmtContentionPr(pr, nowMs, newSet.has(pr.number)));
+    }
+    claims.updateClaim(c.id, { contention: { checkedAt: new Date(nowMs).toISOString(), prNumbers: curNumbers } });
+    return prs.length > 0;
+  };
   let polled = 0;
   for (const c of targets) {
-    if (!c.prUrl) continue;
+    if (!c.prUrl) {
+      if (ACTIVE_PRE_SUBMIT.has(c.state)) {
+        const num = (parseGitHubUrl(c.issueUrl) || {}).number;
+        const result = num ? await listOpenPRsReferencingIssue(c.repoFullName, num) : null;
+        if (result && result.total > 0 && renderContention(c, result)) {
+          console.log(CONTENTION_HINT);
+        }
+      }
+      continue;
+    }
     const res = await pollPR(c.prUrl);
     if (!res) {
       console.log(`  ? ${c.title} \u2014 could not read PR state (${c.prUrl})`);
@@ -10371,6 +10725,12 @@ async function cmdStatus(id) {
     }
     const mark = res.merged ? "\u2713 merged" : res.state === "closed" ? "\u2717 closed (unmerged)" : "\u2026 open";
     console.log(`  ${mark} \u2014 ${c.title}  (${c.prUrl})`);
+    if (!res.merged && res.state !== "closed") {
+      const num = (parseGitHubUrl(c.issueUrl) || {}).number;
+      const ourNum = (parseGitHubUrl(c.prUrl) || {}).number;
+      const result = num ? await listOpenPRsReferencingIssue(c.repoFullName, num) : null;
+      if (result) renderContention(c, result, { excludeNumber: ourNum });
+    }
   }
   if (polled === 0) console.log("  No submitted claims with a PR URL yet. Set one via `claim update <id> submitted` after `submit`.");
   printMetric(claims.acceptedPRRate());
@@ -10391,6 +10751,23 @@ async function cmdUpdate(id, state, prUrl) {
       process.exit(1);
     }
     patch.prUrl = prUrl;
+  }
+  if (patch.prUrl) {
+    try {
+      const core = await Promise.resolve().then(() => (init_src(), src_exports));
+      const facts = await core.fetchPRScoringFacts(prUrl, process.env.GITHUB_TOKEN || void 0);
+      if (facts) {
+        if (!facts.merged) console.log("  \u24D8 heads-up: that PR is not merged yet \u2014 it will not count until it is.");
+        if (facts.mergedById != null && facts.authorId != null && facts.mergedById === facts.authorId)
+          console.log("  \u24D8 heads-up: that PR was merged by its own author \u2014 self-merges are not external acceptance.");
+        const claim = claims.findClaim(id);
+        const claimedIssueRef = claim && claim.issueUrl ? parseGitHubUrl(claim.issueUrl) : null;
+        const claimedIssue = claimedIssueRef ? claimedIssueRef.number : null;
+        if (claimedIssue != null && facts.closesIssues.length && !facts.closesIssues.includes(claimedIssue))
+          console.log(`  \u24D8 heads-up: that PR closes ${facts.closesIssues.map((n) => "#" + n).join(", ")}, not the issue you claimed (#${claimedIssue}).`);
+      }
+    } catch {
+    }
   }
   const updated = claims.updateClaim(id, patch);
   if (!updated) {
@@ -10430,10 +10807,13 @@ async function cmdAttach(id, worktree, branch) {
   claims.updateClaim(id, { worktreePath: toplevel, branch });
   console.log(`Attached ${id}: worktree=${toplevel} branch=${branch}`);
 }
-async function cmdSubmit(id, worktreeOverride) {
+async function cmdSubmit(id, flags = {}) {
+  const worktreeOverride = flags.worktree;
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
   if (!id) {
-    console.error("Usage: terminalhire claim submit <id> [--worktree <path>]");
+    console.error(
+      "Usage: terminalhire claim submit <id> [--worktree <path>] [--yes] [--body-file <path>] [--no-body] [--title <t>] [--no-closes]"
+    );
     process.exit(1);
   }
   const claim = claims.findClaim(id);
@@ -10459,27 +10839,24 @@ async function cmdSubmit(id, worktreeOverride) {
     );
     process.exit(1);
   }
-  const inspectDir = worktreeOverride || process.cwd();
-  let toplevel;
-  try {
-    toplevel = await sh("git", ["-C", inspectDir, "rev-parse", "--show-toplevel"]);
-  } catch {
-    console.error(
-      `terminalhire claim: '${inspectDir}' is not a git work tree.
-  Run submit from inside the claim's worktree (or pass --worktree <path>).`
-    );
+  const toplevelOf = async (dir) => {
+    try {
+      return await sh("git", ["-C", dir, "rev-parse", "--show-toplevel"]);
+    } catch {
+      return null;
+    }
+  };
+  const recorded = claim.worktreePath;
+  const override = worktreeOverride === void 0 ? void 0 : await toplevelOf(worktreeOverride);
+  const cwdToplevel = await toplevelOf(process.cwd());
+  const recordedIsGit = await toplevelOf(recorded) === recorded;
+  const resolved = resolveSubmitWorktree({ override, cwdToplevel, recorded, recordedIsGit });
+  if (resolved.error) {
+    console.error(`terminalhire claim: ${resolved.error}`);
     process.exit(1);
   }
-  if (toplevel !== claim.worktreePath) {
-    console.error(
-      `terminalhire claim: worktree mismatch \u2014 refusing to push.
-  expected: ${claim.worktreePath}
-  found:    ${toplevel}
-  Run submit from inside the claim's worktree (or pass --worktree <path>).`
-    );
-    process.exit(1);
-  }
-  const wt = toplevel;
+  if (resolved.note) console.log(`  ${resolved.note}`);
+  const wt = resolved.wt;
   const curBranch = await sh("git", ["-C", wt, "rev-parse", "--abbrev-ref", "HEAD"]);
   if (curBranch !== claim.branch) {
     console.error(
@@ -10511,31 +10888,16 @@ async function cmdSubmit(id, worktreeOverride) {
       process.exit(1);
     }
   }
-  const dirty = await sh("git", ["-C", wt, "status", "--porcelain"]);
+  const dirty = await sh("git", ["-C", wt, "status", "--porcelain", "--untracked-files=no"]);
   if (dirty) {
     console.error("terminalhire claim: working tree is not clean \u2014 commit or stash before submitting (submit pushes what was reviewed).");
     process.exit(1);
   }
-  let originUrl;
+  let untrackedFiles = [];
   try {
-    originUrl = await sh("git", ["-C", wt, "remote", "get-url", "origin"]);
+    const untrackedOut = await sh("git", ["-C", wt, "status", "--porcelain", "--untracked-files=normal"]);
+    untrackedFiles = untrackedOut.split("\n").filter((l) => l.startsWith("?? ")).map((l) => l.slice(3).trim()).filter(Boolean);
   } catch {
-    console.error("terminalhire claim: no 'origin' remote in the worktree.");
-    process.exit(1);
-  }
-  const originRepo = parseRepoFromRemote(originUrl);
-  if (!originRepo) {
-    console.error(`terminalhire claim: could not parse owner/repo from origin (${originUrl}).`);
-    process.exit(1);
-  }
-  if (originRepo.toLowerCase() === claim.repoFullName.toLowerCase()) {
-    console.error(
-      `terminalhire claim: origin points at the UPSTREAM bounty repo (${claim.repoFullName}), not a fork.
-  Pushing would create a branch directly on the target repo. Fork first:
-    gh repo fork ${claim.repoFullName} --clone=false
-  set your fork as 'origin' (or push it there), then retry.`
-    );
-    process.exit(1);
   }
   let ghUser;
   try {
@@ -10544,23 +10906,156 @@ async function cmdSubmit(id, worktreeOverride) {
     console.error("terminalhire claim: 'gh' CLI not available or not authenticated. Run 'gh auth login'.");
     process.exit(1);
   }
+  const collectRemotes = async () => {
+    let names;
+    try {
+      names = (await sh("git", ["-C", wt, "remote"])).split("\n").map((s) => s.trim()).filter(Boolean);
+    } catch {
+      console.error("terminalhire claim: could not list git remotes in the worktree.");
+      process.exit(1);
+    }
+    const parsed = [];
+    for (const name of names) {
+      let url;
+      try {
+        url = await sh("git", ["-C", wt, "remote", "get-url", name]);
+      } catch {
+        continue;
+      }
+      const repo = parseRepoFromRemote(url);
+      if (repo) parsed.push({ name, repo });
+    }
+    return { names, remotes: parsed };
+  };
+  let { names: remoteNames, remotes } = await collectRemotes();
+  let pushRemote = selectPushRemote(remotes, claim.repoFullName, ghUser);
+  if (!pushRemote) {
+    const noForkError = () => {
+      console.error(
+        `terminalhire claim: no remote points at your fork of the UPSTREAM bounty repo (${claim.repoFullName}) \u2014 refusing to push.
+  Pushing would create a branch directly on the target repo. Fork first:
+    gh repo fork ${claim.repoFullName} --clone=false
+  add your fork as a remote, then retry.`
+      );
+    };
+    const upstreamRepoName = claim.repoFullName.split("/")[1];
+    const forkFullName = `${ghUser}/${upstreamRepoName}`;
+    if (process.stdin.isTTY && !flags.yes) {
+      console.log(`
+  No remote points at your fork of ${claim.repoFullName}.`);
+      const doFork = await confirm(
+        `  Create fork ${forkFullName} with gh and add it as remote 'fork'? (y/N) `
+      );
+      if (doFork) {
+        try {
+          await sh("gh", ["repo", "fork", claim.repoFullName, "--clone=false"]);
+        } catch (err) {
+          console.error(`terminalhire claim: 'gh repo fork' failed. ${err.stderr || err.message || err}`);
+          noForkError();
+          process.exit(1);
+        }
+        let verified = false;
+        try {
+          verified = await sh("gh", ["api", `repos/${forkFullName}`, "--jq", ".fork"]) === "true";
+        } catch {
+          verified = false;
+        }
+        if (!verified) {
+          noForkError();
+          console.error("  (fork created but could not be verified \u2014 add it as a remote manually.)");
+          process.exit(1);
+        }
+        if (remoteNames.includes("fork")) {
+          console.error(
+            `terminalhire claim: a remote named 'fork' already exists but does not point at your fork \u2014 refusing to clobber it. Fix it manually and retry.`
+          );
+          process.exit(1);
+        }
+        try {
+          await sh("git", ["-C", wt, "remote", "add", "fork", `https://github.com/${forkFullName}.git`]);
+        } catch (err) {
+          console.error(`terminalhire claim: could not add the 'fork' remote. ${err.stderr || err.message || err}`);
+          process.exit(1);
+        }
+        console.log(`  \u2713 Forked ${claim.repoFullName} \u2192 ${forkFullName} and added remote 'fork'.`);
+        ({ names: remoteNames, remotes } = await collectRemotes());
+        pushRemote = selectPushRemote(remotes, claim.repoFullName, ghUser);
+      }
+    }
+    if (!pushRemote) {
+      noForkError();
+      process.exit(1);
+    }
+  }
+  const originRepo = pushRemote.repo;
   const upstream = claim.repoFullName;
   const head = `${ghUser}:${claim.branch}`;
+  const title = flags.title || claim.title;
+  const noBody = Boolean(flags["no-body"]);
+  const prBodyPath = join17(wt, "PR-BODY.md");
+  const bodySource = pickBodySource({
+    bodyFileFlag: flags["body-file"],
+    noBody,
+    prBodyExists: existsSync10(prBodyPath)
+  });
+  let bodyText;
+  let bodyDescr;
+  if (bodySource === "body-file") {
+    try {
+      bodyText = readFileSync17(flags["body-file"], "utf8");
+    } catch (err) {
+      console.error(`terminalhire claim: could not read --body-file '${flags["body-file"]}': ${err.message ?? err}`);
+      process.exit(1);
+    }
+    bodyDescr = `--body-file ${flags["body-file"]}`;
+  } else if (bodySource === "pr-body") {
+    bodyText = readFileSync17(prBodyPath, "utf8");
+    bodyDescr = "PR-BODY.md (auto-detected)";
+  } else {
+    bodyDescr = "(default: Closes + disclosure)";
+  }
+  const noCloses = Boolean(flags["no-closes"]);
   console.log(`
   SUBMIT \xB7 ${claim.title}`);
   console.log(`  upstream: ${upstream}`);
-  console.log(`  fork:     ${originRepo}`);
+  console.log(`  fork:     ${originRepo} (remote '${pushRemote.name}')`);
   console.log(`  branch:   ${claim.branch}`);
   console.log(`  head:     ${head}`);
   console.log(`  issue:    ${claim.issueUrl}`);
-  const ok = await confirm(`
+  console.log(`  title:    ${title}`);
+  console.log(`  body:     ${bodyDescr} (+ disclosure)`);
+  if (untrackedFiles.length > 0) {
+    console.log(`  note:     ${untrackedFiles.length} untracked file(s) present (never pushed): ${untrackedFiles.join(", ")}`);
+  }
+  {
+    const issueNo = (parseGitHubUrl(claim.issueUrl) || {}).number;
+    const contention = issueNo ? await listOpenPRsReferencingIssue(claim.repoFullName, issueNo) : null;
+    if (contention && contention.total > 0) {
+      console.log(`  \u26A0 contention: ${contention.total} open PR(s) already reference this issue:`);
+      const nowMs = Date.now();
+      for (const pr of contention.prs) console.log(fmtContentionPr(pr, nowMs, false));
+      console.log(CONTENTION_HINT);
+    }
+  }
+  let ok;
+  if (flags.yes) {
+    console.log("\n  --yes supplied \u2014 skipping interactive confirm.");
+    ok = true;
+  } else if (!process.stdin.isTTY) {
+    console.error(
+      "\nterminalhire claim: stdin is not a TTY \u2014 cannot ask for confirmation.\n  Re-run with --yes to confirm non-interactively (a human must type it;\n  agents/skills must never pass --yes)."
+    );
+    process.exit(1);
+  } else {
+    ok = await confirm(`
   Push '${claim.branch}' to ${originRepo} and open a PR against ${upstream}? (y/N) `);
+  }
   if (!ok) {
     console.log("Aborted \u2014 nothing pushed.");
     return;
   }
   try {
-    await sh("git", ["-C", wt, "push", "origin", claim.branch]);
+    await sh("git", ["-C", wt, "push", pushRemote.name, claim.branch]);
   } catch (err) {
     console.error(`terminalhire claim: git push failed (NOT force-pushed). ${err.stderr || err.message || err}`);
     console.error(`  Resolve and retry, or open the PR manually then: terminalhire claim update ${id} submitted <prUrl>`);
@@ -10568,20 +11063,35 @@ async function cmdSubmit(id, worktreeOverride) {
   }
   let prUrl = null;
   try {
-    const existing = await sh("gh", ["pr", "list", "--repo", upstream, "--head", head, "--state", "open", "--json", "url", "-q", ".[0].url // empty"]);
-    if (existing) prUrl = existing;
+    const out = await sh("gh", ["pr", "list", "--repo", upstream, "--head", claim.branch, "--state", "open", "--json", "url,headRepositoryOwner"]);
+    prUrl = pickExistingPr(JSON.parse(out || "[]"), ghUser);
+    if (prUrl) console.log(`  Found existing open PR \u2014 adopting: ${prUrl}`);
   } catch {
   }
   if (!prUrl) {
     const issueNum = (parseGitHubUrl(claim.issueUrl) || {}).number;
-    const body = buildSubmitBody(issueNum);
+    const body = buildSubmitBody(issueNum, { bodyText, noCloses });
     try {
-      const out = await sh("gh", ["pr", "create", "--repo", upstream, "--head", head, "--title", claim.title, "--body", body]);
+      const out = await sh("gh", ["pr", "create", "--repo", upstream, "--head", head, "--title", title, "--body", body]);
       prUrl = out.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("https://github.com/")).pop() || null;
     } catch (err) {
-      console.error(`terminalhire claim: branch pushed, but 'gh pr create' failed. ${err.stderr || err.message || err}`);
-      console.error(`  Open the PR manually (gh pr create / web UI), then: terminalhire claim update ${id} submitted <prUrl>`);
-      process.exit(1);
+      const stderrText = err.stderr || err.message || String(err);
+      if (/already exists/i.test(stderrText)) {
+        try {
+          const retryOut = await sh("gh", ["pr", "list", "--repo", upstream, "--head", claim.branch, "--state", "open", "--json", "url,headRepositoryOwner"]);
+          const recovered = pickExistingPr(JSON.parse(retryOut || "[]"), ghUser);
+          if (recovered) {
+            prUrl = recovered;
+            console.log(`  Found existing open PR \u2014 adopting: ${prUrl}`);
+          }
+        } catch {
+        }
+      }
+      if (!prUrl) {
+        console.error(`terminalhire claim: branch pushed, but 'gh pr create' failed. ${stderrText}`);
+        console.error(`  Open the PR manually (gh pr create / web UI), then: terminalhire claim update ${id} submitted <prUrl>`);
+        process.exit(1);
+      }
     }
   }
   if (!prUrl || !parseGitHubUrl(prUrl)) {
@@ -10879,7 +11389,8 @@ async function cmdRevoke() {
 }
 async function run7() {
   const verb = process.argv[2];
-  const { flags, positional } = parseArgs(process.argv.slice(3));
+  const rawArgs = process.argv.slice(3).map((a) => a === "-y" ? "--yes" : a);
+  const { flags, positional } = parseArgs(rawArgs);
   const active = Boolean(flags.active);
   const json = Boolean(flags.json);
   if (verb === "--push") {
@@ -10908,7 +11419,7 @@ async function run7() {
         await cmdAttach(positional[0], flags.worktree, flags.branch);
         break;
       case "submit":
-        await cmdSubmit(positional[0], flags.worktree);
+        await cmdSubmit(positional[0], flags);
         break;
       case "release":
         await cmdRelease(positional[0]);
@@ -10922,7 +11433,7 @@ async function run7() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR13, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, API_URL6, CLAIM_SYNC_BASE2, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, GH_API2, GH_HEADERS2, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS;
+var TERMINALHIRE_DIR13, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, API_URL6, CLAIM_SYNC_BASE2, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, GH_API2, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
@@ -10940,9 +11451,10 @@ var init_jpi_claim = __esm({
     CLAIM_POLL_TIMEOUT_MS = 10 * 60 * 1e3;
     GH_API2 = "https://api.github.com";
     GH_HEADERS2 = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
+    CONTENTION_HINT = "    tip: if scopes overlap, comment on the ISSUE comparing scope \u2014 generous + compatible wins triage.";
     AI_DISCLOSURE_NOTE = "---\nThis contribution was developed with AI assistance via [terminalhire](https://terminalhire.com). The author has reviewed the change and takes responsibility for its content.";
     pExecFile = promisify(execFile);
-    VALUE_FLAGS = /* @__PURE__ */ new Set(["worktree", "branch"]);
+    VALUE_FLAGS = /* @__PURE__ */ new Set(["worktree", "branch", "body-file", "title"]);
   }
 });
 

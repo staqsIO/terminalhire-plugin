@@ -827,6 +827,13 @@ var init_indexer = __esm({
   }
 });
 
+// ../../packages/core/src/credit.ts
+var init_credit = __esm({
+  "../../packages/core/src/credit.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/intro.ts
 function buildIntroPayload(input) {
   const payload = {
@@ -956,6 +963,7 @@ var init_src = __esm({
     init_indexer();
     init_partners();
     init_github();
+    init_credit();
     init_intro();
     init_directoryThreshold();
     init_chatCrypto();
@@ -1013,9 +1021,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/claim-frictionless/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/claim-frictionless/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {

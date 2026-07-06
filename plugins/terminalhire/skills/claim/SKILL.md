@@ -73,9 +73,9 @@ States: `claimed` → `working` → `in-review` → `ready` → `submitted` → 
 
 ### Submit a `ready` claim (the only step that pushes)
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim submit <id>   # run from INSIDE the claim's worktree
+node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim submit <id>   # runs from anywhere — auto-resolves the recorded worktree
 ```
-`submit` pushes the worktree branch to the user's **fork** and opens the PR against the upstream bounty repo, then advances `ready → submitted` with the PR URL attached. It refuses unless the claim is `ready` (and not `revise`), the worktree/branch match what was recorded (see `attach` below), the tree is clean, and `origin` is a fork (never the upstream). It **always asks for explicit confirmation** before pushing and **never force-pushes**. If the push succeeds but PR creation fails, open the PR manually then `claim update <id> submitted <prUrl>`.
+`submit` pushes the worktree branch to the user's **fork** and opens the PR against the upstream bounty repo, then advances `ready → submitted` with the PR URL attached. It resolves the worktree automatically: the cwd if it matches the recorded path, else the recorded worktree (an explicit `--worktree` that contradicts the record is a hard error, as is a recorded worktree that no longer exists — re-run `attach`). It refuses unless the claim is `ready` (and not `revise`), the branch matches what was recorded (see `attach` below), and the tree is clean. Any configured remote pointing at the user's fork of the upstream works (not just `origin`); if no fork remote exists, submit offers to create the fork and add it as a `fork` remote (only with a human at an interactive terminal, and it never repoints `origin`). A `PR-BODY.md` at the worktree root is auto-detected as the PR body (`--body-file` overrides it, `--no-body` suppresses); the confirm card shows which body source is used plus any competing open PRs referencing the issue. It **always asks for explicit confirmation** before pushing and **never force-pushes**. If the push succeeds but PR creation fails, open the PR manually then `claim update <id> submitted <prUrl>`.
 
 `submit` **always** appends a baseline AI-assistance disclosure line to the PR body — there is no flag to disable it. If the target repo's PR template (read during the policy check above) asks for its own disclosure format or a specific section, honor that too — write the PR description to match the repo's template, with the CLI's baseline disclosure alongside it, not instead of it.
 
@@ -92,7 +92,7 @@ If the user asks you to actually DO a claimed bounty, work it in an **isolated g
   ```bash
   node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim attach <id> --worktree <absPath> --branch <branchName>
   ```
-  `origin` in that worktree must be the user's **fork** of the bounty repo (`gh repo fork <upstream> --clone=false` if needed), not the upstream — `submit` refuses to push to the upstream.
+  Some remote in that worktree must point at the user's **fork** of the bounty repo — `submit` refuses to push to the upstream itself. `origin` pointing at the upstream is fine as long as a fork remote exists too; if none does, `submit` offers to create the fork and add a `fork` remote at confirm time (interactive terminal only).
 - **Never `git push` or `gh pr`** — the user reviews the diff first, then `claim submit` pushes deliberately.
 - Clone + read the issue + write a patch. **Do not run the repo's tests/build** without the user's explicit go-ahead (it is arbitrary third-party code).
 - Never read or pass `~/.terminalhire/*` or the user's tokens into the work — the bounty work never needs the profile.
