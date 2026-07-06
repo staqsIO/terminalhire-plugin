@@ -346,9 +346,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline-wt/release-v0240/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline-wt/release-v0240/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -13414,7 +13414,8 @@ function createRuntime({
   input = typeof process !== "undefined" ? process.stdin : void 0,
   output = typeof process !== "undefined" ? process.stdout : void 0,
   signals = typeof process !== "undefined" ? process : void 0,
-  exit = (code) => process.exit(code)
+  exit = (code) => process.exit(code),
+  mouse = false
 } = {}) {
   let entered = false;
   let cleaned = false;
@@ -13442,7 +13443,8 @@ function createRuntime({
     } catch {
     }
     try {
-      if (output && typeof output.write === "function") output.write(SHOW_CURSOR + EXIT_ALT);
+      if (output && typeof output.write === "function")
+        output.write((mouse ? MOUSE_OFF : "") + SHOW_CURSOR + EXIT_ALT);
     } catch {
     }
   }
@@ -13477,7 +13479,8 @@ function createRuntime({
       signals.on("unhandledRejection", onUncaught);
       signals.on("exit", onExitEvt);
     }
-    if (output && typeof output.write === "function") output.write(ENTER_ALT + HIDE_CURSOR);
+    if (output && typeof output.write === "function")
+      output.write(ENTER_ALT + HIDE_CURSOR + (mouse ? MOUSE_ON : ""));
   }
   return {
     enter,
@@ -13700,7 +13703,7 @@ function gradientFg(stops, t, level = "truecolor") {
   const b = Math.round(c0.b + (c1.b - c0.b) * localT);
   return level === "256" ? `\x1B[38;5;${rgbTo256(r, g, b)}m` : `\x1B[38;2;${r};${g};${b}m`;
 }
-var HIDE_CURSOR, SHOW_CURSOR, ENTER_ALT, EXIT_ALT, INVERSE, RESET, BOLD, KEY_CTRL_C, KEY_ESC, KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT, KEY_TAB, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, KEY_Q, KEY_DIGITS, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, PALETTE, COLOR_ROLES, CUBE_STEPS;
+var HIDE_CURSOR, SHOW_CURSOR, ENTER_ALT, EXIT_ALT, MOUSE_ON, MOUSE_OFF, INVERSE, RESET, BOLD, KEY_CTRL_C, KEY_ESC, KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT, KEY_TAB, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, KEY_Q, KEY_DIGITS, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, PALETTE, COLOR_ROLES, CUBE_STEPS;
 var init_tui_core = __esm({
   "bin/tui-core.js"() {
     "use strict";
@@ -13708,6 +13711,8 @@ var init_tui_core = __esm({
     SHOW_CURSOR = "\x1B[?25h";
     ENTER_ALT = "\x1B[?1049h";
     EXIT_ALT = "\x1B[?1049l";
+    MOUSE_ON = "\x1B[?1000h\x1B[?1006h";
+    MOUSE_OFF = "\x1B[?1006l\x1B[?1000l";
     INVERSE = "\x1B[7m";
     RESET = "\x1B[0m";
     BOLD = "\x1B[1m";
@@ -15658,7 +15663,7 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
       output && output.isTTY
     );
     const c = (role) => degrade(role, level);
-    const runtime = createRuntime({ input, output, signals });
+    const runtime = createRuntime({ input, output, signals, mouse: true });
     const initial = readTermSize(output);
     const renderer = createRenderer({ output, rows: initial.rows, cols: initial.cols });
     let active = 0;
@@ -15689,6 +15694,52 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
     let homeIntrosOpen = false;
     let splashActive = true;
     let splashTimer = null;
+    const MOUSE_SPLIT_MS = 50;
+    let mousePending = "";
+    let mouseFlushTimer = null;
+    function clearMousePending() {
+      mousePending = "";
+      if (mouseFlushTimer) {
+        clearTimeout(mouseFlushTimer);
+        mouseFlushTimer = null;
+      }
+    }
+    function armMouseFlush() {
+      mouseFlushTimer = setTimeout(() => {
+        const held = mousePending;
+        mousePending = "";
+        mouseFlushTimer = null;
+        if (done) return;
+        if (held === KEY_ESC || held === "\x1B[") {
+          if (mode !== "nav") escToNav();
+          const tail = held.slice(1);
+          if (tail) {
+            onData(Buffer.from(tail, "utf8"));
+            return;
+          }
+          repaint();
+        }
+      }, MOUSE_SPLIT_MS);
+      if (mouseFlushTimer.unref) mouseFlushTimer.unref();
+    }
+    function isIncompleteMousePrefix(x) {
+      return /^\x1b\[(<[0-9;]*)?$/.test(x);
+    }
+    function beginsMouse(x) {
+      return /^\x1b\[<\d+;\d+;\d+[Mm]/.test(x) || isIncompleteMousePrefix(x);
+    }
+    function reassembles(x) {
+      return beginsMouse(x) || x === KEY_UP || x === KEY_DOWN || x === KEY_LEFT || x === KEY_RIGHT || x === KEY_SHIFT_TAB;
+    }
+    function completesEscSequence(x) {
+      return (
+        // eslint-disable-next-line no-control-regex -- a leading COMPLETE SGR mouse report by design
+        /^\x1b\[<\d+;\d+;\d+[Mm]/.test(x) || x === KEY_UP || x === KEY_DOWN || x === KEY_LEFT || x === KEY_RIGHT || x === KEY_SHIFT_TAB
+      );
+    }
+    function continuesSgrMouse(x) {
+      return /^\x1b\[<[0-9;]*$/.test(x);
+    }
     const errMsg = (e) => String(e && e.message ? e.message : e);
     function paletteResults() {
       return PALETTE_VERBS.filter((v) => fuzzyMatch(paletteQuery, v));
@@ -15940,7 +15991,7 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
       rows.push(inboxLine, introsLine);
       return rows;
     }
-    function activeSourceIndex() {
+    function sourceIndexForVisible(visibleTarget) {
       const name = PANES[active];
       const raw = paneRows(name);
       const q = filterByPane[active];
@@ -15948,14 +15999,16 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
       for (let i = 0; i < raw.length; i++) {
         if (substrMatch(q, raw[i])) {
           visibleIdx++;
-          if (visibleIdx === offsetByPane[active]) return i;
+          if (visibleIdx === visibleTarget) return i;
         }
       }
       return -1;
     }
-    function activateRow() {
+    function activeSourceIndex() {
+      return sourceIndexForVisible(offsetByPane[active]);
+    }
+    function activateRow(idx = activeSourceIndex()) {
       const name = PANES[active];
-      const idx = activeSourceIndex();
       if (idx < 0) return;
       if (name === "Jobs") {
         const st = listState.Jobs;
@@ -16025,6 +16078,7 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
       const q = filterByPane[active];
       return paneRows(PANES[active]).filter((r) => substrMatch(q, r));
     }
+    const NAV_WIDTH = 16;
     function bodyRegion() {
       const rows = renderer.rows;
       const top = 2;
@@ -16072,7 +16126,7 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
         return;
       }
       const buf = createBuffer(rows, cols);
-      const navWidth = 16;
+      const navWidth = NAV_WIDTH;
       const mainCol = navWidth + 1;
       const mainWidth = cols - mainCol;
       const { top: bodyTop, bottom: bodyBottom, listTop, viewH } = bodyRegion();
@@ -16171,6 +16225,7 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
         "\u2190 / \u2192      previous / next pane",
         "Tab        cycle pane forward",
         "Shift+Tab  cycle pane backward",
+        "click      select section \xB7 wheel scroll",
         "Ctrl+K / : open command palette",
         "/          filter the active pane",
         "?          toggle this help",
@@ -16288,10 +16343,63 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
         }
       }
     }
+    function onClick(row, col) {
+      if (mode !== "nav") return;
+      const { top: bodyTop, bottom: bodyBottom, listTop, viewH } = bodyRegion();
+      if (col < NAV_WIDTH) {
+        const paneIdx = row - bodyTop;
+        if (paneIdx >= 0 && paneIdx < PANES.length && row <= bodyBottom) active = paneIdx;
+        return;
+      }
+      if (col > NAV_WIDTH && row >= listTop && row < listTop + viewH) {
+        const visibleTarget = offsetByPane[active] + (row - listTop);
+        activateRow(sourceIndexForVisible(visibleTarget));
+      }
+    }
+    function handleMouse(seq) {
+      const head = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])/;
+      let rest = seq;
+      let m;
+      while (m = head.exec(rest)) {
+        const b = Number(m[1]);
+        const col = Number(m[2]) - 1;
+        const row = Number(m[3]) - 1;
+        const press = m[4] === "M";
+        rest = rest.slice(m[0].length);
+        if (b === 64) {
+          if (mode === "nav") scrollActive(-1);
+          continue;
+        }
+        if (b === 65) {
+          if (mode === "nav") scrollActive(1);
+          continue;
+        }
+        if (press && (b & 3) === 0) onClick(row, col);
+      }
+      return rest;
+    }
     function onData(chunk) {
       if (done) return;
-      const s = chunk.toString("utf8");
+      let s = chunk.toString("utf8");
       if (s === KEY_CTRL_C) return quit();
+      if (mousePending) {
+        const combined = mousePending + s;
+        const wasEsc = mousePending === KEY_ESC;
+        clearMousePending();
+        if (wasEsc) {
+          if (completesEscSequence(combined)) {
+            s = combined;
+          } else if (continuesSgrMouse(combined)) {
+            mousePending = combined;
+            armMouseFlush();
+            return;
+          } else if (mode !== "nav") {
+            escToNav();
+          }
+        } else if (reassembles(combined)) {
+          s = combined;
+        }
+      }
       if (splashActive) {
         splashActive = false;
         if (splashTimer) {
@@ -16300,9 +16408,41 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
         }
         renderer.invalidate();
       }
-      if (s === KEY_ESC) {
-        if (mode !== "nav") escToNav();
+      if (s === "\x1B[") {
+        mousePending = s;
+        armMouseFlush();
+        return;
+      }
+      if (s.length >= 3 && s.charCodeAt(0) === 27 && s[1] === "[" && s[2] === "<") {
+        const remainder = handleMouse(s);
+        if (remainder) {
+          if (isIncompleteMousePrefix(remainder)) {
+            mousePending = remainder;
+            armMouseFlush();
+          } else if (remainder !== s) {
+            onData(Buffer.from(remainder, "utf8"));
+            return;
+          } else {
+            const tail = s.replace(/^\x1b\[<[0-9;]*/, "");
+            if (tail && tail !== s) {
+              const escAt = tail.indexOf("\x1B");
+              const keys = escAt === -1 ? tail : tail.slice(0, escAt);
+              if (keys) dispatchKeys(keys);
+              if (escAt !== -1) {
+                onData(Buffer.from(tail.slice(escAt), "utf8"));
+                return;
+              }
+              repaint();
+              return;
+            }
+          }
+        }
         repaint();
+        return;
+      }
+      if (s === KEY_ESC) {
+        mousePending = KEY_ESC;
+        armMouseFlush();
         return;
       }
       if (s === KEY_SHIFT_TAB) {
@@ -16352,6 +16492,7 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
         clearTimeout(splashTimer);
         splashTimer = null;
       }
+      clearMousePending();
       try {
         input.removeListener("data", onData);
       } catch {

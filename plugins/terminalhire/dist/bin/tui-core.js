@@ -3,6 +3,8 @@ var HIDE_CURSOR = "\x1B[?25l";
 var SHOW_CURSOR = "\x1B[?25h";
 var ENTER_ALT = "\x1B[?1049h";
 var EXIT_ALT = "\x1B[?1049l";
+var MOUSE_ON = "\x1B[?1000h\x1B[?1006h";
+var MOUSE_OFF = "\x1B[?1006l\x1B[?1000l";
 var CLEAR = "\x1B[2J\x1B[H";
 var INVERSE = "\x1B[7m";
 var RESET = "\x1B[0m";
@@ -36,7 +38,8 @@ function createRuntime({
   input = typeof process !== "undefined" ? process.stdin : void 0,
   output = typeof process !== "undefined" ? process.stdout : void 0,
   signals = typeof process !== "undefined" ? process : void 0,
-  exit = (code) => process.exit(code)
+  exit = (code) => process.exit(code),
+  mouse = false
 } = {}) {
   let entered = false;
   let cleaned = false;
@@ -64,7 +67,8 @@ function createRuntime({
     } catch {
     }
     try {
-      if (output && typeof output.write === "function") output.write(SHOW_CURSOR + EXIT_ALT);
+      if (output && typeof output.write === "function")
+        output.write((mouse ? MOUSE_OFF : "") + SHOW_CURSOR + EXIT_ALT);
     } catch {
     }
   }
@@ -99,7 +103,8 @@ function createRuntime({
       signals.on("unhandledRejection", onUncaught);
       signals.on("exit", onExitEvt);
     }
-    if (output && typeof output.write === "function") output.write(ENTER_ALT + HIDE_CURSOR);
+    if (output && typeof output.write === "function")
+      output.write(ENTER_ALT + HIDE_CURSOR + (mouse ? MOUSE_ON : ""));
   }
   return {
     enter,
@@ -416,6 +421,8 @@ export {
   KEY_RIGHT,
   KEY_TAB,
   KEY_UP,
+  MOUSE_OFF,
+  MOUSE_ON,
   RESET,
   SHOW_CURSOR,
   clampOffset,
