@@ -732,6 +732,15 @@ var AI_BAN_DENYLIST = [
 ];
 var AI_BAN_LC = new Set(AI_BAN_DENYLIST.map((g) => g.toLowerCase()));
 
+// ../../packages/core/src/credential/rigor.ts
+var RIGOR = {
+  /** `authorAssociation` values that count as a maintainer review. */
+  MAINTAINER_ASSOCIATIONS: ["OWNER", "MEMBER", "COLLABORATOR"]
+};
+var MAINTAINER_SET = new Set(
+  RIGOR.MAINTAINER_ASSOCIATIONS.map((a) => a.toUpperCase())
+);
+
 // ../../packages/core/src/github.ts
 var RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
 

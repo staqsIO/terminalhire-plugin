@@ -41,9 +41,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/claim-frictionless/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/claim-frictionless/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -449,6 +449,15 @@ var AI_BAN_DENYLIST = [
   // supply-side drop on. https://www.theregister.com/ai-and-ml/2026/05/29/qemu-mulls-relaxing-ai-contribution-ban/
 ];
 var AI_BAN_LC = new Set(AI_BAN_DENYLIST.map((g) => g.toLowerCase()));
+
+// ../../packages/core/src/credential/rigor.ts
+var RIGOR = {
+  /** `authorAssociation` values that count as a maintainer review. */
+  MAINTAINER_ASSOCIATIONS: ["OWNER", "MEMBER", "COLLABORATOR"]
+};
+var MAINTAINER_SET = new Set(
+  RIGOR.MAINTAINER_ASSOCIATIONS.map((a) => a.toUpperCase())
+);
 
 // ../../packages/core/src/github.ts
 var RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;

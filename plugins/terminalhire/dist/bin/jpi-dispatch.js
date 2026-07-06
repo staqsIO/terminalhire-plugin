@@ -346,9 +346,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/claim-frictionless/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/claim-frictionless/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -1325,6 +1325,30 @@ var init_contribution_gate = __esm({
   }
 });
 
+// ../../packages/core/src/credential/rigor.ts
+function deriveRigorTiers(input) {
+  const tiers = {};
+  if (input.reviewerAssociations !== void 0) {
+    tiers.maintainerReviewed = input.reviewerAssociations.some(
+      (a) => MAINTAINER_SET.has(String(a).toUpperCase())
+    );
+  }
+  return tiers;
+}
+var RIGOR, MAINTAINER_SET;
+var init_rigor = __esm({
+  "../../packages/core/src/credential/rigor.ts"() {
+    "use strict";
+    RIGOR = {
+      /** `authorAssociation` values that count as a maintainer review. */
+      MAINTAINER_ASSOCIATIONS: ["OWNER", "MEMBER", "COLLABORATOR"]
+    };
+    MAINTAINER_SET = new Set(
+      RIGOR.MAINTAINER_ASSOCIATIONS.map((a) => a.toUpperCase())
+    );
+  }
+});
+
 // ../../packages/core/src/github.ts
 function ghHeaders(token) {
   const headers = {
@@ -1603,6 +1627,33 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
       if (mergedAt > b.lastMergedAt) b.lastMergedAt = mergedAt;
     }
   }
+  if (token) {
+    const enrichStats = { transient: 0 };
+    const enrichCount = Math.min(qualifyingPRs.length, MAX_ENRICH_PRS);
+    for (let i = 0; i < enrichCount; i++) {
+      const pr = qualifyingPRs[i];
+      const ref = parseGitHubRef(pr.url);
+      if (!ref || ref.kind !== "pull") continue;
+      try {
+        const reviews = await ghFetch(
+          `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/reviews?per_page=100`,
+          token
+        );
+        const reviewerAssociations = reviews.map((r) => r.author_association);
+        const tiers = deriveRigorTiers({ reviewerAssociations });
+        if (tiers.maintainerReviewed !== void 0) pr.maintainerReviewed = tiers.maintainerReviewed;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (TRANSIENT_META_ERROR.test(msg)) {
+          enrichStats.transient += 1;
+          console.warn(
+            `[acceptance] ${login}: per-PR rigor enrichment transient failure (${enrichStats.transient}) \u2014 leaving remaining tiers undefined rather than fabricating a false`
+          );
+          break;
+        }
+      }
+    }
+  }
   const finalDomains = {};
   for (const [d, b] of Object.entries(byDomain)) {
     finalDomains[d] = {
@@ -1809,6 +1860,17 @@ async function fetchPRScoringFacts(prUrl, token, signal) {
   }
   const contributors = await repoContributorCount(owner, repo, token, sig);
   const { closesIssues, linkageSource } = await resolveClosingIssues(owner, repo, number3, pr.body ?? "", token, sig);
+  let reviewerAssociations;
+  try {
+    const reviews = await ghFetch(
+      `/repos/${owner}/${repo}/pulls/${number3}/reviews?per_page=100`,
+      token,
+      sig
+    );
+    reviewerAssociations = reviews.map((r) => r.author_association);
+  } catch {
+    reviewerAssociations = void 0;
+  }
   return {
     repo: `${owner}/${repo}`,
     prNumber: number3,
@@ -1826,17 +1888,24 @@ async function fetchPRScoringFacts(prUrl, token, signal) {
     repoArchived: !!repoMeta?.archived,
     repoFork: !!repoMeta?.fork,
     repoPrivate: !!repoMeta?.private,
+    additions: pr.additions ?? null,
+    deletions: pr.deletions ?? null,
+    changedFiles: pr.changed_files ?? null,
+    repoForks: repoMeta?.forks_count ?? null,
+    reviewerAssociations,
     fetchedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
-var TRACTION_TOP_N, CANDIDATE_PR_PAGE, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
+var TRACTION_TOP_N, CANDIDATE_PR_PAGE, MAX_ENRICH_PRS, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
     init_vocabulary();
     init_contribution_gate();
+    init_rigor();
     TRACTION_TOP_N = 6;
     CANDIDATE_PR_PAGE = 50;
+    MAX_ENRICH_PRS = 12;
     OPEN_PR_PAGE = 20;
     TRANSIENT_META_ERROR = /HTTP 403|HTTP 429|rate limit|HTTP 5\d\d|timeout|network|fetch failed/i;
     RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
@@ -2608,14 +2677,14 @@ async function mapWithConcurrency(items, limit, fn) {
   if (items.length === 0) return results;
   const workers = Math.max(1, Math.min(Math.floor(limit) || 1, items.length));
   let next = 0;
-  async function run25() {
+  async function run26() {
     for (; ; ) {
       const i = next++;
       if (i >= items.length) return;
       results[i] = await fn(items[i], i);
     }
   }
-  await Promise.all(Array.from({ length: workers }, run25));
+  await Promise.all(Array.from({ length: workers }, run26));
   return results;
 }
 var init_concurrency = __esm({
@@ -4755,10 +4824,10 @@ function ensureBytes(title, hex, expectedLength) {
 function equalBytes(a, b) {
   if (a.length !== b.length)
     return false;
-  let diff = 0;
+  let diff2 = 0;
   for (let i = 0; i < a.length; i++)
-    diff |= a[i] ^ b[i];
-  return diff === 0;
+    diff2 |= a[i] ^ b[i];
+  return diff2 === 0;
 }
 function copyBytes(bytes) {
   return Uint8Array.from(bytes);
@@ -6422,10 +6491,10 @@ function checkOpts(defaults, opts) {
 function equalBytes2(a, b) {
   if (a.length !== b.length)
     return false;
-  let diff = 0;
+  let diff2 = 0;
   for (let i = 0; i < a.length; i++)
-    diff |= a[i] ^ b[i];
-  return diff === 0;
+    diff2 |= a[i] ^ b[i];
+  return diff2 === 0;
 }
 function getOutput(expectedLength, out, onlyAligned = true) {
   if (out === void 0)
@@ -7640,10 +7709,13 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
     if (daysAgo !== void 0) s += ` \u2014 most recent ${daysAgo}d ago`;
     proofSentence = `${s}.`;
   }
+  const enrichedPRs = ok ? credential.qualifyingPRs ?? [] : [];
+  const maintainerReviewedCount = enrichedPRs.some((p) => p.maintainerReviewed !== void 0) ? enrichedPRs.filter((p) => p.maintainerReviewed === true).length : void 0;
   const auditableBadge = ok ? {
     mergedTotal: credential.qualifyingTotal,
     distinctOrgs: orgCount,
-    thresholds: { stars: MIN_STARS, contributors: MIN_CONTRIBUTORS }
+    thresholds: { stars: MIN_STARS, contributors: MIN_CONTRIBUTORS },
+    ...maintainerReviewedCount !== void 0 ? { maintainerReviewedCount } : {}
   } : null;
   const profile = {
     headline,
@@ -7839,6 +7911,7 @@ __export(src_exports, {
   MENTION_DELTA: () => MENTION_DELTA,
   MIN_CONTRIBUTORS: () => MIN_CONTRIBUTORS,
   MIN_STARS: () => MIN_STARS,
+  RIGOR: () => RIGOR,
   STRONG_MATCH_THRESHOLD: () => STRONG_MATCH_THRESHOLD,
   SYNONYMS: () => SYNONYMS,
   TRIVIAL_PR_TITLE: () => TRIVIAL_PR_TITLE,
@@ -7867,6 +7940,7 @@ __export(src_exports, {
   decryptMessage: () => decryptMessage,
   deriveLegibleProfile: () => deriveLegibleProfile,
   deriveResumeTrend: () => deriveResumeTrend,
+  deriveRigorTiers: () => deriveRigorTiers,
   deriveSharedKey: () => deriveSharedKey,
   deriveTrajectoryNarrative: () => deriveTrajectoryNarrative,
   displayableDrift: () => displayableDrift,
@@ -7946,6 +8020,7 @@ var init_src = __esm({
     init_job_status();
     init_legible();
     init_legible_trajectory();
+    init_rigor();
     init_short_token();
   }
 });
@@ -8750,6 +8825,7 @@ __export(jpi_jobs_exports, {
   VALID_STATUS_FILTERS: () => VALID_STATUS_FILTERS,
   appliedThisWeek: () => appliedThisWeek,
   applyStatusView: () => applyStatusView,
+  getJobMatches: () => getJobMatches,
   run: () => run2,
   statusLabel: () => statusLabel
 });
@@ -8953,6 +9029,36 @@ function handleMark() {
   markStatus(id, status);
   console.log(`Marked ${id} as ${status}.`);
 }
+async function getJobMatches({ quiet = false, offline = false } = {}) {
+  const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+  const { match: match2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+  const profile = await readProfile2();
+  if (profile.skillTags.length === 0) {
+    return { status: "no-profile" };
+  }
+  if (!quiet) console.log(`Fetching job index from ${API_URL}/api/index...`);
+  const index = offline ? readIndexCache() : await fetchIndex();
+  if (offline && !index) return { status: "no-cache" };
+  const allListings = index.jobs ?? [];
+  const jobs = allListings.filter((j) => j.source !== "bounty");
+  const bountyCount = allListings.length - jobs.length;
+  if (jobs.length === 0) {
+    return { status: "no-jobs", bountyCount };
+  }
+  const fp = profileToFingerprint2(profile);
+  if (REMOTE_ONLY) fp.prefs = { ...fp.prefs, remoteOnly: true };
+  const ranked = match2(fp, jobs, jobs.length, Date.now(), {
+    acceptance: profile.acceptance
+  });
+  try {
+    updateIndexCache({ matchCount: ranked.length });
+  } catch {
+  }
+  if (ranked.length === 0) {
+    return { status: "no-matches", profile, bountyCount };
+  }
+  return { status: "ok", ranked, bountyCount, profile };
+}
 async function run2() {
   try {
     if (args[0] === "mark") {
@@ -8965,38 +9071,25 @@ async function run2() {
       );
       process.exit(1);
     }
-    const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-    const { match: match2, decorate: decorate2, pageMatches: pageMatches2, funnelCounts: funnelCounts2 } = await Promise.resolve().then(() => (init_src(), src_exports));
-    const profile = await readProfile2();
-    if (profile.skillTags.length === 0) {
+    const result = await getJobMatches();
+    if (result.status === "no-profile") {
       console.log("\u2726 terminalhire jobs: no skill tags in local profile yet.");
       console.log("  Start a Claude Code session in a personal project to accumulate tags.");
       console.log("  Or edit your profile: terminalhire profile --edit");
       return;
     }
-    console.log(`Fetching job index from ${API_URL}/api/index...`);
-    const index = await fetchIndex();
-    const allListings = index.jobs ?? [];
-    const jobs = allListings.filter((j) => j.source !== "bounty");
-    const bountyCount = allListings.length - jobs.length;
-    if (jobs.length === 0) {
+    if (result.status === "no-jobs") {
       console.log("No jobs in index. Try again later.");
       return;
     }
-    const fp = profileToFingerprint2(profile);
-    if (REMOTE_ONLY) fp.prefs = { ...fp.prefs, remoteOnly: true };
-    const ranked = match2(fp, jobs, jobs.length, Date.now(), {
-      acceptance: profile.acceptance
-    });
-    try {
-      updateIndexCache({ matchCount: ranked.length });
-    } catch {
-    }
-    if (ranked.length === 0) {
+    if (result.status === "no-matches") {
       console.log("No matching roles found for your current profile.");
-      console.log("  Your tags: " + profile.skillTags.join(", "));
+      console.log("  Your tags: " + result.profile.skillTags.join(", "));
       return;
     }
+    if (result.status !== "ok") return;
+    const { ranked, bountyCount, profile } = result;
+    const { decorate: decorate2, pageMatches: pageMatches2, funnelCounts: funnelCounts2 } = await Promise.resolve().then(() => (init_src(), src_exports));
     const statusMap = readStatusMap();
     const decorated = decorate2(ranked, statusMap);
     const view = applyStatusView(decorated, STATUS_FILTER);
@@ -9195,6 +9288,7 @@ var init_directory2 = __esm({
 // bin/jpi-devs.js
 var jpi_devs_exports = {};
 __export(jpi_devs_exports, {
+  getDevs: () => getDevs,
   reportMatched: () => reportMatched,
   run: () => run3
 });
@@ -9225,54 +9319,69 @@ ${i + 1}. ${linkTitle(job.title, url)} \u2014 ${kind}${byline}${scoreStr}`);
   if (matchedTags && matchedTags.length) console.log(`   Tags matched: ${matchedTags.slice(0, 5).join(", ")}`);
   console.log(`   Profile: ${sanitizeText(url)}`);
 }
+async function getDevs({ quiet = false, offline = false } = {}) {
+  const { match: match2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+  let fp;
+  if (AS_PROJECT) {
+    const project = readProject();
+    if (!project) return { status: "no-project" };
+    if (!project.skillTags || project.skillTags.length === 0) return { status: "project-no-skills" };
+    fp = { skillTags: project.skillTags, prefs: project.prefs ?? {} };
+    if (!quiet) console.log(`Ranking builders for your project: ${project.title}`);
+  } else {
+    const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+    const profile = await readProfile2();
+    if (profile.skillTags.length === 0) return { status: "no-profile" };
+    fp = profileToFingerprint2(profile);
+  }
+  let index;
+  if (offline) {
+    const cached2 = readDirectoryCache();
+    if (!cached2) return { status: "no-cache", fp };
+    index = cached2.index;
+  } else {
+    index = await fetchDirectory({ quiet });
+  }
+  const cards = index.cards ?? [];
+  if (cards.length === 0) return { status: "no-cards", fp };
+  let results = match2(fp, cards, SHOW_ALL2 ? cards.length : LIMIT2);
+  let ownLogin;
+  try {
+    const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+    ownLogin = (await readProfile2())?.github?.login;
+  } catch {
+  }
+  results = excludeOwnCard(results, ownLogin);
+  if (results.length === 0) return { status: "no-matches", fp };
+  return { status: "ok", results, fp };
+}
 async function run3() {
   try {
-    const { match: match2 } = await Promise.resolve().then(() => (init_src(), src_exports));
-    let fp;
-    if (AS_PROJECT) {
-      const project = readProject();
-      if (!project) {
+    const result = await getDevs();
+    switch (result.status) {
+      case "no-project":
         console.log("\u2726 terminalhire devs --as-project: no project declared yet.");
         console.log('  Run `terminalhire project "<title>: <skills it needs>"` first, then come back.');
         return;
-      }
-      if (!project.skillTags || project.skillTags.length === 0) {
+      case "project-no-skills":
         console.log("\u2726 Your declared project has no recognized skills yet.");
         console.log("  Re-run `terminalhire project` with known stack names (react, go, postgres, ...).");
         return;
-      }
-      fp = { skillTags: project.skillTags, prefs: project.prefs ?? {} };
-      console.log(`Ranking builders for your project: ${project.title}`);
-    } else {
-      const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-      const profile = await readProfile2();
-      if (profile.skillTags.length === 0) {
+      case "no-profile":
         console.log("\u2726 terminalhire devs: no skill tags in your local profile yet.");
         console.log("  Run `terminalhire init` first to set up your profile, then come back.");
         console.log("  (Tags also accumulate as you work in Claude Code sessions.)");
         return;
-      }
-      fp = profileToFingerprint2(profile);
+      case "no-cards":
+        console.log("\nNo builders or projects published yet. Check back soon \u2014 the directory fills as devs publish.");
+        return;
+      case "no-matches":
+        console.log(`No matching builders or projects for your current ${AS_PROJECT ? "project" : "profile"}.`);
+        console.log("  Your tags: " + result.fp.skillTags.join(", "));
+        return;
     }
-    const index = await fetchDirectory();
-    const cards = index.cards ?? [];
-    if (cards.length === 0) {
-      console.log("\nNo builders or projects published yet. Check back soon \u2014 the directory fills as devs publish.");
-      return;
-    }
-    let results = match2(fp, cards, SHOW_ALL2 ? cards.length : LIMIT2);
-    let ownLogin;
-    try {
-      const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-      ownLogin = (await readProfile2())?.github?.login;
-    } catch {
-    }
-    results = excludeOwnCard(results, ownLogin);
-    if (results.length === 0) {
-      console.log(`No matching builders or projects for your current ${AS_PROJECT ? "project" : "profile"}.`);
-      console.log("  Your tags: " + fp.skillTags.join(", "));
-      return;
-    }
+    if (result.status !== "ok") return;
+    const { results } = result;
     reportMatched(results);
     console.log(
       `
@@ -9425,6 +9534,7 @@ var init_jpi_project = __esm({
 // bin/jpi-bounties.js
 var jpi_bounties_exports = {};
 __export(jpi_bounties_exports, {
+  getBounties: () => getBounties,
   run: () => run5
 });
 import { readFileSync as readFileSync13 } from "fs";
@@ -9481,36 +9591,46 @@ ${i + 1}. ${linkTitle(job.title, job.url)} [${ref}]`);
   console.log(`   Claim: ${sanitizeText(b.claimUrl ?? job.url)}`);
   console.log(`   \u2192 terminalhire claim ${ref}`);
 }
+async function getBounties({ quiet = false, offline = false } = {}) {
+  if (!quiet) console.log(`Fetching bounty index from ${API_URL4}/api/index...`);
+  const index = offline ? readIndexCache2() : await fetchIndex2();
+  if (offline && !index) return { status: "no-cache" };
+  let bounties = (index.jobs ?? []).filter((j) => j.source === "bounty");
+  if (PRICED_ONLY) bounties = bounties.filter((j) => j.bounty?.amountUSD != null);
+  if (WINNABLE_ONLY) bounties = bounties.filter((j) => (j.bounty?.competingOpenPRs ?? 0) === 0);
+  if (bounties.length === 0) {
+    return { status: "empty" };
+  }
+  const ranked = /* @__PURE__ */ new Map();
+  try {
+    const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+    const { match: match2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+    const profile = await readProfile2();
+    if (profile.skillTags.length > 0) {
+      const fp = profileToFingerprint2(profile);
+      for (const r of match2(fp, bounties, bounties.length)) {
+        ranked.set(r.job.id, { score: r.score, reason: r.reason, matchedTags: r.matchedTags });
+      }
+    }
+  } catch {
+  }
+  const score = (j) => ranked.get(j.id)?.score ?? 0;
+  const amt = (j) => j.bounty?.amountUSD ?? -1;
+  const contested = (j) => (j.bounty?.competingOpenPRs ?? 0) > 0 ? 1 : 0;
+  bounties.sort((a, b) => contested(a) - contested(b) || score(b) - score(a) || amt(b) - amt(a));
+  const matchedCount = bounties.filter((j) => score(j) > 0).length;
+  return { status: "ok", bounties, ranked, matchedCount };
+}
 async function run5() {
   try {
-    console.log(`Fetching bounty index from ${API_URL4}/api/index...`);
-    const index = await fetchIndex2();
-    let bounties = (index.jobs ?? []).filter((j) => j.source === "bounty");
-    if (PRICED_ONLY) bounties = bounties.filter((j) => j.bounty?.amountUSD != null);
-    if (WINNABLE_ONLY) bounties = bounties.filter((j) => (j.bounty?.competingOpenPRs ?? 0) === 0);
-    if (bounties.length === 0) {
+    const result = await getBounties();
+    if (result.status === "empty") {
       console.log("\nNo bounties available right now. Try again later \u2014 supply refreshes through the day.");
       return;
     }
-    const ranked = /* @__PURE__ */ new Map();
-    try {
-      const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-      const { match: match2 } = await Promise.resolve().then(() => (init_src(), src_exports));
-      const profile = await readProfile2();
-      if (profile.skillTags.length > 0) {
-        const fp = profileToFingerprint2(profile);
-        for (const r of match2(fp, bounties, bounties.length)) {
-          ranked.set(r.job.id, { score: r.score, reason: r.reason, matchedTags: r.matchedTags });
-        }
-      }
-    } catch {
-    }
-    const score = (j) => ranked.get(j.id)?.score ?? 0;
-    const amt = (j) => j.bounty?.amountUSD ?? -1;
-    const contested = (j) => (j.bounty?.competingOpenPRs ?? 0) > 0 ? 1 : 0;
-    bounties.sort((a, b) => contested(a) - contested(b) || score(b) - score(a) || amt(b) - amt(a));
+    if (result.status !== "ok") return;
+    const { bounties, ranked, matchedCount } = result;
     const shown = SHOW_ALL3 ? bounties : bounties.slice(0, LIMIT3);
-    const matchedCount = bounties.filter((j) => score(j) > 0).length;
     console.log(
       `
 \u26A1 ${bounties.length} bount${bounties.length === 1 ? "y" : "ies"} you could knock out` + (matchedCount ? ` \u2014 ${matchedCount} matched to your profile` : "") + ` (local rank \u2014 no data sent)
@@ -11913,12 +12033,12 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
       continue;
     }
     spansConsidered++;
-    let run25 = 0;
+    let run26 = 0;
     const closeChain = () => {
-      if (run25 > 0) {
+      if (run26 > 0) {
         recoveryChains++;
-        totalDepth += run25;
-        run25 = 0;
+        totalDepth += run26;
+        run26 = 0;
       }
     };
     for (const uuid2 of episode.mainNodeUuids) {
@@ -11927,9 +12047,9 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
         continue;
       }
       if (node.kind === "tool_result" /* ToolResult */ && node.isError) {
-        run25++;
-        if (run25 > maxConsecutiveErrors) {
-          maxConsecutiveErrors = run25;
+        run26++;
+        if (run26 > maxConsecutiveErrors) {
+          maxConsecutiveErrors = run26;
         }
       } else if (node.kind === "tool_result" /* ToolResult */ && !node.isError) {
         closeChain();
@@ -12441,6 +12561,7 @@ var init_jpi_trajectory = __esm({
 // src/intro.ts
 var intro_exports = {};
 __export(intro_exports, {
+  getIntros: () => getIntros,
   runIntroDecision: () => runIntroDecision,
   runIntroList: () => runIntroList,
   runIntroRequest: () => runIntroRequest
@@ -12757,14 +12878,11 @@ async function runIntroDecision(args5, overrides) {
   if (data.contact) deps.log(`  They also shared: ${data.contact}`);
   deps.log("");
 }
-async function runIntroList(overrides) {
+async function getIntros(overrides) {
   const deps = { ...defaultIntroDeps(), ...overrides };
   const cookie = deps.sessionCookie();
   if (!cookie) {
-    deps.log("\n  No linked web session found on this machine.");
-    deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
-    deps.exit(0);
-    return;
+    return { status: "no-session" };
   }
   let res;
   try {
@@ -12774,46 +12892,67 @@ async function runIntroList(overrides) {
       signal: AbortSignal.timeout(1e4)
     });
   } catch (err) {
-    deps.errorLog(`
-  Request failed: ${err instanceof Error ? err.message : String(err)}
-`);
-    deps.exit(1);
-    return;
+    return { status: "request-failed", message: err instanceof Error ? err.message : String(err) };
   }
   if (res.status === 401) {
-    deps.log("\n  Your linked web session expired.");
-    deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
-    deps.exit(1);
-    return;
+    return { status: "expired" };
   }
   if (!res.ok) {
-    deps.errorLog(`
-  Request failed: /api/intro/list returned ${res.status}.
-`);
-    deps.exit(1);
-    return;
+    return { status: "error", httpStatus: res.status };
   }
   let data = {};
   try {
     data = await res.json();
   } catch {
   }
-  const intros = data.intros ?? [];
-  if (intros.length === 0) {
-    deps.log("\n  No intros yet.\n");
-    return;
-  }
-  deps.log("");
-  for (const it of intros) {
-    const dir = it.role === "incoming" ? "from" : "to";
-    deps.log(`  [${it.status}] ${dir} @${it.counterpartyLogin}`);
-    if (it.note) deps.log(`      note: ${it.note}`);
-    if (it.contact) deps.log(`      contact: ${it.contact}`);
-    else if (it.role === "incoming" && it.status === "pending") {
-      deps.log(`      \u2192 accept: terminalhire intro --accept @${it.counterpartyLogin}`);
+  return { status: "ok", intros: data.intros ?? [] };
+}
+async function runIntroList(overrides) {
+  const deps = { ...defaultIntroDeps(), ...overrides };
+  const result = await getIntros(deps);
+  switch (result.status) {
+    case "no-session":
+      deps.log("\n  No linked web session found on this machine.");
+      deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
+      deps.exit(0);
+      return;
+    case "expired":
+      deps.log("\n  Your linked web session expired.");
+      deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
+      deps.exit(1);
+      return;
+    case "request-failed":
+      deps.errorLog(`
+  Request failed: ${result.message}
+`);
+      deps.exit(1);
+      return;
+    case "error":
+      deps.errorLog(`
+  Request failed: /api/intro/list returned ${result.httpStatus}.
+`);
+      deps.exit(1);
+      return;
+    case "ok": {
+      const intros = result.intros;
+      if (intros.length === 0) {
+        deps.log("\n  No intros yet.\n");
+        return;
+      }
+      deps.log("");
+      for (const it of intros) {
+        const dir = it.role === "incoming" ? "from" : "to";
+        deps.log(`  [${it.status}] ${dir} @${it.counterpartyLogin}`);
+        if (it.note) deps.log(`      note: ${it.note}`);
+        if (it.contact) deps.log(`      contact: ${it.contact}`);
+        else if (it.role === "incoming" && it.status === "pending") {
+          deps.log(`      \u2192 accept: terminalhire intro --accept @${it.counterpartyLogin}`);
+        }
+      }
+      deps.log("");
+      return;
     }
   }
-  deps.log("");
 }
 var LINK_BASE2, GH_SESSION_COOKIE3, UUID_RE;
 var init_intro2 = __esm({
@@ -13144,6 +13283,372 @@ var init_chat_client = __esm({
   }
 });
 
+// bin/tui-core.js
+function sanitizeLine(text) {
+  return String(text).replace(ANSI_CSI, "").replace(ANSI_OSC, "").replace(ANSI_OTHER, "").replace(C0_C1_DEL, "");
+}
+function truncate(s, n) {
+  const t = String(s);
+  return t.length <= n ? t : `${t.slice(0, n - 1)}\u2026`;
+}
+function createRuntime({
+  input = typeof process !== "undefined" ? process.stdin : void 0,
+  output = typeof process !== "undefined" ? process.stdout : void 0,
+  signals = typeof process !== "undefined" ? process : void 0,
+  exit = (code) => process.exit(code)
+} = {}) {
+  let entered = false;
+  let cleaned = false;
+  function cleanup() {
+    if (cleaned) return;
+    cleaned = true;
+    entered = false;
+    try {
+      if (input && typeof input.setRawMode === "function") input.setRawMode(false);
+    } catch {
+    }
+    try {
+      if (input && typeof input.pause === "function") input.pause();
+    } catch {
+    }
+    try {
+      if (signals && typeof signals.removeListener === "function") {
+        signals.removeListener("SIGINT", onSignal);
+        signals.removeListener("SIGTERM", onSignal);
+        signals.removeListener("SIGHUP", onSignal);
+        signals.removeListener("uncaughtException", onUncaught);
+        signals.removeListener("unhandledRejection", onUncaught);
+        signals.removeListener("exit", onExitEvt);
+      }
+    } catch {
+    }
+    try {
+      if (output && typeof output.write === "function") output.write(SHOW_CURSOR + EXIT_ALT);
+    } catch {
+    }
+  }
+  function onSignal() {
+    cleanup();
+    exit(130);
+  }
+  function onUncaught(err) {
+    cleanup();
+    throw err;
+  }
+  function onExitEvt() {
+    cleanup();
+  }
+  function enter() {
+    if (entered) return;
+    entered = true;
+    cleaned = false;
+    try {
+      if (input && typeof input.setRawMode === "function") input.setRawMode(true);
+    } catch {
+    }
+    try {
+      if (input && typeof input.resume === "function") input.resume();
+    } catch {
+    }
+    if (signals && typeof signals.on === "function") {
+      signals.on("SIGINT", onSignal);
+      signals.on("SIGTERM", onSignal);
+      signals.on("SIGHUP", onSignal);
+      signals.on("uncaughtException", onUncaught);
+      signals.on("unhandledRejection", onUncaught);
+      signals.on("exit", onExitEvt);
+    }
+    if (output && typeof output.write === "function") output.write(ENTER_ALT + HIDE_CURSOR);
+  }
+  return {
+    enter,
+    cleanup,
+    get entered() {
+      return entered;
+    },
+    get cleaned() {
+      return cleaned;
+    }
+  };
+}
+function createBuffer(rows, cols) {
+  const n = Math.max(0, rows) * Math.max(0, cols);
+  const buf = new Array(n);
+  for (let i = 0; i < n; i++) buf[i] = { ch: " ", fg: null, bg: null, attr: null };
+  return buf;
+}
+function drawText(buf, cols, row, col, str, style = {}) {
+  if (row < 0 || col < 0 || col >= cols) return;
+  const maxLen = cols - col;
+  if (maxLen <= 0) return;
+  const points = Array.from(sanitizeLine(str));
+  const text = points.length <= maxLen ? points : points.slice(0, Math.max(0, maxLen - 1)).concat("\u2026");
+  const fg = style.fg ?? null;
+  const bg = style.bg ?? null;
+  const attr = style.attr ?? null;
+  for (let i = 0; i < text.length && col + i < cols; i++) {
+    const idx = row * cols + (col + i);
+    if (idx < 0 || idx >= buf.length) break;
+    buf[idx] = { ch: text[i], fg, bg, attr };
+  }
+}
+function cellNe(a, b) {
+  if (!a || !b) return true;
+  return a.ch !== b.ch || a.fg !== b.fg || a.bg !== b.bg || a.attr !== b.attr;
+}
+function diff(prev, next, cols) {
+  if (!Number.isInteger(cols) || cols <= 0) return [];
+  const ops = [];
+  const len = next.length;
+  let run26 = null;
+  for (let i = 0; i < len; i++) {
+    const col = i % cols;
+    const row = (i - col) / cols;
+    if (col === 0 && run26) {
+      ops.push(run26);
+      run26 = null;
+    }
+    if (cellNe(prev[i], next[i])) {
+      if (run26 && run26.row === row && run26.col + run26.run.length === col) {
+        run26.run.push(next[i]);
+      } else {
+        if (run26) ops.push(run26);
+        run26 = { row, col, run: [next[i]] };
+      }
+    } else if (run26) {
+      ops.push(run26);
+      run26 = null;
+    }
+  }
+  if (run26) ops.push(run26);
+  return ops;
+}
+function styleOf(cell) {
+  const pre = (cell.attr || "") + (cell.fg || "") + (cell.bg || "");
+  return pre;
+}
+function encode(ops) {
+  if (!ops || ops.length === 0) return "";
+  let out = "";
+  let curRow = -1;
+  let curCol = -1;
+  for (const op of ops) {
+    if (!Number.isInteger(op.row) || !Number.isInteger(op.col)) continue;
+    if (op.row !== curRow || op.col !== curCol) {
+      out += `\x1B[${op.row + 1};${op.col + 1}H`;
+    }
+    for (const cell of op.run) {
+      const pre = styleOf(cell);
+      out += pre ? pre + cell.ch + RESET : cell.ch;
+    }
+    curRow = op.row;
+    curCol = op.col + op.run.length;
+  }
+  return out;
+}
+function createRenderer({
+  write,
+  output = typeof process !== "undefined" ? process.stdout : void 0,
+  rows,
+  cols
+} = {}) {
+  const doWrite = write || (output && output.write ? output.write.bind(output) : () => {
+  });
+  const fallback = readTermSize(output);
+  let _rows = Number.isInteger(rows) && rows > 0 ? rows : fallback.rows;
+  let _cols = Number.isInteger(cols) && cols > 0 ? cols : fallback.cols;
+  let prev = createBuffer(_rows, _cols);
+  return {
+    render(nextBuf) {
+      const s = encode(diff(prev, nextBuf, _cols));
+      if (s) doWrite(s);
+      prev = nextBuf;
+    },
+    /** Drop the previous frame so the next render repaints every cell. */
+    invalidate() {
+      prev = [];
+    },
+    /** Adopt new dimensions and force a full redraw on the next render. */
+    resize(newRows, newCols) {
+      _rows = newRows;
+      _cols = newCols;
+      prev = [];
+    },
+    get rows() {
+      return _rows;
+    },
+    get cols() {
+      return _cols;
+    }
+  };
+}
+function clampOffset(offset, contentLen, viewH, scrolloff = 0) {
+  const so = Math.max(0, scrolloff | 0);
+  const maxOffset = Math.max(0, contentLen - viewH + so);
+  let o = Number.isFinite(offset) ? Math.trunc(offset) : 0;
+  if (o < 0) o = 0;
+  if (o > maxOffset) o = maxOffset;
+  return o;
+}
+function scrollUp(offset, contentLen, viewH, scrolloff = 0, by = 1) {
+  return clampOffset(offset - by, contentLen, viewH, scrolloff);
+}
+function scrollDown(offset, contentLen, viewH, scrolloff = 0, by = 1) {
+  return clampOffset(offset + by, contentLen, viewH, scrolloff);
+}
+function readTermSize(out) {
+  const o = out || (typeof process !== "undefined" ? process.stdout : void 0);
+  const cols = o && Number.isInteger(o.columns) && o.columns > 0 ? o.columns : 80;
+  const rows = o && Number.isInteger(o.rows) && o.rows > 0 ? o.rows : 24;
+  return { rows, cols };
+}
+function wireResize({ output = typeof process !== "undefined" ? process.stdout : void 0, onResize } = {}) {
+  const handler = () => {
+    if (typeof onResize === "function") onResize(readTermSize(output));
+  };
+  let unsubscribe = () => {
+  };
+  if (output && typeof output.on === "function") {
+    output.on("resize", handler);
+    unsubscribe = () => {
+      try {
+        if (typeof output.removeListener === "function") output.removeListener("resize", handler);
+      } catch {
+      }
+    };
+  } else if (typeof process !== "undefined" && typeof process.on === "function") {
+    process.on("SIGWINCH", handler);
+    unsubscribe = () => {
+      try {
+        process.removeListener("SIGWINCH", handler);
+      } catch {
+      }
+    };
+  }
+  return unsubscribe;
+}
+function detectColorLevel(env = {}, isTTY = false) {
+  const force = String(env.FORCE_COLOR ?? "");
+  const colorterm = String(env.COLORTERM ?? "").toLowerCase();
+  const term = String(env.TERM ?? "").toLowerCase();
+  if (force === "3") return "truecolor";
+  if (force === "2") return "256";
+  if (colorterm === "truecolor" || colorterm === "24bit") return "truecolor";
+  if (term.includes("256")) return "256";
+  if (env.NO_COLOR != null && env.NO_COLOR !== "" || term === "dumb" || term === "") return "16";
+  if (!isTTY && force === "") return "16";
+  return "16";
+}
+function degrade(role, level = "truecolor") {
+  const table = PALETTE[level] || PALETTE["16"];
+  return table[role] || "";
+}
+function hexToRgb(hex) {
+  const h = String(hex).replace(/^#/, "");
+  const n = parseInt(h, 16);
+  return { r: n >> 16 & 255, g: n >> 8 & 255, b: n & 255 };
+}
+function nearestCubeStep(v) {
+  let best = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < CUBE_STEPS.length; i++) {
+    const d = Math.abs(CUBE_STEPS[i] - v);
+    if (d < bestDist) {
+      bestDist = d;
+      best = i;
+    }
+  }
+  return best;
+}
+function rgbTo256(r, g, b) {
+  return 16 + 36 * nearestCubeStep(r) + 6 * nearestCubeStep(g) + nearestCubeStep(b);
+}
+function gradientFg(stops, t, level = "truecolor") {
+  if (level === "16") return degrade("accent-bright", level);
+  if (!Array.isArray(stops) || stops.length === 0) return "";
+  if (stops.length === 1) {
+    const { r: r2, g: g2, b: b2 } = hexToRgb(stops[0]);
+    return level === "256" ? `\x1B[38;5;${rgbTo256(r2, g2, b2)}m` : `\x1B[38;2;${r2};${g2};${b2}m`;
+  }
+  const clamped = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
+  const seg = clamped * (stops.length - 1);
+  const i0 = Math.min(stops.length - 2, Math.floor(seg));
+  const localT = seg - i0;
+  const c0 = hexToRgb(stops[i0]);
+  const c1 = hexToRgb(stops[i0 + 1]);
+  const r = Math.round(c0.r + (c1.r - c0.r) * localT);
+  const g = Math.round(c0.g + (c1.g - c0.g) * localT);
+  const b = Math.round(c0.b + (c1.b - c0.b) * localT);
+  return level === "256" ? `\x1B[38;5;${rgbTo256(r, g, b)}m` : `\x1B[38;2;${r};${g};${b}m`;
+}
+var HIDE_CURSOR, SHOW_CURSOR, ENTER_ALT, EXIT_ALT, INVERSE, RESET, BOLD, KEY_CTRL_C, KEY_ESC, KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT, KEY_TAB, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, KEY_Q, KEY_DIGITS, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, PALETTE, COLOR_ROLES, CUBE_STEPS;
+var init_tui_core = __esm({
+  "bin/tui-core.js"() {
+    "use strict";
+    HIDE_CURSOR = "\x1B[?25l";
+    SHOW_CURSOR = "\x1B[?25h";
+    ENTER_ALT = "\x1B[?1049h";
+    EXIT_ALT = "\x1B[?1049l";
+    INVERSE = "\x1B[7m";
+    RESET = "\x1B[0m";
+    BOLD = "\x1B[1m";
+    KEY_CTRL_C = "";
+    KEY_ESC = "\x1B";
+    KEY_UP = "\x1B[A";
+    KEY_DOWN = "\x1B[B";
+    KEY_RIGHT = "\x1B[C";
+    KEY_LEFT = "\x1B[D";
+    KEY_TAB = "	";
+    KEY_ENTER_A = "\r";
+    KEY_ENTER_B = "\n";
+    KEY_BACKSPACE_A = "\x7F";
+    KEY_BACKSPACE_B = "\b";
+    KEY_Q = "q";
+    KEY_DIGITS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+    ANSI_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+    ANSI_OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+    ANSI_OTHER = /\x1b[@-_]/g;
+    C0_C1_DEL = /[\x00-\x1f\x7f-\x9f]/g;
+    PALETTE = {
+      truecolor: {
+        bg: "\x1B[48;2;13;17;23m",
+        panel: "\x1B[48;2;22;27;34m",
+        rule: "\x1B[38;2;48;54;61m",
+        text: "\x1B[38;2;201;209;217m",
+        muted: "\x1B[38;2;125;133;144m",
+        accent: "\x1B[38;2;88;166;255m",
+        "accent-bright": "\x1B[38;2;121;192;255m",
+        green: "\x1B[38;2;63;185;80m",
+        amber: "\x1B[38;2;210;153;34m"
+      },
+      256: {
+        bg: "\x1B[48;5;233m",
+        panel: "\x1B[48;5;235m",
+        rule: "\x1B[38;5;240m",
+        text: "\x1B[38;5;252m",
+        muted: "\x1B[38;5;245m",
+        accent: "\x1B[38;5;75m",
+        "accent-bright": "\x1B[38;5;117m",
+        green: "\x1B[38;5;71m",
+        amber: "\x1B[38;5;178m"
+      },
+      16: {
+        bg: "\x1B[40m",
+        panel: "\x1B[100m",
+        rule: "\x1B[90m",
+        text: "\x1B[37m",
+        muted: "\x1B[90m",
+        accent: "\x1B[94m",
+        "accent-bright": "\x1B[96m",
+        green: "\x1B[92m",
+        amber: "\x1B[93m"
+      }
+    };
+    COLOR_ROLES = Object.keys(PALETTE.truecolor);
+    CUBE_STEPS = [0, 95, 135, 175, 215, 255];
+  }
+});
+
 // bin/jpi-chat-read.js
 var jpi_chat_read_exports = {};
 __export(jpi_chat_read_exports, {
@@ -13245,7 +13750,7 @@ function formatStamp(iso, now = /* @__PURE__ */ new Date()) {
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
-function truncate(s, n) {
+function truncate2(s, n) {
   const t = String(s);
   return t.length <= n ? t : `${t.slice(0, n - 1)}\u2026`;
 }
@@ -13270,7 +13775,7 @@ function renderInbox(items, invites = []) {
       const unread = it.unread > 0 ? `\u2709 ${it.unread}` : "\u2014";
       const login = `@${sanitizeLine(it.login)}`;
       const stamp = sanitizeLine(it.lastStamp || "");
-      const preview = it.preview ? truncate(sanitizeLine(it.preview), 38) : "";
+      const preview = it.preview ? truncate2(sanitizeLine(it.preview), 38) : "";
       lines.push(
         `  ${dot} ${login.padEnd(18)} ${unread.padEnd(5)} ${stamp.padStart(6)}  ${preview}`
       );
@@ -13614,7 +14119,7 @@ function formatInbox(state) {
         }
         const handle = `@${sanitizeLine(row.login)}`;
         const text = `  \u2198 ${handle.padEnd(18)} wants to connect`;
-        lines.push(sel ? INVERSE + text + RESET : text);
+        lines.push(sel ? INVERSE2 + text + RESET2 : text);
       } else {
         if (inviteCount > 0 && !printedConvSep) {
           lines.push("  " + "\u2500".repeat(64));
@@ -13624,11 +14129,11 @@ function formatInbox(state) {
         const login = `@${sanitizeLine(row.login)}`;
         const badgeVisible = row.unread > 0 ? `\u2709 ${row.unread}` : "\u2014";
         const badgeCell = badgeVisible.padEnd(5);
-        const badge = row.unread > 0 ? BOLD + badgeCell + BOLD_OFF : badgeCell;
+        const badge = row.unread > 0 ? BOLD2 + badgeCell + BOLD_OFF : badgeCell;
         const stamp = sanitizeLine(row.lastStamp || "").padStart(6);
-        const preview = row.preview ? truncate2(sanitizeLine(row.preview), 34) : "";
+        const preview = row.preview ? truncate(sanitizeLine(row.preview), 34) : "";
         const text = `  ${dot} ${login.padEnd(18)} ${badge} ${stamp}  ${preview}`;
-        lines.push(sel ? INVERSE + text + RESET : text);
+        lines.push(sel ? INVERSE2 + text + RESET2 : text);
       }
     }
   }
@@ -13654,10 +14159,6 @@ function formatInbox(state) {
     lines.push(`  ${banner}`);
   }
   return CLEAR + lines.join("\n") + "\n";
-}
-function truncate2(s, n) {
-  const t = String(s);
-  return t.length <= n ? t : `${t.slice(0, n - 1)}\u2026`;
 }
 async function runInboxPane(opts = {}) {
   const {
@@ -13826,8 +14327,8 @@ async function runInboxPane(opts = {}) {
         case "q":
           finish({ action: "quit" });
           break;
-        case KEY_ENTER_A:
-        case KEY_ENTER_B:
+        case KEY_ENTER_A2:
+        case KEY_ENTER_B2:
           activateRow();
           break;
         case "a":
@@ -13847,17 +14348,17 @@ async function runInboxPane(opts = {}) {
       }
     }
     function handleInputChunk(s) {
-      if (s === KEY_ENTER_A || s === KEY_ENTER_B || s === "\r\n") {
+      if (s === KEY_ENTER_A2 || s === KEY_ENTER_B2 || s === "\r\n") {
         void submitDecision("accept", inputBuffer.trim());
         return;
       }
-      if (s === KEY_BACKSPACE_A || s === KEY_BACKSPACE_B) {
+      if (s === KEY_BACKSPACE_A2 || s === KEY_BACKSPACE_B2) {
         inputBuffer = inputBuffer.slice(0, -1);
         repaint();
         return;
       }
       for (const ch of s) {
-        if (ch === KEY_BACKSPACE_A || ch === KEY_BACKSPACE_B) {
+        if (ch === KEY_BACKSPACE_A2 || ch === KEY_BACKSPACE_B2) {
           inputBuffer = inputBuffer.slice(0, -1);
         } else if (ch >= " " && inputBuffer.length < MAX_CONTACT_LEN) {
           inputBuffer += ch;
@@ -13877,19 +14378,19 @@ async function runInboxPane(opts = {}) {
     function onData(chunk) {
       if (cleaned) return;
       const s = chunk.toString("utf8");
-      if (s === KEY_CTRL_C) {
+      if (s === KEY_CTRL_C2) {
         finish({ action: "quit" });
         return;
       }
-      if (s === KEY_ESC) {
+      if (s === KEY_ESC2) {
         if (mode === "input" || mode === "confirm") cancelMode();
         else finish({ action: "quit" });
         return;
       }
       if (s.charCodeAt(0) === 27) {
         if (mode === "list" && !busy) {
-          if (s === KEY_UP) moveSelection(-1);
-          else if (s === KEY_DOWN) moveSelection(1);
+          if (s === KEY_UP2) moveSelection(-1);
+          else if (s === KEY_DOWN2) moveSelection(1);
         }
         return;
       }
@@ -13940,7 +14441,7 @@ async function runInboxPane(opts = {}) {
         signals.removeListener("exit", onExit);
       } catch {
       }
-      output.write(SHOW_CURSOR + EXIT_ALT);
+      output.write(SHOW_CURSOR2 + EXIT_ALT2);
     }
     function finish(result) {
       if (cleaned) return;
@@ -13963,7 +14464,7 @@ async function runInboxPane(opts = {}) {
     try {
       if (typeof input.setRawMode === "function") input.setRawMode(true);
       if (typeof input.resume === "function") input.resume();
-      output.write(ENTER_ALT + HIDE_CURSOR);
+      output.write(ENTER_ALT2 + HIDE_CURSOR2);
       input.on("data", onData);
       if (typeof output.on === "function") output.on("resize", onResize);
       signals.on("SIGINT", onSignal);
@@ -14028,30 +14529,31 @@ async function run10(opts = {}) {
     await mod2.runInbox({});
   }
 }
-var HIDE_CURSOR, SHOW_CURSOR, ENTER_ALT, EXIT_ALT, CLEAR, INVERSE, RESET, BOLD, BOLD_OFF, KEY_CTRL_C, KEY_ESC, KEY_UP, KEY_DOWN, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, MAX_CONTACT_LEN, DEFAULT_REFRESH_MS;
+var HIDE_CURSOR2, SHOW_CURSOR2, ENTER_ALT2, EXIT_ALT2, CLEAR, INVERSE2, RESET2, BOLD2, BOLD_OFF, KEY_CTRL_C2, KEY_ESC2, KEY_UP2, KEY_DOWN2, KEY_ENTER_A2, KEY_ENTER_B2, KEY_BACKSPACE_A2, KEY_BACKSPACE_B2, MAX_CONTACT_LEN, DEFAULT_REFRESH_MS;
 var init_jpi_inbox = __esm({
   "bin/jpi-inbox.js"() {
     "use strict";
     init_chat_client();
     init_jpi_chat();
     init_jpi_chat_read();
-    HIDE_CURSOR = "\x1B[?25l";
-    SHOW_CURSOR = "\x1B[?25h";
-    ENTER_ALT = "\x1B[?1049h";
-    EXIT_ALT = "\x1B[?1049l";
+    init_tui_core();
+    HIDE_CURSOR2 = "\x1B[?25l";
+    SHOW_CURSOR2 = "\x1B[?25h";
+    ENTER_ALT2 = "\x1B[?1049h";
+    EXIT_ALT2 = "\x1B[?1049l";
     CLEAR = "\x1B[2J\x1B[H";
-    INVERSE = "\x1B[7m";
-    RESET = "\x1B[0m";
-    BOLD = "\x1B[1m";
+    INVERSE2 = "\x1B[7m";
+    RESET2 = "\x1B[0m";
+    BOLD2 = "\x1B[1m";
     BOLD_OFF = "\x1B[22m";
-    KEY_CTRL_C = "";
-    KEY_ESC = "\x1B";
-    KEY_UP = "\x1B[A";
-    KEY_DOWN = "\x1B[B";
-    KEY_ENTER_A = "\r";
-    KEY_ENTER_B = "\n";
-    KEY_BACKSPACE_A = "\x7F";
-    KEY_BACKSPACE_B = "\b";
+    KEY_CTRL_C2 = "";
+    KEY_ESC2 = "\x1B";
+    KEY_UP2 = "\x1B[A";
+    KEY_DOWN2 = "\x1B[B";
+    KEY_ENTER_A2 = "\r";
+    KEY_ENTER_B2 = "\n";
+    KEY_BACKSPACE_A2 = "\x7F";
+    KEY_BACKSPACE_B2 = "\b";
     MAX_CONTACT_LEN = 200;
     DEFAULT_REFRESH_MS = 4e3;
   }
@@ -14075,6 +14577,7 @@ __export(jpi_chat_exports, {
   run: () => run11,
   runBlockCommand: () => runBlockCommand,
   runChatPane: () => runChatPane,
+  runNoticePane: () => runNoticePane,
   runShareActivityCommand: () => runShareActivityCommand,
   sanitizeLine: () => sanitizeLine
 });
@@ -14082,9 +14585,6 @@ import { createInterface as createInterface9 } from "readline";
 import { existsSync as existsSync15, readFileSync as readFileSync22 } from "fs";
 import { homedir as homedir20 } from "os";
 import { join as join22 } from "path";
-function sanitizeLine(text) {
-  return String(text).replace(ANSI_CSI, "").replace(ANSI_OSC, "").replace(ANSI_OTHER, "").replace(C0_C1_DEL, "");
-}
 function defaultPromptAck({ input = process.stdin, output = process.stdout } = {}) {
   if (!input || input.isTTY !== true) return Promise.resolve(false);
   const rl = createInterface9({ input, output });
@@ -14266,6 +14766,96 @@ async function defaultMarkThreadRead(peerLogin, iso) {
   await postReadCursor2(peerLogin, iso).catch(() => {
   });
 }
+function runNoticePane(opts = {}) {
+  const {
+    message,
+    backHint = null,
+    input = process.stdin,
+    output = process.stdout,
+    signals = process
+  } = opts;
+  return new Promise((resolve2) => {
+    let cleaned = false;
+    const body = String(message ?? "").replace(/^\n+/, "").replace(/\n+$/, "");
+    function render() {
+      const lines = ["", ...body.split("\n"), ""];
+      lines.push(
+        backHint ? `  Press Esc, Enter, or q to go back to ${sanitizeLine(backHint)}.` : "  Press Esc, Enter, or q to continue."
+      );
+      output.write(CLEAR2 + lines.join("\n") + "\n");
+    }
+    function cleanup() {
+      if (cleaned) return;
+      cleaned = true;
+      try {
+        if (typeof input.setRawMode === "function") input.setRawMode(false);
+      } catch {
+      }
+      try {
+        input.removeListener("data", onData);
+      } catch {
+      }
+      try {
+        if (typeof input.pause === "function") input.pause();
+      } catch {
+      }
+      try {
+        signals.removeListener("SIGINT", onDismiss);
+        signals.removeListener("SIGTERM", onDismiss);
+        signals.removeListener("SIGHUP", onDismiss);
+        signals.removeListener("uncaughtException", onUncaught);
+        signals.removeListener("unhandledRejection", onUncaught);
+        signals.removeListener("exit", cleanup);
+      } catch {
+      }
+      output.write(SHOW_CURSOR3 + EXIT_ALT3);
+    }
+    function onDismiss() {
+      if (cleaned) return;
+      cleanup();
+      resolve2();
+    }
+    function onUncaught(err) {
+      cleanup();
+      throw err;
+    }
+    function onData(chunk) {
+      if (cleaned) return;
+      const s = chunk.toString("utf8");
+      if (s === KEY_ESC3 || s === KEY_ENTER_A3 || s === KEY_ENTER_B3) {
+        onDismiss();
+        return;
+      }
+      if (s.charCodeAt(0) === 27) return;
+      for (const ch of s) {
+        if (ch === KEY_CTRL_C3 || ch === "q" || ch === "Q") {
+          onDismiss();
+          return;
+        }
+      }
+    }
+    try {
+      if (typeof input.setRawMode === "function") input.setRawMode(true);
+      if (typeof input.resume === "function") input.resume();
+      output.write(ENTER_ALT3 + HIDE_CURSOR3);
+      input.on("data", onData);
+      signals.on("SIGINT", onDismiss);
+      signals.on("SIGTERM", onDismiss);
+      signals.on("SIGHUP", onDismiss);
+      signals.on("uncaughtException", onUncaught);
+      signals.on("unhandledRejection", onUncaught);
+      signals.on("exit", cleanup);
+      render();
+    } catch (err) {
+      cleanup();
+      output.write(`
+  ${err instanceof Error ? err.message : String(err)}
+
+`);
+      resolve2();
+    }
+  });
+}
 async function runChatPane(opts = {}) {
   const {
     login,
@@ -14287,80 +14877,87 @@ async function runChatPane(opts = {}) {
     output.write("\n  Usage: terminalhire chat <github-login>\n\n");
     return { entered: false, reason: "no-login" };
   }
+  async function noticeStop(message, reason) {
+    if (backHint && input && input.isTTY === true && typeof input.setRawMode === "function") {
+      await runNoticePane({ message, backHint, input, output, signals });
+    } else {
+      output.write(message);
+    }
+    return { entered: false, reason };
+  }
   const resolved = await resolveConnection(target);
   if (resolved.status === "not-linked") {
-    output.write(
-      "\n  No linked web session found on this machine.\n  Run `terminalhire link` to connect this terminal to your account, then re-run.\n\n"
+    return await noticeStop(
+      "\n  No linked web session found on this machine.\n  Run `terminalhire link` to connect this terminal to your account, then re-run.\n\n",
+      "not-linked"
     );
-    return { entered: false, reason: "not-linked" };
   }
   if (resolved.status === "expired") {
-    output.write(
+    return await noticeStop(
       `
   Your web session expired \u2014 sign in again at ${CHAT_BASE3}/dashboard and re-bridge your session, then re-run.
 
-`
+`,
+      "expired"
     );
-    return { entered: false, reason: "expired" };
   }
   if (resolved.status === "error") {
-    output.write(`
+    return await noticeStop(`
   Could not check your connections: ${resolved.message}
 
-`);
-    return { entered: false, reason: "error" };
+`, "error");
   }
   if (resolved.status === "not-connected") {
-    output.write(
+    return await noticeStop(
       `
   You are not connected to @${target}.
   Chat is only available for an accepted intro. Request one with:
     terminalhire intro ${target}
 
-`
+`,
+      "not-connected"
     );
-    return { entered: false, reason: "not-connected" };
   }
   const { introId, peerLogin } = resolved;
   try {
     await client.ensureKeyPublished();
   } catch (err) {
     if (err instanceof ChatSessionExpiredError || err instanceof ChatNotLinkedError) {
-      output.write(`
+      return await noticeStop(`
   ${err.message}
 
-`);
-      return { entered: false, reason: "session" };
+`, "session");
     }
-    output.write(`
+    return await noticeStop(
+      `
   Could not open the chat: ${err instanceof Error ? err.message : String(err)}
 
-`);
-    return { entered: false, reason: "error" };
+`,
+      "error"
+    );
   }
   if (typeof client.fetchPeerKey === "function") {
     try {
       await client.fetchPeerKey(peerLogin);
     } catch (err) {
       if (err instanceof ChatSessionExpiredError || err instanceof ChatNotLinkedError) {
-        output.write(`
+        return await noticeStop(`
   ${err.message}
 
-`);
-        return { entered: false, reason: "session" };
+`, "session");
       }
       if (err instanceof SafetyNumberChangedError) {
-        output.write(
+        return await noticeStop(
           `
   \u26A0 The safety number for @${peerLogin} changed \u2014 the key on file no longer
   matches the server. Verify out of band before continuing. Chat not opened.
 
-`
+`,
+          "safety-changed"
         );
-        return { entered: false, reason: "safety-changed" };
       }
       if (err && err.name === "ChatRequestError" && err.status === 404) {
-        output.write(
+        return await noticeStop(
           `
   @${peerLogin} isn't reachable for chat yet.
   Chat is end-to-end encrypted, so they need to open chat once to
@@ -14368,15 +14965,17 @@ async function runChatPane(opts = {}) {
     terminalhire chat
   on their side, messages will flow.
 
-`
+`,
+          "no-key"
         );
-        return { entered: false, reason: "no-key" };
       }
-      output.write(`
+      return await noticeStop(
+        `
   Could not open the chat: ${err instanceof Error ? err.message : String(err)}
 
-`);
-      return { entered: false, reason: "error" };
+`,
+        "error"
+      );
     }
   }
   let selfLogin;
@@ -14453,7 +15052,7 @@ async function runChatPane(opts = {}) {
         signals.removeListener("exit", onExit);
       } catch {
       }
-      output.write(SHOW_CURSOR2 + EXIT_ALT2);
+      output.write(SHOW_CURSOR3 + EXIT_ALT3);
     }
     function finish(reason) {
       if (cleaned) return;
@@ -14604,13 +15203,13 @@ async function runChatPane(opts = {}) {
     function onData(chunk) {
       if (cleaned) return;
       const s = chunk.toString("utf8");
-      if (s === KEY_ESC2) {
+      if (s === KEY_ESC3) {
         finish("back");
         return;
       }
       if (s.charCodeAt(0) === 27) return;
       for (const ch of s) {
-        if (ch === KEY_CTRL_C2) {
+        if (ch === KEY_CTRL_C3) {
           finish("sigint");
           return;
         }
@@ -14618,14 +15217,14 @@ async function runChatPane(opts = {}) {
           void showSafetyNumber();
           continue;
         }
-        if (ch === KEY_ENTER_A2 || ch === KEY_ENTER_B2) {
+        if (ch === KEY_ENTER_A3 || ch === KEY_ENTER_B3) {
           const line = inputBuffer;
           inputBuffer = "";
           repaint();
           void submitLine(line);
           continue;
         }
-        if (ch === KEY_BACKSPACE_A2 || ch === KEY_BACKSPACE_B2) {
+        if (ch === KEY_BACKSPACE_A3 || ch === KEY_BACKSPACE_B3) {
           inputBuffer = inputBuffer.slice(0, -1);
           repaint();
           continue;
@@ -14657,7 +15256,7 @@ async function runChatPane(opts = {}) {
     try {
       if (typeof input.setRawMode === "function") input.setRawMode(true);
       if (typeof input.resume === "function") input.resume();
-      output.write(ENTER_ALT2 + HIDE_CURSOR2);
+      output.write(ENTER_ALT3 + HIDE_CURSOR3);
       input.on("data", onData);
       signals.on("SIGINT", onSignal);
       signals.on("SIGTERM", onTerm);
@@ -14843,45 +15442,895 @@ async function run11() {
     process.exit(0);
   } catch (err) {
     try {
-      process.stdout.write(SHOW_CURSOR2 + EXIT_ALT2);
+      process.stdout.write(SHOW_CURSOR3 + EXIT_ALT3);
     } catch {
     }
     console.error("terminalhire chat error:", err instanceof Error ? err.message : err);
     process.exit(1);
   }
 }
-var CHAT_BASE3, GH_SESSION_COOKIE6, HIDE_CURSOR2, SHOW_CURSOR2, ENTER_ALT2, EXIT_ALT2, CLEAR2, KEY_CTRL_C2, KEY_ESC2, KEY_CTRL_S, KEY_ENTER_A2, KEY_ENTER_B2, KEY_BACKSPACE_A2, KEY_BACKSPACE_B2, MAX_INPUT_LEN, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA, ACTIVE_WINDOW_MS;
+var CHAT_BASE3, GH_SESSION_COOKIE6, HIDE_CURSOR3, SHOW_CURSOR3, ENTER_ALT3, EXIT_ALT3, CLEAR2, KEY_CTRL_C3, KEY_ESC3, KEY_CTRL_S, KEY_ENTER_A3, KEY_ENTER_B3, KEY_BACKSPACE_A3, KEY_BACKSPACE_B3, MAX_INPUT_LEN, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA, ACTIVE_WINDOW_MS;
 var init_jpi_chat = __esm({
   "bin/jpi-chat.js"() {
     "use strict";
     init_chat_client();
     init_config();
     init_web_session();
+    init_tui_core();
     CHAT_BASE3 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE6 = "__jpi_gh_session";
-    HIDE_CURSOR2 = "\x1B[?25l";
-    SHOW_CURSOR2 = "\x1B[?25h";
-    ENTER_ALT2 = "\x1B[?1049h";
-    EXIT_ALT2 = "\x1B[?1049l";
+    HIDE_CURSOR3 = "\x1B[?25l";
+    SHOW_CURSOR3 = "\x1B[?25h";
+    ENTER_ALT3 = "\x1B[?1049h";
+    EXIT_ALT3 = "\x1B[?1049l";
     CLEAR2 = "\x1B[2J\x1B[H";
-    KEY_CTRL_C2 = "";
-    KEY_ESC2 = "\x1B";
+    KEY_CTRL_C3 = "";
+    KEY_ESC3 = "\x1B";
     KEY_CTRL_S = "";
-    KEY_ENTER_A2 = "\r";
-    KEY_ENTER_B2 = "\n";
-    KEY_BACKSPACE_A2 = "\x7F";
-    KEY_BACKSPACE_B2 = "\b";
+    KEY_ENTER_A3 = "\r";
+    KEY_ENTER_B3 = "\n";
+    KEY_BACKSPACE_A3 = "\x7F";
+    KEY_BACKSPACE_B3 = "\b";
     MAX_INPUT_LEN = 2e3;
-    ANSI_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
-    ANSI_OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
-    ANSI_OTHER = /\x1b[@-_]/g;
-    C0_C1_DEL = /[\x00-\x1f\x7f-\x9f]/g;
     CHAT_DISCLOSURE = "Messages are end-to-end encrypted using keys stored only on your device. Our server cannot read message content. Since we distribute your contact's public key, verify your connection by comparing Safety Numbers to rule out a server-side substitution. We store metadata: who messaged whom, when, and message count. Content is purged after 90 days.";
     CHAT_AT_REST = "Your private key is encrypted against casual access, not full machine compromise.";
     CHAT_CODE_OF_CONDUCT = "Code of conduct: keep it professional \u2014 harassment, spam, or abuse gets you blocked and removed.";
     CHAT_MIN_AGE = "You must be at least 13 years old to use connections chat.";
     DEPOSIT_CTA = "\n  Keep building together \u2014 publish your r\xE9sum\xE9 so more builders find you:\n    https://terminalhire.com/dashboard\n\n";
     ACTIVE_WINDOW_MS = 2 * 60 * 1e3;
+  }
+});
+
+// bin/jpi-hub.js
+var jpi_hub_exports = {};
+__export(jpi_hub_exports, {
+  run: () => run12,
+  runHubTui: () => runHubTui
+});
+function stubRows(paneName) {
+  return [
+    `${paneName} \u2014 (data wired in a later phase)`,
+    `${paneName} placeholder row \xB7 alpha`,
+    `${paneName} placeholder row \xB7 bravo`,
+    `${paneName} placeholder row \xB7 charlie`,
+    `${paneName} placeholder row \xB7 delta`
+  ];
+}
+function sparkline(rows) {
+  if (!rows || !rows.length) return "";
+  const sorted = [...rows].sort((a, b) => new Date(a.claimedAt || 0) - new Date(b.claimedAt || 0));
+  const tail = sorted.slice(-24);
+  return tail.map((c) => SPARK_LEVELS[STATE_LEVEL[c.state] ?? 1]).join("");
+}
+function fuzzyMatch(query, candidate) {
+  const q = query.toLowerCase();
+  const c = candidate.toLowerCase();
+  if (q === "") return true;
+  let i = 0;
+  for (let j = 0; j < c.length && i < q.length; j++) {
+    if (c[j] === q[i]) i++;
+  }
+  return i === q.length;
+}
+function substrMatch(query, candidate) {
+  if (query === "") return true;
+  return candidate.toLowerCase().includes(query.toLowerCase());
+}
+function runHubTui({ input = process.stdin, output = process.stdout, signals, deps = {} } = {}) {
+  const {
+    listClaims: _listClaims = listClaims,
+    acceptedPRRate: _acceptedPRRate = acceptedPRRate,
+    readProfile: _readProfile = readProfile,
+    readConfig: _readConfig = readConfig,
+    buildInboxItems: _buildInboxItems = buildInboxItems,
+    getJobMatches: _getJobMatches = getJobMatches,
+    getBounties: _getBounties = getBounties,
+    getDevs: _getDevs = getDevs,
+    readCacheEntry: _readCacheEntry = readCacheEntry,
+    getIntros: _getIntros = getIntros,
+    openInBrowser: _openInBrowser = openInBrowser,
+    // Injectable boot-splash duration — production uses the real 900ms default;
+    // tests override with a tiny value to exercise auto-dismiss without a real wait.
+    splashMs: _splashMs = DEFAULT_SPLASH_MS
+  } = deps;
+  return new Promise((resolve2) => {
+    const level = detectColorLevel(
+      typeof process !== "undefined" ? process.env : {},
+      output && output.isTTY
+    );
+    const c = (role) => degrade(role, level);
+    const runtime = createRuntime({ input, output, signals });
+    const initial = readTermSize(output);
+    const renderer = createRenderer({ output, rows: initial.rows, cols: initial.cols });
+    let active = 0;
+    let mode = "nav";
+    const offsetByPane = PANES.map(() => 0);
+    let paletteQuery = "";
+    let paletteSel = 0;
+    let lastVerb = null;
+    const filterByPane = PANES.map(() => "");
+    let filterSnapshot = "";
+    let done = false;
+    let unwireResize = () => {
+    };
+    let claimsState = { loaded: false, rate: null, rows: [], error: null };
+    let profileState = { loaded: false, loading: false, profile: null, error: null };
+    let inboxState = { loaded: false, loading: false, status: null, items: null, message: null };
+    const listState = {
+      Jobs: { loaded: false, loading: false, result: null, error: null },
+      Bounties: { loaded: false, loading: false, result: null, error: null },
+      Devs: { loaded: false, loading: false, result: null, error: null }
+    };
+    const LIST_LOADERS = {
+      Jobs: () => _getJobMatches({ quiet: true, offline: true }),
+      Bounties: () => _getBounties({ quiet: true, offline: true }),
+      Devs: () => _getDevs({ quiet: true, offline: true })
+    };
+    let introsState = { loaded: false, loading: false, result: null, error: null };
+    let homeIntrosOpen = false;
+    let splashActive = true;
+    let splashTimer = null;
+    const errMsg = (e) => String(e && e.message ? e.message : e);
+    function paletteResults() {
+      return PALETTE_VERBS.filter((v) => fuzzyMatch(paletteQuery, v));
+    }
+    function loadClaims() {
+      if (claimsState.loaded) return;
+      try {
+        const rows = _listClaims();
+        claimsState = { loaded: true, rate: _acceptedPRRate(rows), rows, error: null };
+      } catch (e) {
+        claimsState = { loaded: true, rate: null, rows: [], error: errMsg(e) };
+      }
+    }
+    function loadListPane(name) {
+      const st = listState[name];
+      if (!st || st.loaded || st.loading) return;
+      listState[name] = { ...st, loading: true };
+      LIST_LOADERS[name]().then((result) => {
+        listState[name] = { loaded: true, loading: false, result, error: null };
+      }).catch((e) => {
+        listState[name] = { loaded: true, loading: false, result: null, error: errMsg(e) };
+      }).finally(() => repaint());
+    }
+    function loadIntros() {
+      if (introsState.loaded || introsState.loading) return;
+      introsState = { ...introsState, loading: true };
+      _getIntros().then((result) => {
+        introsState = { loaded: true, loading: false, result, error: null };
+      }).catch((e) => {
+        introsState = { loaded: true, loading: false, result: null, error: errMsg(e) };
+      }).finally(() => repaint());
+    }
+    function ensurePaneLoaded() {
+      const name = PANES[active];
+      if (name === "Home") {
+        loadListPane("Jobs");
+        loadListPane("Bounties");
+        loadClaims();
+        return;
+      }
+      if (name === "Claims") {
+        loadClaims();
+        return;
+      }
+      if (name === "Profile") {
+        if (profileState.loaded || profileState.loading) return;
+        profileState = { ...profileState, loading: true };
+        _readProfile().then((profile) => {
+          profileState = { loaded: true, loading: false, profile, error: null };
+        }).catch((e) => {
+          profileState = { loaded: true, loading: false, profile: null, error: errMsg(e) };
+        }).finally(() => repaint());
+        return;
+      }
+      if (name === "Inbox") {
+        if (inboxState.loaded || inboxState.loading) return;
+        let acked = false;
+        try {
+          acked = _readConfig().chatDisclosureAck === true;
+        } catch {
+          acked = false;
+        }
+        if (!acked) {
+          inboxState = { loaded: true, loading: false, status: "disclosure", items: null, message: null };
+          return;
+        }
+        inboxState = { ...inboxState, loading: true };
+        _buildInboxItems().then((built) => {
+          if (built.status === "ok") {
+            inboxState = { loaded: true, loading: false, status: "ok", items: built.items, message: null };
+          } else if (built.status === "error") {
+            inboxState = { loaded: true, loading: false, status: "error", items: null, message: built.message || "could not load inbox" };
+          } else {
+            inboxState = { loaded: true, loading: false, status: built.status, items: null, message: null };
+          }
+        }).catch((e) => {
+          inboxState = { loaded: true, loading: false, status: "error", items: null, message: errMsg(e) };
+        }).finally(() => repaint());
+        return;
+      }
+      if (listState[name]) {
+        loadListPane(name);
+        return;
+      }
+    }
+    function formatClaimRow(claim) {
+      const amt = typeof claim.amountUSD === "number" ? ` \xB7 $${claim.amountUSD}` : "";
+      return `${String(claim.state).padEnd(9)} ${claim.repoFullName} \xB7 ${claim.title}${amt}`;
+    }
+    function profileRows(p) {
+      const tags = p && Array.isArray(p.skillTags) ? p.skillTags : [];
+      const hasContent = tags.length > 0 || p && (p.displayName || p.seniority);
+      if (!hasContent) return ["No profile yet \u2014 run `terminalhire init` to create one."];
+      const rows = [];
+      if (p.displayName) rows.push(`Name: ${p.displayName}`);
+      if (p.seniority) rows.push(`Seniority: ${p.seniority}`);
+      rows.push(`Skills (${tags.length}): ${tags.slice(0, 12).join(", ")}`);
+      return rows;
+    }
+    function formatInboxItem(it) {
+      const dot = formatPresence(it.presence).charAt(0) || "\u25D0";
+      const unread = it.unread > 0 ? `\u2709 ${it.unread}` : "\u2014";
+      const login = `@${sanitizeLine(it.login)}`;
+      const stamp = sanitizeLine(it.lastStamp || "");
+      const preview = it.preview ? truncate(sanitizeLine(it.preview), 38) : "";
+      return `${dot} ${login.padEnd(18)} ${unread.padEnd(5)} ${stamp.padStart(6)}  ${preview}`;
+    }
+    function inboxRows(st) {
+      switch (st.status) {
+        case "disclosure":
+          return ["Messaging disclosure not yet acknowledged \u2014 run `terminalhire inbox` once to review it and enable messages."];
+        case "not-linked":
+          return ["Not linked \u2014 run `terminalhire link` to connect your web session."];
+        case "expired":
+          return ["Session expired \u2014 run `terminalhire link` again."];
+        case "not-connected":
+          return ["No connections yet."];
+        case "error":
+          return ["Error: " + (st.message || "could not load inbox")];
+        case "ok":
+          if (!st.items || st.items.length === 0) return ["No conversations yet."];
+          return st.items.map(formatInboxItem);
+        default:
+          return ["No conversations yet."];
+      }
+    }
+    function jobsRows(result) {
+      switch (result && result.status) {
+        case "no-profile":
+          return ["No skill tags in your local profile yet \u2014 run `terminalhire init`."];
+        case "no-cache":
+          return ["No cached job index \u2014 run `terminalhire jobs` once to fetch it."];
+        case "no-jobs":
+          return ["No jobs in the index yet. Check back soon."];
+        case "no-matches":
+          return ["No matching roles for your current profile."];
+        case "ok":
+          return result.ranked.map((r) => {
+            const pct2 = Math.round(r.score * 100);
+            const lead = r.job.applyMode === "buyer-lead" ? " [COASTAL LEAD]" : "";
+            return `${sanitizeLine(r.job.title)} \u2014 ${sanitizeLine(r.job.company)}${lead} \xB7 ${pct2}%`;
+          });
+        default:
+          return ["No jobs to show."];
+      }
+    }
+    function bountiesRows(result) {
+      switch (result && result.status) {
+        case "no-cache":
+          return ["No cached bounty index \u2014 run `terminalhire bounties` once to fetch it."];
+        case "empty":
+          return ["No bounties available right now. Check back through the day."];
+        case "ok":
+          return result.bounties.map((job) => {
+            const b = job.bounty || {};
+            const amt = b.amountUSD != null ? "$" + b.amountUSD.toLocaleString() : "$\u2014";
+            const repo = sanitizeLine(b.repoFullName || job.company);
+            const prs = b.competingOpenPRs;
+            const contend = prs != null && prs > 0 ? ` \xB7 \u26A0 ${prs} in flight` : "";
+            return `${amt} \xB7 ${sanitizeLine(job.title)} \u2014 ${repo}${contend}`;
+          });
+        default:
+          return ["No bounties to show."];
+      }
+    }
+    function devsRows(result) {
+      switch (result && result.status) {
+        case "no-project":
+          return ['No project declared \u2014 run `terminalhire project "<title>: <skills>"`.'];
+        case "project-no-skills":
+          return ["Your declared project has no recognized skills yet."];
+        case "no-profile":
+          return ["No skill tags in your local profile yet \u2014 run `terminalhire init`."];
+        case "no-cache":
+          return ["No cached directory \u2014 run `terminalhire devs` once to fetch it."];
+        case "no-cards":
+          return ["No builders or projects published yet. Check back soon."];
+        case "no-matches":
+          return ["No matching builders or projects for your current profile."];
+        case "ok":
+          return result.results.map((r) => {
+            const kind = r.job.source === "project" ? "project" : "developer";
+            const pct2 = r.score > 0 ? ` \xB7 ${Math.round(r.score * 100)}%` : "";
+            return `${sanitizeLine(r.job.title)} \u2014 ${kind}${pct2}`;
+          });
+        default:
+          return ["No matches to show."];
+      }
+    }
+    const LIST_FORMATTERS = { Jobs: jobsRows, Bounties: bountiesRows, Devs: devsRows };
+    function introRows(result) {
+      if (!result) return ["Loading\u2026"];
+      switch (result.status) {
+        case "no-session":
+          return ["Not linked \u2014 run `terminalhire link` to connect this terminal to your account."];
+        case "expired":
+          return ["Your linked web session expired \u2014 run `terminalhire link` again."];
+        case "request-failed":
+          return ["Could not reach terminalhire \u2014 " + (result.message || "request failed")];
+        case "error":
+          return ["Could not load intros (server returned " + result.httpStatus + ")."];
+        case "ok": {
+          if (!result.intros.length) return ["No intros yet."];
+          const rows = [];
+          for (const it of result.intros) {
+            const dir = it.role === "incoming" ? "from" : "to";
+            rows.push(`[${it.status}] ${dir} @${sanitizeLine(it.counterpartyLogin)}`);
+            if (it.note) rows.push(`    note: ${sanitizeLine(it.note)}`);
+            if (it.contact) rows.push(`    contact: ${sanitizeLine(it.contact)}`);
+            else if (it.role === "incoming" && it.status === "pending") {
+              rows.push(`    \u2192 accept: terminalhire intro --accept @${sanitizeLine(it.counterpartyLogin)}`);
+            }
+          }
+          return rows;
+        }
+        default:
+          return ["No intros to show."];
+      }
+    }
+    function homeUnreadCount() {
+      if (!inboxState.loaded || inboxState.status !== "ok" || !inboxState.items) return null;
+      return inboxState.items.reduce((sum, it) => sum + (Number(it.unread) || 0), 0);
+    }
+    function homeIntrosCount() {
+      try {
+        const entry = _readCacheEntry();
+        return Number(entry && entry.incomingPending && entry.incomingPending.count) || 0;
+      } catch {
+        return 0;
+      }
+    }
+    function homeRows() {
+      if (homeIntrosOpen) {
+        if (!introsState.loaded) return ["Loading\u2026"];
+        if (introsState.error) return ["Could not load intros \u2014 " + introsState.error];
+        return introRows(introsState.result);
+      }
+      const jobsCount = listState.Jobs.loaded && !listState.Jobs.error && listState.Jobs.result && listState.Jobs.result.status === "ok" ? listState.Jobs.result.ranked.length : null;
+      const jobsLine = !listState.Jobs.loaded ? "Jobs: Loading\u2026" : listState.Jobs.error ? "Jobs: could not load" : `Jobs: ${jobsCount ?? 0} matching roles`;
+      const bountiesCount = listState.Bounties.loaded && !listState.Bounties.error && listState.Bounties.result && listState.Bounties.result.status === "ok" ? listState.Bounties.result.bounties.length : null;
+      const bountiesLine = !listState.Bounties.loaded ? "Bounties: Loading\u2026" : listState.Bounties.error ? "Bounties: could not load" : `Bounties: ${bountiesCount ?? 0} available`;
+      const claimsLine = !claimsState.loaded ? "Claims: Loading\u2026" : claimsState.error ? "Claims: could not load" : `Claims: ${claimsState.rows.filter((c2) => c2.state !== "merged" && c2.state !== "abandoned").length} active`;
+      const spark = claimsState.loaded && !claimsState.error ? sparkline(claimsState.rows) : "";
+      const unread = homeUnreadCount();
+      const inboxLine = `Inbox: ${unread === null ? "\u2014" : unread + " unread"}`;
+      const introsLine = `Intros: ${homeIntrosCount()} pending  (press i to view)`;
+      const rows = [jobsLine, bountiesLine, claimsLine];
+      if (spark) rows.push(`Accepted-PR trend: ${spark}`);
+      rows.push(inboxLine, introsLine);
+      return rows;
+    }
+    function activeSourceIndex() {
+      const name = PANES[active];
+      const raw = paneRows(name);
+      const q = filterByPane[active];
+      let visibleIdx = -1;
+      for (let i = 0; i < raw.length; i++) {
+        if (substrMatch(q, raw[i])) {
+          visibleIdx++;
+          if (visibleIdx === offsetByPane[active]) return i;
+        }
+      }
+      return -1;
+    }
+    function activateRow() {
+      const name = PANES[active];
+      const idx = activeSourceIndex();
+      if (idx < 0) return;
+      if (name === "Jobs") {
+        const st = listState.Jobs;
+        if (st.loaded && !st.error && st.result && st.result.status === "ok") {
+          const row = st.result.ranked[idx];
+          if (row && row.job && row.job.url) _openInBrowser(row.job.url);
+        }
+        return;
+      }
+      if (name === "Bounties") {
+        const st = listState.Bounties;
+        if (st.loaded && !st.error && st.result && st.result.status === "ok") {
+          const job = st.result.bounties[idx];
+          if (job) _openInBrowser((job.bounty && job.bounty.claimUrl) ?? job.url);
+        }
+      }
+    }
+    function paneRows(name) {
+      if (name === "Home") return homeRows();
+      if (listState[name]) {
+        const st = listState[name];
+        if (!st.loaded) return ["Loading\u2026"];
+        if (st.error) return ["Could not load " + name.toLowerCase() + " \u2014 " + st.error];
+        return LIST_FORMATTERS[name](st.result);
+      }
+      if (name === "Claims") {
+        if (!claimsState.loaded) return ["Loading\u2026"];
+        if (claimsState.error) return ["Could not read claims \u2014 " + claimsState.error];
+        if (!claimsState.rows.length) return ["No claims yet \u2014 run `terminalhire claim <url>` to start one."];
+        return claimsState.rows.map(formatClaimRow);
+      }
+      if (name === "Profile") {
+        if (!profileState.loaded) return ["Loading\u2026"];
+        if (profileState.error) return ["Could not read profile \u2014 " + profileState.error];
+        return profileRows(profileState.profile);
+      }
+      if (name === "Inbox") {
+        if (!inboxState.loaded) return ["Loading\u2026"];
+        return inboxRows(inboxState);
+      }
+      return stubRows(name);
+    }
+    function paneHeader(name) {
+      if (name === "Home") return homeIntrosOpen ? "Intros \xB7 press i to go back" : "Home";
+      if (name === "Claims") {
+        if (claimsState.loaded && claimsState.rate) {
+          const r = claimsState.rate;
+          const pct2 = Math.round(r.rate * 100);
+          return `Accepted-PR rate: ${r.merged}/${r.total} merged (${pct2}%)`;
+        }
+        return "Claims";
+      }
+      if (name === "Profile") return "Profile";
+      if (name === "Inbox") return "Inbox";
+      if (listState[name]) {
+        const st = listState[name];
+        if (st.loaded && !st.error && st.result && st.result.status === "ok") {
+          if (name === "Jobs") return `${st.result.ranked.length} roles matching your profile`;
+          if (name === "Bounties") return `${st.result.bounties.length} bounties you could knock out`;
+          if (name === "Devs") return `${st.result.results.length} matches in the builder directory`;
+        }
+        return name;
+      }
+      return `${name} \u2014 (data wired in a later phase)`;
+    }
+    function visibleRows() {
+      const q = filterByPane[active];
+      return paneRows(PANES[active]).filter((r) => substrMatch(q, r));
+    }
+    function bodyRegion() {
+      const rows = renderer.rows;
+      const top = 2;
+      const bottom = rows - 2;
+      const listTop = top + 2;
+      const viewH = Math.max(0, bottom - listTop + 1);
+      return { top, bottom, listTop, viewH };
+    }
+    function activeViewH() {
+      return bodyRegion().viewH;
+    }
+    function renderSplash(buf, rows, cols) {
+      const glyphW = TH_GLYPH[0].length;
+      const startRow = Math.max(0, Math.floor((rows - TH_GLYPH.length) / 2));
+      const startCol = Math.max(0, Math.floor((cols - glyphW) / 2));
+      for (let i = 0; i < TH_GLYPH.length; i++) {
+        const row = startRow + i;
+        if (row < 0 || row >= rows) continue;
+        const t = TH_GLYPH.length <= 1 ? 0 : i / (TH_GLYPH.length - 1);
+        drawText(buf, cols, row, startCol, TH_GLYPH[i], { fg: gradientFg(BRAND_GRADIENT, t, level) });
+      }
+      const hint = "press any key to continue";
+      const hintRow = Math.min(rows - 1, startRow + TH_GLYPH.length + 1);
+      if (hintRow < rows) {
+        drawText(buf, cols, hintRow, Math.max(0, Math.floor((cols - hint.length) / 2)), hint, {
+          fg: c("muted")
+        });
+      }
+    }
+    function repaint() {
+      if (done) return;
+      const rows = renderer.rows;
+      const cols = renderer.cols;
+      if (splashActive) {
+        const buf2 = createBuffer(rows, cols);
+        if (rows >= 4 && cols >= 20) renderSplash(buf2, rows, cols);
+        renderer.render(buf2);
+        return;
+      }
+      ensurePaneLoaded();
+      if (rows < 4 || cols < 20) {
+        const buf2 = createBuffer(rows, cols);
+        drawText(buf2, cols, 0, 0, "terminalhire hub \u2014 window too small", { fg: c("amber") });
+        renderer.render(buf2);
+        return;
+      }
+      const buf = createBuffer(rows, cols);
+      const navWidth = 16;
+      const mainCol = navWidth + 1;
+      const mainWidth = cols - mainCol;
+      const { top: bodyTop, bottom: bodyBottom, listTop, viewH } = bodyRegion();
+      drawText(buf, cols, 0, 1, "terminalhire", { fg: c("accent-bright"), attr: BOLD });
+      const ctx = `hub \xB7 ${PANES[active]}`;
+      drawText(buf, cols, 0, cols - ctx.length - 1, ctx, { fg: c("muted") });
+      drawText(buf, cols, 1, 0, "\u2500".repeat(cols), { fg: c("rule") });
+      for (let i = 0; i < PANES.length; i++) {
+        const row = bodyTop + i;
+        if (row > bodyBottom) break;
+        const label = ` ${i + 1} ${PANES[i]}`;
+        const padded = label.length >= navWidth ? label : label + " ".repeat(navWidth - label.length);
+        if (i === active) {
+          drawText(buf, cols, row, 0, padded, { attr: INVERSE });
+        } else {
+          drawText(buf, cols, row, 0, padded, { fg: c("text") });
+        }
+      }
+      for (let row = bodyTop; row <= bodyBottom; row++) {
+        drawText(buf, cols, row, navWidth, "\u2502", { fg: c("rule") });
+      }
+      const rowsData = visibleRows();
+      offsetByPane[active] = clampOffset(offsetByPane[active], rowsData.length, viewH, 0);
+      drawText(buf, cols, bodyTop, mainCol, paneHeader(PANES[active]), {
+        fg: c("accent"),
+        attr: BOLD
+      });
+      for (let vi = 0; vi < viewH; vi++) {
+        const di = offsetByPane[active] + vi;
+        if (di >= rowsData.length) break;
+        drawText(buf, cols, listTop + vi, mainCol, truncate(rowsData[di], mainWidth), {
+          fg: c("text")
+        });
+      }
+      if (rowsData.length === 0) {
+        drawText(buf, cols, listTop, mainCol, "(no rows match filter)", { fg: c("muted") });
+      }
+      let keys;
+      if (mode === "palette") keys = "type to filter \xB7 \u2191/\u2193 move \xB7 Enter run \xB7 Esc close";
+      else if (mode === "filter") keys = "type to filter pane \xB7 Enter apply \xB7 Esc close";
+      else if (mode === "help") keys = "? or Esc close help";
+      else {
+        keys = "j/k \u2191\u2193 scroll \xB7 1-7/Tab/\u2190\u2192 panes \xB7 Ctrl+K/: palette \xB7 / filter \xB7 ? help \xB7 q quit";
+        if (PANES[active] === "Home") keys += " \xB7 i intros";
+        else if (PANES[active] === "Jobs" || PANES[active] === "Bounties") keys += " \xB7 Enter open";
+      }
+      drawText(buf, cols, rows - 1, 0, " ".repeat(cols), { attr: INVERSE });
+      drawText(buf, cols, rows - 1, 1, truncate(keys, cols - 2), { attr: INVERSE });
+      if (mode === "palette") drawPalette(buf, rows, cols);
+      else if (mode === "help") drawHelp(buf, rows, cols);
+      else if (mode === "filter") drawFilterPrompt(buf, rows, cols);
+      renderer.render(buf);
+    }
+    function drawBox(buf, rows, cols, top, left, h, w, title) {
+      for (let r = 0; r < h; r++) {
+        const row = top + r;
+        if (row < 0 || row >= rows) continue;
+        drawText(buf, cols, row, left, " ".repeat(w), { fg: c("text"), bg: c("panel") });
+      }
+      drawText(buf, cols, top, left + 1, truncate(` ${title} `, w - 2), {
+        fg: c("accent-bright"),
+        attr: BOLD
+      });
+      drawText(buf, cols, top + 1, left, "\u2500".repeat(w), { fg: c("rule") });
+    }
+    function drawPalette(buf, rows, cols) {
+      const w = Math.min(48, cols - 4);
+      const results = paletteResults();
+      const h = Math.min(rows - 4, results.length + 4);
+      const top = 2;
+      const left = Math.max(0, Math.floor((cols - w) / 2));
+      drawBox(buf, rows, cols, top, left, h, w, "Command Palette");
+      drawText(buf, cols, top + 2, left + 1, truncate(`> ${paletteQuery}`, w - 2), {
+        fg: c("text")
+      });
+      const sel = results.length ? Math.min(paletteSel, results.length - 1) : 0;
+      for (let i = 0; i < results.length && top + 3 + i < top + h; i++) {
+        const style = i === sel ? { attr: INVERSE } : { fg: c("muted") };
+        drawText(buf, cols, top + 3 + i, left + 1, truncate(` ${results[i]}`, w - 2), style);
+      }
+    }
+    function drawFilterPrompt(buf, rows, cols) {
+      const w = Math.min(40, cols - 4);
+      const left = Math.max(0, Math.floor((cols - w) / 2));
+      const top = rows - 4;
+      drawBox(buf, rows, cols, top, left, 3, w, `Filter \xB7 ${PANES[active]}`);
+      drawText(buf, cols, top + 2, left + 1, truncate(`/ ${filterByPane[active]}`, w - 2), {
+        fg: c("text")
+      });
+    }
+    function drawHelp(buf, rows, cols) {
+      const lines = [
+        "j / k      scroll pane down / up",
+        "\u2191 / \u2193      scroll pane down / up",
+        "1\u20137        jump to pane",
+        "\u2190 / \u2192      previous / next pane",
+        "Tab        cycle pane forward",
+        "Shift+Tab  cycle pane backward",
+        "Ctrl+K / : open command palette",
+        "/          filter the active pane",
+        "?          toggle this help",
+        "q / Ctrl+C quit"
+      ];
+      const w = Math.min(44, cols - 4);
+      const h = Math.min(rows - 2, lines.length + 3);
+      const top = 1;
+      const left = Math.max(0, Math.floor((cols - w) / 2));
+      drawBox(buf, rows, cols, top, left, h, w, "Keybindings");
+      for (let i = 0; i < lines.length && top + 2 + i < top + h; i++) {
+        drawText(buf, cols, top + 2 + i, left + 1, truncate(lines[i], w - 2), { fg: c("text") });
+      }
+    }
+    function moveNav(delta) {
+      const n = PANES.length;
+      active = Math.min(n - 1, Math.max(0, active + delta));
+    }
+    function cycleFocus(delta) {
+      const n = PANES.length;
+      active = (active + delta + n) % n;
+    }
+    function scrollActive(delta) {
+      const contentLen = visibleRows().length;
+      const viewH = activeViewH();
+      const fn = delta > 0 ? scrollDown : scrollUp;
+      offsetByPane[active] = fn(offsetByPane[active], contentLen, viewH, 0);
+    }
+    function handleNavChar(ch) {
+      const digit = KEY_DIGITS.indexOf(ch);
+      if (digit >= 1 && digit <= PANES.length) {
+        active = digit - 1;
+        return;
+      }
+      if (ch === "j") return scrollActive(1);
+      if (ch === "k") return scrollActive(-1);
+      if (ch === KEY_TAB) return cycleFocus(1);
+      if (ch === "i" && PANES[active] === "Home") {
+        homeIntrosOpen = !homeIntrosOpen;
+        offsetByPane[active] = 0;
+        if (homeIntrosOpen) loadIntros();
+        return;
+      }
+      if (ch === KEY_ENTER_A || ch === KEY_ENTER_B) {
+        activateRow();
+        return;
+      }
+      if (ch === ":" || ch === KEY_CTRL_K) {
+        mode = "palette";
+        paletteQuery = "";
+        paletteSel = 0;
+        return;
+      }
+      if (ch === "/") {
+        filterSnapshot = filterByPane[active];
+        offsetByPane[active] = 0;
+        mode = "filter";
+        return;
+      }
+      if (ch === "?") {
+        mode = "help";
+        return;
+      }
+    }
+    function handlePaletteChar(ch) {
+      if (ch === KEY_ENTER_A || ch === KEY_ENTER_B) {
+        const results = paletteResults();
+        if (results.length) lastVerb = results[Math.min(paletteSel, results.length - 1)];
+        mode = "nav";
+        return;
+      }
+      if (ch === KEY_BACKSPACE_A || ch === KEY_BACKSPACE_B) {
+        paletteQuery = paletteQuery.slice(0, -1);
+        paletteSel = 0;
+        return;
+      }
+      if (ch >= " " && ch <= "~") {
+        paletteQuery += ch;
+        paletteSel = 0;
+      }
+    }
+    function handleFilterChar(ch) {
+      if (ch === KEY_ENTER_A || ch === KEY_ENTER_B) {
+        mode = "nav";
+        offsetByPane[active] = 0;
+        return;
+      }
+      if (ch === KEY_BACKSPACE_A || ch === KEY_BACKSPACE_B) {
+        filterByPane[active] = filterByPane[active].slice(0, -1);
+        return;
+      }
+      if (ch >= " " && ch <= "~") {
+        filterByPane[active] += ch;
+      }
+    }
+    function escToNav() {
+      if (mode === "filter") {
+        filterByPane[active] = filterSnapshot;
+        offsetByPane[active] = 0;
+      }
+      mode = "nav";
+    }
+    function dispatchKeys(str) {
+      for (const ch of str) {
+        if (done) return;
+        if (mode === "nav") {
+          if (ch === KEY_Q) return quit();
+          handleNavChar(ch);
+        } else if (mode === "palette") {
+          handlePaletteChar(ch);
+        } else if (mode === "filter") {
+          handleFilterChar(ch);
+        } else if (mode === "help") {
+          if (ch === "?" || ch === KEY_Q) mode = "nav";
+        }
+      }
+    }
+    function onData(chunk) {
+      if (done) return;
+      const s = chunk.toString("utf8");
+      if (s === KEY_CTRL_C) return quit();
+      if (splashActive) {
+        splashActive = false;
+        if (splashTimer) {
+          clearTimeout(splashTimer);
+          splashTimer = null;
+        }
+        renderer.invalidate();
+      }
+      if (s === KEY_ESC) {
+        if (mode !== "nav") escToNav();
+        repaint();
+        return;
+      }
+      if (s === KEY_SHIFT_TAB) {
+        if (mode === "nav") cycleFocus(-1);
+        repaint();
+        return;
+      }
+      if (s.charCodeAt(0) === 27) {
+        if (s === KEY_UP) {
+          if (mode === "nav") scrollActive(-1);
+          else if (mode === "palette") paletteSel = Math.max(0, paletteSel - 1);
+          repaint();
+          return;
+        }
+        if (s === KEY_DOWN) {
+          if (mode === "nav") scrollActive(1);
+          else if (mode === "palette") {
+            const n = paletteResults().length;
+            paletteSel = Math.min(Math.max(0, n - 1), paletteSel + 1);
+          }
+          repaint();
+          return;
+        }
+        if (s === KEY_LEFT) {
+          if (mode === "nav") moveNav(-1);
+          repaint();
+          return;
+        }
+        if (s === KEY_RIGHT) {
+          if (mode === "nav") moveNav(1);
+          repaint();
+          return;
+        }
+        if (mode !== "nav") escToNav();
+        const rest = s.slice(1);
+        if (rest && rest.charCodeAt(0) !== 27) dispatchKeys(rest);
+        repaint();
+        return;
+      }
+      dispatchKeys(s);
+      repaint();
+    }
+    function quit() {
+      if (done) return;
+      done = true;
+      if (splashTimer) {
+        clearTimeout(splashTimer);
+        splashTimer = null;
+      }
+      try {
+        input.removeListener("data", onData);
+      } catch {
+      }
+      try {
+        unwireResize();
+      } catch {
+      }
+      runtime.cleanup();
+      resolve2({ ok: true, lastVerb });
+    }
+    runtime.enter();
+    splashTimer = setTimeout(() => {
+      splashTimer = null;
+      if (splashActive) {
+        splashActive = false;
+        renderer.invalidate();
+        repaint();
+      }
+    }, _splashMs);
+    unwireResize = wireResize({
+      output,
+      onResize: (sz) => {
+        renderer.resize(sz.rows, sz.cols);
+        repaint();
+      }
+    });
+    if (typeof input.on === "function") input.on("data", onData);
+    repaint();
+  });
+}
+function printStatic(output = process.stdout) {
+  const out = (s) => output.write(s);
+  out("\n  terminalhire hub\n");
+  out("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n");
+  out("  Panes: " + PANES.map((p) => sanitizeLine(p)).join(" \xB7 ") + "\n\n");
+  out("  Run `terminalhire hub` in an interactive terminal to launch the full-screen hub.\n\n");
+}
+async function run12(opts = {}) {
+  const {
+    isTTY = process.stdout.isTTY,
+    input = process.stdin,
+    output = process.stdout,
+    runTui = runHubTui,
+    runStatic = null
+  } = opts;
+  if (isTTY) {
+    await runTui({ input, output });
+  } else if (runStatic) {
+    await runStatic({ output });
+  } else {
+    printStatic(output);
+  }
+}
+var KEY_CTRL_K, KEY_SHIFT_TAB, PANES, PALETTE_VERBS, TH_GLYPH, BRAND_GRADIENT, DEFAULT_SPLASH_MS, STATE_LEVEL, SPARK_LEVELS;
+var init_jpi_hub = __esm({
+  "bin/jpi-hub.js"() {
+    "use strict";
+    init_tui_core();
+    init_claims();
+    init_profile();
+    init_config();
+    init_jpi_chat_read();
+    init_jpi_chat();
+    init_jpi_jobs();
+    init_jpi_bounties();
+    init_jpi_devs();
+    init_cache_store();
+    init_intro2();
+    init_open_url();
+    KEY_CTRL_K = "\v";
+    KEY_SHIFT_TAB = "\x1B[Z";
+    PANES = ["Home", "Jobs", "Bounties", "Devs", "Inbox", "Claims", "Profile"];
+    PALETTE_VERBS = [
+      "jobs",
+      "bounties",
+      "devs",
+      "inbox",
+      "claims",
+      "profile",
+      "sync",
+      "claim",
+      "contribute",
+      "refresh",
+      "init"
+    ];
+    TH_GLYPH = [
+      "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557  \u2588\u2588\u2557",
+      "\u255A\u2550\u2550\u2588\u2588\u2554\u2550\u2550\u255D\u2588\u2588\u2551  \u2588\u2588\u2551",
+      "   \u2588\u2588\u2551   \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551",
+      "   \u2588\u2588\u2551   \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551",
+      "   \u2588\u2588\u2551   \u2588\u2588\u2551  \u2588\u2588\u2551",
+      "   \u255A\u2550\u255D   \u255A\u2550\u255D  \u255A\u2550\u255D"
+    ];
+    BRAND_GRADIENT = ["#9d8fff", "#7c6af7", "#5b4fcf"];
+    DEFAULT_SPLASH_MS = 900;
+    STATE_LEVEL = { abandoned: 0, claimed: 2, working: 3, "in-review": 4, ready: 5, submitted: 6, merged: 7 };
+    SPARK_LEVELS = ["\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586", "\u2587", "\u2588"];
   }
 });
 
@@ -19770,7 +21219,7 @@ var init_errors2 = __esm({
 });
 
 // ../../node_modules/zod/v4/classic/parse.js
-var parse2, parseAsync2, safeParse3, safeParseAsync2, encode2, decode2, encodeAsync2, decodeAsync2, safeEncode2, safeDecode2, safeEncodeAsync2, safeDecodeAsync2;
+var parse2, parseAsync2, safeParse3, safeParseAsync2, encode3, decode2, encodeAsync2, decodeAsync2, safeEncode2, safeDecode2, safeEncodeAsync2, safeDecodeAsync2;
 var init_parse3 = __esm({
   "../../node_modules/zod/v4/classic/parse.js"() {
     "use strict";
@@ -19780,7 +21229,7 @@ var init_parse3 = __esm({
     parseAsync2 = /* @__PURE__ */ _parseAsync(ZodRealError);
     safeParse3 = /* @__PURE__ */ _safeParse(ZodRealError);
     safeParseAsync2 = /* @__PURE__ */ _safeParseAsync(ZodRealError);
-    encode2 = /* @__PURE__ */ _encode(ZodRealError);
+    encode3 = /* @__PURE__ */ _encode(ZodRealError);
     decode2 = /* @__PURE__ */ _decode(ZodRealError);
     encodeAsync2 = /* @__PURE__ */ _encodeAsync(ZodRealError);
     decodeAsync2 = /* @__PURE__ */ _decodeAsync(ZodRealError);
@@ -20036,7 +21485,7 @@ var init_schemas3 = __esm({
       inst.parseAsync = async (data, params) => parseAsync2(inst, data, params, { callee: inst.parseAsync });
       inst.safeParseAsync = async (data, params) => safeParseAsync2(inst, data, params);
       inst.spa = inst.safeParseAsync;
-      inst.encode = (data, params) => encode2(inst, data, params);
+      inst.encode = (data, params) => encode3(inst, data, params);
       inst.decode = (data, params) => decode2(inst, data, params);
       inst.encodeAsync = async (data, params) => encodeAsync2(inst, data, params);
       inst.decodeAsync = async (data, params) => decodeAsync2(inst, data, params);
@@ -37203,7 +38652,7 @@ __export(jpi_mcp_exports, {
   contributeResult: () => contributeResult,
   inboxResult: () => inboxResult,
   jobsResult: () => jobsResult,
-  run: () => run12
+  run: () => run13
 });
 function clampLimit(limit) {
   const n = Number(limit);
@@ -37274,7 +38723,7 @@ function buildToolResult(name, args5, entry, contributeEnabled) {
       return { status: "error", hint: `Unknown tool: ${name}` };
   }
 }
-async function run12() {
+async function run13() {
   const { Server: Server2 } = await Promise.resolve().then(() => (init_server2(), server_exports));
   const { StdioServerTransport: StdioServerTransport2 } = await Promise.resolve().then(() => (init_stdio2(), stdio_exports));
   const { ListToolsRequestSchema: ListToolsRequestSchema2, CallToolRequestSchema: CallToolRequestSchema2 } = await Promise.resolve().then(() => (init_types3(), types_exports));
@@ -37376,9 +38825,9 @@ var init_jpi_mcp = __esm({
 // bin/jpi-connect.js
 var jpi_connect_exports = {};
 __export(jpi_connect_exports, {
-  run: () => run13
+  run: () => run14
 });
-async function run13() {
+async function run14() {
   const args5 = process.argv.slice(2).filter((a) => a !== "connect");
   if (args5.includes("--mute")) {
     writeConfig({ inboundNudgeMuted: true });
@@ -37607,9 +39056,9 @@ var init_link = __esm({
 // bin/jpi-link.js
 var jpi_link_exports = {};
 __export(jpi_link_exports, {
-  run: () => run14
+  run: () => run15
 });
-async function run14() {
+async function run15() {
   try {
     const args5 = process.argv.slice(2);
     if (args5.includes("--logout")) {
@@ -37636,7 +39085,7 @@ var init_jpi_link = __esm({
 // bin/jpi-profile.js
 var jpi_profile_exports = {};
 __export(jpi_profile_exports, {
-  run: () => run15
+  run: () => run16
 });
 import { createInterface as createInterface10 } from "readline";
 function prompt4(question) {
@@ -37648,7 +39097,7 @@ function prompt4(question) {
     });
   });
 }
-async function run15() {
+async function run16() {
   const { readProfile: readProfile2, writeProfile: writeProfile2, deleteProfile: deleteProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
   const args5 = process.argv.slice(2);
   if (args5.includes("--show")) {
@@ -37981,9 +39430,9 @@ var init_signal = __esm({
 // bin/jpi-learn.js
 var jpi_learn_exports = {};
 __export(jpi_learn_exports, {
-  run: () => run16
+  run: () => run17
 });
-async function run16() {
+async function run17() {
   try {
     const args5 = process.argv.slice(2);
     const cwdIdx = args5.indexOf("--cwd");
@@ -38010,7 +39459,7 @@ var init_jpi_learn = __esm({
     "use strict";
     isMain = process.argv[1]?.endsWith("jpi-learn.js") || process.argv[1]?.endsWith("jpi-learn");
     if (isMain) {
-      run16();
+      run17();
     }
   }
 });
@@ -38018,7 +39467,7 @@ var init_jpi_learn = __esm({
 // bin/jpi-config.js
 var jpi_config_exports = {};
 __export(jpi_config_exports, {
-  run: () => run17
+  run: () => run18
 });
 import { join as join25 } from "path";
 import { homedir as homedir22 } from "os";
@@ -38028,7 +39477,7 @@ function parseNudgeMode2(raw) {
   if (m && parseInt(m[1], 10) >= 1) return raw;
   return null;
 }
-async function run17() {
+async function run18() {
   const args5 = process.argv.slice(2);
   const filtered = args5[0] === "config" ? args5.slice(1) : args5;
   if (filtered.includes("--show") || filtered.length === 0) {
@@ -38724,7 +40173,7 @@ var init_spinner = __esm({
 // bin/jpi-spinner.js
 var jpi_spinner_exports = {};
 __export(jpi_spinner_exports, {
-  run: () => run18
+  run: () => run19
 });
 import {
   readFileSync as readFileSync27,
@@ -38772,7 +40221,7 @@ function readTopMatches() {
     return [];
   }
 }
-async function run18() {
+async function run19() {
   const args5 = process.argv.slice(2).filter((a) => a !== "spinner");
   const has = (f) => args5.includes(f);
   const val = (f) => {
@@ -38919,7 +40368,7 @@ var init_jpi_spinner = __esm({
 // bin/jpi-sync.js
 var jpi_sync_exports = {};
 __export(jpi_sync_exports, {
-  run: () => run19
+  run: () => run20
 });
 import { readFileSync as readFileSync28, writeFileSync as writeFileSync20, mkdirSync as mkdirSync20, existsSync as existsSync19, rmSync as rmSync6 } from "fs";
 import { join as join30 } from "path";
@@ -39231,7 +40680,7 @@ async function runDelete() {
   clearMarker();
   console.log("\n  Synced profile deleted and local marker cleared.\n");
 }
-async function run19() {
+async function run20() {
   const args5 = process.argv.slice(2).filter((a) => a !== "sync");
   const has = (f) => args5.includes(f);
   if (has("--push") || has("--enable")) {
@@ -39275,7 +40724,7 @@ var init_jpi_sync = __esm({
 // bin/jpi-init.js
 var jpi_init_exports = {};
 __export(jpi_init_exports, {
-  run: () => run20
+  run: () => run21
 });
 import { existsSync as existsSync20 } from "fs";
 import { join as join31, resolve } from "path";
@@ -39309,7 +40758,7 @@ function resolveStatuslineInstallJs() {
 function tokenizeInterest(raw) {
   return raw.split(/[,/]|\s+/).map((t) => t.trim()).filter(Boolean);
 }
-async function run20() {
+async function run21() {
   const rl = createInterface13({ input: process.stdin, output: process.stdout });
   const ask3 = (question) => new Promise((resolve2) => {
     let answered = false;
@@ -39649,10 +41098,10 @@ var init_beta_nudge = __esm({
 // bin/jpi-refresh.js
 var jpi_refresh_exports = {};
 __export(jpi_refresh_exports, {
-  run: () => run21
+  run: () => run22
 });
 import { fileURLToPath as fileURLToPath6 } from "url";
-async function run21() {
+async function run22() {
   try {
     let index;
     for (let attempt = 1; ; attempt++) {
@@ -39975,7 +41424,7 @@ var init_jpi_refresh = __esm({
 // bin/jpi-save.js
 var jpi_save_exports = {};
 __export(jpi_save_exports, {
-  run: () => run22
+  run: () => run23
 });
 import { readFileSync as readFileSync29, existsSync as existsSync21 } from "fs";
 import { join as join32 } from "path";
@@ -40053,7 +41502,7 @@ async function cmdUnsave(jobId) {
     process.exit(1);
   }
 }
-async function run22() {
+async function run23() {
   const verb = process.argv[2];
   const jobId = process.argv[3];
   try {
@@ -40085,10 +41534,10 @@ var init_jpi_save = __esm({
 // bin/jpi-beta.js
 var jpi_beta_exports = {};
 __export(jpi_beta_exports, {
-  run: () => run23
+  run: () => run24
 });
 import { createInterface as createInterface14 } from "readline";
-async function run23() {
+async function run24() {
   const rl = createInterface14({ input: process.stdin, output: process.stdout });
   const ask3 = (question) => new Promise((resolve2) => {
     const onClose = () => resolve2(null);
@@ -40208,7 +41657,7 @@ var init_jpi_beta = __esm({
 // bin/jpi-feedback.js
 var jpi_feedback_exports = {};
 __export(jpi_feedback_exports, {
-  run: () => run24
+  run: () => run25
 });
 import { createInterface as createInterface15 } from "readline";
 import { readFileSync as readFileSync30, existsSync as existsSync22 } from "fs";
@@ -40226,7 +41675,7 @@ function readLocalVersion3() {
   }
   return null;
 }
-async function run24() {
+async function run25() {
   const rl = createInterface15({ input: process.stdin, output: process.stdout });
   const ask3 = (question) => new Promise((resolve2) => {
     const onClose = () => resolve2(null);
@@ -40372,7 +41821,7 @@ function readPackageVersion() {
   }
   return "0.1.1";
 }
-var SUBCOMMANDS = ["jobs", "devs", "project", "bounties", "contribute", "claim", "trajectory", "mirror", "intro", "chat", "inbox", "mcp", "connect", "link", "profile", "login", "logout", "learn", "config", "spinner", "statusline", "sync", "init", "refresh", "save", "saved", "unsave", "beta", "feedback", "help", "--help", "-h", "--version", "-v"];
+var SUBCOMMANDS = ["jobs", "devs", "project", "bounties", "contribute", "claim", "trajectory", "mirror", "intro", "chat", "inbox", "hub", "mcp", "connect", "link", "profile", "login", "logout", "learn", "config", "spinner", "statusline", "sync", "init", "refresh", "save", "saved", "unsave", "beta", "feedback", "help", "--help", "-h", "--version", "-v"];
 var firstArg = process.argv[2];
 if (!firstArg && !process.stdin.isTTY) {
   const { default: childProcess } = await import("child_process");
@@ -40567,6 +42016,18 @@ if (firstArg === "inbox") {
   } catch (err) {
     process.stdout.write("\x1B[?25h\x1B[?1049l");
     console.error(`inbox error: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+  process.exit(0);
+}
+if (firstArg === "hub") {
+  process.argv.splice(2, 1);
+  const mod2 = await Promise.resolve().then(() => (init_jpi_hub(), jpi_hub_exports));
+  try {
+    await mod2.run();
+  } catch (err) {
+    process.stdout.write("\x1B[?25h\x1B[?1049l");
+    console.error(`hub error: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
   process.exit(0);

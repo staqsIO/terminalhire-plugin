@@ -462,6 +462,21 @@ var init_contribution_gate = __esm({
   }
 });
 
+// ../../packages/core/src/credential/rigor.ts
+var RIGOR, MAINTAINER_SET;
+var init_rigor = __esm({
+  "../../packages/core/src/credential/rigor.ts"() {
+    "use strict";
+    RIGOR = {
+      /** `authorAssociation` values that count as a maintainer review. */
+      MAINTAINER_ASSOCIATIONS: ["OWNER", "MEMBER", "COLLABORATOR"]
+    };
+    MAINTAINER_SET = new Set(
+      RIGOR.MAINTAINER_ASSOCIATIONS.map((a) => a.toUpperCase())
+    );
+  }
+});
+
 // ../../packages/core/src/github.ts
 var RESUME_DECAY_HALF_LIFE_MS;
 var init_github = __esm({
@@ -469,6 +484,7 @@ var init_github = __esm({
     "use strict";
     init_vocabulary();
     init_contribution_gate();
+    init_rigor();
     RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
   }
 });
@@ -3963,6 +3979,7 @@ var init_src = __esm({
     init_job_status();
     init_legible();
     init_legible_trajectory();
+    init_rigor();
     init_short_token();
   }
 });
@@ -3975,9 +3992,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/claim-frictionless/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/claim-frictionless/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -4439,14 +4456,62 @@ var init_config = __esm({
   }
 });
 
+// bin/tui-core.js
+function sanitizeLine(text) {
+  return String(text).replace(ANSI_CSI, "").replace(ANSI_OSC, "").replace(ANSI_OTHER, "").replace(C0_C1_DEL, "");
+}
+var ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, PALETTE, COLOR_ROLES;
+var init_tui_core = __esm({
+  "bin/tui-core.js"() {
+    "use strict";
+    ANSI_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+    ANSI_OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+    ANSI_OTHER = /\x1b[@-_]/g;
+    C0_C1_DEL = /[\x00-\x1f\x7f-\x9f]/g;
+    PALETTE = {
+      truecolor: {
+        bg: "\x1B[48;2;13;17;23m",
+        panel: "\x1B[48;2;22;27;34m",
+        rule: "\x1B[38;2;48;54;61m",
+        text: "\x1B[38;2;201;209;217m",
+        muted: "\x1B[38;2;125;133;144m",
+        accent: "\x1B[38;2;88;166;255m",
+        "accent-bright": "\x1B[38;2;121;192;255m",
+        green: "\x1B[38;2;63;185;80m",
+        amber: "\x1B[38;2;210;153;34m"
+      },
+      256: {
+        bg: "\x1B[48;5;233m",
+        panel: "\x1B[48;5;235m",
+        rule: "\x1B[38;5;240m",
+        text: "\x1B[38;5;252m",
+        muted: "\x1B[38;5;245m",
+        accent: "\x1B[38;5;75m",
+        "accent-bright": "\x1B[38;5;117m",
+        green: "\x1B[38;5;71m",
+        amber: "\x1B[38;5;178m"
+      },
+      16: {
+        bg: "\x1B[40m",
+        panel: "\x1B[100m",
+        rule: "\x1B[90m",
+        text: "\x1B[37m",
+        muted: "\x1B[90m",
+        accent: "\x1B[94m",
+        "accent-bright": "\x1B[96m",
+        green: "\x1B[92m",
+        amber: "\x1B[93m"
+      }
+    };
+    COLOR_ROLES = Object.keys(PALETTE.truecolor);
+  }
+});
+
 // bin/jpi-chat.js
 import { createInterface } from "readline";
 import { existsSync as existsSync6, readFileSync as readFileSync7 } from "fs";
 import { homedir as homedir6 } from "os";
 import { join as join7 } from "path";
-function sanitizeLine(text) {
-  return String(text).replace(ANSI_CSI, "").replace(ANSI_OSC, "").replace(ANSI_OTHER, "").replace(C0_C1_DEL, "");
-}
 function defaultPromptAck({ input = process.stdin, output = process.stdout } = {}) {
   if (!input || input.isTTY !== true) return Promise.resolve(false);
   const rl = createInterface({ input, output });
@@ -4565,19 +4630,16 @@ function formatPresence(presence, now = /* @__PURE__ */ new Date()) {
   }
   return "\u25D0 reachable";
 }
-var CHAT_BASE2, GH_SESSION_COOKIE2, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, ACTIVE_WINDOW_MS;
+var CHAT_BASE2, GH_SESSION_COOKIE2, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, ACTIVE_WINDOW_MS;
 var init_jpi_chat = __esm({
   "bin/jpi-chat.js"() {
     "use strict";
     init_chat_client();
     init_config();
     init_web_session();
+    init_tui_core();
     CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE2 = "__jpi_gh_session";
-    ANSI_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
-    ANSI_OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
-    ANSI_OTHER = /\x1b[@-_]/g;
-    C0_C1_DEL = /[\x00-\x1f\x7f-\x9f]/g;
     CHAT_DISCLOSURE = "Messages are end-to-end encrypted using keys stored only on your device. Our server cannot read message content. Since we distribute your contact's public key, verify your connection by comparing Safety Numbers to rule out a server-side substitution. We store metadata: who messaged whom, when, and message count. Content is purged after 90 days.";
     CHAT_AT_REST = "Your private key is encrypted against casual access, not full machine compromise.";
     CHAT_CODE_OF_CONDUCT = "Code of conduct: keep it professional \u2014 harassment, spam, or abuse gets you blocked and removed.";

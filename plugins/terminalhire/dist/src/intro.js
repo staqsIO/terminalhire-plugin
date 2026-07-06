@@ -478,6 +478,21 @@ var init_contribution_gate = __esm({
   }
 });
 
+// ../../packages/core/src/credential/rigor.ts
+var RIGOR, MAINTAINER_SET;
+var init_rigor = __esm({
+  "../../packages/core/src/credential/rigor.ts"() {
+    "use strict";
+    RIGOR = {
+      /** `authorAssociation` values that count as a maintainer review. */
+      MAINTAINER_ASSOCIATIONS: ["OWNER", "MEMBER", "COLLABORATOR"]
+    };
+    MAINTAINER_SET = new Set(
+      RIGOR.MAINTAINER_ASSOCIATIONS.map((a) => a.toUpperCase())
+    );
+  }
+});
+
 // ../../packages/core/src/github.ts
 var RESUME_DECAY_HALF_LIFE_MS;
 var init_github = __esm({
@@ -485,6 +500,7 @@ var init_github = __esm({
     "use strict";
     init_vocabulary();
     init_contribution_gate();
+    init_rigor();
     RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
   }
 });
@@ -969,6 +985,7 @@ var init_src = __esm({
     init_job_status();
     init_legible();
     init_legible_trajectory();
+    init_rigor();
     init_short_token();
   }
 });
@@ -981,9 +998,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/claim-frictionless/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/claim-frictionless/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -1658,14 +1675,11 @@ async function runIntroDecision(args, overrides) {
   if (data.contact) deps.log(`  They also shared: ${data.contact}`);
   deps.log("");
 }
-async function runIntroList(overrides) {
+async function getIntros(overrides) {
   const deps = { ...defaultIntroDeps(), ...overrides };
   const cookie = deps.sessionCookie();
   if (!cookie) {
-    deps.log("\n  No linked web session found on this machine.");
-    deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
-    deps.exit(0);
-    return;
+    return { status: "no-session" };
   }
   let res;
   try {
@@ -1675,48 +1689,70 @@ async function runIntroList(overrides) {
       signal: AbortSignal.timeout(1e4)
     });
   } catch (err) {
-    deps.errorLog(`
-  Request failed: ${err instanceof Error ? err.message : String(err)}
-`);
-    deps.exit(1);
-    return;
+    return { status: "request-failed", message: err instanceof Error ? err.message : String(err) };
   }
   if (res.status === 401) {
-    deps.log("\n  Your linked web session expired.");
-    deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
-    deps.exit(1);
-    return;
+    return { status: "expired" };
   }
   if (!res.ok) {
-    deps.errorLog(`
-  Request failed: /api/intro/list returned ${res.status}.
-`);
-    deps.exit(1);
-    return;
+    return { status: "error", httpStatus: res.status };
   }
   let data = {};
   try {
     data = await res.json();
   } catch {
   }
-  const intros = data.intros ?? [];
-  if (intros.length === 0) {
-    deps.log("\n  No intros yet.\n");
-    return;
-  }
-  deps.log("");
-  for (const it of intros) {
-    const dir = it.role === "incoming" ? "from" : "to";
-    deps.log(`  [${it.status}] ${dir} @${it.counterpartyLogin}`);
-    if (it.note) deps.log(`      note: ${it.note}`);
-    if (it.contact) deps.log(`      contact: ${it.contact}`);
-    else if (it.role === "incoming" && it.status === "pending") {
-      deps.log(`      \u2192 accept: terminalhire intro --accept @${it.counterpartyLogin}`);
+  return { status: "ok", intros: data.intros ?? [] };
+}
+async function runIntroList(overrides) {
+  const deps = { ...defaultIntroDeps(), ...overrides };
+  const result = await getIntros(deps);
+  switch (result.status) {
+    case "no-session":
+      deps.log("\n  No linked web session found on this machine.");
+      deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
+      deps.exit(0);
+      return;
+    case "expired":
+      deps.log("\n  Your linked web session expired.");
+      deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
+      deps.exit(1);
+      return;
+    case "request-failed":
+      deps.errorLog(`
+  Request failed: ${result.message}
+`);
+      deps.exit(1);
+      return;
+    case "error":
+      deps.errorLog(`
+  Request failed: /api/intro/list returned ${result.httpStatus}.
+`);
+      deps.exit(1);
+      return;
+    case "ok": {
+      const intros = result.intros;
+      if (intros.length === 0) {
+        deps.log("\n  No intros yet.\n");
+        return;
+      }
+      deps.log("");
+      for (const it of intros) {
+        const dir = it.role === "incoming" ? "from" : "to";
+        deps.log(`  [${it.status}] ${dir} @${it.counterpartyLogin}`);
+        if (it.note) deps.log(`      note: ${it.note}`);
+        if (it.contact) deps.log(`      contact: ${it.contact}`);
+        else if (it.role === "incoming" && it.status === "pending") {
+          deps.log(`      \u2192 accept: terminalhire intro --accept @${it.counterpartyLogin}`);
+        }
+      }
+      deps.log("");
+      return;
     }
   }
-  deps.log("");
 }
 export {
+  getIntros,
   runIntroDecision,
   runIntroList,
   runIntroRequest

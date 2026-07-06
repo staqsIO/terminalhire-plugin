@@ -479,6 +479,21 @@ var init_contribution_gate = __esm({
   }
 });
 
+// ../../packages/core/src/credential/rigor.ts
+var RIGOR, MAINTAINER_SET;
+var init_rigor = __esm({
+  "../../packages/core/src/credential/rigor.ts"() {
+    "use strict";
+    RIGOR = {
+      /** `authorAssociation` values that count as a maintainer review. */
+      MAINTAINER_ASSOCIATIONS: ["OWNER", "MEMBER", "COLLABORATOR"]
+    };
+    MAINTAINER_SET = new Set(
+      RIGOR.MAINTAINER_ASSOCIATIONS.map((a) => a.toUpperCase())
+    );
+  }
+});
+
 // ../../packages/core/src/github.ts
 var RESUME_DECAY_HALF_LIFE_MS;
 var init_github = __esm({
@@ -486,6 +501,7 @@ var init_github = __esm({
     "use strict";
     init_vocabulary();
     init_contribution_gate();
+    init_rigor();
     RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
   }
 });
@@ -3991,6 +4007,7 @@ var init_src = __esm({
     init_job_status();
     init_legible();
     init_legible_trajectory();
+    init_rigor();
     init_short_token();
   }
 });
@@ -4003,9 +4020,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/claim-frictionless/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/claim-frictionless/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -4467,6 +4484,61 @@ var init_config = __esm({
   }
 });
 
+// bin/tui-core.js
+function sanitizeLine(text) {
+  return String(text).replace(ANSI_CSI, "").replace(ANSI_OSC, "").replace(ANSI_OTHER, "").replace(C0_C1_DEL, "");
+}
+function truncate(s, n) {
+  const t = String(s);
+  return t.length <= n ? t : `${t.slice(0, n - 1)}\u2026`;
+}
+var ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, PALETTE, COLOR_ROLES;
+var init_tui_core = __esm({
+  "bin/tui-core.js"() {
+    "use strict";
+    ANSI_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+    ANSI_OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+    ANSI_OTHER = /\x1b[@-_]/g;
+    C0_C1_DEL = /[\x00-\x1f\x7f-\x9f]/g;
+    PALETTE = {
+      truecolor: {
+        bg: "\x1B[48;2;13;17;23m",
+        panel: "\x1B[48;2;22;27;34m",
+        rule: "\x1B[38;2;48;54;61m",
+        text: "\x1B[38;2;201;209;217m",
+        muted: "\x1B[38;2;125;133;144m",
+        accent: "\x1B[38;2;88;166;255m",
+        "accent-bright": "\x1B[38;2;121;192;255m",
+        green: "\x1B[38;2;63;185;80m",
+        amber: "\x1B[38;2;210;153;34m"
+      },
+      256: {
+        bg: "\x1B[48;5;233m",
+        panel: "\x1B[48;5;235m",
+        rule: "\x1B[38;5;240m",
+        text: "\x1B[38;5;252m",
+        muted: "\x1B[38;5;245m",
+        accent: "\x1B[38;5;75m",
+        "accent-bright": "\x1B[38;5;117m",
+        green: "\x1B[38;5;71m",
+        amber: "\x1B[38;5;178m"
+      },
+      16: {
+        bg: "\x1B[40m",
+        panel: "\x1B[100m",
+        rule: "\x1B[90m",
+        text: "\x1B[37m",
+        muted: "\x1B[90m",
+        accent: "\x1B[94m",
+        "accent-bright": "\x1B[96m",
+        green: "\x1B[92m",
+        amber: "\x1B[93m"
+      }
+    };
+    COLOR_ROLES = Object.keys(PALETTE.truecolor);
+  }
+});
+
 // bin/jpi-chat-read.js
 var jpi_chat_read_exports = {};
 __export(jpi_chat_read_exports, {
@@ -4568,7 +4640,7 @@ function formatStamp(iso, now = /* @__PURE__ */ new Date()) {
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
-function truncate(s, n) {
+function truncate2(s, n) {
   const t = String(s);
   return t.length <= n ? t : `${t.slice(0, n - 1)}\u2026`;
 }
@@ -4593,7 +4665,7 @@ function renderInbox(items, invites = []) {
       const unread = it.unread > 0 ? `\u2709 ${it.unread}` : "\u2014";
       const login = `@${sanitizeLine(it.login)}`;
       const stamp = sanitizeLine(it.lastStamp || "");
-      const preview = it.preview ? truncate(sanitizeLine(it.preview), 38) : "";
+      const preview = it.preview ? truncate2(sanitizeLine(it.preview), 38) : "";
       lines.push(
         `  ${dot} ${login.padEnd(18)} ${unread.padEnd(5)} ${stamp.padStart(6)}  ${preview}`
       );
@@ -5142,6 +5214,7 @@ var init_open_url = __esm({
 // src/intro.ts
 var intro_exports = {};
 __export(intro_exports, {
+  getIntros: () => getIntros,
   runIntroDecision: () => runIntroDecision,
   runIntroList: () => runIntroList,
   runIntroRequest: () => runIntroRequest
@@ -5458,14 +5531,11 @@ async function runIntroDecision(args, overrides) {
   if (data.contact) deps.log(`  They also shared: ${data.contact}`);
   deps.log("");
 }
-async function runIntroList(overrides) {
+async function getIntros(overrides) {
   const deps = { ...defaultIntroDeps(), ...overrides };
   const cookie = deps.sessionCookie();
   if (!cookie) {
-    deps.log("\n  No linked web session found on this machine.");
-    deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
-    deps.exit(0);
-    return;
+    return { status: "no-session" };
   }
   let res;
   try {
@@ -5475,46 +5545,67 @@ async function runIntroList(overrides) {
       signal: AbortSignal.timeout(1e4)
     });
   } catch (err) {
-    deps.errorLog(`
-  Request failed: ${err instanceof Error ? err.message : String(err)}
-`);
-    deps.exit(1);
-    return;
+    return { status: "request-failed", message: err instanceof Error ? err.message : String(err) };
   }
   if (res.status === 401) {
-    deps.log("\n  Your linked web session expired.");
-    deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
-    deps.exit(1);
-    return;
+    return { status: "expired" };
   }
   if (!res.ok) {
-    deps.errorLog(`
-  Request failed: /api/intro/list returned ${res.status}.
-`);
-    deps.exit(1);
-    return;
+    return { status: "error", httpStatus: res.status };
   }
   let data = {};
   try {
     data = await res.json();
   } catch {
   }
-  const intros = data.intros ?? [];
-  if (intros.length === 0) {
-    deps.log("\n  No intros yet.\n");
-    return;
-  }
-  deps.log("");
-  for (const it of intros) {
-    const dir = it.role === "incoming" ? "from" : "to";
-    deps.log(`  [${it.status}] ${dir} @${it.counterpartyLogin}`);
-    if (it.note) deps.log(`      note: ${it.note}`);
-    if (it.contact) deps.log(`      contact: ${it.contact}`);
-    else if (it.role === "incoming" && it.status === "pending") {
-      deps.log(`      \u2192 accept: terminalhire intro --accept @${it.counterpartyLogin}`);
+  return { status: "ok", intros: data.intros ?? [] };
+}
+async function runIntroList(overrides) {
+  const deps = { ...defaultIntroDeps(), ...overrides };
+  const result = await getIntros(deps);
+  switch (result.status) {
+    case "no-session":
+      deps.log("\n  No linked web session found on this machine.");
+      deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
+      deps.exit(0);
+      return;
+    case "expired":
+      deps.log("\n  Your linked web session expired.");
+      deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
+      deps.exit(1);
+      return;
+    case "request-failed":
+      deps.errorLog(`
+  Request failed: ${result.message}
+`);
+      deps.exit(1);
+      return;
+    case "error":
+      deps.errorLog(`
+  Request failed: /api/intro/list returned ${result.httpStatus}.
+`);
+      deps.exit(1);
+      return;
+    case "ok": {
+      const intros = result.intros;
+      if (intros.length === 0) {
+        deps.log("\n  No intros yet.\n");
+        return;
+      }
+      deps.log("");
+      for (const it of intros) {
+        const dir = it.role === "incoming" ? "from" : "to";
+        deps.log(`  [${it.status}] ${dir} @${it.counterpartyLogin}`);
+        if (it.note) deps.log(`      note: ${it.note}`);
+        if (it.contact) deps.log(`      contact: ${it.contact}`);
+        else if (it.role === "incoming" && it.status === "pending") {
+          deps.log(`      \u2192 accept: terminalhire intro --accept @${it.counterpartyLogin}`);
+        }
+      }
+      deps.log("");
+      return;
     }
   }
-  deps.log("");
 }
 var LINK_BASE, GH_SESSION_COOKIE3, UUID_RE;
 var init_intro2 = __esm({
@@ -5611,7 +5702,7 @@ function formatInbox(state) {
         const badgeCell = badgeVisible.padEnd(5);
         const badge = row.unread > 0 ? BOLD + badgeCell + BOLD_OFF : badgeCell;
         const stamp = sanitizeLine(row.lastStamp || "").padStart(6);
-        const preview = row.preview ? truncate2(sanitizeLine(row.preview), 34) : "";
+        const preview = row.preview ? truncate(sanitizeLine(row.preview), 34) : "";
         const text = `  ${dot} ${login.padEnd(18)} ${badge} ${stamp}  ${preview}`;
         lines.push(sel ? INVERSE + text + RESET : text);
       }
@@ -5639,10 +5730,6 @@ function formatInbox(state) {
     lines.push(`  ${banner}`);
   }
   return CLEAR + lines.join("\n") + "\n";
-}
-function truncate2(s, n) {
-  const t = String(s);
-  return t.length <= n ? t : `${t.slice(0, n - 1)}\u2026`;
 }
 async function runInboxPane(opts = {}) {
   const {
@@ -6020,6 +6107,7 @@ var init_jpi_inbox = __esm({
     init_chat_client();
     init_jpi_chat();
     init_jpi_chat_read();
+    init_tui_core();
     HIDE_CURSOR = "\x1B[?25l";
     SHOW_CURSOR = "\x1B[?25h";
     ENTER_ALT = "\x1B[?1049h";
@@ -6047,9 +6135,6 @@ import { createInterface } from "readline";
 import { existsSync as existsSync8, readFileSync as readFileSync9 } from "fs";
 import { homedir as homedir8 } from "os";
 import { join as join9 } from "path";
-function sanitizeLine(text) {
-  return String(text).replace(ANSI_CSI, "").replace(ANSI_OSC, "").replace(ANSI_OTHER, "").replace(C0_C1_DEL, "");
-}
 function defaultPromptAck({ input = process.stdin, output = process.stdout } = {}) {
   if (!input || input.isTTY !== true) return Promise.resolve(false);
   const rl = createInterface({ input, output });
@@ -6231,6 +6316,96 @@ async function defaultMarkThreadRead(peerLogin, iso) {
   await postReadCursor2(peerLogin, iso).catch(() => {
   });
 }
+function runNoticePane(opts = {}) {
+  const {
+    message,
+    backHint = null,
+    input = process.stdin,
+    output = process.stdout,
+    signals = process
+  } = opts;
+  return new Promise((resolve) => {
+    let cleaned = false;
+    const body = String(message ?? "").replace(/^\n+/, "").replace(/\n+$/, "");
+    function render() {
+      const lines = ["", ...body.split("\n"), ""];
+      lines.push(
+        backHint ? `  Press Esc, Enter, or q to go back to ${sanitizeLine(backHint)}.` : "  Press Esc, Enter, or q to continue."
+      );
+      output.write(CLEAR2 + lines.join("\n") + "\n");
+    }
+    function cleanup() {
+      if (cleaned) return;
+      cleaned = true;
+      try {
+        if (typeof input.setRawMode === "function") input.setRawMode(false);
+      } catch {
+      }
+      try {
+        input.removeListener("data", onData);
+      } catch {
+      }
+      try {
+        if (typeof input.pause === "function") input.pause();
+      } catch {
+      }
+      try {
+        signals.removeListener("SIGINT", onDismiss);
+        signals.removeListener("SIGTERM", onDismiss);
+        signals.removeListener("SIGHUP", onDismiss);
+        signals.removeListener("uncaughtException", onUncaught);
+        signals.removeListener("unhandledRejection", onUncaught);
+        signals.removeListener("exit", cleanup);
+      } catch {
+      }
+      output.write(SHOW_CURSOR2 + EXIT_ALT2);
+    }
+    function onDismiss() {
+      if (cleaned) return;
+      cleanup();
+      resolve();
+    }
+    function onUncaught(err) {
+      cleanup();
+      throw err;
+    }
+    function onData(chunk) {
+      if (cleaned) return;
+      const s = chunk.toString("utf8");
+      if (s === KEY_ESC2 || s === KEY_ENTER_A2 || s === KEY_ENTER_B2) {
+        onDismiss();
+        return;
+      }
+      if (s.charCodeAt(0) === 27) return;
+      for (const ch of s) {
+        if (ch === KEY_CTRL_C2 || ch === "q" || ch === "Q") {
+          onDismiss();
+          return;
+        }
+      }
+    }
+    try {
+      if (typeof input.setRawMode === "function") input.setRawMode(true);
+      if (typeof input.resume === "function") input.resume();
+      output.write(ENTER_ALT2 + HIDE_CURSOR2);
+      input.on("data", onData);
+      signals.on("SIGINT", onDismiss);
+      signals.on("SIGTERM", onDismiss);
+      signals.on("SIGHUP", onDismiss);
+      signals.on("uncaughtException", onUncaught);
+      signals.on("unhandledRejection", onUncaught);
+      signals.on("exit", cleanup);
+      render();
+    } catch (err) {
+      cleanup();
+      output.write(`
+  ${err instanceof Error ? err.message : String(err)}
+
+`);
+      resolve();
+    }
+  });
+}
 async function runChatPane(opts = {}) {
   const {
     login,
@@ -6252,80 +6427,87 @@ async function runChatPane(opts = {}) {
     output.write("\n  Usage: terminalhire chat <github-login>\n\n");
     return { entered: false, reason: "no-login" };
   }
+  async function noticeStop(message, reason) {
+    if (backHint && input && input.isTTY === true && typeof input.setRawMode === "function") {
+      await runNoticePane({ message, backHint, input, output, signals });
+    } else {
+      output.write(message);
+    }
+    return { entered: false, reason };
+  }
   const resolved = await resolveConnection(target);
   if (resolved.status === "not-linked") {
-    output.write(
-      "\n  No linked web session found on this machine.\n  Run `terminalhire link` to connect this terminal to your account, then re-run.\n\n"
+    return await noticeStop(
+      "\n  No linked web session found on this machine.\n  Run `terminalhire link` to connect this terminal to your account, then re-run.\n\n",
+      "not-linked"
     );
-    return { entered: false, reason: "not-linked" };
   }
   if (resolved.status === "expired") {
-    output.write(
+    return await noticeStop(
       `
   Your web session expired \u2014 sign in again at ${CHAT_BASE3}/dashboard and re-bridge your session, then re-run.
 
-`
+`,
+      "expired"
     );
-    return { entered: false, reason: "expired" };
   }
   if (resolved.status === "error") {
-    output.write(`
+    return await noticeStop(`
   Could not check your connections: ${resolved.message}
 
-`);
-    return { entered: false, reason: "error" };
+`, "error");
   }
   if (resolved.status === "not-connected") {
-    output.write(
+    return await noticeStop(
       `
   You are not connected to @${target}.
   Chat is only available for an accepted intro. Request one with:
     terminalhire intro ${target}
 
-`
+`,
+      "not-connected"
     );
-    return { entered: false, reason: "not-connected" };
   }
   const { introId, peerLogin } = resolved;
   try {
     await client.ensureKeyPublished();
   } catch (err) {
     if (err instanceof ChatSessionExpiredError || err instanceof ChatNotLinkedError) {
-      output.write(`
+      return await noticeStop(`
   ${err.message}
 
-`);
-      return { entered: false, reason: "session" };
+`, "session");
     }
-    output.write(`
+    return await noticeStop(
+      `
   Could not open the chat: ${err instanceof Error ? err.message : String(err)}
 
-`);
-    return { entered: false, reason: "error" };
+`,
+      "error"
+    );
   }
   if (typeof client.fetchPeerKey === "function") {
     try {
       await client.fetchPeerKey(peerLogin);
     } catch (err) {
       if (err instanceof ChatSessionExpiredError || err instanceof ChatNotLinkedError) {
-        output.write(`
+        return await noticeStop(`
   ${err.message}
 
-`);
-        return { entered: false, reason: "session" };
+`, "session");
       }
       if (err instanceof SafetyNumberChangedError) {
-        output.write(
+        return await noticeStop(
           `
   \u26A0 The safety number for @${peerLogin} changed \u2014 the key on file no longer
   matches the server. Verify out of band before continuing. Chat not opened.
 
-`
+`,
+          "safety-changed"
         );
-        return { entered: false, reason: "safety-changed" };
       }
       if (err && err.name === "ChatRequestError" && err.status === 404) {
-        output.write(
+        return await noticeStop(
           `
   @${peerLogin} isn't reachable for chat yet.
   Chat is end-to-end encrypted, so they need to open chat once to
@@ -6333,15 +6515,17 @@ async function runChatPane(opts = {}) {
     terminalhire chat
   on their side, messages will flow.
 
-`
+`,
+          "no-key"
         );
-        return { entered: false, reason: "no-key" };
       }
-      output.write(`
+      return await noticeStop(
+        `
   Could not open the chat: ${err instanceof Error ? err.message : String(err)}
 
-`);
-      return { entered: false, reason: "error" };
+`,
+        "error"
+      );
     }
   }
   let selfLogin;
@@ -6815,12 +6999,13 @@ async function run2() {
     process.exit(1);
   }
 }
-var CHAT_BASE3, GH_SESSION_COOKIE4, HIDE_CURSOR2, SHOW_CURSOR2, ENTER_ALT2, EXIT_ALT2, CLEAR2, KEY_CTRL_C2, KEY_ESC2, KEY_CTRL_S, KEY_ENTER_A2, KEY_ENTER_B2, KEY_BACKSPACE_A2, KEY_BACKSPACE_B2, MAX_INPUT_LEN, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA, ACTIVE_WINDOW_MS;
+var CHAT_BASE3, GH_SESSION_COOKIE4, HIDE_CURSOR2, SHOW_CURSOR2, ENTER_ALT2, EXIT_ALT2, CLEAR2, KEY_CTRL_C2, KEY_ESC2, KEY_CTRL_S, KEY_ENTER_A2, KEY_ENTER_B2, KEY_BACKSPACE_A2, KEY_BACKSPACE_B2, MAX_INPUT_LEN, CHAT_DISCLOSURE, CHAT_AT_REST, CHAT_CODE_OF_CONDUCT, CHAT_MIN_AGE, DEPOSIT_CTA, ACTIVE_WINDOW_MS;
 var init_jpi_chat = __esm({
   "bin/jpi-chat.js"() {
     init_chat_client();
     init_config();
     init_web_session();
+    init_tui_core();
     CHAT_BASE3 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE4 = "__jpi_gh_session";
     HIDE_CURSOR2 = "\x1B[?25l";
@@ -6836,10 +7021,6 @@ var init_jpi_chat = __esm({
     KEY_BACKSPACE_A2 = "\x7F";
     KEY_BACKSPACE_B2 = "\b";
     MAX_INPUT_LEN = 2e3;
-    ANSI_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
-    ANSI_OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
-    ANSI_OTHER = /\x1b[@-_]/g;
-    C0_C1_DEL = /[\x00-\x1f\x7f-\x9f]/g;
     CHAT_DISCLOSURE = "Messages are end-to-end encrypted using keys stored only on your device. Our server cannot read message content. Since we distribute your contact's public key, verify your connection by comparing Safety Numbers to rule out a server-side substitution. We store metadata: who messaged whom, when, and message count. Content is purged after 90 days.";
     CHAT_AT_REST = "Your private key is encrypted against casual access, not full machine compromise.";
     CHAT_CODE_OF_CONDUCT = "Code of conduct: keep it professional \u2014 harassment, spam, or abuse gets you blocked and removed.";
@@ -6865,6 +7046,7 @@ export {
   run2 as run,
   runBlockCommand,
   runChatPane,
+  runNoticePane,
   runShareActivityCommand,
   sanitizeLine
 };

@@ -1,13 +1,408 @@
 #!/usr/bin/env node
+var __create = Object.create;
 var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
+  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
+}) : x)(function(x) {
+  if (typeof require !== "undefined") return require.apply(this, arguments);
+  throw Error('Dynamic require of "' + x + '" is not supported');
+});
 var __esm = (fn, res) => function __init() {
   return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __commonJS = (cb, mod2) => function __require2() {
+  return mod2 || (0, cb[__getOwnPropNames(cb)[0]])((mod2 = { exports: {} }).exports, mod2), mod2.exports;
 };
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__getProtoOf(mod2)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod2 || !mod2.__esModule ? __defProp(target, "default", { value: mod2, enumerable: true }) : target,
+  mod2
+));
+
+// bin/tui-core.js
+function sanitizeLine(text) {
+  return String(text).replace(ANSI_CSI, "").replace(ANSI_OSC, "").replace(ANSI_OTHER, "").replace(C0_C1_DEL, "");
+}
+function truncate(s, n) {
+  const t = String(s);
+  return t.length <= n ? t : `${t.slice(0, n - 1)}\u2026`;
+}
+function createRuntime({
+  input = typeof process !== "undefined" ? process.stdin : void 0,
+  output = typeof process !== "undefined" ? process.stdout : void 0,
+  signals = typeof process !== "undefined" ? process : void 0,
+  exit = (code) => process.exit(code)
+} = {}) {
+  let entered = false;
+  let cleaned = false;
+  function cleanup() {
+    if (cleaned) return;
+    cleaned = true;
+    entered = false;
+    try {
+      if (input && typeof input.setRawMode === "function") input.setRawMode(false);
+    } catch {
+    }
+    try {
+      if (input && typeof input.pause === "function") input.pause();
+    } catch {
+    }
+    try {
+      if (signals && typeof signals.removeListener === "function") {
+        signals.removeListener("SIGINT", onSignal);
+        signals.removeListener("SIGTERM", onSignal);
+        signals.removeListener("SIGHUP", onSignal);
+        signals.removeListener("uncaughtException", onUncaught);
+        signals.removeListener("unhandledRejection", onUncaught);
+        signals.removeListener("exit", onExitEvt);
+      }
+    } catch {
+    }
+    try {
+      if (output && typeof output.write === "function") output.write(SHOW_CURSOR + EXIT_ALT);
+    } catch {
+    }
+  }
+  function onSignal() {
+    cleanup();
+    exit(130);
+  }
+  function onUncaught(err) {
+    cleanup();
+    throw err;
+  }
+  function onExitEvt() {
+    cleanup();
+  }
+  function enter() {
+    if (entered) return;
+    entered = true;
+    cleaned = false;
+    try {
+      if (input && typeof input.setRawMode === "function") input.setRawMode(true);
+    } catch {
+    }
+    try {
+      if (input && typeof input.resume === "function") input.resume();
+    } catch {
+    }
+    if (signals && typeof signals.on === "function") {
+      signals.on("SIGINT", onSignal);
+      signals.on("SIGTERM", onSignal);
+      signals.on("SIGHUP", onSignal);
+      signals.on("uncaughtException", onUncaught);
+      signals.on("unhandledRejection", onUncaught);
+      signals.on("exit", onExitEvt);
+    }
+    if (output && typeof output.write === "function") output.write(ENTER_ALT + HIDE_CURSOR);
+  }
+  return {
+    enter,
+    cleanup,
+    get entered() {
+      return entered;
+    },
+    get cleaned() {
+      return cleaned;
+    }
+  };
+}
+function createBuffer(rows, cols) {
+  const n = Math.max(0, rows) * Math.max(0, cols);
+  const buf = new Array(n);
+  for (let i = 0; i < n; i++) buf[i] = { ch: " ", fg: null, bg: null, attr: null };
+  return buf;
+}
+function drawText(buf, cols, row, col, str, style = {}) {
+  if (row < 0 || col < 0 || col >= cols) return;
+  const maxLen = cols - col;
+  if (maxLen <= 0) return;
+  const points = Array.from(sanitizeLine(str));
+  const text = points.length <= maxLen ? points : points.slice(0, Math.max(0, maxLen - 1)).concat("\u2026");
+  const fg = style.fg ?? null;
+  const bg = style.bg ?? null;
+  const attr = style.attr ?? null;
+  for (let i = 0; i < text.length && col + i < cols; i++) {
+    const idx = row * cols + (col + i);
+    if (idx < 0 || idx >= buf.length) break;
+    buf[idx] = { ch: text[i], fg, bg, attr };
+  }
+}
+function cellNe(a, b) {
+  if (!a || !b) return true;
+  return a.ch !== b.ch || a.fg !== b.fg || a.bg !== b.bg || a.attr !== b.attr;
+}
+function diff(prev, next, cols) {
+  if (!Number.isInteger(cols) || cols <= 0) return [];
+  const ops = [];
+  const len = next.length;
+  let run2 = null;
+  for (let i = 0; i < len; i++) {
+    const col = i % cols;
+    const row = (i - col) / cols;
+    if (col === 0 && run2) {
+      ops.push(run2);
+      run2 = null;
+    }
+    if (cellNe(prev[i], next[i])) {
+      if (run2 && run2.row === row && run2.col + run2.run.length === col) {
+        run2.run.push(next[i]);
+      } else {
+        if (run2) ops.push(run2);
+        run2 = { row, col, run: [next[i]] };
+      }
+    } else if (run2) {
+      ops.push(run2);
+      run2 = null;
+    }
+  }
+  if (run2) ops.push(run2);
+  return ops;
+}
+function styleOf(cell) {
+  const pre = (cell.attr || "") + (cell.fg || "") + (cell.bg || "");
+  return pre;
+}
+function encode(ops) {
+  if (!ops || ops.length === 0) return "";
+  let out = "";
+  let curRow = -1;
+  let curCol = -1;
+  for (const op of ops) {
+    if (!Number.isInteger(op.row) || !Number.isInteger(op.col)) continue;
+    if (op.row !== curRow || op.col !== curCol) {
+      out += `\x1B[${op.row + 1};${op.col + 1}H`;
+    }
+    for (const cell of op.run) {
+      const pre = styleOf(cell);
+      out += pre ? pre + cell.ch + RESET : cell.ch;
+    }
+    curRow = op.row;
+    curCol = op.col + op.run.length;
+  }
+  return out;
+}
+function createRenderer({
+  write,
+  output = typeof process !== "undefined" ? process.stdout : void 0,
+  rows,
+  cols
+} = {}) {
+  const doWrite = write || (output && output.write ? output.write.bind(output) : () => {
+  });
+  const fallback = readTermSize(output);
+  let _rows = Number.isInteger(rows) && rows > 0 ? rows : fallback.rows;
+  let _cols = Number.isInteger(cols) && cols > 0 ? cols : fallback.cols;
+  let prev = createBuffer(_rows, _cols);
+  return {
+    render(nextBuf) {
+      const s = encode(diff(prev, nextBuf, _cols));
+      if (s) doWrite(s);
+      prev = nextBuf;
+    },
+    /** Drop the previous frame so the next render repaints every cell. */
+    invalidate() {
+      prev = [];
+    },
+    /** Adopt new dimensions and force a full redraw on the next render. */
+    resize(newRows, newCols) {
+      _rows = newRows;
+      _cols = newCols;
+      prev = [];
+    },
+    get rows() {
+      return _rows;
+    },
+    get cols() {
+      return _cols;
+    }
+  };
+}
+function clampOffset(offset, contentLen, viewH, scrolloff = 0) {
+  const so = Math.max(0, scrolloff | 0);
+  const maxOffset = Math.max(0, contentLen - viewH + so);
+  let o = Number.isFinite(offset) ? Math.trunc(offset) : 0;
+  if (o < 0) o = 0;
+  if (o > maxOffset) o = maxOffset;
+  return o;
+}
+function scrollUp(offset, contentLen, viewH, scrolloff = 0, by = 1) {
+  return clampOffset(offset - by, contentLen, viewH, scrolloff);
+}
+function scrollDown(offset, contentLen, viewH, scrolloff = 0, by = 1) {
+  return clampOffset(offset + by, contentLen, viewH, scrolloff);
+}
+function readTermSize(out) {
+  const o = out || (typeof process !== "undefined" ? process.stdout : void 0);
+  const cols = o && Number.isInteger(o.columns) && o.columns > 0 ? o.columns : 80;
+  const rows = o && Number.isInteger(o.rows) && o.rows > 0 ? o.rows : 24;
+  return { rows, cols };
+}
+function wireResize({ output = typeof process !== "undefined" ? process.stdout : void 0, onResize } = {}) {
+  const handler = () => {
+    if (typeof onResize === "function") onResize(readTermSize(output));
+  };
+  let unsubscribe = () => {
+  };
+  if (output && typeof output.on === "function") {
+    output.on("resize", handler);
+    unsubscribe = () => {
+      try {
+        if (typeof output.removeListener === "function") output.removeListener("resize", handler);
+      } catch {
+      }
+    };
+  } else if (typeof process !== "undefined" && typeof process.on === "function") {
+    process.on("SIGWINCH", handler);
+    unsubscribe = () => {
+      try {
+        process.removeListener("SIGWINCH", handler);
+      } catch {
+      }
+    };
+  }
+  return unsubscribe;
+}
+function detectColorLevel(env = {}, isTTY = false) {
+  const force = String(env.FORCE_COLOR ?? "");
+  const colorterm = String(env.COLORTERM ?? "").toLowerCase();
+  const term = String(env.TERM ?? "").toLowerCase();
+  if (force === "3") return "truecolor";
+  if (force === "2") return "256";
+  if (colorterm === "truecolor" || colorterm === "24bit") return "truecolor";
+  if (term.includes("256")) return "256";
+  if (env.NO_COLOR != null && env.NO_COLOR !== "" || term === "dumb" || term === "") return "16";
+  if (!isTTY && force === "") return "16";
+  return "16";
+}
+function degrade(role, level = "truecolor") {
+  const table = PALETTE[level] || PALETTE["16"];
+  return table[role] || "";
+}
+function hexToRgb(hex) {
+  const h = String(hex).replace(/^#/, "");
+  const n = parseInt(h, 16);
+  return { r: n >> 16 & 255, g: n >> 8 & 255, b: n & 255 };
+}
+function nearestCubeStep(v) {
+  let best = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < CUBE_STEPS.length; i++) {
+    const d = Math.abs(CUBE_STEPS[i] - v);
+    if (d < bestDist) {
+      bestDist = d;
+      best = i;
+    }
+  }
+  return best;
+}
+function rgbTo256(r, g, b) {
+  return 16 + 36 * nearestCubeStep(r) + 6 * nearestCubeStep(g) + nearestCubeStep(b);
+}
+function gradientFg(stops, t, level = "truecolor") {
+  if (level === "16") return degrade("accent-bright", level);
+  if (!Array.isArray(stops) || stops.length === 0) return "";
+  if (stops.length === 1) {
+    const { r: r2, g: g2, b: b2 } = hexToRgb(stops[0]);
+    return level === "256" ? `\x1B[38;5;${rgbTo256(r2, g2, b2)}m` : `\x1B[38;2;${r2};${g2};${b2}m`;
+  }
+  const clamped = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
+  const seg = clamped * (stops.length - 1);
+  const i0 = Math.min(stops.length - 2, Math.floor(seg));
+  const localT = seg - i0;
+  const c0 = hexToRgb(stops[i0]);
+  const c1 = hexToRgb(stops[i0 + 1]);
+  const r = Math.round(c0.r + (c1.r - c0.r) * localT);
+  const g = Math.round(c0.g + (c1.g - c0.g) * localT);
+  const b = Math.round(c0.b + (c1.b - c0.b) * localT);
+  return level === "256" ? `\x1B[38;5;${rgbTo256(r, g, b)}m` : `\x1B[38;2;${r};${g};${b}m`;
+}
+var HIDE_CURSOR, SHOW_CURSOR, ENTER_ALT, EXIT_ALT, INVERSE, RESET, BOLD, KEY_CTRL_C, KEY_ESC, KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT, KEY_TAB, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, KEY_Q, KEY_DIGITS, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, PALETTE, COLOR_ROLES, CUBE_STEPS;
+var init_tui_core = __esm({
+  "bin/tui-core.js"() {
+    "use strict";
+    HIDE_CURSOR = "\x1B[?25l";
+    SHOW_CURSOR = "\x1B[?25h";
+    ENTER_ALT = "\x1B[?1049h";
+    EXIT_ALT = "\x1B[?1049l";
+    INVERSE = "\x1B[7m";
+    RESET = "\x1B[0m";
+    BOLD = "\x1B[1m";
+    KEY_CTRL_C = "";
+    KEY_ESC = "\x1B";
+    KEY_UP = "\x1B[A";
+    KEY_DOWN = "\x1B[B";
+    KEY_RIGHT = "\x1B[C";
+    KEY_LEFT = "\x1B[D";
+    KEY_TAB = "	";
+    KEY_ENTER_A = "\r";
+    KEY_ENTER_B = "\n";
+    KEY_BACKSPACE_A = "\x7F";
+    KEY_BACKSPACE_B = "\b";
+    KEY_Q = "q";
+    KEY_DIGITS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+    ANSI_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+    ANSI_OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+    ANSI_OTHER = /\x1b[@-_]/g;
+    C0_C1_DEL = /[\x00-\x1f\x7f-\x9f]/g;
+    PALETTE = {
+      truecolor: {
+        bg: "\x1B[48;2;13;17;23m",
+        panel: "\x1B[48;2;22;27;34m",
+        rule: "\x1B[38;2;48;54;61m",
+        text: "\x1B[38;2;201;209;217m",
+        muted: "\x1B[38;2;125;133;144m",
+        accent: "\x1B[38;2;88;166;255m",
+        "accent-bright": "\x1B[38;2;121;192;255m",
+        green: "\x1B[38;2;63;185;80m",
+        amber: "\x1B[38;2;210;153;34m"
+      },
+      256: {
+        bg: "\x1B[48;5;233m",
+        panel: "\x1B[48;5;235m",
+        rule: "\x1B[38;5;240m",
+        text: "\x1B[38;5;252m",
+        muted: "\x1B[38;5;245m",
+        accent: "\x1B[38;5;75m",
+        "accent-bright": "\x1B[38;5;117m",
+        green: "\x1B[38;5;71m",
+        amber: "\x1B[38;5;178m"
+      },
+      16: {
+        bg: "\x1B[40m",
+        panel: "\x1B[100m",
+        rule: "\x1B[90m",
+        text: "\x1B[37m",
+        muted: "\x1B[90m",
+        accent: "\x1B[94m",
+        "accent-bright": "\x1B[96m",
+        green: "\x1B[92m",
+        amber: "\x1B[93m"
+      }
+    };
+    COLOR_ROLES = Object.keys(PALETTE.truecolor);
+    CUBE_STEPS = [0, 95, 135, 175, 215, 255];
+  }
+});
 
 // ../../packages/core/src/types.ts
 function isBounty(job) {
@@ -3512,12 +3907,12 @@ function introRateLimitCheck(history, now, opts) {
 function isOverIntroLimit(recentCount, max) {
   return recentCount >= max;
 }
-function composeIntroEmail(args2) {
-  const subject = `New intro request from @${args2.requesterLogin} \xB7 terminalhire`;
-  const text = `@${args2.requesterLogin} wants an intro to you on terminalhire.
+function composeIntroEmail(args4) {
+  const subject = `New intro request from @${args4.requesterLogin} \xB7 terminalhire`;
+  const text = `@${args4.requesterLogin} wants an intro to you on terminalhire.
 
 Sign in to view the request and choose whether to share your contact back:
-${args2.dashboardUrl}
+${args4.dashboardUrl}
 
 You control whether this connects \u2014 no contact details are shared unless you accept.
 
@@ -3578,13 +3973,13 @@ function buildIntroListItem(intro, viewerLogin) {
     contact: reveal.toRequester
   };
 }
-function composeIntroAcceptedEmail(args2) {
-  const subject = `Intro connected with @${args2.counterpartyLogin} \xB7 terminalhire`;
-  const lead = args2.recipientRole === "requester" ? `@${args2.counterpartyLogin} accepted your intro request on terminalhire.` : `You accepted @${args2.counterpartyLogin}'s intro request on terminalhire.`;
+function composeIntroAcceptedEmail(args4) {
+  const subject = `Intro connected with @${args4.counterpartyLogin} \xB7 terminalhire`;
+  const lead = args4.recipientRole === "requester" ? `@${args4.counterpartyLogin} accepted your intro request on terminalhire.` : `You accepted @${args4.counterpartyLogin}'s intro request on terminalhire.`;
   const text = `${lead}
 
 You can now reach them directly:
-    @${args2.counterpartyLogin} \u2014 ${args2.counterpartyContact}
+    @${args4.counterpartyLogin} \u2014 ${args4.counterpartyContact}
 
 Take it from here.
 
@@ -4219,10 +4614,10 @@ function ensureBytes(title, hex, expectedLength) {
 function equalBytes(a, b) {
   if (a.length !== b.length)
     return false;
-  let diff = 0;
+  let diff2 = 0;
   for (let i = 0; i < a.length; i++)
-    diff |= a[i] ^ b[i];
-  return diff === 0;
+    diff2 |= a[i] ^ b[i];
+  return diff2 === 0;
 }
 function copyBytes(bytes) {
   return Uint8Array.from(bytes);
@@ -4256,11 +4651,11 @@ function _validateObject(object, fields, optFields = {}) {
 }
 function memoized(fn) {
   const map = /* @__PURE__ */ new WeakMap();
-  return (arg, ...args2) => {
+  return (arg, ...args4) => {
     const val = map.get(arg);
     if (val !== void 0)
       return val;
-    const computed = fn(arg, ...args2);
+    const computed = fn(arg, ...args4);
     map.set(arg, computed);
     return computed;
   };
@@ -5181,7 +5576,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   });
   const { prehash } = eddsaOpts;
   const { BASE, Fp: Fp2, Fn: Fn2 } = Point;
-  const randomBytes3 = eddsaOpts.randomBytes || randomBytes;
+  const randomBytes5 = eddsaOpts.randomBytes || randomBytes;
   const adjustScalarBytes2 = eddsaOpts.adjustScalarBytes || ((bytes) => bytes);
   const domain = eddsaOpts.domain || ((data, ctx, phflag) => {
     _abool2(phflag, "phflag");
@@ -5263,7 +5658,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
     signature: 2 * _size,
     seed: _size
   };
-  function randomSecretKey(seed = randomBytes3(lengths.seed)) {
+  function randomSecretKey(seed = randomBytes5(lengths.seed)) {
     return _abytes2(seed, lengths.seed, "seed");
   }
   function keygen(seed) {
@@ -5886,10 +6281,10 @@ function checkOpts(defaults, opts) {
 function equalBytes2(a, b) {
   if (a.length !== b.length)
     return false;
-  let diff = 0;
+  let diff2 = 0;
   for (let i = 0; i < a.length; i++)
-    diff |= a[i] ^ b[i];
-  return diff === 0;
+    diff2 |= a[i] ^ b[i];
+  return diff2 === 0;
 }
 function getOutput(expectedLength, out, onlyAligned = true) {
   if (out === void 0)
@@ -5932,12 +6327,12 @@ var init_utils3 = __esm({
     "use strict";
     isLE = /* @__PURE__ */ (() => new Uint8Array(new Uint32Array([287454020]).buffer)[0] === 68)();
     wrapCipher = /* @__NO_SIDE_EFFECTS__ */ (params, constructor) => {
-      function wrappedCipher(key, ...args2) {
+      function wrappedCipher(key, ...args4) {
         abytes2(key);
         if (!isLE)
           throw new Error("Non little-endian hardware is not yet supported");
         if (params.nonceLength !== void 0) {
-          const nonce = args2[0];
+          const nonce = args4[0];
           if (!nonce)
             throw new Error("nonce / iv required");
           if (params.varSizeNonce)
@@ -5946,10 +6341,10 @@ var init_utils3 = __esm({
             abytes2(nonce, params.nonceLength);
         }
         const tagl = params.tagLength;
-        if (tagl && args2[1] !== void 0) {
-          abytes2(args2[1]);
+        if (tagl && args4[1] !== void 0) {
+          abytes2(args4[1]);
         }
-        const cipher = constructor(key, ...args2);
+        const cipher = constructor(key, ...args4);
         const checkOutput = (fnLength, output) => {
           if (output !== void 0) {
             if (fnLength !== 2)
@@ -7128,135 +7523,2176 @@ var init_src = __esm({
   }
 });
 
-// bin/jpi-project.js
-import { readFileSync as readFileSync3 } from "fs";
+// ../../node_modules/keytar/build/Release/keytar.node
+var keytar_default;
+var init_keytar = __esm({
+  "../../node_modules/keytar/build/Release/keytar.node"() {
+    keytar_default = "../keytar-KOAAH267.node";
+  }
+});
+
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node
+var require_keytar = __commonJS({
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+    "use strict";
+    init_keytar();
+    try {
+      module.exports = __require(keytar_default);
+    } catch {
+    }
+  }
+});
+
+// ../../node_modules/keytar/lib/keytar.js
+var require_keytar2 = __commonJS({
+  "../../node_modules/keytar/lib/keytar.js"(exports, module) {
+    "use strict";
+    var keytar = require_keytar();
+    function checkRequired(val, name) {
+      if (!val || val.length <= 0) {
+        throw new Error(name + " is required.");
+      }
+    }
+    module.exports = {
+      getPassword: function(service, account) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        return keytar.getPassword(service, account);
+      },
+      setPassword: function(service, account, password) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        checkRequired(password, "Password");
+        return keytar.setPassword(service, account, password);
+      },
+      deletePassword: function(service, account) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        return keytar.deletePassword(service, account);
+      },
+      findPassword: function(service) {
+        checkRequired(service, "Service");
+        return keytar.findPassword(service);
+      },
+      findCredentials: function(service) {
+        checkRequired(service, "Service");
+        return keytar.findCredentials(service);
+      }
+    };
+  }
+});
+
+// src/profile.ts
+var profile_exports = {};
+__export(profile_exports, {
+  accumulateGitHubTags: () => accumulateGitHubTags,
+  accumulateSession: () => accumulateSession,
+  accumulateTags: () => accumulateTags,
+  addSavedJob: () => addSavedJob,
+  deleteProfile: () => deleteProfile,
+  listSavedJobs: () => listSavedJobs,
+  profileToFingerprint: () => profileToFingerprint,
+  readProfile: () => readProfile,
+  removeSavedJob: () => removeSavedJob,
+  writeProfile: () => writeProfile
+});
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes as randomBytes3
+} from "crypto";
+import {
+  readFileSync as readFileSync3,
+  writeFileSync as writeFileSync2,
+  mkdirSync as mkdirSync2,
+  existsSync as existsSync2
+} from "fs";
 import { join as join3 } from "path";
 import { homedir as homedir2 } from "os";
-import { createInterface } from "readline";
+async function loadKey() {
+  try {
+    const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
+    const stored = await kt.getPassword("terminalhire", "profile-key");
+    if (stored) {
+      return Buffer.from(stored, "hex");
+    }
+    const key2 = randomBytes3(KEY_BYTES);
+    await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
+    return key2;
+  } catch {
+  }
+  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
+  if (existsSync2(KEY_FILE)) {
+    return Buffer.from(readFileSync3(KEY_FILE, "utf8").trim(), "hex");
+  }
+  const key = randomBytes3(KEY_BYTES);
+  writeFileSync2(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  return key;
+}
+function encrypt(plaintext, key) {
+  const iv = randomBytes3(IV_BYTES);
+  const cipher = createCipheriv(ALGO, key, iv);
+  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return {
+    iv: iv.toString("hex"),
+    tag: tag.toString("hex"),
+    ciphertext: ct.toString("hex")
+  };
+}
+function decrypt(blob, key) {
+  const decipher = createDecipheriv(
+    ALGO,
+    key,
+    Buffer.from(blob.iv, "hex")
+  );
+  decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
+  const plain = Buffer.concat([
+    decipher.update(Buffer.from(blob.ciphertext, "hex")),
+    decipher.final()
+  ]);
+  return plain.toString("utf8");
+}
+function blankProfile() {
+  return {
+    version: 3,
+    skillTags: [],
+    tagWeights: {},
+    hasEmployerSessions: false,
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+function recencyDecay(lastSeen) {
+  const ageMs = Date.now() - new Date(lastSeen).getTime();
+  return Math.pow(0.5, ageMs / DECAY_HALF_LIFE_MS);
+}
+function tagScore(w) {
+  return w.count * recencyDecay(w.lastSeen);
+}
+function deriveSkillTags(tagWeights) {
+  return Object.entries(tagWeights).filter(([, w]) => w.count >= 1).sort(([, a], [, b]) => tagScore(b) - tagScore(a)).map(([tag]) => tag);
+}
+function migrateTagWeights(profile) {
+  if (!profile.tagWeights) {
+    profile.tagWeights = {};
+  }
+  const seed = profile.updatedAt ?? (/* @__PURE__ */ new Date()).toISOString();
+  for (const tag of profile.skillTags) {
+    if (!profile.tagWeights[tag]) {
+      profile.tagWeights[tag] = { count: 1, firstSeen: seed, lastSeen: seed, sessions: 1 };
+    }
+  }
+}
+async function readProfile() {
+  if (!existsSync2(PROFILE_FILE)) return blankProfile();
+  try {
+    const key = await loadKey();
+    const raw = readFileSync3(PROFILE_FILE, "utf8");
+    const blob = JSON.parse(raw);
+    const plaintext = decrypt(blob, key);
+    const parsed = JSON.parse(plaintext);
+    migrateTagWeights(parsed);
+    return parsed;
+  } catch {
+    return blankProfile();
+  }
+}
+async function writeProfile(profile) {
+  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
+  const key = await loadKey();
+  profile.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+  profile.skillTags = deriveSkillTags(profile.tagWeights);
+  const blob = encrypt(JSON.stringify(profile), key);
+  writeFileSync2(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+}
+function accumulateSession(profile, tags, isEmployerContext, inferredSeniority, seniorityIsAuthoritative = false) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  let filtered = normalize(tags);
+  if (isEmployerContext) {
+    filtered = filtered.filter((t) => LANGUAGE_TAGS.has(t));
+    profile.hasEmployerSessions = true;
+  }
+  for (const tag of filtered) {
+    const existing = profile.tagWeights[tag];
+    if (existing) {
+      existing.count += 1;
+      existing.sessions += 1;
+      existing.lastSeen = now;
+    } else {
+      profile.tagWeights[tag] = { count: 1, firstSeen: now, lastSeen: now, sessions: 1 };
+    }
+  }
+  if (inferredSeniority && !isEmployerContext) {
+    if (seniorityIsAuthoritative || !profile.github) {
+      profile.seniority = inferredSeniority;
+    }
+  }
+}
+async function accumulateTags(rawTokens, isEmployerContext, inferredSeniority) {
+  const profile = await readProfile();
+  accumulateSession(profile, rawTokens, isEmployerContext, inferredSeniority);
+  await writeProfile(profile);
+}
+function accumulateGitHubTags(profile, tags, inferredSeniority) {
+  accumulateSession(
+    profile,
+    tags,
+    /* isEmployerContext */
+    false,
+    inferredSeniority,
+    true
+  );
+}
+async function listSavedJobs() {
+  const profile = await readProfile();
+  return profile.savedJobs ?? [];
+}
+async function addSavedJob(job) {
+  const profile = await readProfile();
+  const existing = profile.savedJobs ?? [];
+  const filtered = existing.filter((j) => j.id !== job.id);
+  profile.savedJobs = [...filtered, { ...job, savedAt: (/* @__PURE__ */ new Date()).toISOString() }];
+  await writeProfile(profile);
+}
+async function removeSavedJob(id) {
+  const profile = await readProfile();
+  const existing = profile.savedJobs ?? [];
+  const filtered = existing.filter((j) => j.id !== id);
+  if (filtered.length === existing.length) return false;
+  profile.savedJobs = filtered;
+  await writeProfile(profile);
+  return true;
+}
+async function deleteProfile() {
+  const { rmSync: rmSync4 } = await import("fs");
+  try {
+    rmSync4(PROFILE_FILE);
+  } catch {
+  }
+  try {
+    rmSync4(KEY_FILE);
+  } catch {
+  }
+}
+function profileToFingerprint(profile) {
+  const rankedTags = Object.entries(profile.tagWeights).map(([tag, w]) => ({ tag, score: tagScore(w) })).filter(({ score }) => score >= MIN_FINGERPRINT_SCORE).sort((a, b) => b.score - a.score).map(({ tag }) => tag);
+  const skillTags = rankedTags.length > 0 ? rankedTags : profile.skillTags;
+  return {
+    skillTags,
+    seniorityBand: profile.seniority,
+    prefs: {
+      roleTypes: profile.roleTypes,
+      remoteOnly: profile.remoteOnly,
+      compFloorUsd: profile.compFloorUsd
+    }
+  };
+}
+var TERMINALHIRE_DIR2, PROFILE_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var init_profile = __esm({
+  "src/profile.ts"() {
+    "use strict";
+    init_src();
+    TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
+    PROFILE_FILE = join3(TERMINALHIRE_DIR2, "profile.enc");
+    KEY_FILE = join3(TERMINALHIRE_DIR2, "key");
+    ALGO = "aes-256-gcm";
+    KEY_BYTES = 32;
+    IV_BYTES = 12;
+    DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
+    LANGUAGE_TAGS = /* @__PURE__ */ new Set([
+      "typescript",
+      "javascript",
+      "python",
+      "go",
+      "rust",
+      "java",
+      "ruby",
+      "elixir",
+      "scala",
+      "kotlin",
+      "swift",
+      "cpp",
+      "csharp",
+      "php",
+      "haskell",
+      "clojure",
+      "r"
+    ]);
+    MIN_FINGERPRINT_SCORE = 0.05;
+  }
+});
 
-// bin/directory.js
-import { readFileSync, writeFileSync, mkdirSync, renameSync } from "fs";
+// src/config.ts
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync as existsSync3 } from "fs";
+import { join as join4 } from "path";
+import { homedir as homedir3 } from "os";
+function readConfig() {
+  try {
+    if (!existsSync3(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
+    const raw = readFileSync4(CONFIG_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_CONFIG, ...parsed };
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+}
+var TERMINALHIRE_DIR3, CONFIG_FILE, DEFAULT_CONFIG;
+var init_config = __esm({
+  "src/config.ts"() {
+    "use strict";
+    TERMINALHIRE_DIR3 = join4(homedir3(), ".terminalhire");
+    CONFIG_FILE = join4(TERMINALHIRE_DIR3, "config.json");
+    DEFAULT_CONFIG = {
+      nudge: "session",
+      peerConnect: false,
+      peerConnectPrompted: false,
+      resumePublishPrompted: false,
+      chatDisclosureAck: false,
+      chatShareActivity: false,
+      inboundNudgeMuted: false,
+      inboundNudgeDisclosed: false,
+      contributeEnabled: false,
+      contributePrompted: false,
+      betaOptIn: false,
+      lastFullFeedbackAt: null,
+      lastPulseAskAt: null,
+      pulseDisclosed: false
+    };
+  }
+});
+
+// src/github-auth.ts
+import {
+  createCipheriv as createCipheriv2,
+  createDecipheriv as createDecipheriv2,
+  randomBytes as randomBytes4
+} from "crypto";
+import {
+  readFileSync as readFileSync5,
+  writeFileSync as writeFileSync4,
+  mkdirSync as mkdirSync4,
+  existsSync as existsSync4,
+  rmSync
+} from "fs";
+import { join as join5 } from "path";
+import { homedir as homedir4 } from "os";
+async function loadKey2() {
+  try {
+    const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
+    const stored = await kt.getPassword("terminalhire", "profile-key");
+    if (stored) return Buffer.from(stored, "hex");
+    const key2 = randomBytes4(KEY_BYTES2);
+    await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
+    return key2;
+  } catch {
+  }
+  mkdirSync4(TERMINALHIRE_DIR4, { recursive: true });
+  if (existsSync4(KEY_FILE2)) {
+    return Buffer.from(readFileSync5(KEY_FILE2, "utf8").trim(), "hex");
+  }
+  const key = randomBytes4(KEY_BYTES2);
+  writeFileSync4(KEY_FILE2, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  return key;
+}
+function encrypt2(plaintext, key) {
+  const iv = randomBytes4(IV_BYTES2);
+  const cipher = createCipheriv2(ALGO2, key, iv);
+  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return { iv: iv.toString("hex"), tag: tag.toString("hex"), ciphertext: ct.toString("hex") };
+}
+function decrypt2(blob, key) {
+  const decipher = createDecipheriv2(ALGO2, key, Buffer.from(blob.iv, "hex"));
+  decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
+  const plain = Buffer.concat([
+    decipher.update(Buffer.from(blob.ciphertext, "hex")),
+    decipher.final()
+  ]);
+  return plain.toString("utf8");
+}
+var TERMINALHIRE_DIR4, TOKEN_FILE, KEY_FILE2, ALGO2, KEY_BYTES2, IV_BYTES2;
+var init_github_auth = __esm({
+  "src/github-auth.ts"() {
+    "use strict";
+    TERMINALHIRE_DIR4 = join5(homedir4(), ".terminalhire");
+    TOKEN_FILE = join5(TERMINALHIRE_DIR4, "github-token.enc");
+    KEY_FILE2 = join5(TERMINALHIRE_DIR4, "key");
+    ALGO2 = "aes-256-gcm";
+    KEY_BYTES2 = 32;
+    IV_BYTES2 = 12;
+  }
+});
+
+// src/chat-keystore.ts
+import { existsSync as existsSync5, mkdirSync as mkdirSync5, readFileSync as readFileSync6, writeFileSync as writeFileSync5, rmSync as rmSync2 } from "fs";
+import { homedir as homedir5 } from "os";
+import { join as join6 } from "path";
+async function loadOrCreateIdentity() {
+  const key = await loadKey2();
+  if (existsSync5(IDENTITY_FILE)) {
+    const blob2 = JSON.parse(readFileSync6(IDENTITY_FILE, "utf8"));
+    return JSON.parse(decrypt2(blob2, key));
+  }
+  const keypair = generateIdentityKeypair();
+  mkdirSync5(TERMINALHIRE_DIR5, { recursive: true });
+  const blob = encrypt2(JSON.stringify(keypair), key);
+  writeFileSync5(IDENTITY_FILE, JSON.stringify(blob, null, 2), { mode: 384, encoding: "utf8" });
+  return keypair;
+}
+var TERMINALHIRE_DIR5, IDENTITY_FILE;
+var init_chat_keystore = __esm({
+  "src/chat-keystore.ts"() {
+    "use strict";
+    init_src();
+    init_github_auth();
+    TERMINALHIRE_DIR5 = join6(homedir5(), ".terminalhire");
+    IDENTITY_FILE = join6(TERMINALHIRE_DIR5, "chat-identity.enc");
+  }
+});
+
+// src/web-session.ts
+import {
+  chmodSync as chmodSync2,
+  existsSync as existsSync6,
+  mkdirSync as mkdirSync6,
+  readFileSync as readFileSync7,
+  rmSync as rmSync3,
+  writeFileSync as writeFileSync6
+} from "fs";
+import { homedir as homedir6 } from "os";
+import { join as join7 } from "path";
+function terminalhireDir() {
+  return join7(homedir6(), ".terminalhire");
+}
+function webSessionFilePath() {
+  return join7(terminalhireDir(), "web-session");
+}
+function readWebSessionFile() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync6(path)) return null;
+    const v = readFileSync7(path, "utf8").trim();
+    return v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+function readWebSessionCookie() {
+  const fromFile = readWebSessionFile();
+  if (fromFile) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return typeof env === "string" && env.length > 0 ? env : null;
+}
+var init_web_session = __esm({
+  "src/web-session.ts"() {
+    "use strict";
+  }
+});
+
+// src/chat-client.ts
+import { existsSync as existsSync7, mkdirSync as mkdirSync7, readFileSync as readFileSync8, writeFileSync as writeFileSync7 } from "fs";
+import { homedir as homedir7 } from "os";
+import { join as join8 } from "path";
+function defaultReadPeerPins() {
+  try {
+    if (!existsSync7(PEERS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync8(PEERS_FILE, "utf8"));
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    const out = {};
+    for (const [login, key] of Object.entries(parsed)) {
+      if (typeof key === "string" && key.length > 0) out[login] = key;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+function defaultWritePeerPins(pins) {
+  mkdirSync7(TERMINALHIRE_DIR6, { recursive: true });
+  writeFileSync7(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
+}
+function defaultChatClientDeps() {
+  return {
+    fetchImpl: (...args4) => globalThis.fetch(...args4),
+    // Session source priority: persisted file (`terminalhire link`) FIRST, then the
+    // legacy TERMINALHIRE_WEB_SESSION env, then none.
+    sessionCookie: () => readWebSessionCookie(),
+    loadIdentity: () => loadOrCreateIdentity(),
+    readPeerPins: defaultReadPeerPins,
+    writePeerPins: defaultWritePeerPins
+  };
+}
+function createChatClient(overrides) {
+  const deps = { ...defaultChatClientDeps(), ...overrides };
+  function requireCookie() {
+    const cookie = deps.sessionCookie();
+    if (!cookie) throw new ChatNotLinkedError();
+    return cookie;
+  }
+  async function authedFetch(path, init) {
+    const cookie = requireCookie();
+    const headers = {
+      ...init.headers ?? {},
+      Cookie: `${GH_SESSION_COOKIE}=${cookie}`
+    };
+    const res = await deps.fetchImpl(`${CHAT_BASE}${path}`, {
+      ...init,
+      headers,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    });
+    if (res.status === 401) throw new ChatSessionExpiredError();
+    return res;
+  }
+  async function ensureKeyPublished() {
+    const identity = await deps.loadIdentity();
+    const res = await authedFetch("/api/chat/keys", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ publicKey: identity.publicKey })
+    });
+    if (!res.ok) throw new ChatRequestError("/api/chat/keys", res.status);
+  }
+  async function fetchPeerKey(peerLogin) {
+    const login = peerLogin.trim();
+    if (!login) throw new Error("peerLogin is required");
+    const res = await authedFetch(`/api/chat/keys?login=${encodeURIComponent(login)}`, {
+      method: "GET"
+    });
+    if (!res.ok) throw new ChatRequestError("/api/chat/keys", res.status);
+    const data = await res.json();
+    const servedKey = data.publicKey;
+    if (typeof servedKey !== "string" || servedKey.length === 0) {
+      throw new ChatRequestError("/api/chat/keys", res.status, "missing publicKey in response");
+    }
+    const pins = deps.readPeerPins();
+    const pinned = pins[login];
+    if (pinned === void 0) {
+      pins[login] = servedKey;
+      deps.writePeerPins(pins);
+      return servedKey;
+    }
+    if (pinned !== servedKey) {
+      throw new SafetyNumberChangedError(login, pinned, servedKey);
+    }
+    return pinned;
+  }
+  async function sendMessage(introId, peerLogin, plaintext) {
+    const peerPublicKey = await fetchPeerKey(peerLogin);
+    const identity = await deps.loadIdentity();
+    const encrypted = encryptMessage(plaintext, identity.privateKey, peerPublicKey);
+    const res = await authedFetch("/api/chat/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // Wire body is ciphertext-only — the plaintext never leaves this machine.
+      body: JSON.stringify({
+        introId,
+        ciphertext: encrypted.ciphertext,
+        nonce: encrypted.nonce
+      })
+    });
+    if (!res.ok) throw new ChatRequestError("/api/chat/send", res.status);
+    const data = await res.json();
+    if (typeof data.messageId !== "string") {
+      throw new ChatRequestError("/api/chat/send", res.status, "missing messageId in response");
+    }
+    return data.messageId;
+  }
+  async function pollMessages(introId, peerLogin, since) {
+    const peerPublicKey = await fetchPeerKey(peerLogin);
+    const identity = await deps.loadIdentity();
+    const sinceIso = since === void 0 ? "" : since instanceof Date ? since.toISOString() : String(since);
+    const qs = new URLSearchParams({ intro_id: introId });
+    if (sinceIso) qs.set("since", sinceIso);
+    const res = await authedFetch(`/api/chat/poll?${qs.toString()}`, { method: "GET" });
+    if (!res.ok) throw new ChatRequestError("/api/chat/poll", res.status);
+    const data = await res.json();
+    const messages = data.messages ?? [];
+    return messages.map((m) => ({
+      id: m.id,
+      senderLogin: m.senderLogin,
+      plaintext: decryptMessage({ ciphertext: m.ciphertext, nonce: m.nonce }, identity.privateKey, peerPublicKey),
+      createdAt: m.createdAt
+    }));
+  }
+  async function heartbeat(optin) {
+    const res = await authedFetch("/api/chat/presence", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ optin })
+    });
+    if (!res.ok) throw new ChatRequestError("/api/chat/presence", res.status);
+  }
+  async function getPeerPresence(peerLogin) {
+    const login = peerLogin.trim();
+    if (!login) throw new Error("peerLogin is required");
+    const res = await authedFetch("/api/chat/presence", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ optin: true, peer: login })
+    });
+    if (!res.ok) throw new ChatRequestError("/api/chat/presence", res.status);
+    const data = await res.json();
+    const presence = data.presence ?? null;
+    if (!presence) return null;
+    return {
+      login: presence.login,
+      lastSeen: presence.lastSeen ?? null,
+      optin: presence.optin === true,
+      shareActivity: presence.shareActivity === true
+    };
+  }
+  async function setActivitySharing(share) {
+    const res = await authedFetch("/api/chat/activity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ share })
+    });
+    if (!res.ok) throw new ChatRequestError("/api/chat/activity", res.status);
+    await res.json();
+  }
+  async function applyBlock(login, action) {
+    const target = login.trim();
+    if (!target) throw new Error("login is required");
+    const res = await authedFetch("/api/chat/block", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login: target, action })
+    });
+    if (!res.ok) throw new ChatRequestError("/api/chat/block", res.status);
+  }
+  async function getSafetyNumber(peerLogin) {
+    const peerPublicKey = await fetchPeerKey(peerLogin);
+    const identity = await deps.loadIdentity();
+    return safetyNumber(identity.publicKey, peerPublicKey);
+  }
+  return {
+    ensureKeyPublished,
+    fetchPeerKey,
+    sendMessage,
+    pollMessages,
+    heartbeat,
+    getPeerPresence,
+    setActivitySharing,
+    blockPeer: (login) => applyBlock(login, "block"),
+    unblock: (login) => applyBlock(login, "unblock"),
+    getSafetyNumber
+  };
+}
+var CHAT_BASE, GH_SESSION_COOKIE, TERMINALHIRE_DIR6, PEERS_FILE, REQUEST_TIMEOUT_MS, ChatNotLinkedError, ChatSessionExpiredError, SafetyNumberChangedError, ChatRequestError;
+var init_chat_client = __esm({
+  "src/chat-client.ts"() {
+    "use strict";
+    init_src();
+    init_chat_keystore();
+    init_web_session();
+    CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
+    GH_SESSION_COOKIE = "__jpi_gh_session";
+    TERMINALHIRE_DIR6 = join8(homedir7(), ".terminalhire");
+    PEERS_FILE = join8(TERMINALHIRE_DIR6, "chat-peers.json");
+    REQUEST_TIMEOUT_MS = 1e4;
+    ChatNotLinkedError = class extends Error {
+      constructor() {
+        super(
+          "No linked web session found on this machine. Run `terminalhire link` to connect this terminal to your account, then re-run."
+        );
+        this.name = "ChatNotLinkedError";
+      }
+    };
+    ChatSessionExpiredError = class extends Error {
+      constructor() {
+        super(
+          "Your linked web session expired. Run `terminalhire link` to reconnect this terminal, then re-run."
+        );
+        this.name = "ChatSessionExpiredError";
+      }
+    };
+    SafetyNumberChangedError = class extends Error {
+      peerLogin;
+      pinnedKey;
+      servedKey;
+      constructor(peerLogin, pinnedKey, servedKey) {
+        super(`\u26A0 safety number changed for @${peerLogin} \u2014 the key on file does not match the server. Verify before continuing.`);
+        this.name = "SafetyNumberChangedError";
+        this.peerLogin = peerLogin;
+        this.pinnedKey = pinnedKey;
+        this.servedKey = servedKey;
+      }
+    };
+    ChatRequestError = class extends Error {
+      status;
+      constructor(path, status, detail) {
+        super(`chat request to ${path} failed (${status})${detail ? `: ${detail}` : ""}`);
+        this.name = "ChatRequestError";
+        this.status = status;
+      }
+    };
+  }
+});
+
+// bin/jpi-chat.js
+import { createInterface } from "readline";
+import { existsSync as existsSync8, readFileSync as readFileSync9 } from "fs";
+import { homedir as homedir8 } from "os";
+import { join as join9 } from "path";
+function defaultSessionCookie() {
+  return readWebSessionCookie();
+}
+async function fetchIntroList(deps = {}) {
+  const fetchImpl = deps.fetchImpl ?? ((...a) => globalThis.fetch(...a));
+  const sessionCookie = deps.sessionCookie ?? defaultSessionCookie;
+  const cookie = sessionCookie();
+  if (!cookie) return { status: "not-linked" };
+  let res;
+  try {
+    res = await fetchImpl(`${CHAT_BASE2}/api/intro/list`, {
+      method: "GET",
+      headers: { Cookie: `${GH_SESSION_COOKIE2}=${cookie}` },
+      signal: AbortSignal.timeout(1e4)
+    });
+  } catch (err) {
+    return { status: "error", message: err instanceof Error ? err.message : String(err) };
+  }
+  if (res.status === 401) return { status: "expired" };
+  if (!res.ok) return { status: "error", message: `/api/intro/list returned ${res.status}` };
+  let data = {};
+  try {
+    data = await res.json();
+  } catch {
+  }
+  const intros = Array.isArray(data?.intros) ? data.intros : [];
+  return { status: "ok", intros };
+}
+async function defaultListConnections(deps = {}) {
+  const listed = await fetchIntroList(deps);
+  if (listed.status !== "ok") return listed;
+  const connections = listed.intros.filter((it) => it && it.status === "accepted" && it.counterpartyLogin).map((it) => ({ introId: it.id, peerLogin: it.counterpartyLogin }));
+  return { status: "ok", connections };
+}
+function relativeTime(then, now = /* @__PURE__ */ new Date()) {
+  const t = new Date(then).getTime();
+  if (Number.isNaN(t)) return "";
+  const deltaMs = Math.max(0, now.getTime() - t);
+  const sec = Math.floor(deltaMs / 1e3);
+  if (sec < 60) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${Math.max(1, min)}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}d ago`;
+  const wk = Math.floor(day / 7);
+  if (wk < 5) return `${wk}w ago`;
+  return "a while ago";
+}
+function formatPresence(presence, now = /* @__PURE__ */ new Date()) {
+  if (!presence) return "\u25CB not on chat yet";
+  const share = presence.shareActivity === true;
+  const seenMs = share && presence.lastSeen ? new Date(presence.lastSeen).getTime() : NaN;
+  const hasSeen = !Number.isNaN(seenMs);
+  const fresh = hasSeen && now.getTime() - seenMs <= ACTIVE_WINDOW_MS;
+  if (share && presence.optin === true && fresh) return "\u25CF active now";
+  if (share && hasSeen) {
+    const rel = relativeTime(presence.lastSeen, now);
+    return rel ? `\u25D0 reachable \xB7 seen ${rel}` : "\u25D0 reachable";
+  }
+  return "\u25D0 reachable";
+}
+var CHAT_BASE2, GH_SESSION_COOKIE2, ACTIVE_WINDOW_MS;
+var init_jpi_chat = __esm({
+  "bin/jpi-chat.js"() {
+    "use strict";
+    init_chat_client();
+    init_config();
+    init_web_session();
+    init_tui_core();
+    CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
+    GH_SESSION_COOKIE2 = "__jpi_gh_session";
+    ACTIVE_WINDOW_MS = 2 * 60 * 1e3;
+  }
+});
+
+// bin/jpi-chat-read.js
+import { existsSync as existsSync9, mkdirSync as mkdirSync8, readFileSync as readFileSync10, writeFileSync as writeFileSync8 } from "fs";
+import { homedir as homedir9 } from "os";
+import { join as join10 } from "path";
+function readReadCursors() {
+  try {
+    if (!existsSync9(READS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync10(READS_FILE, "utf8"));
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    const out = {};
+    for (const [login, iso] of Object.entries(parsed)) {
+      if (typeof iso === "string" && iso.length > 0) out[login] = iso;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+function formatClock(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "--:--";
+  let h = d.getHours();
+  const m = d.getMinutes();
+  const ampm = h >= 12 ? "p" : "a";
+  h %= 12;
+  if (h === 0) h = 12;
+  return `${h}:${String(m).padStart(2, "0")}${ampm}`;
+}
+function formatStamp(iso, now = /* @__PURE__ */ new Date()) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  if (sameDay) return formatClock(iso);
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+}
+async function buildInboxItems(deps = {}) {
+  const {
+    client = createChatClient(),
+    listConnections = defaultListConnections,
+    readCursors = readReadCursors
+  } = deps;
+  const listed = await listConnections();
+  if (listed.status !== "ok") return listed;
+  const cursors = readCursors();
+  const items = [];
+  for (const conn of listed.connections) {
+    let messages = [];
+    try {
+      messages = await client.pollMessages(conn.introId, conn.peerLogin);
+    } catch {
+      messages = [];
+    }
+    const cursor = cursors[conn.peerLogin];
+    const unread = messages.filter(
+      (m) => m.senderLogin === conn.peerLogin && (!cursor || m.createdAt > cursor)
+    ).length;
+    const last = messages.length > 0 ? messages[messages.length - 1] : null;
+    items.push({
+      login: conn.peerLogin,
+      presence: REACHABLE_DISPLAY,
+      unread,
+      lastStamp: last ? formatStamp(last.createdAt) : "",
+      // Raw ISO of the newest message — the TUI's `r` key marks the thread read at
+      // this exact watermark (postReadCursor). The formatted lastStamp is display-only.
+      lastStampIso: last ? last.createdAt : null,
+      preview: last ? last.plaintext : ""
+    });
+  }
+  return { status: "ok", items };
+}
+var CHAT_BASE3, TERMINALHIRE_DIR7, READS_FILE, INDEX_CACHE_FILE, REACHABLE_DISPLAY;
+var init_jpi_chat_read = __esm({
+  "bin/jpi-chat-read.js"() {
+    "use strict";
+    init_chat_client();
+    init_web_session();
+    init_jpi_chat();
+    CHAT_BASE3 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
+    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join10(homedir9(), ".terminalhire");
+    READS_FILE = join10(TERMINALHIRE_DIR7, "chat-reads.json");
+    INDEX_CACHE_FILE = join10(TERMINALHIRE_DIR7, "index-cache.json");
+    REACHABLE_DISPLAY = { shareActivity: false, optin: false, lastSeen: null };
+  }
+});
+
+// src/open-url.js
+var open_url_exports = {};
+__export(open_url_exports, {
+  openInBrowser: () => openInBrowser
+});
+import { spawn } from "child_process";
+function openInBrowser(url) {
+  let cmd;
+  let args4;
+  if (process.platform === "darwin") {
+    cmd = "open";
+    args4 = [url];
+  } else if (process.platform === "win32") {
+    cmd = "cmd";
+    args4 = ["/c", "start", "", url];
+  } else {
+    cmd = "xdg-open";
+    args4 = [url];
+  }
+  try {
+    const child = spawn(cmd, args4, { stdio: "ignore", detached: true });
+    child.on("error", () => {
+    });
+    child.unref();
+  } catch {
+  }
+}
+var init_open_url = __esm({
+  "src/open-url.js"() {
+    "use strict";
+  }
+});
+
+// src/intro.ts
+function defaultIntroDeps() {
+  return {
+    readGithubLogin: async () => {
+      try {
+        const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+        const profile = await readProfile2();
+        return profile?.github?.login ?? null;
+      } catch {
+        return null;
+      }
+    },
+    readProfileContact: async () => {
+      try {
+        const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+        const profile = await readProfile2();
+        return { displayName: profile?.displayName };
+      } catch {
+        return {};
+      }
+    },
+    prompt: async (question) => {
+      const { createInterface: createInterface5 } = await import("readline");
+      const rl = createInterface5({ input: process.stdin, output: process.stdout });
+      return new Promise((res) => {
+        rl.question(question, (answer) => {
+          rl.close();
+          res(answer.trim().toLowerCase());
+        });
+      });
+    },
+    fetchImpl: (...args4) => globalThis.fetch(...args4),
+    openBrowser: (url) => {
+      void Promise.resolve().then(() => (init_open_url(), open_url_exports)).then((m) => m.openInBrowser(url)).catch(() => {
+      });
+    },
+    // Session source priority: persisted file (`terminalhire link`) FIRST, then the
+    // legacy TERMINALHIRE_WEB_SESSION env, then none.
+    sessionCookie: () => readWebSessionCookie(),
+    log: (msg) => console.log(msg),
+    errorLog: (msg) => console.error(msg),
+    exit: (code) => process.exit(code)
+  };
+}
+async function getIntros(overrides) {
+  const deps = { ...defaultIntroDeps(), ...overrides };
+  const cookie = deps.sessionCookie();
+  if (!cookie) {
+    return { status: "no-session" };
+  }
+  let res;
+  try {
+    res = await deps.fetchImpl(`${LINK_BASE}/api/intro/list`, {
+      method: "GET",
+      headers: { Cookie: `${GH_SESSION_COOKIE3}=${cookie}` },
+      signal: AbortSignal.timeout(1e4)
+    });
+  } catch (err) {
+    return { status: "request-failed", message: err instanceof Error ? err.message : String(err) };
+  }
+  if (res.status === 401) {
+    return { status: "expired" };
+  }
+  if (!res.ok) {
+    return { status: "error", httpStatus: res.status };
+  }
+  let data = {};
+  try {
+    data = await res.json();
+  } catch {
+  }
+  return { status: "ok", intros: data.intros ?? [] };
+}
+var LINK_BASE, GH_SESSION_COOKIE3;
+var init_intro2 = __esm({
+  "src/intro.ts"() {
+    "use strict";
+    init_src();
+    init_web_session();
+    LINK_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
+    GH_SESSION_COOKIE3 = "__jpi_gh_session";
+  }
+});
+
+// bin/jpi-hub.js
+init_tui_core();
+
+// src/claims.ts
+import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
-var DIRECTORY_CACHE_FILE = join(TERMINALHIRE_DIR, "directory-cache.json");
-var PROJECT_FILE = join(TERMINALHIRE_DIR, "project.json");
-var INDEX_TTL_MS = 15 * 60 * 1e3;
-var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
-function readProject() {
+var CLAIMS_FILE = join(TERMINALHIRE_DIR, "claims.json");
+var TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
+function normalizeClaim(c) {
+  return { ...c, kind: c.kind ?? "bounty", policy: c.policy ?? null };
+}
+function readClaims() {
   try {
-    return JSON.parse(readFileSync(PROJECT_FILE, "utf8"));
+    if (!existsSync(CLAIMS_FILE)) return [];
+    const data = JSON.parse(readFileSync(CLAIMS_FILE, "utf8"));
+    const claims = Array.isArray(data?.claims) ? data.claims : [];
+    return claims.map(normalizeClaim);
   } catch {
-    return null;
+    return [];
   }
 }
-function writeProject(patch) {
-  const existing = readProject() ?? {};
-  const merged = { ...existing, ...patch };
-  if (!merged.createdAt) merged.createdAt = (/* @__PURE__ */ new Date()).toISOString();
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
-  const tmpFile = `${PROJECT_FILE}.tmp`;
-  writeFileSync(tmpFile, JSON.stringify(merged, null, 2), "utf8");
-  renameSync(tmpFile, PROJECT_FILE);
-  return merged;
+function listClaims(opts = {}) {
+  const claims = readClaims();
+  if (!opts.active) return claims;
+  return claims.filter((c) => !TERMINAL_STATES.has(c.state));
+}
+function acceptedPRRate(claims = readClaims()) {
+  const total = claims.length;
+  const merged = claims.filter((c) => c.state === "merged").length;
+  return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
 
-// bin/jpi-project.js
-var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
-var PROJECT_FILE2 = join3(TERMINALHIRE_DIR2, "project.json");
-var args = process.argv.slice(2);
-var SHOW = args.includes("--show");
-var declarationArg = args.filter((a) => !a.startsWith("--")).join(" ").trim();
-function readProject2() {
+// bin/jpi-hub.js
+init_profile();
+init_config();
+init_jpi_chat_read();
+init_jpi_chat();
+
+// bin/jpi-jobs.js
+import { readFileSync as readFileSync13 } from "fs";
+import { join as join13 } from "path";
+import { homedir as homedir12 } from "os";
+import { createInterface as createInterface2 } from "readline";
+import { fileURLToPath as fileURLToPath2 } from "url";
+
+// bin/job-status-store.js
+init_src();
+import {
+  readFileSync as readFileSync11,
+  writeFileSync as writeFileSync9,
+  renameSync as renameSync2,
+  mkdirSync as mkdirSync9,
+  existsSync as existsSync10,
+  copyFileSync,
+  openSync,
+  closeSync,
+  unlinkSync
+} from "fs";
+import { join as join11, dirname } from "path";
+import { homedir as homedir10 } from "os";
+var TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join11(homedir10(), ".terminalhire");
+var STATUS_FILE = join11(TERMINALHIRE_DIR8, "job-status.json");
+var LOCK_FILE = `${STATUS_FILE}.lock`;
+var BAK_FILE = `${STATUS_FILE}.bak`;
+
+// bin/cache-store.js
+import { readFileSync as readFileSync12, writeFileSync as writeFileSync10, mkdirSync as mkdirSync10, renameSync as renameSync3 } from "fs";
+import { join as join12 } from "path";
+import { homedir as homedir11 } from "os";
+var TERMINALHIRE_DIR9 = process.env.TERMINALHIRE_DIR || join12(homedir11(), ".terminalhire");
+var INDEX_CACHE_FILE2 = join12(TERMINALHIRE_DIR9, "index-cache.json");
+var SCHEMA_VERSION2 = 1;
+var tmpCounter = 0;
+function readCacheEntry() {
   try {
-    return JSON.parse(readFileSync3(PROJECT_FILE2, "utf8"));
+    return JSON.parse(readFileSync12(INDEX_CACHE_FILE2, "utf8"));
   } catch {
     return null;
   }
 }
-function promptRaw(question) {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
+function updateIndexCache(patch) {
+  mkdirSync10(TERMINALHIRE_DIR9, { recursive: true });
+  const existing = readCacheEntry() ?? {};
+  const entry = {
+    ...existing,
+    ...patch,
+    schemaVersion: SCHEMA_VERSION2,
+    ts: Date.now()
+  };
+  const tmp = `${INDEX_CACHE_FILE2}.${process.pid}.${tmpCounter++}.tmp`;
+  writeFileSync10(tmp, JSON.stringify(entry), "utf8");
+  renameSync3(tmp, INDEX_CACHE_FILE2);
+  return entry;
+}
+
+// bin/jpi-jobs.js
+var __dirname = fileURLToPath2(new URL(".", import.meta.url));
+var TERMINALHIRE_DIR10 = process.env.TERMINALHIRE_DIR || join13(homedir12(), ".terminalhire");
+var INDEX_CACHE_FILE3 = join13(TERMINALHIRE_DIR10, "index-cache.json");
+var INDEX_TTL_MS = 15 * 60 * 1e3;
+var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+var DEFAULT_LIMIT = 10;
+var args = process.argv.slice(2);
+var limitArg = args.indexOf("--limit");
+var LIMIT = limitArg !== -1 ? parseInt(args[limitArg + 1] ?? "10", 10) : DEFAULT_LIMIT;
+var REMOTE_ONLY = args.includes("--remote-only");
+var SHOW_ALL = args.includes("--all");
+var pageArg = args.indexOf("--page");
+var PAGE = pageArg !== -1 ? parseInt(args[pageArg + 1] ?? "1", 10) : null;
+var statusArg = args.indexOf("--status");
+var STATUS_FILTER = statusArg !== -1 ? args[statusArg + 1] ?? "" : null;
+function readIndexCache() {
+  try {
+    const raw = readFileSync13(INDEX_CACHE_FILE3, "utf8");
+    const entry = JSON.parse(raw);
+    if (Date.now() - entry.ts < INDEX_TTL_MS) return entry.index;
+    return null;
+  } catch {
+    return null;
+  }
+}
+function writeIndexCache(index) {
+  updateIndexCache({ index });
+}
+async function fetchIndex() {
+  const cached = readIndexCache();
+  if (cached) return cached;
+  const res = await fetch(`${API_URL}/api/index`, {
+    signal: AbortSignal.timeout(1e4)
+  });
+  if (!res.ok) throw new Error(`/api/index returned ${res.status}`);
+  const index = await res.json();
+  writeIndexCache(index);
+  return index;
+}
+async function getJobMatches({ quiet = false, offline = false } = {}) {
+  const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+  const { match: match2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+  const profile = await readProfile2();
+  if (profile.skillTags.length === 0) {
+    return { status: "no-profile" };
+  }
+  if (!quiet) console.log(`Fetching job index from ${API_URL}/api/index...`);
+  const index = offline ? readIndexCache() : await fetchIndex();
+  if (offline && !index) return { status: "no-cache" };
+  const allListings = index.jobs ?? [];
+  const jobs = allListings.filter((j) => j.source !== "bounty");
+  const bountyCount = allListings.length - jobs.length;
+  if (jobs.length === 0) {
+    return { status: "no-jobs", bountyCount };
+  }
+  const fp = profileToFingerprint2(profile);
+  if (REMOTE_ONLY) fp.prefs = { ...fp.prefs, remoteOnly: true };
+  const ranked = match2(fp, jobs, jobs.length, Date.now(), {
+    acceptance: profile.acceptance
+  });
+  try {
+    updateIndexCache({ matchCount: ranked.length });
+  } catch {
+  }
+  if (ranked.length === 0) {
+    return { status: "no-matches", profile, bountyCount };
+  }
+  return { status: "ok", ranked, bountyCount, profile };
+}
+
+// bin/jpi-bounties.js
+init_src();
+import { readFileSync as readFileSync14 } from "fs";
+import { join as join14 } from "path";
+import { homedir as homedir13 } from "os";
+import { createInterface as createInterface3 } from "readline";
+var TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join14(homedir13(), ".terminalhire");
+var INDEX_CACHE_FILE4 = join14(TERMINALHIRE_DIR11, "index-cache.json");
+var INDEX_TTL_MS2 = 15 * 60 * 1e3;
+var API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+var DEFAULT_LIMIT2 = 15;
+var args2 = process.argv.slice(2);
+var limitArg2 = args2.indexOf("--limit");
+var LIMIT2 = limitArg2 !== -1 ? parseInt(args2[limitArg2 + 1] ?? "15", 10) : DEFAULT_LIMIT2;
+var PRICED_ONLY = args2.includes("--priced");
+var SHOW_ALL2 = args2.includes("--all");
+var WINNABLE_ONLY = args2.includes("--winnable");
+function readIndexCache2() {
+  try {
+    const entry = JSON.parse(readFileSync14(INDEX_CACHE_FILE4, "utf8"));
+    if (Date.now() - entry.ts < INDEX_TTL_MS2) return entry.index;
+    return null;
+  } catch {
+    return null;
+  }
+}
+function writeIndexCache2(index) {
+  updateIndexCache({ index });
+}
+async function fetchIndex2() {
+  const cached = readIndexCache2();
+  if (cached) return cached;
+  const res = await fetch(`${API_URL2}/api/index`, { signal: AbortSignal.timeout(1e4) });
+  if (!res.ok) throw new Error(`/api/index returned ${res.status}`);
+  const index = await res.json();
+  writeIndexCache2(index);
+  return index;
+}
+async function getBounties({ quiet = false, offline = false } = {}) {
+  if (!quiet) console.log(`Fetching bounty index from ${API_URL2}/api/index...`);
+  const index = offline ? readIndexCache2() : await fetchIndex2();
+  if (offline && !index) return { status: "no-cache" };
+  let bounties = (index.jobs ?? []).filter((j) => j.source === "bounty");
+  if (PRICED_ONLY) bounties = bounties.filter((j) => j.bounty?.amountUSD != null);
+  if (WINNABLE_ONLY) bounties = bounties.filter((j) => (j.bounty?.competingOpenPRs ?? 0) === 0);
+  if (bounties.length === 0) {
+    return { status: "empty" };
+  }
+  const ranked = /* @__PURE__ */ new Map();
+  try {
+    const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+    const { match: match2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+    const profile = await readProfile2();
+    if (profile.skillTags.length > 0) {
+      const fp = profileToFingerprint2(profile);
+      for (const r of match2(fp, bounties, bounties.length)) {
+        ranked.set(r.job.id, { score: r.score, reason: r.reason, matchedTags: r.matchedTags });
+      }
+    }
+  } catch {
+  }
+  const score = (j) => ranked.get(j.id)?.score ?? 0;
+  const amt = (j) => j.bounty?.amountUSD ?? -1;
+  const contested = (j) => (j.bounty?.competingOpenPRs ?? 0) > 0 ? 1 : 0;
+  bounties.sort((a, b) => contested(a) - contested(b) || score(b) - score(a) || amt(b) - amt(a));
+  const matchedCount = bounties.filter((j) => score(j) > 0).length;
+  return { status: "ok", bounties, ranked, matchedCount };
+}
+
+// bin/jpi-devs.js
+import { createInterface as createInterface4 } from "readline";
+
+// bin/directory.js
+import { readFileSync as readFileSync15, writeFileSync as writeFileSync11, mkdirSync as mkdirSync11, renameSync as renameSync4 } from "fs";
+import { join as join15 } from "path";
+import { homedir as homedir14 } from "os";
+var TERMINALHIRE_DIR12 = process.env.TERMINALHIRE_DIR || join15(homedir14(), ".terminalhire");
+var DIRECTORY_CACHE_FILE = join15(TERMINALHIRE_DIR12, "directory-cache.json");
+var PROJECT_FILE = join15(TERMINALHIRE_DIR12, "project.json");
+var INDEX_TTL_MS3 = 15 * 60 * 1e3;
+var API_URL3 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+function readDirectoryCache() {
+  try {
+    const entry = JSON.parse(readFileSync15(DIRECTORY_CACHE_FILE, "utf8"));
+    if (typeof entry.ts === "number" && Number.isFinite(entry.ts) && Date.now() - entry.ts < INDEX_TTL_MS3) {
+      return { index: entry.index, ts: entry.ts };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+function writeDirectoryCache(index) {
+  mkdirSync11(TERMINALHIRE_DIR12, { recursive: true });
+  writeFileSync11(DIRECTORY_CACHE_FILE, JSON.stringify({ ts: Date.now(), index }), "utf8");
+}
+function readProject() {
+  try {
+    return JSON.parse(readFileSync15(PROJECT_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function relativeTime2(ts) {
+  const secs = Math.max(0, Math.round((Date.now() - ts) / 1e3));
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.round(secs / 60);
+  return mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
+}
+async function fetchDirectory({ quiet = false } = {}) {
+  const cached = readDirectoryCache();
+  if (cached) {
+    if (!quiet) console.log(`\u2713 Using cached directory (updated ${relativeTime2(cached.ts)})`);
+    return cached.index;
+  }
+  if (!quiet) console.log(`\u21BB Refreshing builder directory from ${API_URL3}/api/directory...`);
+  const res = await fetch(`${API_URL3}/api/directory`, { signal: AbortSignal.timeout(1e4) });
+  if (!res.ok) throw new Error(`/api/directory returned ${res.status}`);
+  const index = await res.json();
+  writeDirectoryCache(index);
+  return index;
+}
+function excludeOwnCard(results, ownLogin) {
+  if (!Array.isArray(results)) return results;
+  if (typeof ownLogin !== "string" || ownLogin.length === 0) return results;
+  const own = ownLogin.toLowerCase();
+  return results.filter((r) => {
+    const handle = r?.job?.company;
+    return typeof handle !== "string" || handle.toLowerCase() !== own;
   });
 }
-function splitDeclaration(line) {
-  const m = line.match(/\s*[:：—]|\s-\s/);
-  if (m && m.index !== void 0) {
-    const title = line.slice(0, m.index).trim();
-    const skillsRaw = line.slice(m.index + m[0].length).trim();
-    return { title: title || line, skillsRaw: skillsRaw || line };
+
+// bin/jpi-devs.js
+var API_URL4 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+var DEFAULT_LIMIT3 = 10;
+var args3 = process.argv.slice(2);
+var limitArg3 = args3.indexOf("--limit");
+var LIMIT3 = limitArg3 !== -1 ? parseInt(args3[limitArg3 + 1] ?? "10", 10) : DEFAULT_LIMIT3;
+var SHOW_ALL3 = args3.includes("--all");
+var AS_PROJECT = args3.includes("--as-project");
+async function getDevs({ quiet = false, offline = false } = {}) {
+  const { match: match2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+  let fp;
+  if (AS_PROJECT) {
+    const project = readProject();
+    if (!project) return { status: "no-project" };
+    if (!project.skillTags || project.skillTags.length === 0) return { status: "project-no-skills" };
+    fp = { skillTags: project.skillTags, prefs: project.prefs ?? {} };
+    if (!quiet) console.log(`Ranking builders for your project: ${project.title}`);
+  } else {
+    const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+    const profile = await readProfile2();
+    if (profile.skillTags.length === 0) return { status: "no-profile" };
+    fp = profileToFingerprint2(profile);
   }
-  return { title: line, skillsRaw: line };
-}
-function tokenize5(skillsRaw) {
-  return skillsRaw.split(/[,/]|\s+/).map((t) => t.trim()).filter(Boolean);
-}
-async function run() {
+  let index;
+  if (offline) {
+    const cached = readDirectoryCache();
+    if (!cached) return { status: "no-cache", fp };
+    index = cached.index;
+  } else {
+    index = await fetchDirectory({ quiet });
+  }
+  const cards = index.cards ?? [];
+  if (cards.length === 0) return { status: "no-cards", fp };
+  let results = match2(fp, cards, SHOW_ALL3 ? cards.length : LIMIT3);
+  let ownLogin;
   try {
-    if (SHOW) {
-      const existing = readProject2();
-      if (!existing) {
-        console.log("\u2726 terminalhire project: nothing declared yet.");
-        console.log('  Run `terminalhire project "<title>: <skills it needs>"` to declare one.');
+    const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+    ownLogin = (await readProfile2())?.github?.login;
+  } catch {
+  }
+  results = excludeOwnCard(results, ownLogin);
+  if (results.length === 0) return { status: "no-matches", fp };
+  return { status: "ok", results, fp };
+}
+
+// bin/jpi-hub.js
+init_intro2();
+init_open_url();
+var KEY_CTRL_K = "\v";
+var KEY_SHIFT_TAB = "\x1B[Z";
+var PANES = ["Home", "Jobs", "Bounties", "Devs", "Inbox", "Claims", "Profile"];
+var PALETTE_VERBS = [
+  "jobs",
+  "bounties",
+  "devs",
+  "inbox",
+  "claims",
+  "profile",
+  "sync",
+  "claim",
+  "contribute",
+  "refresh",
+  "init"
+];
+function stubRows(paneName) {
+  return [
+    `${paneName} \u2014 (data wired in a later phase)`,
+    `${paneName} placeholder row \xB7 alpha`,
+    `${paneName} placeholder row \xB7 bravo`,
+    `${paneName} placeholder row \xB7 charlie`,
+    `${paneName} placeholder row \xB7 delta`
+  ];
+}
+var TH_GLYPH = [
+  "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557  \u2588\u2588\u2557",
+  "\u255A\u2550\u2550\u2588\u2588\u2554\u2550\u2550\u255D\u2588\u2588\u2551  \u2588\u2588\u2551",
+  "   \u2588\u2588\u2551   \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551",
+  "   \u2588\u2588\u2551   \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551",
+  "   \u2588\u2588\u2551   \u2588\u2588\u2551  \u2588\u2588\u2551",
+  "   \u255A\u2550\u255D   \u255A\u2550\u255D  \u255A\u2550\u255D"
+];
+var BRAND_GRADIENT = ["#9d8fff", "#7c6af7", "#5b4fcf"];
+var DEFAULT_SPLASH_MS = 900;
+var STATE_LEVEL = { abandoned: 0, claimed: 2, working: 3, "in-review": 4, ready: 5, submitted: 6, merged: 7 };
+var SPARK_LEVELS = ["\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586", "\u2587", "\u2588"];
+function sparkline(rows) {
+  if (!rows || !rows.length) return "";
+  const sorted = [...rows].sort((a, b) => new Date(a.claimedAt || 0) - new Date(b.claimedAt || 0));
+  const tail = sorted.slice(-24);
+  return tail.map((c) => SPARK_LEVELS[STATE_LEVEL[c.state] ?? 1]).join("");
+}
+function fuzzyMatch(query, candidate) {
+  const q = query.toLowerCase();
+  const c = candidate.toLowerCase();
+  if (q === "") return true;
+  let i = 0;
+  for (let j = 0; j < c.length && i < q.length; j++) {
+    if (c[j] === q[i]) i++;
+  }
+  return i === q.length;
+}
+function substrMatch(query, candidate) {
+  if (query === "") return true;
+  return candidate.toLowerCase().includes(query.toLowerCase());
+}
+function runHubTui({ input = process.stdin, output = process.stdout, signals, deps = {} } = {}) {
+  const {
+    listClaims: _listClaims = listClaims,
+    acceptedPRRate: _acceptedPRRate = acceptedPRRate,
+    readProfile: _readProfile = readProfile,
+    readConfig: _readConfig = readConfig,
+    buildInboxItems: _buildInboxItems = buildInboxItems,
+    getJobMatches: _getJobMatches = getJobMatches,
+    getBounties: _getBounties = getBounties,
+    getDevs: _getDevs = getDevs,
+    readCacheEntry: _readCacheEntry = readCacheEntry,
+    getIntros: _getIntros = getIntros,
+    openInBrowser: _openInBrowser = openInBrowser,
+    // Injectable boot-splash duration — production uses the real 900ms default;
+    // tests override with a tiny value to exercise auto-dismiss without a real wait.
+    splashMs: _splashMs = DEFAULT_SPLASH_MS
+  } = deps;
+  return new Promise((resolve) => {
+    const level = detectColorLevel(
+      typeof process !== "undefined" ? process.env : {},
+      output && output.isTTY
+    );
+    const c = (role) => degrade(role, level);
+    const runtime = createRuntime({ input, output, signals });
+    const initial = readTermSize(output);
+    const renderer = createRenderer({ output, rows: initial.rows, cols: initial.cols });
+    let active = 0;
+    let mode = "nav";
+    const offsetByPane = PANES.map(() => 0);
+    let paletteQuery = "";
+    let paletteSel = 0;
+    let lastVerb = null;
+    const filterByPane = PANES.map(() => "");
+    let filterSnapshot = "";
+    let done = false;
+    let unwireResize = () => {
+    };
+    let claimsState = { loaded: false, rate: null, rows: [], error: null };
+    let profileState = { loaded: false, loading: false, profile: null, error: null };
+    let inboxState = { loaded: false, loading: false, status: null, items: null, message: null };
+    const listState = {
+      Jobs: { loaded: false, loading: false, result: null, error: null },
+      Bounties: { loaded: false, loading: false, result: null, error: null },
+      Devs: { loaded: false, loading: false, result: null, error: null }
+    };
+    const LIST_LOADERS = {
+      Jobs: () => _getJobMatches({ quiet: true, offline: true }),
+      Bounties: () => _getBounties({ quiet: true, offline: true }),
+      Devs: () => _getDevs({ quiet: true, offline: true })
+    };
+    let introsState = { loaded: false, loading: false, result: null, error: null };
+    let homeIntrosOpen = false;
+    let splashActive = true;
+    let splashTimer = null;
+    const errMsg = (e) => String(e && e.message ? e.message : e);
+    function paletteResults() {
+      return PALETTE_VERBS.filter((v) => fuzzyMatch(paletteQuery, v));
+    }
+    function loadClaims() {
+      if (claimsState.loaded) return;
+      try {
+        const rows = _listClaims();
+        claimsState = { loaded: true, rate: _acceptedPRRate(rows), rows, error: null };
+      } catch (e) {
+        claimsState = { loaded: true, rate: null, rows: [], error: errMsg(e) };
+      }
+    }
+    function loadListPane(name) {
+      const st = listState[name];
+      if (!st || st.loaded || st.loading) return;
+      listState[name] = { ...st, loading: true };
+      LIST_LOADERS[name]().then((result) => {
+        listState[name] = { loaded: true, loading: false, result, error: null };
+      }).catch((e) => {
+        listState[name] = { loaded: true, loading: false, result: null, error: errMsg(e) };
+      }).finally(() => repaint());
+    }
+    function loadIntros() {
+      if (introsState.loaded || introsState.loading) return;
+      introsState = { ...introsState, loading: true };
+      _getIntros().then((result) => {
+        introsState = { loaded: true, loading: false, result, error: null };
+      }).catch((e) => {
+        introsState = { loaded: true, loading: false, result: null, error: errMsg(e) };
+      }).finally(() => repaint());
+    }
+    function ensurePaneLoaded() {
+      const name = PANES[active];
+      if (name === "Home") {
+        loadListPane("Jobs");
+        loadListPane("Bounties");
+        loadClaims();
         return;
       }
-      console.log(`
-\u2726 Your project (local only \u2014 never sent):
-`);
-      console.log(`  ${existing.title}`);
-      console.log(`  Skills: ${(existing.skillTags ?? []).join(", ") || "(none recognized)"}`);
-      console.log(`  Declared: ${existing.createdAt ?? "unknown"}`);
-      console.log(`
-  Rank builders for it: terminalhire devs --as-project`);
-      return;
-    }
-    const { normalize: normalize2 } = await Promise.resolve().then(() => (init_src(), src_exports));
-    let declaration = declarationArg;
-    if (!declaration) {
-      if (!process.stdin.isTTY) {
-        console.log("\u2726 terminalhire project: declare what you are building, e.g.");
-        console.log('  terminalhire project "Realtime collab editor: react, typescript, websockets, postgres"');
+      if (name === "Claims") {
+        loadClaims();
         return;
       }
-      console.log("Declare your project in one line \u2014 a short title and the stack/skills it needs.");
-      console.log("Example: Realtime collab editor: react, typescript, websockets, postgres\n");
-      declaration = await promptRaw("Project: ");
+      if (name === "Profile") {
+        if (profileState.loaded || profileState.loading) return;
+        profileState = { ...profileState, loading: true };
+        _readProfile().then((profile) => {
+          profileState = { loaded: true, loading: false, profile, error: null };
+        }).catch((e) => {
+          profileState = { loaded: true, loading: false, profile: null, error: errMsg(e) };
+        }).finally(() => repaint());
+        return;
+      }
+      if (name === "Inbox") {
+        if (inboxState.loaded || inboxState.loading) return;
+        let acked = false;
+        try {
+          acked = _readConfig().chatDisclosureAck === true;
+        } catch {
+          acked = false;
+        }
+        if (!acked) {
+          inboxState = { loaded: true, loading: false, status: "disclosure", items: null, message: null };
+          return;
+        }
+        inboxState = { ...inboxState, loading: true };
+        _buildInboxItems().then((built) => {
+          if (built.status === "ok") {
+            inboxState = { loaded: true, loading: false, status: "ok", items: built.items, message: null };
+          } else if (built.status === "error") {
+            inboxState = { loaded: true, loading: false, status: "error", items: null, message: built.message || "could not load inbox" };
+          } else {
+            inboxState = { loaded: true, loading: false, status: built.status, items: null, message: null };
+          }
+        }).catch((e) => {
+          inboxState = { loaded: true, loading: false, status: "error", items: null, message: errMsg(e) };
+        }).finally(() => repaint());
+        return;
+      }
+      if (listState[name]) {
+        loadListPane(name);
+        return;
+      }
     }
-    if (!declaration) {
-      console.log("Nothing declared \u2014 run again with a one-line project.");
-      return;
+    function formatClaimRow(claim) {
+      const amt = typeof claim.amountUSD === "number" ? ` \xB7 $${claim.amountUSD}` : "";
+      return `${String(claim.state).padEnd(9)} ${claim.repoFullName} \xB7 ${claim.title}${amt}`;
     }
-    const { title, skillsRaw } = splitDeclaration(declaration);
-    const skillTags = normalize2(tokenize5(skillsRaw));
-    if (skillTags.length === 0) {
-      console.log("\n\u2726 No recognized skills in that declaration.");
-      console.log("  Use known stack names (e.g. react, typescript, go, postgres, kubernetes).");
-      console.log("  Nothing was saved.");
-      return;
+    function profileRows(p) {
+      const tags = p && Array.isArray(p.skillTags) ? p.skillTags : [];
+      const hasContent = tags.length > 0 || p && (p.displayName || p.seniority);
+      if (!hasContent) return ["No profile yet \u2014 run `terminalhire init` to create one."];
+      const rows = [];
+      if (p.displayName) rows.push(`Name: ${p.displayName}`);
+      if (p.seniority) rows.push(`Seniority: ${p.seniority}`);
+      rows.push(`Skills (${tags.length}): ${tags.slice(0, 12).join(", ")}`);
+      return rows;
     }
-    writeProject({
-      title,
-      declaration,
-      skillTags,
-      prefs: {},
-      createdAt: (/* @__PURE__ */ new Date()).toISOString()
+    function formatInboxItem(it) {
+      const dot = formatPresence(it.presence).charAt(0) || "\u25D0";
+      const unread = it.unread > 0 ? `\u2709 ${it.unread}` : "\u2014";
+      const login = `@${sanitizeLine(it.login)}`;
+      const stamp = sanitizeLine(it.lastStamp || "");
+      const preview = it.preview ? truncate(sanitizeLine(it.preview), 38) : "";
+      return `${dot} ${login.padEnd(18)} ${unread.padEnd(5)} ${stamp.padStart(6)}  ${preview}`;
+    }
+    function inboxRows(st) {
+      switch (st.status) {
+        case "disclosure":
+          return ["Messaging disclosure not yet acknowledged \u2014 run `terminalhire inbox` once to review it and enable messages."];
+        case "not-linked":
+          return ["Not linked \u2014 run `terminalhire link` to connect your web session."];
+        case "expired":
+          return ["Session expired \u2014 run `terminalhire link` again."];
+        case "not-connected":
+          return ["No connections yet."];
+        case "error":
+          return ["Error: " + (st.message || "could not load inbox")];
+        case "ok":
+          if (!st.items || st.items.length === 0) return ["No conversations yet."];
+          return st.items.map(formatInboxItem);
+        default:
+          return ["No conversations yet."];
+      }
+    }
+    function jobsRows(result) {
+      switch (result && result.status) {
+        case "no-profile":
+          return ["No skill tags in your local profile yet \u2014 run `terminalhire init`."];
+        case "no-cache":
+          return ["No cached job index \u2014 run `terminalhire jobs` once to fetch it."];
+        case "no-jobs":
+          return ["No jobs in the index yet. Check back soon."];
+        case "no-matches":
+          return ["No matching roles for your current profile."];
+        case "ok":
+          return result.ranked.map((r) => {
+            const pct = Math.round(r.score * 100);
+            const lead = r.job.applyMode === "buyer-lead" ? " [COASTAL LEAD]" : "";
+            return `${sanitizeLine(r.job.title)} \u2014 ${sanitizeLine(r.job.company)}${lead} \xB7 ${pct}%`;
+          });
+        default:
+          return ["No jobs to show."];
+      }
+    }
+    function bountiesRows(result) {
+      switch (result && result.status) {
+        case "no-cache":
+          return ["No cached bounty index \u2014 run `terminalhire bounties` once to fetch it."];
+        case "empty":
+          return ["No bounties available right now. Check back through the day."];
+        case "ok":
+          return result.bounties.map((job) => {
+            const b = job.bounty || {};
+            const amt = b.amountUSD != null ? "$" + b.amountUSD.toLocaleString() : "$\u2014";
+            const repo = sanitizeLine(b.repoFullName || job.company);
+            const prs = b.competingOpenPRs;
+            const contend = prs != null && prs > 0 ? ` \xB7 \u26A0 ${prs} in flight` : "";
+            return `${amt} \xB7 ${sanitizeLine(job.title)} \u2014 ${repo}${contend}`;
+          });
+        default:
+          return ["No bounties to show."];
+      }
+    }
+    function devsRows(result) {
+      switch (result && result.status) {
+        case "no-project":
+          return ['No project declared \u2014 run `terminalhire project "<title>: <skills>"`.'];
+        case "project-no-skills":
+          return ["Your declared project has no recognized skills yet."];
+        case "no-profile":
+          return ["No skill tags in your local profile yet \u2014 run `terminalhire init`."];
+        case "no-cache":
+          return ["No cached directory \u2014 run `terminalhire devs` once to fetch it."];
+        case "no-cards":
+          return ["No builders or projects published yet. Check back soon."];
+        case "no-matches":
+          return ["No matching builders or projects for your current profile."];
+        case "ok":
+          return result.results.map((r) => {
+            const kind = r.job.source === "project" ? "project" : "developer";
+            const pct = r.score > 0 ? ` \xB7 ${Math.round(r.score * 100)}%` : "";
+            return `${sanitizeLine(r.job.title)} \u2014 ${kind}${pct}`;
+          });
+        default:
+          return ["No matches to show."];
+      }
+    }
+    const LIST_FORMATTERS = { Jobs: jobsRows, Bounties: bountiesRows, Devs: devsRows };
+    function introRows(result) {
+      if (!result) return ["Loading\u2026"];
+      switch (result.status) {
+        case "no-session":
+          return ["Not linked \u2014 run `terminalhire link` to connect this terminal to your account."];
+        case "expired":
+          return ["Your linked web session expired \u2014 run `terminalhire link` again."];
+        case "request-failed":
+          return ["Could not reach terminalhire \u2014 " + (result.message || "request failed")];
+        case "error":
+          return ["Could not load intros (server returned " + result.httpStatus + ")."];
+        case "ok": {
+          if (!result.intros.length) return ["No intros yet."];
+          const rows = [];
+          for (const it of result.intros) {
+            const dir = it.role === "incoming" ? "from" : "to";
+            rows.push(`[${it.status}] ${dir} @${sanitizeLine(it.counterpartyLogin)}`);
+            if (it.note) rows.push(`    note: ${sanitizeLine(it.note)}`);
+            if (it.contact) rows.push(`    contact: ${sanitizeLine(it.contact)}`);
+            else if (it.role === "incoming" && it.status === "pending") {
+              rows.push(`    \u2192 accept: terminalhire intro --accept @${sanitizeLine(it.counterpartyLogin)}`);
+            }
+          }
+          return rows;
+        }
+        default:
+          return ["No intros to show."];
+      }
+    }
+    function homeUnreadCount() {
+      if (!inboxState.loaded || inboxState.status !== "ok" || !inboxState.items) return null;
+      return inboxState.items.reduce((sum, it) => sum + (Number(it.unread) || 0), 0);
+    }
+    function homeIntrosCount() {
+      try {
+        const entry = _readCacheEntry();
+        return Number(entry && entry.incomingPending && entry.incomingPending.count) || 0;
+      } catch {
+        return 0;
+      }
+    }
+    function homeRows() {
+      if (homeIntrosOpen) {
+        if (!introsState.loaded) return ["Loading\u2026"];
+        if (introsState.error) return ["Could not load intros \u2014 " + introsState.error];
+        return introRows(introsState.result);
+      }
+      const jobsCount = listState.Jobs.loaded && !listState.Jobs.error && listState.Jobs.result && listState.Jobs.result.status === "ok" ? listState.Jobs.result.ranked.length : null;
+      const jobsLine = !listState.Jobs.loaded ? "Jobs: Loading\u2026" : listState.Jobs.error ? "Jobs: could not load" : `Jobs: ${jobsCount ?? 0} matching roles`;
+      const bountiesCount = listState.Bounties.loaded && !listState.Bounties.error && listState.Bounties.result && listState.Bounties.result.status === "ok" ? listState.Bounties.result.bounties.length : null;
+      const bountiesLine = !listState.Bounties.loaded ? "Bounties: Loading\u2026" : listState.Bounties.error ? "Bounties: could not load" : `Bounties: ${bountiesCount ?? 0} available`;
+      const claimsLine = !claimsState.loaded ? "Claims: Loading\u2026" : claimsState.error ? "Claims: could not load" : `Claims: ${claimsState.rows.filter((c2) => c2.state !== "merged" && c2.state !== "abandoned").length} active`;
+      const spark = claimsState.loaded && !claimsState.error ? sparkline(claimsState.rows) : "";
+      const unread = homeUnreadCount();
+      const inboxLine = `Inbox: ${unread === null ? "\u2014" : unread + " unread"}`;
+      const introsLine = `Intros: ${homeIntrosCount()} pending  (press i to view)`;
+      const rows = [jobsLine, bountiesLine, claimsLine];
+      if (spark) rows.push(`Accepted-PR trend: ${spark}`);
+      rows.push(inboxLine, introsLine);
+      return rows;
+    }
+    function activeSourceIndex() {
+      const name = PANES[active];
+      const raw = paneRows(name);
+      const q = filterByPane[active];
+      let visibleIdx = -1;
+      for (let i = 0; i < raw.length; i++) {
+        if (substrMatch(q, raw[i])) {
+          visibleIdx++;
+          if (visibleIdx === offsetByPane[active]) return i;
+        }
+      }
+      return -1;
+    }
+    function activateRow() {
+      const name = PANES[active];
+      const idx = activeSourceIndex();
+      if (idx < 0) return;
+      if (name === "Jobs") {
+        const st = listState.Jobs;
+        if (st.loaded && !st.error && st.result && st.result.status === "ok") {
+          const row = st.result.ranked[idx];
+          if (row && row.job && row.job.url) _openInBrowser(row.job.url);
+        }
+        return;
+      }
+      if (name === "Bounties") {
+        const st = listState.Bounties;
+        if (st.loaded && !st.error && st.result && st.result.status === "ok") {
+          const job = st.result.bounties[idx];
+          if (job) _openInBrowser((job.bounty && job.bounty.claimUrl) ?? job.url);
+        }
+      }
+    }
+    function paneRows(name) {
+      if (name === "Home") return homeRows();
+      if (listState[name]) {
+        const st = listState[name];
+        if (!st.loaded) return ["Loading\u2026"];
+        if (st.error) return ["Could not load " + name.toLowerCase() + " \u2014 " + st.error];
+        return LIST_FORMATTERS[name](st.result);
+      }
+      if (name === "Claims") {
+        if (!claimsState.loaded) return ["Loading\u2026"];
+        if (claimsState.error) return ["Could not read claims \u2014 " + claimsState.error];
+        if (!claimsState.rows.length) return ["No claims yet \u2014 run `terminalhire claim <url>` to start one."];
+        return claimsState.rows.map(formatClaimRow);
+      }
+      if (name === "Profile") {
+        if (!profileState.loaded) return ["Loading\u2026"];
+        if (profileState.error) return ["Could not read profile \u2014 " + profileState.error];
+        return profileRows(profileState.profile);
+      }
+      if (name === "Inbox") {
+        if (!inboxState.loaded) return ["Loading\u2026"];
+        return inboxRows(inboxState);
+      }
+      return stubRows(name);
+    }
+    function paneHeader(name) {
+      if (name === "Home") return homeIntrosOpen ? "Intros \xB7 press i to go back" : "Home";
+      if (name === "Claims") {
+        if (claimsState.loaded && claimsState.rate) {
+          const r = claimsState.rate;
+          const pct = Math.round(r.rate * 100);
+          return `Accepted-PR rate: ${r.merged}/${r.total} merged (${pct}%)`;
+        }
+        return "Claims";
+      }
+      if (name === "Profile") return "Profile";
+      if (name === "Inbox") return "Inbox";
+      if (listState[name]) {
+        const st = listState[name];
+        if (st.loaded && !st.error && st.result && st.result.status === "ok") {
+          if (name === "Jobs") return `${st.result.ranked.length} roles matching your profile`;
+          if (name === "Bounties") return `${st.result.bounties.length} bounties you could knock out`;
+          if (name === "Devs") return `${st.result.results.length} matches in the builder directory`;
+        }
+        return name;
+      }
+      return `${name} \u2014 (data wired in a later phase)`;
+    }
+    function visibleRows() {
+      const q = filterByPane[active];
+      return paneRows(PANES[active]).filter((r) => substrMatch(q, r));
+    }
+    function bodyRegion() {
+      const rows = renderer.rows;
+      const top = 2;
+      const bottom = rows - 2;
+      const listTop = top + 2;
+      const viewH = Math.max(0, bottom - listTop + 1);
+      return { top, bottom, listTop, viewH };
+    }
+    function activeViewH() {
+      return bodyRegion().viewH;
+    }
+    function renderSplash(buf, rows, cols) {
+      const glyphW = TH_GLYPH[0].length;
+      const startRow = Math.max(0, Math.floor((rows - TH_GLYPH.length) / 2));
+      const startCol = Math.max(0, Math.floor((cols - glyphW) / 2));
+      for (let i = 0; i < TH_GLYPH.length; i++) {
+        const row = startRow + i;
+        if (row < 0 || row >= rows) continue;
+        const t = TH_GLYPH.length <= 1 ? 0 : i / (TH_GLYPH.length - 1);
+        drawText(buf, cols, row, startCol, TH_GLYPH[i], { fg: gradientFg(BRAND_GRADIENT, t, level) });
+      }
+      const hint = "press any key to continue";
+      const hintRow = Math.min(rows - 1, startRow + TH_GLYPH.length + 1);
+      if (hintRow < rows) {
+        drawText(buf, cols, hintRow, Math.max(0, Math.floor((cols - hint.length) / 2)), hint, {
+          fg: c("muted")
+        });
+      }
+    }
+    function repaint() {
+      if (done) return;
+      const rows = renderer.rows;
+      const cols = renderer.cols;
+      if (splashActive) {
+        const buf2 = createBuffer(rows, cols);
+        if (rows >= 4 && cols >= 20) renderSplash(buf2, rows, cols);
+        renderer.render(buf2);
+        return;
+      }
+      ensurePaneLoaded();
+      if (rows < 4 || cols < 20) {
+        const buf2 = createBuffer(rows, cols);
+        drawText(buf2, cols, 0, 0, "terminalhire hub \u2014 window too small", { fg: c("amber") });
+        renderer.render(buf2);
+        return;
+      }
+      const buf = createBuffer(rows, cols);
+      const navWidth = 16;
+      const mainCol = navWidth + 1;
+      const mainWidth = cols - mainCol;
+      const { top: bodyTop, bottom: bodyBottom, listTop, viewH } = bodyRegion();
+      drawText(buf, cols, 0, 1, "terminalhire", { fg: c("accent-bright"), attr: BOLD });
+      const ctx = `hub \xB7 ${PANES[active]}`;
+      drawText(buf, cols, 0, cols - ctx.length - 1, ctx, { fg: c("muted") });
+      drawText(buf, cols, 1, 0, "\u2500".repeat(cols), { fg: c("rule") });
+      for (let i = 0; i < PANES.length; i++) {
+        const row = bodyTop + i;
+        if (row > bodyBottom) break;
+        const label = ` ${i + 1} ${PANES[i]}`;
+        const padded = label.length >= navWidth ? label : label + " ".repeat(navWidth - label.length);
+        if (i === active) {
+          drawText(buf, cols, row, 0, padded, { attr: INVERSE });
+        } else {
+          drawText(buf, cols, row, 0, padded, { fg: c("text") });
+        }
+      }
+      for (let row = bodyTop; row <= bodyBottom; row++) {
+        drawText(buf, cols, row, navWidth, "\u2502", { fg: c("rule") });
+      }
+      const rowsData = visibleRows();
+      offsetByPane[active] = clampOffset(offsetByPane[active], rowsData.length, viewH, 0);
+      drawText(buf, cols, bodyTop, mainCol, paneHeader(PANES[active]), {
+        fg: c("accent"),
+        attr: BOLD
+      });
+      for (let vi = 0; vi < viewH; vi++) {
+        const di = offsetByPane[active] + vi;
+        if (di >= rowsData.length) break;
+        drawText(buf, cols, listTop + vi, mainCol, truncate(rowsData[di], mainWidth), {
+          fg: c("text")
+        });
+      }
+      if (rowsData.length === 0) {
+        drawText(buf, cols, listTop, mainCol, "(no rows match filter)", { fg: c("muted") });
+      }
+      let keys;
+      if (mode === "palette") keys = "type to filter \xB7 \u2191/\u2193 move \xB7 Enter run \xB7 Esc close";
+      else if (mode === "filter") keys = "type to filter pane \xB7 Enter apply \xB7 Esc close";
+      else if (mode === "help") keys = "? or Esc close help";
+      else {
+        keys = "j/k \u2191\u2193 scroll \xB7 1-7/Tab/\u2190\u2192 panes \xB7 Ctrl+K/: palette \xB7 / filter \xB7 ? help \xB7 q quit";
+        if (PANES[active] === "Home") keys += " \xB7 i intros";
+        else if (PANES[active] === "Jobs" || PANES[active] === "Bounties") keys += " \xB7 Enter open";
+      }
+      drawText(buf, cols, rows - 1, 0, " ".repeat(cols), { attr: INVERSE });
+      drawText(buf, cols, rows - 1, 1, truncate(keys, cols - 2), { attr: INVERSE });
+      if (mode === "palette") drawPalette(buf, rows, cols);
+      else if (mode === "help") drawHelp(buf, rows, cols);
+      else if (mode === "filter") drawFilterPrompt(buf, rows, cols);
+      renderer.render(buf);
+    }
+    function drawBox(buf, rows, cols, top, left, h, w, title) {
+      for (let r = 0; r < h; r++) {
+        const row = top + r;
+        if (row < 0 || row >= rows) continue;
+        drawText(buf, cols, row, left, " ".repeat(w), { fg: c("text"), bg: c("panel") });
+      }
+      drawText(buf, cols, top, left + 1, truncate(` ${title} `, w - 2), {
+        fg: c("accent-bright"),
+        attr: BOLD
+      });
+      drawText(buf, cols, top + 1, left, "\u2500".repeat(w), { fg: c("rule") });
+    }
+    function drawPalette(buf, rows, cols) {
+      const w = Math.min(48, cols - 4);
+      const results = paletteResults();
+      const h = Math.min(rows - 4, results.length + 4);
+      const top = 2;
+      const left = Math.max(0, Math.floor((cols - w) / 2));
+      drawBox(buf, rows, cols, top, left, h, w, "Command Palette");
+      drawText(buf, cols, top + 2, left + 1, truncate(`> ${paletteQuery}`, w - 2), {
+        fg: c("text")
+      });
+      const sel = results.length ? Math.min(paletteSel, results.length - 1) : 0;
+      for (let i = 0; i < results.length && top + 3 + i < top + h; i++) {
+        const style = i === sel ? { attr: INVERSE } : { fg: c("muted") };
+        drawText(buf, cols, top + 3 + i, left + 1, truncate(` ${results[i]}`, w - 2), style);
+      }
+    }
+    function drawFilterPrompt(buf, rows, cols) {
+      const w = Math.min(40, cols - 4);
+      const left = Math.max(0, Math.floor((cols - w) / 2));
+      const top = rows - 4;
+      drawBox(buf, rows, cols, top, left, 3, w, `Filter \xB7 ${PANES[active]}`);
+      drawText(buf, cols, top + 2, left + 1, truncate(`/ ${filterByPane[active]}`, w - 2), {
+        fg: c("text")
+      });
+    }
+    function drawHelp(buf, rows, cols) {
+      const lines = [
+        "j / k      scroll pane down / up",
+        "\u2191 / \u2193      scroll pane down / up",
+        "1\u20137        jump to pane",
+        "\u2190 / \u2192      previous / next pane",
+        "Tab        cycle pane forward",
+        "Shift+Tab  cycle pane backward",
+        "Ctrl+K / : open command palette",
+        "/          filter the active pane",
+        "?          toggle this help",
+        "q / Ctrl+C quit"
+      ];
+      const w = Math.min(44, cols - 4);
+      const h = Math.min(rows - 2, lines.length + 3);
+      const top = 1;
+      const left = Math.max(0, Math.floor((cols - w) / 2));
+      drawBox(buf, rows, cols, top, left, h, w, "Keybindings");
+      for (let i = 0; i < lines.length && top + 2 + i < top + h; i++) {
+        drawText(buf, cols, top + 2 + i, left + 1, truncate(lines[i], w - 2), { fg: c("text") });
+      }
+    }
+    function moveNav(delta) {
+      const n = PANES.length;
+      active = Math.min(n - 1, Math.max(0, active + delta));
+    }
+    function cycleFocus(delta) {
+      const n = PANES.length;
+      active = (active + delta + n) % n;
+    }
+    function scrollActive(delta) {
+      const contentLen = visibleRows().length;
+      const viewH = activeViewH();
+      const fn = delta > 0 ? scrollDown : scrollUp;
+      offsetByPane[active] = fn(offsetByPane[active], contentLen, viewH, 0);
+    }
+    function handleNavChar(ch) {
+      const digit = KEY_DIGITS.indexOf(ch);
+      if (digit >= 1 && digit <= PANES.length) {
+        active = digit - 1;
+        return;
+      }
+      if (ch === "j") return scrollActive(1);
+      if (ch === "k") return scrollActive(-1);
+      if (ch === KEY_TAB) return cycleFocus(1);
+      if (ch === "i" && PANES[active] === "Home") {
+        homeIntrosOpen = !homeIntrosOpen;
+        offsetByPane[active] = 0;
+        if (homeIntrosOpen) loadIntros();
+        return;
+      }
+      if (ch === KEY_ENTER_A || ch === KEY_ENTER_B) {
+        activateRow();
+        return;
+      }
+      if (ch === ":" || ch === KEY_CTRL_K) {
+        mode = "palette";
+        paletteQuery = "";
+        paletteSel = 0;
+        return;
+      }
+      if (ch === "/") {
+        filterSnapshot = filterByPane[active];
+        offsetByPane[active] = 0;
+        mode = "filter";
+        return;
+      }
+      if (ch === "?") {
+        mode = "help";
+        return;
+      }
+    }
+    function handlePaletteChar(ch) {
+      if (ch === KEY_ENTER_A || ch === KEY_ENTER_B) {
+        const results = paletteResults();
+        if (results.length) lastVerb = results[Math.min(paletteSel, results.length - 1)];
+        mode = "nav";
+        return;
+      }
+      if (ch === KEY_BACKSPACE_A || ch === KEY_BACKSPACE_B) {
+        paletteQuery = paletteQuery.slice(0, -1);
+        paletteSel = 0;
+        return;
+      }
+      if (ch >= " " && ch <= "~") {
+        paletteQuery += ch;
+        paletteSel = 0;
+      }
+    }
+    function handleFilterChar(ch) {
+      if (ch === KEY_ENTER_A || ch === KEY_ENTER_B) {
+        mode = "nav";
+        offsetByPane[active] = 0;
+        return;
+      }
+      if (ch === KEY_BACKSPACE_A || ch === KEY_BACKSPACE_B) {
+        filterByPane[active] = filterByPane[active].slice(0, -1);
+        return;
+      }
+      if (ch >= " " && ch <= "~") {
+        filterByPane[active] += ch;
+      }
+    }
+    function escToNav() {
+      if (mode === "filter") {
+        filterByPane[active] = filterSnapshot;
+        offsetByPane[active] = 0;
+      }
+      mode = "nav";
+    }
+    function dispatchKeys(str) {
+      for (const ch of str) {
+        if (done) return;
+        if (mode === "nav") {
+          if (ch === KEY_Q) return quit();
+          handleNavChar(ch);
+        } else if (mode === "palette") {
+          handlePaletteChar(ch);
+        } else if (mode === "filter") {
+          handleFilterChar(ch);
+        } else if (mode === "help") {
+          if (ch === "?" || ch === KEY_Q) mode = "nav";
+        }
+      }
+    }
+    function onData(chunk) {
+      if (done) return;
+      const s = chunk.toString("utf8");
+      if (s === KEY_CTRL_C) return quit();
+      if (splashActive) {
+        splashActive = false;
+        if (splashTimer) {
+          clearTimeout(splashTimer);
+          splashTimer = null;
+        }
+        renderer.invalidate();
+      }
+      if (s === KEY_ESC) {
+        if (mode !== "nav") escToNav();
+        repaint();
+        return;
+      }
+      if (s === KEY_SHIFT_TAB) {
+        if (mode === "nav") cycleFocus(-1);
+        repaint();
+        return;
+      }
+      if (s.charCodeAt(0) === 27) {
+        if (s === KEY_UP) {
+          if (mode === "nav") scrollActive(-1);
+          else if (mode === "palette") paletteSel = Math.max(0, paletteSel - 1);
+          repaint();
+          return;
+        }
+        if (s === KEY_DOWN) {
+          if (mode === "nav") scrollActive(1);
+          else if (mode === "palette") {
+            const n = paletteResults().length;
+            paletteSel = Math.min(Math.max(0, n - 1), paletteSel + 1);
+          }
+          repaint();
+          return;
+        }
+        if (s === KEY_LEFT) {
+          if (mode === "nav") moveNav(-1);
+          repaint();
+          return;
+        }
+        if (s === KEY_RIGHT) {
+          if (mode === "nav") moveNav(1);
+          repaint();
+          return;
+        }
+        if (mode !== "nav") escToNav();
+        const rest = s.slice(1);
+        if (rest && rest.charCodeAt(0) !== 27) dispatchKeys(rest);
+        repaint();
+        return;
+      }
+      dispatchKeys(s);
+      repaint();
+    }
+    function quit() {
+      if (done) return;
+      done = true;
+      if (splashTimer) {
+        clearTimeout(splashTimer);
+        splashTimer = null;
+      }
+      try {
+        input.removeListener("data", onData);
+      } catch {
+      }
+      try {
+        unwireResize();
+      } catch {
+      }
+      runtime.cleanup();
+      resolve({ ok: true, lastVerb });
+    }
+    runtime.enter();
+    splashTimer = setTimeout(() => {
+      splashTimer = null;
+      if (splashActive) {
+        splashActive = false;
+        renderer.invalidate();
+        repaint();
+      }
+    }, _splashMs);
+    unwireResize = wireResize({
+      output,
+      onResize: (sz) => {
+        renderer.resize(sz.rows, sz.cols);
+        repaint();
+      }
     });
-    console.log(`
-\u2726 Project saved locally (never sent): ${title}`);
-    console.log(`  Skills: ${skillTags.join(", ")}`);
-    console.log(`
-  Rank builders for it: terminalhire devs --as-project`);
-  } catch (err) {
-    console.error("terminalhire project error:", err.message ?? err);
-    process.exit(1);
+    if (typeof input.on === "function") input.on("data", onData);
+    repaint();
+  });
+}
+function printStatic(output = process.stdout) {
+  const out = (s) => output.write(s);
+  out("\n  terminalhire hub\n");
+  out("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n");
+  out("  Panes: " + PANES.map((p) => sanitizeLine(p)).join(" \xB7 ") + "\n\n");
+  out("  Run `terminalhire hub` in an interactive terminal to launch the full-screen hub.\n\n");
+}
+async function run(opts = {}) {
+  const {
+    isTTY = process.stdout.isTTY,
+    input = process.stdin,
+    output = process.stdout,
+    runTui = runHubTui,
+    runStatic = null
+  } = opts;
+  if (isTTY) {
+    await runTui({ input, output });
+  } else if (runStatic) {
+    await runStatic({ output });
+  } else {
+    printStatic(output);
   }
 }
 export {
-  run
+  run,
+  runHubTui
 };
 /*! Bundled license information:
 

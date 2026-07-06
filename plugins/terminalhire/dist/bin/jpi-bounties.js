@@ -749,6 +749,30 @@ var init_contribution_gate = __esm({
   }
 });
 
+// ../../packages/core/src/credential/rigor.ts
+function deriveRigorTiers(input) {
+  const tiers = {};
+  if (input.reviewerAssociations !== void 0) {
+    tiers.maintainerReviewed = input.reviewerAssociations.some(
+      (a) => MAINTAINER_SET.has(String(a).toUpperCase())
+    );
+  }
+  return tiers;
+}
+var RIGOR, MAINTAINER_SET;
+var init_rigor = __esm({
+  "../../packages/core/src/credential/rigor.ts"() {
+    "use strict";
+    RIGOR = {
+      /** `authorAssociation` values that count as a maintainer review. */
+      MAINTAINER_ASSOCIATIONS: ["OWNER", "MEMBER", "COLLABORATOR"]
+    };
+    MAINTAINER_SET = new Set(
+      RIGOR.MAINTAINER_ASSOCIATIONS.map((a) => a.toUpperCase())
+    );
+  }
+});
+
 // ../../packages/core/src/github.ts
 function ghHeaders(token) {
   const headers = {
@@ -1027,6 +1051,33 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
       if (mergedAt > b.lastMergedAt) b.lastMergedAt = mergedAt;
     }
   }
+  if (token) {
+    const enrichStats = { transient: 0 };
+    const enrichCount = Math.min(qualifyingPRs.length, MAX_ENRICH_PRS);
+    for (let i = 0; i < enrichCount; i++) {
+      const pr = qualifyingPRs[i];
+      const ref = parseGitHubRef(pr.url);
+      if (!ref || ref.kind !== "pull") continue;
+      try {
+        const reviews = await ghFetch(
+          `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/reviews?per_page=100`,
+          token
+        );
+        const reviewerAssociations = reviews.map((r) => r.author_association);
+        const tiers = deriveRigorTiers({ reviewerAssociations });
+        if (tiers.maintainerReviewed !== void 0) pr.maintainerReviewed = tiers.maintainerReviewed;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (TRANSIENT_META_ERROR.test(msg)) {
+          enrichStats.transient += 1;
+          console.warn(
+            `[acceptance] ${login}: per-PR rigor enrichment transient failure (${enrichStats.transient}) \u2014 leaving remaining tiers undefined rather than fabricating a false`
+          );
+          break;
+        }
+      }
+    }
+  }
   const finalDomains = {};
   for (const [d, b] of Object.entries(byDomain)) {
     finalDomains[d] = {
@@ -1233,6 +1284,17 @@ async function fetchPRScoringFacts(prUrl, token, signal) {
   }
   const contributors = await repoContributorCount(owner, repo, token, sig);
   const { closesIssues, linkageSource } = await resolveClosingIssues(owner, repo, number, pr.body ?? "", token, sig);
+  let reviewerAssociations;
+  try {
+    const reviews = await ghFetch(
+      `/repos/${owner}/${repo}/pulls/${number}/reviews?per_page=100`,
+      token,
+      sig
+    );
+    reviewerAssociations = reviews.map((r) => r.author_association);
+  } catch {
+    reviewerAssociations = void 0;
+  }
   return {
     repo: `${owner}/${repo}`,
     prNumber: number,
@@ -1250,17 +1312,24 @@ async function fetchPRScoringFacts(prUrl, token, signal) {
     repoArchived: !!repoMeta?.archived,
     repoFork: !!repoMeta?.fork,
     repoPrivate: !!repoMeta?.private,
+    additions: pr.additions ?? null,
+    deletions: pr.deletions ?? null,
+    changedFiles: pr.changed_files ?? null,
+    repoForks: repoMeta?.forks_count ?? null,
+    reviewerAssociations,
     fetchedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
-var TRACTION_TOP_N, CANDIDATE_PR_PAGE, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
+var TRACTION_TOP_N, CANDIDATE_PR_PAGE, MAX_ENRICH_PRS, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
     init_vocabulary();
     init_contribution_gate();
+    init_rigor();
     TRACTION_TOP_N = 6;
     CANDIDATE_PR_PAGE = 50;
+    MAX_ENRICH_PRS = 12;
     OPEN_PR_PAGE = 20;
     TRANSIENT_META_ERROR = /HTTP 403|HTTP 429|rate limit|HTTP 5\d\d|timeout|network|fetch failed/i;
     RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
@@ -6772,10 +6841,13 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
     if (daysAgo !== void 0) s += ` \u2014 most recent ${daysAgo}d ago`;
     proofSentence = `${s}.`;
   }
+  const enrichedPRs = ok ? credential.qualifyingPRs ?? [] : [];
+  const maintainerReviewedCount = enrichedPRs.some((p) => p.maintainerReviewed !== void 0) ? enrichedPRs.filter((p) => p.maintainerReviewed === true).length : void 0;
   const auditableBadge = ok ? {
     mergedTotal: credential.qualifyingTotal,
     distinctOrgs: orgCount,
-    thresholds: { stars: MIN_STARS, contributors: MIN_CONTRIBUTORS }
+    thresholds: { stars: MIN_STARS, contributors: MIN_CONTRIBUTORS },
+    ...maintainerReviewedCount !== void 0 ? { maintainerReviewedCount } : {}
   } : null;
   const profile = {
     headline,
@@ -6971,6 +7043,7 @@ __export(src_exports, {
   MENTION_DELTA: () => MENTION_DELTA,
   MIN_CONTRIBUTORS: () => MIN_CONTRIBUTORS,
   MIN_STARS: () => MIN_STARS,
+  RIGOR: () => RIGOR,
   STRONG_MATCH_THRESHOLD: () => STRONG_MATCH_THRESHOLD,
   SYNONYMS: () => SYNONYMS,
   TRIVIAL_PR_TITLE: () => TRIVIAL_PR_TITLE,
@@ -6999,6 +7072,7 @@ __export(src_exports, {
   decryptMessage: () => decryptMessage,
   deriveLegibleProfile: () => deriveLegibleProfile,
   deriveResumeTrend: () => deriveResumeTrend,
+  deriveRigorTiers: () => deriveRigorTiers,
   deriveSharedKey: () => deriveSharedKey,
   deriveTrajectoryNarrative: () => deriveTrajectoryNarrative,
   displayableDrift: () => displayableDrift,
@@ -7078,6 +7152,7 @@ var init_src = __esm({
     init_job_status();
     init_legible();
     init_legible_trajectory();
+    init_rigor();
     init_short_token();
   }
 });
@@ -7090,9 +7165,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/claim-frictionless/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/claim-frictionless/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/91995792-9cff-48f4-ae9c-dee9e36fc319/scratchpad/release-v0230/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -7512,36 +7587,46 @@ ${i + 1}. ${linkTitle(job.title, job.url)} [${ref}]`);
   console.log(`   Claim: ${sanitizeText(b.claimUrl ?? job.url)}`);
   console.log(`   \u2192 terminalhire claim ${ref}`);
 }
+async function getBounties({ quiet = false, offline = false } = {}) {
+  if (!quiet) console.log(`Fetching bounty index from ${API_URL}/api/index...`);
+  const index = offline ? readIndexCache() : await fetchIndex();
+  if (offline && !index) return { status: "no-cache" };
+  let bounties = (index.jobs ?? []).filter((j) => j.source === "bounty");
+  if (PRICED_ONLY) bounties = bounties.filter((j) => j.bounty?.amountUSD != null);
+  if (WINNABLE_ONLY) bounties = bounties.filter((j) => (j.bounty?.competingOpenPRs ?? 0) === 0);
+  if (bounties.length === 0) {
+    return { status: "empty" };
+  }
+  const ranked = /* @__PURE__ */ new Map();
+  try {
+    const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+    const { match: match2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+    const profile = await readProfile2();
+    if (profile.skillTags.length > 0) {
+      const fp = profileToFingerprint2(profile);
+      for (const r of match2(fp, bounties, bounties.length)) {
+        ranked.set(r.job.id, { score: r.score, reason: r.reason, matchedTags: r.matchedTags });
+      }
+    }
+  } catch {
+  }
+  const score = (j) => ranked.get(j.id)?.score ?? 0;
+  const amt = (j) => j.bounty?.amountUSD ?? -1;
+  const contested = (j) => (j.bounty?.competingOpenPRs ?? 0) > 0 ? 1 : 0;
+  bounties.sort((a, b) => contested(a) - contested(b) || score(b) - score(a) || amt(b) - amt(a));
+  const matchedCount = bounties.filter((j) => score(j) > 0).length;
+  return { status: "ok", bounties, ranked, matchedCount };
+}
 async function run() {
   try {
-    console.log(`Fetching bounty index from ${API_URL}/api/index...`);
-    const index = await fetchIndex();
-    let bounties = (index.jobs ?? []).filter((j) => j.source === "bounty");
-    if (PRICED_ONLY) bounties = bounties.filter((j) => j.bounty?.amountUSD != null);
-    if (WINNABLE_ONLY) bounties = bounties.filter((j) => (j.bounty?.competingOpenPRs ?? 0) === 0);
-    if (bounties.length === 0) {
+    const result = await getBounties();
+    if (result.status === "empty") {
       console.log("\nNo bounties available right now. Try again later \u2014 supply refreshes through the day.");
       return;
     }
-    const ranked = /* @__PURE__ */ new Map();
-    try {
-      const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-      const { match: match2 } = await Promise.resolve().then(() => (init_src(), src_exports));
-      const profile = await readProfile2();
-      if (profile.skillTags.length > 0) {
-        const fp = profileToFingerprint2(profile);
-        for (const r of match2(fp, bounties, bounties.length)) {
-          ranked.set(r.job.id, { score: r.score, reason: r.reason, matchedTags: r.matchedTags });
-        }
-      }
-    } catch {
-    }
-    const score = (j) => ranked.get(j.id)?.score ?? 0;
-    const amt = (j) => j.bounty?.amountUSD ?? -1;
-    const contested = (j) => (j.bounty?.competingOpenPRs ?? 0) > 0 ? 1 : 0;
-    bounties.sort((a, b) => contested(a) - contested(b) || score(b) - score(a) || amt(b) - amt(a));
+    if (result.status !== "ok") return;
+    const { bounties, ranked, matchedCount } = result;
     const shown = SHOW_ALL ? bounties : bounties.slice(0, LIMIT);
-    const matchedCount = bounties.filter((j) => score(j) > 0).length;
     console.log(
       `
 \u26A1 ${bounties.length} bount${bounties.length === 1 ? "y" : "ies"} you could knock out` + (matchedCount ? ` \u2014 ${matchedCount} matched to your profile` : "") + ` (local rank \u2014 no data sent)
@@ -7573,6 +7658,7 @@ Open this to claim/work the bounty (you go straight to the source \u2014 we neve
   }
 }
 export {
+  getBounties,
   run
 };
 /*! Bundled license information:
