@@ -522,6 +522,16 @@ var BUYER_REGISTRY = {
   [EXAMPLE_BUYER.id]: EXAMPLE_BUYER
 };
 
+// ../../packages/core/src/winnability.ts
+var WINNABILITY_NORM = {
+  /** ~500 new stars in a build interval is treated as "maxed" momentum. */
+  starVelocity: 500,
+  /** ~10 HN mentions is treated as "maxed" social. */
+  socialMentions: 10,
+  /** log(stars) ceiling — ~100k-star repos saturate the absolute-traction floor. */
+  starsLog: Math.log(1e5)
+};
+
 // ../../packages/core/src/intro.ts
 var INTRO_ALLOWED_FIELDS = [
   "requesterLogin",

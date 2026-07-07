@@ -41,9 +41,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/b71aee8e-782d-49b4-ac3c-a32c7d372392/scratchpad/wt-release-v0250/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/b71aee8e-782d-49b4-ac3c-a32c7d372392/scratchpad/wt-release-v0250/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -601,6 +601,16 @@ var EXAMPLE_BUYER = {
 };
 var BUYER_REGISTRY = {
   [EXAMPLE_BUYER.id]: EXAMPLE_BUYER
+};
+
+// ../../packages/core/src/winnability.ts
+var WINNABILITY_NORM = {
+  /** ~500 new stars in a build interval is treated as "maxed" momentum. */
+  starVelocity: 500,
+  /** ~10 HN mentions is treated as "maxed" social. */
+  socialMentions: 10,
+  /** log(stars) ceiling — ~100k-star repos saturate the absolute-traction floor. */
+  starsLog: Math.log(1e5)
 };
 
 // ../../packages/core/src/intro.ts

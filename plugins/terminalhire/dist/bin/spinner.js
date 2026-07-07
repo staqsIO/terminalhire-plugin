@@ -323,9 +323,6 @@ function buildContextVerbs(topMatches, sessionTags) {
   } else {
     headers = [`\u2726 Work that fits your stack`, `\u2726 A match for you \u2014 link in the tip below`];
   }
-  const list = Array.isArray(topMatches) ? topMatches : [];
-  const hasBounty = list.some((m) => m && m.source === "bounty");
-  if (hasBounty) headers.push(`\u2726 Roles + \u{1F48E} paid bounties in your stack \u2014 link below`);
   return headers;
 }
 function buildPeerLine(topPeers) {
@@ -883,6 +880,16 @@ var EXAMPLE_BUYER = {
 };
 var BUYER_REGISTRY = {
   [EXAMPLE_BUYER.id]: EXAMPLE_BUYER
+};
+
+// ../../packages/core/src/winnability.ts
+var WINNABILITY_NORM = {
+  /** ~500 new stars in a build interval is treated as "maxed" momentum. */
+  starVelocity: 500,
+  /** ~10 HN mentions is treated as "maxed" social. */
+  socialMentions: 10,
+  /** log(stars) ceiling — ~100k-star repos saturate the absolute-traction floor. */
+  starsLog: Math.log(1e5)
 };
 
 // ../../packages/core/src/intro.ts

@@ -1181,7 +1181,15 @@ function passesContributionGate(input) {
   if (isAiBanRepo(input.fullName)) return false;
   return input.stars >= MIN_STARS && input.contributors >= MIN_CONTRIBUTORS && !TRIVIAL_PR_TITLE.test(input.title) && !input.archived && !input.fork;
 }
-var MIN_STARS, MIN_CONTRIBUTORS, TRIVIAL_PR_TITLE;
+function qualifiesMaintainer(repos) {
+  const eligible = repos.filter(
+    (r) => r.externalContributors >= MAINTAINER_MIN_EXTERNAL_CONTRIBUTORS && r.stars >= MAINTAINER_MIN_STARS && !r.archived && !r.fork
+  );
+  if (eligible.length === 0) return { qualifies: false, bestRepoName: null };
+  eligible.sort((a, b) => b.externalContributors - a.externalContributors || b.stars - a.stars);
+  return { qualifies: true, bestRepoName: eligible[0].name };
+}
+var MIN_STARS, MIN_CONTRIBUTORS, TRIVIAL_PR_TITLE, MAINTAINER_MIN_EXTERNAL_CONTRIBUTORS, MAINTAINER_MIN_STARS;
 var init_contribution_gate = __esm({
   "../../packages/core/src/feeds/contribution-gate.ts"() {
     "use strict";
@@ -1189,6 +1197,8 @@ var init_contribution_gate = __esm({
     MIN_STARS = 50;
     MIN_CONTRIBUTORS = 10;
     TRIVIAL_PR_TITLE = /^\s*(fix\s+typo|typo\b|update\s+readme|readme\b|docs?:|docs?\(|chore:|chore\(|style:|ci:|build:|bump\b|update\s+dependenc)/i;
+    MAINTAINER_MIN_EXTERNAL_CONTRIBUTORS = 5;
+    MAINTAINER_MIN_STARS = 50;
   }
 });
 
@@ -1310,6 +1320,31 @@ function githubToFingerprint(p) {
   const seniorityBand = inferSeniority(p);
   return { skillTags, seniorityBand };
 }
+async function repoExternalContributorCount(owner, name, ownerLogin, token, signal) {
+  try {
+    const res = await ghFetchRaw(
+      `/repos/${owner}/${name}/contributors?per_page=100&anon=false`,
+      token,
+      signal
+    );
+    if (!res.ok) return 0;
+    const body = await res.json();
+    if (!Array.isArray(body)) return 0;
+    const ownerLc = ownerLogin.toLowerCase();
+    const seen = /* @__PURE__ */ new Set();
+    for (const c of body) {
+      const login = typeof c?.login === "string" ? c.login : null;
+      if (!login) continue;
+      if (c.type?.toLowerCase() === "bot" || /\[bot\]$/i.test(login)) continue;
+      const lc = login.toLowerCase();
+      if (lc === ownerLc) continue;
+      seen.add(lc);
+    }
+    return seen.size;
+  } catch {
+    return 0;
+  }
+}
 async function fetchOwnedRepoTraction(login, token) {
   const computedAt = (/* @__PURE__ */ new Date()).toISOString();
   const empty = (status) => ({
@@ -1318,6 +1353,11 @@ async function fetchOwnedRepoTraction(login, token) {
     totalForks: 0,
     reposWithStars: 0,
     top: [],
+    qualifies: false,
+    // honesty rail: no maintainer claim on a non-'ok' status
+    bestRepoName: null,
+    bestRepoExternalContributors: null,
+    bestRepoStars: null,
     computedAt
   });
   let repos;
@@ -1344,15 +1384,33 @@ async function fetchOwnedRepoTraction(login, token) {
     totalStars += stars;
     totalForks += forks;
     if (stars >= 1) reposWithStars++;
-    ranked.push({ name: r.name, stars, forks });
+    ranked.push({ name: r.name, stars, forks, externalContributors: 0 });
   }
   ranked.sort((a, b) => b.stars - a.stars || b.forks - a.forks);
+  const enrichCandidates = ranked.filter((r) => r.stars >= MAINTAINER_MIN_STARS).slice(0, MAINTAINER_ENRICH_MAX);
+  for (const r of enrichCandidates) {
+    r.externalContributors = await repoExternalContributorCount(login, r.name, login, token);
+  }
+  const gate = qualifiesMaintainer(
+    ranked.map((r) => ({
+      name: r.name,
+      stars: r.stars,
+      externalContributors: r.externalContributors,
+      archived: false,
+      fork: false
+    }))
+  );
+  const best = gate.qualifies ? ranked.find((r) => r.name === gate.bestRepoName) ?? null : null;
   return {
     status: "ok",
     totalStars,
     totalForks,
     reposWithStars,
     top: ranked.slice(0, TRACTION_TOP_N),
+    qualifies: gate.qualifies,
+    bestRepoName: gate.bestRepoName,
+    bestRepoExternalContributors: best ? best.externalContributors : null,
+    bestRepoStars: best ? best.stars : null,
     computedAt
   };
 }
@@ -1636,6 +1694,58 @@ async function fetchRepoRecency(login, token) {
     return [];
   }
 }
+function isExternalAuthor(pr) {
+  const assoc = (pr.author_association ?? "").toUpperCase();
+  return assoc !== "OWNER" && assoc !== "MEMBER" && assoc !== "COLLABORATOR";
+}
+async function fetchRepoReceptivity(fullName, opts = {}) {
+  const doFetch = opts.fetchImpl ?? fetch;
+  const now = opts.now ?? Date.now();
+  try {
+    const res = await doFetch(
+      `https://api.github.com/repos/${fullName}/pulls?state=closed&per_page=50&sort=updated&direction=desc`,
+      { headers: ghHeaders(opts.token) }
+    );
+    if (!res.ok) return null;
+    const prs = await res.json();
+    if (!Array.isArray(prs)) return null;
+    const external = prs.filter(isExternalAuthor);
+    if (external.length === 0) return null;
+    const merged = external.filter((p) => p.merged_at != null);
+    const mergedFraction = merged.length / external.length;
+    if (merged.length === 0) return 0;
+    let lastMergeMs = 0;
+    for (const p of merged) {
+      const t = Date.parse(p.merged_at);
+      if (Number.isFinite(t) && t > lastMergeMs) lastMergeMs = t;
+    }
+    const ageDays2 = (now - lastMergeMs) / (24 * 60 * 60 * 1e3);
+    const recencyWeight = Math.max(
+      RECEPTIVITY_RECENCY_FLOOR,
+      Math.min(1, 1 - ageDays2 / RECEPTIVITY_RECENCY_DAYS)
+    );
+    return Math.max(0, Math.min(1, mergedFraction * recencyWeight));
+  } catch {
+    return null;
+  }
+}
+async function fetchTrendingSlugs(opts = {}) {
+  const doFetch = opts.fetchImpl ?? fetch;
+  try {
+    const res = await doFetch("https://github.com/trending?since=daily", {
+      headers: { "User-Agent": "terminalhire", Accept: "text/html" }
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const slugs = /* @__PURE__ */ new Set();
+    for (const m of html.matchAll(/<h2[^>]*>\s*<a[^>]*href="\/([^"/]+\/[^"/]+)"/g)) {
+      slugs.add(m[1].toLowerCase());
+    }
+    return slugs.size > 0 ? slugs : null;
+  } catch {
+    return null;
+  }
+}
 function deriveResumeTrend(cred, repoRecency, now = Date.now()) {
   const agg = /* @__PURE__ */ new Map();
   const bump = (domain, when, count, mergedPRs) => {
@@ -1763,20 +1873,24 @@ async function fetchPRScoringFacts(prUrl, token, signal) {
     fetchedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
-var TRACTION_TOP_N, CANDIDATE_PR_PAGE, MAX_ENRICH_PRS, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE;
+var TRACTION_TOP_N, MAINTAINER_ENRICH_MAX, CANDIDATE_PR_PAGE, MAX_ENRICH_PRS, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE, RECEPTIVITY_RECENCY_DAYS, RECEPTIVITY_RECENCY_FLOOR;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
     init_vocabulary();
     init_contribution_gate();
+    init_contribution_gate();
     init_rigor();
     TRACTION_TOP_N = 6;
+    MAINTAINER_ENRICH_MAX = 25;
     CANDIDATE_PR_PAGE = 50;
     MAX_ENRICH_PRS = 12;
     OPEN_PR_PAGE = 20;
     TRANSIENT_META_ERROR = /HTTP 403|HTTP 429|rate limit|HTTP 5\d\d|timeout|network|fetch failed/i;
     RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
     RESUME_MIN_SCORE = 0.05;
+    RECEPTIVITY_RECENCY_DAYS = 180;
+    RECEPTIVITY_RECENCY_FLOOR = 0.1;
   }
 });
 
@@ -3633,6 +3747,37 @@ async function searchContribIssues(client, queries) {
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
 }
+function buildContributionJob(a) {
+  return {
+    id: a.id,
+    source: "contribute",
+    title: a.title,
+    company: a.repo.owner.login,
+    url: a.issue.html_url,
+    remote: true,
+    location: "Remote",
+    tags: a.tags,
+    roleType: "freelance",
+    postedAt: a.issue.created_at,
+    applyMode: "direct",
+    contribution: {
+      repoFullName: a.fullName,
+      repoStars: a.repo.stargazers_count,
+      repoContributors: a.contributors,
+      issueNumber: a.issue.number,
+      labels: a.labels,
+      issueUrl: a.issue.html_url,
+      issueBody: a.body.slice(0, 1e3) || void 0,
+      // Provably 0 open PRs ONLY when the open-PR check actually ran and returned a
+      // verified-empty/non-matching set; a failed check leaves it undefined (never a
+      // fabricated 0), so the claim path falls through to a live re-count.
+      openPRsAtDiscovery: a.openPRsAtDiscovery
+    },
+    // Provenance: repo-first discovered items only (label-first omits the field).
+    ...a.discovered ? { discovered: true } : {},
+    raw: a.issue
+  };
+}
 async function aggregateContributions(opts = {}) {
   const paceEnabled = opts.paceEnabled ?? !opts.fetchImpl;
   const client = makeClient(opts.fetchImpl ?? fetchWithTimeout, {
@@ -3654,22 +3799,25 @@ async function aggregateContributions(opts = {}) {
   const contribCache = /* @__PURE__ */ new Map();
   const prRefsCache = /* @__PURE__ */ new Map();
   async function repoMeta(fullName) {
-    const hit = repoCache.get(fullName);
+    const key = repoKey(fullName);
+    const hit = repoCache.get(key);
     if (hit !== void 0) return hit;
     const r = await client.json(`/repos/${fullName}`) ?? null;
-    repoCache.set(fullName, r);
+    repoCache.set(key, r);
     return r;
   }
   async function repoContribCount(fullName) {
-    if (contribCache.has(fullName)) return contribCache.get(fullName);
+    const key = repoKey(fullName);
+    if (contribCache.has(key)) return contribCache.get(key);
     const n = await contributorCount(client, fullName);
-    contribCache.set(fullName, n);
+    contribCache.set(key, n);
     return n;
   }
   async function repoPRRefs(fullName) {
-    if (prRefsCache.has(fullName)) return prRefsCache.get(fullName) ?? null;
+    const key = repoKey(fullName);
+    if (prRefsCache.has(key)) return prRefsCache.get(key) ?? null;
     const refs = await openPRIssueRefs(client, fullName);
-    prRefsCache.set(fullName, refs);
+    prRefsCache.set(key, refs);
     return refs;
   }
   const jobs = [];
@@ -3682,11 +3830,11 @@ async function aggregateContributions(opts = {}) {
     if (jobs.length >= MAX_CONTRIB_ITEMS) break;
     const fullName = repoFullNameFromApiUrl2(issue.repository_url);
     if (!fullName) continue;
-    const id = `contribute:${fullName}#${issue.number}`;
+    const id = `contribute:${repoKey(fullName)}#${issue.number}`;
     if (seen.has(id)) continue;
     if (isDenylistedRepo(fullName)) continue;
     if (isAssigned(issue)) continue;
-    if ((perRepo.get(fullName) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) continue;
+    if ((perRepo.get(repoKey(fullName)) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) continue;
     const repo = await repoMeta(fullName);
     if (!repo) {
       metaNull++;
@@ -3717,38 +3865,150 @@ async function aggregateContributions(opts = {}) {
       tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
     );
     seen.add(id);
-    perRepo.set(fullName, (perRepo.get(fullName) ?? 0) + 1);
-    jobs.push({
-      id,
-      source: "contribute",
-      title,
-      company: repo.owner.login,
-      url: issue.html_url,
-      remote: true,
-      location: "Remote",
-      tags,
-      roleType: "freelance",
-      postedAt: issue.created_at,
-      applyMode: "direct",
-      contribution: {
-        repoFullName: fullName,
-        repoStars: repo.stargazers_count,
-        repoContributors: contributors,
-        // gate guarantees a number here
-        issueNumber: issue.number,
+    perRepo.set(repoKey(fullName), (perRepo.get(repoKey(fullName)) ?? 0) + 1);
+    jobs.push(
+      buildContributionJob({
+        id,
+        fullName,
+        repo,
+        issue,
+        title,
+        body,
         labels,
-        issueUrl: issue.html_url,
-        issueBody: body.slice(0, 1e3) || void 0,
-        // Provably 0 open PRs at discovery ONLY when the open-PR check actually
-        // ran and returned a verified-empty/non-matching set (`openPRsAtDiscovery
-        // === 0`). When the check FAILED (rate-limit/error → `prRefs === null`)
-        // this is `undefined`, NOT a fabricated 0 — the claim path then falls
-        // through to a live re-count / honest "unknown" (jpi-claim.js:242-260)
-        // instead of persisting an unverified "0 open PRs" as fact.
+        tags,
+        contributors,
+        // gate guarantees a number here
         openPRsAtDiscovery
-      },
-      raw: issue
-    });
+      })
+    );
+  }
+  const doDiscovery = opts.discoverRepos ?? (opts.trendingSlugs != null || opts.vocabTerms != null);
+  let discoveredEmitted = 0;
+  let discoveryBudgetStopped = false;
+  if (doDiscovery && jobs.length < MAX_CONTRIB_ITEMS) {
+    const maxRepos = Math.min(
+      Math.max(0, opts.maxDiscoveredRepos ?? MAX_DISCOVERED_REPOS),
+      MAX_DISCOVERED_REPOS
+    );
+    const vocabTerms = (opts.vocabTerms ?? DISCOVERY_VOCAB_TERMS).slice(
+      0,
+      DISCOVERY_VOCAB_TERMS.length
+    );
+    const vocabCandidates = [];
+    for (const term of vocabTerms) {
+      if (client.getStats().budgetAborted || client.getStats().secondaryAborted) {
+        discoveryBudgetStopped = true;
+        break;
+      }
+      const res = await client.json(
+        `/search/repositories?q=${encodeURIComponent(term)}&sort=updated&order=desc&per_page=${DISCOVERY_REPOS_PER_TERM}`
+      );
+      for (const r of res?.items ?? []) {
+        if (!r?.full_name) continue;
+        if (!repoCache.has(repoKey(r.full_name))) {
+          repoCache.set(repoKey(r.full_name), {
+            full_name: r.full_name,
+            stargazers_count: r.stargazers_count,
+            archived: r.archived,
+            disabled: r.disabled ?? false,
+            fork: r.fork,
+            language: r.language,
+            owner: r.owner
+          });
+        }
+        vocabCandidates.push({ fullName: r.full_name, stars: r.stargazers_count ?? 0 });
+      }
+    }
+    vocabCandidates.sort((a, b) => b.stars - a.stars);
+    const candidates = [];
+    const candSeen = /* @__PURE__ */ new Set();
+    for (const slug of opts.trendingSlugs ?? []) {
+      const s = slug?.toLowerCase();
+      if (s && !candSeen.has(repoKey(s))) {
+        candSeen.add(repoKey(s));
+        candidates.push(s);
+      }
+    }
+    for (const { fullName } of vocabCandidates) {
+      if (!candSeen.has(repoKey(fullName))) {
+        candSeen.add(repoKey(fullName));
+        candidates.push(fullName);
+      }
+    }
+    const scanned = candidates.slice(0, maxRepos);
+    for (const fullName of scanned) {
+      if (jobs.length >= MAX_CONTRIB_ITEMS) break;
+      if (client.getStats().budgetAborted || client.getStats().secondaryAborted) {
+        discoveryBudgetStopped = true;
+        break;
+      }
+      if (isDenylistedRepo(fullName)) continue;
+      const repo = await repoMeta(fullName);
+      if (!repo) {
+        metaNull++;
+        continue;
+      }
+      if (repo.disabled) continue;
+      const contributors = await repoContribCount(fullName);
+      if (contributors === void 0) contribUndefined++;
+      if (repo.archived || repo.fork || repo.stargazers_count < MIN_STARS || contributors === void 0 || contributors < MIN_CONTRIBUTORS) {
+        continue;
+      }
+      const q = `repo:${fullName} is:issue is:open label:${DISCOVERY_ISSUE_LABELS}`;
+      const searchRes = await client.json(
+        `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE2}`
+      );
+      const repoIssues = (searchRes?.items ?? []).filter((it) => !it.pull_request);
+      let perRepoDiscovered = 0;
+      for (const issue of repoIssues) {
+        if (jobs.length >= MAX_CONTRIB_ITEMS) break;
+        if (perRepoDiscovered >= MAX_ISSUES_PER_DISCOVERED_REPO) break;
+        if ((perRepo.get(repoKey(fullName)) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) break;
+        const id = `contribute:${repoKey(fullName)}#${issue.number}`;
+        if (seen.has(id)) continue;
+        if (isAssigned(issue)) continue;
+        const title = decodeEntities(issue.title).trim();
+        if (!passesContributionGate({
+          fullName,
+          stars: repo.stargazers_count,
+          contributors,
+          title,
+          archived: repo.archived,
+          fork: repo.fork
+        })) {
+          continue;
+        }
+        const body = issue.body ? decodeEntities(issue.body) : "";
+        const labels = labelNames2(issue.labels);
+        if (looksLikeContentTask({ title, body, labels })) continue;
+        const prRefs = await repoPRRefs(fullName);
+        if (prRefs === null) prRefsNull++;
+        if (prRefs && prRefs.has(issue.number)) continue;
+        const openPRsAtDiscovery = prRefs ? 0 : void 0;
+        const tags = normalize(
+          tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
+        );
+        seen.add(id);
+        perRepo.set(repoKey(fullName), (perRepo.get(repoKey(fullName)) ?? 0) + 1);
+        perRepoDiscovered++;
+        discoveredEmitted++;
+        jobs.push(
+          buildContributionJob({
+            id,
+            fullName,
+            repo,
+            issue,
+            title,
+            body,
+            labels,
+            tags,
+            contributors,
+            openPRsAtDiscovery,
+            discovered: true
+          })
+        );
+      }
+    }
   }
   if (!opts.fetchImpl) {
     const rl = await fetchRateLimit(client);
@@ -3757,12 +4017,17 @@ async function aggregateContributions(opts = {}) {
     const noToken = !(process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"]);
     const { pacedMs, secondaryAborted, budgetAborted, elapsedMs } = client.getStats();
     console.info(
-      `[contribute] build metrics \u2014 scanned=${issues.length} reposDistinct=${repoCache.size} emitted=${jobs.length} metaNull=${metaNull} contribUndefined=${contribUndefined} prRefsNull=${prRefsNull} paced=${pacedMs} secondaryAborted=${secondaryAborted} budgetAborted=${budgetAborted} core=${core} search=${search} elapsed=${elapsedMs}` + (noToken ? " (NO TOKEN \u2192 60/hr)" : "")
+      `[contribute] build metrics \u2014 scanned=${issues.length} reposDistinct=${repoCache.size} emitted=${jobs.length} discovered=${discoveredEmitted} metaNull=${metaNull} contribUndefined=${contribUndefined} prRefsNull=${prRefsNull} paced=${pacedMs} secondaryAborted=${secondaryAborted} budgetAborted=${budgetAborted} core=${core} search=${search} elapsed=${elapsedMs}` + (noToken ? " (NO TOKEN \u2192 60/hr)" : "")
     );
+    if (discoveryBudgetStopped) {
+      console.warn(
+        `[contribute] repo-first discovery stopped early \u2014 build budget exhausted (emitted ${discoveredEmitted} discovered before the cap)`
+      );
+    }
   }
   return jobs;
 }
-var GITHUB_API2, DEFAULT_REQ_GAP_MS, SECONDARY_BACKOFF_CAP_S, DEFAULT_BUILD_BUDGET_MS, MIN_BUILD_BUDGET_MS, MAX_BUILD_BUDGET_MS, PROBE_TIMEOUT_MS, realSleep, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, MAX_CONTRIB_ITEMS, MAX_CONTRIB_ISSUES_SCANNED;
+var GITHUB_API2, DEFAULT_REQ_GAP_MS, SECONDARY_BACKOFF_CAP_S, DEFAULT_BUILD_BUDGET_MS, MIN_BUILD_BUDGET_MS, MAX_BUILD_BUDGET_MS, PROBE_TIMEOUT_MS, realSleep, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, MAX_CONTRIB_ITEMS, MAX_CONTRIB_ISSUES_SCANNED, MAX_DISCOVERED_REPOS, MAX_ISSUES_PER_DISCOVERED_REPO, DISCOVERY_REPOS_PER_TERM, DISCOVERY_VOCAB_TERMS, DISCOVERY_ISSUE_LABELS, repoKey;
 var init_contributions = __esm({
   "../../packages/core/src/feeds/contributions.ts"() {
     "use strict";
@@ -3800,6 +4065,12 @@ var init_contributions = __esm({
     SEARCH_PER_PAGE2 = 100;
     MAX_CONTRIB_ITEMS = 150;
     MAX_CONTRIB_ISSUES_SCANNED = 600;
+    MAX_DISCOVERED_REPOS = 15;
+    MAX_ISSUES_PER_DISCOVERED_REPO = 3;
+    DISCOVERY_REPOS_PER_TERM = 20;
+    DISCOVERY_VOCAB_TERMS = ["rust", "go", "python", "typescript"];
+    DISCOVERY_ISSUE_LABELS = '"good first issue","help wanted","good-first-issue","help-wanted"';
+    repoKey = (name) => name.toLowerCase();
   }
 });
 
@@ -3861,7 +4132,177 @@ var init_partners = __esm({
   }
 });
 
+// ../../packages/core/src/winnability.ts
+function clamp01(n) {
+  if (!Number.isFinite(n)) return 0;
+  return n < 0 ? 0 : n > 1 ? 1 : n;
+}
+function credentialValue(s) {
+  const velocity = clamp01((s.starVelocity30d ?? 0) / WINNABILITY_NORM.starVelocity);
+  const social = clamp01((s.socialMentions ?? 0) / WINNABILITY_NORM.socialMentions);
+  const stars = s.repoStars ?? 0;
+  const starsFloor = stars > 0 ? clamp01(Math.log(stars) / WINNABILITY_NORM.starsLog) * CREDENTIAL_WEIGHTS.starsFloor : 0;
+  let momentum;
+  if (s.trending === void 0) {
+    const rest = CREDENTIAL_WEIGHTS.starVelocity + CREDENTIAL_WEIGHTS.socialMentions;
+    const scale = 1 / rest;
+    momentum = velocity * CREDENTIAL_WEIGHTS.starVelocity * scale + social * CREDENTIAL_WEIGHTS.socialMentions * scale;
+  } else {
+    const trending = s.trending ? 1 : 0;
+    momentum = trending * CREDENTIAL_WEIGHTS.trending + velocity * CREDENTIAL_WEIGHTS.starVelocity + social * CREDENTIAL_WEIGHTS.socialMentions;
+  }
+  return momentum + starsFloor;
+}
+function mergeProbability(s) {
+  const recept = s.mergeReceptivity ?? MERGE_PROBABILITY.receptivityUnknownPrior;
+  const contested = (s.competingOpenPRs ?? 0) > 0;
+  const contentionFactor = contested ? 1 - MERGE_PROBABILITY.contentionPenalty : 1;
+  const vocabFactor = MERGE_PROBABILITY.vocabFloor + (1 - MERGE_PROBABILITY.vocabFloor) * clamp01(s.vocabMatch ?? 0);
+  return clamp01(recept) * contentionFactor * vocabFactor;
+}
+function computeWinnability(s) {
+  const cv = credentialValue(s);
+  const mp = mergeProbability(s);
+  const velocity = clamp01((s.starVelocity30d ?? 0) / WINNABILITY_NORM.starVelocity);
+  const social = clamp01((s.socialMentions ?? 0) / WINNABILITY_NORM.socialMentions);
+  const stars = s.repoStars ?? 0;
+  const contested = (s.competingOpenPRs ?? 0) > 0;
+  return {
+    score: cv * mp,
+    credentialValue: cv,
+    mergeProbability: mp,
+    components: {
+      trending: s.trending === void 0 ? -1 : s.trending ? 1 : 0,
+      starVelocity: velocity,
+      socialMentions: social,
+      starsFloor: stars > 0 ? clamp01(Math.log(stars) / WINNABILITY_NORM.starsLog) : 0,
+      mergeReceptivity: s.mergeReceptivity ?? -1,
+      contentionFactor: contested ? 1 - MERGE_PROBABILITY.contentionPenalty : 1,
+      vocabFactor: MERGE_PROBABILITY.vocabFloor + (1 - MERGE_PROBABILITY.vocabFloor) * clamp01(s.vocabMatch ?? 0)
+    }
+  };
+}
+var CREDENTIAL_WEIGHTS, WINNABILITY_NORM, MERGE_PROBABILITY;
+var init_winnability = __esm({
+  "../../packages/core/src/winnability.ts"() {
+    "use strict";
+    CREDENTIAL_WEIGHTS = {
+      trending: 0.5,
+      starVelocity: 0.3,
+      socialMentions: 0.2,
+      starsFloor: 0.2
+    };
+    WINNABILITY_NORM = {
+      /** ~500 new stars in a build interval is treated as "maxed" momentum. */
+      starVelocity: 500,
+      /** ~10 HN mentions is treated as "maxed" social. */
+      socialMentions: 10,
+      /** log(stars) ceiling — ~100k-star repos saturate the absolute-traction floor. */
+      starsLog: Math.log(1e5)
+    };
+    MERGE_PROBABILITY = {
+      /** Neutral prior used when mergeReceptivity is UNMEASURED (undefined). NOT used
+       *  when it is a measured 0 — a real 0 must zero the score (the thesis). Callers
+       *  that only attach winnabilityScore on measured receptivity never hit this in
+       *  production; it exists so the composite is total for internal/debug callers. */
+      receptivityUnknownPrior: 0.5,
+      /** Multiplicative factor applied when the item is contested (≥1 competing open PR).
+       *  `1 − contentionPenalty`; uncontested = 1.0. */
+      contentionPenalty: 0.6,
+      /** vocabMatch is folded as `vocabFloor + (1−vocabFloor)·vocabMatch` so a
+       *  tag-sparse title (vocabMatch≈0) NEVER zeroes mergeProbability — vocab is ONE
+       *  input, never the gate (bounty/issue titles are token-sparse by nature). */
+      vocabFloor: 0.5
+    };
+  }
+});
+
 // ../../packages/core/src/indexer.ts
+function collectScoreTargets(jobs, contribute) {
+  const out = [];
+  for (const j of jobs) {
+    if (j.source === "bounty" && j.bounty?.repoFullName) {
+      out.push({
+        job: j,
+        repo: j.bounty.repoFullName,
+        stars: j.bounty.repoStars ?? 0,
+        competingOpenPRs: j.bounty.competingOpenPRs
+      });
+    }
+  }
+  for (const j of contribute) {
+    if (j.contribution?.repoFullName) {
+      out.push({
+        job: j,
+        repo: j.contribution.repoFullName,
+        stars: j.contribution.repoStars ?? 0,
+        competingOpenPRs: j.contribution.openPRsAtDiscovery
+      });
+    }
+  }
+  return out;
+}
+async function enrichWinnability(jobs, contribute, w) {
+  const maxRepos = w.maxRepos ?? 30;
+  const now = w.now ?? Date.now();
+  const priorStars = w.priorStars ?? {};
+  const hnText = jobs.filter((j) => j.source === "hn").map((j) => `${j.title} ${j.company} ${j.url}`.toLowerCase());
+  const mentionsOf = (slug) => {
+    const s = slug.toLowerCase();
+    let n = 0;
+    for (const t of hnText) if (t.includes(s)) n++;
+    return n;
+  };
+  const byRepo = /* @__PURE__ */ new Map();
+  for (const t of collectScoreTargets(jobs, contribute)) {
+    const bucket = byRepo.get(t.repo);
+    if (bucket) bucket.push(t);
+    else byRepo.set(t.repo, [t]);
+  }
+  const starsOf = (repo) => byRepo.get(repo)?.[0]?.stars ?? 0;
+  const repos = [...byRepo.keys()].sort((a, b) => starsOf(b) - starsOf(a));
+  const scored = repos.slice(0, maxRepos);
+  const cappedOut = repos.length - scored.length;
+  for (const repo of scored) {
+    const targets = byRepo.get(repo) ?? [];
+    const receptivity = await fetchRepoReceptivity(repo, {
+      token: w.token,
+      fetchImpl: w.fetchImpl,
+      now
+    });
+    const stars = starsOf(repo);
+    const prev = priorStars[repo];
+    const velocity = prev != null ? Math.max(0, stars - prev) : 0;
+    const social = mentionsOf(repo);
+    const onTrending = w.trendingSlugs ? w.trendingSlugs.has(repo.toLowerCase()) : void 0;
+    for (const { job, competingOpenPRs } of targets) {
+      job.starVelocity30d = velocity;
+      job.socialMentions = social;
+      if (onTrending !== void 0) job.trending = onTrending;
+      if (receptivity != null) {
+        job.mergeReceptivity = receptivity;
+        const signals = {
+          trending: onTrending,
+          starVelocity30d: velocity,
+          socialMentions: social,
+          repoStars: stars,
+          mergeReceptivity: receptivity,
+          competingOpenPRs,
+          // vocabMatch is intentionally omitted server-side: the index is shared
+          // anonymously (no dev fingerprint here). The CLI's own match() folds
+          // vocab back in as the getBounties() comparator tiebreaker.
+          vocabMatch: void 0
+        };
+        job.winnabilityScore = computeWinnability(signals).score;
+      }
+    }
+  }
+  if (cappedOut > 0) {
+    console.warn(
+      `[winnability] receptivity cap hit \u2014 scored ${scored.length}/${repos.length} repos (${cappedOut} beyond maxRepos=${maxRepos} left un-scored, legacy ranking)`
+    );
+  }
+}
 async function buildIndex(opts) {
   const includePartners = opts?.includePartners ?? true;
   const publicJobs = await aggregate(opts);
@@ -3886,6 +4327,9 @@ async function buildIndex(opts) {
     const contributions = await aggregateContributions(opts.contributeOpts);
     index.contribute = contributions.map(({ raw: _raw, ...rest }) => rest);
   }
+  if (opts?.winnability) {
+    await enrichWinnability(jobs, index.contribute ?? [], opts.winnability);
+  }
   return index;
 }
 var init_indexer = __esm({
@@ -3894,6 +4338,8 @@ var init_indexer = __esm({
     init_feeds();
     init_contributions();
     init_partners();
+    init_github();
+    init_winnability();
   }
 });
 
@@ -7465,6 +7911,7 @@ __export(src_exports, {
   AI_BAN_DENYLIST: () => AI_BAN_DENYLIST,
   ASHBY_SLUGS_BY_TIER: () => ASHBY_SLUGS_BY_TIER,
   CAP_LABELS: () => CAP_LABELS,
+  CREDENTIAL_WEIGHTS: () => CREDENTIAL_WEIGHTS,
   DECAY_FLOOR: () => DECAY_FLOOR,
   DEFAULT_ASHBY_SLUGS: () => DEFAULT_ASHBY_SLUGS,
   DEFAULT_BOUNTY_REPOS: () => DEFAULT_BOUNTY_REPOS,
@@ -7484,6 +7931,7 @@ __export(src_exports, {
   LANG_LABELS: () => LANG_LABELS,
   LEVER_SLUGS_BY_TIER: () => LEVER_SLUGS_BY_TIER,
   MENTION_DELTA: () => MENTION_DELTA,
+  MERGE_PROBABILITY: () => MERGE_PROBABILITY,
   MIN_CONTRIBUTORS: () => MIN_CONTRIBUTORS,
   MIN_STARS: () => MIN_STARS,
   RIGOR: () => RIGOR,
@@ -7492,6 +7940,7 @@ __export(src_exports, {
   TRIVIAL_PR_TITLE: () => TRIVIAL_PR_TITLE,
   VOCABULARY: () => VOCABULARY,
   VOCAB_NODES: () => VOCAB_NODES,
+  WINNABILITY_NORM: () => WINNABILITY_NORM,
   acceptanceCountForDomains: () => acceptanceCountForDomains,
   aggregate: () => aggregate,
   aggregateBounties: () => aggregateBounties,
@@ -7511,8 +7960,10 @@ __export(src_exports, {
   composeIntroEmail: () => composeIntroEmail,
   computeAcceptanceCredential: () => computeAcceptanceCredential,
   computeAcceptanceCredentialPublic: () => computeAcceptanceCredentialPublic,
+  computeWinnability: () => computeWinnability,
   contributeShortToken: () => contributeShortToken,
   coreTagsFromTitle: () => coreTagsFromTitle,
+  credentialValue: () => credentialValue,
   decorate: () => decorate,
   decryptMessage: () => decryptMessage,
   deriveLegibleProfile: () => deriveLegibleProfile,
@@ -7529,6 +7980,8 @@ __export(src_exports, {
   fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
   fetchPRScoringFacts: () => fetchPRScoringFacts,
   fetchRepoRecency: () => fetchRepoRecency,
+  fetchRepoReceptivity: () => fetchRepoReceptivity,
+  fetchTrendingSlugs: () => fetchTrendingSlugs,
   flattenTiers: () => flattenTiers,
   funnelCounts: () => funnelCounts,
   generateIdentityKeypair: () => generateIdentityKeypair,
@@ -7553,6 +8006,7 @@ __export(src_exports, {
   loadPartnerRoles: () => loadPartnerRoles,
   looksLikeEngRole: () => looksLikeEngRole,
   match: () => match,
+  mergeProbability: () => mergeProbability,
   mmrRerank: () => mmrRerank,
   normalize: () => normalize,
   opire: () => opire,
@@ -7588,6 +8042,7 @@ var init_src = __esm({
     init_rerank();
     init_feeds();
     init_indexer();
+    init_winnability();
     init_partners();
     init_github();
     init_credit();
@@ -7610,9 +8065,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/b71aee8e-782d-49b4-ac3c-a32c7d372392/scratchpad/wt-release-v0250/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/b71aee8e-782d-49b4-ac3c-a32c7d372392/scratchpad/wt-release-v0250/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -8771,6 +9226,7 @@ var TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join14(homedir13(), ".t
 var INDEX_CACHE_FILE4 = join14(TERMINALHIRE_DIR11, "index-cache.json");
 var INDEX_TTL_MS2 = 15 * 60 * 1e3;
 var API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+var RANK_MODE = process.env["TERMINALHIRE_BOUNTY_RANK"] ?? "winnability";
 var DEFAULT_LIMIT2 = 15;
 var args2 = process.argv.slice(2);
 var limitArg2 = args2.indexOf("--limit");
@@ -8799,14 +9255,39 @@ async function fetchIndex2() {
   writeIndexCache2(index);
   return index;
 }
-async function getBounties({ quiet = false, offline = false } = {}) {
+function rankBounties(bounties, { rankMode = "winnability", scoreOf = () => 0 } = {}) {
+  const legacy = rankMode === "legacy";
+  const contested = (j) => (j.bounty?.competingOpenPRs ?? 0) > 0 ? 1 : 0;
+  const amt = (j) => j.bounty?.amountUSD ?? -1;
+  const winTier = (j) => {
+    const s = j.winnabilityScore;
+    if (s == null) return 1;
+    return s > 0 ? 2 : 0;
+  };
+  const winVal = (j) => j.winnabilityScore ?? 0;
+  bounties.sort(
+    (a, b) => (legacy ? 0 : winTier(b) - winTier(a)) || (legacy ? 0 : winVal(b) - winVal(a)) || contested(a) - contested(b) || scoreOf(b) - scoreOf(a) || amt(b) - amt(a)
+  );
+  return bounties;
+}
+function filterPaidVisibility(items, { priced = false } = {}) {
+  if (priced) return items;
+  return items.filter((j) => j.source !== "bounty");
+}
+function classifyEmptyStatus({ preFilterCount, postFilterCount, priced }) {
+  if (postFilterCount > 0) return "ok";
+  if (preFilterCount > 0 && !priced) return "demoted";
+  return "empty";
+}
+async function getBounties({ quiet = false, offline = false, priced = PRICED_ONLY } = {}) {
   if (!quiet) console.log(`Fetching bounty index from ${API_URL2}/api/index...`);
   const index = offline ? readIndexCache2() : await fetchIndex2();
   if (offline && !index) return { status: "no-cache" };
   let bounties = (index.jobs ?? []).filter((j) => j.source === "bounty");
   if (PRICED_ONLY) bounties = bounties.filter((j) => j.bounty?.amountUSD != null);
   if (WINNABLE_ONLY) bounties = bounties.filter((j) => (j.bounty?.competingOpenPRs ?? 0) === 0);
-  if (bounties.length === 0) {
+  const preFilterCount = bounties.length;
+  if (preFilterCount === 0) {
     return { status: "empty" };
   }
   const ranked = /* @__PURE__ */ new Map();
@@ -8823,9 +9304,14 @@ async function getBounties({ quiet = false, offline = false } = {}) {
   } catch {
   }
   const score = (j) => ranked.get(j.id)?.score ?? 0;
-  const amt = (j) => j.bounty?.amountUSD ?? -1;
-  const contested = (j) => (j.bounty?.competingOpenPRs ?? 0) > 0 ? 1 : 0;
-  bounties.sort((a, b) => contested(a) - contested(b) || score(b) - score(a) || amt(b) - amt(a));
+  rankBounties(bounties, {
+    rankMode: RANK_MODE,
+    scoreOf: (j) => ranked.get(j.id)?.score ?? 0
+  });
+  bounties = filterPaidVisibility(bounties, { priced });
+  if (bounties.length === 0) {
+    return { status: classifyEmptyStatus({ preFilterCount, postFilterCount: 0, priced }) };
+  }
   const matchedCount = bounties.filter((j) => score(j) > 0).length;
   return { status: "ok", bounties, ranked, matchedCount };
 }
@@ -8943,7 +9429,7 @@ init_intro2();
 init_open_url();
 var KEY_CTRL_K = "\v";
 var KEY_SHIFT_TAB = "\x1B[Z";
-var PANES = ["Home", "Jobs", "Bounties", "Devs", "Inbox", "Claims", "Profile"];
+var PANES = ["Home", "Jobs", "Devs", "Inbox", "Claims", "Bounties", "Profile"];
 var PALETTE_VERBS = [
   "jobs",
   "bounties",
@@ -9250,6 +9736,8 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
           return ["No cached bounty index \u2014 run `terminalhire bounties` once to fetch it."];
         case "empty":
           return ["No bounties available right now. Check back through the day."];
+        case "demoted":
+          return ["Paid bounties paused \u2014 run `bounties --priced` to view them. Try Contribute or Jobs."];
         case "ok":
           return result.bounties.map((job) => {
             const b = job.bounty || {};
