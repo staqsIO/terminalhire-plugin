@@ -37,7 +37,8 @@
 
 'use strict';
 
-const { spawnSync } = require('node:child_process');
+const { spawnSync, spawn } = require('node:child_process');
+const http = require('node:http');
 const { readFileSync, writeFileSync, mkdirSync, unlinkSync } = require('node:fs');
 const { join, dirname } = require('node:path');
 const { homedir } = require('node:os');
@@ -277,10 +278,119 @@ function releaseLock() {
   }
 }
 
+// ── Loopback click-catcher ──────────────────────────────────────────────────
+// A 127.0.0.1-only HTTP listener the monitor owns (it is the sole long-lived
+// process). Statusline job-tip links normally point at terminalhire.com/j/<token>
+// (an anonymous server redirect), so a click never reaches the LOCAL job-status
+// funnel and clicked jobs re-surface. When the catcher is up, tip links point at
+// this loopback instead: a click records `clicked` locally (via the hidden
+// `__record-click` dispatch subcommand — status 'clicked' only, never a self-mark,
+// V-8) and then 302s onward to the public URL so anon analytics still fire. This
+// is a LISTENER only — zero new egress.
+let catcherServer = null;
+let catcherPort = null;
+
+/**
+ * Fire-and-forget: record a click locally via the bundled engine. Never awaited.
+ * `exec` defaults to this Node binary and is only overridden by tests to force the
+ * async spawn-error path deterministically.
+ */
+function spawnRecordClick(id, exec = process.execPath) {
+  // Spawn FAILURES (ENOENT, EMFILE/ENFILE fd/process exhaustion, EAGAIN) surface as
+  // an ASYNC 'error' event, NOT a synchronous throw — the caller's try/catch can't
+  // catch them, and with no listener Node re-throws as an uncaughtException that would
+  // kill this long-lived monitor. Swallow it (a lost click must never crash the loop),
+  // and unref() so this fire-and-forget child never keeps the event loop alive / blocks
+  // a clean shutdown.
+  const child = spawn(exec, [DISPATCH, '__record-click', id], { stdio: 'ignore', detached: false });
+  child.on('error', () => {});
+  child.unref();
+}
+
+/**
+ * Build the request handler (factory so it is unit-testable with an injected
+ * spawner). Only `GET /j/<base64url token>` records a click; every other
+ * path/method is a safe passthrough. It NEVER 500s and never throws — a broken
+ * request just 302s to the public site.
+ */
+function createCatcherHandler(spawnClick) {
+  return function catcherHandler(req, res) {
+    try {
+      const path = String(req.url || '').split('?')[0];
+      const m = req.method === 'GET' && /^\/j\/([^/]+)\/?$/.exec(path);
+      if (!m) {
+        // Non-/j/ path or non-GET method → safe passthrough to the public site.
+        res.writeHead(302, { Location: 'https://terminalhire.com' });
+        res.end();
+        return;
+      }
+      const token = m[1];
+      let id = '';
+      try {
+        id = Buffer.from(token, 'base64url').toString('utf8');
+      } catch {
+        id = '';
+      }
+      if (/^[a-z0-9._-]+:.+$/.test(id)) {
+        try {
+          spawnClick(id);
+        } catch {
+          /* fire-and-forget — a failed spawn must never break the redirect */
+        }
+      }
+      // Re-encode the ORIGINAL token verbatim (never re-derive) so the onward
+      // redirect is byte-identical to the public link's target.
+      res.writeHead(302, { Location: `https://terminalhire.com/j/${token}` });
+      res.end();
+    } catch {
+      // Never 500: worst case is a passthrough redirect to the public site.
+      try {
+        res.writeHead(302, { Location: 'https://terminalhire.com' });
+        res.end();
+      } catch {
+        /* response already torn down */
+      }
+    }
+  };
+}
+
+/**
+ * Bind the loopback catcher on an ephemeral 127.0.0.1 port. Fail-open: a binding
+ * failure (EADDRINUSE etc.) leaves catcherPort=null so ticks fall back to public
+ * URLs — the monitor keeps running WITHOUT a catcher rather than crashing.
+ */
+function startCatcher() {
+  try {
+    catcherServer = http.createServer(createCatcherHandler(spawnRecordClick));
+    catcherServer.on('error', () => {
+      try { catcherServer.close(); } catch { /* ignore */ }
+      catcherServer = null;
+      catcherPort = null;
+    });
+    catcherServer.listen(0, '127.0.0.1', () => {
+      try {
+        const addr = catcherServer.address();
+        catcherPort = addr && typeof addr === 'object' ? addr.port : null;
+      } catch {
+        catcherPort = null;
+      }
+    });
+  } catch {
+    catcherServer = null;
+    catcherPort = null;
+  }
+}
+
 /** One refresh tick — fail-closed (never throws, never blocks the loop). */
 function runTick() {
   try {
-    spawnSync(process.execPath, [DISPATCH, 'refresh'], { stdio: 'ignore' });
+    spawnSync(process.execPath, [DISPATCH, 'refresh'], {
+      stdio: 'ignore',
+      // Thread the catcher base to the tick child so its rendered tip links point
+      // at the loopback (which records the click locally). Unset when unbound ⇒
+      // the renderer falls back to public /j/ URLs, exactly as before.
+      env: { ...process.env, ...(catcherPort ? { TH_CLICK_CATCHER: 'http://127.0.0.1:' + catcherPort } : {}) },
+    });
   } catch {
     /* fail-closed — ignore and keep looping */
   }
@@ -289,6 +399,7 @@ function runTick() {
 let timer = null;
 function shutdown() {
   if (timer) clearTimeout(timer);
+  try { if (catcherServer) catcherServer.close(); } catch { /* best-effort */ }
   releaseLock();
   process.exit(0);
 }
@@ -302,6 +413,11 @@ function main() {
     // Another live monitor already owns the loop — skip so only one ever runs.
     process.exit(0);
   }
+
+  // Loopback click-catcher: only the singleton lock holder binds it, so exactly
+  // one catcher is ever live. Binds asynchronously; the first (immediate) tick
+  // below may miss it and render public URLs — subsequent ticks pick up the port.
+  startCatcher();
 
   runTick(); // run once immediately, like the .sh
 
@@ -334,5 +450,6 @@ if (require.main === module) {
 
 module.exports = {
   acquireLock, releaseLock, ownerIsLive, readOwner, isAlive, beat,
+  createCatcherHandler, spawnRecordClick,
   OWNER_TAG, STALE_BEAT_MS,
 };

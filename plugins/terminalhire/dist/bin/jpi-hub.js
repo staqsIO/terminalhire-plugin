@@ -1466,6 +1466,8 @@ async function fetchRepoMeta(owner, name, token, cache, stats) {
       private: !!r.private,
       language: r.language ?? null,
       topics: r.topics ?? [],
+      // `|| null` collapses "" → null so an empty description never crosses the wire.
+      description: r.description || null,
       contributors
     };
   } catch (err) {
@@ -1543,7 +1545,9 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
       title: item.title,
       repo: `${repo.owner}/${repo.name}`,
       domains: domainTags,
-      mergedAt
+      mergedAt,
+      repoStars: meta.stars,
+      repoDescription: meta.description
     });
     for (const d of domainTags) {
       const b = byDomain[d] ?? (byDomain[d] = { mergedPRs: 0, distinctOrgs: 0, lastMergedAt: mergedAt, orgs: /* @__PURE__ */ new Set() });
@@ -8065,9 +8069,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/b71aee8e-782d-49b4-ac3c-a32c7d372392/scratchpad/wt-release-v0250/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a4d8b1364e2f66adc/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/b71aee8e-782d-49b4-ac3c-a32c7d372392/scratchpad/wt-release-v0250/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a4d8b1364e2f66adc/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {

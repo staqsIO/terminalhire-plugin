@@ -1185,6 +1185,8 @@ async function fetchRepoMeta(owner, name, token, cache, stats) {
       private: !!r.private,
       language: r.language ?? null,
       topics: r.topics ?? [],
+      // `|| null` collapses "" → null so an empty description never crosses the wire.
+      description: r.description || null,
       contributors
     };
   } catch (err) {
@@ -1262,7 +1264,9 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
       title: item.title,
       repo: `${repo.owner}/${repo.name}`,
       domains: domainTags,
-      mergedAt
+      mergedAt,
+      repoStars: meta.stars,
+      repoDescription: meta.description
     });
     for (const d of domainTags) {
       const b = byDomain[d] ?? (byDomain[d] = { mergedPRs: 0, distinctOrgs: 0, lastMergedAt: mergedAt, orgs: /* @__PURE__ */ new Set() });
@@ -7784,9 +7788,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/b71aee8e-782d-49b4-ac3c-a32c7d372392/scratchpad/wt-release-v0250/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a4d8b1364e2f66adc/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/b71aee8e-782d-49b4-ac3c-a32c7d372392/scratchpad/wt-release-v0250/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a4d8b1364e2f66adc/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -8903,6 +8907,7 @@ function interleaveBySource(topMatches) {
 }
 function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
   const base = String(baseUrl || "https://terminalhire.com").replace(/\/+$/, "");
+  const clickBase = opts.clickCatcher ? String(opts.clickCatcher).replace(/\/+$/, "") : base;
   const out = [];
   const surfacedIds = [];
   const seenRole = /* @__PURE__ */ new Set();
@@ -8951,7 +8956,7 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
       const company = titleCase(companyRaw);
       const pct = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
       const token = Buffer.from(String(m.id)).toString("base64url");
-      const url = `${base}/j/${token}`;
+      const url = `${clickBase}/j/${token}`;
       if (source === "bounty") {
         const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
         const repo = m.repo || companyRaw;
@@ -9008,7 +9013,8 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
   else clearSpinnerVerbs();
   const { tips, surfacedIds } = buildTipsDetailed(ranked, opts.baseUrl, 8, {
     seenHistory,
-    widen: opts.widen
+    widen: opts.widen,
+    clickCatcher: opts.clickCatcher
   });
   if (tips.length > 0) applySpinnerTips(tips);
   else clearSpinnerTips();
@@ -10056,7 +10062,12 @@ async function run() {
         contributeNudge,
         baseUrl: API_URL2,
         seenHistory,
-        widen
+        widen,
+        // When the refresh monitor set up its loopback click-catcher, it threads
+        // the base in via this env var so tip /j/ links record clicks locally.
+        // Absent (a manual `terminalhire refresh` outside the monitor) ⇒ undefined
+        // ⇒ public /j/ URLs, unchanged. baseUrl/API_URL are untouched.
+        clickCatcher: process.env.TH_CLICK_CATCHER || void 0
       });
     } catch {
     }
