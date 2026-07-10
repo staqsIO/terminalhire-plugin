@@ -754,6 +754,18 @@ var DEFAULT_GREENHOUSE_SLUGS = flattenTiers(GREENHOUSE_SLUGS_BY_TIER);
 var DEFAULT_ASHBY_SLUGS = flattenTiers(ASHBY_SLUGS_BY_TIER);
 var DEFAULT_LEVER_SLUGS = flattenTiers(LEVER_SLUGS_BY_TIER);
 
+// ../../packages/core/src/feeds/contribution-classify.ts
+var CONTENT_NOUN_STRONG = String.raw`proverbs?|words?|phrases?|sayings?|quotes?|quotations?|translations?|entry|entries|definitions?|terms?|idioms?|synonyms?|antonyms?|acronyms?|abbreviations?`;
+var CONTENT_NOUN_BROAD = String.raw`trivia\s+questions?|grammar\s+points?|trivia|facts?|quiz(?:zes)?|flash\s?cards?|vocab(?:ulary)?|lessons?|kanji`;
+var CONTENT_ADD_RE = new RegExp(
+  String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${CONTENT_NOUN_STRONG})\b`,
+  "i"
+);
+var NUMBERED_SEED_RE = new RegExp(
+  String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${CONTENT_NOUN_STRONG}|${CONTENT_NOUN_BROAD})\s*#?\s*\d{1,3}\s*$`,
+  "i"
+);
+
 // ../../packages/core/src/feeds/contributions.ts
 var CONTRIB_LABEL_QUERIES = [
   'label:"good first issue" type:issue state:open',

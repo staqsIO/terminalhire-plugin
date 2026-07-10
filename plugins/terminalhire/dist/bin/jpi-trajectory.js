@@ -1349,6 +1349,13 @@ var init_rigor = __esm({
   }
 });
 
+// ../../packages/core/src/gh-governor.ts
+var init_gh_governor = __esm({
+  "../../packages/core/src/gh-governor.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/github.ts
 var RESUME_DECAY_HALF_LIFE_MS;
 var init_github = __esm({
@@ -1358,6 +1365,7 @@ var init_github = __esm({
     init_contribution_gate();
     init_contribution_gate();
     init_rigor();
+    init_gh_governor();
     RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
   }
 });
@@ -1633,9 +1641,20 @@ var init_feeds = __esm({
 });
 
 // ../../packages/core/src/feeds/contribution-classify.ts
+var CONTENT_NOUN_STRONG, CONTENT_NOUN_BROAD, CONTENT_ADD_RE, NUMBERED_SEED_RE;
 var init_contribution_classify = __esm({
   "../../packages/core/src/feeds/contribution-classify.ts"() {
     "use strict";
+    CONTENT_NOUN_STRONG = String.raw`proverbs?|words?|phrases?|sayings?|quotes?|quotations?|translations?|entry|entries|definitions?|terms?|idioms?|synonyms?|antonyms?|acronyms?|abbreviations?`;
+    CONTENT_NOUN_BROAD = String.raw`trivia\s+questions?|grammar\s+points?|trivia|facts?|quiz(?:zes)?|flash\s?cards?|vocab(?:ulary)?|lessons?|kanji`;
+    CONTENT_ADD_RE = new RegExp(
+      String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${CONTENT_NOUN_STRONG})\b`,
+      "i"
+    );
+    NUMBERED_SEED_RE = new RegExp(
+      String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${CONTENT_NOUN_STRONG}|${CONTENT_NOUN_BROAD})\s*#?\s*\d{1,3}\s*$`,
+      "i"
+    );
   }
 });
 
@@ -1651,6 +1670,7 @@ var init_contributions = __esm({
     init_contribution_classify();
     init_github_bounties();
     init_http();
+    init_gh_governor();
     CONTRIB_LABEL_QUERIES = [
       'label:"good first issue" type:issue state:open',
       'label:"good-first-issue" type:issue state:open',
@@ -1713,6 +1733,7 @@ var init_indexer = __esm({
     init_contributions();
     init_partners();
     init_github();
+    init_gh_governor();
     init_winnability();
   }
 });
@@ -1837,6 +1858,7 @@ var init_src = __esm({
     init_winnability();
     init_partners();
     init_github();
+    init_gh_governor();
     init_credit();
     init_intro();
     init_directoryThreshold();
@@ -1896,9 +1918,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a4d8b1364e2f66adc/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a4d8b1364e2f66adc/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {

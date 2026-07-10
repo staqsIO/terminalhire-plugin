@@ -700,6 +700,13 @@ var init_rigor = __esm({
   }
 });
 
+// ../../packages/core/src/gh-governor.ts
+var init_gh_governor = __esm({
+  "../../packages/core/src/gh-governor.ts"() {
+    "use strict";
+  }
+});
+
 // ../../packages/core/src/github.ts
 function bestAcceptanceDomain(cred, domains) {
   if (cred.status !== "ok") return null;
@@ -718,6 +725,7 @@ var init_github = __esm({
     init_contribution_gate();
     init_contribution_gate();
     init_rigor();
+    init_gh_governor();
     RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
   }
 });
@@ -799,34 +807,45 @@ function mergeSoftCoverage(covMap, softTags, cap) {
   }
   return covMap;
 }
+function tagKernel(job, ctx) {
+  const { expanded, covMap, maxDevScore, skillTags } = ctx;
+  const details = [];
+  let jobMatchScore = 0;
+  let jobMaxScore = 0;
+  const devCovByTag = /* @__PURE__ */ new Map();
+  for (const tag of job.tags) {
+    const w = backgroundIdf(tag);
+    jobMaxScore += w;
+    const covHit = covMap.get(tag);
+    if (covHit) jobMatchScore += w * Math.pow(covHit.weight, SHARPEN);
+    const fpHit = expanded.get(tag);
+    if (fpHit) {
+      const credit = Math.pow(fpHit.weight, SHARPEN);
+      details.push({ tag, weight: fpHit.weight, via: fpHit.via });
+      if (credit > (devCovByTag.get(fpHit.via) ?? 0)) devCovByTag.set(fpHit.via, credit);
+    }
+  }
+  let devScore = 0;
+  for (const t of skillTags) devScore += backgroundIdf(t) * (devCovByTag.get(t) ?? 0);
+  const devCov = maxDevScore > 0 ? Math.min(1, devScore / maxDevScore) : 0;
+  const jobCov = jobMaxScore > 0 ? Math.min(1, jobMatchScore / jobMaxScore) : 0;
+  return { tagComponent: harmonicMean(devCov, jobCov), details };
+}
+function relevanceScore(fp, job, softTags = []) {
+  const expanded = expandWeighted(fp.skillTags);
+  const covMap = softTags.length > 0 ? mergeSoftCoverage(new Map(expanded), softTags, INTEREST_CAP) : expanded;
+  const maxDevScore = fp.skillTags.reduce((acc, t) => acc + backgroundIdf(t), 0);
+  return tagKernel(job, { expanded, covMap, maxDevScore, skillTags: fp.skillTags }).tagComponent;
+}
 function match(fp, jobs, limit = 5, now = Date.now(), opts = {}) {
   const idfOf = backgroundIdf;
   const expanded = expandWeighted(fp.skillTags);
   const covMap = opts.softTags && opts.softTags.length > 0 ? mergeSoftCoverage(new Map(expanded), opts.softTags, INTEREST_CAP) : expanded;
   const maxDevScore = fp.skillTags.reduce((acc, t) => acc + idfOf(t), 0);
+  const ctx = { expanded, covMap, maxDevScore, skillTags: fp.skillTags };
   const candidates = jobs.filter((j) => passesFilters(fp, j));
   const scored = candidates.map((job) => {
-    const details = [];
-    let jobMatchScore = 0;
-    let jobMaxScore = 0;
-    const devCovByTag = /* @__PURE__ */ new Map();
-    for (const tag of job.tags) {
-      const w = idfOf(tag);
-      jobMaxScore += w;
-      const covHit = covMap.get(tag);
-      if (covHit) jobMatchScore += w * Math.pow(covHit.weight, SHARPEN);
-      const fpHit = expanded.get(tag);
-      if (fpHit) {
-        const credit = Math.pow(fpHit.weight, SHARPEN);
-        details.push({ tag, weight: fpHit.weight, via: fpHit.via });
-        if (credit > (devCovByTag.get(fpHit.via) ?? 0)) devCovByTag.set(fpHit.via, credit);
-      }
-    }
-    let devScore = 0;
-    for (const t of fp.skillTags) devScore += idfOf(t) * (devCovByTag.get(t) ?? 0);
-    const devCov = maxDevScore > 0 ? Math.min(1, devScore / maxDevScore) : 0;
-    const jobCov = jobMaxScore > 0 ? Math.min(1, jobMatchScore / jobMaxScore) : 0;
-    const tagComponent = harmonicMean(devCov, jobCov);
+    const { tagComponent, details } = tagKernel(job, ctx);
     if (tagComponent === 0) return null;
     const coreTags = job.coreTags ?? coreTagsFromTitle(job.title);
     let coreComponent = tagComponent;
@@ -1147,9 +1166,20 @@ var init_feeds = __esm({
 });
 
 // ../../packages/core/src/feeds/contribution-classify.ts
+var CONTENT_NOUN_STRONG, CONTENT_NOUN_BROAD, CONTENT_ADD_RE, NUMBERED_SEED_RE;
 var init_contribution_classify = __esm({
   "../../packages/core/src/feeds/contribution-classify.ts"() {
     "use strict";
+    CONTENT_NOUN_STRONG = String.raw`proverbs?|words?|phrases?|sayings?|quotes?|quotations?|translations?|entry|entries|definitions?|terms?|idioms?|synonyms?|antonyms?|acronyms?|abbreviations?`;
+    CONTENT_NOUN_BROAD = String.raw`trivia\s+questions?|grammar\s+points?|trivia|facts?|quiz(?:zes)?|flash\s?cards?|vocab(?:ulary)?|lessons?|kanji`;
+    CONTENT_ADD_RE = new RegExp(
+      String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${CONTENT_NOUN_STRONG})\b`,
+      "i"
+    );
+    NUMBERED_SEED_RE = new RegExp(
+      String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${CONTENT_NOUN_STRONG}|${CONTENT_NOUN_BROAD})\s*#?\s*\d{1,3}\s*$`,
+      "i"
+    );
   }
 });
 
@@ -1165,6 +1195,7 @@ var init_contributions = __esm({
     init_contribution_classify();
     init_github_bounties();
     init_http();
+    init_gh_governor();
     CONTRIB_LABEL_QUERIES = [
       'label:"good first issue" type:issue state:open',
       'label:"good-first-issue" type:issue state:open',
@@ -1227,6 +1258,7 @@ var init_indexer = __esm({
     init_contributions();
     init_partners();
     init_github();
+    init_gh_governor();
     init_winnability();
   }
 });
@@ -1360,6 +1392,7 @@ var init_src = __esm({
     init_winnability();
     init_partners();
     init_github();
+    init_gh_governor();
     init_credit();
     init_intro();
     init_directoryThreshold();
@@ -1380,9 +1413,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a4d8b1364e2f66adc/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a4d8b1364e2f66adc/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -1821,9 +1854,19 @@ function defaultPrompt(question) {
     });
   });
 }
+var STRONG_THRESHOLD = 0.5;
+if (STRONG_THRESHOLD <= 0) {
+  throw new Error("STRONG_THRESHOLD must be > 0 or the contested-issue fail-safe breaks");
+}
 function rankContributions(fp, items) {
   if (!fp || !Array.isArray(items) || items.length === 0) return [];
-  return match(fp, items, items.length);
+  const ranked = match(fp, items, items.length);
+  const rel = new Map(ranked.map((r) => [r, relevanceScore(fp, r.job)]));
+  ranked.sort((a, b) => (rel.get(b) ?? 0) - (rel.get(a) ?? 0));
+  return ranked.filter((r) => {
+    const contested = (r.job.contribution?.openPRsAtDiscovery ?? 0) > 0;
+    return !contested || (rel.get(r) ?? 0) >= STRONG_THRESHOLD;
+  });
 }
 async function rankLocally(items, injectedFp) {
   if (!Array.isArray(items) || items.length === 0) return [];

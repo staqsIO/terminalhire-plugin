@@ -1226,6 +1226,187 @@ var init_rigor = __esm({
   }
 });
 
+// ../../packages/core/src/gh-governor.ts
+function readReqGapMs() {
+  const raw = process.env["CONTRIB_REQ_GAP_MS"];
+  if (raw == null) return DEFAULT_REQ_GAP_MS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_REQ_GAP_MS;
+  return Math.min(Math.max(n, 0), 1e3);
+}
+function readBuildBudgetMs() {
+  const raw = process.env["CONTRIB_BUILD_BUDGET_MS"];
+  if (raw == null) return DEFAULT_BUILD_BUDGET_MS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_BUILD_BUDGET_MS;
+  return Math.min(Math.max(n, MIN_BUILD_BUDGET_MS), MAX_BUILD_BUDGET_MS);
+}
+function makeDefaultGovernorConfig(o) {
+  return {
+    paceEnabled: o.paceEnabled,
+    gapMs: readReqGapMs(),
+    budgetMs: readBuildBudgetMs(),
+    sleep: o.sleep ?? realSleep,
+    now: o.now ?? Date.now,
+    probeTimeoutMs: o.probeTimeoutMs ?? (o.paceEnabled ? PROBE_TIMEOUT_MS : null)
+  };
+}
+function makeGitHubGovernor(fetchImpl, cfg) {
+  const startedAt = cfg.now();
+  let lastRequestAt = 0;
+  let pacedMs = 0;
+  let secondaryHits = 0;
+  let aborted = false;
+  let secondaryAborted = false;
+  let budgetAborted = false;
+  let gqlCost = 0;
+  let gqlRemaining = null;
+  let coreHealthyAtStart = false;
+  async function noteAndMaybeBackOff(res) {
+    if (res.status !== 403) return;
+    const remaining = res.headers.get("x-ratelimit-remaining");
+    const retryAfter = res.headers.get("retry-after");
+    const positiveSecondary = retryAfter != null || remaining != null && remaining !== "0";
+    const isSecondary = positiveSecondary || coreHealthyAtStart;
+    if (!isSecondary) return;
+    await recordSecondaryStrike(retryAfter);
+  }
+  async function recordSecondaryStrike(retryAfter) {
+    secondaryHits++;
+    if (secondaryHits >= 2) {
+      aborted = true;
+      secondaryAborted = true;
+      return;
+    }
+    if (cfg.paceEnabled) {
+      const trimmed = (retryAfter ?? "").trim();
+      const parsed = trimmed.length === 0 ? Number.NaN : Number(trimmed);
+      const sec = Number.isNaN(parsed) ? SECONDARY_BACKOFF_CAP_S : Math.min(Math.max(parsed, 0), SECONDARY_BACKOFF_CAP_S);
+      const remainingBudget = Math.max(0, cfg.budgetMs - (cfg.now() - startedAt));
+      await cfg.sleep(Math.min(sec * 1e3, remainingBudget));
+    }
+  }
+  async function noteGraphQLAndMaybeBackOff(res, body) {
+    const b = body ?? {};
+    const rl = b.data?.rateLimit;
+    if (rl) {
+      if (typeof rl.cost === "number") gqlCost += rl.cost;
+      if (typeof rl.remaining === "number") gqlRemaining = rl.remaining;
+    }
+    const remainingHdr = res.headers?.get("x-ratelimit-remaining") ?? null;
+    const retryAfter = res.headers?.get("retry-after") ?? null;
+    const headerRate = retryAfter != null || remainingHdr === "0";
+    const errs = Array.isArray(b.errors) ? b.errors : [];
+    const bodyRate = errs.some((e) => e?.type === "RATE_LIMITED" || /rate limit/i.test(String(e?.message ?? ""))) || typeof rl?.remaining === "number" && rl.remaining <= 0;
+    if (headerRate || bodyRate) await recordSecondaryStrike(retryAfter);
+  }
+  async function preflight() {
+    if (aborted) return false;
+    if (cfg.now() - startedAt >= cfg.budgetMs) {
+      aborted = true;
+      budgetAborted = true;
+      return false;
+    }
+    if (cfg.paceEnabled && cfg.gapMs > 0) {
+      const wait = cfg.gapMs - (cfg.now() - lastRequestAt);
+      if (wait > 0) {
+        await cfg.sleep(wait);
+        pacedMs += wait;
+        if (cfg.now() - startedAt >= cfg.budgetMs) {
+          aborted = true;
+          budgetAborted = true;
+          return false;
+        }
+      }
+      lastRequestAt = cfg.now();
+    }
+    return true;
+  }
+  async function get(url, init) {
+    if (!await preflight()) return null;
+    try {
+      const res = await fetchImpl(url, init);
+      await noteAndMaybeBackOff(res);
+      return res;
+    } catch {
+      return null;
+    }
+  }
+  async function graphql(url, init) {
+    if (!await preflight()) return null;
+    let res;
+    try {
+      res = await fetchImpl(url, init);
+    } catch {
+      return null;
+    }
+    let body;
+    try {
+      body = await res.json();
+    } catch {
+      return null;
+    }
+    await noteGraphQLAndMaybeBackOff(res, body);
+    if (!res.ok) return null;
+    return body;
+  }
+  async function probe(url, init) {
+    const bound = cfg.probeTimeoutMs;
+    let timer;
+    const fetchP = fetchImpl(url, init).then(
+      (r) => r,
+      () => null
+    );
+    try {
+      const res = bound == null ? await fetchP : await Promise.race([
+        fetchP,
+        new Promise((resolve) => {
+          timer = setTimeout(() => resolve(null), bound);
+        })
+      ]);
+      if (!res || !res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  function setSecondaryHint(coreHealthy) {
+    coreHealthyAtStart = coreHealthy;
+  }
+  function getStats() {
+    return {
+      pacedMs,
+      secondaryAborted: secondaryAborted ? 1 : 0,
+      budgetAborted: budgetAborted ? 1 : 0,
+      elapsedMs: cfg.now() - startedAt,
+      gqlCost,
+      gqlRemaining
+    };
+  }
+  function tripped() {
+    return secondaryAborted;
+  }
+  function budgetExhausted() {
+    return budgetAborted || cfg.now() - startedAt >= cfg.budgetMs;
+  }
+  return { get, graphql, probe, setSecondaryHint, getStats, tripped, budgetExhausted };
+}
+var DEFAULT_REQ_GAP_MS, SECONDARY_BACKOFF_CAP_S, DEFAULT_BUILD_BUDGET_MS, MIN_BUILD_BUDGET_MS, MAX_BUILD_BUDGET_MS, PROBE_TIMEOUT_MS, realSleep;
+var init_gh_governor = __esm({
+  "../../packages/core/src/gh-governor.ts"() {
+    "use strict";
+    DEFAULT_REQ_GAP_MS = 75;
+    SECONDARY_BACKOFF_CAP_S = 30;
+    DEFAULT_BUILD_BUDGET_MS = 9e4;
+    MIN_BUILD_BUDGET_MS = 1e4;
+    MAX_BUILD_BUDGET_MS = 9e4;
+    PROBE_TIMEOUT_MS = 3e3;
+    realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  }
+});
+
 // ../../packages/core/src/github.ts
 function ghHeaders(token) {
   const headers = {
@@ -1706,11 +1887,9 @@ async function fetchRepoReceptivity(fullName, opts = {}) {
   const doFetch = opts.fetchImpl ?? fetch;
   const now = opts.now ?? Date.now();
   try {
-    const res = await doFetch(
-      `https://api.github.com/repos/${fullName}/pulls?state=closed&per_page=50&sort=updated&direction=desc`,
-      { headers: ghHeaders(opts.token) }
-    );
-    if (!res.ok) return null;
+    const url = `https://api.github.com/repos/${fullName}/pulls?state=closed&per_page=50&sort=updated&direction=desc`;
+    const res = opts.governor ? await opts.governor.get(url, { headers: ghHeaders(opts.token) }) : await doFetch(url, { headers: ghHeaders(opts.token) });
+    if (!res || !res.ok) return null;
     const prs = await res.json();
     if (!Array.isArray(prs)) return null;
     const external = prs.filter(isExternalAuthor);
@@ -1795,25 +1974,34 @@ function parseGitHubRef(url) {
   if (!m) return null;
   return { owner: m[1], repo: m[2], number: parseInt(m[4], 10), kind: m[3] === "pull" ? "pull" : "issue" };
 }
-async function ghGraphQL(query, variables, token, signal) {
-  const res = await fetch("https://api.github.com/graphql", {
+async function ghGraphQL(query, variables, token, signal, governor) {
+  const init = {
     method: "POST",
     headers: { ...ghHeaders(token), "Content-Type": "application/json" },
     body: JSON.stringify({ query, variables }),
     signal
-  });
+  };
+  if (governor) {
+    const json2 = await governor.graphql(GITHUB_GRAPHQL_URL, init);
+    if (json2 === null) return null;
+    if (json2.errors?.length) throw new Error("GitHub GraphQL errors: " + JSON.stringify(json2.errors));
+    return json2;
+  }
+  const res = await fetch(GITHUB_GRAPHQL_URL, init);
   if (!res.ok) throw new Error(`GitHub GraphQL: HTTP ${res.status}`);
   const json = await res.json();
   if (json.errors?.length) throw new Error("GitHub GraphQL errors: " + JSON.stringify(json.errors));
   return json;
 }
-async function resolveClosingIssues(owner, name, number, body, token, signal) {
+async function resolveClosingIssues(owner, name, number, body, token, signal, governor) {
   if (token) {
     try {
-      const q = `query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){closingIssuesReferences(first:20){nodes{number}}}}}`;
-      const r = await ghGraphQL(q, { o: owner, n: name, p: number }, token, signal);
-      const nodes = r.data?.repository?.pullRequest?.closingIssuesReferences?.nodes ?? [];
-      return { closesIssues: nodes.map((x) => x.number), linkageSource: "graphql" };
+      const q = `query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){closingIssuesReferences(first:20){nodes{number}}}}rateLimit{cost remaining}}`;
+      const r = await ghGraphQL(q, { o: owner, n: name, p: number }, token, signal, governor);
+      if (r) {
+        const nodes = r.data?.repository?.pullRequest?.closingIssuesReferences?.nodes ?? [];
+        return { closesIssues: nodes.map((x) => x.number), linkageSource: "graphql" };
+      }
     } catch {
     }
   }
@@ -1823,11 +2011,19 @@ async function resolveClosingIssues(owner, name, number, body, token, signal) {
   while ((m = re.exec(body)) !== null) nums.add(parseInt(m[1], 10));
   return { closesIssues: [...nums], linkageSource: nums.size ? "body-keyword" : "none" };
 }
-async function fetchPRScoringFacts(prUrl, token, signal) {
+function makeScoringGovernor(governor) {
+  return governor ?? makeGitHubGovernor(
+    ((url, init) => fetch(url, init)),
+    makeDefaultGovernorConfig({ paceEnabled: false })
+  );
+}
+async function fetchPRScoringFacts(prUrl, token, signal, governor) {
   const ref = parseGitHubRef(prUrl);
   if (!ref || ref.kind !== "pull") return null;
   const { owner, repo, number } = ref;
   const sig = signal ?? AbortSignal.timeout(1e4);
+  const gov = makeScoringGovernor(governor);
+  if (gov.tripped() || gov.budgetExhausted()) return null;
   let pr;
   try {
     pr = await ghFetch(`/repos/${owner}/${repo}/pulls/${number}`, token, sig);
@@ -1835,22 +2031,26 @@ async function fetchPRScoringFacts(prUrl, token, signal) {
     return null;
   }
   let repoMeta = null;
-  try {
-    repoMeta = await ghFetch(`/repos/${owner}/${repo}`, token, sig);
-  } catch {
+  if (!gov.tripped() && !gov.budgetExhausted()) {
+    try {
+      repoMeta = await ghFetch(`/repos/${owner}/${repo}`, token, sig);
+    } catch {
+    }
   }
-  const contributors = await repoContributorCount(owner, repo, token, sig);
-  const { closesIssues, linkageSource } = await resolveClosingIssues(owner, repo, number, pr.body ?? "", token, sig);
+  const contributors = gov.tripped() || gov.budgetExhausted() ? null : await repoContributorCount(owner, repo, token, sig);
+  const { closesIssues, linkageSource } = await resolveClosingIssues(owner, repo, number, pr.body ?? "", token, sig, gov);
   let reviewerAssociations;
-  try {
-    const reviews = await ghFetch(
-      `/repos/${owner}/${repo}/pulls/${number}/reviews?per_page=100`,
-      token,
-      sig
-    );
-    reviewerAssociations = reviews.map((r) => r.author_association);
-  } catch {
-    reviewerAssociations = void 0;
+  if (!gov.tripped() && !gov.budgetExhausted()) {
+    try {
+      const reviews = await ghFetch(
+        `/repos/${owner}/${repo}/pulls/${number}/reviews?per_page=100`,
+        token,
+        sig
+      );
+      reviewerAssociations = reviews.map((r) => r.author_association);
+    } catch {
+      reviewerAssociations = void 0;
+    }
   }
   return {
     repo: `${owner}/${repo}`,
@@ -1877,7 +2077,7 @@ async function fetchPRScoringFacts(prUrl, token, signal) {
     fetchedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
-var TRACTION_TOP_N, MAINTAINER_ENRICH_MAX, CANDIDATE_PR_PAGE, MAX_ENRICH_PRS, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE, RECEPTIVITY_RECENCY_DAYS, RECEPTIVITY_RECENCY_FLOOR;
+var TRACTION_TOP_N, MAINTAINER_ENRICH_MAX, CANDIDATE_PR_PAGE, MAX_ENRICH_PRS, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE, RECEPTIVITY_RECENCY_DAYS, RECEPTIVITY_RECENCY_FLOOR, GITHUB_GRAPHQL_URL;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
@@ -1885,6 +2085,7 @@ var init_github = __esm({
     init_contribution_gate();
     init_contribution_gate();
     init_rigor();
+    init_gh_governor();
     TRACTION_TOP_N = 6;
     MAINTAINER_ENRICH_MAX = 25;
     CANDIDATE_PR_PAGE = 50;
@@ -1895,6 +2096,7 @@ var init_github = __esm({
     RESUME_MIN_SCORE = 0.05;
     RECEPTIVITY_RECENCY_DAYS = 180;
     RECEPTIVITY_RECENCY_FLOOR = 0.1;
+    GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
   }
 });
 
@@ -1975,34 +2177,45 @@ function mergeSoftCoverage(covMap, softTags, cap) {
   }
   return covMap;
 }
+function tagKernel(job, ctx) {
+  const { expanded, covMap, maxDevScore, skillTags } = ctx;
+  const details = [];
+  let jobMatchScore = 0;
+  let jobMaxScore = 0;
+  const devCovByTag = /* @__PURE__ */ new Map();
+  for (const tag of job.tags) {
+    const w = backgroundIdf(tag);
+    jobMaxScore += w;
+    const covHit = covMap.get(tag);
+    if (covHit) jobMatchScore += w * Math.pow(covHit.weight, SHARPEN);
+    const fpHit = expanded.get(tag);
+    if (fpHit) {
+      const credit = Math.pow(fpHit.weight, SHARPEN);
+      details.push({ tag, weight: fpHit.weight, via: fpHit.via });
+      if (credit > (devCovByTag.get(fpHit.via) ?? 0)) devCovByTag.set(fpHit.via, credit);
+    }
+  }
+  let devScore = 0;
+  for (const t of skillTags) devScore += backgroundIdf(t) * (devCovByTag.get(t) ?? 0);
+  const devCov = maxDevScore > 0 ? Math.min(1, devScore / maxDevScore) : 0;
+  const jobCov = jobMaxScore > 0 ? Math.min(1, jobMatchScore / jobMaxScore) : 0;
+  return { tagComponent: harmonicMean(devCov, jobCov), details };
+}
+function relevanceScore(fp, job, softTags = []) {
+  const expanded = expandWeighted(fp.skillTags);
+  const covMap = softTags.length > 0 ? mergeSoftCoverage(new Map(expanded), softTags, INTEREST_CAP) : expanded;
+  const maxDevScore = fp.skillTags.reduce((acc, t) => acc + backgroundIdf(t), 0);
+  return tagKernel(job, { expanded, covMap, maxDevScore, skillTags: fp.skillTags }).tagComponent;
+}
 function match(fp, jobs, limit = 5, now = Date.now(), opts = {}) {
   const idfOf = backgroundIdf;
   const expanded = expandWeighted(fp.skillTags);
   const covMap = opts.softTags && opts.softTags.length > 0 ? mergeSoftCoverage(new Map(expanded), opts.softTags, INTEREST_CAP) : expanded;
   const maxDevScore = fp.skillTags.reduce((acc, t) => acc + idfOf(t), 0);
+  const ctx = { expanded, covMap, maxDevScore, skillTags: fp.skillTags };
   const candidates = jobs.filter((j) => passesFilters(fp, j));
   const scored = candidates.map((job) => {
-    const details = [];
-    let jobMatchScore = 0;
-    let jobMaxScore = 0;
-    const devCovByTag = /* @__PURE__ */ new Map();
-    for (const tag of job.tags) {
-      const w = idfOf(tag);
-      jobMaxScore += w;
-      const covHit = covMap.get(tag);
-      if (covHit) jobMatchScore += w * Math.pow(covHit.weight, SHARPEN);
-      const fpHit = expanded.get(tag);
-      if (fpHit) {
-        const credit = Math.pow(fpHit.weight, SHARPEN);
-        details.push({ tag, weight: fpHit.weight, via: fpHit.via });
-        if (credit > (devCovByTag.get(fpHit.via) ?? 0)) devCovByTag.set(fpHit.via, credit);
-      }
-    }
-    let devScore = 0;
-    for (const t of fp.skillTags) devScore += idfOf(t) * (devCovByTag.get(t) ?? 0);
-    const devCov = maxDevScore > 0 ? Math.min(1, devScore / maxDevScore) : 0;
-    const jobCov = jobMaxScore > 0 ? Math.min(1, jobMatchScore / jobMaxScore) : 0;
-    const tagComponent = harmonicMean(devCov, jobCov);
+    const { tagComponent, details } = tagKernel(job, ctx);
     if (tagComponent === 0) return null;
     const coreTags = job.coreTags ?? coreTagsFromTitle(job.title);
     let coreComponent = tagComponent;
@@ -3537,6 +3750,7 @@ function hasContentSignal(title, body, labels) {
 ${body}`;
   if (CONTENT_ADD_RE.test(text)) return true;
   if (ADD_TO_CORPUS_RE.test(text)) return true;
+  if (NUMBERED_SEED_RE.test(title)) return true;
   if (TRANSLATE_RE.test(text)) return true;
   if (TYPO_RE.test(text)) return true;
   return false;
@@ -3552,7 +3766,7 @@ function classifyContributionKind(input) {
 function looksLikeContentTask(input) {
   return classifyContributionKind(input) === "content";
 }
-var CONTENT_LABEL_RE, CODE_LABEL_RE, CODE_TERM_RE, CODE_EXCEPTION_RE, CODE_FENCE_RE, FILE_PATH_RE, CONTENT_ADD_RE, ADD_TO_CORPUS_RE, TRANSLATE_RE, TYPO_RE;
+var CONTENT_LABEL_RE, CODE_LABEL_RE, CODE_TERM_RE, CODE_EXCEPTION_RE, CODE_FENCE_RE, FILE_PATH_RE, CONTENT_NOUN_STRONG, CONTENT_NOUN_BROAD, CONTENT_ADD_RE, NUMBERED_SEED_RE, ADD_TO_CORPUS_RE, TRANSLATE_RE, TYPO_RE;
 var init_contribution_classify = __esm({
   "../../packages/core/src/feeds/contribution-classify.ts"() {
     "use strict";
@@ -3562,7 +3776,16 @@ var init_contribution_classify = __esm({
     CODE_EXCEPTION_RE = /exception|stacktrace|segfault|traceback/i;
     CODE_FENCE_RE = /```|(?:^|\n)\s{4,}\S/;
     FILE_PATH_RE = /\b[\w./-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|rb|go|rs|java|kt|scala|c|cc|cpp|cxx|h|hpp|cs|php|swift|m|mm|sh|bash|zsh|sql|graphql|proto|css|scss|sass|less|vue|svelte|toml|ini|gradle|dockerfile)\b/i;
-    CONTENT_ADD_RE = /\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:proverbs?|words?|phrases?|sayings?|quotes?|quotations?|translations?|entry|entries|definitions?|terms?|idioms?|synonyms?|antonyms?|acronyms?|abbreviations?)\b/i;
+    CONTENT_NOUN_STRONG = String.raw`proverbs?|words?|phrases?|sayings?|quotes?|quotations?|translations?|entry|entries|definitions?|terms?|idioms?|synonyms?|antonyms?|acronyms?|abbreviations?`;
+    CONTENT_NOUN_BROAD = String.raw`trivia\s+questions?|grammar\s+points?|trivia|facts?|quiz(?:zes)?|flash\s?cards?|vocab(?:ulary)?|lessons?|kanji`;
+    CONTENT_ADD_RE = new RegExp(
+      String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${CONTENT_NOUN_STRONG})\b`,
+      "i"
+    );
+    NUMBERED_SEED_RE = new RegExp(
+      String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${CONTENT_NOUN_STRONG}|${CONTENT_NOUN_BROAD})\s*#?\s*\d{1,3}\s*$`,
+      "i"
+    );
     ADD_TO_CORPUS_RE = /\badd\b[\s\S]*?\bto\s+(?:the\s+)?(?:word\s?list|dictionary|glossary|phrasebook)\b/i;
     TRANSLATE_RE = /\b(?:translate|translating|translation|localize|localise|localization|localisation)\b/i;
     TYPO_RE = /\bfix(?:ing)?\s+(?:a\s+|the\s+|some\s+)?typos?\b/i;
@@ -3570,20 +3793,6 @@ var init_contribution_classify = __esm({
 });
 
 // ../../packages/core/src/feeds/contributions.ts
-function readReqGapMs() {
-  const raw = process.env["CONTRIB_REQ_GAP_MS"];
-  if (raw == null) return DEFAULT_REQ_GAP_MS;
-  const n = Number.parseInt(raw, 10);
-  if (Number.isNaN(n)) return DEFAULT_REQ_GAP_MS;
-  return Math.min(Math.max(n, 0), 1e3);
-}
-function readBuildBudgetMs() {
-  const raw = process.env["CONTRIB_BUILD_BUDGET_MS"];
-  if (raw == null) return DEFAULT_BUILD_BUDGET_MS;
-  const n = Number.parseInt(raw, 10);
-  if (Number.isNaN(n)) return DEFAULT_BUILD_BUDGET_MS;
-  return Math.min(Math.max(n, MIN_BUILD_BUDGET_MS), MAX_BUILD_BUDGET_MS);
-}
 function authHeaders2() {
   const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
   const h = {
@@ -3605,57 +3814,9 @@ function repoFullNameFromApiUrl2(url) {
   return m ? `${m[1]}/${m[2]}` : null;
 }
 function makeClient(fetchImpl, cfg) {
-  const startedAt = cfg.now();
-  let lastRequestAt = 0;
-  let pacedMs = 0;
-  let secondaryHits = 0;
-  let aborted = false;
-  let secondaryAborted = false;
-  let budgetAborted = false;
-  let coreHealthyAtStart = false;
-  async function noteAndMaybeBackOff(res) {
-    if (res.status !== 403) return;
-    const remaining = res.headers.get("x-ratelimit-remaining");
-    const retryAfter = res.headers.get("retry-after");
-    const positiveSecondary = retryAfter != null || remaining != null && remaining !== "0";
-    const isSecondary = positiveSecondary || coreHealthyAtStart;
-    if (!isSecondary) return;
-    secondaryHits++;
-    if (secondaryHits >= 2) {
-      aborted = true;
-      secondaryAborted = true;
-      return;
-    }
-    if (cfg.paceEnabled) {
-      const trimmed = (retryAfter ?? "").trim();
-      const parsed = trimmed.length === 0 ? Number.NaN : Number(trimmed);
-      const sec = Number.isNaN(parsed) ? SECONDARY_BACKOFF_CAP_S : Math.min(Math.max(parsed, 0), SECONDARY_BACKOFF_CAP_S);
-      const remaining2 = Math.max(0, cfg.budgetMs - (cfg.now() - startedAt));
-      await cfg.sleep(Math.min(sec * 1e3, remaining2));
-    }
-  }
+  const gov = makeGitHubGovernor(fetchImpl, cfg);
   async function raw(path) {
-    if (aborted) return null;
-    if (cfg.now() - startedAt > cfg.budgetMs) {
-      aborted = true;
-      budgetAborted = true;
-      return null;
-    }
-    if (cfg.paceEnabled && cfg.gapMs > 0) {
-      const wait = cfg.gapMs - (cfg.now() - lastRequestAt);
-      if (wait > 0) {
-        await cfg.sleep(wait);
-        pacedMs += wait;
-      }
-      lastRequestAt = cfg.now();
-    }
-    try {
-      const res = await fetchImpl(`${GITHUB_API2}${path}`, { headers: authHeaders2() });
-      await noteAndMaybeBackOff(res);
-      return res;
-    } catch {
-      return null;
-    }
+    return gov.get(`${GITHUB_API2}${path}`, { headers: authHeaders2() });
   }
   async function json(path) {
     const res = await raw(path);
@@ -3669,41 +3830,9 @@ function makeClient(fetchImpl, cfg) {
     }
   }
   async function probe(path) {
-    const bound = cfg.probeTimeoutMs;
-    let timer;
-    const fetchP = fetchImpl(`${GITHUB_API2}${path}`, {
-      headers: authHeaders2()
-    }).then(
-      (r) => r,
-      () => null
-    );
-    try {
-      const res = bound == null ? await fetchP : await Promise.race([
-        fetchP,
-        new Promise((resolve) => {
-          timer = setTimeout(() => resolve(null), bound);
-        })
-      ]);
-      if (!res || !res.ok) return null;
-      return await res.json();
-    } catch {
-      return null;
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
+    return gov.probe(`${GITHUB_API2}${path}`, { headers: authHeaders2() });
   }
-  function setSecondaryHint(coreHealthy) {
-    coreHealthyAtStart = coreHealthy;
-  }
-  function getStats() {
-    return {
-      pacedMs,
-      secondaryAborted: secondaryAborted ? 1 : 0,
-      budgetAborted: budgetAborted ? 1 : 0,
-      elapsedMs: cfg.now() - startedAt
-    };
-  }
-  return { raw, json, probe, setSecondaryHint, getStats };
+  return { raw, json, probe, setSecondaryHint: gov.setSecondaryHint, getStats: gov.getStats };
 }
 async function contributorCount(client, fullName) {
   const res = await client.raw(`/repos/${fullName}/contributors?per_page=1&anon=false`);
@@ -3802,16 +3931,71 @@ async function aggregateContributions(opts = {}) {
   const repoCache = /* @__PURE__ */ new Map();
   const contribCache = /* @__PURE__ */ new Map();
   const prRefsCache = /* @__PURE__ */ new Map();
+  const xbuild = opts.repoMetaCache;
+  const servedFromXbuild = /* @__PURE__ */ new Set();
+  const persistedXbuild = /* @__PURE__ */ new Set();
+  const xbuildTried = /* @__PURE__ */ new Set();
+  async function primeFromXbuild(key, fullName) {
+    if (!xbuild || xbuildTried.has(key)) return;
+    xbuildTried.add(key);
+    if (repoCache.has(key) && contribCache.has(key)) return;
+    let cached = null;
+    try {
+      cached = await xbuild.get(key);
+    } catch {
+      return;
+    }
+    if (!cached) return;
+    if (!repoCache.has(key)) {
+      const owner = fullName.split("/")[0] ?? "";
+      repoCache.set(key, {
+        full_name: fullName,
+        stargazers_count: cached.stars,
+        archived: cached.archived,
+        disabled: cached.disabled,
+        fork: cached.fork,
+        language: cached.language,
+        owner: { login: owner }
+      });
+    }
+    if (!contribCache.has(key)) {
+      contribCache.set(key, cached.contributors);
+      servedFromXbuild.add(key);
+    }
+  }
+  async function persistRepoMeta(fullName, repo, contributors) {
+    if (!xbuild) return;
+    const key = repoKey(fullName);
+    if (servedFromXbuild.has(key) || persistedXbuild.has(key)) return;
+    if (contributors === void 0) return;
+    persistedXbuild.add(key);
+    try {
+      await xbuild.set(key, {
+        stars: repo.stargazers_count,
+        contributors,
+        language: repo.language,
+        archived: repo.archived,
+        fork: repo.fork,
+        disabled: repo.disabled
+      });
+    } catch {
+    }
+  }
   async function repoMeta(fullName) {
     const key = repoKey(fullName);
     const hit = repoCache.get(key);
     if (hit !== void 0) return hit;
+    await primeFromXbuild(key, fullName);
+    const primed = repoCache.get(key);
+    if (primed !== void 0) return primed;
     const r = await client.json(`/repos/${fullName}`) ?? null;
     repoCache.set(key, r);
     return r;
   }
   async function repoContribCount(fullName) {
     const key = repoKey(fullName);
+    if (contribCache.has(key)) return contribCache.get(key);
+    await primeFromXbuild(key, fullName);
     if (contribCache.has(key)) return contribCache.get(key);
     const n = await contributorCount(client, fullName);
     contribCache.set(key, n);
@@ -3839,14 +4023,18 @@ async function aggregateContributions(opts = {}) {
     if (isDenylistedRepo(fullName)) continue;
     if (isAssigned(issue)) continue;
     if ((perRepo.get(repoKey(fullName)) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) continue;
+    const title = decodeEntities(issue.title).trim();
+    const body = issue.body ? decodeEntities(issue.body) : "";
+    const labels = labelNames2(issue.labels);
+    if (looksLikeContentTask({ title, body, labels })) continue;
     const repo = await repoMeta(fullName);
     if (!repo) {
       metaNull++;
       continue;
     }
-    const title = decodeEntities(issue.title).trim();
     const contributors = await repoContribCount(fullName);
     if (contributors === void 0) contribUndefined++;
+    await persistRepoMeta(fullName, repo, contributors);
     if (!passesContributionGate({
       fullName,
       stars: repo.stargazers_count,
@@ -3858,13 +4046,9 @@ async function aggregateContributions(opts = {}) {
       continue;
     }
     if (repo.disabled) continue;
-    const body = issue.body ? decodeEntities(issue.body) : "";
-    const labels = labelNames2(issue.labels);
-    if (looksLikeContentTask({ title, body, labels })) continue;
     const prRefs = await repoPRRefs(fullName);
     if (prRefs === null) prRefsNull++;
-    if (prRefs && prRefs.has(issue.number)) continue;
-    const openPRsAtDiscovery = prRefs ? 0 : void 0;
+    const openPRsAtDiscovery = prRefs ? prRefs.has(issue.number) ? 1 : 0 : void 0;
     const tags = normalize(
       tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
     );
@@ -3955,6 +4139,7 @@ async function aggregateContributions(opts = {}) {
       if (repo.disabled) continue;
       const contributors = await repoContribCount(fullName);
       if (contributors === void 0) contribUndefined++;
+      await persistRepoMeta(fullName, repo, contributors);
       if (repo.archived || repo.fork || repo.stargazers_count < MIN_STARS || contributors === void 0 || contributors < MIN_CONTRIBUTORS) {
         continue;
       }
@@ -3987,8 +4172,7 @@ async function aggregateContributions(opts = {}) {
         if (looksLikeContentTask({ title, body, labels })) continue;
         const prRefs = await repoPRRefs(fullName);
         if (prRefs === null) prRefsNull++;
-        if (prRefs && prRefs.has(issue.number)) continue;
-        const openPRsAtDiscovery = prRefs ? 0 : void 0;
+        const openPRsAtDiscovery = prRefs ? prRefs.has(issue.number) ? 1 : 0 : void 0;
         const tags = normalize(
           tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
         );
@@ -4019,9 +4203,9 @@ async function aggregateContributions(opts = {}) {
     const core = rl?.core ? `${rl.core.remaining}/${rl.core.limit}` : "n/a";
     const search = rl?.search ? `${rl.search.remaining}/${rl.search.limit}` : "n/a";
     const noToken = !(process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"]);
-    const { pacedMs, secondaryAborted, budgetAborted, elapsedMs } = client.getStats();
+    const { pacedMs, secondaryAborted, budgetAborted, elapsedMs, gqlCost, gqlRemaining } = client.getStats();
     console.info(
-      `[contribute] build metrics \u2014 scanned=${issues.length} reposDistinct=${repoCache.size} emitted=${jobs.length} discovered=${discoveredEmitted} metaNull=${metaNull} contribUndefined=${contribUndefined} prRefsNull=${prRefsNull} paced=${pacedMs} secondaryAborted=${secondaryAborted} budgetAborted=${budgetAborted} core=${core} search=${search} elapsed=${elapsedMs}` + (noToken ? " (NO TOKEN \u2192 60/hr)" : "")
+      `[contribute] build metrics \u2014 scanned=${issues.length} reposDistinct=${repoCache.size} emitted=${jobs.length} discovered=${discoveredEmitted} metaNull=${metaNull} contribUndefined=${contribUndefined} prRefsNull=${prRefsNull} paced=${pacedMs} secondaryAborted=${secondaryAborted} budgetAborted=${budgetAborted} core=${core} search=${search} gqlCost=${gqlCost} gqlRemaining=${gqlRemaining ?? "n/a"} elapsed=${elapsedMs}` + (noToken ? " (NO TOKEN \u2192 60/hr)" : "")
     );
     if (discoveryBudgetStopped) {
       console.warn(
@@ -4031,7 +4215,7 @@ async function aggregateContributions(opts = {}) {
   }
   return jobs;
 }
-var GITHUB_API2, DEFAULT_REQ_GAP_MS, SECONDARY_BACKOFF_CAP_S, DEFAULT_BUILD_BUDGET_MS, MIN_BUILD_BUDGET_MS, MAX_BUILD_BUDGET_MS, PROBE_TIMEOUT_MS, realSleep, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, MAX_CONTRIB_ITEMS, MAX_CONTRIB_ISSUES_SCANNED, MAX_DISCOVERED_REPOS, MAX_ISSUES_PER_DISCOVERED_REPO, DISCOVERY_REPOS_PER_TERM, DISCOVERY_VOCAB_TERMS, DISCOVERY_ISSUE_LABELS, repoKey;
+var GITHUB_API2, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, MAX_CONTRIB_ITEMS, MAX_CONTRIB_ISSUES_SCANNED, MAX_DISCOVERED_REPOS, MAX_ISSUES_PER_DISCOVERED_REPO, DISCOVERY_REPOS_PER_TERM, DISCOVERY_VOCAB_TERMS, DISCOVERY_ISSUE_LABELS, repoKey;
 var init_contributions = __esm({
   "../../packages/core/src/feeds/contributions.ts"() {
     "use strict";
@@ -4042,14 +4226,8 @@ var init_contributions = __esm({
     init_contribution_classify();
     init_github_bounties();
     init_http();
+    init_gh_governor();
     GITHUB_API2 = "https://api.github.com";
-    DEFAULT_REQ_GAP_MS = 75;
-    SECONDARY_BACKOFF_CAP_S = 30;
-    DEFAULT_BUILD_BUDGET_MS = 9e4;
-    MIN_BUILD_BUDGET_MS = 1e4;
-    MAX_BUILD_BUDGET_MS = 9e4;
-    PROBE_TIMEOUT_MS = 3e3;
-    realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
     CONTRIB_LABEL_QUERIES = [
       'label:"good first issue" type:issue state:open',
       'label:"good-first-issue" type:issue state:open',
@@ -4267,12 +4445,22 @@ async function enrichWinnability(jobs, contribute, w) {
   const repos = [...byRepo.keys()].sort((a, b) => starsOf(b) - starsOf(a));
   const scored = repos.slice(0, maxRepos);
   const cappedOut = repos.length - scored.length;
+  const gov = w.governor ?? makeGitHubGovernor(
+    w.fetchImpl ?? fetch,
+    makeDefaultGovernorConfig({ paceEnabled: !w.fetchImpl })
+  );
+  let stoppedEarly = false;
   for (const repo of scored) {
+    if (gov.tripped() || gov.budgetExhausted()) {
+      stoppedEarly = true;
+      break;
+    }
     const targets = byRepo.get(repo) ?? [];
     const receptivity = await fetchRepoReceptivity(repo, {
       token: w.token,
       fetchImpl: w.fetchImpl,
-      now
+      now,
+      governor: gov
     });
     const stars = starsOf(repo);
     const prev = priorStars[repo];
@@ -4300,6 +4488,12 @@ async function enrichWinnability(jobs, contribute, w) {
         job.winnabilityScore = computeWinnability(signals).score;
       }
     }
+  }
+  if (stoppedEarly) {
+    const reason = gov.tripped() ? "secondary-abuse breaker" : "wall-clock budget";
+    console.warn(
+      `[winnability] receptivity governor stopped the loop \u2014 ${reason} tripped; remaining repos left un-scored (legacy ranking). Governed egress halted to avoid prolonging the GitHub rate-limit window.`
+    );
   }
   if (cappedOut > 0) {
     console.warn(
@@ -4343,6 +4537,7 @@ var init_indexer = __esm({
     init_contributions();
     init_partners();
     init_github();
+    init_gh_governor();
     init_winnability();
   }
 });
@@ -7938,6 +8133,7 @@ __export(src_exports, {
   MERGE_PROBABILITY: () => MERGE_PROBABILITY,
   MIN_CONTRIBUTORS: () => MIN_CONTRIBUTORS,
   MIN_STARS: () => MIN_STARS,
+  PROBE_TIMEOUT_MS: () => PROBE_TIMEOUT_MS,
   RIGOR: () => RIGOR,
   STRONG_MATCH_THRESHOLD: () => STRONG_MATCH_THRESHOLD,
   SYNONYMS: () => SYNONYMS,
@@ -8009,6 +8205,9 @@ __export(src_exports, {
   lever: () => lever,
   loadPartnerRoles: () => loadPartnerRoles,
   looksLikeEngRole: () => looksLikeEngRole,
+  makeDefaultGovernorConfig: () => makeDefaultGovernorConfig,
+  makeGitHubGovernor: () => makeGitHubGovernor,
+  makeScoringGovernor: () => makeScoringGovernor,
   match: () => match,
   mergeProbability: () => mergeProbability,
   mmrRerank: () => mmrRerank,
@@ -8021,8 +8220,12 @@ __export(src_exports, {
   passesMaturityGate: () => passesMaturityGate,
   personCardToJob: () => personCardToJob,
   projectCardToJob: () => projectCardToJob,
+  readBuildBudgetMs: () => readBuildBudgetMs,
+  readReqGapMs: () => readReqGapMs,
+  realSleep: () => realSleep,
   recordClick: () => recordClick,
   rejectExtraIntroFields: () => rejectExtraIntroFields,
+  relevanceScore: () => relevanceScore,
   revealIntroContacts: () => revealIntroContacts,
   safetyNumber: () => safetyNumber,
   sameLogin: () => sameLogin,
@@ -8049,6 +8252,7 @@ var init_src = __esm({
     init_winnability();
     init_partners();
     init_github();
+    init_gh_governor();
     init_credit();
     init_intro();
     init_directoryThreshold();
@@ -8069,9 +8273,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a4d8b1364e2f66adc/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a4d8b1364e2f66adc/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
