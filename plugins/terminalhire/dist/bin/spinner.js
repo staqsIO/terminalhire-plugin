@@ -346,6 +346,9 @@ function buildContributeNudgeLine(contributeNudge) {
 function buildSessionStaleLine(sessionStale) {
   return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
 }
+function buildUnpushedClaimsLine(unpushedClaims) {
+  return unpushedClaims === true ? "\u26A0 new claims not yet on your dashboard \u2014 run: terminalhire claim --push --keep-updated" : null;
+}
 function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   const {
     sessionTags,
@@ -354,16 +357,19 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
     incomingPending,
     sessionStale,
     contributeNudge,
+    unpushedClaims,
     seenHistory
   } = opts;
   const staleLine = buildSessionStaleLine(sessionStale);
   const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
   const introLine = buildIncomingIntroLine(incomingPending);
   const contributeLine = buildContributeNudgeLine(contributeNudge);
+  const unpushedLine = buildUnpushedClaimsLine(unpushedClaims);
   const ranked = filterFreshMatches(rankBySessionTags(topMatches, sessionTags), seenHistory);
   if (!Array.isArray(ranked) || ranked.length === 0) {
     if (introLine) return withStale([introLine]);
     if (contributeLine) return withStale([contributeLine]);
+    if (unpushedLine) return withStale([unpushedLine]);
     const peerLine = buildPeerLine(topPeers);
     return withStale(peerLine ? [peerLine] : []);
   }
@@ -373,6 +379,7 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   const pool = [...headers.slice(0, cap), ctaVerb()];
   if (introLine) pool.push(introLine);
   if (contributeLine) pool.push(contributeLine);
+  if (unpushedLine) pool.push(unpushedLine);
   return withStale(pool);
 }
 
@@ -1057,6 +1064,7 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
     incomingPending: opts.incomingPending,
     sessionStale: opts.sessionStale,
     contributeNudge: opts.contributeNudge,
+    unpushedClaims: opts.unpushedClaims,
     seenHistory
   });
   if (verbs.length > 0) applySpinnerVerbs(verbs, sc.mode);
@@ -1083,6 +1091,7 @@ export {
   buildSpinnerPool,
   buildTips,
   buildTipsDetailed,
+  buildUnpushedClaimsLine,
   clearSpinnerTips,
   clearSpinnerVerbs,
   ctaVerb,

@@ -285,6 +285,7 @@ function decrypt(blob, key) {
 var TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join3(homedir3(), ".terminalhire");
 var CLAIM_PUSH_AUTO_MARKER = join3(TERMINALHIRE_DIR3, "claim-push-auto.json");
 var CLAIM_PUSH_TOKEN_FILE = join3(TERMINALHIRE_DIR3, "claim-push-token.enc");
+var CLAIM_PUSH_MANUAL_MARKER = join3(TERMINALHIRE_DIR3, "claim-push.json");
 var CLAIM_SYNC_BASE = "https://terminalhire.com";
 var AUTO_CONSENT_VERSION = 2;
 var AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
@@ -352,6 +353,43 @@ function backgroundPushGate(params) {
   }
   return { push: true, reason: "ok" };
 }
+function unpushedNudgeGate(params) {
+  const {
+    autoMarkerExists,
+    tokenFileExists,
+    manualMarkerExists,
+    lastSnapshotHash,
+    currentHash,
+    claimCount
+  } = params;
+  if (autoMarkerExists && tokenFileExists) return false;
+  if (!manualMarkerExists) return false;
+  if (!(claimCount > 0)) return false;
+  return lastSnapshotHash !== currentHash;
+}
+async function shouldNudgeUnpushed() {
+  try {
+    const { listClaims: listClaims2, toPushedClaim: toPushedClaim2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
+    const pushed = listClaims2().map((c) => toPushedClaim2(c));
+    const currentHash = computeSnapshotHash(pushed);
+    let manual = null;
+    try {
+      manual = existsSync3(CLAIM_PUSH_MANUAL_MARKER) ? JSON.parse(readFileSync3(CLAIM_PUSH_MANUAL_MARKER, "utf8")) : null;
+    } catch {
+      manual = null;
+    }
+    return unpushedNudgeGate({
+      autoMarkerExists: existsSync3(CLAIM_PUSH_AUTO_MARKER),
+      tokenFileExists: existsSync3(CLAIM_PUSH_TOKEN_FILE),
+      manualMarkerExists: !!manual,
+      lastSnapshotHash: manual?.lastSnapshotHash ?? null,
+      currentHash,
+      claimCount: pushed.length
+    });
+  } catch {
+    return false;
+  }
+}
 async function runBackgroundClaimPush({ now = Date.now() } = {}) {
   try {
     if (!existsSync3(CLAIM_PUSH_AUTO_MARKER) || !existsSync3(CLAIM_PUSH_TOKEN_FILE)) return;
@@ -396,6 +434,7 @@ export {
   AUTO_CONSENT_VERSION,
   AUTO_PUSH_THROTTLE_MS,
   CLAIM_PUSH_AUTO_MARKER,
+  CLAIM_PUSH_MANUAL_MARKER,
   CLAIM_PUSH_TOKEN_FILE,
   backgroundPushGate,
   clearAutoMarker,
@@ -404,6 +443,8 @@ export {
   readAutoMarker,
   readPushTokenEnc,
   runBackgroundClaimPush,
+  shouldNudgeUnpushed,
+  unpushedNudgeGate,
   writeAutoMarker,
   writePushTokenEnc
 };

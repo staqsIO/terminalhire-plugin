@@ -10811,6 +10811,7 @@ __export(claim_push_bg_exports, {
   AUTO_CONSENT_VERSION: () => AUTO_CONSENT_VERSION,
   AUTO_PUSH_THROTTLE_MS: () => AUTO_PUSH_THROTTLE_MS,
   CLAIM_PUSH_AUTO_MARKER: () => CLAIM_PUSH_AUTO_MARKER,
+  CLAIM_PUSH_MANUAL_MARKER: () => CLAIM_PUSH_MANUAL_MARKER,
   CLAIM_PUSH_TOKEN_FILE: () => CLAIM_PUSH_TOKEN_FILE,
   backgroundPushGate: () => backgroundPushGate,
   clearAutoMarker: () => clearAutoMarker,
@@ -10819,6 +10820,8 @@ __export(claim_push_bg_exports, {
   readAutoMarker: () => readAutoMarker,
   readPushTokenEnc: () => readPushTokenEnc,
   runBackgroundClaimPush: () => runBackgroundClaimPush,
+  shouldNudgeUnpushed: () => shouldNudgeUnpushed,
+  unpushedNudgeGate: () => unpushedNudgeGate,
   writeAutoMarker: () => writeAutoMarker,
   writePushTokenEnc: () => writePushTokenEnc
 });
@@ -10890,6 +10893,43 @@ function backgroundPushGate(params) {
   }
   return { push: true, reason: "ok" };
 }
+function unpushedNudgeGate(params) {
+  const {
+    autoMarkerExists,
+    tokenFileExists,
+    manualMarkerExists,
+    lastSnapshotHash,
+    currentHash,
+    claimCount
+  } = params;
+  if (autoMarkerExists && tokenFileExists) return false;
+  if (!manualMarkerExists) return false;
+  if (!(claimCount > 0)) return false;
+  return lastSnapshotHash !== currentHash;
+}
+async function shouldNudgeUnpushed() {
+  try {
+    const { listClaims: listClaims2, toPushedClaim: toPushedClaim2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
+    const pushed = listClaims2().map((c) => toPushedClaim2(c));
+    const currentHash = computeSnapshotHash(pushed);
+    let manual = null;
+    try {
+      manual = existsSync9(CLAIM_PUSH_MANUAL_MARKER) ? JSON.parse(readFileSync16(CLAIM_PUSH_MANUAL_MARKER, "utf8")) : null;
+    } catch {
+      manual = null;
+    }
+    return unpushedNudgeGate({
+      autoMarkerExists: existsSync9(CLAIM_PUSH_AUTO_MARKER),
+      tokenFileExists: existsSync9(CLAIM_PUSH_TOKEN_FILE),
+      manualMarkerExists: !!manual,
+      lastSnapshotHash: manual?.lastSnapshotHash ?? null,
+      currentHash,
+      claimCount: pushed.length
+    });
+  } catch {
+    return false;
+  }
+}
 async function runBackgroundClaimPush({ now = Date.now() } = {}) {
   try {
     if (!existsSync9(CLAIM_PUSH_AUTO_MARKER) || !existsSync9(CLAIM_PUSH_TOKEN_FILE)) return;
@@ -10930,7 +10970,7 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
   } catch {
   }
 }
-var TERMINALHIRE_DIR12, CLAIM_PUSH_AUTO_MARKER, CLAIM_PUSH_TOKEN_FILE, CLAIM_SYNC_BASE, AUTO_CONSENT_VERSION, AUTO_PUSH_THROTTLE_MS;
+var TERMINALHIRE_DIR12, CLAIM_PUSH_AUTO_MARKER, CLAIM_PUSH_TOKEN_FILE, CLAIM_PUSH_MANUAL_MARKER, CLAIM_SYNC_BASE, AUTO_CONSENT_VERSION, AUTO_PUSH_THROTTLE_MS;
 var init_claim_push_bg = __esm({
   "bin/claim-push-bg.js"() {
     "use strict";
@@ -10938,6 +10978,7 @@ var init_claim_push_bg = __esm({
     TERMINALHIRE_DIR12 = process.env.TERMINALHIRE_DIR || join16(homedir14(), ".terminalhire");
     CLAIM_PUSH_AUTO_MARKER = join16(TERMINALHIRE_DIR12, "claim-push-auto.json");
     CLAIM_PUSH_TOKEN_FILE = join16(TERMINALHIRE_DIR12, "claim-push-token.enc");
+    CLAIM_PUSH_MANUAL_MARKER = join16(TERMINALHIRE_DIR12, "claim-push.json");
     CLAIM_SYNC_BASE = "https://terminalhire.com";
     AUTO_CONSENT_VERSION = 2;
     AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
@@ -11035,10 +11076,12 @@ __export(jpi_claim_exports, {
   AI_DISCLOSURE_NOTE: () => AI_DISCLOSURE_NOTE,
   CLAIM_CONSENT_VERSION: () => CLAIM_CONSENT_VERSION,
   backgroundEnableFailed: () => backgroundEnableFailed,
+  buildAssignmentComment: () => buildAssignmentComment,
   buildSubmitBody: () => buildSubmitBody,
   cmdRecord: () => cmdRecord,
   countOpenPRsReferencingIssue: () => countOpenPRsReferencingIssue,
   diffContention: () => diffContention,
+  explicitForkConsent: () => explicitForkConsent,
   findClaimableByShortRef: () => findClaimableByShortRef,
   findClaimableInCache: () => findClaimableInCache,
   fmtAge: () => fmtAge,
@@ -11054,7 +11097,10 @@ __export(jpi_claim_exports, {
   resolveSubmitWorktree: () => resolveSubmitWorktree,
   revokeFailureAction: () => revokeFailureAction,
   run: () => run7,
-  selectPushRemote: () => selectPushRemote
+  selectCompetingPrs: () => selectCompetingPrs,
+  selectPushRemote: () => selectPushRemote,
+  startBranchFor: () => startBranchFor,
+  workDirFor: () => workDirFor
 });
 import { readFileSync as readFileSync17, writeFileSync as writeFileSync11, mkdirSync as mkdirSync11, existsSync as existsSync10, rmSync as rmSync4 } from "fs";
 import { join as join17 } from "path";
@@ -11285,6 +11331,10 @@ ${p.body ?? ""}`)) {
   }
   return matched;
 }
+function selectCompetingPrs(prs, selfLogin) {
+  if (!Array.isArray(prs)) return [];
+  return prs.filter((pr) => pr && pr.author !== selfLogin);
+}
 async function listOpenPRsReferencingIssue(repoFullName, issueNumber) {
   try {
     const res = await fetch(`${GH_API2}/repos/${repoFullName}/pulls?state=open&per_page=100`, {
@@ -11348,6 +11398,65 @@ async function fetchIssue(repoFullName, issueNumber) {
     };
   } catch {
     return null;
+  }
+}
+function buildAssignmentComment(repoFullName) {
+  const usesTakeBot = TAKE_BOT_REPOS.has(repoFullName.toLowerCase());
+  const body = usesTakeBot ? "/take" : `I'd like to work on this \u2014 could I be assigned? Thanks!
+
+${ASSIGNMENT_MARKER}`;
+  return { usesTakeBot, body };
+}
+async function hasPriorAssignmentRequest(repoFullName, issueNumber, login) {
+  try {
+    const res = await fetch(
+      `${GH_API2}/repos/${repoFullName}/issues/${issueNumber}/comments?per_page=100&sort=created&direction=desc`,
+      { headers: GH_HEADERS2, signal: AbortSignal.timeout(1e4) }
+    );
+    if (!res.ok) return false;
+    const comments = await res.json();
+    if (!Array.isArray(comments)) return false;
+    return comments.some(
+      (c) => c && c.user && c.user.login === login && typeof c.body === "string" && c.body.includes(ASSIGNMENT_MARKER)
+    );
+  } catch {
+    return false;
+  }
+}
+async function requestIssueAssignment(claim, flags = {}, ghUser) {
+  if (flags["no-assign"]) {
+    console.log("  (--no-assign \u2014 skipping the assignment request; request it manually before working)");
+    return;
+  }
+  const parsed = parseGitHubUrl(claim.issueUrl);
+  if (!parsed) return;
+  const { repoFullName, number: number3 } = parsed;
+  let login = ghUser;
+  if (!login) {
+    try {
+      login = await sh("gh", ["api", "user", "-q", ".login"]);
+    } catch {
+      console.log("  (assignment not requested: 'gh' not authenticated \u2014 comment on the issue manually before working)");
+      return;
+    }
+  }
+  const issue2 = await fetchIssue(repoFullName, number3);
+  if (issue2 && issue2.assignees.includes(login)) {
+    console.log(`  \u2713 Already assigned to @${login} on ${repoFullName}#${number3}.`);
+    return;
+  }
+  const { usesTakeBot, body } = buildAssignmentComment(repoFullName);
+  if (!usesTakeBot && await hasPriorAssignmentRequest(repoFullName, number3, login)) {
+    console.log(`  \u2713 Assignment already requested on ${repoFullName}#${number3}.`);
+    return;
+  }
+  try {
+    await sh("gh", ["issue", "comment", String(number3), "--repo", repoFullName, "--body", body]);
+    console.log(
+      usesTakeBot ? `  \u2713 Requested assignment via /take on ${repoFullName}#${number3}.` : `  \u2713 Requested assignment on ${repoFullName}#${number3}.`
+    );
+  } catch (err) {
+    console.log(`  (could not post the assignment request: ${err.stderr || err.message || err} \u2014 do it manually before working)`);
   }
 }
 async function pollPR(prUrl) {
@@ -11565,10 +11674,19 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
   console.log("   \u2022 MUST NOT `git push` or `gh pr` \u2014 pushing happens only via `terminalhire submit`");
   console.log("   \u2022 clone + static analysis + patch only; NO test/build execution without explicit approval");
   console.log("   \u2022 no access to ~/.terminalhire (the executor never needs your profile)");
-  console.log("\n  Next:");
-  console.log("   1. record the worktree:  terminalhire claim attach " + claim.id + " --worktree <path> --branch <branch>");
-  console.log("   2. do the work + review, then mark it cleared:  terminalhire claim update " + claim.id + " ready");
-  console.log("   3. publish (pushes to your fork + opens the PR):  terminalhire claim submit " + claim.id);
+  console.log("\n  Next \u2014 start work (forks + clones into an isolated worktree; your terminal stays put):");
+  console.log("    terminalhire claim start " + claim.id);
+  console.log("  Then publish when it is done (the only step that pushes + opens the PR):");
+  console.log("    terminalhire claim submit " + claim.id);
+  if (flags.start) {
+    await cmdStart(claim.id, { start: true });
+  } else if (process.stdin.isTTY && !flags["no-start"]) {
+    const go = await confirm(`
+  Fork ${claim.repoFullName} and start now? (y/N) `);
+    if (go) await cmdStart(claim.id, { start: true });
+    else console.log(`
+  Saved. Start anytime:  terminalhire claim start ${claim.id}`);
+  }
 }
 async function cmdPreview(arg, { json } = {}) {
   if (!arg) {
@@ -11631,6 +11749,12 @@ ${list.length} ${active ? "active " : ""}claim${list.length === 1 ? "" : "s"}:
     console.log(`    id: ${c.id}${pr}`);
   }
   printMetric(claims.acceptedPRRate());
+  try {
+    if (await shouldNudgeUnpushed()) {
+      console.log("\n  \u26A0 new claims not yet on your dashboard \u2014 run: terminalhire claim --push --keep-updated");
+    }
+  } catch {
+  }
 }
 async function cmdStatus(id) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -11765,6 +11889,181 @@ async function cmdAttach(id, worktree, branch) {
   claims.updateClaim(id, { worktreePath: toplevel, branch });
   console.log(`Attached ${id}: worktree=${toplevel} branch=${branch}`);
 }
+function workDirFor(repoFullName, issueNumber) {
+  const [owner, repo] = String(repoFullName).split("/");
+  const suffix = issueNumber ? `-${issueNumber}` : "";
+  return join17(homedir15(), "terminalhire", "work", `${owner}-${repo}${suffix}`);
+}
+function startBranchFor(repoFullName, issueNumber) {
+  const repo = String(repoFullName).split("/")[1] || "claim";
+  return `th/${repo}-${issueNumber || "work"}`;
+}
+function explicitForkConsent(flags = {}) {
+  return Boolean(flags.start) || Boolean(flags.fork);
+}
+async function ensureForkExists(repoFullName, ghUser) {
+  const repoShort = repoFullName.split("/")[1];
+  const forkFullName = `${ghUser}/${repoShort}`;
+  await sh("gh", ["repo", "fork", repoFullName, "--clone=false"]);
+  let isFork = false;
+  try {
+    isFork = await sh("gh", ["api", `repos/${forkFullName}`, "--jq", ".fork"]) === "true";
+  } catch {
+    isFork = false;
+  }
+  if (!isFork) throw new Error(`fork ${forkFullName} created but could not be verified as a fork`);
+  return forkFullName;
+}
+async function cmdStart(id, flags = {}) {
+  const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+  if (!id) {
+    const startable = claims.listClaims({ active: true }).filter((c) => c.state === "claimed");
+    if (startable.length === 0) {
+      console.log("No claims ready to start. Claim one first:  terminalhire claim <ref>");
+      return;
+    }
+    console.log(`
+${startable.length} claim${startable.length === 1 ? "" : "s"} ready to start:
+`);
+    for (const c of startable) {
+      console.log(`  ${c.title}`);
+      console.log(`    terminalhire claim start ${c.id}`);
+    }
+    console.log("\nRun the command under the one you want to start.");
+    return;
+  }
+  const claim = claims.findClaim(id);
+  if (!claim) {
+    console.error(`terminalhire claim: no claim with id '${id}'.`);
+    process.exit(1);
+  }
+  if (claim.worktreePath) {
+    let stillThere = false;
+    try {
+      stillThere = await sh("git", ["-C", claim.worktreePath, "rev-parse", "--show-toplevel"]) === claim.worktreePath;
+    } catch {
+      stillThere = false;
+    }
+    if (stillThere) {
+      console.log("Already started \u2014 your worktree is ready (your terminal stays put):");
+      console.log(`  cd ${claim.worktreePath}`);
+      if (claim.branch) console.log(`  branch: ${claim.branch}`);
+      console.log(`
+When it's done:  terminalhire claim submit ${id}`);
+      return;
+    }
+  }
+  if (flags.here) {
+    await cmdStartHere(claims, claim, flags);
+    return;
+  }
+  let ghUser;
+  try {
+    ghUser = await sh("gh", ["api", "user", "-q", ".login"]);
+  } catch {
+    console.error("terminalhire claim: 'gh' CLI not available or not authenticated. Run 'gh auth login'.");
+    process.exit(1);
+  }
+  let consented = explicitForkConsent(flags);
+  if (!consented && process.stdin.isTTY) {
+    consented = await confirm(`
+  Fork ${claim.repoFullName} to @${ghUser} and clone it to start? (y/N) `);
+  }
+  if (!consented) {
+    console.error(
+      `
+terminalhire claim: not started \u2014 starting forks ${claim.repoFullName} to your GitHub account (a network write).
+  Re-run in a terminal to confirm interactively, or pass --fork to consent non-interactively.`
+    );
+    process.exit(1);
+  }
+  const issueNumber = (parseGitHubUrl(claim.issueUrl) || {}).number;
+  const destDir = workDirFor(claim.repoFullName, issueNumber);
+  if (existsSync10(destDir)) {
+    console.error(
+      `terminalhire claim: ${destDir} already exists \u2014 refusing to clobber it.
+  Remove it and retry, or attach it: terminalhire claim attach ${id} --worktree ${destDir} --branch <branch>`
+    );
+    process.exit(1);
+  }
+  mkdirSync11(join17(homedir15(), "terminalhire", "work"), { recursive: true });
+  let forkFullName;
+  try {
+    forkFullName = await ensureForkExists(claim.repoFullName, ghUser);
+  } catch (err) {
+    console.error(`terminalhire claim: could not create your fork of ${claim.repoFullName}. ${err.message ?? err}`);
+    process.exit(1);
+  }
+  try {
+    await sh("gh", ["repo", "clone", forkFullName, destDir]);
+  } catch (err) {
+    try {
+      rmSync4(destDir, { recursive: true, force: true });
+    } catch {
+    }
+    console.error(`terminalhire claim: clone of ${forkFullName} failed. ${err.stderr || err.message || err}`);
+    process.exit(1);
+  }
+  try {
+    await sh("git", ["-C", destDir, "remote", "get-url", "upstream"]);
+  } catch {
+    try {
+      await sh("git", ["-C", destDir, "remote", "add", "upstream", `https://github.com/${claim.repoFullName}.git`]);
+    } catch {
+    }
+  }
+  const branch = startBranchFor(claim.repoFullName, issueNumber);
+  await sh("git", ["-C", destDir, "checkout", "-b", branch]);
+  const toplevel = await sh("git", ["-C", destDir, "rev-parse", "--show-toplevel"]);
+  claims.updateClaim(id, { worktreePath: toplevel, branch, state: "working" });
+  await requestIssueAssignment(claim, flags, ghUser);
+  console.log(`
+\u2713 Started: ${claim.title}`);
+  console.log(`  fork:   ${forkFullName}`);
+  console.log(`  branch: ${branch}`);
+  console.log("\n  Your isolated worktree is ready \u2014 your current terminal is untouched:");
+  console.log(`    cd ${toplevel}`);
+  console.log("\n  When the work is done (the only step that pushes + opens the PR):");
+  console.log(`    terminalhire claim submit ${id}`);
+}
+async function cmdStartHere(claims, claim, flags = {}) {
+  let toplevel;
+  try {
+    toplevel = await sh("git", ["-C", process.cwd(), "rev-parse", "--show-toplevel"]);
+  } catch {
+    console.error("terminalhire claim: --here must be run inside a git repository.");
+    process.exit(1);
+  }
+  const remotesOut = await sh("git", ["-C", toplevel, "remote", "-v"]).catch(() => "");
+  const repos = new Set(
+    remotesOut.split("\n").map((l) => parseRepoFromRemote(l.split(/\s+/)[1])).filter(Boolean).map((r) => r.toLowerCase())
+  );
+  if (!repos.has(claim.repoFullName.toLowerCase())) {
+    console.error(
+      `terminalhire claim: --here expects a clone of ${claim.repoFullName}, but no remote here points there.
+  Use \`terminalhire claim start ${claim.id}\` (no --here) to fork + clone it into a fresh worktree.`
+    );
+    process.exit(1);
+  }
+  const dirty = await sh("git", ["-C", toplevel, "status", "--porcelain", "--untracked-files=no"]).catch(() => "");
+  if (dirty) {
+    console.error(
+      "terminalhire claim: --here needs a clean working tree (claim work must not mix with your current changes).\n  Commit or stash first, or use `terminalhire claim start` for an isolated worktree."
+    );
+    process.exit(1);
+  }
+  const issueNumber = (parseGitHubUrl(claim.issueUrl) || {}).number;
+  const branch = startBranchFor(claim.repoFullName, issueNumber);
+  await sh("git", ["-C", toplevel, "checkout", "-b", branch]);
+  claims.updateClaim(claim.id, { worktreePath: toplevel, branch, state: "working" });
+  await requestIssueAssignment(claim, flags);
+  console.log(`
+\u2713 Started here: ${claim.title}`);
+  console.log(`  worktree: ${toplevel}`);
+  console.log(`  branch:   ${branch}`);
+  console.log(`
+  When the work is done:  terminalhire claim submit ${claim.id}`);
+}
 async function cmdSubmit(id, flags = {}) {
   const worktreeOverride = flags.worktree;
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -11779,10 +12078,10 @@ async function cmdSubmit(id, flags = {}) {
     console.error(`terminalhire claim: no claim with id '${id}'.`);
     process.exit(1);
   }
-  if (claim.state !== "ready") {
+  if (claim.state !== "working" && claim.state !== "ready") {
     console.error(
-      `terminalhire claim: ${id} is '${claim.state}', not 'ready'. Submit only runs after the review gate clears it:
-  terminalhire claim update ${id} ready`
+      `terminalhire claim: ${id} is '${claim.state}'. Submit runs once work has started ('working', via 'claim start') or the review gate cleared it ('ready'). Start it first:
+  terminalhire claim start ${id}`
     );
     process.exit(1);
   }
@@ -11989,10 +12288,22 @@ async function cmdSubmit(id, flags = {}) {
     const issueNo = (parseGitHubUrl(claim.issueUrl) || {}).number;
     const contention = issueNo ? await listOpenPRsReferencingIssue(claim.repoFullName, issueNo) : null;
     if (contention && contention.total > 0) {
-      console.log(`  \u26A0 contention: ${contention.total} open PR(s) already reference this issue:`);
       const nowMs = Date.now();
+      console.log(`  \u26A0 contention: ${contention.total} open PR(s) already reference this issue:`);
       for (const pr of contention.prs) console.log(fmtContentionPr(pr, nowMs, false));
       console.log(CONTENTION_HINT);
+      const competing = selectCompetingPrs(contention.prs, ghUser);
+      if (competing.length > 0 && !flags["force-competing"]) {
+        console.error(
+          `
+terminalhire claim: refusing to submit \u2014 ${competing.length} open PR(s) by someone else already address ${claim.repoFullName}#${issueNo}:`
+        );
+        for (const pr of competing) console.error(fmtContentionPr(pr, nowMs, false));
+        console.error(
+          "\n  Opening a competing PR reads as low-effort duplication and burns maintainer goodwill.\n  Stand down, or add value on the existing PR instead (a review, a test, a comment).\n  If you are certain yours should still go up, re-run with --force-competing."
+        );
+        process.exit(1);
+      }
     }
   }
   let ok;
@@ -12260,7 +12571,13 @@ async function cmdPush({ keepUpdated = false } = {}) {
     pushToken = body?.pushToken || null;
   } catch {
   }
-  writeClaimPushMarker({ consentedAt, login, deleteToken });
+  writeClaimPushMarker({
+    consentedAt,
+    login,
+    deleteToken,
+    lastPushedAt: consentedAt,
+    lastSnapshotHash: computeSnapshotHash(pushed)
+  });
   if (autoConsent && pushToken) {
     try {
       await writePushTokenEnc(pushToken);
@@ -12374,6 +12691,9 @@ async function run7() {
       case "record":
         await cmdRecord(positional[0], flags);
         break;
+      case "start":
+        await cmdStart(positional[0], flags);
+        break;
       case "list":
         await cmdList(active);
         break;
@@ -12393,7 +12713,7 @@ async function run7() {
         await cmdRelease(positional[0]);
         break;
       default:
-        console.error(`terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | attach | list | status | update | submit | release`);
+        console.error(`terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | list | status | update | submit | release`);
         process.exit(1);
     }
   } catch (err) {
@@ -12401,7 +12721,7 @@ async function run7() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR13, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, API_URL6, CLAIM_SYNC_BASE2, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, GH_API2, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS;
+var TERMINALHIRE_DIR13, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, API_URL6, CLAIM_SYNC_BASE2, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, GH_API2, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, TAKE_BOT_REPOS;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
@@ -12423,6 +12743,8 @@ var init_jpi_claim = __esm({
     AI_DISCLOSURE_NOTE = "---\nThis contribution was developed with AI assistance via [terminalhire](https://terminalhire.com). The author has reviewed the change and takes responsibility for its content.";
     pExecFile = promisify(execFile);
     VALUE_FLAGS = /* @__PURE__ */ new Set(["worktree", "branch", "body-file", "title"]);
+    ASSIGNMENT_MARKER = "<!-- terminalhire:assignment-request -->";
+    TAKE_BOT_REPOS = /* @__PURE__ */ new Set(["paradedb/paradedb"]);
   }
 });
 
@@ -40922,6 +41244,9 @@ function buildContributeNudgeLine(contributeNudge) {
 function buildSessionStaleLine(sessionStale) {
   return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
 }
+function buildUnpushedClaimsLine(unpushedClaims) {
+  return unpushedClaims === true ? "\u26A0 new claims not yet on your dashboard \u2014 run: terminalhire claim --push --keep-updated" : null;
+}
 function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   const {
     sessionTags,
@@ -40930,16 +41255,19 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
     incomingPending,
     sessionStale,
     contributeNudge,
+    unpushedClaims,
     seenHistory
   } = opts;
   const staleLine = buildSessionStaleLine(sessionStale);
   const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
   const introLine = buildIncomingIntroLine(incomingPending);
   const contributeLine = buildContributeNudgeLine(contributeNudge);
+  const unpushedLine = buildUnpushedClaimsLine(unpushedClaims);
   const ranked = filterFreshMatches(rankBySessionTags(topMatches, sessionTags), seenHistory);
   if (!Array.isArray(ranked) || ranked.length === 0) {
     if (introLine) return withStale([introLine]);
     if (contributeLine) return withStale([contributeLine]);
+    if (unpushedLine) return withStale([unpushedLine]);
     const peerLine = buildPeerLine(topPeers);
     return withStale(peerLine ? [peerLine] : []);
   }
@@ -40949,6 +41277,7 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   const pool = [...headers.slice(0, cap), ctaVerb()];
   if (introLine) pool.push(introLine);
   if (contributeLine) pool.push(contributeLine);
+  if (unpushedLine) pool.push(unpushedLine);
   return withStale(pool);
 }
 var init_spinner_verbs = __esm({
@@ -41088,6 +41417,7 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
     incomingPending: opts.incomingPending,
     sessionStale: opts.sessionStale,
     contributeNudge: opts.contributeNudge,
+    unpushedClaims: opts.unpushedClaims,
     seenHistory
   });
   if (verbs.length > 0) applySpinnerVerbs(verbs, sc.mode);
@@ -41127,6 +41457,7 @@ __export(spinner_exports, {
   buildSpinnerPool: () => buildSpinnerPool,
   buildTips: () => buildTips,
   buildTipsDetailed: () => buildTipsDetailed,
+  buildUnpushedClaimsLine: () => buildUnpushedClaimsLine,
   clearSpinnerTips: () => clearSpinnerTips,
   clearSpinnerVerbs: () => clearSpinnerVerbs,
   ctaVerb: () => ctaVerb,
@@ -41143,6 +41474,7 @@ var init_spinner = __esm({
     "use strict";
     init_spinner_config();
     init_spinner_config();
+    init_spinner_verbs();
     init_spinner_verbs();
     init_spinner_verbs();
     init_spinner_verbs();
@@ -42313,6 +42645,12 @@ async function run22() {
       topMatches = filterFreshMatches2(topMatches, seenHistory);
     } catch {
     }
+    let unpushedClaims = false;
+    try {
+      const { shouldNudgeUnpushed: shouldNudgeUnpushed2 } = await Promise.resolve().then(() => (init_claim_push_bg(), claim_push_bg_exports));
+      unpushedClaims = await shouldNudgeUnpushed2();
+    } catch {
+    }
     const cacheEntry = {
       index,
       matchCount,
@@ -42321,6 +42659,7 @@ async function run22() {
       incomingPending,
       unreadChat,
       sessionStale,
+      unpushedClaims,
       // In-process-only despite being persisted: the render pass receives it as
       // a function argument below. A future cache READER must not gate on this
       // field without re-checking isContributeEnabled/isContributePrompted at
@@ -42359,6 +42698,7 @@ async function run22() {
         incomingPending,
         sessionStale,
         contributeNudge,
+        unpushedClaims,
         baseUrl: API_URL8,
         seenHistory,
         widen,
@@ -42869,6 +43209,7 @@ if (!firstArg || firstArg === "help" || firstArg === "--help" || firstArg === "-
   console.log("  terminalhire bounties --priced              Only bounties with a known $ amount");
   console.log("  terminalhire contribute                     Open issues where a merged PR counts toward your r\xE9sum\xE9");
   console.log("  terminalhire claim record <id|issueUrl>     Claim a bounty locally + print the executor brief");
+  console.log("  terminalhire claim start [<id>]             Fork + clone + branch into an isolated worktree (never cd's you)");
   console.log("  terminalhire claim list [--active]          List your claims + accepted-PR rate");
   console.log("  terminalhire claim status [<id>]            Poll source PR merge state (updates the metric)");
   console.log("  terminalhire claim --push                   Opt-in: show your claims on your dashboard (typed-yes + browser confirm)");

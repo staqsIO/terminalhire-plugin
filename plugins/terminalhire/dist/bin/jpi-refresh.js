@@ -9045,6 +9045,9 @@ function buildContributeNudgeLine(contributeNudge) {
 function buildSessionStaleLine(sessionStale) {
   return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
 }
+function buildUnpushedClaimsLine(unpushedClaims) {
+  return unpushedClaims === true ? "\u26A0 new claims not yet on your dashboard \u2014 run: terminalhire claim --push --keep-updated" : null;
+}
 function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   const {
     sessionTags,
@@ -9053,16 +9056,19 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
     incomingPending,
     sessionStale,
     contributeNudge,
+    unpushedClaims,
     seenHistory
   } = opts;
   const staleLine = buildSessionStaleLine(sessionStale);
   const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
   const introLine = buildIncomingIntroLine(incomingPending);
   const contributeLine = buildContributeNudgeLine(contributeNudge);
+  const unpushedLine = buildUnpushedClaimsLine(unpushedClaims);
   const ranked = filterFreshMatches(rankBySessionTags(topMatches, sessionTags), seenHistory);
   if (!Array.isArray(ranked) || ranked.length === 0) {
     if (introLine) return withStale([introLine]);
     if (contributeLine) return withStale([contributeLine]);
+    if (unpushedLine) return withStale([unpushedLine]);
     const peerLine = buildPeerLine(topPeers);
     return withStale(peerLine ? [peerLine] : []);
   }
@@ -9072,6 +9078,7 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   const pool = [...headers.slice(0, cap), ctaVerb()];
   if (introLine) pool.push(introLine);
   if (contributeLine) pool.push(contributeLine);
+  if (unpushedLine) pool.push(unpushedLine);
   return withStale(pool);
 }
 var init_spinner_verbs = __esm({
@@ -9211,6 +9218,7 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
     incomingPending: opts.incomingPending,
     sessionStale: opts.sessionStale,
     contributeNudge: opts.contributeNudge,
+    unpushedClaims: opts.unpushedClaims,
     seenHistory
   });
   if (verbs.length > 0) applySpinnerVerbs(verbs, sc.mode);
@@ -9250,6 +9258,7 @@ __export(spinner_exports, {
   buildSpinnerPool: () => buildSpinnerPool,
   buildTips: () => buildTips,
   buildTipsDetailed: () => buildTipsDetailed,
+  buildUnpushedClaimsLine: () => buildUnpushedClaimsLine,
   clearSpinnerTips: () => clearSpinnerTips,
   clearSpinnerVerbs: () => clearSpinnerVerbs,
   ctaVerb: () => ctaVerb,
@@ -9274,6 +9283,7 @@ var init_spinner = __esm({
     init_spinner_verbs();
     init_spinner_verbs();
     init_spinner_verbs();
+    init_spinner_verbs();
     init_spinner_select();
     init_spinner_select();
     init_spinner_select();
@@ -9285,137 +9295,6 @@ var init_spinner = __esm({
     init_spinner_render();
     init_spinner_render();
     init_spinner_render();
-  }
-});
-
-// bin/version-nudge.js
-var version_nudge_exports = {};
-__export(version_nudge_exports, {
-  buildStaleNudge: () => buildStaleNudge,
-  cachedStaleNudge: () => cachedStaleNudge,
-  compareVersions: () => compareVersions,
-  emitInteractiveNudge: () => emitInteractiveNudge,
-  parseVersion: () => parseVersion,
-  readLatestVersionFromCache: () => readLatestVersionFromCache,
-  readLocalVersion: () => readLocalVersion,
-  recordNag: () => recordNag,
-  shouldNag: () => shouldNag
-});
-import { readFileSync as readFileSync11, writeFileSync as writeFileSync9, mkdirSync as mkdirSync9, existsSync as existsSync6 } from "fs";
-import { join as join12 } from "path";
-import { homedir as homedir9 } from "os";
-import { fileURLToPath as fileURLToPath2 } from "url";
-function stateDir() {
-  return process.env.TERMINALHIRE_DIR || join12(homedir9(), ".terminalhire");
-}
-function indexCacheFile() {
-  return join12(stateDir(), "index-cache.json");
-}
-function nudgeStateFile() {
-  return join12(stateDir(), "version-nudge.json");
-}
-function parseVersion(v) {
-  if (typeof v !== "string") return null;
-  const m = v.trim().replace(/^v/, "").match(/^(\d+)\.(\d+)\.(\d+)/);
-  if (!m) return null;
-  return [Number(m[1]), Number(m[2]), Number(m[3])];
-}
-function compareVersions(a, b) {
-  const pa = parseVersion(a);
-  const pb = parseVersion(b);
-  if (!pa || !pb) return null;
-  for (let i = 0; i < 3; i++) {
-    if (pa[i] < pb[i]) return -1;
-    if (pa[i] > pb[i]) return 1;
-  }
-  return 0;
-}
-function buildStaleNudge(local, latest) {
-  if (compareVersions(local, latest) !== -1) return null;
-  return `your terminalhire CLI is behind (${local} \u2192 ${latest}) \u2014 npm i -g terminalhire@latest`;
-}
-function readLocalVersion() {
-  try {
-    const candidates = [
-      join12(__dirname, "..", "..", "package.json"),
-      join12(__dirname, "..", "package.json")
-    ];
-    for (const p of candidates) {
-      if (existsSync6(p)) {
-        const pkg = JSON.parse(readFileSync11(p, "utf8"));
-        if (pkg.version) return pkg.version;
-      }
-    }
-  } catch {
-  }
-  return null;
-}
-function readLatestVersionFromCache() {
-  try {
-    const cache = JSON.parse(readFileSync11(indexCacheFile(), "utf8"));
-    const v = cache?.index?.cliVersion;
-    return typeof v === "string" ? v : null;
-  } catch {
-    return null;
-  }
-}
-function cachedStaleNudge(localVersion) {
-  const local = localVersion ?? readLocalVersion();
-  if (!local) return null;
-  return buildStaleNudge(local, readLatestVersionFromCache());
-}
-function shouldNag(now = Date.now()) {
-  try {
-    const state = JSON.parse(readFileSync11(nudgeStateFile(), "utf8"));
-    const last = state?.lastNaggedAt;
-    if (typeof last !== "number" || !Number.isFinite(last)) return true;
-    return now - last >= NAG_INTERVAL_MS;
-  } catch {
-    return true;
-  }
-}
-function recordNag(now = Date.now()) {
-  try {
-    mkdirSync9(stateDir(), { recursive: true });
-    writeFileSync9(nudgeStateFile(), JSON.stringify({ lastNaggedAt: now }) + "\n", "utf8");
-  } catch {
-  }
-}
-function emitInteractiveNudge({ now = Date.now(), stream = process.stderr, localVersion } = {}) {
-  try {
-    const nudge = cachedStaleNudge(localVersion);
-    if (!nudge) return false;
-    if (!shouldNag(now)) return false;
-    stream.write(`${nudge}
-`);
-    recordNag(now);
-    return true;
-  } catch {
-    return false;
-  }
-}
-var __dirname, NAG_INTERVAL_MS;
-var init_version_nudge = __esm({
-  "bin/version-nudge.js"() {
-    "use strict";
-    __dirname = fileURLToPath2(new URL(".", import.meta.url));
-    NAG_INTERVAL_MS = 24 * 60 * 60 * 1e3;
-  }
-});
-
-// bin/beta-nudge.js
-var beta_nudge_exports = {};
-__export(beta_nudge_exports, {
-  buildBetaNudge: () => buildBetaNudge
-});
-function buildBetaNudge(betaOpen, betaOptIn) {
-  if (betaOpen !== true) return null;
-  if (betaOptIn === true) return null;
-  return "\u{1F9EA} Beta's open \u2014 run `terminalhire beta` to join as a Founding Contributor";
-}
-var init_beta_nudge = __esm({
-  "bin/beta-nudge.js"() {
-    "use strict";
   }
 });
 
@@ -9426,14 +9305,14 @@ import {
   randomBytes as randomBytes4
 } from "crypto";
 import {
-  readFileSync as readFileSync12,
-  writeFileSync as writeFileSync10,
-  mkdirSync as mkdirSync10,
-  existsSync as existsSync7,
+  readFileSync as readFileSync11,
+  writeFileSync as writeFileSync9,
+  mkdirSync as mkdirSync9,
+  existsSync as existsSync6,
   rmSync as rmSync2
 } from "fs";
-import { join as join13 } from "path";
-import { homedir as homedir10 } from "os";
+import { join as join12 } from "path";
+import { homedir as homedir9 } from "os";
 async function loadKey2() {
   try {
     const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
@@ -9444,12 +9323,12 @@ async function loadKey2() {
     return key2;
   } catch {
   }
-  mkdirSync10(TERMINALHIRE_DIR6, { recursive: true });
-  if (existsSync7(KEY_FILE2)) {
-    return Buffer.from(readFileSync12(KEY_FILE2, "utf8").trim(), "hex");
+  mkdirSync9(TERMINALHIRE_DIR6, { recursive: true });
+  if (existsSync6(KEY_FILE2)) {
+    return Buffer.from(readFileSync11(KEY_FILE2, "utf8").trim(), "hex");
   }
   const key = randomBytes4(KEY_BYTES2);
-  writeFileSync10(KEY_FILE2, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  writeFileSync9(KEY_FILE2, key.toString("hex"), { mode: 384, encoding: "utf8" });
   return key;
 }
 function encrypt2(plaintext, key) {
@@ -9472,9 +9351,9 @@ var TERMINALHIRE_DIR6, TOKEN_FILE, KEY_FILE2, ALGO2, KEY_BYTES2, IV_BYTES2;
 var init_github_auth = __esm({
   "src/github-auth.ts"() {
     "use strict";
-    TERMINALHIRE_DIR6 = join13(homedir10(), ".terminalhire");
-    TOKEN_FILE = join13(TERMINALHIRE_DIR6, "github-token.enc");
-    KEY_FILE2 = join13(TERMINALHIRE_DIR6, "key");
+    TERMINALHIRE_DIR6 = join12(homedir9(), ".terminalhire");
+    TOKEN_FILE = join12(TERMINALHIRE_DIR6, "github-token.enc");
+    KEY_FILE2 = join12(TERMINALHIRE_DIR6, "key");
     ALGO2 = "aes-256-gcm";
     KEY_BYTES2 = 32;
     IV_BYTES2 = 12;
@@ -9494,9 +9373,9 @@ __export(claims_exports, {
   toPushedClaim: () => toPushedClaim,
   updateClaim: () => updateClaim
 });
-import { readFileSync as readFileSync13, writeFileSync as writeFileSync11, mkdirSync as mkdirSync11, renameSync as renameSync6, existsSync as existsSync8 } from "fs";
-import { join as join14 } from "path";
-import { homedir as homedir11 } from "os";
+import { readFileSync as readFileSync12, writeFileSync as writeFileSync10, mkdirSync as mkdirSync10, renameSync as renameSync6, existsSync as existsSync7 } from "fs";
+import { join as join13 } from "path";
+import { homedir as homedir10 } from "os";
 function toPushedClaim(claim) {
   return {
     kind: claim.kind,
@@ -9516,8 +9395,8 @@ function normalizeClaim(c) {
 }
 function readClaims() {
   try {
-    if (!existsSync8(CLAIMS_FILE)) return [];
-    const data = JSON.parse(readFileSync13(CLAIMS_FILE, "utf8"));
+    if (!existsSync7(CLAIMS_FILE)) return [];
+    const data = JSON.parse(readFileSync12(CLAIMS_FILE, "utf8"));
     const claims = Array.isArray(data?.claims) ? data.claims : [];
     return claims.map(normalizeClaim);
   } catch {
@@ -9525,10 +9404,10 @@ function readClaims() {
   }
 }
 function writeClaims(claims) {
-  mkdirSync11(TERMINALHIRE_DIR7, { recursive: true });
+  mkdirSync10(TERMINALHIRE_DIR7, { recursive: true });
   const tmp = `${CLAIMS_FILE}.tmp`;
   const payload = { claims };
-  writeFileSync11(tmp, JSON.stringify(payload, null, 2), "utf8");
+  writeFileSync10(tmp, JSON.stringify(payload, null, 2), "utf8");
   renameSync6(tmp, CLAIMS_FILE);
 }
 function findClaim(id) {
@@ -9589,8 +9468,8 @@ var TERMINALHIRE_DIR7, CLAIMS_FILE, PUSHED_CLAIM_FIELDS, TERMINAL_STATES;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
-    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join14(homedir11(), ".terminalhire");
-    CLAIMS_FILE = join14(TERMINALHIRE_DIR7, "claims.json");
+    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join13(homedir10(), ".terminalhire");
+    CLAIMS_FILE = join13(TERMINALHIRE_DIR7, "claims.json");
     PUSHED_CLAIM_FIELDS = [
       "kind",
       "repoFullName",
@@ -9610,6 +9489,7 @@ __export(claim_push_bg_exports, {
   AUTO_CONSENT_VERSION: () => AUTO_CONSENT_VERSION,
   AUTO_PUSH_THROTTLE_MS: () => AUTO_PUSH_THROTTLE_MS,
   CLAIM_PUSH_AUTO_MARKER: () => CLAIM_PUSH_AUTO_MARKER,
+  CLAIM_PUSH_MANUAL_MARKER: () => CLAIM_PUSH_MANUAL_MARKER,
   CLAIM_PUSH_TOKEN_FILE: () => CLAIM_PUSH_TOKEN_FILE,
   backgroundPushGate: () => backgroundPushGate,
   clearAutoMarker: () => clearAutoMarker,
@@ -9618,24 +9498,26 @@ __export(claim_push_bg_exports, {
   readAutoMarker: () => readAutoMarker,
   readPushTokenEnc: () => readPushTokenEnc,
   runBackgroundClaimPush: () => runBackgroundClaimPush,
+  shouldNudgeUnpushed: () => shouldNudgeUnpushed,
+  unpushedNudgeGate: () => unpushedNudgeGate,
   writeAutoMarker: () => writeAutoMarker,
   writePushTokenEnc: () => writePushTokenEnc
 });
 import { createHash as createHash3 } from "crypto";
-import { readFileSync as readFileSync14, writeFileSync as writeFileSync12, mkdirSync as mkdirSync12, existsSync as existsSync9, rmSync as rmSync3 } from "fs";
-import { join as join15 } from "path";
-import { homedir as homedir12 } from "os";
+import { readFileSync as readFileSync13, writeFileSync as writeFileSync11, mkdirSync as mkdirSync11, existsSync as existsSync8, rmSync as rmSync3 } from "fs";
+import { join as join14 } from "path";
+import { homedir as homedir11 } from "os";
 async function writePushTokenEnc(rawToken) {
-  mkdirSync12(TERMINALHIRE_DIR8, { recursive: true });
+  mkdirSync11(TERMINALHIRE_DIR8, { recursive: true });
   const key = await loadKey2();
   const blob = encrypt2(rawToken, key);
-  writeFileSync12(CLAIM_PUSH_TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+  writeFileSync11(CLAIM_PUSH_TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 async function readPushTokenEnc() {
-  if (!existsSync9(CLAIM_PUSH_TOKEN_FILE)) return void 0;
+  if (!existsSync8(CLAIM_PUSH_TOKEN_FILE)) return void 0;
   try {
     const key = await loadKey2();
-    const blob = JSON.parse(readFileSync14(CLAIM_PUSH_TOKEN_FILE, "utf8"));
+    const blob = JSON.parse(readFileSync13(CLAIM_PUSH_TOKEN_FILE, "utf8"));
     return decrypt2(blob, key);
   } catch {
     return void 0;
@@ -9649,14 +9531,14 @@ function clearPushTokenEnc() {
 }
 function readAutoMarker() {
   try {
-    return existsSync9(CLAIM_PUSH_AUTO_MARKER) ? JSON.parse(readFileSync14(CLAIM_PUSH_AUTO_MARKER, "utf8")) : null;
+    return existsSync8(CLAIM_PUSH_AUTO_MARKER) ? JSON.parse(readFileSync13(CLAIM_PUSH_AUTO_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
 }
 function writeAutoMarker(marker) {
-  mkdirSync12(TERMINALHIRE_DIR8, { recursive: true });
-  writeFileSync12(CLAIM_PUSH_AUTO_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  mkdirSync11(TERMINALHIRE_DIR8, { recursive: true });
+  writeFileSync11(CLAIM_PUSH_AUTO_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearAutoMarker() {
   try {
@@ -9689,9 +9571,46 @@ function backgroundPushGate(params) {
   }
   return { push: true, reason: "ok" };
 }
+function unpushedNudgeGate(params) {
+  const {
+    autoMarkerExists,
+    tokenFileExists,
+    manualMarkerExists,
+    lastSnapshotHash,
+    currentHash,
+    claimCount
+  } = params;
+  if (autoMarkerExists && tokenFileExists) return false;
+  if (!manualMarkerExists) return false;
+  if (!(claimCount > 0)) return false;
+  return lastSnapshotHash !== currentHash;
+}
+async function shouldNudgeUnpushed() {
+  try {
+    const { listClaims: listClaims2, toPushedClaim: toPushedClaim2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
+    const pushed = listClaims2().map((c) => toPushedClaim2(c));
+    const currentHash = computeSnapshotHash(pushed);
+    let manual = null;
+    try {
+      manual = existsSync8(CLAIM_PUSH_MANUAL_MARKER) ? JSON.parse(readFileSync13(CLAIM_PUSH_MANUAL_MARKER, "utf8")) : null;
+    } catch {
+      manual = null;
+    }
+    return unpushedNudgeGate({
+      autoMarkerExists: existsSync8(CLAIM_PUSH_AUTO_MARKER),
+      tokenFileExists: existsSync8(CLAIM_PUSH_TOKEN_FILE),
+      manualMarkerExists: !!manual,
+      lastSnapshotHash: manual?.lastSnapshotHash ?? null,
+      currentHash,
+      claimCount: pushed.length
+    });
+  } catch {
+    return false;
+  }
+}
 async function runBackgroundClaimPush({ now = Date.now() } = {}) {
   try {
-    if (!existsSync9(CLAIM_PUSH_AUTO_MARKER) || !existsSync9(CLAIM_PUSH_TOKEN_FILE)) return;
+    if (!existsSync8(CLAIM_PUSH_AUTO_MARKER) || !existsSync8(CLAIM_PUSH_TOKEN_FILE)) return;
     const marker = readAutoMarker();
     if (!marker || !marker.autoConsentedAt) return;
     const { listClaims: listClaims2, toPushedClaim: toPushedClaim2, PUSHED_CLAIM_FIELDS: PUSHED_CLAIM_FIELDS2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -9729,17 +9648,149 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
   } catch {
   }
 }
-var TERMINALHIRE_DIR8, CLAIM_PUSH_AUTO_MARKER, CLAIM_PUSH_TOKEN_FILE, CLAIM_SYNC_BASE, AUTO_CONSENT_VERSION, AUTO_PUSH_THROTTLE_MS;
+var TERMINALHIRE_DIR8, CLAIM_PUSH_AUTO_MARKER, CLAIM_PUSH_TOKEN_FILE, CLAIM_PUSH_MANUAL_MARKER, CLAIM_SYNC_BASE, AUTO_CONSENT_VERSION, AUTO_PUSH_THROTTLE_MS;
 var init_claim_push_bg = __esm({
   "bin/claim-push-bg.js"() {
     "use strict";
     init_github_auth();
-    TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join15(homedir12(), ".terminalhire");
-    CLAIM_PUSH_AUTO_MARKER = join15(TERMINALHIRE_DIR8, "claim-push-auto.json");
-    CLAIM_PUSH_TOKEN_FILE = join15(TERMINALHIRE_DIR8, "claim-push-token.enc");
+    TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join14(homedir11(), ".terminalhire");
+    CLAIM_PUSH_AUTO_MARKER = join14(TERMINALHIRE_DIR8, "claim-push-auto.json");
+    CLAIM_PUSH_TOKEN_FILE = join14(TERMINALHIRE_DIR8, "claim-push-token.enc");
+    CLAIM_PUSH_MANUAL_MARKER = join14(TERMINALHIRE_DIR8, "claim-push.json");
     CLAIM_SYNC_BASE = "https://terminalhire.com";
     AUTO_CONSENT_VERSION = 2;
     AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
+  }
+});
+
+// bin/version-nudge.js
+var version_nudge_exports = {};
+__export(version_nudge_exports, {
+  buildStaleNudge: () => buildStaleNudge,
+  cachedStaleNudge: () => cachedStaleNudge,
+  compareVersions: () => compareVersions,
+  emitInteractiveNudge: () => emitInteractiveNudge,
+  parseVersion: () => parseVersion,
+  readLatestVersionFromCache: () => readLatestVersionFromCache,
+  readLocalVersion: () => readLocalVersion,
+  recordNag: () => recordNag,
+  shouldNag: () => shouldNag
+});
+import { readFileSync as readFileSync14, writeFileSync as writeFileSync12, mkdirSync as mkdirSync12, existsSync as existsSync9 } from "fs";
+import { join as join15 } from "path";
+import { homedir as homedir12 } from "os";
+import { fileURLToPath as fileURLToPath2 } from "url";
+function stateDir() {
+  return process.env.TERMINALHIRE_DIR || join15(homedir12(), ".terminalhire");
+}
+function indexCacheFile() {
+  return join15(stateDir(), "index-cache.json");
+}
+function nudgeStateFile() {
+  return join15(stateDir(), "version-nudge.json");
+}
+function parseVersion(v) {
+  if (typeof v !== "string") return null;
+  const m = v.trim().replace(/^v/, "").match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+function compareVersions(a, b) {
+  const pa = parseVersion(a);
+  const pb = parseVersion(b);
+  if (!pa || !pb) return null;
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] < pb[i]) return -1;
+    if (pa[i] > pb[i]) return 1;
+  }
+  return 0;
+}
+function buildStaleNudge(local, latest) {
+  if (compareVersions(local, latest) !== -1) return null;
+  return `your terminalhire CLI is behind (${local} \u2192 ${latest}) \u2014 npm i -g terminalhire@latest`;
+}
+function readLocalVersion() {
+  try {
+    const candidates = [
+      join15(__dirname, "..", "..", "package.json"),
+      join15(__dirname, "..", "package.json")
+    ];
+    for (const p of candidates) {
+      if (existsSync9(p)) {
+        const pkg = JSON.parse(readFileSync14(p, "utf8"));
+        if (pkg.version) return pkg.version;
+      }
+    }
+  } catch {
+  }
+  return null;
+}
+function readLatestVersionFromCache() {
+  try {
+    const cache = JSON.parse(readFileSync14(indexCacheFile(), "utf8"));
+    const v = cache?.index?.cliVersion;
+    return typeof v === "string" ? v : null;
+  } catch {
+    return null;
+  }
+}
+function cachedStaleNudge(localVersion) {
+  const local = localVersion ?? readLocalVersion();
+  if (!local) return null;
+  return buildStaleNudge(local, readLatestVersionFromCache());
+}
+function shouldNag(now = Date.now()) {
+  try {
+    const state = JSON.parse(readFileSync14(nudgeStateFile(), "utf8"));
+    const last = state?.lastNaggedAt;
+    if (typeof last !== "number" || !Number.isFinite(last)) return true;
+    return now - last >= NAG_INTERVAL_MS;
+  } catch {
+    return true;
+  }
+}
+function recordNag(now = Date.now()) {
+  try {
+    mkdirSync12(stateDir(), { recursive: true });
+    writeFileSync12(nudgeStateFile(), JSON.stringify({ lastNaggedAt: now }) + "\n", "utf8");
+  } catch {
+  }
+}
+function emitInteractiveNudge({ now = Date.now(), stream = process.stderr, localVersion } = {}) {
+  try {
+    const nudge = cachedStaleNudge(localVersion);
+    if (!nudge) return false;
+    if (!shouldNag(now)) return false;
+    stream.write(`${nudge}
+`);
+    recordNag(now);
+    return true;
+  } catch {
+    return false;
+  }
+}
+var __dirname, NAG_INTERVAL_MS;
+var init_version_nudge = __esm({
+  "bin/version-nudge.js"() {
+    "use strict";
+    __dirname = fileURLToPath2(new URL(".", import.meta.url));
+    NAG_INTERVAL_MS = 24 * 60 * 60 * 1e3;
+  }
+});
+
+// bin/beta-nudge.js
+var beta_nudge_exports = {};
+__export(beta_nudge_exports, {
+  buildBetaNudge: () => buildBetaNudge
+});
+function buildBetaNudge(betaOpen, betaOptIn) {
+  if (betaOpen !== true) return null;
+  if (betaOptIn === true) return null;
+  return "\u{1F9EA} Beta's open \u2014 run `terminalhire beta` to join as a Founding Contributor";
+}
+var init_beta_nudge = __esm({
+  "bin/beta-nudge.js"() {
+    "use strict";
   }
 });
 
@@ -10218,6 +10269,12 @@ async function run() {
       topMatches = filterFreshMatches2(topMatches, seenHistory);
     } catch {
     }
+    let unpushedClaims = false;
+    try {
+      const { shouldNudgeUnpushed: shouldNudgeUnpushed2 } = await Promise.resolve().then(() => (init_claim_push_bg(), claim_push_bg_exports));
+      unpushedClaims = await shouldNudgeUnpushed2();
+    } catch {
+    }
     const cacheEntry = {
       index,
       matchCount,
@@ -10226,6 +10283,7 @@ async function run() {
       incomingPending,
       unreadChat,
       sessionStale,
+      unpushedClaims,
       // In-process-only despite being persisted: the render pass receives it as
       // a function argument below. A future cache READER must not gate on this
       // field without re-checking isContributeEnabled/isContributePrompted at
@@ -10264,6 +10322,7 @@ async function run() {
         incomingPending,
         sessionStale,
         contributeNudge,
+        unpushedClaims,
         baseUrl: API_URL2,
         seenHistory,
         widen,
