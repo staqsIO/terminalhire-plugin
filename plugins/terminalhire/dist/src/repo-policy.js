@@ -2,6 +2,7 @@
 var GH_API = "https://api.github.com";
 var GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
 var MAX_REQUESTS = 4;
+var POLICY_RULESET_VERSION = 2;
 var AI_SIGNAL_PATTERNS = [
   { label: "AI", re: /\bAI\b/i },
   { label: "artificial intelligence", re: /artificial intelligence/i },
@@ -13,10 +14,41 @@ var AI_SIGNAL_PATTERNS = [
   { label: "generative", re: /\bgenerative\b/i },
   { label: "machine-generated", re: /machine[\s-]generated/i }
 ];
+var AI_TERM = "(?:ai|llms?|generative(?:\\s+ai)?|artificial intelligence|language models?|copilot|chatgpt|claude|machine[\\s-]generated)";
+var PROHIBITED_PATTERNS = [
+  new RegExp(`prohibit\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
+  /did not write the code yourself/i,
+  new RegExp(`(?:not|never|don'?t|won'?t)\\s+accept\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
+  new RegExp(`\\bno\\s+${AI_TERM}[^.\\n]{0,40}\\b(?:prs?|pull requests?|contributions?|code|patch(?:es)?|commits?|submissions?)\\b`, "i"),
+  new RegExp(
+    `\\b${AI_TERM}[^.\\n]{0,60}\\b(?:is|are|will be)\\s+(?:\\w+\\s+)?(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
+    "i"
+  )
+];
+var DISCLOSURE_PATTERNS = [
+  new RegExp(`disclos\\w+[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
+  new RegExp(`\\b${AI_TERM}[^.\\n]{0,60}disclos`, "i"),
+  new RegExp(`\\b${AI_TERM}[\\s-]assist\\w*[^.\\n]{0,60}\\b(?:must|should|required?)\\b`, "i"),
+  // PR-template checkbox, e.g. "- [ ] I used AI tools and have reviewed the output"
+  new RegExp(`\\[ \\][^\\n]{0,80}\\b${AI_TERM}`, "i")
+];
+var REQUIREMENT_PATTERNS = [
+  // `/take` bot first: its docs usually also say "assign", and the bot is the
+  // more specific expectation (post exactly `/take`, not a prose request).
+  { kind: "take-bot", re: /(?:^|[\s`"'(])\/take\b/m },
+  { kind: "assignment-required", re: /(?:request|ask|wait)[^.\n]{0,40}\bassign/i },
+  { kind: "assignment-required", re: /\bassigned before\b/i },
+  { kind: "assignment-required", re: /\bself[\s-]assign/i },
+  { kind: "assignment-required", re: /do not (?:open|submit)[^.\n]{0,40}\b(?:prs?|pull requests?)\b/i },
+  { kind: "cla-required", re: /\bCLA\b/ },
+  { kind: "cla-required", re: /contributor licen[cs]e agreement/i },
+  { kind: "discussion-first", re: /open an issue (?:first|before)/i },
+  { kind: "discussion-first", re: /discuss\w*[^.\n]{0,40}\bbefore\b/i }
+];
 var CANDIDATE_GROUPS = [
   ["CONTRIBUTING.md", ".github/CONTRIBUTING.md", "docs/CONTRIBUTING.md"],
-  [".github/PULL_REQUEST_TEMPLATE.md", "PULL_REQUEST_TEMPLATE.md"],
-  ["AGENTS.md"]
+  ["AGENTS.md", "AGENTS.MD"],
+  [".github/PULL_REQUEST_TEMPLATE.md", "PULL_REQUEST_TEMPLATE.md"]
 ];
 async function fetchContentsFile(fetchImpl, repoFullName, path) {
   try {
@@ -37,23 +69,55 @@ async function fetchContentsFile(fetchImpl, repoFullName, path) {
     return { ok: false, missing: false, content: null };
   }
 }
-function findHits(file, content) {
-  const lines = content.split("\n");
+function classifyLine(line) {
+  if (PROHIBITED_PATTERNS.some((re) => re.test(line))) return "prohibited";
+  if (DISCLOSURE_PATTERNS.some((re) => re.test(line))) return "disclosure-required";
+  if (AI_SIGNAL_PATTERNS.some((p) => p.re.test(line))) return "ai-mentioned";
+  return null;
+}
+var VERDICT_SEVERITY = {
+  "ai-mentioned": 1,
+  "disclosure-required": 2,
+  prohibited: 3
+};
+function sanitizeExcerpt(text) {
+  return text.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, "");
+}
+function excerptAround(lines, i) {
+  const start = Math.max(0, i - 2);
+  const end = Math.min(lines.length, i + 3);
+  return sanitizeExcerpt(lines.slice(start, end).join("\n"));
+}
+function auditContent(files) {
   const hits = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!AI_SIGNAL_PATTERNS.some((p) => p.re.test(line))) continue;
-    const start = Math.max(0, i - 2);
-    const end = Math.min(lines.length, i + 3);
-    hits.push({ file, excerpt: lines.slice(start, end).join("\n") });
+  const requirements = [];
+  const seenKinds = /* @__PURE__ */ new Set();
+  for (const { file, content } of files) {
+    const lines = content.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const rule = classifyLine(lines[i]);
+      if (rule) hits.push({ file, excerpt: excerptAround(lines, i), rule });
+      for (const { kind, re } of REQUIREMENT_PATTERNS) {
+        if (seenKinds.has(kind) || !re.test(lines[i])) continue;
+        seenKinds.add(kind);
+        requirements.push({ kind, file, excerpt: excerptAround(lines, i) });
+      }
+    }
   }
-  return hits;
+  let verdict = "clean";
+  for (const h of hits) {
+    if (verdict === "clean" || VERDICT_SEVERITY[h.rule] > VERDICT_SEVERITY[verdict]) {
+      verdict = h.rule;
+    }
+  }
+  const assignment = seenKinds.has("take-bot") ? "take-bot" : seenKinds.has("assignment-required") ? "required" : "none";
+  return { hits, requirements, verdict, assignment };
 }
 async function checkRepoPolicy(repoFullName, opts = {}) {
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   let requestsUsed = 0;
   let hadError = false;
-  const hits = [];
+  const files = [];
   outer: for (const group of CANDIDATE_GROUPS) {
     for (const path of group) {
       if (requestsUsed >= MAX_REQUESTS) break outer;
@@ -64,14 +128,21 @@ async function checkRepoPolicy(repoFullName, opts = {}) {
         continue;
       }
       if (outcome.missing) continue;
-      if (outcome.content) hits.push(...findHits(path, outcome.content));
+      if (outcome.content) files.push({ file: path, content: outcome.content });
       break;
     }
   }
-  if (hits.length > 0) return { status: "flagged", hits };
-  if (hadError) return { status: "unavailable", hits: [] };
-  return { status: "clean", hits: [] };
+  const { hits, requirements, verdict, assignment } = auditContent(files);
+  if (hits.length > 0) {
+    return { status: "flagged", verdict, hits, requirements, assignment, rulesetVersion: POLICY_RULESET_VERSION };
+  }
+  if (hadError) {
+    return { status: "unavailable", verdict: "unavailable", hits: [], requirements, assignment, rulesetVersion: POLICY_RULESET_VERSION };
+  }
+  return { status: "clean", verdict: "clean", hits: [], requirements, assignment, rulesetVersion: POLICY_RULESET_VERSION };
 }
 export {
+  POLICY_RULESET_VERSION,
+  auditContent,
   checkRepoPolicy
 };

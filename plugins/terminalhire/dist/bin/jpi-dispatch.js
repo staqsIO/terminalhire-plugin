@@ -305,6 +305,315 @@ var init_version_nudge = __esm({
   }
 });
 
+// src/open-url.js
+var open_url_exports = {};
+__export(open_url_exports, {
+  openInBrowser: () => openInBrowser
+});
+import { spawn } from "child_process";
+function openInBrowser(url) {
+  let cmd;
+  let args5;
+  if (process.platform === "darwin") {
+    cmd = "open";
+    args5 = [url];
+  } else if (process.platform === "win32") {
+    cmd = "cmd";
+    args5 = ["/c", "start", "", url];
+  } else {
+    cmd = "xdg-open";
+    args5 = [url];
+  }
+  try {
+    const child = spawn(cmd, args5, { stdio: "ignore", detached: true });
+    child.on("error", () => {
+    });
+    child.unref();
+  } catch {
+  }
+}
+var init_open_url = __esm({
+  "src/open-url.js"() {
+    "use strict";
+  }
+});
+
+// ../../node_modules/keytar/build/Release/keytar.node
+var keytar_default;
+var init_keytar = __esm({
+  "../../node_modules/keytar/build/Release/keytar.node"() {
+    keytar_default = "../keytar-KOAAH267.node";
+  }
+});
+
+// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a0bc554500876cd51/node_modules/keytar/build/Release/keytar.node
+var require_keytar = __commonJS({
+  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a0bc554500876cd51/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+    "use strict";
+    init_keytar();
+    try {
+      module.exports = __require(keytar_default);
+    } catch {
+    }
+  }
+});
+
+// ../../node_modules/keytar/lib/keytar.js
+var require_keytar2 = __commonJS({
+  "../../node_modules/keytar/lib/keytar.js"(exports, module) {
+    "use strict";
+    var keytar = require_keytar();
+    function checkRequired(val, name) {
+      if (!val || val.length <= 0) {
+        throw new Error(name + " is required.");
+      }
+    }
+    module.exports = {
+      getPassword: function(service, account) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        return keytar.getPassword(service, account);
+      },
+      setPassword: function(service, account, password) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        checkRequired(password, "Password");
+        return keytar.setPassword(service, account, password);
+      },
+      deletePassword: function(service, account) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        return keytar.deletePassword(service, account);
+      },
+      findPassword: function(service) {
+        checkRequired(service, "Service");
+        return keytar.findPassword(service);
+      },
+      findCredentials: function(service) {
+        checkRequired(service, "Service");
+        return keytar.findCredentials(service);
+      }
+    };
+  }
+});
+
+// src/github-auth.ts
+var github_auth_exports = {};
+__export(github_auth_exports, {
+  GITHUB_SCOPE: () => GITHUB_SCOPE,
+  decrypt: () => decrypt,
+  deleteGitHubToken: () => deleteGitHubToken,
+  encrypt: () => encrypt,
+  hasGitHubToken: () => hasGitHubToken,
+  loadKey: () => loadKey,
+  readGitHubToken: () => readGitHubToken,
+  resolveStoredLogin: () => resolveStoredLogin,
+  runDeviceFlow: () => runDeviceFlow,
+  writeGitHubToken: () => writeGitHubToken
+});
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes
+} from "crypto";
+import {
+  readFileSync as readFileSync4,
+  writeFileSync as writeFileSync4,
+  mkdirSync as mkdirSync4,
+  existsSync as existsSync4,
+  rmSync as rmSync2
+} from "fs";
+import { join as join4 } from "path";
+import { homedir as homedir4 } from "os";
+async function loadKey() {
+  try {
+    const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
+    const stored = await kt.getPassword("terminalhire", "profile-key");
+    if (stored) return Buffer.from(stored, "hex");
+    const key2 = randomBytes(KEY_BYTES);
+    await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
+    return key2;
+  } catch {
+  }
+  mkdirSync4(TERMINALHIRE_DIR2, { recursive: true });
+  if (existsSync4(KEY_FILE)) {
+    return Buffer.from(readFileSync4(KEY_FILE, "utf8").trim(), "hex");
+  }
+  const key = randomBytes(KEY_BYTES);
+  writeFileSync4(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  return key;
+}
+function encrypt(plaintext, key) {
+  const iv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv(ALGO, key, iv);
+  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return { iv: iv.toString("hex"), tag: tag.toString("hex"), ciphertext: ct.toString("hex") };
+}
+function decrypt(blob, key) {
+  const decipher = createDecipheriv(ALGO, key, Buffer.from(blob.iv, "hex"));
+  decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
+  const plain = Buffer.concat([
+    decipher.update(Buffer.from(blob.ciphertext, "hex")),
+    decipher.final()
+  ]);
+  return plain.toString("utf8");
+}
+async function readGitHubToken() {
+  if (!existsSync4(TOKEN_FILE)) return void 0;
+  try {
+    const key = await loadKey();
+    const raw = readFileSync4(TOKEN_FILE, "utf8");
+    const blob = JSON.parse(raw);
+    return decrypt(blob, key);
+  } catch {
+    return void 0;
+  }
+}
+async function writeGitHubToken(token) {
+  mkdirSync4(TERMINALHIRE_DIR2, { recursive: true });
+  const key = await loadKey();
+  const blob = encrypt(token, key);
+  writeFileSync4(TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+}
+async function deleteGitHubToken() {
+  try {
+    rmSync2(TOKEN_FILE);
+  } catch {
+  }
+}
+async function hasGitHubToken() {
+  return existsSync4(TOKEN_FILE);
+}
+async function runDeviceFlow() {
+  if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
+    console.log("\n[mock] GitHub OAuth skipped (JPI_GITHUB_MOCK=1)");
+    console.log(`[mock] Using fixture profile: ${MOCK_LOGIN}`);
+    await writeGitHubToken(MOCK_TOKEN);
+    return MOCK_LOGIN;
+  }
+  const clientId = process.env["GITHUB_DEVICE_CLIENT_ID"] ?? process.env["GITHUB_CLIENT_ID"] ?? BAKED_IN_CLIENT_ID;
+  if (clientId === "Iv1.PLACEHOLDER_REGISTER_YOUR_APP") {
+    console.warn("\nWarning: GITHUB_CLIENT_ID env var looks like a placeholder.");
+    console.warn("Remove it to use the baked-in client ID, or set it to your own OAuth App Client ID.\n");
+  }
+  const deviceRes = await fetch(DEVICE_CODE_URL, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({ client_id: clientId, scope: GITHUB_SCOPE }).toString(),
+    signal: AbortSignal.timeout(15e3)
+  });
+  if (!deviceRes.ok) {
+    throw new Error(`GitHub device code request failed: HTTP ${deviceRes.status}`);
+  }
+  const deviceData = await deviceRes.json();
+  console.log("");
+  console.log("  GitHub sign-in (device flow)");
+  console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+  console.log(`  1. Open: ${deviceData.verification_uri}`);
+  console.log(`  2. Enter code: ${deviceData.user_code}`);
+  console.log('  3. Authorize "Terminalhire" (scope: read:user \u2014 public data only)');
+  console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+  console.log("  Waiting for authorization...");
+  console.log("");
+  let intervalSecs = deviceData.interval ?? 5;
+  const expiresAt = Date.now() + (deviceData.expires_in ?? 900) * 1e3;
+  const clientSecret = process.env["GITHUB_CLIENT_SECRET"];
+  while (Date.now() < expiresAt) {
+    await sleep(intervalSecs * 1e3);
+    const body = new URLSearchParams({
+      client_id: clientId,
+      device_code: deviceData.device_code,
+      grant_type: "urn:ietf:params:oauth:grant-type:device_code"
+    });
+    if (clientSecret) body.set("client_secret", clientSecret);
+    const tokenRes = await fetch(ACCESS_TOKEN_URL, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: body.toString(),
+      signal: AbortSignal.timeout(15e3)
+    });
+    if (!tokenRes.ok) {
+      throw new Error(`GitHub token poll failed: HTTP ${tokenRes.status}`);
+    }
+    const tokenData = await tokenRes.json();
+    if (tokenData.access_token) {
+      await writeGitHubToken(tokenData.access_token);
+      const login = await fetchAuthedLogin(tokenData.access_token);
+      console.log(`  Authorized as: ${login}`);
+      return login;
+    }
+    if (tokenData.error === "authorization_pending") {
+      continue;
+    }
+    if (tokenData.error === "slow_down") {
+      intervalSecs = (tokenData.interval ?? intervalSecs) + 5;
+      continue;
+    }
+    if (tokenData.error === "expired_token") {
+      throw new Error("GitHub device code expired. Please run `terminalhire login` again.");
+    }
+    if (tokenData.error === "access_denied") {
+      throw new Error("GitHub authorization was denied by the user.");
+    }
+    throw new Error(
+      `GitHub device flow error: ${tokenData.error ?? "unknown"} \u2014 ${tokenData.error_description ?? ""}`
+    );
+  }
+  throw new Error("GitHub device code expired before authorization. Please run `terminalhire login` again.");
+}
+async function fetchAuthedLogin(token) {
+  if (token === MOCK_TOKEN) return MOCK_LOGIN;
+  const res = await fetch("https://api.github.com/user", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28"
+    },
+    signal: AbortSignal.timeout(1e4)
+  });
+  if (!res.ok) throw new Error(`GitHub /user: HTTP ${res.status}`);
+  const data = await res.json();
+  return data.login;
+}
+async function resolveStoredLogin() {
+  if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") return MOCK_LOGIN;
+  const token = await readGitHubToken();
+  if (!token) return void 0;
+  try {
+    return await fetchAuthedLogin(token);
+  } catch {
+    return void 0;
+  }
+}
+function sleep(ms) {
+  return new Promise((resolve2) => setTimeout(resolve2, ms));
+}
+var TERMINALHIRE_DIR2, TOKEN_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, GITHUB_SCOPE, DEVICE_CODE_URL, ACCESS_TOKEN_URL, BAKED_IN_CLIENT_ID, MOCK_TOKEN, MOCK_LOGIN;
+var init_github_auth = __esm({
+  "src/github-auth.ts"() {
+    "use strict";
+    TERMINALHIRE_DIR2 = join4(homedir4(), ".terminalhire");
+    TOKEN_FILE = join4(TERMINALHIRE_DIR2, "github-token.enc");
+    KEY_FILE = join4(TERMINALHIRE_DIR2, "key");
+    ALGO = "aes-256-gcm";
+    KEY_BYTES = 32;
+    IV_BYTES = 12;
+    GITHUB_SCOPE = "read:user";
+    DEVICE_CODE_URL = "https://github.com/login/device/code";
+    ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
+    BAKED_IN_CLIENT_ID = "Ov23lignE2ZSBe0J3a6B";
+    MOCK_TOKEN = "mock-github-token-jpi-dev";
+    MOCK_LOGIN = "janedev";
+  }
+});
+
 // ../../packages/core/src/types.ts
 function isBounty(job) {
   return job.source === "bounty" && job.bounty != null;
@@ -1973,7 +2282,152 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
     fetchedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
-var TRACTION_TOP_N, MAINTAINER_ENRICH_MAX, CANDIDATE_PR_PAGE, MAX_ENRICH_PRS, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE, RECEPTIVITY_RECENCY_DAYS, RECEPTIVITY_RECENCY_FLOOR, GITHUB_GRAPHQL_URL;
+function isLifecycleBot(actor) {
+  if (!actor) return false;
+  if (actor.type === "Bot") return true;
+  const login = String(actor.login ?? "");
+  if (/\[bot\]$/i.test(login)) return true;
+  return LIFECYCLE_BOT_LOGINS.has(login.toLowerCase());
+}
+async function fetchPRLifecycle(prUrl, token, signal, governor) {
+  const ref = parseGitHubRef(prUrl);
+  if (!ref || ref.kind !== "pull") return null;
+  const { owner, repo, number: number3 } = ref;
+  const sig = signal ?? AbortSignal.timeout(1e4);
+  const gov = makeScoringGovernor(governor);
+  if (gov.tripped() || gov.budgetExhausted()) return null;
+  let pr;
+  try {
+    pr = await ghFetch(`/repos/${owner}/${repo}/pulls/${number3}`, token, sig);
+  } catch {
+    return null;
+  }
+  const authorId = pr.user?.id ?? null;
+  const events = [];
+  const complete = { reviews: false, comments: false, commits: false };
+  if (pr.created_at) {
+    events.push({
+      event_type: "pr_opened",
+      source_id: `pr-${number3}`,
+      actor_id: authorId ?? 0,
+      actor_assoc: "",
+      is_author: true,
+      is_bot: false,
+      occurred_at: pr.created_at
+    });
+  }
+  if (!gov.tripped() && !gov.budgetExhausted()) {
+    try {
+      const reviews = await ghFetch(
+        `/repos/${owner}/${repo}/pulls/${number3}/reviews?per_page=100`,
+        token,
+        sig
+      );
+      for (const r of reviews) {
+        if (r.state === "PENDING" || !r.submitted_at) continue;
+        const aid = r.user?.id ?? 0;
+        events.push({
+          event_type: "review_submitted",
+          source_id: `review-${r.id}`,
+          actor_id: aid,
+          actor_assoc: r.author_association ?? "",
+          is_author: authorId != null && aid === authorId,
+          is_bot: isLifecycleBot(r.user),
+          occurred_at: r.submitted_at
+        });
+      }
+      complete.reviews = true;
+    } catch {
+      complete.reviews = false;
+    }
+  }
+  if (!gov.tripped() && !gov.budgetExhausted()) {
+    try {
+      const comments = await ghFetch(
+        `/repos/${owner}/${repo}/issues/${number3}/comments?per_page=100`,
+        token,
+        sig
+      );
+      for (const c of comments) {
+        if (!c.created_at) continue;
+        const aid = c.user?.id ?? 0;
+        events.push({
+          event_type: "issue_comment",
+          source_id: `comment-${c.id}`,
+          actor_id: aid,
+          actor_assoc: c.author_association ?? "",
+          is_author: authorId != null && aid === authorId,
+          is_bot: isLifecycleBot(c.user),
+          occurred_at: c.created_at
+        });
+      }
+      complete.comments = true;
+    } catch {
+      complete.comments = false;
+    }
+  }
+  if (!gov.tripped() && !gov.budgetExhausted()) {
+    try {
+      const commits = await ghFetch(
+        `/repos/${owner}/${repo}/pulls/${number3}/commits?per_page=100`,
+        token,
+        sig
+      );
+      for (const cm of commits) {
+        const when = cm.commit?.author?.date ?? null;
+        if (!when) continue;
+        const aid = cm.author?.id ?? authorId ?? 0;
+        events.push({
+          event_type: "commit_pushed",
+          source_id: `commit-${cm.sha}`,
+          actor_id: aid,
+          actor_assoc: "",
+          is_author: authorId != null && aid === authorId,
+          is_bot: isLifecycleBot(cm.author),
+          occurred_at: when
+        });
+      }
+      complete.commits = true;
+    } catch {
+      complete.commits = false;
+    }
+  }
+  if (pr.merged && pr.merged_at) {
+    events.push({
+      event_type: "pr_merged",
+      source_id: `merged-${number3}`,
+      actor_id: pr.merged_by?.id ?? 0,
+      actor_assoc: "",
+      is_author: authorId != null && pr.merged_by?.id === authorId,
+      // A bot merger (mergify[bot], a merge queue, etc.) must NOT count as an
+      // independent human counterparty. Classify it like every other actor (§4b V4).
+      is_bot: isLifecycleBot(pr.merged_by),
+      occurred_at: pr.merged_at
+    });
+  } else if (pr.state === "closed" && pr.closed_at) {
+    events.push({
+      event_type: "pr_closed_unmerged",
+      source_id: `closed-${number3}`,
+      actor_id: 0,
+      actor_assoc: "",
+      is_author: false,
+      is_bot: false,
+      occurred_at: pr.closed_at
+    });
+  }
+  return {
+    prNumber: number3,
+    prUrl: pr.html_url,
+    openedAt: pr.created_at ?? null,
+    merged: pr.merged === true,
+    mergedAt: pr.merged_at ?? null,
+    closedUnmergedAt: !pr.merged && pr.state === "closed" ? pr.closed_at ?? null : null,
+    authorId,
+    events,
+    complete
+  };
+}
+var TRACTION_TOP_N, MAINTAINER_ENRICH_MAX, CANDIDATE_PR_PAGE, MAX_ENRICH_PRS, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE, RECEPTIVITY_RECENCY_DAYS, RECEPTIVITY_RECENCY_FLOOR, GITHUB_GRAPHQL_URL, LIFECYCLE_BOT_LOGINS;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
@@ -1993,6 +2447,20 @@ var init_github = __esm({
     RECEPTIVITY_RECENCY_DAYS = 180;
     RECEPTIVITY_RECENCY_FLOOR = 0.1;
     GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
+    LIFECYCLE_BOT_LOGINS = /* @__PURE__ */ new Set([
+      "mergify",
+      "mergify[bot]",
+      "bors",
+      "bors[bot]",
+      "kodiakhq",
+      "kodiakhq[bot]",
+      "dependabot",
+      "dependabot[bot]",
+      "renovate",
+      "renovate[bot]",
+      "github-actions",
+      "github-actions[bot]"
+    ]);
   }
 });
 
@@ -4153,21 +4621,21 @@ var init_contributions = __esm({
 });
 
 // ../../packages/core/src/partners.ts
-import { readFileSync as readFileSync4 } from "fs";
-import { join as join4 } from "path";
+import { readFileSync as readFileSync5 } from "fs";
+import { join as join5 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 function resolveDataPath() {
   try {
     const dir = fileURLToPath2(new URL("../../../data", import.meta.url));
-    return join4(dir, "partner-roles.json");
+    return join5(dir, "partner-roles.json");
   } catch {
-    return join4(process.cwd(), "data", "partner-roles.json");
+    return join5(process.cwd(), "data", "partner-roles.json");
   }
 }
 function loadPartnerRoles() {
   const filePath = resolveDataPath();
   try {
-    const raw = readFileSync4(filePath, "utf-8");
+    const raw = readFileSync5(filePath, "utf-8");
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
       console.warn("[partners] partner-roles.json is not an array \u2014 skipping");
@@ -4769,7 +5237,7 @@ function createHasher(hashCons) {
   hashC.create = () => hashCons();
   return hashC;
 }
-function randomBytes(bytesLength = 32) {
+function randomBytes2(bytesLength = 32) {
   if (crypto && typeof crypto.getRandomValues === "function") {
     return crypto.getRandomValues(new Uint8Array(bytesLength));
   }
@@ -6194,7 +6662,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   });
   const { prehash } = eddsaOpts;
   const { BASE, Fp: Fp2, Fn: Fn2 } = Point;
-  const randomBytes6 = eddsaOpts.randomBytes || randomBytes;
+  const randomBytes6 = eddsaOpts.randomBytes || randomBytes2;
   const adjustScalarBytes2 = eddsaOpts.adjustScalarBytes || ((bytes) => bytes);
   const domain = eddsaOpts.domain || ((data, ctx, phflag) => {
     _abool2(phflag, "phflag");
@@ -6472,7 +6940,7 @@ function montgomery(curveDef) {
   const is25519 = type === "x25519";
   if (!is25519 && type !== "x448")
     throw new Error("invalid type");
-  const randomBytes_ = rand || randomBytes;
+  const randomBytes_ = rand || randomBytes2;
   const montgomeryBits = is25519 ? 255 : 448;
   const fieldLen = is25519 ? 32 : 56;
   const Gu = is25519 ? BigInt(9) : BigInt(5);
@@ -7611,7 +8079,7 @@ var init_chacha = __esm({
 });
 
 // ../../packages/core/src/chatCrypto.ts
-import { hkdfSync, createHash, randomBytes as randomBytes2 } from "crypto";
+import { hkdfSync, createHash, randomBytes as randomBytes3 } from "crypto";
 function bytesToHex2(bytes) {
   return Buffer.from(bytes).toString("hex");
 }
@@ -7640,7 +8108,7 @@ function deriveSharedKey(myPrivateKey, peerPublicKey) {
 }
 function encryptMessage(plaintext, myPrivateKey, peerPublicKey) {
   const key = deriveSharedKey(myPrivateKey, peerPublicKey);
-  const nonce = new Uint8Array(randomBytes2(NONCE_BYTES));
+  const nonce = new Uint8Array(randomBytes3(NONCE_BYTES));
   const cipher = xchacha20poly1305(key, nonce);
   const ct = cipher.encrypt(new Uint8Array(Buffer.from(plaintext, "utf8")));
   return { ciphertext: bytesToB64(ct), nonce: bytesToB64(nonce) };
@@ -8366,6 +8834,7 @@ __export(src_exports, {
   fetchGitHubProfile: () => fetchGitHubProfile,
   fetchOpenExternalPRs: () => fetchOpenExternalPRs,
   fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
+  fetchPRLifecycle: () => fetchPRLifecycle,
   fetchPRScoringFacts: () => fetchPRScoringFacts,
   fetchRepoRecency: () => fetchRepoRecency,
   fetchRepoReceptivity: () => fetchRepoReceptivity,
@@ -8453,437 +8922,6 @@ var init_src = __esm({
   }
 });
 
-// bin/job-status-store.js
-var job_status_store_exports = {};
-__export(job_status_store_exports, {
-  markClicked: () => markClicked,
-  markStatus: () => markStatus,
-  readStatusMap: () => readStatusMap,
-  statusFilePath: () => statusFilePath
-});
-import {
-  readFileSync as readFileSync5,
-  writeFileSync as writeFileSync4,
-  renameSync,
-  mkdirSync as mkdirSync4,
-  existsSync as existsSync4,
-  copyFileSync,
-  openSync,
-  closeSync,
-  unlinkSync
-} from "fs";
-import { join as join5, dirname } from "path";
-import { homedir as homedir4 } from "os";
-function statusFilePath() {
-  return STATUS_FILE;
-}
-function atomicWriteJson(path, obj) {
-  mkdirSync4(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync4(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
-  renameSync(tmp, path);
-}
-function sleepMs(ms) {
-  try {
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-  } catch {
-    const end = Date.now() + ms;
-    while (Date.now() < end) {
-    }
-  }
-}
-function withLock(fn) {
-  const deadline = Date.now() + 2e3;
-  for (; ; ) {
-    let fd;
-    try {
-      mkdirSync4(dirname(LOCK_FILE), { recursive: true });
-      fd = openSync(LOCK_FILE, "wx");
-    } catch (err) {
-      if (err && err.code === "EEXIST") {
-        if (Date.now() > deadline) {
-          try {
-            unlinkSync(LOCK_FILE);
-          } catch {
-          }
-          continue;
-        }
-        sleepMs(5);
-        continue;
-      }
-      throw err;
-    }
-    try {
-      return fn();
-    } finally {
-      try {
-        closeSync(fd);
-      } catch {
-      }
-      try {
-        unlinkSync(LOCK_FILE);
-      } catch {
-      }
-    }
-  }
-}
-function readStatusMap() {
-  if (!existsSync4(STATUS_FILE)) return {};
-  let raw;
-  try {
-    raw = readFileSync5(STATUS_FILE, "utf8");
-  } catch {
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
-    throw new Error("status store is not an object");
-  } catch {
-    try {
-      copyFileSync(STATUS_FILE, BAK_FILE);
-    } catch {
-    }
-    return {};
-  }
-}
-function markStatus(id, status) {
-  return withLock(() => {
-    const current = readStatusMap();
-    const next = status === "claimed" ? { ...current, [id]: { ...current[id], status: "claimed", markedAt: (/* @__PURE__ */ new Date()).toISOString() } } : setStatus(current, id, status);
-    atomicWriteJson(STATUS_FILE, next);
-    return next[id];
-  });
-}
-function markClicked(id) {
-  return withLock(() => {
-    const current = readStatusMap();
-    const next = recordClick(current, id);
-    atomicWriteJson(STATUS_FILE, next);
-    return next[id];
-  });
-}
-var TERMINALHIRE_DIR2, STATUS_FILE, LOCK_FILE, BAK_FILE;
-var init_job_status_store = __esm({
-  "bin/job-status-store.js"() {
-    "use strict";
-    init_src();
-    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
-    STATUS_FILE = join5(TERMINALHIRE_DIR2, "job-status.json");
-    LOCK_FILE = `${STATUS_FILE}.lock`;
-    BAK_FILE = `${STATUS_FILE}.bak`;
-  }
-});
-
-// src/open-url.js
-var open_url_exports = {};
-__export(open_url_exports, {
-  openInBrowser: () => openInBrowser
-});
-import { spawn } from "child_process";
-function openInBrowser(url) {
-  let cmd;
-  let args5;
-  if (process.platform === "darwin") {
-    cmd = "open";
-    args5 = [url];
-  } else if (process.platform === "win32") {
-    cmd = "cmd";
-    args5 = ["/c", "start", "", url];
-  } else {
-    cmd = "xdg-open";
-    args5 = [url];
-  }
-  try {
-    const child = spawn(cmd, args5, { stdio: "ignore", detached: true });
-    child.on("error", () => {
-    });
-    child.unref();
-  } catch {
-  }
-}
-var init_open_url = __esm({
-  "src/open-url.js"() {
-    "use strict";
-  }
-});
-
-// ../../node_modules/keytar/build/Release/keytar.node
-var keytar_default;
-var init_keytar = __esm({
-  "../../node_modules/keytar/build/Release/keytar.node"() {
-    keytar_default = "../keytar-KOAAH267.node";
-  }
-});
-
-// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
-var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
-    "use strict";
-    init_keytar();
-    try {
-      module.exports = __require(keytar_default);
-    } catch {
-    }
-  }
-});
-
-// ../../node_modules/keytar/lib/keytar.js
-var require_keytar2 = __commonJS({
-  "../../node_modules/keytar/lib/keytar.js"(exports, module) {
-    "use strict";
-    var keytar = require_keytar();
-    function checkRequired(val, name) {
-      if (!val || val.length <= 0) {
-        throw new Error(name + " is required.");
-      }
-    }
-    module.exports = {
-      getPassword: function(service, account) {
-        checkRequired(service, "Service");
-        checkRequired(account, "Account");
-        return keytar.getPassword(service, account);
-      },
-      setPassword: function(service, account, password) {
-        checkRequired(service, "Service");
-        checkRequired(account, "Account");
-        checkRequired(password, "Password");
-        return keytar.setPassword(service, account, password);
-      },
-      deletePassword: function(service, account) {
-        checkRequired(service, "Service");
-        checkRequired(account, "Account");
-        return keytar.deletePassword(service, account);
-      },
-      findPassword: function(service) {
-        checkRequired(service, "Service");
-        return keytar.findPassword(service);
-      },
-      findCredentials: function(service) {
-        checkRequired(service, "Service");
-        return keytar.findCredentials(service);
-      }
-    };
-  }
-});
-
-// src/github-auth.ts
-var github_auth_exports = {};
-__export(github_auth_exports, {
-  GITHUB_SCOPE: () => GITHUB_SCOPE,
-  decrypt: () => decrypt,
-  deleteGitHubToken: () => deleteGitHubToken,
-  encrypt: () => encrypt,
-  hasGitHubToken: () => hasGitHubToken,
-  loadKey: () => loadKey,
-  readGitHubToken: () => readGitHubToken,
-  resolveStoredLogin: () => resolveStoredLogin,
-  runDeviceFlow: () => runDeviceFlow,
-  writeGitHubToken: () => writeGitHubToken
-});
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes as randomBytes3
-} from "crypto";
-import {
-  readFileSync as readFileSync6,
-  writeFileSync as writeFileSync5,
-  mkdirSync as mkdirSync5,
-  existsSync as existsSync5,
-  rmSync as rmSync2
-} from "fs";
-import { join as join6 } from "path";
-import { homedir as homedir5 } from "os";
-async function loadKey() {
-  try {
-    const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
-    const stored = await kt.getPassword("terminalhire", "profile-key");
-    if (stored) return Buffer.from(stored, "hex");
-    const key2 = randomBytes3(KEY_BYTES);
-    await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
-    return key2;
-  } catch {
-  }
-  mkdirSync5(TERMINALHIRE_DIR3, { recursive: true });
-  if (existsSync5(KEY_FILE)) {
-    return Buffer.from(readFileSync6(KEY_FILE, "utf8").trim(), "hex");
-  }
-  const key = randomBytes3(KEY_BYTES);
-  writeFileSync5(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
-  return key;
-}
-function encrypt(plaintext, key) {
-  const iv = randomBytes3(IV_BYTES);
-  const cipher = createCipheriv(ALGO, key, iv);
-  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return { iv: iv.toString("hex"), tag: tag.toString("hex"), ciphertext: ct.toString("hex") };
-}
-function decrypt(blob, key) {
-  const decipher = createDecipheriv(ALGO, key, Buffer.from(blob.iv, "hex"));
-  decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
-  const plain = Buffer.concat([
-    decipher.update(Buffer.from(blob.ciphertext, "hex")),
-    decipher.final()
-  ]);
-  return plain.toString("utf8");
-}
-async function readGitHubToken() {
-  if (!existsSync5(TOKEN_FILE)) return void 0;
-  try {
-    const key = await loadKey();
-    const raw = readFileSync6(TOKEN_FILE, "utf8");
-    const blob = JSON.parse(raw);
-    return decrypt(blob, key);
-  } catch {
-    return void 0;
-  }
-}
-async function writeGitHubToken(token) {
-  mkdirSync5(TERMINALHIRE_DIR3, { recursive: true });
-  const key = await loadKey();
-  const blob = encrypt(token, key);
-  writeFileSync5(TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
-}
-async function deleteGitHubToken() {
-  try {
-    rmSync2(TOKEN_FILE);
-  } catch {
-  }
-}
-async function hasGitHubToken() {
-  return existsSync5(TOKEN_FILE);
-}
-async function runDeviceFlow() {
-  if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
-    console.log("\n[mock] GitHub OAuth skipped (JPI_GITHUB_MOCK=1)");
-    console.log(`[mock] Using fixture profile: ${MOCK_LOGIN}`);
-    await writeGitHubToken(MOCK_TOKEN);
-    return MOCK_LOGIN;
-  }
-  const clientId = process.env["GITHUB_DEVICE_CLIENT_ID"] ?? process.env["GITHUB_CLIENT_ID"] ?? BAKED_IN_CLIENT_ID;
-  if (clientId === "Iv1.PLACEHOLDER_REGISTER_YOUR_APP") {
-    console.warn("\nWarning: GITHUB_CLIENT_ID env var looks like a placeholder.");
-    console.warn("Remove it to use the baked-in client ID, or set it to your own OAuth App Client ID.\n");
-  }
-  const deviceRes = await fetch(DEVICE_CODE_URL, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: new URLSearchParams({ client_id: clientId, scope: GITHUB_SCOPE }).toString(),
-    signal: AbortSignal.timeout(15e3)
-  });
-  if (!deviceRes.ok) {
-    throw new Error(`GitHub device code request failed: HTTP ${deviceRes.status}`);
-  }
-  const deviceData = await deviceRes.json();
-  console.log("");
-  console.log("  GitHub sign-in (device flow)");
-  console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
-  console.log(`  1. Open: ${deviceData.verification_uri}`);
-  console.log(`  2. Enter code: ${deviceData.user_code}`);
-  console.log('  3. Authorize "Terminalhire" (scope: read:user \u2014 public data only)');
-  console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
-  console.log("  Waiting for authorization...");
-  console.log("");
-  let intervalSecs = deviceData.interval ?? 5;
-  const expiresAt = Date.now() + (deviceData.expires_in ?? 900) * 1e3;
-  const clientSecret = process.env["GITHUB_CLIENT_SECRET"];
-  while (Date.now() < expiresAt) {
-    await sleep(intervalSecs * 1e3);
-    const body = new URLSearchParams({
-      client_id: clientId,
-      device_code: deviceData.device_code,
-      grant_type: "urn:ietf:params:oauth:grant-type:device_code"
-    });
-    if (clientSecret) body.set("client_secret", clientSecret);
-    const tokenRes = await fetch(ACCESS_TOKEN_URL, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body: body.toString(),
-      signal: AbortSignal.timeout(15e3)
-    });
-    if (!tokenRes.ok) {
-      throw new Error(`GitHub token poll failed: HTTP ${tokenRes.status}`);
-    }
-    const tokenData = await tokenRes.json();
-    if (tokenData.access_token) {
-      await writeGitHubToken(tokenData.access_token);
-      const login = await fetchAuthedLogin(tokenData.access_token);
-      console.log(`  Authorized as: ${login}`);
-      return login;
-    }
-    if (tokenData.error === "authorization_pending") {
-      continue;
-    }
-    if (tokenData.error === "slow_down") {
-      intervalSecs = (tokenData.interval ?? intervalSecs) + 5;
-      continue;
-    }
-    if (tokenData.error === "expired_token") {
-      throw new Error("GitHub device code expired. Please run `terminalhire login` again.");
-    }
-    if (tokenData.error === "access_denied") {
-      throw new Error("GitHub authorization was denied by the user.");
-    }
-    throw new Error(
-      `GitHub device flow error: ${tokenData.error ?? "unknown"} \u2014 ${tokenData.error_description ?? ""}`
-    );
-  }
-  throw new Error("GitHub device code expired before authorization. Please run `terminalhire login` again.");
-}
-async function fetchAuthedLogin(token) {
-  if (token === MOCK_TOKEN) return MOCK_LOGIN;
-  const res = await fetch("https://api.github.com/user", {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28"
-    },
-    signal: AbortSignal.timeout(1e4)
-  });
-  if (!res.ok) throw new Error(`GitHub /user: HTTP ${res.status}`);
-  const data = await res.json();
-  return data.login;
-}
-async function resolveStoredLogin() {
-  if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") return MOCK_LOGIN;
-  const token = await readGitHubToken();
-  if (!token) return void 0;
-  try {
-    return await fetchAuthedLogin(token);
-  } catch {
-    return void 0;
-  }
-}
-function sleep(ms) {
-  return new Promise((resolve2) => setTimeout(resolve2, ms));
-}
-var TERMINALHIRE_DIR3, TOKEN_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, GITHUB_SCOPE, DEVICE_CODE_URL, ACCESS_TOKEN_URL, BAKED_IN_CLIENT_ID, MOCK_TOKEN, MOCK_LOGIN;
-var init_github_auth = __esm({
-  "src/github-auth.ts"() {
-    "use strict";
-    TERMINALHIRE_DIR3 = join6(homedir5(), ".terminalhire");
-    TOKEN_FILE = join6(TERMINALHIRE_DIR3, "github-token.enc");
-    KEY_FILE = join6(TERMINALHIRE_DIR3, "key");
-    ALGO = "aes-256-gcm";
-    KEY_BYTES = 32;
-    IV_BYTES = 12;
-    GITHUB_SCOPE = "read:user";
-    DEVICE_CODE_URL = "https://github.com/login/device/code";
-    ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
-    BAKED_IN_CLIENT_ID = "Ov23lignE2ZSBe0J3a6B";
-    MOCK_TOKEN = "mock-github-token-jpi-dev";
-    MOCK_LOGIN = "janedev";
-  }
-});
-
 // src/profile.ts
 var profile_exports = {};
 __export(profile_exports, {
@@ -8904,13 +8942,13 @@ import {
   randomBytes as randomBytes4
 } from "crypto";
 import {
-  readFileSync as readFileSync7,
-  writeFileSync as writeFileSync6,
-  mkdirSync as mkdirSync6,
-  existsSync as existsSync6
+  readFileSync as readFileSync6,
+  writeFileSync as writeFileSync5,
+  mkdirSync as mkdirSync5,
+  existsSync as existsSync5
 } from "fs";
-import { join as join7 } from "path";
-import { homedir as homedir6 } from "os";
+import { join as join6 } from "path";
+import { homedir as homedir5 } from "os";
 async function loadKey2() {
   try {
     const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
@@ -8923,12 +8961,12 @@ async function loadKey2() {
     return key2;
   } catch {
   }
-  mkdirSync6(TERMINALHIRE_DIR4, { recursive: true });
-  if (existsSync6(KEY_FILE2)) {
-    return Buffer.from(readFileSync7(KEY_FILE2, "utf8").trim(), "hex");
+  mkdirSync5(TERMINALHIRE_DIR3, { recursive: true });
+  if (existsSync5(KEY_FILE2)) {
+    return Buffer.from(readFileSync6(KEY_FILE2, "utf8").trim(), "hex");
   }
   const key = randomBytes4(KEY_BYTES2);
-  writeFileSync6(KEY_FILE2, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  writeFileSync5(KEY_FILE2, key.toString("hex"), { mode: 384, encoding: "utf8" });
   return key;
 }
 function encrypt2(plaintext, key) {
@@ -8986,10 +9024,10 @@ function migrateTagWeights(profile) {
   }
 }
 async function readProfile() {
-  if (!existsSync6(PROFILE_FILE)) return blankProfile();
+  if (!existsSync5(PROFILE_FILE)) return blankProfile();
   try {
     const key = await loadKey2();
-    const raw = readFileSync7(PROFILE_FILE, "utf8");
+    const raw = readFileSync6(PROFILE_FILE, "utf8");
     const blob = JSON.parse(raw);
     const plaintext = decrypt2(blob, key);
     const parsed = JSON.parse(plaintext);
@@ -9000,12 +9038,12 @@ async function readProfile() {
   }
 }
 async function writeProfile(profile) {
-  mkdirSync6(TERMINALHIRE_DIR4, { recursive: true });
+  mkdirSync5(TERMINALHIRE_DIR3, { recursive: true });
   const key = await loadKey2();
   profile.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
   profile.skillTags = deriveSkillTags(profile.tagWeights);
   const blob = encrypt2(JSON.stringify(profile), key);
-  writeFileSync6(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+  writeFileSync5(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 function accumulateSession(profile, tags, isEmployerContext2, inferredSeniority, seniorityIsAuthoritative = false) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -9089,14 +9127,14 @@ function profileToFingerprint(profile) {
     }
   };
 }
-var TERMINALHIRE_DIR4, PROFILE_FILE, KEY_FILE2, ALGO2, KEY_BYTES2, IV_BYTES2, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var TERMINALHIRE_DIR3, PROFILE_FILE, KEY_FILE2, ALGO2, KEY_BYTES2, IV_BYTES2, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
 var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
     init_src();
-    TERMINALHIRE_DIR4 = join7(homedir6(), ".terminalhire");
-    PROFILE_FILE = join7(TERMINALHIRE_DIR4, "profile.enc");
-    KEY_FILE2 = join7(TERMINALHIRE_DIR4, "key");
+    TERMINALHIRE_DIR3 = join6(homedir5(), ".terminalhire");
+    PROFILE_FILE = join6(TERMINALHIRE_DIR3, "profile.enc");
+    KEY_FILE2 = join6(TERMINALHIRE_DIR3, "key");
     ALGO2 = "aes-256-gcm";
     KEY_BYTES2 = 32;
     IV_BYTES2 = 12;
@@ -9386,6 +9424,128 @@ var init_jpi_login = __esm({
   "bin/jpi-login.js"() {
     "use strict";
     init_open_url();
+  }
+});
+
+// bin/job-status-store.js
+var job_status_store_exports = {};
+__export(job_status_store_exports, {
+  markClicked: () => markClicked,
+  markStatus: () => markStatus,
+  readStatusMap: () => readStatusMap,
+  statusFilePath: () => statusFilePath
+});
+import {
+  readFileSync as readFileSync7,
+  writeFileSync as writeFileSync6,
+  renameSync,
+  mkdirSync as mkdirSync6,
+  existsSync as existsSync6,
+  copyFileSync,
+  openSync,
+  closeSync,
+  unlinkSync
+} from "fs";
+import { join as join7, dirname } from "path";
+import { homedir as homedir6 } from "os";
+function statusFilePath() {
+  return STATUS_FILE;
+}
+function atomicWriteJson(path, obj) {
+  mkdirSync6(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync6(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  renameSync(tmp, path);
+}
+function sleepMs(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+    }
+  }
+}
+function withLock(fn) {
+  const deadline = Date.now() + 2e3;
+  for (; ; ) {
+    let fd;
+    try {
+      mkdirSync6(dirname(LOCK_FILE), { recursive: true });
+      fd = openSync(LOCK_FILE, "wx");
+    } catch (err) {
+      if (err && err.code === "EEXIST") {
+        if (Date.now() > deadline) {
+          try {
+            unlinkSync(LOCK_FILE);
+          } catch {
+          }
+          continue;
+        }
+        sleepMs(5);
+        continue;
+      }
+      throw err;
+    }
+    try {
+      return fn();
+    } finally {
+      try {
+        closeSync(fd);
+      } catch {
+      }
+      try {
+        unlinkSync(LOCK_FILE);
+      } catch {
+      }
+    }
+  }
+}
+function readStatusMap() {
+  if (!existsSync6(STATUS_FILE)) return {};
+  let raw;
+  try {
+    raw = readFileSync7(STATUS_FILE, "utf8");
+  } catch {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    throw new Error("status store is not an object");
+  } catch {
+    try {
+      copyFileSync(STATUS_FILE, BAK_FILE);
+    } catch {
+    }
+    return {};
+  }
+}
+function markStatus(id, status) {
+  return withLock(() => {
+    const current = readStatusMap();
+    const next = status === "claimed" ? { ...current, [id]: { ...current[id], status: "claimed", markedAt: (/* @__PURE__ */ new Date()).toISOString() } } : setStatus(current, id, status);
+    atomicWriteJson(STATUS_FILE, next);
+    return next[id];
+  });
+}
+function markClicked(id) {
+  return withLock(() => {
+    const current = readStatusMap();
+    const next = recordClick(current, id);
+    atomicWriteJson(STATUS_FILE, next);
+    return next[id];
+  });
+}
+var TERMINALHIRE_DIR4, STATUS_FILE, LOCK_FILE, BAK_FILE;
+var init_job_status_store = __esm({
+  "bin/job-status-store.js"() {
+    "use strict";
+    init_src();
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join7(homedir6(), ".terminalhire");
+    STATUS_FILE = join7(TERMINALHIRE_DIR4, "job-status.json");
+    LOCK_FILE = `${STATUS_FILE}.lock`;
+    BAK_FILE = `${STATUS_FILE}.bak`;
   }
 });
 
@@ -10022,6 +10182,94 @@ var init_directory2 = __esm({
   }
 });
 
+// bin/match-slots.js
+function rotate(list, now, windowMs = ROTATE_WINDOW_MS) {
+  if (!Array.isArray(list) || list.length === 0) return [];
+  const idx = Math.floor(now / windowMs) % list.length;
+  return [...list.slice(idx), ...list.slice(0, idx)];
+}
+function budgetSlots(results, opts = {}) {
+  const {
+    thinProfile = false,
+    contributeEnabled = true,
+    totalSlots = TOTAL_SLOTS,
+    now = Date.now(),
+    interestPicks = [],
+    interestJobPicks = [],
+    interestJobSlots = INTEREST_JOB_SLOTS
+  } = opts;
+  const list = Array.isArray(results) ? results : [];
+  const bountyMatches = list.filter(
+    (r) => r && r.job && r.job.source === "bounty" && typeof r.score === "number" && r.score >= BOUNTY_MIN_MATCH
+  );
+  const bountyTop = [...bountyMatches].sort((a, b) => b.score - a.score).slice(0, BOUNTY_SLOTS);
+  const contributeMatches = list.filter((r) => r && r.job && r.job.source === "contribute");
+  const contributeCap = thinProfile && contributeEnabled ? CONTRIBUTE_SLOTS_THIN : CONTRIBUTE_SLOTS;
+  const contributeTop = rotate(contributeMatches, now).slice(0, contributeCap);
+  const reservedContributeIds = new Set(contributeTop.map((r) => r.job.id));
+  const interestTop = (Array.isArray(interestPicks) ? interestPicks : []).filter((r) => r && r.job && !reservedContributeIds.has(r.job.id)).slice(0, INTEREST_CONTRIBUTE_SLOTS).map((r) => ({ ...r, interestLabel: INTEREST_SLOT_LABEL }));
+  const surfacedIds = new Set(list.map((r) => r?.job?.id).filter(Boolean));
+  const interestJobTop = (Array.isArray(interestJobPicks) ? interestJobPicks : []).filter((r) => r && r.job && !surfacedIds.has(r.job.id)).slice(0, interestJobSlots).map((r) => ({ ...r, interestLabel: INTEREST_SLOT_LABEL }));
+  const roleSlots = Math.max(
+    0,
+    totalSlots - bountyTop.length - contributeTop.length - interestTop.length - interestJobTop.length
+  );
+  const roleMatches = list.filter(
+    (r) => r && r.job && r.job.source !== "bounty" && r.job.source !== "contribute"
+  );
+  const roleStable = Math.min(ROLE_STABLE_MAX, roleSlots);
+  const headPoolSize = Math.max(roleStable, ROLE_HEAD_POOL);
+  const headPool = roleMatches.slice(0, headPoolSize);
+  const headIndex = new Map(headPool.map((r, i) => [r, i]));
+  const stableRoles = rotate(headPool, now, ROLE_HEAD_ROTATE_MS).slice(0, roleStable).sort((a, b) => headIndex.get(a) - headIndex.get(b));
+  const rotableRoles = roleMatches.slice(headPoolSize, headPoolSize + ROLE_ROTATE_WINDOW);
+  const rotatedRoles = rotate(rotableRoles, now);
+  const roleTop = [...stableRoles, ...rotatedRoles].slice(0, roleSlots);
+  return { roleTop, bountyTop, contributeTop, interestTop, interestJobTop };
+}
+var TOTAL_SLOTS, BOUNTY_SLOTS, BOUNTY_MIN_MATCH, INTEREST_CONTRIBUTE_SLOTS, INTEREST_JOB_SLOTS, INTEREST_SLOT_LABEL, CONTRIBUTE_SLOTS, CONTRIBUTE_SLOTS_THIN, ROLE_STABLE_MAX, ROLE_ROTATE_WINDOW, ROTATE_WINDOW_MS, ROLE_HEAD_POOL, ROLE_HEAD_ROTATE_MS;
+var init_match_slots = __esm({
+  "bin/match-slots.js"() {
+    "use strict";
+    TOTAL_SLOTS = 25;
+    BOUNTY_SLOTS = 3;
+    BOUNTY_MIN_MATCH = 0.5;
+    INTEREST_CONTRIBUTE_SLOTS = 1;
+    INTEREST_JOB_SLOTS = 1;
+    INTEREST_SLOT_LABEL = "Stretch";
+    CONTRIBUTE_SLOTS = 5;
+    CONTRIBUTE_SLOTS_THIN = 8;
+    ROLE_STABLE_MAX = 8;
+    ROLE_ROTATE_WINDOW = 60;
+    ROTATE_WINDOW_MS = 5 * 60 * 1e3;
+    ROLE_HEAD_POOL = 12;
+    ROLE_HEAD_ROTATE_MS = 60 * 60 * 1e3;
+  }
+});
+
+// bin/directory-select.js
+function selectDirectoryDevs(results, { limit, now = Date.now() } = {}) {
+  const list = Array.isArray(results) ? results : [];
+  if (list.length === 0) return [];
+  if (limit >= list.length) return list;
+  const head = list.slice(0, Math.min(DEVS_STABLE_HEAD, limit));
+  const tailPool = list.slice(head.length, head.length + DEVS_ROTATE_WINDOW);
+  const tailSelected = rotate(tailPool, now, DEVS_ROTATE_MS).slice(0, limit - head.length);
+  const rankOf = new Map(list.map((item, idx) => [item, idx]));
+  const tail = [...tailSelected].sort((a, b) => rankOf.get(a) - rankOf.get(b));
+  return [...head, ...tail];
+}
+var DEVS_STABLE_HEAD, DEVS_ROTATE_WINDOW, DEVS_ROTATE_MS;
+var init_directory_select = __esm({
+  "bin/directory-select.js"() {
+    "use strict";
+    init_match_slots();
+    DEVS_STABLE_HEAD = 5;
+    DEVS_ROTATE_WINDOW = 15;
+    DEVS_ROTATE_MS = 5 * 60 * 1e3;
+  }
+});
+
 // bin/jpi-devs.js
 var jpi_devs_exports = {};
 __export(jpi_devs_exports, {
@@ -10081,7 +10329,7 @@ async function getDevs({ quiet = false, offline = false } = {}) {
   }
   const cards = index.cards ?? [];
   if (cards.length === 0) return { status: "no-cards", fp };
-  let results = match2(fp, cards, SHOW_ALL2 ? cards.length : LIMIT2);
+  let results = match2(fp, cards, cards.length);
   let ownLogin;
   try {
     const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
@@ -10089,6 +10337,7 @@ async function getDevs({ quiet = false, offline = false } = {}) {
   } catch {
   }
   results = excludeOwnCard(results, ownLogin);
+  if (!SHOW_ALL2) results = selectDirectoryDevs(results, { limit: LIMIT2 });
   if (results.length === 0) return { status: "no-matches", fp };
   return { status: "ok", results, fp };
 }
@@ -10148,6 +10397,7 @@ var init_jpi_devs = __esm({
     "use strict";
     init_directory2();
     init_sanitize();
+    init_directory_select();
     API_URL3 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
     DEFAULT_LIMIT2 = 10;
     args2 = process.argv.slice(2);
@@ -10988,6 +11238,8 @@ var init_claim_push_bg = __esm({
 // src/repo-policy.ts
 var repo_policy_exports = {};
 __export(repo_policy_exports, {
+  POLICY_RULESET_VERSION: () => POLICY_RULESET_VERSION,
+  auditContent: () => auditContent,
   checkRepoPolicy: () => checkRepoPolicy
 });
 async function fetchContentsFile(fetchImpl, repoFullName, path) {
@@ -11009,23 +11261,50 @@ async function fetchContentsFile(fetchImpl, repoFullName, path) {
     return { ok: false, missing: false, content: null };
   }
 }
-function findHits(file, content) {
-  const lines = content.split("\n");
+function classifyLine(line) {
+  if (PROHIBITED_PATTERNS.some((re) => re.test(line))) return "prohibited";
+  if (DISCLOSURE_PATTERNS.some((re) => re.test(line))) return "disclosure-required";
+  if (AI_SIGNAL_PATTERNS.some((p) => p.re.test(line))) return "ai-mentioned";
+  return null;
+}
+function sanitizeExcerpt(text) {
+  return text.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, "");
+}
+function excerptAround(lines, i) {
+  const start = Math.max(0, i - 2);
+  const end = Math.min(lines.length, i + 3);
+  return sanitizeExcerpt(lines.slice(start, end).join("\n"));
+}
+function auditContent(files) {
   const hits = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!AI_SIGNAL_PATTERNS.some((p) => p.re.test(line))) continue;
-    const start = Math.max(0, i - 2);
-    const end = Math.min(lines.length, i + 3);
-    hits.push({ file, excerpt: lines.slice(start, end).join("\n") });
+  const requirements = [];
+  const seenKinds = /* @__PURE__ */ new Set();
+  for (const { file, content } of files) {
+    const lines = content.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const rule = classifyLine(lines[i]);
+      if (rule) hits.push({ file, excerpt: excerptAround(lines, i), rule });
+      for (const { kind, re } of REQUIREMENT_PATTERNS) {
+        if (seenKinds.has(kind) || !re.test(lines[i])) continue;
+        seenKinds.add(kind);
+        requirements.push({ kind, file, excerpt: excerptAround(lines, i) });
+      }
+    }
   }
-  return hits;
+  let verdict = "clean";
+  for (const h of hits) {
+    if (verdict === "clean" || VERDICT_SEVERITY[h.rule] > VERDICT_SEVERITY[verdict]) {
+      verdict = h.rule;
+    }
+  }
+  const assignment = seenKinds.has("take-bot") ? "take-bot" : seenKinds.has("assignment-required") ? "required" : "none";
+  return { hits, requirements, verdict, assignment };
 }
 async function checkRepoPolicy(repoFullName, opts = {}) {
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   let requestsUsed = 0;
   let hadError = false;
-  const hits = [];
+  const files = [];
   outer: for (const group of CANDIDATE_GROUPS) {
     for (const path of group) {
       if (requestsUsed >= MAX_REQUESTS) break outer;
@@ -11036,21 +11315,27 @@ async function checkRepoPolicy(repoFullName, opts = {}) {
         continue;
       }
       if (outcome.missing) continue;
-      if (outcome.content) hits.push(...findHits(path, outcome.content));
+      if (outcome.content) files.push({ file: path, content: outcome.content });
       break;
     }
   }
-  if (hits.length > 0) return { status: "flagged", hits };
-  if (hadError) return { status: "unavailable", hits: [] };
-  return { status: "clean", hits: [] };
+  const { hits, requirements, verdict, assignment } = auditContent(files);
+  if (hits.length > 0) {
+    return { status: "flagged", verdict, hits, requirements, assignment, rulesetVersion: POLICY_RULESET_VERSION };
+  }
+  if (hadError) {
+    return { status: "unavailable", verdict: "unavailable", hits: [], requirements, assignment, rulesetVersion: POLICY_RULESET_VERSION };
+  }
+  return { status: "clean", verdict: "clean", hits: [], requirements, assignment, rulesetVersion: POLICY_RULESET_VERSION };
 }
-var GH_API, GH_HEADERS, MAX_REQUESTS, AI_SIGNAL_PATTERNS, CANDIDATE_GROUPS;
+var GH_API, GH_HEADERS, MAX_REQUESTS, POLICY_RULESET_VERSION, AI_SIGNAL_PATTERNS, AI_TERM, PROHIBITED_PATTERNS, DISCLOSURE_PATTERNS, REQUIREMENT_PATTERNS, CANDIDATE_GROUPS, VERDICT_SEVERITY;
 var init_repo_policy = __esm({
   "src/repo-policy.ts"() {
     "use strict";
     GH_API = "https://api.github.com";
     GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
     MAX_REQUESTS = 4;
+    POLICY_RULESET_VERSION = 2;
     AI_SIGNAL_PATTERNS = [
       { label: "AI", re: /\bAI\b/i },
       { label: "artificial intelligence", re: /artificial intelligence/i },
@@ -11062,10 +11347,186 @@ var init_repo_policy = __esm({
       { label: "generative", re: /\bgenerative\b/i },
       { label: "machine-generated", re: /machine[\s-]generated/i }
     ];
+    AI_TERM = "(?:ai|llms?|generative(?:\\s+ai)?|artificial intelligence|language models?|copilot|chatgpt|claude|machine[\\s-]generated)";
+    PROHIBITED_PATTERNS = [
+      new RegExp(`prohibit\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
+      /did not write the code yourself/i,
+      new RegExp(`(?:not|never|don'?t|won'?t)\\s+accept\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
+      new RegExp(`\\bno\\s+${AI_TERM}[^.\\n]{0,40}\\b(?:prs?|pull requests?|contributions?|code|patch(?:es)?|commits?|submissions?)\\b`, "i"),
+      new RegExp(
+        `\\b${AI_TERM}[^.\\n]{0,60}\\b(?:is|are|will be)\\s+(?:\\w+\\s+)?(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
+        "i"
+      )
+    ];
+    DISCLOSURE_PATTERNS = [
+      new RegExp(`disclos\\w+[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
+      new RegExp(`\\b${AI_TERM}[^.\\n]{0,60}disclos`, "i"),
+      new RegExp(`\\b${AI_TERM}[\\s-]assist\\w*[^.\\n]{0,60}\\b(?:must|should|required?)\\b`, "i"),
+      // PR-template checkbox, e.g. "- [ ] I used AI tools and have reviewed the output"
+      new RegExp(`\\[ \\][^\\n]{0,80}\\b${AI_TERM}`, "i")
+    ];
+    REQUIREMENT_PATTERNS = [
+      // `/take` bot first: its docs usually also say "assign", and the bot is the
+      // more specific expectation (post exactly `/take`, not a prose request).
+      { kind: "take-bot", re: /(?:^|[\s`"'(])\/take\b/m },
+      { kind: "assignment-required", re: /(?:request|ask|wait)[^.\n]{0,40}\bassign/i },
+      { kind: "assignment-required", re: /\bassigned before\b/i },
+      { kind: "assignment-required", re: /\bself[\s-]assign/i },
+      { kind: "assignment-required", re: /do not (?:open|submit)[^.\n]{0,40}\b(?:prs?|pull requests?)\b/i },
+      { kind: "cla-required", re: /\bCLA\b/ },
+      { kind: "cla-required", re: /contributor licen[cs]e agreement/i },
+      { kind: "discussion-first", re: /open an issue (?:first|before)/i },
+      { kind: "discussion-first", re: /discuss\w*[^.\n]{0,40}\bbefore\b/i }
+    ];
     CANDIDATE_GROUPS = [
       ["CONTRIBUTING.md", ".github/CONTRIBUTING.md", "docs/CONTRIBUTING.md"],
-      [".github/PULL_REQUEST_TEMPLATE.md", "PULL_REQUEST_TEMPLATE.md"],
-      ["AGENTS.md"]
+      ["AGENTS.md", "AGENTS.MD"],
+      [".github/PULL_REQUEST_TEMPLATE.md", "PULL_REQUEST_TEMPLATE.md"]
+    ];
+    VERDICT_SEVERITY = {
+      "ai-mentioned": 1,
+      "disclosure-required": 2,
+      prohibited: 3
+    };
+  }
+});
+
+// src/reputation/identity.ts
+var identity_exports = {};
+__export(identity_exports, {
+  resolveCallerIdentity: () => resolveCallerIdentity
+});
+import { execFile } from "child_process";
+import { promisify } from "util";
+async function resolveCallerIdentity() {
+  try {
+    const { stdout } = await execFileAsync("gh", ["api", "user"], { timeout: 1e4 });
+    const u = JSON.parse(stdout);
+    if (typeof u.id === "number" && typeof u.login === "string" && u.login.length > 0) {
+      return { id: u.id, login: u.login };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+var execFileAsync;
+var init_identity = __esm({
+  "src/reputation/identity.ts"() {
+    "use strict";
+    execFileAsync = promisify(execFile);
+  }
+});
+
+// src/reputation/fetch.ts
+var fetch_exports = {};
+__export(fetch_exports, {
+  gatherAudit: () => gatherAudit
+});
+async function gatherAudit(prUrl, token) {
+  const signal = AbortSignal.timeout(2e4);
+  const governor = makeScoringGovernor();
+  const [lifecycle, facts] = await Promise.all([
+    fetchPRLifecycle(prUrl, token, signal, governor),
+    fetchPRScoringFacts(prUrl, token, signal, governor)
+  ]);
+  return { lifecycle, facts };
+}
+var init_fetch = __esm({
+  "src/reputation/fetch.ts"() {
+    "use strict";
+    init_src();
+  }
+});
+
+// src/reputation/audit.ts
+var audit_exports = {};
+__export(audit_exports, {
+  buildAuditView: () => buildAuditView
+});
+function roleOf(e) {
+  if (e.is_bot) return "bot";
+  if (e.is_author) return "you";
+  const a = String(e.actor_assoc || "").toUpperCase();
+  if (MAINTAINER_ASSOC.has(a)) return "maintainer";
+  if (a === "CONTRIBUTOR") return "contributor";
+  if (a === "NONE") return "outside";
+  return "unknown";
+}
+function isMaintainerResponse(e) {
+  return !e.is_author && !e.is_bot && MAINTAINER_ASSOC.has(String(e.actor_assoc || "").toUpperCase());
+}
+function byTime(a, b) {
+  if (a.occurred_at < b.occurred_at) return -1;
+  if (a.occurred_at > b.occurred_at) return 1;
+  if (a.source_id < b.source_id) return -1;
+  if (a.source_id > b.source_id) return 1;
+  return 0;
+}
+function hoursBetween(a, b) {
+  if (!a || !b) return null;
+  const ta = Date.parse(a);
+  const tb = Date.parse(b);
+  if (Number.isNaN(ta) || Number.isNaN(tb)) return null;
+  return Math.round((tb - ta) / 36e5 * 10) / 10;
+}
+function buildAuditView(lifecycle, facts) {
+  const events = [...lifecycle.events].sort(byTime);
+  const counterpartyIds = /* @__PURE__ */ new Set();
+  for (const e of events) {
+    if (!e.is_author && !e.is_bot && e.actor_id !== 0) counterpartyIds.add(e.actor_id);
+  }
+  const firstResponse = events.find(isMaintainerResponse) ?? null;
+  const firstResponseAt = firstResponse?.occurred_at ?? null;
+  const maintainerReviews = events.filter(
+    (e) => e.event_type === "review_submitted" && isMaintainerResponse(e)
+  ).length;
+  const iterationsAfterFirstResponse = firstResponseAt ? events.filter(
+    (e) => e.event_type === "commit_pushed" && e.is_author && e.occurred_at > firstResponseAt
+  ).length : 0;
+  const outcome = lifecycle.merged ? "merged" : lifecycle.closedUnmergedAt ? "closed_unmerged" : "open";
+  const signals = {
+    distinctCounterparties: counterpartyIds.size,
+    maintainerReviews,
+    iterationsAfterFirstResponse,
+    hoursToFirstResponse: hoursBetween(lifecycle.openedAt, firstResponseAt),
+    hoursToMerge: hoursBetween(lifecycle.openedAt, lifecycle.mergedAt)
+  };
+  const timeline = events.map((e) => ({
+    at: e.occurred_at,
+    event: e.event_type,
+    role: roleOf(e)
+  }));
+  const notes = [];
+  if (!lifecycle.complete.reviews) notes.push("Review data incomplete \u2014 review counts may undercount.");
+  if (!lifecycle.complete.comments) notes.push("Comment data incomplete \u2014 response detection may be partial.");
+  if (!lifecycle.complete.commits) notes.push("Commit data incomplete \u2014 iteration count may undercount.");
+  if (lifecycle.authorId == null) notes.push("PR author identity unavailable \u2014 author/counterparty split may be imprecise.");
+  return {
+    repo: facts?.repo ?? "",
+    prNumber: lifecycle.prNumber,
+    prUrl: lifecycle.prUrl,
+    openedAt: lifecycle.openedAt,
+    outcome,
+    mergedAt: lifecycle.mergedAt,
+    closedUnmergedAt: lifecycle.closedUnmergedAt,
+    mergedByLogin: facts?.mergedByLogin ?? null,
+    signals,
+    timeline,
+    completeness: { ...lifecycle.complete },
+    notes,
+    limitations: [...AUDIT_LIMITATIONS]
+  };
+}
+var MAINTAINER_ASSOC, AUDIT_LIMITATIONS;
+var init_audit = __esm({
+  "src/reputation/audit.ts"() {
+    "use strict";
+    MAINTAINER_ASSOC = /* @__PURE__ */ new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+    AUDIT_LIMITATIONS = [
+      "Post-merge bug/revert rate \u2014 longitudinal; it only shows up after the merge this audit stops at.",
+      "Downstream adoption / real-world impact \u2014 a repo-level, slow signal not visible in one PR timeline.",
+      "Reviewer satisfaction and collaboration quality \u2014 not observable from public timeline events."
     ];
   }
 });
@@ -11099,14 +11560,15 @@ __export(jpi_claim_exports, {
   run: () => run7,
   selectCompetingPrs: () => selectCompetingPrs,
   selectPushRemote: () => selectPushRemote,
+  shouldRequestAssignment: () => shouldRequestAssignment,
   startBranchFor: () => startBranchFor,
   workDirFor: () => workDirFor
 });
 import { readFileSync as readFileSync17, writeFileSync as writeFileSync11, mkdirSync as mkdirSync11, existsSync as existsSync10, rmSync as rmSync4 } from "fs";
 import { join as join17 } from "path";
 import { homedir as homedir15, hostname as osHostname } from "os";
-import { execFile } from "child_process";
-import { promisify } from "util";
+import { execFile as execFile2 } from "child_process";
+import { promisify as promisify2 } from "util";
 import { createInterface as createInterface8 } from "readline";
 function buildSubmitBody(issueNumber, opts = {}) {
   const { bodyText, noCloses } = opts;
@@ -11123,16 +11585,37 @@ function buildSubmitBody(issueNumber, opts = {}) {
   return `${closesLine}${main}${AI_DISCLOSURE_NOTE}`;
 }
 function printPolicySection(policy) {
-  if (policy.status === "flagged") {
+  const verdict = policy.verdict ?? (policy.status === "flagged" ? "ai-mentioned" : policy.status);
+  if (verdict === "prohibited") {
+    console.log("\n  POLICY: \u2717 this repo PROHIBITS AI-generated contributions \u2014 READ BEFORE CLAIMING:");
+  } else if (verdict === "disclosure-required") {
+    console.log("\n  POLICY: \u26A0 this repo requires disclosing AI assistance \u2014 READ BEFORE WORKING:");
+  } else if (verdict === "ai-mentioned") {
     console.log("\n  POLICY: \u26A0 possible AI-assistance policy language found \u2014 READ BEFORE WORKING:");
-    for (const hit of policy.hits) {
-      console.log(`    [${hit.file}]`);
-      for (const line of hit.excerpt.split("\n")) console.log(`      ${line}`);
-    }
   } else if (policy.status === "unavailable") {
     console.log("\n  POLICY: could not read this repo's CONTRIBUTING/PR-template/AGENTS docs (rate-limited or unreachable) \u2014 read them yourself before working.");
   } else {
     console.log("  policy: no AI-assistance policy language detected in CONTRIBUTING/PR-template/AGENTS docs");
+  }
+  for (const hit of policy.hits ?? []) {
+    console.log(`    [${hit.file}]`);
+    for (const line of hit.excerpt.split("\n")) console.log(`      ${line}`);
+  }
+  const requirements = policy.requirements ?? [];
+  if (requirements.length > 0) {
+    console.log("\n  REQUIREMENTS: this repo sets contribution expectations \u2014 in its own words:");
+    for (const req of requirements) {
+      console.log(`    ${req.kind} [${req.file}]`);
+      for (const line of req.excerpt.split("\n")) console.log(`      ${line}`);
+    }
+  }
+  const assignment = policy.assignment ?? "none";
+  if (assignment === "take-bot") {
+    console.log("  assignment: repo self-assigns via a /take comment \u2014 `claim start` will post `/take` on the issue");
+  } else if (assignment === "required") {
+    console.log("  assignment: repo expects you to request assignment \u2014 `claim start` will post a request comment on the issue");
+  } else {
+    console.log("  assignment: no assignment expectation found in repo docs \u2014 `claim start` will not comment (pass --assign to request anyway)");
   }
 }
 async function sh(cmd, args5, opts = {}) {
@@ -11400,9 +11883,9 @@ async function fetchIssue(repoFullName, issueNumber) {
     return null;
   }
 }
-function buildAssignmentComment(repoFullName) {
-  const usesTakeBot = TAKE_BOT_REPOS.has(repoFullName.toLowerCase());
-  const body = usesTakeBot ? "/take" : `I'd like to work on this \u2014 could I be assigned? Thanks!
+function buildAssignmentComment(repoFullName, opts = {}) {
+  const usesTakeBot = TAKE_BOT_REPOS.has(repoFullName.toLowerCase()) || Boolean(opts.takeBot);
+  const body = usesTakeBot ? "/take" : `Hi! I'd like to work on this issue. Could you assign it to me? Thanks!
 
 ${ASSIGNMENT_MARKER}`;
   return { usesTakeBot, body };
@@ -11423,6 +11906,11 @@ async function hasPriorAssignmentRequest(repoFullName, issueNumber, login) {
     return false;
   }
 }
+function shouldRequestAssignment(claim, flags = {}) {
+  const expectation = claim && claim.policy ? claim.policy.assignment : void 0;
+  const post = Boolean(flags.assign) || expectation === void 0 || expectation === "required" || expectation === "take-bot";
+  return { post, takeBot: expectation === "take-bot" };
+}
 async function requestIssueAssignment(claim, flags = {}, ghUser) {
   if (flags["no-assign"]) {
     console.log("  (--no-assign \u2014 skipping the assignment request; request it manually before working)");
@@ -11431,6 +11919,11 @@ async function requestIssueAssignment(claim, flags = {}, ghUser) {
   const parsed = parseGitHubUrl(claim.issueUrl);
   if (!parsed) return;
   const { repoFullName, number: number3 } = parsed;
+  const expectation = shouldRequestAssignment(claim, flags);
+  if (!expectation.post) {
+    console.log("  (no assignment expectation found in repo docs \u2014 pass --assign to request assignment anyway)");
+    return;
+  }
   let login = ghUser;
   if (!login) {
     try {
@@ -11445,10 +11938,20 @@ async function requestIssueAssignment(claim, flags = {}, ghUser) {
     console.log(`  \u2713 Already assigned to @${login} on ${repoFullName}#${number3}.`);
     return;
   }
-  const { usesTakeBot, body } = buildAssignmentComment(repoFullName);
+  const { usesTakeBot, body } = buildAssignmentComment(repoFullName, { takeBot: expectation.takeBot });
   if (!usesTakeBot && await hasPriorAssignmentRequest(repoFullName, number3, login)) {
     console.log(`  \u2713 Assignment already requested on ${repoFullName}#${number3}.`);
     return;
+  }
+  if (process.stdin.isTTY) {
+    console.log(`
+  About to comment on ${repoFullName}#${number3} as @${login}:`);
+    for (const line of body.split("\n")) console.log(`    ${line}`);
+    const go = await confirm("  Post it? (y/N) ");
+    if (!go) {
+      console.log("  (skipped \u2014 request assignment manually before working)");
+      return;
+    }
   }
   try {
     await sh("gh", ["issue", "comment", String(number3), "--repo", repoFullName, "--body", body]);
@@ -11582,7 +12085,7 @@ function fmtContestedWarning(b) {
 async function cmdRecord(arg, flags = {}) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
   if (!arg) {
-    console.error("Usage: terminalhire claim record <bountyId|issueUrl> [--ack-policy] [--ack-contested]");
+    console.error("Usage: terminalhire claim record <bountyId|issueUrl> [--ack-policy] [--ack-policy-prohibited] [--ack-contested]");
     console.error("  Run `terminalhire bounties` first to populate the local index cache,");
     console.error("  then pass the id shown in its output \u2014 or pass a GitHub issue URL directly.");
     process.exit(1);
@@ -11620,8 +12123,25 @@ ${contestedWarning}`);
   const policy = await checkRepoPolicy2(b.repoFullName);
   printPolicySection(policy);
   let ackedAt = null;
-  if (policy.status === "flagged" || policy.status === "unavailable") {
-    const reason = policy.status === "flagged" ? "This repo may prohibit AI-generated contributions" : "This repo's contribution policy could not be checked";
+  if (policy.verdict === "prohibited") {
+    let acked = Boolean(flags["ack-policy-prohibited"]);
+    if (!acked && process.stdin.isTTY) {
+      acked = await confirm(
+        "\n  This repo PROHIBITS AI-generated contributions \u2014 continuing means everything you submit must be hand-written by you. Continue? (y/N) "
+      );
+    }
+    if (!acked) {
+      console.error(
+        `
+terminalhire claim: refusing to record \u2014 ${b.repoFullName} prohibits AI-generated contributions.
+  Read the excerpts above. If you will hand-write the work yourself, re-run with
+  --ack-policy-prohibited (or confirm interactively). --ack-policy is not enough here.`
+      );
+      process.exit(1);
+    }
+    ackedAt = (/* @__PURE__ */ new Date()).toISOString();
+  } else if (policy.status === "flagged" || policy.status === "unavailable") {
+    const reason = policy.status === "flagged" ? "This repo has AI-assistance policy language" : "This repo's contribution policy could not be checked";
     let acked = Boolean(flags["ack-policy"]);
     if (!acked && process.stdin.isTTY) {
       acked = await confirm(`
@@ -11651,7 +12171,18 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
       amountUSD: b.amountUSD,
       openPRsAtClaim: b.openPRs,
       kind,
-      policy: { status: policy.status, ackedAt }
+      // Persist the full audit verdict (not just the coarse status) so `claim
+      // start` can drive the assignment decision from it and `claim audit` can
+      // show what ruleset the dev acknowledged. Excerpts are NOT persisted —
+      // the record stores the conclusion; the docs stay the source of truth.
+      policy: {
+        status: policy.status,
+        verdict: policy.verdict,
+        assignment: policy.assignment,
+        requirements: (policy.requirements ?? []).map((r) => r.kind),
+        rulesetVersion: policy.rulesetVersion,
+        ackedAt
+      }
     });
   } catch (err) {
     console.error(`terminalhire claim: ${err.message ?? err}`);
@@ -11713,7 +12244,14 @@ async function cmdPreview(arg, { json } = {}) {
         openPRs: b.openPRs,
         assignees: b.assignees,
         contested: isContested(b),
-        policy: { status: policy.status, hits: policy.hits }
+        policy: {
+          status: policy.status,
+          verdict: policy.verdict,
+          assignment: policy.assignment,
+          rulesetVersion: policy.rulesetVersion,
+          hits: policy.hits,
+          requirements: policy.requirements
+        }
       }) + "\n"
     );
     return;
@@ -12662,6 +13200,100 @@ async function cmdRevoke() {
   console.log("\n  \u2713 Pushed claims deleted and local marker cleared.\n");
   console.log("  Background updates (if any) have been stopped.\n");
 }
+function renderAudit(view) {
+  const roleLabel = {
+    you: "you",
+    maintainer: "maintainer",
+    contributor: "contributor",
+    outside: "outside",
+    bot: "bot",
+    unknown: "\u2014"
+  };
+  const eventLabel = {
+    pr_opened: "opened PR",
+    review_submitted: "reviewed",
+    issue_comment: "commented",
+    commit_pushed: "pushed commit",
+    pr_merged: "merged",
+    pr_closed_unmerged: "closed (unmerged)"
+  };
+  const outcomeLabel = {
+    merged: "\u2714 merged",
+    closed_unmerged: "\u2715 closed without merge",
+    open: "\u2026 still open"
+  };
+  const hrs = (h) => h == null ? "\u2014" : `${h}h`;
+  console.log(`
+  Audit \u2014 ${view.repo || "repo"} #${view.prNumber}`);
+  console.log(`  ${view.prUrl}`);
+  console.log(`  Outcome: ${outcomeLabel[view.outcome] ?? view.outcome}` + (view.mergedByLogin ? `  (merged by @${view.mergedByLogin})` : ""));
+  console.log("\n  Engagement (raw counts \u2014 not a score):");
+  console.log(`    Independent counterparties engaged : ${view.signals.distinctCounterparties}`);
+  console.log(`    Maintainer reviews                 : ${view.signals.maintainerReviews}`);
+  console.log(`    Your commits after first response  : ${view.signals.iterationsAfterFirstResponse}`);
+  console.log(`    Time to first maintainer response  : ${hrs(view.signals.hoursToFirstResponse)}`);
+  console.log(`    Time to merge                      : ${hrs(view.signals.hoursToMerge)}`);
+  console.log("\n  Timeline:");
+  if (view.timeline.length === 0) {
+    console.log("    (no events captured)");
+  } else {
+    for (const e of view.timeline) {
+      console.log(`    ${e.at}  ${roleLabel[e.role] ?? e.role} ${eventLabel[e.event] ?? e.event}`);
+    }
+  }
+  if (view.notes.length > 0) {
+    console.log("\n  Notes:");
+    for (const n of view.notes) console.log(`    \u26A0 ${n}`);
+  }
+  console.log("\n  What this does NOT measure:");
+  for (const l of view.limitations || []) console.log(`    \xB7 ${l}`);
+  console.log("");
+}
+async function cmdAudit(id, flags = {}) {
+  if (!id) {
+    console.error("terminalhire claim audit: needs a claim id. Try `terminalhire claim list`.");
+    process.exit(1);
+  }
+  const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+  const claim = claims.findClaim(id);
+  if (!claim) {
+    console.error(`No claim with id '${id}'.`);
+    process.exit(1);
+  }
+  if (!claim.prUrl) {
+    console.log(`Claim '${id}' has no submitted PR yet \u2014 nothing to audit. Submit first: terminalhire claim submit ${id}`);
+    return;
+  }
+  const { resolveCallerIdentity: resolveCallerIdentity2 } = await Promise.resolve().then(() => (init_identity(), identity_exports));
+  const identity = await resolveCallerIdentity2();
+  if (!identity) {
+    console.error("terminalhire claim audit: could not verify your GitHub identity (`gh api user`). Run `gh auth login` and retry.");
+    process.exit(1);
+  }
+  let token;
+  try {
+    token = await sh("gh", ["auth", "token"]);
+  } catch {
+    token = void 0;
+  }
+  const { gatherAudit: gatherAudit2 } = await Promise.resolve().then(() => (init_fetch(), fetch_exports));
+  const { lifecycle, facts } = await gatherAudit2(claim.prUrl, token || void 0);
+  if (!lifecycle) {
+    console.error(`terminalhire claim audit: could not fetch the PR lifecycle for ${claim.prUrl} (private, deleted, rate-limited, or not a PR).`);
+    process.exit(1);
+  }
+  if (lifecycle.authorId !== identity.id) {
+    console.error(`terminalhire claim audit: PR ${claim.prUrl} was not authored by you (@${identity.login}); the audit only covers your own PRs.`);
+    process.exit(1);
+  }
+  const { buildAuditView: buildAuditView2 } = await Promise.resolve().then(() => (init_audit(), audit_exports));
+  const view = buildAuditView2(lifecycle, facts);
+  if (flags.json) {
+    console.log(JSON.stringify(view, null, 2));
+    return;
+  }
+  renderAudit(view);
+}
 async function run7() {
   const verb = process.argv[2];
   const rawArgs = process.argv.slice(3).map((a) => a === "-y" ? "--yes" : a);
@@ -12712,8 +13344,11 @@ async function run7() {
       case "release":
         await cmdRelease(positional[0]);
         break;
+      case "audit":
+        await cmdAudit(positional[0], flags);
+        break;
       default:
-        console.error(`terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | list | status | update | submit | release`);
+        console.error(`terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | list | status | update | submit | audit | release`);
         process.exit(1);
     }
   } catch (err) {
@@ -12741,7 +13376,7 @@ var init_jpi_claim = __esm({
     GH_HEADERS2 = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
     CONTENTION_HINT = "    tip: if scopes overlap, comment on the ISSUE comparing scope \u2014 generous + compatible wins triage.";
     AI_DISCLOSURE_NOTE = "---\nThis contribution was developed with AI assistance via [terminalhire](https://terminalhire.com). The author has reviewed the change and takes responsibility for its content.";
-    pExecFile = promisify(execFile);
+    pExecFile = promisify2(execFile2);
     VALUE_FLAGS = /* @__PURE__ */ new Set(["worktree", "branch", "body-file", "title"]);
     ASSIGNMENT_MARKER = "<!-- terminalhire:assignment-request -->";
     TAKE_BOT_REPOS = /* @__PURE__ */ new Set(["paradedb/paradedb"]);
@@ -41317,7 +41952,6 @@ function interleaveBySource(topMatches) {
 }
 function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
   const base = String(baseUrl || "https://terminalhire.com").replace(/\/+$/, "");
-  const clickBase = opts.clickCatcher ? String(opts.clickCatcher).replace(/\/+$/, "") : base;
   const out = [];
   const surfacedIds = [];
   const seenRole = /* @__PURE__ */ new Set();
@@ -41366,7 +42000,7 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
       const company = titleCase(companyRaw);
       const pct2 = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
       const token = Buffer.from(String(m.id)).toString("base64url");
-      const url = `${clickBase}/j/${token}`;
+      const url = `${base}/j/${token}`;
       if (source === "bounty") {
         const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
         const repo = m.repo || companyRaw;
@@ -42285,66 +42919,6 @@ var init_jpi_init = __esm({
   }
 });
 
-// bin/match-slots.js
-function rotate(list, now) {
-  if (!Array.isArray(list) || list.length === 0) return [];
-  const idx = Math.floor(now / ROTATE_WINDOW_MS) % list.length;
-  return [...list.slice(idx), ...list.slice(0, idx)];
-}
-function budgetSlots(results, opts = {}) {
-  const {
-    thinProfile = false,
-    contributeEnabled = true,
-    totalSlots = TOTAL_SLOTS,
-    now = Date.now(),
-    interestPicks = [],
-    interestJobPicks = [],
-    interestJobSlots = INTEREST_JOB_SLOTS
-  } = opts;
-  const list = Array.isArray(results) ? results : [];
-  const bountyMatches = list.filter(
-    (r) => r && r.job && r.job.source === "bounty" && typeof r.score === "number" && r.score >= BOUNTY_MIN_MATCH
-  );
-  const bountyTop = [...bountyMatches].sort((a, b) => b.score - a.score).slice(0, BOUNTY_SLOTS);
-  const contributeMatches = list.filter((r) => r && r.job && r.job.source === "contribute");
-  const contributeCap = thinProfile && contributeEnabled ? CONTRIBUTE_SLOTS_THIN : CONTRIBUTE_SLOTS;
-  const contributeTop = rotate(contributeMatches, now).slice(0, contributeCap);
-  const reservedContributeIds = new Set(contributeTop.map((r) => r.job.id));
-  const interestTop = (Array.isArray(interestPicks) ? interestPicks : []).filter((r) => r && r.job && !reservedContributeIds.has(r.job.id)).slice(0, INTEREST_CONTRIBUTE_SLOTS).map((r) => ({ ...r, interestLabel: INTEREST_SLOT_LABEL }));
-  const surfacedIds = new Set(list.map((r) => r?.job?.id).filter(Boolean));
-  const interestJobTop = (Array.isArray(interestJobPicks) ? interestJobPicks : []).filter((r) => r && r.job && !surfacedIds.has(r.job.id)).slice(0, interestJobSlots).map((r) => ({ ...r, interestLabel: INTEREST_SLOT_LABEL }));
-  const roleSlots = Math.max(
-    0,
-    totalSlots - bountyTop.length - contributeTop.length - interestTop.length - interestJobTop.length
-  );
-  const roleMatches = list.filter(
-    (r) => r && r.job && r.job.source !== "bounty" && r.job.source !== "contribute"
-  );
-  const roleStable = Math.min(ROLE_STABLE_MAX, roleSlots);
-  const stableRoles = roleMatches.slice(0, roleStable);
-  const rotableRoles = roleMatches.slice(roleStable, roleStable + ROLE_ROTATE_WINDOW);
-  const rotatedRoles = rotate(rotableRoles, now);
-  const roleTop = [...stableRoles, ...rotatedRoles].slice(0, roleSlots);
-  return { roleTop, bountyTop, contributeTop, interestTop, interestJobTop };
-}
-var TOTAL_SLOTS, BOUNTY_SLOTS, BOUNTY_MIN_MATCH, INTEREST_CONTRIBUTE_SLOTS, INTEREST_JOB_SLOTS, INTEREST_SLOT_LABEL, CONTRIBUTE_SLOTS, CONTRIBUTE_SLOTS_THIN, ROLE_STABLE_MAX, ROLE_ROTATE_WINDOW, ROTATE_WINDOW_MS;
-var init_match_slots = __esm({
-  "bin/match-slots.js"() {
-    "use strict";
-    TOTAL_SLOTS = 25;
-    BOUNTY_SLOTS = 3;
-    BOUNTY_MIN_MATCH = 0.5;
-    INTEREST_CONTRIBUTE_SLOTS = 1;
-    INTEREST_JOB_SLOTS = 1;
-    INTEREST_SLOT_LABEL = "Stretch";
-    CONTRIBUTE_SLOTS = 5;
-    CONTRIBUTE_SLOTS_THIN = 8;
-    ROLE_STABLE_MAX = 8;
-    ROLE_ROTATE_WINDOW = 60;
-    ROTATE_WINDOW_MS = 5 * 60 * 1e3;
-  }
-});
-
 // bin/interest-picks.js
 function selectInterestPicks(contributeSupply, declaredTags, fpSkillTags, cap = INTEREST_PICKS_CAP) {
   if (!Array.isArray(contributeSupply) || contributeSupply.length === 0) return [];
@@ -42701,12 +43275,7 @@ async function run22() {
         unpushedClaims,
         baseUrl: API_URL8,
         seenHistory,
-        widen,
-        // When the refresh monitor set up its loopback click-catcher, it threads
-        // the base in via this env var so tip /j/ links record clicks locally.
-        // Absent (a manual `terminalhire refresh` outside the monitor) ⇒ undefined
-        // ⇒ public /j/ URLs, unchanged. baseUrl/API_URL are untouched.
-        clickCatcher: process.env.TH_CLICK_CATCHER || void 0
+        widen
       });
     } catch {
     }
@@ -43289,17 +43858,6 @@ if (firstArg === "chat" || firstArg === "link" || firstArg === "claim") {
     emitInteractiveNudge2();
   } catch {
   }
-}
-if (firstArg === "__record-click") {
-  const id = process.argv[3];
-  if (id && /^[a-z0-9._-]+:.+$/.test(id)) {
-    try {
-      const { markClicked: markClicked2 } = await Promise.resolve().then(() => (init_job_status_store(), job_status_store_exports));
-      markClicked2(id);
-    } catch {
-    }
-  }
-  process.exit(0);
 }
 if (firstArg === "login" || firstArg === "logout") {
   const mod2 = await Promise.resolve().then(() => (init_jpi_login(), jpi_login_exports));

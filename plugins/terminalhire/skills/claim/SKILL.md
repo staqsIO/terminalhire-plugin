@@ -21,7 +21,11 @@ Invoke the bundled engine in a Bash tool call. Pick the subcommand that matches 
    ```bash
    node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim preview <bountyId|issueUrl> --json
    ```
-   Parse the single JSON line: `{ bountyId, title, amountUSD, repoFullName, issueUrl, issueState, openPRs, policy: { status, hits } }`. `policy.status` is `"flagged"` (AI-assistance policy language found — `hits` carries `{ file, excerpt }` entries), `"clean"` (no such language), or `"unavailable"` (the repo's CONTRIBUTING/PR-template/AGENTS docs couldn't be read).
+   Parse the single JSON line: `{ bountyId, title, amountUSD, repoFullName, issueUrl, issueState, openPRs, policy: { status, verdict, assignment, rulesetVersion, hits, requirements } }`. The `policy` object is the repo's contribution audit:
+   - `verdict` — `"prohibited"` (the repo bans AI-generated contributions), `"disclosure-required"` (allowed, must be disclosed), `"ai-mentioned"` (AI-policy language found, intent unclear), `"clean"`, or `"unavailable"` (docs couldn't be read). `hits` carries `{ file, excerpt, rule }` — the repo's verbatim words.
+   - `requirements` — `{ kind, file, excerpt }` entries for non-AI expectations found in the docs: `assignment-required`, `take-bot`, `cla-required`, `discussion-first`.
+   - `assignment` — `"required"`, `"take-bot"`, or `"none"`: what `claim start` will do about issue assignment (it only posts a comment for the first two; `"none"` means start posts nothing unless the dev asks for `--assign`).
+   - `status` — legacy coarse field (`"flagged"`/`"clean"`/`"unavailable"`); prefer `verdict`.
 
 2. **Confirm via a styled `AskUserQuestion`.** One question — *"Claim this bounty?"* — with options **"Claim it"** (recommended, listed first) and **"Cancel"**. Put a terminal-styled card in the `preview` field of the **Claim it** option so it renders inline. Build the card from the JSON:
    ```
@@ -43,6 +47,13 @@ Invoke the bundled engine in a Bash tool call. Pick the subcommand that matches 
    - `openPRs === 0` → `no open PRs reference this yet`
    - `openPRs === null` → `open PRs: unknown — verify on the issue before working`
 
+   Below the race line, surface the audit so the dev decides with the policy in view:
+   - `verdict === "prohibited"` → do NOT show this card at all; use the prohibited handshake in step 3 instead.
+   - `verdict === "disclosure-required"` → `⚠ repo requires disclosing AI assistance`
+   - `verdict === "ai-mentioned"` → `⚠ AI-policy language in repo docs — read before working`
+   - each `requirements[]` entry → one line, e.g. `• repo expects you to request assignment first` / `• CLA required` / `• discuss before opening a PR`
+   - the assignment plan → `start will post an assignment request` (`"required"`), `start will post /take` (`"take-bot"`), or `start will not comment on the issue` (`"none"`)
+
    **If `issueState === "closed"`: do NOT show the confirm card and do NOT call `claim record`.** Tell the dev the issue is closed and can't be claimed (the pool drops closed issues — likely a stale cache entry; suggest `terminalhire bounties` for the current pool), then stop.
 
 3. **Record only if the dev picks "Claim it":**
@@ -51,11 +62,20 @@ Invoke the bundled engine in a Bash tool call. Pick the subcommand that matches 
    ```
    On **Cancel** (or a closed issue), do not record — tell the dev nothing was claimed. `claim record` prints the executor brief and re-checks the live open-PR race at commit time.
 
-   **Policy handshake — when `preview` reported `policy.status` `"flagged"` or `"unavailable"`:** `claim record` will REFUSE (exit 1) unless it is acknowledged, and it will NOT prompt interactively when invoked this way (non-TTY via the Bash tool → the confirm is skipped, the refusal fires). So do your judgment-layer read of the repo's actual CONTRIBUTING / PR-template / AGENTS docs FIRST (see *Doing the work* below — HARD-STOP if the repo prohibits AI-assisted contributions). Only if you've read them and the work is genuinely mergeable, append `--ack-policy` to record it:
+   **Prohibited handshake — when `preview` reported `verdict: "prohibited"`:** the repo bans AI-generated contributions, and `claim record` will REFUSE (exit 1) unless it gets the dedicated `--ack-policy-prohibited` flag. That flag is a HUMAN decision, never yours to make:
+   1. Show the dev the `hits[].excerpt` text **verbatim** (the repo's own words), and state plainly: continuing means everything submitted must be hand-written by them — terminalhire's AI-assisted executor flow does not fit this repo.
+   2. Ask an explicit yes/no (`AskUserQuestion`: *"This repo prohibits AI-generated contributions. Claim it anyway, committing to hand-written work?"* with **"Don't claim"** as the recommended first option).
+   3. Only on an explicit human **yes**, record with:
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim record <bountyId|issueUrl> --ack-policy-prohibited
+   ```
+   Never pass `--ack-policy-prohibited` on your own judgment, and never suggest routing around the policy. If the dev declines, nothing is recorded.
+
+   **Policy handshake — when `verdict` is `"disclosure-required"`/`"ai-mentioned"` (or `status` is `"unavailable"`):** `claim record` will REFUSE (exit 1) unless acknowledged, and it will NOT prompt interactively when invoked this way (non-TTY via the Bash tool → the confirm is skipped, the refusal fires). Do your judgment-layer read of the repo's actual CONTRIBUTING / PR-template / AGENTS docs FIRST (see *Doing the work* below). Only if you've read them and the work is genuinely mergeable, append `--ack-policy` to record it:
    ```bash
    node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim record <bountyId|issueUrl> --ack-policy
    ```
-   A `"clean"` status records without the flag. Never pass `--ack-policy` reflexively — it is your attestation that you read the policy and the contribution is allowed.
+   A `"clean"` verdict records without any flag. Never pass `--ack-policy` reflexively — it is your attestation that you read the policy and the contribution is allowed. It does NOT clear a `"prohibited"` verdict; only the human handshake above does.
 
 ### Track claims and the metric
 ```bash
@@ -85,9 +105,9 @@ node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim submit <id>   # runs
 
 If the user asks you to actually DO a claimed bounty, work it in an **isolated git worktree**, and enforce these guardrails (a slop PR under the user's GitHub identity is permanent and damages their reputation):
 
-**Request assignment on the issue before starting — this is not optional.** Maintainers expect claim-before-work; skipping it reads as low-effort and has drawn explicit callouts. `claim start` does this for you automatically (it posts `/take` on repos with a self-assign bot, or a plain assignment-request comment otherwise) as part of provisioning, and won't double-post on a re-run. Do not attempt to suppress or bypass that step. If you provisioned the worktree some other way (not via `claim start`), request assignment on the issue yourself before writing code.
+**Assignment is audit-driven.** When the repo's docs set an assignment expectation (`assignment: "required"` or `"take-bot"` in the audit), `claim start` posts the request automatically (`/take` on bot repos, a plain assignment-request comment otherwise), won't double-post on a re-run, and — on an interactive terminal — shows the dev the exact comment before posting. Do not attempt to suppress or bypass that step (the CLI has a human-only escape hatch for it; it is never yours to pass). When the audit found no expectation (`"none"`), `start` posts nothing; if the dev wants to request assignment anyway, they can pass `--assign`. If you provisioned the worktree some other way (not via `claim start`) on a repo that expects assignment, request it on the issue yourself before writing code.
 
-**Before writing any code — read the repo's contribution policy.** `claim record` already ran a bounded, deterministic keyword scan (`src/repo-policy.ts`) and printed a `POLICY` section; if it showed excerpts (status `flagged`) or said the docs couldn't be read (status `unavailable`), read the actual CONTRIBUTING.md / PR template / AGENTS.md yourself — fetch them from the repo if you don't already have them — before doing anything else. The CLI scan is a keyword FLAG, not a verdict; you are the judgment layer it can't be:
+**Before writing any code — read the repo's contribution policy.** `claim record` already ran a bounded, deterministic audit (`src/repo-policy.ts`) and printed `POLICY` + `REQUIREMENTS` sections; if it showed excerpts (any non-clean verdict) or said the docs couldn't be read (`unavailable`), read the actual CONTRIBUTING.md / PR template / AGENTS.md yourself — fetch them from the repo if you don't already have them — before doing anything else. The audit is a deterministic pattern match, not comprehension; you are the judgment layer it can't be (it can miss a prohibition phrased unusually, or in a doc it doesn't fetch):
 - If the repo's policy **prohibits AI-generated/AI-assisted contributions** (e.g. Gentoo/NetBSD-style "tainted code" language, an outright ban on LLM-authored PRs), **HARD-STOP**. Do not clone, do not write a patch, do not open a worktree for it. Tell the user plainly that this repo doesn't accept AI-assisted work and the claim isn't mergeable as-is — do not attempt to route around it (e.g. "write it as if you wrote it yourself"). Suggest they either work it by hand or `terminalhire claim release <id>`.
 - If the policy is silent, permissive, or merely asks for **disclosure**, proceed — and follow whatever disclosure format the repo asks for (see the submit step below; the CLI's baseline note may need to sit alongside a repo-specific tag/section, not replace it).
 - If you can't find or read the policy docs at all, say so and let the user decide whether to proceed — don't silently treat "couldn't check" as "no policy."

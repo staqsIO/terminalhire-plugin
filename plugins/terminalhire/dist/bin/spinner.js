@@ -964,7 +964,6 @@ function interleaveBySource(topMatches) {
 }
 function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
   const base = String(baseUrl || "https://terminalhire.com").replace(/\/+$/, "");
-  const clickBase = opts.clickCatcher ? String(opts.clickCatcher).replace(/\/+$/, "") : base;
   const out = [];
   const surfacedIds = [];
   const seenRole = /* @__PURE__ */ new Set();
@@ -1013,7 +1012,7 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
       const company = titleCase(companyRaw);
       const pct = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
       const token = Buffer.from(String(m.id)).toString("base64url");
-      const url = `${clickBase}/j/${token}`;
+      const url = `${base}/j/${token}`;
       if (source === "bounty") {
         const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
         const repo = m.repo || companyRaw;

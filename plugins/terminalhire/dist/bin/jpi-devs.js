@@ -1706,7 +1706,152 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
     fetchedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
-var TRACTION_TOP_N, MAINTAINER_ENRICH_MAX, CANDIDATE_PR_PAGE, MAX_ENRICH_PRS, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE, RECEPTIVITY_RECENCY_DAYS, RECEPTIVITY_RECENCY_FLOOR, GITHUB_GRAPHQL_URL;
+function isLifecycleBot(actor) {
+  if (!actor) return false;
+  if (actor.type === "Bot") return true;
+  const login = String(actor.login ?? "");
+  if (/\[bot\]$/i.test(login)) return true;
+  return LIFECYCLE_BOT_LOGINS.has(login.toLowerCase());
+}
+async function fetchPRLifecycle(prUrl, token, signal, governor) {
+  const ref = parseGitHubRef(prUrl);
+  if (!ref || ref.kind !== "pull") return null;
+  const { owner, repo, number } = ref;
+  const sig = signal ?? AbortSignal.timeout(1e4);
+  const gov = makeScoringGovernor(governor);
+  if (gov.tripped() || gov.budgetExhausted()) return null;
+  let pr;
+  try {
+    pr = await ghFetch(`/repos/${owner}/${repo}/pulls/${number}`, token, sig);
+  } catch {
+    return null;
+  }
+  const authorId = pr.user?.id ?? null;
+  const events = [];
+  const complete = { reviews: false, comments: false, commits: false };
+  if (pr.created_at) {
+    events.push({
+      event_type: "pr_opened",
+      source_id: `pr-${number}`,
+      actor_id: authorId ?? 0,
+      actor_assoc: "",
+      is_author: true,
+      is_bot: false,
+      occurred_at: pr.created_at
+    });
+  }
+  if (!gov.tripped() && !gov.budgetExhausted()) {
+    try {
+      const reviews = await ghFetch(
+        `/repos/${owner}/${repo}/pulls/${number}/reviews?per_page=100`,
+        token,
+        sig
+      );
+      for (const r of reviews) {
+        if (r.state === "PENDING" || !r.submitted_at) continue;
+        const aid = r.user?.id ?? 0;
+        events.push({
+          event_type: "review_submitted",
+          source_id: `review-${r.id}`,
+          actor_id: aid,
+          actor_assoc: r.author_association ?? "",
+          is_author: authorId != null && aid === authorId,
+          is_bot: isLifecycleBot(r.user),
+          occurred_at: r.submitted_at
+        });
+      }
+      complete.reviews = true;
+    } catch {
+      complete.reviews = false;
+    }
+  }
+  if (!gov.tripped() && !gov.budgetExhausted()) {
+    try {
+      const comments = await ghFetch(
+        `/repos/${owner}/${repo}/issues/${number}/comments?per_page=100`,
+        token,
+        sig
+      );
+      for (const c of comments) {
+        if (!c.created_at) continue;
+        const aid = c.user?.id ?? 0;
+        events.push({
+          event_type: "issue_comment",
+          source_id: `comment-${c.id}`,
+          actor_id: aid,
+          actor_assoc: c.author_association ?? "",
+          is_author: authorId != null && aid === authorId,
+          is_bot: isLifecycleBot(c.user),
+          occurred_at: c.created_at
+        });
+      }
+      complete.comments = true;
+    } catch {
+      complete.comments = false;
+    }
+  }
+  if (!gov.tripped() && !gov.budgetExhausted()) {
+    try {
+      const commits = await ghFetch(
+        `/repos/${owner}/${repo}/pulls/${number}/commits?per_page=100`,
+        token,
+        sig
+      );
+      for (const cm of commits) {
+        const when = cm.commit?.author?.date ?? null;
+        if (!when) continue;
+        const aid = cm.author?.id ?? authorId ?? 0;
+        events.push({
+          event_type: "commit_pushed",
+          source_id: `commit-${cm.sha}`,
+          actor_id: aid,
+          actor_assoc: "",
+          is_author: authorId != null && aid === authorId,
+          is_bot: isLifecycleBot(cm.author),
+          occurred_at: when
+        });
+      }
+      complete.commits = true;
+    } catch {
+      complete.commits = false;
+    }
+  }
+  if (pr.merged && pr.merged_at) {
+    events.push({
+      event_type: "pr_merged",
+      source_id: `merged-${number}`,
+      actor_id: pr.merged_by?.id ?? 0,
+      actor_assoc: "",
+      is_author: authorId != null && pr.merged_by?.id === authorId,
+      // A bot merger (mergify[bot], a merge queue, etc.) must NOT count as an
+      // independent human counterparty. Classify it like every other actor (§4b V4).
+      is_bot: isLifecycleBot(pr.merged_by),
+      occurred_at: pr.merged_at
+    });
+  } else if (pr.state === "closed" && pr.closed_at) {
+    events.push({
+      event_type: "pr_closed_unmerged",
+      source_id: `closed-${number}`,
+      actor_id: 0,
+      actor_assoc: "",
+      is_author: false,
+      is_bot: false,
+      occurred_at: pr.closed_at
+    });
+  }
+  return {
+    prNumber: number,
+    prUrl: pr.html_url,
+    openedAt: pr.created_at ?? null,
+    merged: pr.merged === true,
+    mergedAt: pr.merged_at ?? null,
+    closedUnmergedAt: !pr.merged && pr.state === "closed" ? pr.closed_at ?? null : null,
+    authorId,
+    events,
+    complete
+  };
+}
+var TRACTION_TOP_N, MAINTAINER_ENRICH_MAX, CANDIDATE_PR_PAGE, MAX_ENRICH_PRS, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE, RECEPTIVITY_RECENCY_DAYS, RECEPTIVITY_RECENCY_FLOOR, GITHUB_GRAPHQL_URL, LIFECYCLE_BOT_LOGINS;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
@@ -1726,6 +1871,20 @@ var init_github = __esm({
     RECEPTIVITY_RECENCY_DAYS = 180;
     RECEPTIVITY_RECENCY_FLOOR = 0.1;
     GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
+    LIFECYCLE_BOT_LOGINS = /* @__PURE__ */ new Set([
+      "mergify",
+      "mergify[bot]",
+      "bors",
+      "bors[bot]",
+      "kodiakhq",
+      "kodiakhq[bot]",
+      "dependabot",
+      "dependabot[bot]",
+      "renovate",
+      "renovate[bot]",
+      "github-actions",
+      "github-actions[bot]"
+    ]);
   }
 });
 
@@ -7807,6 +7966,7 @@ __export(src_exports, {
   fetchGitHubProfile: () => fetchGitHubProfile,
   fetchOpenExternalPRs: () => fetchOpenExternalPRs,
   fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
+  fetchPRLifecycle: () => fetchPRLifecycle,
   fetchPRScoringFacts: () => fetchPRScoringFacts,
   fetchRepoRecency: () => fetchRepoRecency,
   fetchRepoReceptivity: () => fetchRepoReceptivity,
@@ -7902,9 +8062,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a0bc554500876cd51/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a0bc554500876cd51/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -8307,6 +8467,31 @@ function linkTitle(title, url) {
   return href ? `${safeTitle} (${href})` : safeTitle;
 }
 
+// bin/match-slots.js
+var ROTATE_WINDOW_MS = 5 * 60 * 1e3;
+var ROLE_HEAD_ROTATE_MS = 60 * 60 * 1e3;
+function rotate(list, now, windowMs = ROTATE_WINDOW_MS) {
+  if (!Array.isArray(list) || list.length === 0) return [];
+  const idx = Math.floor(now / windowMs) % list.length;
+  return [...list.slice(idx), ...list.slice(0, idx)];
+}
+
+// bin/directory-select.js
+var DEVS_STABLE_HEAD = 5;
+var DEVS_ROTATE_WINDOW = 15;
+var DEVS_ROTATE_MS = 5 * 60 * 1e3;
+function selectDirectoryDevs(results, { limit, now = Date.now() } = {}) {
+  const list = Array.isArray(results) ? results : [];
+  if (list.length === 0) return [];
+  if (limit >= list.length) return list;
+  const head = list.slice(0, Math.min(DEVS_STABLE_HEAD, limit));
+  const tailPool = list.slice(head.length, head.length + DEVS_ROTATE_WINDOW);
+  const tailSelected = rotate(tailPool, now, DEVS_ROTATE_MS).slice(0, limit - head.length);
+  const rankOf = new Map(list.map((item, idx) => [item, idx]));
+  const tail = [...tailSelected].sort((a, b) => rankOf.get(a) - rankOf.get(b));
+  return [...head, ...tail];
+}
+
 // bin/jpi-devs.js
 var API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
 var DEFAULT_LIMIT = 10;
@@ -8366,7 +8551,7 @@ async function getDevs({ quiet = false, offline = false } = {}) {
   }
   const cards = index.cards ?? [];
   if (cards.length === 0) return { status: "no-cards", fp };
-  let results = match2(fp, cards, SHOW_ALL ? cards.length : LIMIT);
+  let results = match2(fp, cards, cards.length);
   let ownLogin;
   try {
     const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
@@ -8374,6 +8559,7 @@ async function getDevs({ quiet = false, offline = false } = {}) {
   } catch {
   }
   results = excludeOwnCard(results, ownLogin);
+  if (!SHOW_ALL) results = selectDirectoryDevs(results, { limit: LIMIT });
   if (results.length === 0) return { status: "no-matches", fp };
   return { status: "ok", results, fp };
 }

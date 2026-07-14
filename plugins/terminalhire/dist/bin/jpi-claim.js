@@ -1706,7 +1706,152 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
     fetchedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
-var TRACTION_TOP_N, MAINTAINER_ENRICH_MAX, CANDIDATE_PR_PAGE, MAX_ENRICH_PRS, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE, RECEPTIVITY_RECENCY_DAYS, RECEPTIVITY_RECENCY_FLOOR, GITHUB_GRAPHQL_URL;
+function isLifecycleBot(actor) {
+  if (!actor) return false;
+  if (actor.type === "Bot") return true;
+  const login = String(actor.login ?? "");
+  if (/\[bot\]$/i.test(login)) return true;
+  return LIFECYCLE_BOT_LOGINS.has(login.toLowerCase());
+}
+async function fetchPRLifecycle(prUrl, token, signal, governor) {
+  const ref = parseGitHubRef(prUrl);
+  if (!ref || ref.kind !== "pull") return null;
+  const { owner, repo, number } = ref;
+  const sig = signal ?? AbortSignal.timeout(1e4);
+  const gov = makeScoringGovernor(governor);
+  if (gov.tripped() || gov.budgetExhausted()) return null;
+  let pr;
+  try {
+    pr = await ghFetch(`/repos/${owner}/${repo}/pulls/${number}`, token, sig);
+  } catch {
+    return null;
+  }
+  const authorId = pr.user?.id ?? null;
+  const events = [];
+  const complete = { reviews: false, comments: false, commits: false };
+  if (pr.created_at) {
+    events.push({
+      event_type: "pr_opened",
+      source_id: `pr-${number}`,
+      actor_id: authorId ?? 0,
+      actor_assoc: "",
+      is_author: true,
+      is_bot: false,
+      occurred_at: pr.created_at
+    });
+  }
+  if (!gov.tripped() && !gov.budgetExhausted()) {
+    try {
+      const reviews = await ghFetch(
+        `/repos/${owner}/${repo}/pulls/${number}/reviews?per_page=100`,
+        token,
+        sig
+      );
+      for (const r of reviews) {
+        if (r.state === "PENDING" || !r.submitted_at) continue;
+        const aid = r.user?.id ?? 0;
+        events.push({
+          event_type: "review_submitted",
+          source_id: `review-${r.id}`,
+          actor_id: aid,
+          actor_assoc: r.author_association ?? "",
+          is_author: authorId != null && aid === authorId,
+          is_bot: isLifecycleBot(r.user),
+          occurred_at: r.submitted_at
+        });
+      }
+      complete.reviews = true;
+    } catch {
+      complete.reviews = false;
+    }
+  }
+  if (!gov.tripped() && !gov.budgetExhausted()) {
+    try {
+      const comments = await ghFetch(
+        `/repos/${owner}/${repo}/issues/${number}/comments?per_page=100`,
+        token,
+        sig
+      );
+      for (const c of comments) {
+        if (!c.created_at) continue;
+        const aid = c.user?.id ?? 0;
+        events.push({
+          event_type: "issue_comment",
+          source_id: `comment-${c.id}`,
+          actor_id: aid,
+          actor_assoc: c.author_association ?? "",
+          is_author: authorId != null && aid === authorId,
+          is_bot: isLifecycleBot(c.user),
+          occurred_at: c.created_at
+        });
+      }
+      complete.comments = true;
+    } catch {
+      complete.comments = false;
+    }
+  }
+  if (!gov.tripped() && !gov.budgetExhausted()) {
+    try {
+      const commits = await ghFetch(
+        `/repos/${owner}/${repo}/pulls/${number}/commits?per_page=100`,
+        token,
+        sig
+      );
+      for (const cm of commits) {
+        const when = cm.commit?.author?.date ?? null;
+        if (!when) continue;
+        const aid = cm.author?.id ?? authorId ?? 0;
+        events.push({
+          event_type: "commit_pushed",
+          source_id: `commit-${cm.sha}`,
+          actor_id: aid,
+          actor_assoc: "",
+          is_author: authorId != null && aid === authorId,
+          is_bot: isLifecycleBot(cm.author),
+          occurred_at: when
+        });
+      }
+      complete.commits = true;
+    } catch {
+      complete.commits = false;
+    }
+  }
+  if (pr.merged && pr.merged_at) {
+    events.push({
+      event_type: "pr_merged",
+      source_id: `merged-${number}`,
+      actor_id: pr.merged_by?.id ?? 0,
+      actor_assoc: "",
+      is_author: authorId != null && pr.merged_by?.id === authorId,
+      // A bot merger (mergify[bot], a merge queue, etc.) must NOT count as an
+      // independent human counterparty. Classify it like every other actor (§4b V4).
+      is_bot: isLifecycleBot(pr.merged_by),
+      occurred_at: pr.merged_at
+    });
+  } else if (pr.state === "closed" && pr.closed_at) {
+    events.push({
+      event_type: "pr_closed_unmerged",
+      source_id: `closed-${number}`,
+      actor_id: 0,
+      actor_assoc: "",
+      is_author: false,
+      is_bot: false,
+      occurred_at: pr.closed_at
+    });
+  }
+  return {
+    prNumber: number,
+    prUrl: pr.html_url,
+    openedAt: pr.created_at ?? null,
+    merged: pr.merged === true,
+    mergedAt: pr.merged_at ?? null,
+    closedUnmergedAt: !pr.merged && pr.state === "closed" ? pr.closed_at ?? null : null,
+    authorId,
+    events,
+    complete
+  };
+}
+var TRACTION_TOP_N, MAINTAINER_ENRICH_MAX, CANDIDATE_PR_PAGE, MAX_ENRICH_PRS, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE, RECEPTIVITY_RECENCY_DAYS, RECEPTIVITY_RECENCY_FLOOR, GITHUB_GRAPHQL_URL, LIFECYCLE_BOT_LOGINS;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
@@ -1726,6 +1871,20 @@ var init_github = __esm({
     RECEPTIVITY_RECENCY_DAYS = 180;
     RECEPTIVITY_RECENCY_FLOOR = 0.1;
     GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
+    LIFECYCLE_BOT_LOGINS = /* @__PURE__ */ new Set([
+      "mergify",
+      "mergify[bot]",
+      "bors",
+      "bors[bot]",
+      "kodiakhq",
+      "kodiakhq[bot]",
+      "dependabot",
+      "dependabot[bot]",
+      "renovate",
+      "renovate[bot]",
+      "github-actions",
+      "github-actions[bot]"
+    ]);
   }
 });
 
@@ -7807,6 +7966,7 @@ __export(src_exports, {
   fetchGitHubProfile: () => fetchGitHubProfile,
   fetchOpenExternalPRs: () => fetchOpenExternalPRs,
   fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
+  fetchPRLifecycle: () => fetchPRLifecycle,
   fetchPRScoringFacts: () => fetchPRScoringFacts,
   fetchRepoRecency: () => fetchRepoRecency,
   fetchRepoReceptivity: () => fetchRepoReceptivity,
@@ -8025,9 +8185,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node
+// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a0bc554500876cd51/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a0bc554500876cd51/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -8079,6 +8239,8 @@ var require_keytar2 = __commonJS({
 // src/repo-policy.ts
 var repo_policy_exports = {};
 __export(repo_policy_exports, {
+  POLICY_RULESET_VERSION: () => POLICY_RULESET_VERSION,
+  auditContent: () => auditContent,
   checkRepoPolicy: () => checkRepoPolicy
 });
 async function fetchContentsFile(fetchImpl, repoFullName, path) {
@@ -8100,23 +8262,50 @@ async function fetchContentsFile(fetchImpl, repoFullName, path) {
     return { ok: false, missing: false, content: null };
   }
 }
-function findHits(file, content) {
-  const lines = content.split("\n");
+function classifyLine(line) {
+  if (PROHIBITED_PATTERNS.some((re) => re.test(line))) return "prohibited";
+  if (DISCLOSURE_PATTERNS.some((re) => re.test(line))) return "disclosure-required";
+  if (AI_SIGNAL_PATTERNS.some((p) => p.re.test(line))) return "ai-mentioned";
+  return null;
+}
+function sanitizeExcerpt(text) {
+  return text.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, "");
+}
+function excerptAround(lines, i) {
+  const start = Math.max(0, i - 2);
+  const end = Math.min(lines.length, i + 3);
+  return sanitizeExcerpt(lines.slice(start, end).join("\n"));
+}
+function auditContent(files) {
   const hits = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!AI_SIGNAL_PATTERNS.some((p) => p.re.test(line))) continue;
-    const start = Math.max(0, i - 2);
-    const end = Math.min(lines.length, i + 3);
-    hits.push({ file, excerpt: lines.slice(start, end).join("\n") });
+  const requirements = [];
+  const seenKinds = /* @__PURE__ */ new Set();
+  for (const { file, content } of files) {
+    const lines = content.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const rule = classifyLine(lines[i]);
+      if (rule) hits.push({ file, excerpt: excerptAround(lines, i), rule });
+      for (const { kind, re } of REQUIREMENT_PATTERNS) {
+        if (seenKinds.has(kind) || !re.test(lines[i])) continue;
+        seenKinds.add(kind);
+        requirements.push({ kind, file, excerpt: excerptAround(lines, i) });
+      }
+    }
   }
-  return hits;
+  let verdict = "clean";
+  for (const h of hits) {
+    if (verdict === "clean" || VERDICT_SEVERITY[h.rule] > VERDICT_SEVERITY[verdict]) {
+      verdict = h.rule;
+    }
+  }
+  const assignment = seenKinds.has("take-bot") ? "take-bot" : seenKinds.has("assignment-required") ? "required" : "none";
+  return { hits, requirements, verdict, assignment };
 }
 async function checkRepoPolicy(repoFullName, opts = {}) {
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   let requestsUsed = 0;
   let hadError = false;
-  const hits = [];
+  const files = [];
   outer: for (const group of CANDIDATE_GROUPS) {
     for (const path of group) {
       if (requestsUsed >= MAX_REQUESTS) break outer;
@@ -8127,21 +8316,27 @@ async function checkRepoPolicy(repoFullName, opts = {}) {
         continue;
       }
       if (outcome.missing) continue;
-      if (outcome.content) hits.push(...findHits(path, outcome.content));
+      if (outcome.content) files.push({ file: path, content: outcome.content });
       break;
     }
   }
-  if (hits.length > 0) return { status: "flagged", hits };
-  if (hadError) return { status: "unavailable", hits: [] };
-  return { status: "clean", hits: [] };
+  const { hits, requirements, verdict, assignment } = auditContent(files);
+  if (hits.length > 0) {
+    return { status: "flagged", verdict, hits, requirements, assignment, rulesetVersion: POLICY_RULESET_VERSION };
+  }
+  if (hadError) {
+    return { status: "unavailable", verdict: "unavailable", hits: [], requirements, assignment, rulesetVersion: POLICY_RULESET_VERSION };
+  }
+  return { status: "clean", verdict: "clean", hits: [], requirements, assignment, rulesetVersion: POLICY_RULESET_VERSION };
 }
-var GH_API, GH_HEADERS, MAX_REQUESTS, AI_SIGNAL_PATTERNS, CANDIDATE_GROUPS;
+var GH_API, GH_HEADERS, MAX_REQUESTS, POLICY_RULESET_VERSION, AI_SIGNAL_PATTERNS, AI_TERM, PROHIBITED_PATTERNS, DISCLOSURE_PATTERNS, REQUIREMENT_PATTERNS, CANDIDATE_GROUPS, VERDICT_SEVERITY;
 var init_repo_policy = __esm({
   "src/repo-policy.ts"() {
     "use strict";
     GH_API = "https://api.github.com";
     GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
     MAX_REQUESTS = 4;
+    POLICY_RULESET_VERSION = 2;
     AI_SIGNAL_PATTERNS = [
       { label: "AI", re: /\bAI\b/i },
       { label: "artificial intelligence", re: /artificial intelligence/i },
@@ -8153,11 +8348,47 @@ var init_repo_policy = __esm({
       { label: "generative", re: /\bgenerative\b/i },
       { label: "machine-generated", re: /machine[\s-]generated/i }
     ];
+    AI_TERM = "(?:ai|llms?|generative(?:\\s+ai)?|artificial intelligence|language models?|copilot|chatgpt|claude|machine[\\s-]generated)";
+    PROHIBITED_PATTERNS = [
+      new RegExp(`prohibit\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
+      /did not write the code yourself/i,
+      new RegExp(`(?:not|never|don'?t|won'?t)\\s+accept\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
+      new RegExp(`\\bno\\s+${AI_TERM}[^.\\n]{0,40}\\b(?:prs?|pull requests?|contributions?|code|patch(?:es)?|commits?|submissions?)\\b`, "i"),
+      new RegExp(
+        `\\b${AI_TERM}[^.\\n]{0,60}\\b(?:is|are|will be)\\s+(?:\\w+\\s+)?(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
+        "i"
+      )
+    ];
+    DISCLOSURE_PATTERNS = [
+      new RegExp(`disclos\\w+[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
+      new RegExp(`\\b${AI_TERM}[^.\\n]{0,60}disclos`, "i"),
+      new RegExp(`\\b${AI_TERM}[\\s-]assist\\w*[^.\\n]{0,60}\\b(?:must|should|required?)\\b`, "i"),
+      // PR-template checkbox, e.g. "- [ ] I used AI tools and have reviewed the output"
+      new RegExp(`\\[ \\][^\\n]{0,80}\\b${AI_TERM}`, "i")
+    ];
+    REQUIREMENT_PATTERNS = [
+      // `/take` bot first: its docs usually also say "assign", and the bot is the
+      // more specific expectation (post exactly `/take`, not a prose request).
+      { kind: "take-bot", re: /(?:^|[\s`"'(])\/take\b/m },
+      { kind: "assignment-required", re: /(?:request|ask|wait)[^.\n]{0,40}\bassign/i },
+      { kind: "assignment-required", re: /\bassigned before\b/i },
+      { kind: "assignment-required", re: /\bself[\s-]assign/i },
+      { kind: "assignment-required", re: /do not (?:open|submit)[^.\n]{0,40}\b(?:prs?|pull requests?)\b/i },
+      { kind: "cla-required", re: /\bCLA\b/ },
+      { kind: "cla-required", re: /contributor licen[cs]e agreement/i },
+      { kind: "discussion-first", re: /open an issue (?:first|before)/i },
+      { kind: "discussion-first", re: /discuss\w*[^.\n]{0,40}\bbefore\b/i }
+    ];
     CANDIDATE_GROUPS = [
       ["CONTRIBUTING.md", ".github/CONTRIBUTING.md", "docs/CONTRIBUTING.md"],
-      [".github/PULL_REQUEST_TEMPLATE.md", "PULL_REQUEST_TEMPLATE.md"],
-      ["AGENTS.md"]
+      ["AGENTS.md", "AGENTS.MD"],
+      [".github/PULL_REQUEST_TEMPLATE.md", "PULL_REQUEST_TEMPLATE.md"]
     ];
+    VERDICT_SEVERITY = {
+      "ai-mentioned": 1,
+      "disclosure-required": 2,
+      prohibited: 3
+    };
   }
 });
 
@@ -8523,13 +8754,153 @@ var init_profile = __esm({
   }
 });
 
+// src/reputation/identity.ts
+var identity_exports = {};
+__export(identity_exports, {
+  resolveCallerIdentity: () => resolveCallerIdentity
+});
+import { execFile } from "child_process";
+import { promisify } from "util";
+async function resolveCallerIdentity() {
+  try {
+    const { stdout } = await execFileAsync("gh", ["api", "user"], { timeout: 1e4 });
+    const u = JSON.parse(stdout);
+    if (typeof u.id === "number" && typeof u.login === "string" && u.login.length > 0) {
+      return { id: u.id, login: u.login };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+var execFileAsync;
+var init_identity = __esm({
+  "src/reputation/identity.ts"() {
+    "use strict";
+    execFileAsync = promisify(execFile);
+  }
+});
+
+// src/reputation/fetch.ts
+var fetch_exports = {};
+__export(fetch_exports, {
+  gatherAudit: () => gatherAudit
+});
+async function gatherAudit(prUrl, token) {
+  const signal = AbortSignal.timeout(2e4);
+  const governor = makeScoringGovernor();
+  const [lifecycle, facts] = await Promise.all([
+    fetchPRLifecycle(prUrl, token, signal, governor),
+    fetchPRScoringFacts(prUrl, token, signal, governor)
+  ]);
+  return { lifecycle, facts };
+}
+var init_fetch = __esm({
+  "src/reputation/fetch.ts"() {
+    "use strict";
+    init_src();
+  }
+});
+
+// src/reputation/audit.ts
+var audit_exports = {};
+__export(audit_exports, {
+  buildAuditView: () => buildAuditView
+});
+function roleOf(e) {
+  if (e.is_bot) return "bot";
+  if (e.is_author) return "you";
+  const a = String(e.actor_assoc || "").toUpperCase();
+  if (MAINTAINER_ASSOC.has(a)) return "maintainer";
+  if (a === "CONTRIBUTOR") return "contributor";
+  if (a === "NONE") return "outside";
+  return "unknown";
+}
+function isMaintainerResponse(e) {
+  return !e.is_author && !e.is_bot && MAINTAINER_ASSOC.has(String(e.actor_assoc || "").toUpperCase());
+}
+function byTime(a, b) {
+  if (a.occurred_at < b.occurred_at) return -1;
+  if (a.occurred_at > b.occurred_at) return 1;
+  if (a.source_id < b.source_id) return -1;
+  if (a.source_id > b.source_id) return 1;
+  return 0;
+}
+function hoursBetween(a, b) {
+  if (!a || !b) return null;
+  const ta = Date.parse(a);
+  const tb = Date.parse(b);
+  if (Number.isNaN(ta) || Number.isNaN(tb)) return null;
+  return Math.round((tb - ta) / 36e5 * 10) / 10;
+}
+function buildAuditView(lifecycle, facts) {
+  const events = [...lifecycle.events].sort(byTime);
+  const counterpartyIds = /* @__PURE__ */ new Set();
+  for (const e of events) {
+    if (!e.is_author && !e.is_bot && e.actor_id !== 0) counterpartyIds.add(e.actor_id);
+  }
+  const firstResponse = events.find(isMaintainerResponse) ?? null;
+  const firstResponseAt = firstResponse?.occurred_at ?? null;
+  const maintainerReviews = events.filter(
+    (e) => e.event_type === "review_submitted" && isMaintainerResponse(e)
+  ).length;
+  const iterationsAfterFirstResponse = firstResponseAt ? events.filter(
+    (e) => e.event_type === "commit_pushed" && e.is_author && e.occurred_at > firstResponseAt
+  ).length : 0;
+  const outcome = lifecycle.merged ? "merged" : lifecycle.closedUnmergedAt ? "closed_unmerged" : "open";
+  const signals = {
+    distinctCounterparties: counterpartyIds.size,
+    maintainerReviews,
+    iterationsAfterFirstResponse,
+    hoursToFirstResponse: hoursBetween(lifecycle.openedAt, firstResponseAt),
+    hoursToMerge: hoursBetween(lifecycle.openedAt, lifecycle.mergedAt)
+  };
+  const timeline = events.map((e) => ({
+    at: e.occurred_at,
+    event: e.event_type,
+    role: roleOf(e)
+  }));
+  const notes = [];
+  if (!lifecycle.complete.reviews) notes.push("Review data incomplete \u2014 review counts may undercount.");
+  if (!lifecycle.complete.comments) notes.push("Comment data incomplete \u2014 response detection may be partial.");
+  if (!lifecycle.complete.commits) notes.push("Commit data incomplete \u2014 iteration count may undercount.");
+  if (lifecycle.authorId == null) notes.push("PR author identity unavailable \u2014 author/counterparty split may be imprecise.");
+  return {
+    repo: facts?.repo ?? "",
+    prNumber: lifecycle.prNumber,
+    prUrl: lifecycle.prUrl,
+    openedAt: lifecycle.openedAt,
+    outcome,
+    mergedAt: lifecycle.mergedAt,
+    closedUnmergedAt: lifecycle.closedUnmergedAt,
+    mergedByLogin: facts?.mergedByLogin ?? null,
+    signals,
+    timeline,
+    completeness: { ...lifecycle.complete },
+    notes,
+    limitations: [...AUDIT_LIMITATIONS]
+  };
+}
+var MAINTAINER_ASSOC, AUDIT_LIMITATIONS;
+var init_audit = __esm({
+  "src/reputation/audit.ts"() {
+    "use strict";
+    MAINTAINER_ASSOC = /* @__PURE__ */ new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+    AUDIT_LIMITATIONS = [
+      "Post-merge bug/revert rate \u2014 longitudinal; it only shows up after the merge this audit stops at.",
+      "Downstream adoption / real-world impact \u2014 a repo-level, slow signal not visible in one PR timeline.",
+      "Reviewer satisfaction and collaboration quality \u2014 not observable from public timeline events."
+    ];
+  }
+});
+
 // bin/jpi-claim.js
 init_src();
 import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, mkdirSync as mkdirSync6, existsSync as existsSync6, rmSync as rmSync3 } from "fs";
 import { join as join7 } from "path";
 import { homedir as homedir6, hostname as osHostname } from "os";
-import { execFile } from "child_process";
-import { promisify } from "util";
+import { execFile as execFile2 } from "child_process";
+import { promisify as promisify2 } from "util";
 import { createInterface } from "readline";
 
 // src/open-url.js
@@ -8710,19 +9081,40 @@ function buildSubmitBody(issueNumber, opts = {}) {
   return `${closesLine}${main}${AI_DISCLOSURE_NOTE}`;
 }
 function printPolicySection(policy) {
-  if (policy.status === "flagged") {
+  const verdict = policy.verdict ?? (policy.status === "flagged" ? "ai-mentioned" : policy.status);
+  if (verdict === "prohibited") {
+    console.log("\n  POLICY: \u2717 this repo PROHIBITS AI-generated contributions \u2014 READ BEFORE CLAIMING:");
+  } else if (verdict === "disclosure-required") {
+    console.log("\n  POLICY: \u26A0 this repo requires disclosing AI assistance \u2014 READ BEFORE WORKING:");
+  } else if (verdict === "ai-mentioned") {
     console.log("\n  POLICY: \u26A0 possible AI-assistance policy language found \u2014 READ BEFORE WORKING:");
-    for (const hit of policy.hits) {
-      console.log(`    [${hit.file}]`);
-      for (const line of hit.excerpt.split("\n")) console.log(`      ${line}`);
-    }
   } else if (policy.status === "unavailable") {
     console.log("\n  POLICY: could not read this repo's CONTRIBUTING/PR-template/AGENTS docs (rate-limited or unreachable) \u2014 read them yourself before working.");
   } else {
     console.log("  policy: no AI-assistance policy language detected in CONTRIBUTING/PR-template/AGENTS docs");
   }
+  for (const hit of policy.hits ?? []) {
+    console.log(`    [${hit.file}]`);
+    for (const line of hit.excerpt.split("\n")) console.log(`      ${line}`);
+  }
+  const requirements = policy.requirements ?? [];
+  if (requirements.length > 0) {
+    console.log("\n  REQUIREMENTS: this repo sets contribution expectations \u2014 in its own words:");
+    for (const req of requirements) {
+      console.log(`    ${req.kind} [${req.file}]`);
+      for (const line of req.excerpt.split("\n")) console.log(`      ${line}`);
+    }
+  }
+  const assignment = policy.assignment ?? "none";
+  if (assignment === "take-bot") {
+    console.log("  assignment: repo self-assigns via a /take comment \u2014 `claim start` will post `/take` on the issue");
+  } else if (assignment === "required") {
+    console.log("  assignment: repo expects you to request assignment \u2014 `claim start` will post a request comment on the issue");
+  } else {
+    console.log("  assignment: no assignment expectation found in repo docs \u2014 `claim start` will not comment (pass --assign to request anyway)");
+  }
 }
-var pExecFile = promisify(execFile);
+var pExecFile = promisify2(execFile2);
 async function sh(cmd, args, opts = {}) {
   const { stdout } = await pExecFile(cmd, args, { ...opts, shell: false, maxBuffer: 16 * 1024 * 1024 });
   return String(stdout).trim();
@@ -8991,9 +9383,9 @@ async function fetchIssue(repoFullName, issueNumber) {
 }
 var ASSIGNMENT_MARKER = "<!-- terminalhire:assignment-request -->";
 var TAKE_BOT_REPOS = /* @__PURE__ */ new Set(["paradedb/paradedb"]);
-function buildAssignmentComment(repoFullName) {
-  const usesTakeBot = TAKE_BOT_REPOS.has(repoFullName.toLowerCase());
-  const body = usesTakeBot ? "/take" : `I'd like to work on this \u2014 could I be assigned? Thanks!
+function buildAssignmentComment(repoFullName, opts = {}) {
+  const usesTakeBot = TAKE_BOT_REPOS.has(repoFullName.toLowerCase()) || Boolean(opts.takeBot);
+  const body = usesTakeBot ? "/take" : `Hi! I'd like to work on this issue. Could you assign it to me? Thanks!
 
 ${ASSIGNMENT_MARKER}`;
   return { usesTakeBot, body };
@@ -9014,6 +9406,11 @@ async function hasPriorAssignmentRequest(repoFullName, issueNumber, login) {
     return false;
   }
 }
+function shouldRequestAssignment(claim, flags = {}) {
+  const expectation = claim && claim.policy ? claim.policy.assignment : void 0;
+  const post = Boolean(flags.assign) || expectation === void 0 || expectation === "required" || expectation === "take-bot";
+  return { post, takeBot: expectation === "take-bot" };
+}
 async function requestIssueAssignment(claim, flags = {}, ghUser) {
   if (flags["no-assign"]) {
     console.log("  (--no-assign \u2014 skipping the assignment request; request it manually before working)");
@@ -9022,6 +9419,11 @@ async function requestIssueAssignment(claim, flags = {}, ghUser) {
   const parsed = parseGitHubUrl(claim.issueUrl);
   if (!parsed) return;
   const { repoFullName, number } = parsed;
+  const expectation = shouldRequestAssignment(claim, flags);
+  if (!expectation.post) {
+    console.log("  (no assignment expectation found in repo docs \u2014 pass --assign to request assignment anyway)");
+    return;
+  }
   let login = ghUser;
   if (!login) {
     try {
@@ -9036,10 +9438,20 @@ async function requestIssueAssignment(claim, flags = {}, ghUser) {
     console.log(`  \u2713 Already assigned to @${login} on ${repoFullName}#${number}.`);
     return;
   }
-  const { usesTakeBot, body } = buildAssignmentComment(repoFullName);
+  const { usesTakeBot, body } = buildAssignmentComment(repoFullName, { takeBot: expectation.takeBot });
   if (!usesTakeBot && await hasPriorAssignmentRequest(repoFullName, number, login)) {
     console.log(`  \u2713 Assignment already requested on ${repoFullName}#${number}.`);
     return;
+  }
+  if (process.stdin.isTTY) {
+    console.log(`
+  About to comment on ${repoFullName}#${number} as @${login}:`);
+    for (const line of body.split("\n")) console.log(`    ${line}`);
+    const go = await confirm("  Post it? (y/N) ");
+    if (!go) {
+      console.log("  (skipped \u2014 request assignment manually before working)");
+      return;
+    }
   }
   try {
     await sh("gh", ["issue", "comment", String(number), "--repo", repoFullName, "--body", body]);
@@ -9173,7 +9585,7 @@ function fmtContestedWarning(b) {
 async function cmdRecord(arg, flags = {}) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
   if (!arg) {
-    console.error("Usage: terminalhire claim record <bountyId|issueUrl> [--ack-policy] [--ack-contested]");
+    console.error("Usage: terminalhire claim record <bountyId|issueUrl> [--ack-policy] [--ack-policy-prohibited] [--ack-contested]");
     console.error("  Run `terminalhire bounties` first to populate the local index cache,");
     console.error("  then pass the id shown in its output \u2014 or pass a GitHub issue URL directly.");
     process.exit(1);
@@ -9211,8 +9623,25 @@ ${contestedWarning}`);
   const policy = await checkRepoPolicy2(b.repoFullName);
   printPolicySection(policy);
   let ackedAt = null;
-  if (policy.status === "flagged" || policy.status === "unavailable") {
-    const reason = policy.status === "flagged" ? "This repo may prohibit AI-generated contributions" : "This repo's contribution policy could not be checked";
+  if (policy.verdict === "prohibited") {
+    let acked = Boolean(flags["ack-policy-prohibited"]);
+    if (!acked && process.stdin.isTTY) {
+      acked = await confirm(
+        "\n  This repo PROHIBITS AI-generated contributions \u2014 continuing means everything you submit must be hand-written by you. Continue? (y/N) "
+      );
+    }
+    if (!acked) {
+      console.error(
+        `
+terminalhire claim: refusing to record \u2014 ${b.repoFullName} prohibits AI-generated contributions.
+  Read the excerpts above. If you will hand-write the work yourself, re-run with
+  --ack-policy-prohibited (or confirm interactively). --ack-policy is not enough here.`
+      );
+      process.exit(1);
+    }
+    ackedAt = (/* @__PURE__ */ new Date()).toISOString();
+  } else if (policy.status === "flagged" || policy.status === "unavailable") {
+    const reason = policy.status === "flagged" ? "This repo has AI-assistance policy language" : "This repo's contribution policy could not be checked";
     let acked = Boolean(flags["ack-policy"]);
     if (!acked && process.stdin.isTTY) {
       acked = await confirm(`
@@ -9242,7 +9671,18 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
       amountUSD: b.amountUSD,
       openPRsAtClaim: b.openPRs,
       kind,
-      policy: { status: policy.status, ackedAt }
+      // Persist the full audit verdict (not just the coarse status) so `claim
+      // start` can drive the assignment decision from it and `claim audit` can
+      // show what ruleset the dev acknowledged. Excerpts are NOT persisted —
+      // the record stores the conclusion; the docs stay the source of truth.
+      policy: {
+        status: policy.status,
+        verdict: policy.verdict,
+        assignment: policy.assignment,
+        requirements: (policy.requirements ?? []).map((r) => r.kind),
+        rulesetVersion: policy.rulesetVersion,
+        ackedAt
+      }
     });
   } catch (err) {
     console.error(`terminalhire claim: ${err.message ?? err}`);
@@ -9304,7 +9744,14 @@ async function cmdPreview(arg, { json } = {}) {
         openPRs: b.openPRs,
         assignees: b.assignees,
         contested: isContested(b),
-        policy: { status: policy.status, hits: policy.hits }
+        policy: {
+          status: policy.status,
+          verdict: policy.verdict,
+          assignment: policy.assignment,
+          rulesetVersion: policy.rulesetVersion,
+          hits: policy.hits,
+          requirements: policy.requirements
+        }
       }) + "\n"
     );
     return;
@@ -10253,6 +10700,100 @@ async function cmdRevoke() {
   console.log("\n  \u2713 Pushed claims deleted and local marker cleared.\n");
   console.log("  Background updates (if any) have been stopped.\n");
 }
+function renderAudit(view) {
+  const roleLabel = {
+    you: "you",
+    maintainer: "maintainer",
+    contributor: "contributor",
+    outside: "outside",
+    bot: "bot",
+    unknown: "\u2014"
+  };
+  const eventLabel = {
+    pr_opened: "opened PR",
+    review_submitted: "reviewed",
+    issue_comment: "commented",
+    commit_pushed: "pushed commit",
+    pr_merged: "merged",
+    pr_closed_unmerged: "closed (unmerged)"
+  };
+  const outcomeLabel = {
+    merged: "\u2714 merged",
+    closed_unmerged: "\u2715 closed without merge",
+    open: "\u2026 still open"
+  };
+  const hrs = (h) => h == null ? "\u2014" : `${h}h`;
+  console.log(`
+  Audit \u2014 ${view.repo || "repo"} #${view.prNumber}`);
+  console.log(`  ${view.prUrl}`);
+  console.log(`  Outcome: ${outcomeLabel[view.outcome] ?? view.outcome}` + (view.mergedByLogin ? `  (merged by @${view.mergedByLogin})` : ""));
+  console.log("\n  Engagement (raw counts \u2014 not a score):");
+  console.log(`    Independent counterparties engaged : ${view.signals.distinctCounterparties}`);
+  console.log(`    Maintainer reviews                 : ${view.signals.maintainerReviews}`);
+  console.log(`    Your commits after first response  : ${view.signals.iterationsAfterFirstResponse}`);
+  console.log(`    Time to first maintainer response  : ${hrs(view.signals.hoursToFirstResponse)}`);
+  console.log(`    Time to merge                      : ${hrs(view.signals.hoursToMerge)}`);
+  console.log("\n  Timeline:");
+  if (view.timeline.length === 0) {
+    console.log("    (no events captured)");
+  } else {
+    for (const e of view.timeline) {
+      console.log(`    ${e.at}  ${roleLabel[e.role] ?? e.role} ${eventLabel[e.event] ?? e.event}`);
+    }
+  }
+  if (view.notes.length > 0) {
+    console.log("\n  Notes:");
+    for (const n of view.notes) console.log(`    \u26A0 ${n}`);
+  }
+  console.log("\n  What this does NOT measure:");
+  for (const l of view.limitations || []) console.log(`    \xB7 ${l}`);
+  console.log("");
+}
+async function cmdAudit(id, flags = {}) {
+  if (!id) {
+    console.error("terminalhire claim audit: needs a claim id. Try `terminalhire claim list`.");
+    process.exit(1);
+  }
+  const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+  const claim = claims.findClaim(id);
+  if (!claim) {
+    console.error(`No claim with id '${id}'.`);
+    process.exit(1);
+  }
+  if (!claim.prUrl) {
+    console.log(`Claim '${id}' has no submitted PR yet \u2014 nothing to audit. Submit first: terminalhire claim submit ${id}`);
+    return;
+  }
+  const { resolveCallerIdentity: resolveCallerIdentity2 } = await Promise.resolve().then(() => (init_identity(), identity_exports));
+  const identity = await resolveCallerIdentity2();
+  if (!identity) {
+    console.error("terminalhire claim audit: could not verify your GitHub identity (`gh api user`). Run `gh auth login` and retry.");
+    process.exit(1);
+  }
+  let token;
+  try {
+    token = await sh("gh", ["auth", "token"]);
+  } catch {
+    token = void 0;
+  }
+  const { gatherAudit: gatherAudit2 } = await Promise.resolve().then(() => (init_fetch(), fetch_exports));
+  const { lifecycle, facts } = await gatherAudit2(claim.prUrl, token || void 0);
+  if (!lifecycle) {
+    console.error(`terminalhire claim audit: could not fetch the PR lifecycle for ${claim.prUrl} (private, deleted, rate-limited, or not a PR).`);
+    process.exit(1);
+  }
+  if (lifecycle.authorId !== identity.id) {
+    console.error(`terminalhire claim audit: PR ${claim.prUrl} was not authored by you (@${identity.login}); the audit only covers your own PRs.`);
+    process.exit(1);
+  }
+  const { buildAuditView: buildAuditView2 } = await Promise.resolve().then(() => (init_audit(), audit_exports));
+  const view = buildAuditView2(lifecycle, facts);
+  if (flags.json) {
+    console.log(JSON.stringify(view, null, 2));
+    return;
+  }
+  renderAudit(view);
+}
 async function run() {
   const verb = process.argv[2];
   const rawArgs = process.argv.slice(3).map((a) => a === "-y" ? "--yes" : a);
@@ -10303,8 +10844,11 @@ async function run() {
       case "release":
         await cmdRelease(positional[0]);
         break;
+      case "audit":
+        await cmdAudit(positional[0], flags);
+        break;
       default:
-        console.error(`terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | list | status | update | submit | release`);
+        console.error(`terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | list | status | update | submit | audit | release`);
         process.exit(1);
     }
   } catch (err) {
@@ -10339,6 +10883,7 @@ export {
   run,
   selectCompetingPrs,
   selectPushRemote,
+  shouldRequestAssignment,
   startBranchFor,
   workDirFor
 };
