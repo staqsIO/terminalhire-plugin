@@ -868,7 +868,7 @@ function match(fp, jobs, limit = 5, now = Date.now(), opts = {}) {
       reason: buildReason(details)
     };
   });
-  return scored.filter((r) => r !== null && r.score >= MIN_SCORE).sort((a, b) => {
+  return scored.filter((r) => r !== null && r.score >= (opts.minScore ?? MIN_SCORE)).sort((a, b) => {
     const byScore = b.score - a.score;
     if (Math.abs(byScore) > TIEBREAK_EPS) return byScore;
     const byAcceptance = (b.acceptance?.count ?? 0) - (a.acceptance?.count ?? 0);
@@ -1704,11 +1704,134 @@ var init_profile = __esm({
   }
 });
 
-// bin/jpi-contribute.js
-init_src();
-import { readFileSync as readFileSync5 } from "fs";
+// src/claims.ts
+var claims_exports = {};
+__export(claims_exports, {
+  PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
+  acceptedPRRate: () => acceptedPRRate,
+  findClaim: () => findClaim,
+  listClaims: () => listClaims,
+  readClaims: () => readClaims,
+  recordClaim: () => recordClaim,
+  removeClaim: () => removeClaim,
+  toPushedClaim: () => toPushedClaim,
+  updateClaim: () => updateClaim
+});
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4, renameSync as renameSync2, existsSync as existsSync3 } from "fs";
 import { join as join5 } from "path";
 import { homedir as homedir4 } from "os";
+function toPushedClaim(claim) {
+  return {
+    kind: claim.kind,
+    repoFullName: claim.repoFullName,
+    state: claim.state,
+    prUrl: claim.prUrl,
+    merged: claim.state === "merged",
+    claimedAt: claim.claimedAt,
+    updatedAt: claim.updatedAt
+  };
+}
+function nowISO() {
+  return (/* @__PURE__ */ new Date()).toISOString();
+}
+function normalizeClaim(c) {
+  return { ...c, kind: c.kind ?? "bounty", policy: c.policy ?? null };
+}
+function readClaims() {
+  try {
+    if (!existsSync3(CLAIMS_FILE)) return [];
+    const data = JSON.parse(readFileSync5(CLAIMS_FILE, "utf8"));
+    const claims = Array.isArray(data?.claims) ? data.claims : [];
+    return claims.map(normalizeClaim);
+  } catch {
+    return [];
+  }
+}
+function writeClaims(claims) {
+  mkdirSync4(TERMINALHIRE_DIR4, { recursive: true });
+  const tmp = `${CLAIMS_FILE}.tmp`;
+  const payload = { claims };
+  writeFileSync4(tmp, JSON.stringify(payload, null, 2), "utf8");
+  renameSync2(tmp, CLAIMS_FILE);
+}
+function findClaim(id) {
+  return readClaims().find((c) => c.id === id) ?? null;
+}
+function listClaims(opts = {}) {
+  const claims = readClaims();
+  if (!opts.active) return claims;
+  return claims.filter((c) => !TERMINAL_STATES.has(c.state));
+}
+function recordClaim(rec) {
+  const claims = readClaims();
+  if (claims.some((c) => c.id === rec.id)) {
+    throw new Error(
+      `claim already exists for '${rec.id}' \u2014 run 'terminalhire claim status ${rec.id}' or 'terminalhire claim release ${rec.id}'`
+    );
+  }
+  const ts = nowISO();
+  const claim = {
+    ...rec,
+    // Defensive default (mirrors normalizeClaim's `kind ?? 'bounty'` pattern):
+    // a caller written before `policy` existed, or a plain-JS caller that skips
+    // it, still produces a valid record instead of `policy: undefined`.
+    policy: rec.policy ?? null,
+    state: "claimed",
+    worktreePath: null,
+    branch: null,
+    prUrl: null,
+    review: null,
+    claimedAt: ts,
+    updatedAt: ts
+  };
+  claims.push(claim);
+  writeClaims(claims);
+  return claim;
+}
+function updateClaim(id, patch) {
+  const claims = readClaims();
+  const idx = claims.findIndex((c) => c.id === id);
+  if (idx === -1) return null;
+  claims[idx] = { ...claims[idx], ...patch, updatedAt: nowISO() };
+  writeClaims(claims);
+  return claims[idx];
+}
+function removeClaim(id) {
+  const claims = readClaims();
+  const next = claims.filter((c) => c.id !== id);
+  if (next.length === claims.length) return false;
+  writeClaims(next);
+  return true;
+}
+function acceptedPRRate(claims = readClaims()) {
+  const total = claims.length;
+  const merged = claims.filter((c) => c.state === "merged").length;
+  return { merged, total, rate: total === 0 ? 0 : merged / total };
+}
+var TERMINALHIRE_DIR4, CLAIMS_FILE, PUSHED_CLAIM_FIELDS, TERMINAL_STATES;
+var init_claims = __esm({
+  "src/claims.ts"() {
+    "use strict";
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
+    CLAIMS_FILE = join5(TERMINALHIRE_DIR4, "claims.json");
+    PUSHED_CLAIM_FIELDS = [
+      "kind",
+      "repoFullName",
+      "state",
+      "prUrl",
+      "merged",
+      "claimedAt",
+      "updatedAt"
+    ];
+    TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
+  }
+});
+
+// bin/jpi-contribute.js
+init_src();
+import { readFileSync as readFileSync6 } from "fs";
+import { join as join6 } from "path";
+import { homedir as homedir5 } from "os";
 import { createInterface } from "readline";
 
 // bin/cache-store.js
@@ -1815,8 +1938,8 @@ function linkTitle(title, url) {
 }
 
 // bin/jpi-contribute.js
-var TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
-var INDEX_CACHE_FILE2 = join5(TERMINALHIRE_DIR4, "index-cache.json");
+var TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join6(homedir5(), ".terminalhire");
+var INDEX_CACHE_FILE2 = join6(TERMINALHIRE_DIR5, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
 var HEADER = "Contribution opportunities \u2014 open issues where a merged PR actually counts toward your r\xE9sum\xE9.\nRepos \u226550\u2605 / \u226510 contributors \xB7 unassigned \xB7 merit-merge \xB7 matched locally to your stack.";
@@ -1824,7 +1947,7 @@ var OPT_IN_PROMPT = "Contribute is off. Turn it on to see open issues where a me
 var EMPTY_STATE = "Nothing clears the bar right now. We only list issues where a merged PR actually counts toward\nyour r\xE9sum\xE9 \u2014 so the list stays honest. Try again after the next refresh.";
 function readIndexCache() {
   try {
-    const entry = JSON.parse(readFileSync5(INDEX_CACHE_FILE2, "utf8"));
+    const entry = JSON.parse(readFileSync6(INDEX_CACHE_FILE2, "utf8"));
     if (Date.now() - entry.ts < INDEX_TTL_MS) return entry.index;
     return null;
   } catch {
@@ -1925,7 +2048,7 @@ function displayLanguage(job) {
   const tag = (job.tags ?? []).find((t) => LANGUAGES.has(String(t).toLowerCase()));
   return tag ?? "\u2014";
 }
-function renderRow(i, result) {
+function renderRow(i, result, claimedIds = /* @__PURE__ */ new Set()) {
   const job = result.job;
   const c = job.contribution ?? {};
   const repo = sanitizeText(c.repoFullName ?? job.company ?? "");
@@ -1934,9 +2057,11 @@ function renderRow(i, result) {
   const lang = sanitizeText(displayLanguage(job));
   const scorePct = `match ${Math.round((result.score ?? 0) * 100)}%`;
   const ref = opportunityShortToken(job.id);
+  const claimed = claimedIds.has(job.id);
+  const badge = claimed ? " \xB7 \u25CF claimed by you" : "";
   const line1 = `${i + 1}. ${linkTitle(job.title, c.issueUrl ?? job.url)} [${ref}]`;
-  const line2 = `   ${repo} \xB7 ${num} \xB7 ${label} \xB7 ${lang} \xB7 ${scorePct}`;
-  const line3 = `   \u2192 terminalhire claim ${ref}`;
+  const line2 = `   ${repo} \xB7 ${num} \xB7 ${label} \xB7 ${lang} \xB7 ${scorePct}${badge}`;
+  const line3 = claimed ? `   \u2192 claimed by you \u2014 terminalhire claim status ${job.id}` : `   \u2192 terminalhire claim ${ref}`;
   return `${line1}
 ${line2}
 ${line3}`;
@@ -1967,9 +2092,15 @@ async function run(opts = {}) {
       log(EMPTY_STATE);
       return;
     }
+    let claimedIds = /* @__PURE__ */ new Set();
+    try {
+      const { listClaims: listClaims2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
+      claimedIds = new Set(listClaims2({ active: true }).map((c) => c.id));
+    } catch {
+    }
     log(HEADER);
     log("");
-    for (let i = 0; i < results.length; i++) log(renderRow(i, results[i]));
+    for (let i = 0; i < results.length; i++) log(renderRow(i, results[i], claimedIds));
   } catch (err) {
     console.error("terminalhire contribute error:", err?.message ?? err);
     process.exit(1);

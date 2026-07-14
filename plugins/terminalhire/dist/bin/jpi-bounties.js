@@ -2026,7 +2026,7 @@ function match(fp, jobs, limit = 5, now = Date.now(), opts = {}) {
       reason: buildReason(details)
     };
   });
-  return scored.filter((r) => r !== null && r.score >= MIN_SCORE).sort((a, b) => {
+  return scored.filter((r) => r !== null && r.score >= (opts.minScore ?? MIN_SCORE)).sort((a, b) => {
     const byScore = b.score - a.score;
     if (Math.abs(byScore) > TIEBREAK_EPS) return byScore;
     const byAcceptance = (b.acceptance?.count ?? 0) - (a.acceptance?.count ?? 0);
@@ -8353,11 +8353,134 @@ var init_profile = __esm({
   }
 });
 
-// bin/jpi-bounties.js
-init_src();
-import { readFileSync as readFileSync4 } from "fs";
+// src/claims.ts
+var claims_exports = {};
+__export(claims_exports, {
+  PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
+  acceptedPRRate: () => acceptedPRRate,
+  findClaim: () => findClaim,
+  listClaims: () => listClaims,
+  readClaims: () => readClaims,
+  recordClaim: () => recordClaim,
+  removeClaim: () => removeClaim,
+  toPushedClaim: () => toPushedClaim,
+  updateClaim: () => updateClaim
+});
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, renameSync as renameSync2, existsSync as existsSync2 } from "fs";
 import { join as join4 } from "path";
 import { homedir as homedir3 } from "os";
+function toPushedClaim(claim) {
+  return {
+    kind: claim.kind,
+    repoFullName: claim.repoFullName,
+    state: claim.state,
+    prUrl: claim.prUrl,
+    merged: claim.state === "merged",
+    claimedAt: claim.claimedAt,
+    updatedAt: claim.updatedAt
+  };
+}
+function nowISO() {
+  return (/* @__PURE__ */ new Date()).toISOString();
+}
+function normalizeClaim(c) {
+  return { ...c, kind: c.kind ?? "bounty", policy: c.policy ?? null };
+}
+function readClaims() {
+  try {
+    if (!existsSync2(CLAIMS_FILE)) return [];
+    const data = JSON.parse(readFileSync4(CLAIMS_FILE, "utf8"));
+    const claims = Array.isArray(data?.claims) ? data.claims : [];
+    return claims.map(normalizeClaim);
+  } catch {
+    return [];
+  }
+}
+function writeClaims(claims) {
+  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
+  const tmp = `${CLAIMS_FILE}.tmp`;
+  const payload = { claims };
+  writeFileSync3(tmp, JSON.stringify(payload, null, 2), "utf8");
+  renameSync2(tmp, CLAIMS_FILE);
+}
+function findClaim(id) {
+  return readClaims().find((c) => c.id === id) ?? null;
+}
+function listClaims(opts = {}) {
+  const claims = readClaims();
+  if (!opts.active) return claims;
+  return claims.filter((c) => !TERMINAL_STATES.has(c.state));
+}
+function recordClaim(rec) {
+  const claims = readClaims();
+  if (claims.some((c) => c.id === rec.id)) {
+    throw new Error(
+      `claim already exists for '${rec.id}' \u2014 run 'terminalhire claim status ${rec.id}' or 'terminalhire claim release ${rec.id}'`
+    );
+  }
+  const ts = nowISO();
+  const claim = {
+    ...rec,
+    // Defensive default (mirrors normalizeClaim's `kind ?? 'bounty'` pattern):
+    // a caller written before `policy` existed, or a plain-JS caller that skips
+    // it, still produces a valid record instead of `policy: undefined`.
+    policy: rec.policy ?? null,
+    state: "claimed",
+    worktreePath: null,
+    branch: null,
+    prUrl: null,
+    review: null,
+    claimedAt: ts,
+    updatedAt: ts
+  };
+  claims.push(claim);
+  writeClaims(claims);
+  return claim;
+}
+function updateClaim(id, patch) {
+  const claims = readClaims();
+  const idx = claims.findIndex((c) => c.id === id);
+  if (idx === -1) return null;
+  claims[idx] = { ...claims[idx], ...patch, updatedAt: nowISO() };
+  writeClaims(claims);
+  return claims[idx];
+}
+function removeClaim(id) {
+  const claims = readClaims();
+  const next = claims.filter((c) => c.id !== id);
+  if (next.length === claims.length) return false;
+  writeClaims(next);
+  return true;
+}
+function acceptedPRRate(claims = readClaims()) {
+  const total = claims.length;
+  const merged = claims.filter((c) => c.state === "merged").length;
+  return { merged, total, rate: total === 0 ? 0 : merged / total };
+}
+var TERMINALHIRE_DIR3, CLAIMS_FILE, PUSHED_CLAIM_FIELDS, TERMINAL_STATES;
+var init_claims = __esm({
+  "src/claims.ts"() {
+    "use strict";
+    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
+    CLAIMS_FILE = join4(TERMINALHIRE_DIR3, "claims.json");
+    PUSHED_CLAIM_FIELDS = [
+      "kind",
+      "repoFullName",
+      "state",
+      "prUrl",
+      "merged",
+      "claimedAt",
+      "updatedAt"
+    ];
+    TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
+  }
+});
+
+// bin/jpi-bounties.js
+init_src();
+import { readFileSync as readFileSync5 } from "fs";
+import { join as join5 } from "path";
+import { homedir as homedir4 } from "os";
 import { createInterface } from "readline";
 
 // bin/cache-store.js
@@ -8422,8 +8545,8 @@ function linkTitle(title, url) {
 }
 
 // bin/jpi-bounties.js
-var TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
-var INDEX_CACHE_FILE2 = join4(TERMINALHIRE_DIR3, "index-cache.json");
+var TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
+var INDEX_CACHE_FILE2 = join5(TERMINALHIRE_DIR4, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
 var RANK_MODE = process.env["TERMINALHIRE_BOUNTY_RANK"] ?? "winnability";
@@ -8436,7 +8559,7 @@ var SHOW_ALL = args.includes("--all");
 var WINNABLE_ONLY = args.includes("--winnable");
 function readIndexCache() {
   try {
-    const entry = JSON.parse(readFileSync4(INDEX_CACHE_FILE2, "utf8"));
+    const entry = JSON.parse(readFileSync5(INDEX_CACHE_FILE2, "utf8"));
     if (Date.now() - entry.ts < INDEX_TTL_MS) return entry.index;
     return null;
   } catch {
@@ -8468,22 +8591,26 @@ function formatAmount(b) {
   return b.amountUSD != null ? "$" + b.amountUSD.toLocaleString() : "$\u2014";
 }
 var EFFORT_LABEL = { small: "small (~\xBD day)", medium: "medium (~1 day)", large: "large (multi-day)" };
-function printBounty(i, job, score, reason, matchedTags) {
+function printBounty(i, job, score, reason, matchedTags, claimedIds = /* @__PURE__ */ new Set()) {
   const b = job.bounty ?? {};
   const stars = b.repoStars != null ? ` \xB7 ${b.repoStars}\u2605` : "";
   const effort = b.estimatedEffort ? ` \xB7 ${EFFORT_LABEL[b.estimatedEffort]}` : "";
   const scoreStr = score > 0 ? ` \xB7 match ${Math.round(score * 100)}%` : "";
   const prs = b.competingOpenPRs;
   const contend = prs != null && prs > 0 ? ` \xB7 \u26A0 ${prs} PR${prs === 1 ? "" : "s"} in flight` : "";
+  const claimed = claimedIds.has(job.id);
+  const badge = claimed ? " \xB7 \u25CF claimed by you" : "";
   const ref = opportunityShortToken(job.id);
   console.log(`
 ${i + 1}. ${linkTitle(job.title, job.url)} [${ref}]`);
-  console.log(`   ${formatAmount(b)}${effort} \xB7 ${sanitizeText(b.repoFullName ?? job.company)}${stars}${scoreStr}${contend}`);
+  console.log(`   ${formatAmount(b)}${effort} \xB7 ${sanitizeText(b.repoFullName ?? job.company)}${stars}${scoreStr}${contend}${badge}`);
   if (reason) console.log(`   ${reason}`);
   if (matchedTags && matchedTags.length) console.log(`   Tags matched: ${matchedTags.slice(0, 5).join(", ")}`);
   console.log(`   id: ${job.id}`);
   console.log(`   Claim: ${sanitizeText(b.claimUrl ?? job.url)}`);
-  console.log(`   \u2192 terminalhire claim ${ref}`);
+  console.log(
+    claimed ? `   \u2192 claimed by you \u2014 terminalhire claim status ${job.id}` : `   \u2192 terminalhire claim ${ref}`
+  );
 }
 function rankBounties(bounties, { rankMode = "winnability", scoreOf = () => 0 } = {}) {
   const legacy = rankMode === "legacy";
@@ -8561,6 +8688,12 @@ async function run() {
     if (result.status !== "ok") return;
     const { bounties, ranked, matchedCount } = result;
     const shown = SHOW_ALL ? bounties : bounties.slice(0, LIMIT);
+    let claimedIds = /* @__PURE__ */ new Set();
+    try {
+      const { listClaims: listClaims2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
+      claimedIds = new Set(listClaims2({ active: true }).map((c) => c.id));
+    } catch {
+    }
     console.log(
       `
 \u26A1 ${bounties.length} bount${bounties.length === 1 ? "y" : "ies"} you could knock out` + (matchedCount ? ` \u2014 ${matchedCount} matched to your profile` : "") + ` (local rank \u2014 no data sent)
@@ -8568,7 +8701,7 @@ async function run() {
     );
     for (let i = 0; i < shown.length; i++) {
       const r = ranked.get(shown[i].id);
-      printBounty(i, shown[i], r?.score ?? 0, r?.reason, r?.matchedTags);
+      printBounty(i, shown[i], r?.score ?? 0, r?.reason, r?.matchedTags, claimedIds);
     }
     if (!SHOW_ALL && bounties.length > shown.length) {
       console.log(`
@@ -8595,6 +8728,7 @@ export {
   classifyEmptyStatus,
   filterPaidVisibility,
   getBounties,
+  printBounty,
   rankBounties,
   run
 };

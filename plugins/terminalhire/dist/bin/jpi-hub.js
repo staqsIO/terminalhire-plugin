@@ -409,6 +409,43 @@ var init_tui_core = __esm({
   }
 });
 
+// src/claims.ts
+import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
+function normalizeClaim(c) {
+  return { ...c, kind: c.kind ?? "bounty", policy: c.policy ?? null };
+}
+function readClaims() {
+  try {
+    if (!existsSync(CLAIMS_FILE)) return [];
+    const data = JSON.parse(readFileSync(CLAIMS_FILE, "utf8"));
+    const claims = Array.isArray(data?.claims) ? data.claims : [];
+    return claims.map(normalizeClaim);
+  } catch {
+    return [];
+  }
+}
+function listClaims(opts = {}) {
+  const claims = readClaims();
+  if (!opts.active) return claims;
+  return claims.filter((c) => !TERMINAL_STATES.has(c.state));
+}
+function acceptedPRRate(claims = readClaims()) {
+  const total = claims.length;
+  const merged = claims.filter((c) => c.state === "merged").length;
+  return { merged, total, rate: total === 0 ? 0 : merged / total };
+}
+var TERMINALHIRE_DIR, CLAIMS_FILE, TERMINAL_STATES;
+var init_claims = __esm({
+  "src/claims.ts"() {
+    "use strict";
+    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
+    CLAIMS_FILE = join(TERMINALHIRE_DIR, "claims.json");
+    TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
+  }
+});
+
 // ../../packages/core/src/types.ts
 function isBounty(job) {
   return job.source === "bounty" && job.bounty != null;
@@ -2397,7 +2434,7 @@ function match(fp, jobs, limit = 5, now = Date.now(), opts = {}) {
       reason: buildReason(details)
     };
   });
-  return scored.filter((r) => r !== null && r.score >= MIN_SCORE).sort((a, b) => {
+  return scored.filter((r) => r !== null && r.score >= (opts.minScore ?? MIN_SCORE)).sort((a, b) => {
     const byScore = b.score - a.score;
     if (Math.abs(byScore) > TIEBREAK_EPS) return byScore;
     const byAcceptance = (b.acceptance?.count ?? 0) - (a.acceptance?.count ?? 0);
@@ -9418,39 +9455,7 @@ var init_intro2 = __esm({
 
 // bin/jpi-hub.js
 init_tui_core();
-
-// src/claims.ts
-import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
-var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
-var CLAIMS_FILE = join(TERMINALHIRE_DIR, "claims.json");
-var TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
-function normalizeClaim(c) {
-  return { ...c, kind: c.kind ?? "bounty", policy: c.policy ?? null };
-}
-function readClaims() {
-  try {
-    if (!existsSync(CLAIMS_FILE)) return [];
-    const data = JSON.parse(readFileSync(CLAIMS_FILE, "utf8"));
-    const claims = Array.isArray(data?.claims) ? data.claims : [];
-    return claims.map(normalizeClaim);
-  } catch {
-    return [];
-  }
-}
-function listClaims(opts = {}) {
-  const claims = readClaims();
-  if (!opts.active) return claims;
-  return claims.filter((c) => !TERMINAL_STATES.has(c.state));
-}
-function acceptedPRRate(claims = readClaims()) {
-  const total = claims.length;
-  const merged = claims.filter((c) => c.state === "merged").length;
-  return { merged, total, rate: total === 0 ? 0 : merged / total };
-}
-
-// bin/jpi-hub.js
+init_claims();
 init_profile();
 init_config();
 init_jpi_chat_read();

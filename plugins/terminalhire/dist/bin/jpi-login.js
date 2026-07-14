@@ -2331,7 +2331,7 @@ function match(fp, jobs, limit = 5, now = Date.now(), opts = {}) {
       reason: buildReason(details)
     };
   });
-  return scored.filter((r) => r !== null && r.score >= MIN_SCORE).sort((a, b) => {
+  return scored.filter((r) => r !== null && r.score >= (opts.minScore ?? MIN_SCORE)).sort((a, b) => {
     const byScore = b.score - a.score;
     if (Math.abs(byScore) > TIEBREAK_EPS) return byScore;
     const byAcceptance = (b.acceptance?.count ?? 0) - (a.acceptance?.count ?? 0);
