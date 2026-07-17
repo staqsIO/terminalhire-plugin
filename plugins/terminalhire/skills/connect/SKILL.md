@@ -1,25 +1,25 @@
 ---
 name: connect
-description: Discover opted-in developers & founders matched locally, and request a double-opt-in intro (runs terminalhire devs / project / intro). Use when the user wants to find peers or builders, see who they match with, declare a project to staff, or connect with another developer.
+description: Discover opted-in developers & founders using a profile that never leaves your machine, and request a double-opt-in intro (runs terminalhire devs / project / intro). Use when the user wants to find peers or builders, see who they match with, declare a project to staff, or connect with another developer.
 ---
 
 # terminalhire:connect
 
-Privacy-preserving dev↔dev / founder↔builder connection: discover opted-in people matched **locally** to your work, then exchange contact only through a **double-opt-in** intro. No profile data is ever sent for matching — only an intro you explicitly approve crosses the wire.
+Privacy-preserving dev↔dev / founder↔builder connection: discover opted-in people matched to your work using a profile that never leaves your machine, then exchange contact only through a **double-opt-in** intro. No profile data is ever sent for matching — only an intro you explicitly approve crosses the wire.
 
 ## Discover people & projects
 
-Rank opted-in developers (and founders' projects) locally against your profile:
+Rank opted-in developers (and founders' projects) against a profile that never leaves your machine:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" devs
 ```
 
-Each result shows the person/project, a match score, the "why matched" tags, and a verifiable `/r/<login>` credential link. The directory is downloaded anonymously; matching runs on-device.
+Each result shows the person/project, a match score, the "why matched" tags, and a verifiable `/r/<login>` credential link. The directory is downloaded anonymously; your profile never leaves your machine.
 
 ## Founder side — staff a project
 
-Declare a project locally (it never leaves your machine), then rank builders for it:
+Declare a project — it never leaves your machine — then rank builders for it:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" project "Shopify analytics app: react, typescript, postgres"

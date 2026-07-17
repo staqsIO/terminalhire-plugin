@@ -38,6 +38,197 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
+// ../../node_modules/keytar/build/Release/keytar.node
+var keytar_default;
+var init_keytar = __esm({
+  "../../node_modules/keytar/build/Release/keytar.node"() {
+    keytar_default = "../keytar-KOAAH267.node";
+  }
+});
+
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/wt-v034/node_modules/keytar/build/Release/keytar.node
+var require_keytar = __commonJS({
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/wt-v034/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+    "use strict";
+    init_keytar();
+    try {
+      module.exports = __require(keytar_default);
+    } catch {
+    }
+  }
+});
+
+// ../../node_modules/keytar/lib/keytar.js
+var require_keytar2 = __commonJS({
+  "../../node_modules/keytar/lib/keytar.js"(exports, module) {
+    "use strict";
+    var keytar = require_keytar();
+    function checkRequired(val, name) {
+      if (!val || val.length <= 0) {
+        throw new Error(name + " is required.");
+      }
+    }
+    module.exports = {
+      getPassword: function(service, account) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        return keytar.getPassword(service, account);
+      },
+      setPassword: function(service, account, password) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        checkRequired(password, "Password");
+        return keytar.setPassword(service, account, password);
+      },
+      deletePassword: function(service, account) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        return keytar.deletePassword(service, account);
+      },
+      findPassword: function(service) {
+        checkRequired(service, "Service");
+        return keytar.findPassword(service);
+      },
+      findCredentials: function(service) {
+        checkRequired(service, "Service");
+        return keytar.findCredentials(service);
+      }
+    };
+  }
+});
+
+// src/crypto-store.ts
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes
+} from "crypto";
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  renameSync,
+  rmSync
+} from "fs";
+import { join, dirname, basename } from "path";
+import { homedir } from "os";
+import { createRequire } from "module";
+function encrypt(plaintext, key) {
+  const iv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv(ALGO, key, iv);
+  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return {
+    iv: iv.toString("hex"),
+    tag: tag.toString("hex"),
+    ciphertext: ct.toString("hex")
+  };
+}
+function decrypt(blob, key) {
+  const decipher = createDecipheriv(
+    ALGO,
+    key,
+    Buffer.from(blob.iv, "hex")
+  );
+  decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
+  const plain = Buffer.concat([
+    decipher.update(Buffer.from(blob.ciphertext, "hex")),
+    decipher.final()
+  ]);
+  return plain.toString("utf8");
+}
+function skipKeychain() {
+  return process.env.TERMINALHIRE_NO_KEYCHAIN !== void 0 || process.env.CI !== void 0 || process.env.VITEST !== void 0 || process.env.NODE_ENV === "test";
+}
+async function tryLoadFromKeytar(policy) {
+  if (forceKeytarUnavailableForTests || skipKeychain()) return null;
+  try {
+    const kt = policy === "keychain-required" ? createRequire(import.meta.url)("keytar") : await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
+    const stored = await kt.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
+    if (stored) {
+      return Buffer.from(stored, "hex");
+    }
+    const key = randomBytes(KEY_BYTES);
+    await kt.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, key.toString("hex"));
+    return key;
+  } catch {
+    return null;
+  }
+}
+function loadOrCreateFileKey() {
+  mkdirSync(TERMINALHIRE_DIR, { recursive: true, mode: 448 });
+  if (existsSync(KEY_FILE)) {
+    return Buffer.from(readFileSync(KEY_FILE, "utf8").trim(), "hex");
+  }
+  const key = randomBytes(KEY_BYTES);
+  writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  return key;
+}
+function warnStderr(message) {
+  process.stderr.write(`${message}
+`);
+}
+function atomicWriteFileSync(filePath, content) {
+  const dir = dirname(filePath);
+  mkdirSync(dir, { recursive: true, mode: 448 });
+  const tmp = join(dir, `.${basename(filePath)}.tmp-${process.pid}-${randomBytes(6).toString("hex")}`);
+  writeFileSync(tmp, content, { encoding: "utf8", mode: 384 });
+  renameSync(tmp, filePath);
+}
+async function resolveKey(filePath, opts) {
+  if (opts.keyPolicy === "keychain-required") {
+    const key = await tryLoadFromKeytar("keychain-required");
+    if (!key) {
+      warnStderr(`crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`);
+      return null;
+    }
+    return key;
+  }
+  const fromKeytar = await tryLoadFromKeytar("keytar-first-file-fallback");
+  if (fromKeytar) return fromKeytar;
+  return loadOrCreateFileKey();
+}
+function createEncryptedStore(filePath, opts) {
+  dependentStoreFiles.add(filePath);
+  async function read() {
+    const key = await resolveKey(filePath, opts);
+    if (!key) return opts.blank();
+    if (!existsSync(filePath)) return opts.blank();
+    try {
+      const raw = readFileSync(filePath, "utf8");
+      const blob = JSON.parse(raw);
+      const plaintext = decrypt(blob, key);
+      return JSON.parse(plaintext);
+    } catch {
+      warnStderr(`crypto-store: failed to decrypt ${filePath} \u2014 returning blank`);
+      return opts.blank();
+    }
+  }
+  async function write(value) {
+    const key = await resolveKey(filePath, opts);
+    if (!key) return;
+    const blob = encrypt(JSON.stringify(value), key);
+    atomicWriteFileSync(filePath, JSON.stringify(blob, null, 2));
+  }
+  return { read, write };
+}
+var TERMINALHIRE_DIR, KEY_FILE, KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, KEY_BYTES, IV_BYTES, forceKeytarUnavailableForTests, dependentStoreFiles;
+var init_crypto_store = __esm({
+  "src/crypto-store.ts"() {
+    "use strict";
+    TERMINALHIRE_DIR = join(homedir(), ".terminalhire");
+    KEY_FILE = join(TERMINALHIRE_DIR, "key");
+    KEYTAR_SERVICE = "terminalhire";
+    KEYTAR_ACCOUNT = "profile-key";
+    ALGO = "aes-256-gcm";
+    KEY_BYTES = 32;
+    IV_BYTES = 12;
+    forceKeytarUnavailableForTests = false;
+    dependentStoreFiles = /* @__PURE__ */ new Set();
+  }
+});
+
 // ../../packages/core/src/types.ts
 var init_types = __esm({
   "../../packages/core/src/types.ts"() {
@@ -409,19 +600,6 @@ var init_classify = __esm({
 });
 
 // ../../packages/core/src/vocab/index.ts
-function normalize(tokens) {
-  const result = /* @__PURE__ */ new Set();
-  for (const raw of tokens) {
-    const lower = raw.toLowerCase().trim();
-    if (GRAPH.ids.has(lower)) {
-      result.add(lower);
-      continue;
-    }
-    const mapped = GRAPH.synonyms.get(lower);
-    if (mapped) result.add(mapped);
-  }
-  return Array.from(result);
-}
 var GRAPH, VOCABULARY, SYNONYMS;
 var init_vocab = __esm({
   "../../packages/core/src/vocab/index.ts"() {
@@ -914,8 +1092,8 @@ var init_contributions = __esm({
 });
 
 // ../../packages/core/src/partners.ts
-import { readFileSync } from "fs";
-import { join } from "path";
+import { readFileSync as readFileSync2 } from "fs";
+import { join as join2 } from "path";
 import { fileURLToPath } from "url";
 var EXAMPLE_BUYER, BUYER_REGISTRY;
 var init_partners = __esm({
@@ -986,7 +1164,7 @@ var init_directoryThreshold = __esm({
 });
 
 // ../../packages/core/src/chatCrypto.ts
-import { hkdfSync, createHash, randomBytes } from "crypto";
+import { hkdfSync, createHash, randomBytes as randomBytes2 } from "crypto";
 var KDF_INFO;
 var init_chatCrypto = __esm({
   "../../packages/core/src/chatCrypto.ts"() {
@@ -1093,231 +1271,7 @@ var init_src = __esm({
   }
 });
 
-// ../../node_modules/keytar/build/Release/keytar.node
-var keytar_default;
-var init_keytar = __esm({
-  "../../node_modules/keytar/build/Release/keytar.node"() {
-    keytar_default = "../keytar-KOAAH267.node";
-  }
-});
-
-// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/wt-v034/node_modules/keytar/build/Release/keytar.node
-var require_keytar = __commonJS({
-  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/wt-v034/node_modules/keytar/build/Release/keytar.node"(exports, module) {
-    "use strict";
-    init_keytar();
-    try {
-      module.exports = __require(keytar_default);
-    } catch {
-    }
-  }
-});
-
-// ../../node_modules/keytar/lib/keytar.js
-var require_keytar2 = __commonJS({
-  "../../node_modules/keytar/lib/keytar.js"(exports, module) {
-    "use strict";
-    var keytar = require_keytar();
-    function checkRequired(val, name) {
-      if (!val || val.length <= 0) {
-        throw new Error(name + " is required.");
-      }
-    }
-    module.exports = {
-      getPassword: function(service, account) {
-        checkRequired(service, "Service");
-        checkRequired(account, "Account");
-        return keytar.getPassword(service, account);
-      },
-      setPassword: function(service, account, password) {
-        checkRequired(service, "Service");
-        checkRequired(account, "Account");
-        checkRequired(password, "Password");
-        return keytar.setPassword(service, account, password);
-      },
-      deletePassword: function(service, account) {
-        checkRequired(service, "Service");
-        checkRequired(account, "Account");
-        return keytar.deletePassword(service, account);
-      },
-      findPassword: function(service) {
-        checkRequired(service, "Service");
-        return keytar.findPassword(service);
-      },
-      findCredentials: function(service) {
-        checkRequired(service, "Service");
-        return keytar.findCredentials(service);
-      }
-    };
-  }
-});
-
-// src/crypto-store.ts
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes as randomBytes2
-} from "crypto";
-import {
-  readFileSync as readFileSync2,
-  writeFileSync,
-  mkdirSync,
-  existsSync,
-  renameSync,
-  rmSync
-} from "fs";
-import { join as join2, dirname, basename } from "path";
-import { homedir } from "os";
-import { createRequire } from "module";
-function encrypt(plaintext, key) {
-  const iv = randomBytes2(IV_BYTES);
-  const cipher = createCipheriv(ALGO, key, iv);
-  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return {
-    iv: iv.toString("hex"),
-    tag: tag.toString("hex"),
-    ciphertext: ct.toString("hex")
-  };
-}
-function decrypt(blob, key) {
-  const decipher = createDecipheriv(
-    ALGO,
-    key,
-    Buffer.from(blob.iv, "hex")
-  );
-  decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
-  const plain = Buffer.concat([
-    decipher.update(Buffer.from(blob.ciphertext, "hex")),
-    decipher.final()
-  ]);
-  return plain.toString("utf8");
-}
-function skipKeychain() {
-  return process.env.TERMINALHIRE_NO_KEYCHAIN !== void 0 || process.env.CI !== void 0 || process.env.VITEST !== void 0 || process.env.NODE_ENV === "test";
-}
-async function tryLoadFromKeytar(policy) {
-  if (forceKeytarUnavailableForTests || skipKeychain()) return null;
-  try {
-    const kt = policy === "keychain-required" ? createRequire(import.meta.url)("keytar") : await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
-    const stored = await kt.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
-    if (stored) {
-      return Buffer.from(stored, "hex");
-    }
-    const key = randomBytes2(KEY_BYTES);
-    await kt.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, key.toString("hex"));
-    return key;
-  } catch {
-    return null;
-  }
-}
-function loadOrCreateFileKey() {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true, mode: 448 });
-  if (existsSync(KEY_FILE)) {
-    return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");
-  }
-  const key = randomBytes2(KEY_BYTES);
-  writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
-  return key;
-}
-function warnStderr(message) {
-  process.stderr.write(`${message}
-`);
-}
-function atomicWriteFileSync(filePath, content) {
-  const dir = dirname(filePath);
-  mkdirSync(dir, { recursive: true, mode: 448 });
-  const tmp = join2(dir, `.${basename(filePath)}.tmp-${process.pid}-${randomBytes2(6).toString("hex")}`);
-  writeFileSync(tmp, content, { encoding: "utf8", mode: 384 });
-  renameSync(tmp, filePath);
-}
-async function deleteKey() {
-  for (const filePath of dependentStoreFiles) {
-    try {
-      rmSync(filePath);
-    } catch {
-    }
-  }
-  if (!forceKeytarUnavailableForTests && !skipKeychain()) {
-    try {
-      const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
-      await kt.deletePassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
-    } catch {
-    }
-  }
-  try {
-    rmSync(KEY_FILE);
-  } catch {
-  }
-}
-async function resolveKey(filePath, opts) {
-  if (opts.keyPolicy === "keychain-required") {
-    const key = await tryLoadFromKeytar("keychain-required");
-    if (!key) {
-      warnStderr(`crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`);
-      return null;
-    }
-    return key;
-  }
-  const fromKeytar = await tryLoadFromKeytar("keytar-first-file-fallback");
-  if (fromKeytar) return fromKeytar;
-  return loadOrCreateFileKey();
-}
-function createEncryptedStore(filePath, opts) {
-  dependentStoreFiles.add(filePath);
-  async function read() {
-    const key = await resolveKey(filePath, opts);
-    if (!key) return opts.blank();
-    if (!existsSync(filePath)) return opts.blank();
-    try {
-      const raw = readFileSync2(filePath, "utf8");
-      const blob = JSON.parse(raw);
-      const plaintext = decrypt(blob, key);
-      return JSON.parse(plaintext);
-    } catch {
-      warnStderr(`crypto-store: failed to decrypt ${filePath} \u2014 returning blank`);
-      return opts.blank();
-    }
-  }
-  async function write(value) {
-    const key = await resolveKey(filePath, opts);
-    if (!key) return;
-    const blob = encrypt(JSON.stringify(value), key);
-    atomicWriteFileSync(filePath, JSON.stringify(blob, null, 2));
-  }
-  return { read, write };
-}
-var TERMINALHIRE_DIR, KEY_FILE, KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, KEY_BYTES, IV_BYTES, forceKeytarUnavailableForTests, dependentStoreFiles;
-var init_crypto_store = __esm({
-  "src/crypto-store.ts"() {
-    "use strict";
-    TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");
-    KEY_FILE = join2(TERMINALHIRE_DIR, "key");
-    KEYTAR_SERVICE = "terminalhire";
-    KEYTAR_ACCOUNT = "profile-key";
-    ALGO = "aes-256-gcm";
-    KEY_BYTES = 32;
-    IV_BYTES = 12;
-    forceKeytarUnavailableForTests = false;
-    dependentStoreFiles = /* @__PURE__ */ new Set();
-  }
-});
-
 // src/profile.ts
-var profile_exports = {};
-__export(profile_exports, {
-  accumulateGitHubTags: () => accumulateGitHubTags,
-  accumulateSession: () => accumulateSession,
-  accumulateTags: () => accumulateTags,
-  addSavedJob: () => addSavedJob,
-  deleteProfile: () => deleteProfile,
-  listSavedJobs: () => listSavedJobs,
-  profileToFingerprint: () => profileToFingerprint,
-  readProfile: () => readProfile,
-  recencyDecay: () => recencyDecay,
-  removeSavedJob: () => removeSavedJob,
-  writeProfile: () => writeProfile
-});
 import { join as join3 } from "path";
 import { homedir as homedir2 } from "os";
 function blankProfile() {
@@ -1334,108 +1288,7 @@ function recencyDecay(lastSeen, halfLifeDays = 30, now = Date.now()) {
   const halfLifeMs = halfLifeDays * 24 * 60 * 60 * 1e3;
   return Math.pow(0.5, ageMs / halfLifeMs);
 }
-function tagScore(w) {
-  return w.count * recencyDecay(w.lastSeen);
-}
-function deriveSkillTags(tagWeights) {
-  return Object.entries(tagWeights).filter(([, w]) => w.count >= 1).sort(([, a], [, b]) => tagScore(b) - tagScore(a)).map(([tag]) => tag);
-}
-function migrateTagWeights(profile) {
-  if (!profile.tagWeights) {
-    profile.tagWeights = {};
-  }
-  const seed = profile.updatedAt ?? (/* @__PURE__ */ new Date()).toISOString();
-  for (const tag of profile.skillTags) {
-    if (!profile.tagWeights[tag]) {
-      profile.tagWeights[tag] = { count: 1, firstSeen: seed, lastSeen: seed, sessions: 1 };
-    }
-  }
-}
-async function readProfile() {
-  const parsed = await profileStore.read();
-  migrateTagWeights(parsed);
-  return parsed;
-}
-async function writeProfile(profile) {
-  profile.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-  profile.skillTags = deriveSkillTags(profile.tagWeights);
-  await profileStore.write(profile);
-}
-function accumulateSession(profile, tags, isEmployerContext, inferredSeniority, seniorityIsAuthoritative = false) {
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  let filtered = normalize(tags);
-  if (isEmployerContext) {
-    filtered = filtered.filter((t) => LANGUAGE_TAGS.has(t));
-    profile.hasEmployerSessions = true;
-  }
-  for (const tag of filtered) {
-    const existing = profile.tagWeights[tag];
-    if (existing) {
-      existing.count += 1;
-      existing.sessions += 1;
-      existing.lastSeen = now;
-    } else {
-      profile.tagWeights[tag] = { count: 1, firstSeen: now, lastSeen: now, sessions: 1 };
-    }
-  }
-  if (inferredSeniority && !isEmployerContext) {
-    if (seniorityIsAuthoritative || !profile.github) {
-      profile.seniority = inferredSeniority;
-    }
-  }
-}
-async function accumulateTags(rawTokens, isEmployerContext, inferredSeniority) {
-  const profile = await readProfile();
-  accumulateSession(profile, rawTokens, isEmployerContext, inferredSeniority);
-  await writeProfile(profile);
-}
-function accumulateGitHubTags(profile, tags, inferredSeniority) {
-  accumulateSession(
-    profile,
-    tags,
-    /* isEmployerContext */
-    false,
-    inferredSeniority,
-    true
-  );
-}
-async function listSavedJobs() {
-  const profile = await readProfile();
-  return profile.savedJobs ?? [];
-}
-async function addSavedJob(job) {
-  const profile = await readProfile();
-  const existing = profile.savedJobs ?? [];
-  const filtered = existing.filter((j) => j.id !== job.id);
-  profile.savedJobs = [...filtered, { ...job, savedAt: (/* @__PURE__ */ new Date()).toISOString() }];
-  await writeProfile(profile);
-}
-async function removeSavedJob(id) {
-  const profile = await readProfile();
-  const existing = profile.savedJobs ?? [];
-  const filtered = existing.filter((j) => j.id !== id);
-  if (filtered.length === existing.length) return false;
-  profile.savedJobs = filtered;
-  await writeProfile(profile);
-  return true;
-}
-async function deleteProfile() {
-  await deleteKey();
-}
-function profileToFingerprint(profile) {
-  const rankedTags = Object.entries(profile.tagWeights).map(([tag, w]) => ({ tag, score: tagScore(w) })).filter(({ score }) => score >= MIN_FINGERPRINT_SCORE).sort((a, b) => b.score - a.score).map(({ tag }) => tag);
-  const skillTags = rankedTags.length > 0 ? rankedTags : profile.skillTags;
-  return {
-    skillTags,
-    seniorityBand: profile.seniority,
-    prefs: {
-      roleTypes: profile.roleTypes,
-      remoteOnly: profile.remoteOnly,
-      compFloorUsd: profile.compFloorUsd
-    }
-  };
-}
-var TERMINALHIRE_DIR2, PROFILE_FILE, profileStore, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var TERMINALHIRE_DIR2, PROFILE_FILE, profileStore;
 var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
@@ -1447,125 +1300,556 @@ var init_profile = __esm({
       blank: blankProfile,
       keyPolicy: "keytar-first-file-fallback"
     });
-    LANGUAGE_TAGS = /* @__PURE__ */ new Set([
-      "typescript",
-      "javascript",
-      "python",
-      "go",
-      "rust",
-      "java",
-      "ruby",
-      "elixir",
-      "scala",
-      "kotlin",
-      "swift",
-      "cpp",
-      "csharp",
-      "php",
-      "haskell",
-      "clojure",
-      "r"
-    ]);
-    MIN_FINGERPRINT_SCORE = 0.05;
   }
 });
 
-// bin/jpi-save.js
-import { readFileSync as readFileSync3, existsSync as existsSync2 } from "fs";
+// src/repo-experience.ts
+var repo_experience_exports = {};
+__export(repo_experience_exports, {
+  __setStoreForTests: () => __setStoreForTests,
+  addNote: () => addNote,
+  briefingLines: () => briefingLines,
+  calibrationSummary: () => calibrationSummary,
+  continuity: () => continuity,
+  continuityForRepo: () => continuityForRepo,
+  getRepoEntry: () => getRepoEntry,
+  projectOutcomes: () => projectOutcomes,
+  readRepoExperience: () => readRepoExperience,
+  recordAuditSample: () => recordAuditSample,
+  recordBackfill: () => recordBackfill,
+  recordPolicySnapshot: () => recordPolicySnapshot,
+  writeTombstone: () => writeTombstone
+});
 import { join as join4 } from "path";
 import { homedir as homedir3 } from "os";
-import { fileURLToPath as fileURLToPath2 } from "url";
-var __dirname = fileURLToPath2(new URL(".", import.meta.url));
-var TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
-var INDEX_CACHE_FILE = join4(TERMINALHIRE_DIR3, "index-cache.json");
-function findJobInCache(jobId) {
-  try {
-    if (!existsSync2(INDEX_CACHE_FILE)) return null;
-    const raw = readFileSync3(INDEX_CACHE_FILE, "utf8");
-    const entry = JSON.parse(raw);
-    const jobs = entry?.index?.jobs ?? [];
-    return jobs.find((j) => j.id === jobId) ?? null;
-  } catch {
-    return null;
+function blankFile() {
+  return { version: 1, repos: {} };
+}
+function __setStoreForTests(testStore) {
+  activeStore = testStore ?? store;
+}
+function nowISO() {
+  return (/* @__PURE__ */ new Date()).toISOString();
+}
+function blankEntry() {
+  return {
+    updatedAt: nowISO(),
+    policyCache: null,
+    cultureSamples: [],
+    tombstones: [],
+    backfill: [],
+    notes: []
+  };
+}
+function evictLRU(file) {
+  const keys = Object.keys(file.repos);
+  if (keys.length <= MAX_REPOS) return;
+  const sorted = [...keys].sort((a, b) => file.repos[a].updatedAt.localeCompare(file.repos[b].updatedAt));
+  for (const key of sorted.slice(0, keys.length - MAX_REPOS)) {
+    delete file.repos[key];
   }
 }
-async function cmdSave(jobId) {
-  if (!jobId) {
-    console.error("Usage: terminalhire save <jobId>");
-    console.error("  jobId is shown in `terminalhire jobs` output (e.g. greenhouse:abc123)");
-    process.exit(1);
-  }
-  const { addSavedJob: addSavedJob2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-  const job = findJobInCache(jobId);
-  if (!job) {
-    console.error(`terminalhire save: job '${jobId}' not found in local index cache.`);
-    console.error("  Run `terminalhire jobs` first to populate the cache.");
-    process.exit(1);
-  }
-  await addSavedJob2({
-    id: job.id,
-    title: job.title,
-    company: job.company,
-    url: job.url,
-    source: job.source,
-    savedAt: (/* @__PURE__ */ new Date()).toISOString()
-    // overwritten by addSavedJob, but required by type
+async function withEntry(repoFullName, mutate) {
+  const file = await activeStore.read();
+  const entry = file.repos[repoFullName] ?? blankEntry();
+  mutate(entry);
+  entry.updatedAt = nowISO();
+  file.repos[repoFullName] = entry;
+  evictLRU(file);
+  await activeStore.write(file);
+}
+async function readRepoExperience() {
+  return activeStore.read();
+}
+async function getRepoEntry(repoFullName) {
+  const file = await activeStore.read();
+  return file.repos[repoFullName] ?? null;
+}
+async function recordPolicySnapshot(repoFullName, policy) {
+  await withEntry(repoFullName, (entry) => {
+    entry.policyCache = {
+      verdict: policy.verdict,
+      assignment: policy.assignment,
+      requirements: policy.requirements.map((r) => r.kind),
+      rulesetVersion: policy.rulesetVersion,
+      checkedAt: nowISO()
+    };
   });
-  console.log(`Saved: ${job.title} \u2014 ${job.company}`);
-  console.log(`  id: ${job.id}`);
-  console.log(`  url: ${job.url}`);
-  console.log("  Stored locally in encrypted profile. Run `terminalhire saved` to list.");
 }
-async function cmdSaved() {
-  const { listSavedJobs: listSavedJobs2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-  const jobs = await listSavedJobs2();
-  if (jobs.length === 0) {
-    console.log("No saved jobs. Use `terminalhire save <jobId>` to save a role.");
+async function recordAuditSample(repoFullName, signals, completeness) {
+  await withEntry(repoFullName, (entry) => {
+    entry.cultureSamples.push({
+      hoursToFirstResponse: signals.hoursToFirstResponse,
+      iterationsAfterFirstResponse: signals.iterationsAfterFirstResponse,
+      hoursToMerge: signals.hoursToMerge,
+      completeness,
+      sampledAt: nowISO()
+    });
+    if (entry.cultureSamples.length > MAX_CULTURE_SAMPLES) {
+      entry.cultureSamples.splice(0, entry.cultureSamples.length - MAX_CULTURE_SAMPLES);
+    }
+  });
+}
+async function addNote(repoFullName, text, source = "manual") {
+  await withEntry(repoFullName, (entry) => {
+    entry.notes.push({ text, source, addedAt: nowISO() });
+    if (entry.notes.length > MAX_NOTES) {
+      entry.notes.splice(0, entry.notes.length - MAX_NOTES);
+    }
+  });
+}
+async function writeTombstone(repoFullName, claimId, outcome) {
+  await withEntry(repoFullName, (entry) => {
+    if (entry.tombstones.some((t) => t.claimId === claimId)) return;
+    entry.tombstones.push({ claimId, outcome, resolvedAt: nowISO() });
+  });
+}
+async function recordBackfill(repoFullName, entries) {
+  await withEntry(repoFullName, (entry) => {
+    const known = new Set(entry.backfill.map((b) => b.prNumber));
+    for (const e of entries) {
+      if (known.has(e.prNumber)) continue;
+      known.add(e.prNumber);
+      entry.backfill.push({ prNumber: e.prNumber, mergedAt: e.mergedAt });
+    }
+    if (entry.backfill.length > MAX_BACKFILL) {
+      entry.backfill.sort((a, b) => a.mergedAt.localeCompare(b.mergedAt));
+      entry.backfill.splice(0, entry.backfill.length - MAX_BACKFILL);
+    }
+  });
+}
+function prNumberFromUrl(prUrl) {
+  if (!prUrl) return null;
+  const m = /\/pull\/(\d+)/.exec(prUrl);
+  return m ? Number(m[1]) : null;
+}
+function projectOutcomes(claims, tombstones, repo, backfill = []) {
+  const events = [];
+  const seenPrNumbers = /* @__PURE__ */ new Set();
+  for (const c of claims) {
+    if (c.repoFullName !== repo || c.state !== "merged") continue;
+    const prNumber = prNumberFromUrl(c.prUrl);
+    if (prNumber !== null) seenPrNumbers.add(prNumber);
+    events.push({ prNumber, mergedAt: c.updatedAt, source: "claim" });
+  }
+  for (const t of tombstones) {
+    if (t.outcome !== "merged") continue;
+    events.push({ prNumber: null, mergedAt: t.resolvedAt, source: "tombstone" });
+  }
+  for (const b of backfill) {
+    if (seenPrNumbers.has(b.prNumber)) continue;
+    seenPrNumbers.add(b.prNumber);
+    events.push({ prNumber: b.prNumber, mergedAt: b.mergedAt, source: "backfill" });
+  }
+  events.sort((a, b) => a.mergedAt.localeCompare(b.mergedAt));
+  const lastMergedAt = events.length > 0 ? events[events.length - 1].mergedAt : null;
+  return { mergedCount: events.length, lastMergedAt, events };
+}
+function continuity(projection, now = Date.now()) {
+  if (!projection.lastMergedAt) {
+    return { score: 0, reasons: ["no merges recorded here yet"] };
+  }
+  const countFactor = Math.min(projection.mergedCount, 4) / 4;
+  const decay = recencyDecay(projection.lastMergedAt, 90, now);
+  const score = countFactor * decay;
+  const mergeWord = projection.mergedCount === 1 ? "merge" : "merges";
+  return {
+    score,
+    reasons: [`${projection.mergedCount} ${mergeWord} recorded here`, `most recent merge ${projection.lastMergedAt}`]
+  };
+}
+async function continuityForRepo(repoFullName, claims) {
+  try {
+    const entry = await getRepoEntry(repoFullName);
+    const projection = projectOutcomes(claims, entry?.tombstones ?? [], repoFullName, entry?.backfill ?? []);
+    const result = continuity(projection);
+    return { score: result.score, mergedCount: projection.mergedCount };
+  } catch {
+    return { score: 0, mergedCount: 0 };
+  }
+}
+function calibrationSummary(claims, repo) {
+  const resolved = claims.filter(
+    (c) => c.repoFullName === repo && (c.state === "merged" || c.state === "abandoned") && c.review?.acceptanceScore != null
+  );
+  const n = resolved.length;
+  if (n < 5) return { available: false, n, text: null };
+  const meanForecast = resolved.reduce((sum, c) => sum + c.review.acceptanceScore, 0) / n;
+  const mergedCount = resolved.filter((c) => c.state === "merged").length;
+  const mergeRate = mergedCount / n;
+  const delta = Math.round((meanForecast - mergeRate) * 10) / 10;
+  let direction;
+  if (delta > 0) direction = `~${delta} optimistic`;
+  else if (delta < 0) direction = `~${Math.abs(delta)} pessimistic`;
+  else direction = "well-calibrated";
+  return {
+    available: true,
+    n,
+    meanForecast,
+    mergeRate,
+    delta,
+    text: `forecasts here ran ${direction} (n=${n})`
+  };
+}
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+function briefingLines(params) {
+  const { repoFullName, entry, claims } = params;
+  const projection = projectOutcomes(claims, entry?.tombstones ?? [], repoFullName, entry?.backfill ?? []);
+  const lines = [];
+  if (projection.mergedCount > 0) {
+    const months = projection.events.map(
+      (e) => new Date(e.mergedAt).toLocaleString("en-US", { month: "short" })
+    );
+    lines.push(`You: ${projection.mergedCount} merged here (${months.join(", ")})`);
+  }
+  const samplesWithResponse = (entry?.cultureSamples ?? []).filter(
+    (s) => s.completeness.comments && s.hoursToFirstResponse != null
+  );
+  if (samplesWithResponse.length > 0) {
+    const hours = Math.round(median(samplesWithResponse.map((s) => s.hoursToFirstResponse)));
+    lines.push(`maintainer 1st response ~${hours}h`);
+  }
+  if (entry?.policyCache) {
+    lines.push(`policy: ${entry.policyCache.verdict}`);
+  }
+  const latestNote = entry?.notes[entry.notes.length - 1];
+  if (latestNote) {
+    lines.push(`note: ${latestNote.text}`);
+  }
+  return lines;
+}
+var TERMINALHIRE_DIR3, REPO_EXPERIENCE_FILE, MAX_REPOS, MAX_CULTURE_SAMPLES, MAX_NOTES, MAX_BACKFILL, store, activeStore;
+var init_repo_experience = __esm({
+  "src/repo-experience.ts"() {
+    "use strict";
+    init_crypto_store();
+    init_profile();
+    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
+    REPO_EXPERIENCE_FILE = join4(TERMINALHIRE_DIR3, "repo-experience.enc");
+    MAX_REPOS = 100;
+    MAX_CULTURE_SAMPLES = 12;
+    MAX_NOTES = 10;
+    MAX_BACKFILL = 50;
+    store = createEncryptedStore(REPO_EXPERIENCE_FILE, {
+      blank: blankFile,
+      keyPolicy: "keychain-required"
+    });
+    activeStore = store;
+  }
+});
+
+// src/claims.ts
+var claims_exports = {};
+__export(claims_exports, {
+  PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
+  acceptedPRRate: () => acceptedPRRate,
+  findClaim: () => findClaim,
+  listClaims: () => listClaims,
+  nextPolledState: () => nextPolledState,
+  readClaims: () => readClaims,
+  recordClaim: () => recordClaim,
+  removeClaim: () => removeClaim,
+  toPushedClaim: () => toPushedClaim,
+  updateClaim: () => updateClaim
+});
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, renameSync as renameSync2, existsSync as existsSync2, rmSync as rmSync2, statSync } from "fs";
+import { randomBytes as randomBytes3 } from "crypto";
+import { join as join5 } from "path";
+import { homedir as homedir4 } from "os";
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function withClaimsLock(fn) {
+  mkdirSync2(TERMINALHIRE_DIR4, { recursive: true, mode: 448 });
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  for (; ; ) {
+    try {
+      mkdirSync2(LOCK_DIR, { mode: 448 });
+      break;
+    } catch {
+      try {
+        if (Date.now() - statSync(LOCK_DIR).mtimeMs > LOCK_STALE_MS) {
+          rmSync2(LOCK_DIR, { recursive: true, force: true });
+          continue;
+        }
+      } catch {
+      }
+      if (Date.now() > deadline) {
+        throw new Error(
+          `claims store is locked (another terminalhire process?) \u2014 remove ${LOCK_DIR} if no other process is running`
+        );
+      }
+      sleepSync(LOCK_RETRY_MS);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    rmSync2(LOCK_DIR, { recursive: true, force: true });
+  }
+}
+function toPushedClaim(claim) {
+  return {
+    kind: claim.kind,
+    repoFullName: claim.repoFullName,
+    state: claim.state,
+    prUrl: claim.prUrl,
+    merged: claim.state === "merged",
+    claimedAt: claim.claimedAt,
+    updatedAt: claim.updatedAt
+  };
+}
+function nextPolledState(from, observed) {
+  return POLL_TRANSITIONS[observed].has(from) ? observed : from;
+}
+function nowISO2() {
+  return (/* @__PURE__ */ new Date()).toISOString();
+}
+function normalizeClaim(c) {
+  return { ...c, kind: c.kind ?? "bounty", policy: c.policy ?? null };
+}
+function readClaims() {
+  try {
+    if (!existsSync2(CLAIMS_FILE)) return [];
+    const data = JSON.parse(readFileSync3(CLAIMS_FILE, "utf8"));
+    const claims = Array.isArray(data?.claims) ? data.claims : [];
+    return claims.map(normalizeClaim);
+  } catch {
+    return [];
+  }
+}
+function writeClaims(claims) {
+  mkdirSync2(TERMINALHIRE_DIR4, { recursive: true, mode: 448 });
+  const tmp = `${CLAIMS_FILE}.${process.pid}.${randomBytes3(6).toString("hex")}.tmp`;
+  const payload = { claims };
+  try {
+    writeFileSync2(tmp, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 384, flag: "wx" });
+    renameSync2(tmp, CLAIMS_FILE);
+  } catch (err) {
+    try {
+      rmSync2(tmp, { force: true });
+    } catch {
+    }
+    throw err;
+  }
+}
+function findClaim(id) {
+  return readClaims().find((c) => c.id === id) ?? null;
+}
+function listClaims(opts = {}) {
+  const claims = readClaims();
+  if (!opts.active) return claims;
+  return claims.filter((c) => !TERMINAL_STATES.has(c.state));
+}
+function recordClaim(rec) {
+  return withClaimsLock(() => {
+    const claims = readClaims();
+    if (claims.some((c) => c.id === rec.id)) {
+      throw new Error(
+        `claim already exists for '${rec.id}' \u2014 run 'terminalhire claim status ${rec.id}' or 'terminalhire claim release ${rec.id}'`
+      );
+    }
+    const ts = nowISO2();
+    const claim = {
+      ...rec,
+      // Defensive default (mirrors normalizeClaim's `kind ?? 'bounty'` pattern):
+      // a caller written before `policy` existed, or a plain-JS caller that skips
+      // it, still produces a valid record instead of `policy: undefined`.
+      policy: rec.policy ?? null,
+      state: "claimed",
+      worktreePath: null,
+      branch: null,
+      prUrl: null,
+      review: null,
+      claimedAt: ts,
+      updatedAt: ts
+    };
+    claims.push(claim);
+    writeClaims(claims);
+    return claim;
+  });
+}
+function updateClaim(id, patch) {
+  return withClaimsLock(() => {
+    const claims = readClaims();
+    const idx = claims.findIndex((c) => c.id === id);
+    if (idx === -1) return null;
+    claims[idx] = { ...claims[idx], ...patch, updatedAt: nowISO2() };
+    writeClaims(claims);
+    return claims[idx];
+  });
+}
+function removeClaim(id) {
+  return withClaimsLock(() => {
+    const claims = readClaims();
+    const next = claims.filter((c) => c.id !== id);
+    if (next.length === claims.length) return false;
+    writeClaims(next);
+    return true;
+  });
+}
+function acceptedPRRate(claims = readClaims()) {
+  const total = claims.length;
+  const merged = claims.filter((c) => c.state === "merged").length;
+  return { merged, total, rate: total === 0 ? 0 : merged / total };
+}
+var TERMINALHIRE_DIR4, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS;
+var init_claims = __esm({
+  "src/claims.ts"() {
+    "use strict";
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
+    CLAIMS_FILE = join5(TERMINALHIRE_DIR4, "claims.json");
+    LOCK_DIR = `${CLAIMS_FILE}.lock`;
+    LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
+    LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
+    LOCK_TIMEOUT_MS = Number(process.env.TERMINALHIRE_LOCK_TIMEOUT_MS) || 5e3;
+    PUSHED_CLAIM_FIELDS = [
+      "kind",
+      "repoFullName",
+      "state",
+      "prUrl",
+      "merged",
+      "claimedAt",
+      "updatedAt"
+    ];
+    TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
+    POLL_TRANSITIONS = {
+      merged: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready", "submitted", "abandoned"]),
+      abandoned: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready", "submitted", "merged"]),
+      submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
+    };
+  }
+});
+
+// bin/jpi-repo.js
+import { execFile } from "child_process";
+import { promisify } from "util";
+var pExecFile = promisify(execFile);
+async function sh(cmd, args) {
+  const { stdout } = await pExecFile(cmd, args, { shell: false, maxBuffer: 16 * 1024 * 1024 });
+  return stdout.trim();
+}
+function isRepoFullName(s) {
+  return typeof s === "string" && /^[\w.-]+\/[\w.-]+$/.test(s);
+}
+async function cmdShow(repoFullName) {
+  if (!isRepoFullName(repoFullName)) {
+    console.error(`Usage: terminalhire repo <owner/repo>
+  '${repoFullName ?? ""}' does not look like an owner/repo.`);
+    process.exit(1);
+  }
+  const { getRepoEntry: getRepoEntry2, projectOutcomes: projectOutcomes2, continuity: continuity2, calibrationSummary: calibrationSummary2, briefingLines: briefingLines2 } = await Promise.resolve().then(() => (init_repo_experience(), repo_experience_exports));
+  const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+  const entry = await getRepoEntry2(repoFullName);
+  const allClaims = claims.readClaims();
+  const projection = projectOutcomes2(allClaims, entry?.tombstones ?? [], repoFullName, entry?.backfill ?? []);
+  console.log(`
+  ${repoFullName}`);
+  if (!entry && projection.mergedCount === 0) {
+    console.log("  No local history for this repo yet.");
+    console.log(`  Claim something here, or run \`terminalhire repo sync ${repoFullName}\` to backfill from GitHub.`);
     return;
   }
-  console.log(`
-${jobs.length} saved job${jobs.length === 1 ? "" : "s"}:
-`);
-  for (const j of jobs) {
-    const date = new Date(j.savedAt).toLocaleDateString();
-    console.log(`  ${j.id}`);
-    console.log(`    ${j.title} \u2014 ${j.company}`);
-    console.log(`    ${j.url}`);
-    console.log(`    Saved: ${date}`);
-    console.log("");
+  const personalTTY = process.stdout.isTTY;
+  if (personalTTY) {
+    const cont = continuity2(projection);
+    console.log(`  Continuity: ${cont.score.toFixed(2)}  (${cont.reasons.join(" \xB7 ")})`);
+    const calib = calibrationSummary2(allClaims, repoFullName);
+    if (calib.available) console.log(`  Calibration: ${calib.text}`);
   }
-  console.log("To remove: terminalhire unsave <jobId>");
+  if (entry?.policyCache) {
+    const reqs = entry.policyCache.requirements.length ? ` [${entry.policyCache.requirements.join(", ")}]` : "";
+    console.log(`  Policy (cached ${entry.policyCache.checkedAt}): ${entry.policyCache.verdict}${reqs}`);
+    console.log("    (cache is DISPLAY-ONLY \u2014 `claim record`/`preview` always re-check live before you commit)");
+  }
+  if (personalTTY) {
+    const brief = briefingLines2({ repoFullName, entry, claims: allClaims });
+    if (brief.length > 0) console.log(`  Briefing: ${brief.join(" \xB7 ")}`);
+  }
+  if (entry?.notes.length) {
+    console.log("  Notes:");
+    for (const n of entry.notes) console.log(`    \xB7 ${n.text}  (${n.source}, ${n.addedAt})`);
+  }
+  if (personalTTY) {
+    console.log(
+      `  Merges recorded: ${projection.mergedCount}${projection.lastMergedAt ? ` (last ${projection.lastMergedAt})` : ""}`
+    );
+    console.log(
+      `  Backfilled from GitHub: ${entry?.backfill.length ?? 0} (run \`terminalhire repo sync ${repoFullName}\` to refresh)`
+    );
+  }
 }
-async function cmdUnsave(jobId) {
-  if (!jobId) {
-    console.error("Usage: terminalhire unsave <jobId>");
+async function cmdNote(repoFullName, text) {
+  if (!isRepoFullName(repoFullName) || !text) {
+    console.error('Usage: terminalhire repo note <owner/repo> "text"');
     process.exit(1);
   }
-  const { removeSavedJob: removeSavedJob2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-  const removed = await removeSavedJob2(jobId);
-  if (removed) {
-    console.log(`Removed saved job: ${jobId}`);
-  } else {
-    console.error(`terminalhire unsave: job '${jobId}' was not in your saved list.`);
+  const { addNote: addNote2 } = await Promise.resolve().then(() => (init_repo_experience(), repo_experience_exports));
+  await addNote2(repoFullName, text, "manual");
+  console.log(`Noted for ${repoFullName}.`);
+}
+async function cmdSync(repoFullName) {
+  if (!isRepoFullName(repoFullName)) {
+    console.error("Usage: terminalhire repo sync <owner/repo>");
     process.exit(1);
   }
+  console.log(`Syncing your merged PR history in ${repoFullName} from GitHub\u2026`);
+  let raw;
+  try {
+    raw = await sh("gh", [
+      "pr",
+      "list",
+      "--repo",
+      repoFullName,
+      "--author",
+      "@me",
+      "--state",
+      "merged",
+      "--json",
+      "number,mergedAt",
+      "--limit",
+      "100"
+    ]);
+  } catch (err) {
+    console.error(`terminalhire repo sync: \`gh pr list\` failed \u2014 ${err.message ?? err}`);
+    process.exit(1);
+  }
+  let prs;
+  try {
+    prs = JSON.parse(raw);
+  } catch {
+    console.error("terminalhire repo sync: could not parse `gh pr list` output.");
+    process.exit(1);
+  }
+  const entries = (Array.isArray(prs) ? prs : []).filter((p) => p && typeof p.number === "number" && p.mergedAt).map((p) => ({ prNumber: p.number, mergedAt: p.mergedAt }));
+  const { recordBackfill: recordBackfill2 } = await Promise.resolve().then(() => (init_repo_experience(), repo_experience_exports));
+  await recordBackfill2(repoFullName, entries);
+  console.log(`Synced ${entries.length} merged PR${entries.length === 1 ? "" : "s"} for ${repoFullName}.`);
 }
 async function run() {
-  const verb = process.argv[2];
-  const jobId = process.argv[3];
+  const args = process.argv.slice(2);
+  const filtered = args[0] === "repo" ? args.slice(1) : args;
+  const [first, ...rest] = filtered;
+  if (!first) {
+    console.error('Usage: terminalhire repo <owner/repo> | repo note <owner/repo> "text" | repo sync <owner/repo>');
+    process.exit(1);
+  }
   try {
-    if (verb === "save") {
-      await cmdSave(jobId);
-    } else if (verb === "saved") {
-      await cmdSaved();
-    } else if (verb === "unsave") {
-      await cmdUnsave(jobId);
-    } else {
-      console.error(`terminalhire: unknown save verb '${verb}'. Expected: save | saved | unsave`);
-      process.exit(1);
+    if (first === "note") {
+      await cmdNote(rest[0], rest.slice(1).join(" "));
+      return;
     }
+    if (first === "sync") {
+      await cmdSync(rest[0]);
+      return;
+    }
+    await cmdShow(first);
   } catch (err) {
-    console.error("terminalhire save error:", err.message ?? err);
+    console.error("terminalhire repo error:", err.message ?? err);
     process.exit(1);
   }
 }

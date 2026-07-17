@@ -45,9 +45,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a0bc554500876cd51/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/wt-v034/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a0bc554500876cd51/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/wt-v034/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -103,15 +103,49 @@ __export(claims_exports, {
   acceptedPRRate: () => acceptedPRRate,
   findClaim: () => findClaim,
   listClaims: () => listClaims,
+  nextPolledState: () => nextPolledState,
   readClaims: () => readClaims,
   recordClaim: () => recordClaim,
   removeClaim: () => removeClaim,
   toPushedClaim: () => toPushedClaim,
   updateClaim: () => updateClaim
 });
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, renameSync, existsSync as existsSync2 } from "fs";
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, renameSync as renameSync2, existsSync as existsSync2, rmSync as rmSync2, statSync } from "fs";
+import { randomBytes as randomBytes2 } from "crypto";
 import { join as join2 } from "path";
 import { homedir as homedir2 } from "os";
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function withClaimsLock(fn) {
+  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true, mode: 448 });
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  for (; ; ) {
+    try {
+      mkdirSync2(LOCK_DIR, { mode: 448 });
+      break;
+    } catch {
+      try {
+        if (Date.now() - statSync(LOCK_DIR).mtimeMs > LOCK_STALE_MS) {
+          rmSync2(LOCK_DIR, { recursive: true, force: true });
+          continue;
+        }
+      } catch {
+      }
+      if (Date.now() > deadline) {
+        throw new Error(
+          `claims store is locked (another terminalhire process?) \u2014 remove ${LOCK_DIR} if no other process is running`
+        );
+      }
+      sleepSync(LOCK_RETRY_MS);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    rmSync2(LOCK_DIR, { recursive: true, force: true });
+  }
+}
 function toPushedClaim(claim) {
   return {
     kind: claim.kind,
@@ -122,6 +156,9 @@ function toPushedClaim(claim) {
     claimedAt: claim.claimedAt,
     updatedAt: claim.updatedAt
   };
+}
+function nextPolledState(from, observed) {
+  return POLL_TRANSITIONS[observed].has(from) ? observed : from;
 }
 function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
@@ -140,11 +177,19 @@ function readClaims() {
   }
 }
 function writeClaims(claims) {
-  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
-  const tmp = `${CLAIMS_FILE}.tmp`;
+  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true, mode: 448 });
+  const tmp = `${CLAIMS_FILE}.${process.pid}.${randomBytes2(6).toString("hex")}.tmp`;
   const payload = { claims };
-  writeFileSync2(tmp, JSON.stringify(payload, null, 2), "utf8");
-  renameSync(tmp, CLAIMS_FILE);
+  try {
+    writeFileSync2(tmp, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 384, flag: "wx" });
+    renameSync2(tmp, CLAIMS_FILE);
+  } catch (err) {
+    try {
+      rmSync2(tmp, { force: true });
+    } catch {
+    }
+    throw err;
+  }
 }
 function findClaim(id) {
   return readClaims().find((c) => c.id === id) ?? null;
@@ -155,57 +200,67 @@ function listClaims(opts = {}) {
   return claims.filter((c) => !TERMINAL_STATES.has(c.state));
 }
 function recordClaim(rec) {
-  const claims = readClaims();
-  if (claims.some((c) => c.id === rec.id)) {
-    throw new Error(
-      `claim already exists for '${rec.id}' \u2014 run 'terminalhire claim status ${rec.id}' or 'terminalhire claim release ${rec.id}'`
-    );
-  }
-  const ts = nowISO();
-  const claim = {
-    ...rec,
-    // Defensive default (mirrors normalizeClaim's `kind ?? 'bounty'` pattern):
-    // a caller written before `policy` existed, or a plain-JS caller that skips
-    // it, still produces a valid record instead of `policy: undefined`.
-    policy: rec.policy ?? null,
-    state: "claimed",
-    worktreePath: null,
-    branch: null,
-    prUrl: null,
-    review: null,
-    claimedAt: ts,
-    updatedAt: ts
-  };
-  claims.push(claim);
-  writeClaims(claims);
-  return claim;
+  return withClaimsLock(() => {
+    const claims = readClaims();
+    if (claims.some((c) => c.id === rec.id)) {
+      throw new Error(
+        `claim already exists for '${rec.id}' \u2014 run 'terminalhire claim status ${rec.id}' or 'terminalhire claim release ${rec.id}'`
+      );
+    }
+    const ts = nowISO();
+    const claim = {
+      ...rec,
+      // Defensive default (mirrors normalizeClaim's `kind ?? 'bounty'` pattern):
+      // a caller written before `policy` existed, or a plain-JS caller that skips
+      // it, still produces a valid record instead of `policy: undefined`.
+      policy: rec.policy ?? null,
+      state: "claimed",
+      worktreePath: null,
+      branch: null,
+      prUrl: null,
+      review: null,
+      claimedAt: ts,
+      updatedAt: ts
+    };
+    claims.push(claim);
+    writeClaims(claims);
+    return claim;
+  });
 }
 function updateClaim(id, patch) {
-  const claims = readClaims();
-  const idx = claims.findIndex((c) => c.id === id);
-  if (idx === -1) return null;
-  claims[idx] = { ...claims[idx], ...patch, updatedAt: nowISO() };
-  writeClaims(claims);
-  return claims[idx];
+  return withClaimsLock(() => {
+    const claims = readClaims();
+    const idx = claims.findIndex((c) => c.id === id);
+    if (idx === -1) return null;
+    claims[idx] = { ...claims[idx], ...patch, updatedAt: nowISO() };
+    writeClaims(claims);
+    return claims[idx];
+  });
 }
 function removeClaim(id) {
-  const claims = readClaims();
-  const next = claims.filter((c) => c.id !== id);
-  if (next.length === claims.length) return false;
-  writeClaims(next);
-  return true;
+  return withClaimsLock(() => {
+    const claims = readClaims();
+    const next = claims.filter((c) => c.id !== id);
+    if (next.length === claims.length) return false;
+    writeClaims(next);
+    return true;
+  });
 }
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR2, CLAIMS_FILE, PUSHED_CLAIM_FIELDS, TERMINAL_STATES;
+var TERMINALHIRE_DIR2, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
     TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
     CLAIMS_FILE = join2(TERMINALHIRE_DIR2, "claims.json");
+    LOCK_DIR = `${CLAIMS_FILE}.lock`;
+    LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
+    LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
+    LOCK_TIMEOUT_MS = Number(process.env.TERMINALHIRE_LOCK_TIMEOUT_MS) || 5e3;
     PUSHED_CLAIM_FIELDS = [
       "kind",
       "repoFullName",
@@ -216,12 +271,17 @@ var init_claims = __esm({
       "updatedAt"
     ];
     TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
+    POLL_TRANSITIONS = {
+      merged: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready", "submitted", "abandoned"]),
+      abandoned: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready", "submitted", "merged"]),
+      submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
+    };
   }
 });
 
 // bin/claim-push-bg.js
 import { createHash } from "crypto";
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync as existsSync3, rmSync as rmSync2 } from "fs";
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync as existsSync3, rmSync as rmSync3 } from "fs";
 import { join as join3 } from "path";
 import { homedir as homedir3 } from "os";
 
@@ -236,7 +296,8 @@ import {
   writeFileSync,
   mkdirSync,
   existsSync,
-  rmSync
+  rmSync,
+  renameSync
 } from "fs";
 import { join } from "path";
 import { homedir } from "os";
@@ -246,17 +307,22 @@ var KEY_FILE = join(TERMINALHIRE_DIR, "key");
 var ALGO = "aes-256-gcm";
 var KEY_BYTES = 32;
 var IV_BYTES = 12;
+function skipKeychain() {
+  return process.env.TERMINALHIRE_NO_KEYCHAIN !== void 0 || process.env.CI !== void 0 || process.env.VITEST !== void 0 || process.env.NODE_ENV === "test";
+}
 async function loadKey() {
-  try {
-    const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
-    const stored = await kt.getPassword("terminalhire", "profile-key");
-    if (stored) return Buffer.from(stored, "hex");
-    const key2 = randomBytes(KEY_BYTES);
-    await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
-    return key2;
-  } catch {
+  if (!skipKeychain()) {
+    try {
+      const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
+      const stored = await kt.getPassword("terminalhire", "profile-key");
+      if (stored) return Buffer.from(stored, "hex");
+      const key2 = randomBytes(KEY_BYTES);
+      await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
+      return key2;
+    } catch {
+    }
   }
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  mkdirSync(TERMINALHIRE_DIR, { recursive: true, mode: 448 });
   if (existsSync(KEY_FILE)) {
     return Buffer.from(readFileSync(KEY_FILE, "utf8").trim(), "hex");
   }
@@ -307,7 +373,7 @@ async function readPushTokenEnc() {
 }
 function clearPushTokenEnc() {
   try {
-    rmSync2(CLAIM_PUSH_TOKEN_FILE);
+    rmSync3(CLAIM_PUSH_TOKEN_FILE);
   } catch {
   }
 }
@@ -324,7 +390,7 @@ function writeAutoMarker(marker) {
 }
 function clearAutoMarker() {
   try {
-    rmSync2(CLAIM_PUSH_AUTO_MARKER);
+    rmSync3(CLAIM_PUSH_AUTO_MARKER);
   } catch {
   }
 }

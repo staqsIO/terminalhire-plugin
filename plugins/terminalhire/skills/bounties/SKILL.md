@@ -11,7 +11,7 @@ Run the bundled terminalhire engine in a Bash tool call to display day-sized pai
 node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" bounties
 ```
 
-The list is ranked locally — no profile data is sent. Each bounty shows the `$` amount, effort, source repo (with stars), a local match score when it fits the developer's profile, and a claim link that goes straight to the source platform (terminalhire never touches payment).
+The list is ranked from a profile that never leaves your machine — no profile data is sent. Each bounty shows the `$` amount, effort, source repo (with stars), a match score when it fits the developer's profile, and a claim link that goes straight to the source platform (terminalhire never touches payment).
 
 Append `--priced` to show only bounties with a known dollar amount, `--limit N` to change how many are shown, or `--all` to list every bounty.
 

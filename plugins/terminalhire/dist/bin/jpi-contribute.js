@@ -646,11 +646,11 @@ var init_vocabulary = __esm({
 });
 
 // ../../packages/core/src/feeds/bounty-gate.ts
-var BOUNTY_REPO_DENYLIST, DENYLIST_LC, AI_BAN_DENYLIST, AI_BAN_LC;
+var FARM_REPO_DENYLIST, CURATION_EXCLUDED_REPOS, EXCLUDED_LC, AI_BAN_DENYLIST, AI_BAN_LC;
 var init_bounty_gate = __esm({
   "../../packages/core/src/feeds/bounty-gate.ts"() {
     "use strict";
-    BOUNTY_REPO_DENYLIST = [
+    FARM_REPO_DENYLIST = [
       "SecureBananaLabs/bug-bounty",
       // Meta-farm: a bounty PLATFORM whose own issues are an assignment-gated
       // contributor queue ("please assign me, my chief") — an unsolicited PR won't
@@ -658,7 +658,25 @@ var init_bounty_gate = __esm({
       // any fetched field, so it's a manual entry (also dropped from the allowlist).
       "boundlessfi/boundless"
     ];
-    DENYLIST_LC = new Set(BOUNTY_REPO_DENYLIST.map((r) => r.toLowerCase()));
+    CURATION_EXCLUDED_REPOS = [
+      // Owner call, asked twice: "get rid of that particular project — I hate it as the
+      // example." Excluded at the REPO level because that is the ONLY level at which
+      // "don't feature this project" is expressible: projectCuration emits any repo with
+      // >= 1 winnable issue.
+      //
+      // To be clear about what this repo is, since it sits next to a farm list: kana-dojo
+      // is NOT a farm. Measured live 2026-07-17 — 2,960 stars, active, 113 open issues, of
+      // which 58 are genuine substantive bug reports ("年 Onyomi incorrectly displayed as
+      // 'れン'", "Unable to install app as PWA"). The other 55 are a bot's templated
+      // "[Good First Issue] <emoji> Add new <NOUN> [N] - Beginner-Friendly Open-source
+      // Contribution" run, which is what drew our attention — but a content classifier
+      // correctly KEEPS all 58 real bugs, so it can never remove the project. Two prior
+      // attempts to do this per-issue (PR #221, #260) both shipped and left it live.
+      "lingdojo/kana-dojo"
+    ];
+    EXCLUDED_LC = new Set(
+      [...FARM_REPO_DENYLIST, ...CURATION_EXCLUDED_REPOS].map((r) => r.toLowerCase())
+    );
     AI_BAN_DENYLIST = [
       // Gentoo Council voted 6-0 (2024-04-14) to ban AI/ML-generated contributions
       // project-wide. https://wiki.gentoo.org/wiki/Project:Council/AI_policy
@@ -682,6 +700,29 @@ var init_contribution_gate = __esm({
   "../../packages/core/src/feeds/contribution-gate.ts"() {
     "use strict";
     init_bounty_gate();
+  }
+});
+
+// ../../packages/core/src/feeds/contribution-classify.ts
+var CONTENT_NOUN_STRONG, CONTENT_NOUN_BROAD, FARM_SEED_NOUN, CONTENT_ADD_RE, NUMBERED_SEED_RE, FARM_SEED_RE;
+var init_contribution_classify = __esm({
+  "../../packages/core/src/feeds/contribution-classify.ts"() {
+    "use strict";
+    CONTENT_NOUN_STRONG = String.raw`proverbs?|words?|phrases?|sayings?|translations?|entry|entries|definitions?|terms?|idioms?|synonyms?|antonyms?|acronyms?|abbreviations?|nazonazo`;
+    CONTENT_NOUN_BROAD = String.raw`trivia\s+questions?|grammar\s+points?|brain\s?teasers?|trivia|facts?|quotes?|quotations?|quiz(?:zes)?|riddles?|puzzles?|flash\s?cards?|vocab(?:ulary)?|lessons?|kanji`;
+    FARM_SEED_NOUN = String.raw`trivia\s+questions?|grammar\s+points?|brain\s?teasers?|proverbs?|sayings?|idioms?|quotes?|quotations?|riddles?|nazonazo`;
+    CONTENT_ADD_RE = new RegExp(
+      String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${CONTENT_NOUN_STRONG})\b`,
+      "i"
+    );
+    NUMBERED_SEED_RE = new RegExp(
+      String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${CONTENT_NOUN_STRONG}|${CONTENT_NOUN_BROAD})\s*#?\s*(?!(?:19|20)\d{2}(?!\d))\d{1,5}\s*$`,
+      "i"
+    );
+    FARM_SEED_RE = new RegExp(
+      String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${FARM_SEED_NOUN})\s*#?\s*(?!(?:19|20)\d{2}(?!\d))\d{1,5}\s*$`,
+      "i"
+    );
   }
 });
 
@@ -724,6 +765,7 @@ var init_github = __esm({
     init_vocabulary();
     init_contribution_gate();
     init_contribution_gate();
+    init_contribution_classify();
     init_rigor();
     init_gh_governor();
     RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
@@ -1036,11 +1078,49 @@ var init_directory = __esm({
   }
 });
 
+// ../../packages/core/src/winnability.ts
+var WINNABILITY_NORM;
+var init_winnability = __esm({
+  "../../packages/core/src/winnability.ts"() {
+    "use strict";
+    WINNABILITY_NORM = {
+      /** ~500 new stars in a build interval is treated as "maxed" momentum. */
+      starVelocity: 500,
+      /** ~10 HN mentions is treated as "maxed" social. */
+      socialMentions: 10,
+      /** log(stars) ceiling — ~100k-star repos saturate the absolute-traction floor. */
+      starsLog: Math.log(1e5)
+    };
+  }
+});
+
+// ../../packages/core/src/feeds/projectCuration.ts
+var CURATION_NORM;
+var init_projectCuration = __esm({
+  "../../packages/core/src/feeds/projectCuration.ts"() {
+    "use strict";
+    init_winnability();
+    CURATION_NORM = {
+      /** ~60 commits in the last ~30d is treated as "maxed" commit-cadence freshness. */
+      commitCadence: 60,
+      /** An issue posted within this many days is maximally fresh. */
+      freshnessFullDays: 30,
+      /** …and older than this contributes zero recency (linear decay between). */
+      freshnessZeroDays: 180,
+      /** log(stars) ceiling for popularity — reuses the winnability absolute-traction
+       *  ceiling so "popular" means the same thing across both scorers. */
+      starsLog: WINNABILITY_NORM.starsLog,
+      /** Distinct contributors treated as "maxed" for the popularity tiebreaker. */
+      contributors: 500
+    };
+  }
+});
+
 // ../../packages/core/src/feeds/index.ts
 function flattenTiers(t) {
   return [.../* @__PURE__ */ new Set([...t.bigco, ...t.scaleup, ...t.startup])];
 }
-var GREENHOUSE_SLUGS_BY_TIER, ASHBY_SLUGS_BY_TIER, LEVER_SLUGS_BY_TIER, DEFAULT_GREENHOUSE_SLUGS, DEFAULT_ASHBY_SLUGS, DEFAULT_LEVER_SLUGS;
+var GREENHOUSE_SLUGS_BY_TIER, ASHBY_SLUGS_BY_TIER, LEVER_SLUGS_BY_TIER, DEFAULT_GREENHOUSE_SLUGS, DEFAULT_ASHBY_SLUGS, DEFAULT_LEVER_SLUGS, BIGCO_SLUGS_BY_SOURCE;
 var init_feeds = __esm({
   "../../packages/core/src/feeds/index.ts"() {
     "use strict";
@@ -1057,6 +1137,8 @@ var init_feeds = __esm({
     init_bounty_gate();
     init_bounty_gate();
     init_contribution_gate();
+    init_contribution_classify();
+    init_projectCuration();
     GREENHOUSE_SLUGS_BY_TIER = {
       bigco: [
         "stripe",
@@ -1162,24 +1244,11 @@ var init_feeds = __esm({
     DEFAULT_GREENHOUSE_SLUGS = flattenTiers(GREENHOUSE_SLUGS_BY_TIER);
     DEFAULT_ASHBY_SLUGS = flattenTiers(ASHBY_SLUGS_BY_TIER);
     DEFAULT_LEVER_SLUGS = flattenTiers(LEVER_SLUGS_BY_TIER);
-  }
-});
-
-// ../../packages/core/src/feeds/contribution-classify.ts
-var CONTENT_NOUN_STRONG, CONTENT_NOUN_BROAD, CONTENT_ADD_RE, NUMBERED_SEED_RE;
-var init_contribution_classify = __esm({
-  "../../packages/core/src/feeds/contribution-classify.ts"() {
-    "use strict";
-    CONTENT_NOUN_STRONG = String.raw`proverbs?|words?|phrases?|sayings?|quotes?|quotations?|translations?|entry|entries|definitions?|terms?|idioms?|synonyms?|antonyms?|acronyms?|abbreviations?`;
-    CONTENT_NOUN_BROAD = String.raw`trivia\s+questions?|grammar\s+points?|trivia|facts?|quiz(?:zes)?|flash\s?cards?|vocab(?:ulary)?|lessons?|kanji`;
-    CONTENT_ADD_RE = new RegExp(
-      String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${CONTENT_NOUN_STRONG})\b`,
-      "i"
-    );
-    NUMBERED_SEED_RE = new RegExp(
-      String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${CONTENT_NOUN_STRONG}|${CONTENT_NOUN_BROAD})\s*#?\s*\d{1,3}\s*$`,
-      "i"
-    );
+    BIGCO_SLUGS_BY_SOURCE = {
+      greenhouse: new Set(GREENHOUSE_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase())),
+      ashby: new Set(ASHBY_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase())),
+      lever: new Set(LEVER_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase()))
+    };
   }
 });
 
@@ -1234,22 +1303,6 @@ var init_partners = __esm({
   }
 });
 
-// ../../packages/core/src/winnability.ts
-var WINNABILITY_NORM;
-var init_winnability = __esm({
-  "../../packages/core/src/winnability.ts"() {
-    "use strict";
-    WINNABILITY_NORM = {
-      /** ~500 new stars in a build interval is treated as "maxed" momentum. */
-      starVelocity: 500,
-      /** ~10 HN mentions is treated as "maxed" social. */
-      socialMentions: 10,
-      /** log(stars) ceiling — ~100k-star repos saturate the absolute-traction floor. */
-      starsLog: Math.log(1e5)
-    };
-  }
-});
-
 // ../../packages/core/src/indexer.ts
 var init_indexer = __esm({
   "../../packages/core/src/indexer.ts"() {
@@ -1260,6 +1313,14 @@ var init_indexer = __esm({
     init_github();
     init_gh_governor();
     init_winnability();
+  }
+});
+
+// ../../packages/core/src/github-issue-status.ts
+var init_github_issue_status = __esm({
+  "../../packages/core/src/github-issue-status.ts"() {
+    "use strict";
+    init_gh_governor();
   }
 });
 
@@ -1393,6 +1454,7 @@ var init_src = __esm({
     init_partners();
     init_github();
     init_gh_governor();
+    init_github_issue_status();
     init_credit();
     init_intro();
     init_directoryThreshold();
@@ -1413,9 +1475,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a0bc554500876cd51/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/wt-v034/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a0bc554500876cd51/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/wt-v034/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -1464,20 +1526,7 @@ var require_keytar2 = __commonJS({
   }
 });
 
-// src/profile.ts
-var profile_exports = {};
-__export(profile_exports, {
-  accumulateGitHubTags: () => accumulateGitHubTags,
-  accumulateSession: () => accumulateSession,
-  accumulateTags: () => accumulateTags,
-  addSavedJob: () => addSavedJob,
-  deleteProfile: () => deleteProfile,
-  listSavedJobs: () => listSavedJobs,
-  profileToFingerprint: () => profileToFingerprint,
-  readProfile: () => readProfile,
-  removeSavedJob: () => removeSavedJob,
-  writeProfile: () => writeProfile
-});
+// src/crypto-store.ts
 import {
   createCipheriv,
   createDecipheriv,
@@ -1487,30 +1536,13 @@ import {
   readFileSync as readFileSync4,
   writeFileSync as writeFileSync3,
   mkdirSync as mkdirSync3,
-  existsSync as existsSync2
+  existsSync as existsSync2,
+  renameSync as renameSync2,
+  rmSync
 } from "fs";
-import { join as join4 } from "path";
+import { join as join4, dirname, basename } from "path";
 import { homedir as homedir3 } from "os";
-async function loadKey() {
-  try {
-    const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
-    const stored = await kt.getPassword("terminalhire", "profile-key");
-    if (stored) {
-      return Buffer.from(stored, "hex");
-    }
-    const key2 = randomBytes2(KEY_BYTES);
-    await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
-    return key2;
-  } catch {
-  }
-  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
-  if (existsSync2(KEY_FILE)) {
-    return Buffer.from(readFileSync4(KEY_FILE, "utf8").trim(), "hex");
-  }
-  const key = randomBytes2(KEY_BYTES);
-  writeFileSync3(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
-  return key;
-}
+import { createRequire } from "module";
 function encrypt(plaintext, key) {
   const iv = randomBytes2(IV_BYTES);
   const cipher = createCipheriv(ALGO, key, iv);
@@ -1535,6 +1567,133 @@ function decrypt(blob, key) {
   ]);
   return plain.toString("utf8");
 }
+function skipKeychain() {
+  return process.env.TERMINALHIRE_NO_KEYCHAIN !== void 0 || process.env.CI !== void 0 || process.env.VITEST !== void 0 || process.env.NODE_ENV === "test";
+}
+async function tryLoadFromKeytar(policy) {
+  if (forceKeytarUnavailableForTests || skipKeychain()) return null;
+  try {
+    const kt = policy === "keychain-required" ? createRequire(import.meta.url)("keytar") : await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
+    const stored = await kt.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
+    if (stored) {
+      return Buffer.from(stored, "hex");
+    }
+    const key = randomBytes2(KEY_BYTES);
+    await kt.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, key.toString("hex"));
+    return key;
+  } catch {
+    return null;
+  }
+}
+function loadOrCreateFileKey() {
+  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true, mode: 448 });
+  if (existsSync2(KEY_FILE)) {
+    return Buffer.from(readFileSync4(KEY_FILE, "utf8").trim(), "hex");
+  }
+  const key = randomBytes2(KEY_BYTES);
+  writeFileSync3(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  return key;
+}
+function warnStderr(message) {
+  process.stderr.write(`${message}
+`);
+}
+function atomicWriteFileSync(filePath, content) {
+  const dir = dirname(filePath);
+  mkdirSync3(dir, { recursive: true, mode: 448 });
+  const tmp = join4(dir, `.${basename(filePath)}.tmp-${process.pid}-${randomBytes2(6).toString("hex")}`);
+  writeFileSync3(tmp, content, { encoding: "utf8", mode: 384 });
+  renameSync2(tmp, filePath);
+}
+async function deleteKey() {
+  for (const filePath of dependentStoreFiles) {
+    try {
+      rmSync(filePath);
+    } catch {
+    }
+  }
+  if (!forceKeytarUnavailableForTests && !skipKeychain()) {
+    try {
+      const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
+      await kt.deletePassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
+    } catch {
+    }
+  }
+  try {
+    rmSync(KEY_FILE);
+  } catch {
+  }
+}
+async function resolveKey(filePath, opts) {
+  if (opts.keyPolicy === "keychain-required") {
+    const key = await tryLoadFromKeytar("keychain-required");
+    if (!key) {
+      warnStderr(`crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`);
+      return null;
+    }
+    return key;
+  }
+  const fromKeytar = await tryLoadFromKeytar("keytar-first-file-fallback");
+  if (fromKeytar) return fromKeytar;
+  return loadOrCreateFileKey();
+}
+function createEncryptedStore(filePath, opts) {
+  dependentStoreFiles.add(filePath);
+  async function read() {
+    const key = await resolveKey(filePath, opts);
+    if (!key) return opts.blank();
+    if (!existsSync2(filePath)) return opts.blank();
+    try {
+      const raw = readFileSync4(filePath, "utf8");
+      const blob = JSON.parse(raw);
+      const plaintext = decrypt(blob, key);
+      return JSON.parse(plaintext);
+    } catch {
+      warnStderr(`crypto-store: failed to decrypt ${filePath} \u2014 returning blank`);
+      return opts.blank();
+    }
+  }
+  async function write(value) {
+    const key = await resolveKey(filePath, opts);
+    if (!key) return;
+    const blob = encrypt(JSON.stringify(value), key);
+    atomicWriteFileSync(filePath, JSON.stringify(blob, null, 2));
+  }
+  return { read, write };
+}
+var TERMINALHIRE_DIR3, KEY_FILE, KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, KEY_BYTES, IV_BYTES, forceKeytarUnavailableForTests, dependentStoreFiles;
+var init_crypto_store = __esm({
+  "src/crypto-store.ts"() {
+    "use strict";
+    TERMINALHIRE_DIR3 = join4(homedir3(), ".terminalhire");
+    KEY_FILE = join4(TERMINALHIRE_DIR3, "key");
+    KEYTAR_SERVICE = "terminalhire";
+    KEYTAR_ACCOUNT = "profile-key";
+    ALGO = "aes-256-gcm";
+    KEY_BYTES = 32;
+    IV_BYTES = 12;
+    forceKeytarUnavailableForTests = false;
+    dependentStoreFiles = /* @__PURE__ */ new Set();
+  }
+});
+
+// src/profile.ts
+var profile_exports = {};
+__export(profile_exports, {
+  accumulateGitHubTags: () => accumulateGitHubTags,
+  accumulateSession: () => accumulateSession,
+  accumulateTags: () => accumulateTags,
+  addSavedJob: () => addSavedJob,
+  deleteProfile: () => deleteProfile,
+  listSavedJobs: () => listSavedJobs,
+  profileToFingerprint: () => profileToFingerprint,
+  readProfile: () => readProfile,
+  recencyDecay: () => recencyDecay,
+  removeSavedJob: () => removeSavedJob,
+  writeProfile: () => writeProfile
+});
+import { join as join5 } from "path";
+import { homedir as homedir4 } from "os";
 function blankProfile() {
   return {
     version: 3,
@@ -1544,9 +1703,10 @@ function blankProfile() {
     updatedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
-function recencyDecay(lastSeen) {
-  const ageMs = Date.now() - new Date(lastSeen).getTime();
-  return Math.pow(0.5, ageMs / DECAY_HALF_LIFE_MS);
+function recencyDecay(lastSeen, halfLifeDays = 30, now = Date.now()) {
+  const ageMs = now - new Date(lastSeen).getTime();
+  const halfLifeMs = halfLifeDays * 24 * 60 * 60 * 1e3;
+  return Math.pow(0.5, ageMs / halfLifeMs);
 }
 function tagScore(w) {
   return w.count * recencyDecay(w.lastSeen);
@@ -1566,26 +1726,14 @@ function migrateTagWeights(profile) {
   }
 }
 async function readProfile() {
-  if (!existsSync2(PROFILE_FILE)) return blankProfile();
-  try {
-    const key = await loadKey();
-    const raw = readFileSync4(PROFILE_FILE, "utf8");
-    const blob = JSON.parse(raw);
-    const plaintext = decrypt(blob, key);
-    const parsed = JSON.parse(plaintext);
-    migrateTagWeights(parsed);
-    return parsed;
-  } catch {
-    return blankProfile();
-  }
+  const parsed = await profileStore.read();
+  migrateTagWeights(parsed);
+  return parsed;
 }
 async function writeProfile(profile) {
-  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
-  const key = await loadKey();
   profile.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
   profile.skillTags = deriveSkillTags(profile.tagWeights);
-  const blob = encrypt(JSON.stringify(profile), key);
-  writeFileSync3(PROFILE_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+  await profileStore.write(profile);
 }
 function accumulateSession(profile, tags, isEmployerContext, inferredSeniority, seniorityIsAuthoritative = false) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -1646,15 +1794,7 @@ async function removeSavedJob(id) {
   return true;
 }
 async function deleteProfile() {
-  const { rmSync } = await import("fs");
-  try {
-    rmSync(PROFILE_FILE);
-  } catch {
-  }
-  try {
-    rmSync(KEY_FILE);
-  } catch {
-  }
+  await deleteKey();
 }
 function profileToFingerprint(profile) {
   const rankedTags = Object.entries(profile.tagWeights).map(([tag, w]) => ({ tag, score: tagScore(w) })).filter(({ score }) => score >= MIN_FINGERPRINT_SCORE).sort((a, b) => b.score - a.score).map(({ tag }) => tag);
@@ -1669,18 +1809,18 @@ function profileToFingerprint(profile) {
     }
   };
 }
-var TERMINALHIRE_DIR3, PROFILE_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, DECAY_HALF_LIFE_MS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var TERMINALHIRE_DIR4, PROFILE_FILE, profileStore, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
 var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
     init_src();
-    TERMINALHIRE_DIR3 = join4(homedir3(), ".terminalhire");
-    PROFILE_FILE = join4(TERMINALHIRE_DIR3, "profile.enc");
-    KEY_FILE = join4(TERMINALHIRE_DIR3, "key");
-    ALGO = "aes-256-gcm";
-    KEY_BYTES = 32;
-    IV_BYTES = 12;
-    DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
+    init_crypto_store();
+    TERMINALHIRE_DIR4 = join5(homedir4(), ".terminalhire");
+    PROFILE_FILE = join5(TERMINALHIRE_DIR4, "profile.enc");
+    profileStore = createEncryptedStore(PROFILE_FILE, {
+      blank: blankProfile,
+      keyPolicy: "keytar-first-file-fallback"
+    });
     LANGUAGE_TAGS = /* @__PURE__ */ new Set([
       "typescript",
       "javascript",
@@ -1704,6 +1844,245 @@ var init_profile = __esm({
   }
 });
 
+// src/repo-experience.ts
+var repo_experience_exports = {};
+__export(repo_experience_exports, {
+  __setStoreForTests: () => __setStoreForTests,
+  addNote: () => addNote,
+  briefingLines: () => briefingLines,
+  calibrationSummary: () => calibrationSummary,
+  continuity: () => continuity,
+  continuityForRepo: () => continuityForRepo,
+  getRepoEntry: () => getRepoEntry,
+  projectOutcomes: () => projectOutcomes,
+  readRepoExperience: () => readRepoExperience,
+  recordAuditSample: () => recordAuditSample,
+  recordBackfill: () => recordBackfill,
+  recordPolicySnapshot: () => recordPolicySnapshot,
+  writeTombstone: () => writeTombstone
+});
+import { join as join6 } from "path";
+import { homedir as homedir5 } from "os";
+function blankFile() {
+  return { version: 1, repos: {} };
+}
+function __setStoreForTests(testStore) {
+  activeStore = testStore ?? store;
+}
+function nowISO() {
+  return (/* @__PURE__ */ new Date()).toISOString();
+}
+function blankEntry() {
+  return {
+    updatedAt: nowISO(),
+    policyCache: null,
+    cultureSamples: [],
+    tombstones: [],
+    backfill: [],
+    notes: []
+  };
+}
+function evictLRU(file) {
+  const keys = Object.keys(file.repos);
+  if (keys.length <= MAX_REPOS) return;
+  const sorted = [...keys].sort((a, b) => file.repos[a].updatedAt.localeCompare(file.repos[b].updatedAt));
+  for (const key of sorted.slice(0, keys.length - MAX_REPOS)) {
+    delete file.repos[key];
+  }
+}
+async function withEntry(repoFullName, mutate) {
+  const file = await activeStore.read();
+  const entry = file.repos[repoFullName] ?? blankEntry();
+  mutate(entry);
+  entry.updatedAt = nowISO();
+  file.repos[repoFullName] = entry;
+  evictLRU(file);
+  await activeStore.write(file);
+}
+async function readRepoExperience() {
+  return activeStore.read();
+}
+async function getRepoEntry(repoFullName) {
+  const file = await activeStore.read();
+  return file.repos[repoFullName] ?? null;
+}
+async function recordPolicySnapshot(repoFullName, policy) {
+  await withEntry(repoFullName, (entry) => {
+    entry.policyCache = {
+      verdict: policy.verdict,
+      assignment: policy.assignment,
+      requirements: policy.requirements.map((r) => r.kind),
+      rulesetVersion: policy.rulesetVersion,
+      checkedAt: nowISO()
+    };
+  });
+}
+async function recordAuditSample(repoFullName, signals, completeness) {
+  await withEntry(repoFullName, (entry) => {
+    entry.cultureSamples.push({
+      hoursToFirstResponse: signals.hoursToFirstResponse,
+      iterationsAfterFirstResponse: signals.iterationsAfterFirstResponse,
+      hoursToMerge: signals.hoursToMerge,
+      completeness,
+      sampledAt: nowISO()
+    });
+    if (entry.cultureSamples.length > MAX_CULTURE_SAMPLES) {
+      entry.cultureSamples.splice(0, entry.cultureSamples.length - MAX_CULTURE_SAMPLES);
+    }
+  });
+}
+async function addNote(repoFullName, text, source = "manual") {
+  await withEntry(repoFullName, (entry) => {
+    entry.notes.push({ text, source, addedAt: nowISO() });
+    if (entry.notes.length > MAX_NOTES) {
+      entry.notes.splice(0, entry.notes.length - MAX_NOTES);
+    }
+  });
+}
+async function writeTombstone(repoFullName, claimId, outcome) {
+  await withEntry(repoFullName, (entry) => {
+    if (entry.tombstones.some((t) => t.claimId === claimId)) return;
+    entry.tombstones.push({ claimId, outcome, resolvedAt: nowISO() });
+  });
+}
+async function recordBackfill(repoFullName, entries) {
+  await withEntry(repoFullName, (entry) => {
+    const known = new Set(entry.backfill.map((b) => b.prNumber));
+    for (const e of entries) {
+      if (known.has(e.prNumber)) continue;
+      known.add(e.prNumber);
+      entry.backfill.push({ prNumber: e.prNumber, mergedAt: e.mergedAt });
+    }
+    if (entry.backfill.length > MAX_BACKFILL) {
+      entry.backfill.sort((a, b) => a.mergedAt.localeCompare(b.mergedAt));
+      entry.backfill.splice(0, entry.backfill.length - MAX_BACKFILL);
+    }
+  });
+}
+function prNumberFromUrl(prUrl) {
+  if (!prUrl) return null;
+  const m = /\/pull\/(\d+)/.exec(prUrl);
+  return m ? Number(m[1]) : null;
+}
+function projectOutcomes(claims, tombstones, repo, backfill = []) {
+  const events = [];
+  const seenPrNumbers = /* @__PURE__ */ new Set();
+  for (const c of claims) {
+    if (c.repoFullName !== repo || c.state !== "merged") continue;
+    const prNumber = prNumberFromUrl(c.prUrl);
+    if (prNumber !== null) seenPrNumbers.add(prNumber);
+    events.push({ prNumber, mergedAt: c.updatedAt, source: "claim" });
+  }
+  for (const t of tombstones) {
+    if (t.outcome !== "merged") continue;
+    events.push({ prNumber: null, mergedAt: t.resolvedAt, source: "tombstone" });
+  }
+  for (const b of backfill) {
+    if (seenPrNumbers.has(b.prNumber)) continue;
+    seenPrNumbers.add(b.prNumber);
+    events.push({ prNumber: b.prNumber, mergedAt: b.mergedAt, source: "backfill" });
+  }
+  events.sort((a, b) => a.mergedAt.localeCompare(b.mergedAt));
+  const lastMergedAt = events.length > 0 ? events[events.length - 1].mergedAt : null;
+  return { mergedCount: events.length, lastMergedAt, events };
+}
+function continuity(projection, now = Date.now()) {
+  if (!projection.lastMergedAt) {
+    return { score: 0, reasons: ["no merges recorded here yet"] };
+  }
+  const countFactor = Math.min(projection.mergedCount, 4) / 4;
+  const decay = recencyDecay(projection.lastMergedAt, 90, now);
+  const score = countFactor * decay;
+  const mergeWord = projection.mergedCount === 1 ? "merge" : "merges";
+  return {
+    score,
+    reasons: [`${projection.mergedCount} ${mergeWord} recorded here`, `most recent merge ${projection.lastMergedAt}`]
+  };
+}
+async function continuityForRepo(repoFullName, claims) {
+  try {
+    const entry = await getRepoEntry(repoFullName);
+    const projection = projectOutcomes(claims, entry?.tombstones ?? [], repoFullName, entry?.backfill ?? []);
+    const result = continuity(projection);
+    return { score: result.score, mergedCount: projection.mergedCount };
+  } catch {
+    return { score: 0, mergedCount: 0 };
+  }
+}
+function calibrationSummary(claims, repo) {
+  const resolved = claims.filter(
+    (c) => c.repoFullName === repo && (c.state === "merged" || c.state === "abandoned") && c.review?.acceptanceScore != null
+  );
+  const n = resolved.length;
+  if (n < 5) return { available: false, n, text: null };
+  const meanForecast = resolved.reduce((sum, c) => sum + c.review.acceptanceScore, 0) / n;
+  const mergedCount = resolved.filter((c) => c.state === "merged").length;
+  const mergeRate = mergedCount / n;
+  const delta = Math.round((meanForecast - mergeRate) * 10) / 10;
+  let direction;
+  if (delta > 0) direction = `~${delta} optimistic`;
+  else if (delta < 0) direction = `~${Math.abs(delta)} pessimistic`;
+  else direction = "well-calibrated";
+  return {
+    available: true,
+    n,
+    meanForecast,
+    mergeRate,
+    delta,
+    text: `forecasts here ran ${direction} (n=${n})`
+  };
+}
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+function briefingLines(params) {
+  const { repoFullName, entry, claims } = params;
+  const projection = projectOutcomes(claims, entry?.tombstones ?? [], repoFullName, entry?.backfill ?? []);
+  const lines = [];
+  if (projection.mergedCount > 0) {
+    const months = projection.events.map(
+      (e) => new Date(e.mergedAt).toLocaleString("en-US", { month: "short" })
+    );
+    lines.push(`You: ${projection.mergedCount} merged here (${months.join(", ")})`);
+  }
+  const samplesWithResponse = (entry?.cultureSamples ?? []).filter(
+    (s) => s.completeness.comments && s.hoursToFirstResponse != null
+  );
+  if (samplesWithResponse.length > 0) {
+    const hours = Math.round(median(samplesWithResponse.map((s) => s.hoursToFirstResponse)));
+    lines.push(`maintainer 1st response ~${hours}h`);
+  }
+  if (entry?.policyCache) {
+    lines.push(`policy: ${entry.policyCache.verdict}`);
+  }
+  const latestNote = entry?.notes[entry.notes.length - 1];
+  if (latestNote) {
+    lines.push(`note: ${latestNote.text}`);
+  }
+  return lines;
+}
+var TERMINALHIRE_DIR5, REPO_EXPERIENCE_FILE, MAX_REPOS, MAX_CULTURE_SAMPLES, MAX_NOTES, MAX_BACKFILL, store, activeStore;
+var init_repo_experience = __esm({
+  "src/repo-experience.ts"() {
+    "use strict";
+    init_crypto_store();
+    init_profile();
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join6(homedir5(), ".terminalhire");
+    REPO_EXPERIENCE_FILE = join6(TERMINALHIRE_DIR5, "repo-experience.enc");
+    MAX_REPOS = 100;
+    MAX_CULTURE_SAMPLES = 12;
+    MAX_NOTES = 10;
+    MAX_BACKFILL = 50;
+    store = createEncryptedStore(REPO_EXPERIENCE_FILE, {
+      blank: blankFile,
+      keyPolicy: "keychain-required"
+    });
+    activeStore = store;
+  }
+});
+
 // src/claims.ts
 var claims_exports = {};
 __export(claims_exports, {
@@ -1711,15 +2090,49 @@ __export(claims_exports, {
   acceptedPRRate: () => acceptedPRRate,
   findClaim: () => findClaim,
   listClaims: () => listClaims,
+  nextPolledState: () => nextPolledState,
   readClaims: () => readClaims,
   recordClaim: () => recordClaim,
   removeClaim: () => removeClaim,
   toPushedClaim: () => toPushedClaim,
   updateClaim: () => updateClaim
 });
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4, renameSync as renameSync2, existsSync as existsSync3 } from "fs";
-import { join as join5 } from "path";
-import { homedir as homedir4 } from "os";
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4, renameSync as renameSync3, existsSync as existsSync3, rmSync as rmSync2, statSync } from "fs";
+import { randomBytes as randomBytes3 } from "crypto";
+import { join as join7 } from "path";
+import { homedir as homedir6 } from "os";
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function withClaimsLock(fn) {
+  mkdirSync4(TERMINALHIRE_DIR6, { recursive: true, mode: 448 });
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  for (; ; ) {
+    try {
+      mkdirSync4(LOCK_DIR, { mode: 448 });
+      break;
+    } catch {
+      try {
+        if (Date.now() - statSync(LOCK_DIR).mtimeMs > LOCK_STALE_MS) {
+          rmSync2(LOCK_DIR, { recursive: true, force: true });
+          continue;
+        }
+      } catch {
+      }
+      if (Date.now() > deadline) {
+        throw new Error(
+          `claims store is locked (another terminalhire process?) \u2014 remove ${LOCK_DIR} if no other process is running`
+        );
+      }
+      sleepSync(LOCK_RETRY_MS);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    rmSync2(LOCK_DIR, { recursive: true, force: true });
+  }
+}
 function toPushedClaim(claim) {
   return {
     kind: claim.kind,
@@ -1731,7 +2144,10 @@ function toPushedClaim(claim) {
     updatedAt: claim.updatedAt
   };
 }
-function nowISO() {
+function nextPolledState(from, observed) {
+  return POLL_TRANSITIONS[observed].has(from) ? observed : from;
+}
+function nowISO2() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function normalizeClaim(c) {
@@ -1748,11 +2164,19 @@ function readClaims() {
   }
 }
 function writeClaims(claims) {
-  mkdirSync4(TERMINALHIRE_DIR4, { recursive: true });
-  const tmp = `${CLAIMS_FILE}.tmp`;
+  mkdirSync4(TERMINALHIRE_DIR6, { recursive: true, mode: 448 });
+  const tmp = `${CLAIMS_FILE}.${process.pid}.${randomBytes3(6).toString("hex")}.tmp`;
   const payload = { claims };
-  writeFileSync4(tmp, JSON.stringify(payload, null, 2), "utf8");
-  renameSync2(tmp, CLAIMS_FILE);
+  try {
+    writeFileSync4(tmp, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 384, flag: "wx" });
+    renameSync3(tmp, CLAIMS_FILE);
+  } catch (err) {
+    try {
+      rmSync2(tmp, { force: true });
+    } catch {
+    }
+    throw err;
+  }
 }
 function findClaim(id) {
   return readClaims().find((c) => c.id === id) ?? null;
@@ -1763,57 +2187,67 @@ function listClaims(opts = {}) {
   return claims.filter((c) => !TERMINAL_STATES.has(c.state));
 }
 function recordClaim(rec) {
-  const claims = readClaims();
-  if (claims.some((c) => c.id === rec.id)) {
-    throw new Error(
-      `claim already exists for '${rec.id}' \u2014 run 'terminalhire claim status ${rec.id}' or 'terminalhire claim release ${rec.id}'`
-    );
-  }
-  const ts = nowISO();
-  const claim = {
-    ...rec,
-    // Defensive default (mirrors normalizeClaim's `kind ?? 'bounty'` pattern):
-    // a caller written before `policy` existed, or a plain-JS caller that skips
-    // it, still produces a valid record instead of `policy: undefined`.
-    policy: rec.policy ?? null,
-    state: "claimed",
-    worktreePath: null,
-    branch: null,
-    prUrl: null,
-    review: null,
-    claimedAt: ts,
-    updatedAt: ts
-  };
-  claims.push(claim);
-  writeClaims(claims);
-  return claim;
+  return withClaimsLock(() => {
+    const claims = readClaims();
+    if (claims.some((c) => c.id === rec.id)) {
+      throw new Error(
+        `claim already exists for '${rec.id}' \u2014 run 'terminalhire claim status ${rec.id}' or 'terminalhire claim release ${rec.id}'`
+      );
+    }
+    const ts = nowISO2();
+    const claim = {
+      ...rec,
+      // Defensive default (mirrors normalizeClaim's `kind ?? 'bounty'` pattern):
+      // a caller written before `policy` existed, or a plain-JS caller that skips
+      // it, still produces a valid record instead of `policy: undefined`.
+      policy: rec.policy ?? null,
+      state: "claimed",
+      worktreePath: null,
+      branch: null,
+      prUrl: null,
+      review: null,
+      claimedAt: ts,
+      updatedAt: ts
+    };
+    claims.push(claim);
+    writeClaims(claims);
+    return claim;
+  });
 }
 function updateClaim(id, patch) {
-  const claims = readClaims();
-  const idx = claims.findIndex((c) => c.id === id);
-  if (idx === -1) return null;
-  claims[idx] = { ...claims[idx], ...patch, updatedAt: nowISO() };
-  writeClaims(claims);
-  return claims[idx];
+  return withClaimsLock(() => {
+    const claims = readClaims();
+    const idx = claims.findIndex((c) => c.id === id);
+    if (idx === -1) return null;
+    claims[idx] = { ...claims[idx], ...patch, updatedAt: nowISO2() };
+    writeClaims(claims);
+    return claims[idx];
+  });
 }
 function removeClaim(id) {
-  const claims = readClaims();
-  const next = claims.filter((c) => c.id !== id);
-  if (next.length === claims.length) return false;
-  writeClaims(next);
-  return true;
+  return withClaimsLock(() => {
+    const claims = readClaims();
+    const next = claims.filter((c) => c.id !== id);
+    if (next.length === claims.length) return false;
+    writeClaims(next);
+    return true;
+  });
 }
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR4, CLAIMS_FILE, PUSHED_CLAIM_FIELDS, TERMINAL_STATES;
+var TERMINALHIRE_DIR6, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
-    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
-    CLAIMS_FILE = join5(TERMINALHIRE_DIR4, "claims.json");
+    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join7(homedir6(), ".terminalhire");
+    CLAIMS_FILE = join7(TERMINALHIRE_DIR6, "claims.json");
+    LOCK_DIR = `${CLAIMS_FILE}.lock`;
+    LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
+    LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
+    LOCK_TIMEOUT_MS = Number(process.env.TERMINALHIRE_LOCK_TIMEOUT_MS) || 5e3;
     PUSHED_CLAIM_FIELDS = [
       "kind",
       "repoFullName",
@@ -1824,14 +2258,19 @@ var init_claims = __esm({
       "updatedAt"
     ];
     TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
+    POLL_TRANSITIONS = {
+      merged: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready", "submitted", "abandoned"]),
+      abandoned: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready", "submitted", "merged"]),
+      submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
+    };
   }
 });
 
 // bin/jpi-contribute.js
 init_src();
 import { readFileSync as readFileSync6 } from "fs";
-import { join as join6 } from "path";
-import { homedir as homedir5 } from "os";
+import { join as join8 } from "path";
+import { homedir as homedir7 } from "os";
 import { createInterface } from "readline";
 
 // bin/cache-store.js
@@ -1938,12 +2377,13 @@ function linkTitle(title, url) {
 }
 
 // bin/jpi-contribute.js
-var TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join6(homedir5(), ".terminalhire");
-var INDEX_CACHE_FILE2 = join6(TERMINALHIRE_DIR5, "index-cache.json");
+var TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join8(homedir7(), ".terminalhire");
+var INDEX_CACHE_FILE2 = join8(TERMINALHIRE_DIR7, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
-var HEADER = "Contribution opportunities \u2014 open issues where a merged PR actually counts toward your r\xE9sum\xE9.\nRepos \u226550\u2605 / \u226510 contributors \xB7 unassigned \xB7 merit-merge \xB7 matched locally to your stack.";
-var OPT_IN_PROMPT = "Contribute is off. Turn it on to see open issues where a merged PR would count toward your r\xE9sum\xE9 \u2014\nmatched to your stack. Matching runs locally; your profile never leaves this machine. Enable? [y/N]";
+var CONTINUITY_RANK_DISABLED = process.env["TERMINALHIRE_NO_CONTINUITY_RANK"] === "1";
+var HEADER = "Contribution opportunities \u2014 open issues where a merged PR actually counts toward your r\xE9sum\xE9.\nRepos \u226550\u2605 / \u226510 contributors \xB7 unassigned \xB7 merit-merge \xB7 matched to your stack.";
+var OPT_IN_PROMPT = "Contribute is off. Turn it on to see open issues where a merged PR would count toward your r\xE9sum\xE9 \u2014\nmatched to your stack. Your profile never leaves this machine. Enable? [y/N]";
 var EMPTY_STATE = "Nothing clears the bar right now. We only list issues where a merged PR actually counts toward\nyour r\xE9sum\xE9 \u2014 so the list stays honest. Try again after the next refresh.";
 function readIndexCache() {
   try {
@@ -2006,6 +2446,23 @@ async function rankLocally(items, injectedFp) {
   }
   return rankContributions(fp, items);
 }
+function applyContinuityRank(results, continuityOf, { enabled = true } = {}) {
+  if (!enabled) return results;
+  const effectiveVal = (r) => {
+    const s = r.score ?? 0;
+    const repo = r.job.contribution?.repoFullName;
+    const c = repo ? continuityOf(repo) || 0 : 0;
+    return s * (1 + 0.15 * c);
+  };
+  results.sort((a, b) => effectiveVal(b) - effectiveVal(a));
+  return results;
+}
+function continuityNoteForRow(entry, isTTY) {
+  if (!isTTY || !entry || !(entry.score > 0) || !(entry.mergedCount > 0)) return null;
+  const n = entry.mergedCount;
+  const word = n === 1 ? "once" : n === 2 ? "twice" : `${n} times`;
+  return `\u2191 you've merged here ${word}`;
+}
 var LANGUAGES = /* @__PURE__ */ new Set([
   "typescript",
   "javascript",
@@ -2048,7 +2505,7 @@ function displayLanguage(job) {
   const tag = (job.tags ?? []).find((t) => LANGUAGES.has(String(t).toLowerCase()));
   return tag ?? "\u2014";
 }
-function renderRow(i, result, claimedIds = /* @__PURE__ */ new Set()) {
+function renderRow(i, result, claimedIds = /* @__PURE__ */ new Set(), continuityNote = null) {
   const job = result.job;
   const c = job.contribution ?? {};
   const repo = sanitizeText(c.repoFullName ?? job.company ?? "");
@@ -2061,9 +2518,11 @@ function renderRow(i, result, claimedIds = /* @__PURE__ */ new Set()) {
   const badge = claimed ? " \xB7 \u25CF claimed by you" : "";
   const line1 = `${i + 1}. ${linkTitle(job.title, c.issueUrl ?? job.url)} [${ref}]`;
   const line2 = `   ${repo} \xB7 ${num} \xB7 ${label} \xB7 ${lang} \xB7 ${scorePct}${badge}`;
+  const noteLine = continuityNote ? `
+   ${continuityNote}` : "";
   const line3 = claimed ? `   \u2192 claimed by you \u2014 terminalhire claim status ${job.id}` : `   \u2192 terminalhire claim ${ref}`;
   return `${line1}
-${line2}
+${line2}${noteLine}
 ${line3}`;
 }
 async function run(opts = {}) {
@@ -2092,6 +2551,20 @@ async function run(opts = {}) {
       log(EMPTY_STATE);
       return;
     }
+    let continuityByRepo = /* @__PURE__ */ new Map();
+    if (!CONTINUITY_RANK_DISABLED && process.stdout.isTTY) {
+      try {
+        const { continuityForRepo: continuityForRepo2 } = await Promise.resolve().then(() => (init_repo_experience(), repo_experience_exports));
+        const { readClaims: readClaims2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
+        const claims = readClaims2();
+        const repos = [...new Set(results.map((r) => r.job.contribution?.repoFullName).filter(Boolean))];
+        for (const repo of repos) {
+          continuityByRepo.set(repo, await continuityForRepo2(repo, claims));
+        }
+        applyContinuityRank(results, (repo) => continuityByRepo.get(repo)?.score ?? 0);
+      } catch {
+      }
+    }
     let claimedIds = /* @__PURE__ */ new Set();
     try {
       const { listClaims: listClaims2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -2100,13 +2573,19 @@ async function run(opts = {}) {
     }
     log(HEADER);
     log("");
-    for (let i = 0; i < results.length; i++) log(renderRow(i, results[i], claimedIds));
+    for (let i = 0; i < results.length; i++) {
+      const continuityEntry = continuityByRepo.get(results[i].job.contribution?.repoFullName);
+      const continuityNote = continuityNoteForRow(continuityEntry, process.stdout.isTTY);
+      log(renderRow(i, results[i], claimedIds, continuityNote));
+    }
   } catch (err) {
     console.error("terminalhire contribute error:", err?.message ?? err);
     process.exit(1);
   }
 }
 export {
+  applyContinuityRank,
+  continuityNoteForRow,
   rankContributions,
   renderRow,
   run

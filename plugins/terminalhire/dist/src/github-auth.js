@@ -41,9 +41,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a0bc554500876cd51/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/wt-v034/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/Users/ericgang/job-placement-inline/.claude/worktrees/agent-a0bc554500876cd51/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/wt-v034/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -103,7 +103,8 @@ import {
   writeFileSync,
   mkdirSync,
   existsSync,
-  rmSync
+  rmSync,
+  renameSync
 } from "fs";
 import { join } from "path";
 import { homedir } from "os";
@@ -117,17 +118,22 @@ var GITHUB_SCOPE = "read:user";
 var DEVICE_CODE_URL = "https://github.com/login/device/code";
 var ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
 var BAKED_IN_CLIENT_ID = "Ov23lignE2ZSBe0J3a6B";
+function skipKeychain() {
+  return process.env.TERMINALHIRE_NO_KEYCHAIN !== void 0 || process.env.CI !== void 0 || process.env.VITEST !== void 0 || process.env.NODE_ENV === "test";
+}
 async function loadKey() {
-  try {
-    const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
-    const stored = await kt.getPassword("terminalhire", "profile-key");
-    if (stored) return Buffer.from(stored, "hex");
-    const key2 = randomBytes(KEY_BYTES);
-    await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
-    return key2;
-  } catch {
+  if (!skipKeychain()) {
+    try {
+      const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
+      const stored = await kt.getPassword("terminalhire", "profile-key");
+      if (stored) return Buffer.from(stored, "hex");
+      const key2 = randomBytes(KEY_BYTES);
+      await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
+      return key2;
+    } catch {
+    }
   }
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  mkdirSync(TERMINALHIRE_DIR, { recursive: true, mode: 448 });
   if (existsSync(KEY_FILE)) {
     return Buffer.from(readFileSync(KEY_FILE, "utf8").trim(), "hex");
   }
@@ -163,10 +169,20 @@ async function readGitHubToken() {
   }
 }
 async function writeGitHubToken(token) {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  mkdirSync(TERMINALHIRE_DIR, { recursive: true, mode: 448 });
   const key = await loadKey();
   const blob = encrypt(token, key);
-  writeFileSync(TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+  const tmpFile = `${TOKEN_FILE}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync(tmpFile, JSON.stringify(blob, null, 2), { encoding: "utf8", mode: 384, flag: "wx" });
+    renameSync(tmpFile, TOKEN_FILE);
+  } catch (err) {
+    try {
+      rmSync(tmpFile, { force: true });
+    } catch {
+    }
+    throw err;
+  }
 }
 async function deleteGitHubToken() {
   try {

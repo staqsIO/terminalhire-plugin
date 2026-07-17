@@ -112,7 +112,7 @@ async function install({ ask: injectedAsk } = {}) {
   console.log('HOW IT WORKS (pull model):');
   console.log('  1. `terminalhire jobs` downloads an anonymous job index from the server');
   console.log('     (GET /api/index — no dev data in the request).');
-  console.log('  2. Matching runs LOCALLY against an encrypted profile on your device.');
+  console.log('  2. Matching runs against an encrypted profile that never leaves your device.');
   console.log('  3. The ambient spinner surfaces your top matches while Claude works.');
   console.log('     It reads only local files and makes zero network calls.');
   console.log('');
@@ -122,7 +122,7 @@ async function install({ ask: injectedAsk } = {}) {
   console.log('     The "tip" line below it shows a ⌘-clickable link to open the listing');
   console.log('     (a terminalhire.com/j/… redirect — clicks are logged anonymously, no');
   console.log('     profile data). Uses official `spinnerVerbs`/`spinnerTipsOverride` settings');
-  console.log('     (no patching, Rule 7). Computed locally, zero egress — only public job text.');
+  console.log('     (no patching, Rule 7). Zero egress — profile never leaves the machine; only public job text.');
   console.log('     This install does NOT write any statusLine — the spinner is the only surface.');
   console.log('     Turn it off any time:  terminalhire spinner --off');
   console.log('');
@@ -237,7 +237,7 @@ async function install({ ask: injectedAsk } = {}) {
   console.log('  Other commands:');
   console.log('    terminalhire login            — sign in with GitHub (enriches profile instantly)');
   console.log('    terminalhire logout           — clear GitHub token');
-  console.log('    terminalhire jobs             — fetch index, match locally, browse roles');
+  console.log('    terminalhire jobs             — fetch index, browse roles matched to your profile');
   console.log('    terminalhire spinner --off    — disable the ambient spinner surface');
   console.log('    terminalhire profile --show   — inspect your encrypted profile');
   console.log('    terminalhire profile --edit   — set displayName, contactEmail, prefs');

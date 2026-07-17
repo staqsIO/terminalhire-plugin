@@ -1,3 +1,231 @@
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
+  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
+}) : x)(function(x) {
+  if (typeof require !== "undefined") return require.apply(this, arguments);
+  throw Error('Dynamic require of "' + x + '" is not supported');
+});
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __commonJS = (cb, mod) => function __require2() {
+  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+};
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
+
+// ../../node_modules/keytar/build/Release/keytar.node
+var keytar_default;
+var init_keytar = __esm({
+  "../../node_modules/keytar/build/Release/keytar.node"() {
+    keytar_default = "../keytar-KOAAH267.node";
+  }
+});
+
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/wt-v034/node_modules/keytar/build/Release/keytar.node
+var require_keytar = __commonJS({
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/wt-v034/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+    "use strict";
+    init_keytar();
+    try {
+      module.exports = __require(keytar_default);
+    } catch {
+    }
+  }
+});
+
+// ../../node_modules/keytar/lib/keytar.js
+var require_keytar2 = __commonJS({
+  "../../node_modules/keytar/lib/keytar.js"(exports, module) {
+    "use strict";
+    var keytar = require_keytar();
+    function checkRequired(val, name) {
+      if (!val || val.length <= 0) {
+        throw new Error(name + " is required.");
+      }
+    }
+    module.exports = {
+      getPassword: function(service, account) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        return keytar.getPassword(service, account);
+      },
+      setPassword: function(service, account, password) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        checkRequired(password, "Password");
+        return keytar.setPassword(service, account, password);
+      },
+      deletePassword: function(service, account) {
+        checkRequired(service, "Service");
+        checkRequired(account, "Account");
+        return keytar.deletePassword(service, account);
+      },
+      findPassword: function(service) {
+        checkRequired(service, "Service");
+        return keytar.findPassword(service);
+      },
+      findCredentials: function(service) {
+        checkRequired(service, "Service");
+        return keytar.findCredentials(service);
+      }
+    };
+  }
+});
+
+// src/repo-experience.ts
+import { join as join4 } from "path";
+import { homedir as homedir3 } from "os";
+
+// src/crypto-store.ts
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes
+} from "crypto";
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  renameSync,
+  rmSync
+} from "fs";
+import { join, dirname, basename } from "path";
+import { homedir } from "os";
+import { createRequire } from "module";
+var TERMINALHIRE_DIR = join(homedir(), ".terminalhire");
+var KEY_FILE = join(TERMINALHIRE_DIR, "key");
+var KEYTAR_SERVICE = "terminalhire";
+var KEYTAR_ACCOUNT = "profile-key";
+var ALGO = "aes-256-gcm";
+var KEY_BYTES = 32;
+var IV_BYTES = 12;
+function encrypt(plaintext, key) {
+  const iv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv(ALGO, key, iv);
+  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return {
+    iv: iv.toString("hex"),
+    tag: tag.toString("hex"),
+    ciphertext: ct.toString("hex")
+  };
+}
+function decrypt(blob, key) {
+  const decipher = createDecipheriv(
+    ALGO,
+    key,
+    Buffer.from(blob.iv, "hex")
+  );
+  decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
+  const plain = Buffer.concat([
+    decipher.update(Buffer.from(blob.ciphertext, "hex")),
+    decipher.final()
+  ]);
+  return plain.toString("utf8");
+}
+var forceKeytarUnavailableForTests = false;
+function skipKeychain() {
+  return process.env.TERMINALHIRE_NO_KEYCHAIN !== void 0 || process.env.CI !== void 0 || process.env.VITEST !== void 0 || process.env.NODE_ENV === "test";
+}
+async function tryLoadFromKeytar(policy) {
+  if (forceKeytarUnavailableForTests || skipKeychain()) return null;
+  try {
+    const kt = policy === "keychain-required" ? createRequire(import.meta.url)("keytar") : await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
+    const stored = await kt.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
+    if (stored) {
+      return Buffer.from(stored, "hex");
+    }
+    const key = randomBytes(KEY_BYTES);
+    await kt.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, key.toString("hex"));
+    return key;
+  } catch {
+    return null;
+  }
+}
+function loadOrCreateFileKey() {
+  mkdirSync(TERMINALHIRE_DIR, { recursive: true, mode: 448 });
+  if (existsSync(KEY_FILE)) {
+    return Buffer.from(readFileSync(KEY_FILE, "utf8").trim(), "hex");
+  }
+  const key = randomBytes(KEY_BYTES);
+  writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  return key;
+}
+function warnStderr(message) {
+  process.stderr.write(`${message}
+`);
+}
+function atomicWriteFileSync(filePath, content) {
+  const dir = dirname(filePath);
+  mkdirSync(dir, { recursive: true, mode: 448 });
+  const tmp = join(dir, `.${basename(filePath)}.tmp-${process.pid}-${randomBytes(6).toString("hex")}`);
+  writeFileSync(tmp, content, { encoding: "utf8", mode: 384 });
+  renameSync(tmp, filePath);
+}
+var dependentStoreFiles = /* @__PURE__ */ new Set();
+async function resolveKey(filePath, opts) {
+  if (opts.keyPolicy === "keychain-required") {
+    const key = await tryLoadFromKeytar("keychain-required");
+    if (!key) {
+      warnStderr(`crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`);
+      return null;
+    }
+    return key;
+  }
+  const fromKeytar = await tryLoadFromKeytar("keytar-first-file-fallback");
+  if (fromKeytar) return fromKeytar;
+  return loadOrCreateFileKey();
+}
+function createEncryptedStore(filePath, opts) {
+  dependentStoreFiles.add(filePath);
+  async function read() {
+    const key = await resolveKey(filePath, opts);
+    if (!key) return opts.blank();
+    if (!existsSync(filePath)) return opts.blank();
+    try {
+      const raw = readFileSync(filePath, "utf8");
+      const blob = JSON.parse(raw);
+      const plaintext = decrypt(blob, key);
+      return JSON.parse(plaintext);
+    } catch {
+      warnStderr(`crypto-store: failed to decrypt ${filePath} \u2014 returning blank`);
+      return opts.blank();
+    }
+  }
+  async function write(value) {
+    const key = await resolveKey(filePath, opts);
+    if (!key) return;
+    const blob = encrypt(JSON.stringify(value), key);
+    atomicWriteFileSync(filePath, JSON.stringify(blob, null, 2));
+  }
+  return { read, write };
+}
+
+// src/profile.ts
+import { join as join3 } from "path";
+import { homedir as homedir2 } from "os";
+
 // ../../packages/core/src/vocab/graph.data.ts
 var VOCAB_NODES = [
   // ── Languages ─────────────────────────────────────────────────────────────
@@ -395,490 +623,8 @@ var MAINTAINER_SET = new Set(
   RIGOR.MAINTAINER_ASSOCIATIONS.map((a) => a.toUpperCase())
 );
 
-// ../../packages/core/src/gh-governor.ts
-var DEFAULT_REQ_GAP_MS = 75;
-var SECONDARY_BACKOFF_CAP_S = 30;
-var DEFAULT_BUILD_BUDGET_MS = 9e4;
-var MIN_BUILD_BUDGET_MS = 1e4;
-var MAX_BUILD_BUDGET_MS = 9e4;
-var PROBE_TIMEOUT_MS = 3e3;
-var realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
-function readReqGapMs() {
-  const raw = process.env["CONTRIB_REQ_GAP_MS"];
-  if (raw == null) return DEFAULT_REQ_GAP_MS;
-  const n = Number.parseInt(raw, 10);
-  if (Number.isNaN(n)) return DEFAULT_REQ_GAP_MS;
-  return Math.min(Math.max(n, 0), 1e3);
-}
-function readBuildBudgetMs() {
-  const raw = process.env["CONTRIB_BUILD_BUDGET_MS"];
-  if (raw == null) return DEFAULT_BUILD_BUDGET_MS;
-  const n = Number.parseInt(raw, 10);
-  if (Number.isNaN(n)) return DEFAULT_BUILD_BUDGET_MS;
-  return Math.min(Math.max(n, MIN_BUILD_BUDGET_MS), MAX_BUILD_BUDGET_MS);
-}
-function makeDefaultGovernorConfig(o) {
-  return {
-    paceEnabled: o.paceEnabled,
-    gapMs: readReqGapMs(),
-    budgetMs: o.budgetMs ?? readBuildBudgetMs(),
-    sleep: o.sleep ?? realSleep,
-    now: o.now ?? Date.now,
-    probeTimeoutMs: o.probeTimeoutMs ?? (o.paceEnabled ? PROBE_TIMEOUT_MS : null)
-  };
-}
-function makeGitHubGovernor(fetchImpl, cfg) {
-  const startedAt = cfg.now();
-  let lastRequestAt = 0;
-  let pacedMs = 0;
-  let secondaryHits = 0;
-  let aborted = false;
-  let secondaryAborted = false;
-  let budgetAborted = false;
-  let gqlCost = 0;
-  let gqlRemaining = null;
-  let coreHealthyAtStart = false;
-  async function noteAndMaybeBackOff(res) {
-    if (res.status !== 403) return;
-    const remaining = res.headers.get("x-ratelimit-remaining");
-    const retryAfter = res.headers.get("retry-after");
-    const positiveSecondary = retryAfter != null || remaining != null && remaining !== "0";
-    const isSecondary = positiveSecondary || coreHealthyAtStart;
-    if (!isSecondary) return;
-    await recordSecondaryStrike(retryAfter);
-  }
-  async function recordSecondaryStrike(retryAfter) {
-    secondaryHits++;
-    if (secondaryHits >= 2) {
-      aborted = true;
-      secondaryAborted = true;
-      return;
-    }
-    if (cfg.paceEnabled) {
-      const trimmed = (retryAfter ?? "").trim();
-      const parsed = trimmed.length === 0 ? Number.NaN : Number(trimmed);
-      const sec = Number.isNaN(parsed) ? SECONDARY_BACKOFF_CAP_S : Math.min(Math.max(parsed, 0), SECONDARY_BACKOFF_CAP_S);
-      const remainingBudget = Math.max(0, cfg.budgetMs - (cfg.now() - startedAt));
-      await cfg.sleep(Math.min(sec * 1e3, remainingBudget));
-    }
-  }
-  async function noteGraphQLAndMaybeBackOff(res, body) {
-    const b = body ?? {};
-    const rl = b.data?.rateLimit;
-    if (rl) {
-      if (typeof rl.cost === "number") gqlCost += rl.cost;
-      if (typeof rl.remaining === "number") gqlRemaining = rl.remaining;
-    }
-    const remainingHdr = res.headers?.get("x-ratelimit-remaining") ?? null;
-    const retryAfter = res.headers?.get("retry-after") ?? null;
-    const headerRate = retryAfter != null || remainingHdr === "0";
-    const errs = Array.isArray(b.errors) ? b.errors : [];
-    const bodyRate = errs.some((e) => e?.type === "RATE_LIMITED" || /rate limit/i.test(String(e?.message ?? ""))) || typeof rl?.remaining === "number" && rl.remaining <= 0;
-    if (headerRate || bodyRate) await recordSecondaryStrike(retryAfter);
-  }
-  async function preflight() {
-    if (aborted) return false;
-    if (cfg.now() - startedAt >= cfg.budgetMs) {
-      aborted = true;
-      budgetAborted = true;
-      return false;
-    }
-    if (cfg.paceEnabled && cfg.gapMs > 0) {
-      const wait = cfg.gapMs - (cfg.now() - lastRequestAt);
-      if (wait > 0) {
-        await cfg.sleep(wait);
-        pacedMs += wait;
-        if (cfg.now() - startedAt >= cfg.budgetMs) {
-          aborted = true;
-          budgetAborted = true;
-          return false;
-        }
-      }
-      lastRequestAt = cfg.now();
-    }
-    return true;
-  }
-  async function get(url, init) {
-    if (!await preflight()) return null;
-    try {
-      const res = await fetchImpl(url, init);
-      await noteAndMaybeBackOff(res);
-      return res;
-    } catch {
-      return null;
-    }
-  }
-  async function graphql(url, init) {
-    if (!await preflight()) return null;
-    let res;
-    try {
-      res = await fetchImpl(url, init);
-    } catch {
-      return null;
-    }
-    let body;
-    try {
-      body = await res.json();
-    } catch {
-      return null;
-    }
-    await noteGraphQLAndMaybeBackOff(res, body);
-    if (!res.ok) return null;
-    return body;
-  }
-  async function probe(url, init) {
-    const bound = cfg.probeTimeoutMs;
-    let timer;
-    const fetchP = fetchImpl(url, init).then(
-      (r) => r,
-      () => null
-    );
-    try {
-      const res = bound == null ? await fetchP : await Promise.race([
-        fetchP,
-        new Promise((resolve) => {
-          timer = setTimeout(() => resolve(null), bound);
-        })
-      ]);
-      if (!res || !res.ok) return null;
-      return await res.json();
-    } catch {
-      return null;
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  }
-  function setSecondaryHint(coreHealthy) {
-    coreHealthyAtStart = coreHealthy;
-  }
-  function getStats() {
-    return {
-      pacedMs,
-      secondaryAborted: secondaryAborted ? 1 : 0,
-      budgetAborted: budgetAborted ? 1 : 0,
-      elapsedMs: cfg.now() - startedAt,
-      gqlCost,
-      gqlRemaining
-    };
-  }
-  function tripped() {
-    return secondaryAborted;
-  }
-  function budgetExhausted() {
-    return budgetAborted || cfg.now() - startedAt >= cfg.budgetMs;
-  }
-  return { get, graphql, probe, setSecondaryHint, getStats, tripped, budgetExhausted };
-}
-
 // ../../packages/core/src/github.ts
-function ghHeaders(token) {
-  const headers = {
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-    // GitHub's REST API REQUIRES a User-Agent; serverless runtimes don't always
-    // send a default (omitting it yields a 403 "administrative rules" error).
-    "User-Agent": "terminalhire"
-  };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  return headers;
-}
-async function ghFetch(path, token, signal) {
-  const url = `https://api.github.com${path}`;
-  const res = await fetch(url, { headers: ghHeaders(token), signal });
-  if (!res.ok) {
-    throw new Error(`GitHub API ${path}: HTTP ${res.status} ${res.statusText}`);
-  }
-  return res.json();
-}
-async function ghFetchRaw(path, token, signal) {
-  return fetch(`https://api.github.com${path}`, { headers: ghHeaders(token), signal });
-}
-async function repoContributorCount(owner, name, token, signal) {
-  try {
-    const res = await ghFetchRaw(
-      `/repos/${owner}/${name}/contributors?per_page=1&anon=false`,
-      token,
-      signal
-    );
-    if (!res.ok) return void 0;
-    const link = res.headers.get("link");
-    const m = link?.match(/[?&]page=(\d+)>;\s*rel="last"/);
-    if (m) return Number(m[1]);
-    const body = await res.json();
-    return Array.isArray(body) ? body.length : 0;
-  } catch {
-    return void 0;
-  }
-}
 var RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
-function parseGitHubRef(url) {
-  const m = String(url ?? "").match(/github\.com\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)/);
-  if (!m) return null;
-  return { owner: m[1], repo: m[2], number: parseInt(m[4], 10), kind: m[3] === "pull" ? "pull" : "issue" };
-}
-var GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
-async function ghGraphQL(query, variables, token, signal, governor) {
-  const init = {
-    method: "POST",
-    headers: { ...ghHeaders(token), "Content-Type": "application/json" },
-    body: JSON.stringify({ query, variables }),
-    signal
-  };
-  if (governor) {
-    const json2 = await governor.graphql(GITHUB_GRAPHQL_URL, init);
-    if (json2 === null) return null;
-    if (json2.errors?.length) throw new Error("GitHub GraphQL errors: " + JSON.stringify(json2.errors));
-    return json2;
-  }
-  const res = await fetch(GITHUB_GRAPHQL_URL, init);
-  if (!res.ok) throw new Error(`GitHub GraphQL: HTTP ${res.status}`);
-  const json = await res.json();
-  if (json.errors?.length) throw new Error("GitHub GraphQL errors: " + JSON.stringify(json.errors));
-  return json;
-}
-async function resolveClosingIssues(owner, name, number, body, token, signal, governor) {
-  if (token) {
-    try {
-      const q = `query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){closingIssuesReferences(first:20){nodes{number}}}}rateLimit{cost remaining}}`;
-      const r = await ghGraphQL(q, { o: owner, n: name, p: number }, token, signal, governor);
-      if (r) {
-        const nodes = r.data?.repository?.pullRequest?.closingIssuesReferences?.nodes ?? [];
-        return { closesIssues: nodes.map((x) => x.number), linkageSource: "graphql" };
-      }
-    } catch {
-    }
-  }
-  const nums = /* @__PURE__ */ new Set();
-  const re = /\b(?:clos(?:e|es|ed)|fix(?:es|ed)?|resolv(?:e|es|ed))\s+#(\d+)/gi;
-  let m;
-  while ((m = re.exec(body)) !== null) nums.add(parseInt(m[1], 10));
-  return { closesIssues: [...nums], linkageSource: nums.size ? "body-keyword" : "none" };
-}
-function makeScoringGovernor(governor) {
-  return governor ?? makeGitHubGovernor(
-    ((url, init) => fetch(url, init)),
-    makeDefaultGovernorConfig({ paceEnabled: false })
-  );
-}
-async function fetchPRScoringFacts(prUrl, token, signal, governor) {
-  const ref = parseGitHubRef(prUrl);
-  if (!ref || ref.kind !== "pull") return null;
-  const { owner, repo, number } = ref;
-  const sig = signal ?? AbortSignal.timeout(1e4);
-  const gov = makeScoringGovernor(governor);
-  if (gov.tripped() || gov.budgetExhausted()) return null;
-  let pr;
-  try {
-    pr = await ghFetch(`/repos/${owner}/${repo}/pulls/${number}`, token, sig);
-  } catch {
-    return null;
-  }
-  let repoMeta = null;
-  if (!gov.tripped() && !gov.budgetExhausted()) {
-    try {
-      repoMeta = await ghFetch(`/repos/${owner}/${repo}`, token, sig);
-    } catch {
-    }
-  }
-  const contributors = gov.tripped() || gov.budgetExhausted() ? null : await repoContributorCount(owner, repo, token, sig);
-  const { closesIssues, linkageSource } = await resolveClosingIssues(owner, repo, number, pr.body ?? "", token, sig, gov);
-  let reviewerAssociations;
-  if (!gov.tripped() && !gov.budgetExhausted()) {
-    try {
-      const reviews = await ghFetch(
-        `/repos/${owner}/${repo}/pulls/${number}/reviews?per_page=100`,
-        token,
-        sig
-      );
-      reviewerAssociations = reviews.map((r) => r.author_association);
-    } catch {
-      reviewerAssociations = void 0;
-    }
-  }
-  return {
-    repo: `${owner}/${repo}`,
-    prNumber: number,
-    prUrl: pr.html_url,
-    merged: pr.merged === true,
-    mergedAt: pr.merged_at ?? null,
-    authorId: pr.user?.id ?? null,
-    authorLogin: pr.user?.login ?? null,
-    mergedById: pr.merged_by?.id ?? null,
-    mergedByLogin: pr.merged_by?.login ?? null,
-    closesIssues,
-    linkageSource,
-    repoStars: repoMeta?.stargazers_count ?? null,
-    repoContributors: contributors ?? null,
-    repoArchived: !!repoMeta?.archived,
-    repoFork: !!repoMeta?.fork,
-    repoPrivate: !!repoMeta?.private,
-    additions: pr.additions ?? null,
-    deletions: pr.deletions ?? null,
-    changedFiles: pr.changed_files ?? null,
-    repoForks: repoMeta?.forks_count ?? null,
-    reviewerAssociations,
-    fetchedAt: (/* @__PURE__ */ new Date()).toISOString()
-  };
-}
-var LIFECYCLE_BOT_LOGINS = /* @__PURE__ */ new Set([
-  "mergify",
-  "mergify[bot]",
-  "bors",
-  "bors[bot]",
-  "kodiakhq",
-  "kodiakhq[bot]",
-  "dependabot",
-  "dependabot[bot]",
-  "renovate",
-  "renovate[bot]",
-  "github-actions",
-  "github-actions[bot]"
-]);
-function isLifecycleBot(actor) {
-  if (!actor) return false;
-  if (actor.type === "Bot") return true;
-  const login = String(actor.login ?? "");
-  if (/\[bot\]$/i.test(login)) return true;
-  return LIFECYCLE_BOT_LOGINS.has(login.toLowerCase());
-}
-async function fetchPRLifecycle(prUrl, token, signal, governor) {
-  const ref = parseGitHubRef(prUrl);
-  if (!ref || ref.kind !== "pull") return null;
-  const { owner, repo, number } = ref;
-  const sig = signal ?? AbortSignal.timeout(1e4);
-  const gov = makeScoringGovernor(governor);
-  if (gov.tripped() || gov.budgetExhausted()) return null;
-  let pr;
-  try {
-    pr = await ghFetch(`/repos/${owner}/${repo}/pulls/${number}`, token, sig);
-  } catch {
-    return null;
-  }
-  const authorId = pr.user?.id ?? null;
-  const events = [];
-  const complete = { reviews: false, comments: false, commits: false };
-  if (pr.created_at) {
-    events.push({
-      event_type: "pr_opened",
-      source_id: `pr-${number}`,
-      actor_id: authorId ?? 0,
-      actor_assoc: "",
-      is_author: true,
-      is_bot: false,
-      occurred_at: pr.created_at
-    });
-  }
-  if (!gov.tripped() && !gov.budgetExhausted()) {
-    try {
-      const reviews = await ghFetch(
-        `/repos/${owner}/${repo}/pulls/${number}/reviews?per_page=100`,
-        token,
-        sig
-      );
-      for (const r of reviews) {
-        if (r.state === "PENDING" || !r.submitted_at) continue;
-        const aid = r.user?.id ?? 0;
-        events.push({
-          event_type: "review_submitted",
-          source_id: `review-${r.id}`,
-          actor_id: aid,
-          actor_assoc: r.author_association ?? "",
-          is_author: authorId != null && aid === authorId,
-          is_bot: isLifecycleBot(r.user),
-          occurred_at: r.submitted_at
-        });
-      }
-      complete.reviews = true;
-    } catch {
-      complete.reviews = false;
-    }
-  }
-  if (!gov.tripped() && !gov.budgetExhausted()) {
-    try {
-      const comments = await ghFetch(
-        `/repos/${owner}/${repo}/issues/${number}/comments?per_page=100`,
-        token,
-        sig
-      );
-      for (const c of comments) {
-        if (!c.created_at) continue;
-        const aid = c.user?.id ?? 0;
-        events.push({
-          event_type: "issue_comment",
-          source_id: `comment-${c.id}`,
-          actor_id: aid,
-          actor_assoc: c.author_association ?? "",
-          is_author: authorId != null && aid === authorId,
-          is_bot: isLifecycleBot(c.user),
-          occurred_at: c.created_at
-        });
-      }
-      complete.comments = true;
-    } catch {
-      complete.comments = false;
-    }
-  }
-  if (!gov.tripped() && !gov.budgetExhausted()) {
-    try {
-      const commits = await ghFetch(
-        `/repos/${owner}/${repo}/pulls/${number}/commits?per_page=100`,
-        token,
-        sig
-      );
-      for (const cm of commits) {
-        const when = cm.commit?.author?.date ?? null;
-        if (!when) continue;
-        const aid = cm.author?.id ?? authorId ?? 0;
-        events.push({
-          event_type: "commit_pushed",
-          source_id: `commit-${cm.sha}`,
-          actor_id: aid,
-          actor_assoc: "",
-          is_author: authorId != null && aid === authorId,
-          is_bot: isLifecycleBot(cm.author),
-          occurred_at: when
-        });
-      }
-      complete.commits = true;
-    } catch {
-      complete.commits = false;
-    }
-  }
-  if (pr.merged && pr.merged_at) {
-    events.push({
-      event_type: "pr_merged",
-      source_id: `merged-${number}`,
-      actor_id: pr.merged_by?.id ?? 0,
-      actor_assoc: "",
-      is_author: authorId != null && pr.merged_by?.id === authorId,
-      // A bot merger (mergify[bot], a merge queue, etc.) must NOT count as an
-      // independent human counterparty. Classify it like every other actor (§4b V4).
-      is_bot: isLifecycleBot(pr.merged_by),
-      occurred_at: pr.merged_at
-    });
-  } else if (pr.state === "closed" && pr.closed_at) {
-    events.push({
-      event_type: "pr_closed_unmerged",
-      source_id: `closed-${number}`,
-      actor_id: 0,
-      actor_assoc: "",
-      is_author: false,
-      is_bot: false,
-      occurred_at: pr.closed_at
-    });
-  }
-  return {
-    prNumber: number,
-    prUrl: pr.html_url,
-    openedAt: pr.created_at ?? null,
-    merged: pr.merged === true,
-    mergedAt: pr.merged_at ?? null,
-    closedUnmergedAt: !pr.merged && pr.state === "closed" ? pr.closed_at ?? null : null,
-    authorId,
-    events,
-    complete
-  };
-}
 
 // ../../packages/core/src/winnability.ts
 var WINNABILITY_NORM = {
@@ -1039,8 +785,8 @@ var CONTRIB_LANGUAGE_QUERIES = [
 var CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
 
 // ../../packages/core/src/partners.ts
-import { readFileSync } from "fs";
-import { join } from "path";
+import { readFileSync as readFileSync2 } from "fs";
+import { join as join2 } from "path";
 import { fileURLToPath } from "url";
 var EXAMPLE_BUYER = {
   id: "northstar",
@@ -1064,22 +810,258 @@ var INTRO_PENDING_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
 var INTRO_ACCEPTED_TTL_MS = 365 * 24 * 60 * 60 * 1e3;
 
 // ../../packages/core/src/chatCrypto.ts
-import { hkdfSync, createHash, randomBytes } from "crypto";
+import { hkdfSync, createHash, randomBytes as randomBytes2 } from "crypto";
 var KDF_INFO = Buffer.from("terminalhire-chat-v1");
 
 // ../../packages/core/src/short-token.ts
 import { createHash as createHash2 } from "crypto";
 
-// src/reputation/fetch.ts
-async function gatherAudit(prUrl, token) {
-  const signal = AbortSignal.timeout(2e4);
-  const governor = makeScoringGovernor();
-  const [lifecycle, facts] = await Promise.all([
-    fetchPRLifecycle(prUrl, token, signal, governor),
-    fetchPRScoringFacts(prUrl, token, signal, governor)
-  ]);
-  return { lifecycle, facts };
+// src/profile.ts
+var TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
+var PROFILE_FILE = join3(TERMINALHIRE_DIR2, "profile.enc");
+function blankProfile() {
+  return {
+    version: 3,
+    skillTags: [],
+    tagWeights: {},
+    hasEmployerSessions: false,
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+var profileStore = createEncryptedStore(PROFILE_FILE, {
+  blank: blankProfile,
+  keyPolicy: "keytar-first-file-fallback"
+});
+function recencyDecay(lastSeen, halfLifeDays = 30, now = Date.now()) {
+  const ageMs = now - new Date(lastSeen).getTime();
+  const halfLifeMs = halfLifeDays * 24 * 60 * 60 * 1e3;
+  return Math.pow(0.5, ageMs / halfLifeMs);
+}
+
+// src/repo-experience.ts
+var TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
+var REPO_EXPERIENCE_FILE = join4(TERMINALHIRE_DIR3, "repo-experience.enc");
+var MAX_REPOS = 100;
+var MAX_CULTURE_SAMPLES = 12;
+var MAX_NOTES = 10;
+var MAX_BACKFILL = 50;
+function blankFile() {
+  return { version: 1, repos: {} };
+}
+var store = createEncryptedStore(REPO_EXPERIENCE_FILE, {
+  blank: blankFile,
+  keyPolicy: "keychain-required"
+});
+var activeStore = store;
+function __setStoreForTests(testStore) {
+  activeStore = testStore ?? store;
+}
+function nowISO() {
+  return (/* @__PURE__ */ new Date()).toISOString();
+}
+function blankEntry() {
+  return {
+    updatedAt: nowISO(),
+    policyCache: null,
+    cultureSamples: [],
+    tombstones: [],
+    backfill: [],
+    notes: []
+  };
+}
+function evictLRU(file) {
+  const keys = Object.keys(file.repos);
+  if (keys.length <= MAX_REPOS) return;
+  const sorted = [...keys].sort((a, b) => file.repos[a].updatedAt.localeCompare(file.repos[b].updatedAt));
+  for (const key of sorted.slice(0, keys.length - MAX_REPOS)) {
+    delete file.repos[key];
+  }
+}
+async function withEntry(repoFullName, mutate) {
+  const file = await activeStore.read();
+  const entry = file.repos[repoFullName] ?? blankEntry();
+  mutate(entry);
+  entry.updatedAt = nowISO();
+  file.repos[repoFullName] = entry;
+  evictLRU(file);
+  await activeStore.write(file);
+}
+async function readRepoExperience() {
+  return activeStore.read();
+}
+async function getRepoEntry(repoFullName) {
+  const file = await activeStore.read();
+  return file.repos[repoFullName] ?? null;
+}
+async function recordPolicySnapshot(repoFullName, policy) {
+  await withEntry(repoFullName, (entry) => {
+    entry.policyCache = {
+      verdict: policy.verdict,
+      assignment: policy.assignment,
+      requirements: policy.requirements.map((r) => r.kind),
+      rulesetVersion: policy.rulesetVersion,
+      checkedAt: nowISO()
+    };
+  });
+}
+async function recordAuditSample(repoFullName, signals, completeness) {
+  await withEntry(repoFullName, (entry) => {
+    entry.cultureSamples.push({
+      hoursToFirstResponse: signals.hoursToFirstResponse,
+      iterationsAfterFirstResponse: signals.iterationsAfterFirstResponse,
+      hoursToMerge: signals.hoursToMerge,
+      completeness,
+      sampledAt: nowISO()
+    });
+    if (entry.cultureSamples.length > MAX_CULTURE_SAMPLES) {
+      entry.cultureSamples.splice(0, entry.cultureSamples.length - MAX_CULTURE_SAMPLES);
+    }
+  });
+}
+async function addNote(repoFullName, text, source = "manual") {
+  await withEntry(repoFullName, (entry) => {
+    entry.notes.push({ text, source, addedAt: nowISO() });
+    if (entry.notes.length > MAX_NOTES) {
+      entry.notes.splice(0, entry.notes.length - MAX_NOTES);
+    }
+  });
+}
+async function writeTombstone(repoFullName, claimId, outcome) {
+  await withEntry(repoFullName, (entry) => {
+    if (entry.tombstones.some((t) => t.claimId === claimId)) return;
+    entry.tombstones.push({ claimId, outcome, resolvedAt: nowISO() });
+  });
+}
+async function recordBackfill(repoFullName, entries) {
+  await withEntry(repoFullName, (entry) => {
+    const known = new Set(entry.backfill.map((b) => b.prNumber));
+    for (const e of entries) {
+      if (known.has(e.prNumber)) continue;
+      known.add(e.prNumber);
+      entry.backfill.push({ prNumber: e.prNumber, mergedAt: e.mergedAt });
+    }
+    if (entry.backfill.length > MAX_BACKFILL) {
+      entry.backfill.sort((a, b) => a.mergedAt.localeCompare(b.mergedAt));
+      entry.backfill.splice(0, entry.backfill.length - MAX_BACKFILL);
+    }
+  });
+}
+function prNumberFromUrl(prUrl) {
+  if (!prUrl) return null;
+  const m = /\/pull\/(\d+)/.exec(prUrl);
+  return m ? Number(m[1]) : null;
+}
+function projectOutcomes(claims, tombstones, repo, backfill = []) {
+  const events = [];
+  const seenPrNumbers = /* @__PURE__ */ new Set();
+  for (const c of claims) {
+    if (c.repoFullName !== repo || c.state !== "merged") continue;
+    const prNumber = prNumberFromUrl(c.prUrl);
+    if (prNumber !== null) seenPrNumbers.add(prNumber);
+    events.push({ prNumber, mergedAt: c.updatedAt, source: "claim" });
+  }
+  for (const t of tombstones) {
+    if (t.outcome !== "merged") continue;
+    events.push({ prNumber: null, mergedAt: t.resolvedAt, source: "tombstone" });
+  }
+  for (const b of backfill) {
+    if (seenPrNumbers.has(b.prNumber)) continue;
+    seenPrNumbers.add(b.prNumber);
+    events.push({ prNumber: b.prNumber, mergedAt: b.mergedAt, source: "backfill" });
+  }
+  events.sort((a, b) => a.mergedAt.localeCompare(b.mergedAt));
+  const lastMergedAt = events.length > 0 ? events[events.length - 1].mergedAt : null;
+  return { mergedCount: events.length, lastMergedAt, events };
+}
+function continuity(projection, now = Date.now()) {
+  if (!projection.lastMergedAt) {
+    return { score: 0, reasons: ["no merges recorded here yet"] };
+  }
+  const countFactor = Math.min(projection.mergedCount, 4) / 4;
+  const decay = recencyDecay(projection.lastMergedAt, 90, now);
+  const score = countFactor * decay;
+  const mergeWord = projection.mergedCount === 1 ? "merge" : "merges";
+  return {
+    score,
+    reasons: [`${projection.mergedCount} ${mergeWord} recorded here`, `most recent merge ${projection.lastMergedAt}`]
+  };
+}
+async function continuityForRepo(repoFullName, claims) {
+  try {
+    const entry = await getRepoEntry(repoFullName);
+    const projection = projectOutcomes(claims, entry?.tombstones ?? [], repoFullName, entry?.backfill ?? []);
+    const result = continuity(projection);
+    return { score: result.score, mergedCount: projection.mergedCount };
+  } catch {
+    return { score: 0, mergedCount: 0 };
+  }
+}
+function calibrationSummary(claims, repo) {
+  const resolved = claims.filter(
+    (c) => c.repoFullName === repo && (c.state === "merged" || c.state === "abandoned") && c.review?.acceptanceScore != null
+  );
+  const n = resolved.length;
+  if (n < 5) return { available: false, n, text: null };
+  const meanForecast = resolved.reduce((sum, c) => sum + c.review.acceptanceScore, 0) / n;
+  const mergedCount = resolved.filter((c) => c.state === "merged").length;
+  const mergeRate = mergedCount / n;
+  const delta = Math.round((meanForecast - mergeRate) * 10) / 10;
+  let direction;
+  if (delta > 0) direction = `~${delta} optimistic`;
+  else if (delta < 0) direction = `~${Math.abs(delta)} pessimistic`;
+  else direction = "well-calibrated";
+  return {
+    available: true,
+    n,
+    meanForecast,
+    mergeRate,
+    delta,
+    text: `forecasts here ran ${direction} (n=${n})`
+  };
+}
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+function briefingLines(params) {
+  const { repoFullName, entry, claims } = params;
+  const projection = projectOutcomes(claims, entry?.tombstones ?? [], repoFullName, entry?.backfill ?? []);
+  const lines = [];
+  if (projection.mergedCount > 0) {
+    const months = projection.events.map(
+      (e) => new Date(e.mergedAt).toLocaleString("en-US", { month: "short" })
+    );
+    lines.push(`You: ${projection.mergedCount} merged here (${months.join(", ")})`);
+  }
+  const samplesWithResponse = (entry?.cultureSamples ?? []).filter(
+    (s) => s.completeness.comments && s.hoursToFirstResponse != null
+  );
+  if (samplesWithResponse.length > 0) {
+    const hours = Math.round(median(samplesWithResponse.map((s) => s.hoursToFirstResponse)));
+    lines.push(`maintainer 1st response ~${hours}h`);
+  }
+  if (entry?.policyCache) {
+    lines.push(`policy: ${entry.policyCache.verdict}`);
+  }
+  const latestNote = entry?.notes[entry.notes.length - 1];
+  if (latestNote) {
+    lines.push(`note: ${latestNote.text}`);
+  }
+  return lines;
 }
 export {
-  gatherAudit
+  __setStoreForTests,
+  addNote,
+  briefingLines,
+  calibrationSummary,
+  continuity,
+  continuityForRepo,
+  getRepoEntry,
+  projectOutcomes,
+  readRepoExperience,
+  recordAuditSample,
+  recordBackfill,
+  recordPolicySnapshot,
+  writeTombstone
 };

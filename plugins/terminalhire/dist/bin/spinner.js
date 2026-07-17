@@ -711,7 +711,7 @@ var VOCABULARY = [...GRAPH.ids];
 var SYNONYMS = Object.fromEntries(GRAPH.synonyms);
 
 // ../../packages/core/src/feeds/bounty-gate.ts
-var BOUNTY_REPO_DENYLIST = [
+var FARM_REPO_DENYLIST = [
   "SecureBananaLabs/bug-bounty",
   // Meta-farm: a bounty PLATFORM whose own issues are an assignment-gated
   // contributor queue ("please assign me, my chief") — an unsolicited PR won't
@@ -719,7 +719,25 @@ var BOUNTY_REPO_DENYLIST = [
   // any fetched field, so it's a manual entry (also dropped from the allowlist).
   "boundlessfi/boundless"
 ];
-var DENYLIST_LC = new Set(BOUNTY_REPO_DENYLIST.map((r) => r.toLowerCase()));
+var CURATION_EXCLUDED_REPOS = [
+  // Owner call, asked twice: "get rid of that particular project — I hate it as the
+  // example." Excluded at the REPO level because that is the ONLY level at which
+  // "don't feature this project" is expressible: projectCuration emits any repo with
+  // >= 1 winnable issue.
+  //
+  // To be clear about what this repo is, since it sits next to a farm list: kana-dojo
+  // is NOT a farm. Measured live 2026-07-17 — 2,960 stars, active, 113 open issues, of
+  // which 58 are genuine substantive bug reports ("年 Onyomi incorrectly displayed as
+  // 'れン'", "Unable to install app as PWA"). The other 55 are a bot's templated
+  // "[Good First Issue] <emoji> Add new <NOUN> [N] - Beginner-Friendly Open-source
+  // Contribution" run, which is what drew our attention — but a content classifier
+  // correctly KEEPS all 58 real bugs, so it can never remove the project. Two prior
+  // attempts to do this per-issue (PR #221, #260) both shipped and left it live.
+  "lingdojo/kana-dojo"
+];
+var EXCLUDED_LC = new Set(
+  [...FARM_REPO_DENYLIST, ...CURATION_EXCLUDED_REPOS].map((r) => r.toLowerCase())
+);
 var AI_BAN_DENYLIST = [
   // Gentoo Council voted 6-0 (2024-04-14) to ban AI/ML-generated contributions
   // project-wide. https://wiki.gentoo.org/wiki/Project:Council/AI_policy
@@ -736,6 +754,23 @@ var AI_BAN_DENYLIST = [
 ];
 var AI_BAN_LC = new Set(AI_BAN_DENYLIST.map((g) => g.toLowerCase()));
 
+// ../../packages/core/src/feeds/contribution-classify.ts
+var CONTENT_NOUN_STRONG = String.raw`proverbs?|words?|phrases?|sayings?|translations?|entry|entries|definitions?|terms?|idioms?|synonyms?|antonyms?|acronyms?|abbreviations?|nazonazo`;
+var CONTENT_NOUN_BROAD = String.raw`trivia\s+questions?|grammar\s+points?|brain\s?teasers?|trivia|facts?|quotes?|quotations?|quiz(?:zes)?|riddles?|puzzles?|flash\s?cards?|vocab(?:ulary)?|lessons?|kanji`;
+var FARM_SEED_NOUN = String.raw`trivia\s+questions?|grammar\s+points?|brain\s?teasers?|proverbs?|sayings?|idioms?|quotes?|quotations?|riddles?|nazonazo`;
+var CONTENT_ADD_RE = new RegExp(
+  String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${CONTENT_NOUN_STRONG})\b`,
+  "i"
+);
+var NUMBERED_SEED_RE = new RegExp(
+  String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${CONTENT_NOUN_STRONG}|${CONTENT_NOUN_BROAD})\s*#?\s*(?!(?:19|20)\d{2}(?!\d))\d{1,5}\s*$`,
+  "i"
+);
+var FARM_SEED_RE = new RegExp(
+  String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${FARM_SEED_NOUN})\s*#?\s*(?!(?:19|20)\d{2}(?!\d))\d{1,5}\s*$`,
+  "i"
+);
+
 // ../../packages/core/src/credential/rigor.ts
 var RIGOR = {
   /** `authorAssociation` values that count as a maintainer review. */
@@ -747,6 +782,31 @@ var MAINTAINER_SET = new Set(
 
 // ../../packages/core/src/github.ts
 var RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
+
+// ../../packages/core/src/winnability.ts
+var WINNABILITY_NORM = {
+  /** ~500 new stars in a build interval is treated as "maxed" momentum. */
+  starVelocity: 500,
+  /** ~10 HN mentions is treated as "maxed" social. */
+  socialMentions: 10,
+  /** log(stars) ceiling — ~100k-star repos saturate the absolute-traction floor. */
+  starsLog: Math.log(1e5)
+};
+
+// ../../packages/core/src/feeds/projectCuration.ts
+var CURATION_NORM = {
+  /** ~60 commits in the last ~30d is treated as "maxed" commit-cadence freshness. */
+  commitCadence: 60,
+  /** An issue posted within this many days is maximally fresh. */
+  freshnessFullDays: 30,
+  /** …and older than this contributes zero recency (linear decay between). */
+  freshnessZeroDays: 180,
+  /** log(stars) ceiling for popularity — reuses the winnability absolute-traction
+   *  ceiling so "popular" means the same thing across both scorers. */
+  starsLog: WINNABILITY_NORM.starsLog,
+  /** Distinct contributors treated as "maxed" for the popularity tiebreaker. */
+  contributors: 500
+};
 
 // ../../packages/core/src/feeds/index.ts
 var GREENHOUSE_SLUGS_BY_TIER = {
@@ -857,18 +917,11 @@ function flattenTiers(t) {
 var DEFAULT_GREENHOUSE_SLUGS = flattenTiers(GREENHOUSE_SLUGS_BY_TIER);
 var DEFAULT_ASHBY_SLUGS = flattenTiers(ASHBY_SLUGS_BY_TIER);
 var DEFAULT_LEVER_SLUGS = flattenTiers(LEVER_SLUGS_BY_TIER);
-
-// ../../packages/core/src/feeds/contribution-classify.ts
-var CONTENT_NOUN_STRONG = String.raw`proverbs?|words?|phrases?|sayings?|quotes?|quotations?|translations?|entry|entries|definitions?|terms?|idioms?|synonyms?|antonyms?|acronyms?|abbreviations?`;
-var CONTENT_NOUN_BROAD = String.raw`trivia\s+questions?|grammar\s+points?|trivia|facts?|quiz(?:zes)?|flash\s?cards?|vocab(?:ulary)?|lessons?|kanji`;
-var CONTENT_ADD_RE = new RegExp(
-  String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${CONTENT_NOUN_STRONG})\b`,
-  "i"
-);
-var NUMBERED_SEED_RE = new RegExp(
-  String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${CONTENT_NOUN_STRONG}|${CONTENT_NOUN_BROAD})\s*#?\s*\d{1,3}\s*$`,
-  "i"
-);
+var BIGCO_SLUGS_BY_SOURCE = {
+  greenhouse: new Set(GREENHOUSE_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase())),
+  ashby: new Set(ASHBY_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase())),
+  lever: new Set(LEVER_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase()))
+};
 
 // ../../packages/core/src/feeds/contributions.ts
 var CONTRIB_LABEL_QUERIES = [
@@ -899,16 +952,6 @@ var EXAMPLE_BUYER = {
 };
 var BUYER_REGISTRY = {
   [EXAMPLE_BUYER.id]: EXAMPLE_BUYER
-};
-
-// ../../packages/core/src/winnability.ts
-var WINNABILITY_NORM = {
-  /** ~500 new stars in a build interval is treated as "maxed" momentum. */
-  starVelocity: 500,
-  /** ~10 HN mentions is treated as "maxed" social. */
-  socialMentions: 10,
-  /** log(stars) ceiling — ~100k-star repos saturate the absolute-traction floor. */
-  starsLog: Math.log(1e5)
 };
 
 // ../../packages/core/src/intro.ts
