@@ -3458,7 +3458,7 @@ function firstNumber(xs) {
 function isWinnableIssue(issue) {
   const contested = (issue.contribution.openPRsAtDiscovery ?? 0) > 0;
   if (contested) return false;
-  if (issue.winnabilityScore !== void 0 && issue.winnabilityScore <= 0) return false;
+  if (issue.winnabilityScore != null && issue.winnabilityScore <= 0) return false;
   return true;
 }
 function issueRecency(postedAt, now) {
@@ -3475,6 +3475,7 @@ function issueRecency(postedAt, now) {
 function curateProjects(issues, opts = {}) {
   const now = opts.now ?? Date.now();
   const vocabSet = new Set(opts.vocabTerms ?? []);
+  const applyFloor = opts.applySkillFloor ?? SKILL_FLOOR_ENABLED;
   const groups = /* @__PURE__ */ new Map();
   for (const issue of issues) {
     const key = repoKeyOf(issue.contribution.repoFullName);
@@ -3502,15 +3503,21 @@ function curateProjects(issues, opts = {}) {
       }
       if (topTags.length >= 4) break;
     }
+    const repoLanguageRaw = firstNonEmptyString(
+      winnableIssues.map((i) => i.contribution.language ?? "")
+    );
+    const languageIds = new Set(repoLanguageRaw ? normalize(tokenize(repoLanguageRaw)) : []);
+    const skillTagUnion = /* @__PURE__ */ new Set();
+    for (const iss of winnableIssues) for (const t of iss.tags ?? []) skillTagUnion.add(t);
+    let distinctNonLanguageSkillTags = 0;
+    for (const t of skillTagUnion) if (!languageIds.has(t)) distinctNonLanguageSkillTags++;
+    if (applyFloor && distinctNonLanguageSkillTags < SKILL_FLOOR_MIN) continue;
+    const skillDensity = clamp012(distinctNonLanguageSkillTags / SKILL_DENSITY_SATURATION);
     let vocabRelevance = 0;
-    if (vocabSet.size > 0) {
-      const repoTags = /* @__PURE__ */ new Set();
-      for (const iss of winnableIssues) for (const t of iss.tags ?? []) repoTags.add(t);
-      if (repoTags.size > 0) {
-        let matched = 0;
-        for (const t of repoTags) if (vocabSet.has(t)) matched++;
-        vocabRelevance = matched / repoTags.size;
-      }
+    if (vocabSet.size > 0 && skillTagUnion.size > 0) {
+      let matched = 0;
+      for (const t of skillTagUnion) if (vocabSet.has(t)) matched++;
+      vocabRelevance = matched / skillTagUnion.size;
     }
     const cadence = clamp012((commitCadence ?? 0) / CURATION_NORM.commitCadence);
     let recency = 0;
@@ -3529,6 +3536,8 @@ function curateProjects(issues, opts = {}) {
       repoContributors: repoContributors ?? null,
       topTags,
       vocabRelevance,
+      distinctNonLanguageSkillTags,
+      skillDensity,
       freshness,
       mergeVelocity,
       popularity
@@ -3538,7 +3547,7 @@ function curateProjects(issues, opts = {}) {
   const cards = partials.map((p) => {
     const winnableCount = p.winnableIssues.length;
     const winnableCountNorm = maxCount > 0 ? winnableCount / maxCount : 0;
-    const score = CURATION_WEIGHTS.winnableCount * winnableCountNorm + CURATION_WEIGHTS.vocabRelevance * p.vocabRelevance + CURATION_WEIGHTS.freshness * p.freshness + CURATION_WEIGHTS.mergeVelocity * p.mergeVelocity + CURATION_WEIGHTS.popularity * p.popularity;
+    const score = CURATION_WEIGHTS.winnableCount * winnableCountNorm + CURATION_WEIGHTS.vocabRelevance * p.vocabRelevance + CURATION_WEIGHTS.skillDensity * p.skillDensity + CURATION_WEIGHTS.freshness * p.freshness + CURATION_WEIGHTS.mergeVelocity * p.mergeVelocity + CURATION_WEIGHTS.popularity * p.popularity;
     return {
       repoKey: p.repoKey,
       description: p.description,
@@ -3551,6 +3560,8 @@ function curateProjects(issues, opts = {}) {
         winnableCount,
         winnableCountNorm,
         vocabRelevance: p.vocabRelevance,
+        distinctNonLanguageSkillTags: p.distinctNonLanguageSkillTags,
+        skillDensity: p.skillDensity,
         freshness: p.freshness,
         mergeVelocity: p.mergeVelocity,
         popularity: p.popularity
@@ -3562,18 +3573,32 @@ function curateProjects(issues, opts = {}) {
   );
   return cards;
 }
-var CURATION_WEIGHTS, CURATION_NORM, repoKeyOf;
+function rosterActiveFromContribution(issues) {
+  return curateProjects(issues).map((c) => ({ repoKey: c.repoKey, topTags: c.topTags }));
+}
+var CURATION_WEIGHTS, SKILL_DENSITY_SATURATION, SKILL_FLOOR_ENABLED, SKILL_FLOOR_MIN, CURATION_NORM, repoKeyOf;
 var init_projectCuration = __esm({
   "../../packages/core/src/feeds/projectCuration.ts"() {
     "use strict";
+    init_vocab();
     init_winnability();
     CURATION_WEIGHTS = {
       winnableCount: 0.45,
-      vocabRelevance: 0.2,
+      vocabRelevance: 0.05,
+      skillDensity: 0.15,
       freshness: 0.15,
       mergeVelocity: 0.15,
       popularity: 0.05
     };
+    SKILL_DENSITY_SATURATION = 3;
+    SKILL_FLOOR_ENABLED = false;
+    SKILL_FLOOR_MIN = 1;
+    {
+      const _sum = Object.values(CURATION_WEIGHTS).reduce((a, b) => a + b, 0);
+      if (Math.abs(_sum - 1) > 1e-9) {
+        throw new Error(`CURATION_WEIGHTS must sum to 1.0, got ${_sum}`);
+      }
+    }
     CURATION_NORM = {
       /** ~60 commits in the last ~30d is treated as "maxed" commit-cadence freshness. */
       commitCadence: 60,
@@ -3848,7 +3873,7 @@ var init_feeds = __esm({
     DEFAULT_ASHBY_SLUGS = flattenTiers(ASHBY_SLUGS_BY_TIER);
     DEFAULT_LEVER_SLUGS = flattenTiers(LEVER_SLUGS_BY_TIER);
     DEFAULT_WORKABLE_SLUGS = ["zego", "workmotion"];
-    MAX_JOBS_PER_COMPANY = 3;
+    MAX_JOBS_PER_COMPANY = 10;
     BIGCO_SLUGS_BY_SOURCE = {
       greenhouse: new Set(GREENHOUSE_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase())),
       ashby: new Set(ASHBY_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase())),
@@ -3970,7 +3995,11 @@ function buildContributionJob(a) {
       // verified-empty/non-matching set; a failed check leaves it undefined (never a
       // fabricated 0), so the claim path falls through to a live re-count.
       openPRsAtDiscovery: a.openPRsAtDiscovery,
-      repoDescription: a.repo.description || null
+      repoDescription: a.repo.description || null,
+      // TERM-27: persist the repo's primary language so project curation can
+      // exclude the repo's OWN language id (folded into every issue's tags) from
+      // the distinct-skill signal. Same `repo` used by the tokenize() tag build.
+      language: a.repo.language ?? null
     },
     // Provenance: repo-first discovered items only (label-first omits the field).
     ...a.discovered ? { discovered: true } : {},
@@ -8185,6 +8214,9 @@ __export(src_exports, {
   MIN_STARS: () => MIN_STARS,
   PROBE_TIMEOUT_MS: () => PROBE_TIMEOUT_MS,
   RIGOR: () => RIGOR,
+  SKILL_DENSITY_SATURATION: () => SKILL_DENSITY_SATURATION,
+  SKILL_FLOOR_ENABLED: () => SKILL_FLOOR_ENABLED,
+  SKILL_FLOOR_MIN: () => SKILL_FLOOR_MIN,
   STRONG_MATCH_THRESHOLD: () => STRONG_MATCH_THRESHOLD,
   SYNONYMS: () => SYNONYMS,
   TRIVIAL_PR_TITLE: () => TRIVIAL_PR_TITLE,
@@ -8285,6 +8317,7 @@ __export(src_exports, {
   rejectExtraIntroFields: () => rejectExtraIntroFields,
   relevanceScore: () => relevanceScore,
   revealIntroContacts: () => revealIntroContacts,
+  rosterActiveFromContribution: () => rosterActiveFromContribution,
   safetyNumber: () => safetyNumber,
   sameLogin: () => sameLogin,
   setStatus: () => setStatus,

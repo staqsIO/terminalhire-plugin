@@ -427,6 +427,20 @@ var WINNABILITY_NORM = {
 };
 
 // ../../packages/core/src/feeds/projectCuration.ts
+var CURATION_WEIGHTS = {
+  winnableCount: 0.45,
+  vocabRelevance: 0.05,
+  skillDensity: 0.15,
+  freshness: 0.15,
+  mergeVelocity: 0.15,
+  popularity: 0.05
+};
+{
+  const _sum = Object.values(CURATION_WEIGHTS).reduce((a, b) => a + b, 0);
+  if (Math.abs(_sum - 1) > 1e-9) {
+    throw new Error(`CURATION_WEIGHTS must sum to 1.0, got ${_sum}`);
+  }
+}
 var CURATION_NORM = {
   /** ~60 commits in the last ~30d is treated as "maxed" commit-cadence freshness. */
   commitCadence: 60,

@@ -724,11 +724,26 @@ var init_winnability = __esm({
 });
 
 // ../../packages/core/src/feeds/projectCuration.ts
-var CURATION_NORM;
+var CURATION_WEIGHTS, CURATION_NORM;
 var init_projectCuration = __esm({
   "../../packages/core/src/feeds/projectCuration.ts"() {
     "use strict";
+    init_vocab();
     init_winnability();
+    CURATION_WEIGHTS = {
+      winnableCount: 0.45,
+      vocabRelevance: 0.05,
+      skillDensity: 0.15,
+      freshness: 0.15,
+      mergeVelocity: 0.15,
+      popularity: 0.05
+    };
+    {
+      const _sum = Object.values(CURATION_WEIGHTS).reduce((a, b) => a + b, 0);
+      if (Math.abs(_sum - 1) > 1e-9) {
+        throw new Error(`CURATION_WEIGHTS must sum to 1.0, got ${_sum}`);
+      }
+    }
     CURATION_NORM = {
       /** ~60 commits in the last ~30d is treated as "maxed" commit-cadence freshness. */
       commitCadence: 60,
@@ -1101,9 +1116,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/wt-cli-update/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/deeplink-wt/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/wt-cli-update/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/deeplink-wt/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {

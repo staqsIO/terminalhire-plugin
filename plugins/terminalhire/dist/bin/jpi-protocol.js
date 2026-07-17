@@ -12,10 +12,13 @@ var __export = (target, all) => {
 // src/protocol.ts
 var protocol_exports = {};
 __export(protocol_exports, {
+  HANDLER_TEMPLATE_VERSION: () => HANDLER_TEMPLATE_VERSION,
   defaultProtocolDeps: () => defaultProtocolDeps,
   drainPendingClaims: () => drainPendingClaims,
   handleUrl: () => handleUrl,
+  healStaleHandler: () => healStaleHandler,
   parseClaimUrl: () => parseClaimUrl,
+  printClaimCommand: () => printClaimCommand,
   registerScheme: () => registerScheme,
   schemeStatus: () => schemeStatus,
   unregisterScheme: () => unregisterScheme
@@ -93,7 +96,25 @@ function buildAppleScriptHandler(execPath, dispatchPath) {
   const dispatchLit = appleScriptStringLiteral(dispatchPath);
   return [
     "on open location theURL",
-    `	do shell script quoted form of ${execLit} & " " & quoted form of ${dispatchLit} & " handle-url " & quoted form of theURL & " > /dev/null 2>&1 &"`,
+    '	set claimCmd to ""',
+    "	try",
+    `		set claimCmd to do shell script quoted form of ${execLit} & " " & quoted form of ${dispatchLit} & " print-claim-command " & quoted form of theURL`,
+    "	end try",
+    '	if claimCmd is "" then',
+    `		display notification "That isn't a valid Terminalhire claim link." with title "Terminalhire"`,
+    "		return",
+    "	end if",
+    "	try",
+    '		tell application "Terminal"',
+    "			activate",
+    "			do script claimCmd",
+    "		end tell",
+    "	on error",
+    `		display notification "Couldn't open Terminal automatically. Run: " & claimCmd with title "Terminalhire"`,
+    "		try",
+    `			do shell script quoted form of ${execLit} & " " & quoted form of ${dispatchLit} & " handle-url " & quoted form of theURL & " > /dev/null 2>&1 &"`,
+    "		end try",
+    "	end try",
     "end open location",
     ""
   ].join("\n");
@@ -106,6 +127,15 @@ function buildPreviewShellCommand(token, deps) {
     "preview",
     token
   ].join(" ");
+}
+function printClaimCommand(raw, deps = defaultProtocolDeps()) {
+  const parsed = parseClaimUrl(raw);
+  if (!parsed) {
+    deps.exit(1);
+    return;
+  }
+  deps.log(buildPreviewShellCommand(parsed.token, deps));
+  deps.exit(0);
 }
 function darwinAppPaths(deps) {
   const appDir = join(deps.homedir(), "Applications");
@@ -235,15 +265,36 @@ function linuxStatus(deps) {
   }
   return { registered, appExists: exists };
 }
+function handlerTemplateVersionPath(deps) {
+  return join(stateDir(deps), "handler-template-version");
+}
+function readHandlerTemplateVersion(deps) {
+  try {
+    return deps.readFileSync(handlerTemplateVersionPath(deps)).trim();
+  } catch {
+    return null;
+  }
+}
+function writeHandlerTemplateVersion(deps) {
+  deps.mkdirSync(stateDir(deps));
+  deps.writeFileSync(handlerTemplateVersionPath(deps), String(HANDLER_TEMPLATE_VERSION));
+}
 function registerScheme(deps = defaultProtocolDeps()) {
+  let result;
   switch (deps.platform) {
     case "darwin":
-      return darwinRegister(deps);
+      result = darwinRegister(deps);
+      break;
     case "win32":
-      return win32Register(deps);
+      result = win32Register(deps);
+      break;
     default:
-      return linuxRegister(deps);
+      result = linuxRegister(deps);
   }
+  if (result.ok) {
+    writeHandlerTemplateVersion(deps);
+  }
+  return result;
 }
 function unregisterScheme(deps = defaultProtocolDeps()) {
   switch (deps.platform) {
@@ -265,6 +316,22 @@ function schemeStatus(deps = defaultProtocolDeps()) {
       return { ...win32Status(deps), platform: deps.platform };
     default:
       return { ...linuxStatus(deps), platform: deps.platform };
+  }
+}
+function healStaleHandler(deps = defaultProtocolDeps()) {
+  try {
+    if (readHandlerTemplateVersion(deps) === String(HANDLER_TEMPLATE_VERSION)) {
+      return;
+    }
+    if (schemeStatus(deps).registered) {
+      const r = registerScheme(deps);
+      if (r.ok) {
+        deps.log("\u2713 refreshed the th:// claim-link handler.");
+      }
+    } else {
+      writeHandlerTemplateVersion(deps);
+    }
+  } catch {
   }
 }
 function pendingClaimsPath(deps) {
@@ -378,7 +445,7 @@ async function handleUrl(raw, deps = defaultProtocolDeps()) {
   appendPendingClaim(deps, { token, ts: Date.now() });
   deps.exit(0);
 }
-var CLAIM_URL_RE, PLISTBUDDY, LSREGISTER, WIN32_SCHEMES, LINUX_TERMINAL_CANDIDATES, PENDING_CLAIMS_CAP, PENDING_TOKEN_RE;
+var CLAIM_URL_RE, PLISTBUDDY, LSREGISTER, WIN32_SCHEMES, LINUX_TERMINAL_CANDIDATES, HANDLER_TEMPLATE_VERSION, PENDING_CLAIMS_CAP, PENDING_TOKEN_RE;
 var init_protocol = __esm({
   "src/protocol.ts"() {
     "use strict";
@@ -392,6 +459,7 @@ var init_protocol = __esm({
       ["konsole", ["-e"]],
       ["xterm", ["-e"]]
     ];
+    HANDLER_TEMPLATE_VERSION = 2;
     PENDING_CLAIMS_CAP = 20;
     PENDING_TOKEN_RE = /^[A-Za-z0-9_-]{8}$/;
   }

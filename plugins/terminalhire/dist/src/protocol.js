@@ -75,7 +75,25 @@ function buildAppleScriptHandler(execPath, dispatchPath) {
   const dispatchLit = appleScriptStringLiteral(dispatchPath);
   return [
     "on open location theURL",
-    `	do shell script quoted form of ${execLit} & " " & quoted form of ${dispatchLit} & " handle-url " & quoted form of theURL & " > /dev/null 2>&1 &"`,
+    '	set claimCmd to ""',
+    "	try",
+    `		set claimCmd to do shell script quoted form of ${execLit} & " " & quoted form of ${dispatchLit} & " print-claim-command " & quoted form of theURL`,
+    "	end try",
+    '	if claimCmd is "" then',
+    `		display notification "That isn't a valid Terminalhire claim link." with title "Terminalhire"`,
+    "		return",
+    "	end if",
+    "	try",
+    '		tell application "Terminal"',
+    "			activate",
+    "			do script claimCmd",
+    "		end tell",
+    "	on error",
+    `		display notification "Couldn't open Terminal automatically. Run: " & claimCmd with title "Terminalhire"`,
+    "		try",
+    `			do shell script quoted form of ${execLit} & " " & quoted form of ${dispatchLit} & " handle-url " & quoted form of theURL & " > /dev/null 2>&1 &"`,
+    "		end try",
+    "	end try",
     "end open location",
     ""
   ].join("\n");
@@ -88,6 +106,15 @@ function buildPreviewShellCommand(token, deps) {
     "preview",
     token
   ].join(" ");
+}
+function printClaimCommand(raw, deps = defaultProtocolDeps()) {
+  const parsed = parseClaimUrl(raw);
+  if (!parsed) {
+    deps.exit(1);
+    return;
+  }
+  deps.log(buildPreviewShellCommand(parsed.token, deps));
+  deps.exit(0);
 }
 function darwinAppPaths(deps) {
   const appDir = join(deps.homedir(), "Applications");
@@ -224,15 +251,37 @@ var LINUX_TERMINAL_CANDIDATES = [
   ["konsole", ["-e"]],
   ["xterm", ["-e"]]
 ];
+var HANDLER_TEMPLATE_VERSION = 2;
+function handlerTemplateVersionPath(deps) {
+  return join(stateDir(deps), "handler-template-version");
+}
+function readHandlerTemplateVersion(deps) {
+  try {
+    return deps.readFileSync(handlerTemplateVersionPath(deps)).trim();
+  } catch {
+    return null;
+  }
+}
+function writeHandlerTemplateVersion(deps) {
+  deps.mkdirSync(stateDir(deps));
+  deps.writeFileSync(handlerTemplateVersionPath(deps), String(HANDLER_TEMPLATE_VERSION));
+}
 function registerScheme(deps = defaultProtocolDeps()) {
+  let result;
   switch (deps.platform) {
     case "darwin":
-      return darwinRegister(deps);
+      result = darwinRegister(deps);
+      break;
     case "win32":
-      return win32Register(deps);
+      result = win32Register(deps);
+      break;
     default:
-      return linuxRegister(deps);
+      result = linuxRegister(deps);
   }
+  if (result.ok) {
+    writeHandlerTemplateVersion(deps);
+  }
+  return result;
 }
 function unregisterScheme(deps = defaultProtocolDeps()) {
   switch (deps.platform) {
@@ -254,6 +303,22 @@ function schemeStatus(deps = defaultProtocolDeps()) {
       return { ...win32Status(deps), platform: deps.platform };
     default:
       return { ...linuxStatus(deps), platform: deps.platform };
+  }
+}
+function healStaleHandler(deps = defaultProtocolDeps()) {
+  try {
+    if (readHandlerTemplateVersion(deps) === String(HANDLER_TEMPLATE_VERSION)) {
+      return;
+    }
+    if (schemeStatus(deps).registered) {
+      const r = registerScheme(deps);
+      if (r.ok) {
+        deps.log("\u2713 refreshed the th:// claim-link handler.");
+      }
+    } else {
+      writeHandlerTemplateVersion(deps);
+    }
+  } catch {
   }
 }
 var PENDING_CLAIMS_CAP = 20;
@@ -370,10 +435,13 @@ async function handleUrl(raw, deps = defaultProtocolDeps()) {
   deps.exit(0);
 }
 export {
+  HANDLER_TEMPLATE_VERSION,
   defaultProtocolDeps,
   drainPendingClaims,
   handleUrl,
+  healStaleHandler,
   parseClaimUrl,
+  printClaimCommand,
   registerScheme,
   schemeStatus,
   unregisterScheme
