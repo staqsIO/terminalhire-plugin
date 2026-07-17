@@ -65,9 +65,9 @@ function webSessionFilePath() {
 }
 function readWebSessionFile() {
   try {
-    const path = webSessionFilePath();
-    if (!existsSync(path)) return null;
-    const v = readFileSync(path, "utf8").trim();
+    const path2 = webSessionFilePath();
+    if (!existsSync(path2)) return null;
+    const v = readFileSync(path2, "utf8").trim();
     return v.length > 0 ? v : null;
   } catch {
     return null;
@@ -81,10 +81,10 @@ function readWebSessionCookie() {
 }
 function writeWebSessionFile(token) {
   mkdirSync(terminalhireDir(), { recursive: true });
-  const path = webSessionFilePath();
-  writeFileSync(path, token, { mode: 384, encoding: "utf8" });
+  const path2 = webSessionFilePath();
+  writeFileSync(path2, token, { mode: 384, encoding: "utf8" });
   try {
-    chmodSync(path, 384);
+    chmodSync(path2, 384);
   } catch {
   }
 }
@@ -224,17 +224,17 @@ function defaultProtocolDeps() {
     platform: process.platform,
     spawnSync: (command, args5, options) => spawnSync(command, args5, options),
     spawn: (command, args5, options) => spawn(command, args5, options),
-    existsSync: (path) => existsSync3(path),
-    mkdirSync: (path) => {
-      mkdirSync3(path, { recursive: true });
+    existsSync: (path2) => existsSync3(path2),
+    mkdirSync: (path2) => {
+      mkdirSync3(path2, { recursive: true });
     },
-    writeFileSync: (path, contents) => {
-      writeFileSync3(path, contents, "utf8");
+    writeFileSync: (path2, contents) => {
+      writeFileSync3(path2, contents, "utf8");
     },
-    readFileSync: (path) => readFileSync3(path, "utf8"),
-    rmSync: (path) => {
+    readFileSync: (path2) => readFileSync3(path2, "utf8"),
+    rmSync: (path2) => {
       try {
-        rmSync2(path, { recursive: true, force: true });
+        rmSync2(path2, { recursive: true, force: true });
       } catch {
       }
     },
@@ -734,9 +734,9 @@ var init_keytar = __esm({
   }
 });
 
-// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/wt-v034/node_modules/keytar/build/Release/keytar.node
+// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/wt-cli-update/node_modules/keytar/build/Release/keytar.node
 var require_keytar = __commonJS({
-  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/wt-v034/node_modules/keytar/build/Release/keytar.node"(exports, module) {
+  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/wt-cli-update/node_modules/keytar/build/Release/keytar.node"(exports, module) {
     "use strict";
     init_keytar();
     try {
@@ -1259,11 +1259,11 @@ function validateGraph(nodes) {
   const visiting = /* @__PURE__ */ new Set();
   const done = /* @__PURE__ */ new Set();
   const parentMap = new Map(nodes.map((n) => [n.id, n.parents ?? []]));
-  const walk = (id, path) => {
+  const walk = (id, path2) => {
     if (done.has(id)) return;
-    if (visiting.has(id)) throw new Error(`vocab: parent cycle ${[...path, id].join(" \u2192 ")}`);
+    if (visiting.has(id)) throw new Error(`vocab: parent cycle ${[...path2, id].join(" \u2192 ")}`);
     visiting.add(id);
-    for (const p of parentMap.get(id) ?? []) walk(p, [...path, id]);
+    for (const p of parentMap.get(id) ?? []) walk(p, [...path2, id]);
     visiting.delete(id);
     done.add(id);
   };
@@ -2122,11 +2122,11 @@ function ghHeaders(token) {
   if (token) headers["Authorization"] = `Bearer ${token}`;
   return headers;
 }
-async function ghFetch(path, token, signal) {
-  const url = `https://api.github.com${path}`;
+async function ghFetch(path2, token, signal) {
+  const url = `https://api.github.com${path2}`;
   const res = await fetch(url, { headers: ghHeaders(token), signal });
   if (!res.ok) {
-    throw new Error(`GitHub API ${path}: HTTP ${res.status} ${res.statusText}`);
+    throw new Error(`GitHub API ${path2}: HTTP ${res.status} ${res.statusText}`);
   }
   return res.json();
 }
@@ -2298,8 +2298,8 @@ async function fetchOwnedRepoTraction(login, token) {
     computedAt
   };
 }
-async function ghFetchRaw(path, token, signal) {
-  return fetch(`https://api.github.com${path}`, { headers: ghHeaders(token), signal });
+async function ghFetchRaw(path2, token, signal) {
+  return fetch(`https://api.github.com${path2}`, { headers: ghHeaders(token), signal });
 }
 function parseRepoUrl(repoUrl) {
   const m = repoUrl.match(/\/repos\/([^/]+)\/([^/]+)\/?$/);
@@ -3739,14 +3739,14 @@ async function mapWithConcurrency(items, limit, fn) {
   if (items.length === 0) return results;
   const workers = Math.max(1, Math.min(Math.floor(limit) || 1, items.length));
   let next = 0;
-  async function run28() {
+  async function run29() {
     for (; ; ) {
       const i = next++;
       if (i >= items.length) return;
       results[i] = await fn(items[i], i);
     }
   }
-  await Promise.all(Array.from({ length: workers }, run28));
+  await Promise.all(Array.from({ length: workers }, run29));
   return results;
 }
 var init_concurrency = __esm({
@@ -3802,12 +3802,12 @@ function isBountyIssue(issue2) {
 function isAssigned(issue2) {
   return !!issue2.assignee || (issue2.assignees?.length ?? 0) > 0;
 }
-async function ghJson(path) {
+async function ghJson(path2) {
   let res;
   try {
-    res = await fetchWithTimeout(`${GITHUB_API}${path}`, { headers: authHeaders() });
+    res = await fetchWithTimeout(`${GITHUB_API}${path2}`, { headers: authHeaders() });
   } catch (err) {
-    console.warn(`[github-bounties] network error ${path} \u2014`, err);
+    console.warn(`[github-bounties] network error ${path2} \u2014`, err);
     return null;
   }
   if (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0") {
@@ -3815,7 +3815,7 @@ async function ghJson(path) {
     return null;
   }
   if (!res.ok) {
-    console.warn(`[github-bounties] HTTP ${res.status} ${path}`);
+    console.warn(`[github-bounties] HTTP ${res.status} ${path2}`);
     return null;
   }
   try {
@@ -4889,11 +4889,11 @@ function repoFullNameFromApiUrl2(url) {
 }
 function makeClient(fetchImpl, cfg) {
   const gov = makeGitHubGovernor(fetchImpl, cfg);
-  async function raw(path) {
-    return gov.get(`${GITHUB_API2}${path}`, { headers: authHeaders2() });
+  async function raw(path2) {
+    return gov.get(`${GITHUB_API2}${path2}`, { headers: authHeaders2() });
   }
-  async function json(path) {
-    const res = await raw(path);
+  async function json(path2) {
+    const res = await raw(path2);
     if (!res) return null;
     if (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0") return null;
     if (!res.ok) return null;
@@ -4903,8 +4903,8 @@ function makeClient(fetchImpl, cfg) {
       return null;
     }
   }
-  async function probe(path) {
-    return gov.probe(`${GITHUB_API2}${path}`, { headers: authHeaders2() });
+  async function probe(path2) {
+    return gov.probe(`${GITHUB_API2}${path2}`, { headers: authHeaders2() });
   }
   return { raw, json, probe, setSecondaryHint: gov.setSecondaryHint, getStats: gov.getStats };
 }
@@ -10086,9 +10086,9 @@ async function runLogin() {
   Fetching public profile for @${login}...`);
     let ghProfile;
     if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
-      const { fileURLToPath: fileURLToPath11 } = await import("url");
+      const { fileURLToPath: fileURLToPath12 } = await import("url");
       const { join: join38 } = await import("path");
-      const __dirname9 = fileURLToPath11(new URL(".", import.meta.url));
+      const __dirname9 = fileURLToPath12(new URL(".", import.meta.url));
       const fixturePath = join38(__dirname9, "../../fixtures/github-sample.json");
       const { readFileSync: readFileSync33 } = await import("fs");
       ghProfile = JSON.parse(readFileSync33(fixturePath, "utf8"));
@@ -10232,11 +10232,11 @@ import { homedir as homedir8 } from "os";
 function statusFilePath() {
   return STATUS_FILE;
 }
-function atomicWriteJson(path, obj) {
-  mkdirSync7(dirname2(path), { recursive: true });
-  const tmp = `${path}.tmp-${process.pid}`;
+function atomicWriteJson(path2, obj) {
+  mkdirSync7(dirname2(path2), { recursive: true });
+  const tmp = `${path2}.tmp-${process.pid}`;
   writeFileSync7(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
-  renameSync4(tmp, path);
+  renameSync4(tmp, path2);
 }
 function sleepMs(ms) {
   try {
@@ -12423,9 +12423,9 @@ __export(repo_policy_exports, {
   auditContent: () => auditContent,
   checkRepoPolicy: () => checkRepoPolicy
 });
-async function fetchContentsFile(fetchImpl, repoFullName, path) {
+async function fetchContentsFile(fetchImpl, repoFullName, path2) {
   try {
-    const res = await fetchImpl(`${GH_API}/repos/${repoFullName}/contents/${path}`, {
+    const res = await fetchImpl(`${GH_API}/repos/${repoFullName}/contents/${path2}`, {
       headers: GH_HEADERS,
       signal: AbortSignal.timeout(1e4)
     });
@@ -12487,16 +12487,16 @@ async function checkRepoPolicy(repoFullName, opts = {}) {
   let hadError = false;
   const files = [];
   outer: for (const group of CANDIDATE_GROUPS) {
-    for (const path of group) {
+    for (const path2 of group) {
       if (requestsUsed >= MAX_REQUESTS) break outer;
       requestsUsed++;
-      const outcome = await fetchContentsFile(fetchImpl, repoFullName, path);
+      const outcome = await fetchContentsFile(fetchImpl, repoFullName, path2);
       if (!outcome.ok) {
         hadError = true;
         continue;
       }
       if (outcome.missing) continue;
-      if (outcome.content) files.push({ file: path, content: outcome.content });
+      if (outcome.content) files.push({ file: path2, content: outcome.content });
       break;
     }
   }
@@ -14230,10 +14230,10 @@ terminalhire claim: refusing to submit \u2014 ${competing.length} open PR(s) by 
         const row = line.trim();
         if (!row) continue;
         const [added, deleted, ...pathParts] = row.split("	");
-        const path = pathParts.join("	");
+        const path2 = pathParts.join("	");
         filesChanged += 1;
         linesChanged += (added === "-" ? 0 : parseInt(added, 10) || 0) + (deleted === "-" ? 0 : parseInt(deleted, 10) || 0);
-        if (/(^|\/)(tests?|__tests__|spec|specs)\//i.test(path) || /\.(test|spec)\./i.test(path)) touchesTests = true;
+        if (/(^|\/)(tests?|__tests__|spec|specs)\//i.test(path2) || /\.(test|spec)\./i.test(path2)) touchesTests = true;
       }
       const result = scoreDiffAcceptance2({
         competingOpenPRs: claim.openPRsAtClaim ?? 0,
@@ -14878,6 +14878,113 @@ var init_jpi_repo = __esm({
   }
 });
 
+// bin/jpi-update.js
+var jpi_update_exports = {};
+__export(jpi_update_exports, {
+  decideUpdate: () => decideUpdate,
+  pathIsInsidePluginRoot: () => pathIsInsidePluginRoot,
+  run: () => run9
+});
+import { spawnSync as spawnSync2 } from "child_process";
+import { fileURLToPath as fileURLToPath6 } from "url";
+import path from "path";
+function decideUpdate({ local, latest, force = false, check = false } = {}) {
+  if (check) return { action: "check", reason: "explicit --check" };
+  if (force) return { action: "install", reason: "--force" };
+  if (latest == null) return { action: "install", reason: "latest version unknown \u2014 attempt update" };
+  const cmp = compareVersions(local, latest);
+  if (cmp === null) return { action: "install", reason: "version unparseable \u2014 attempt update" };
+  if (cmp !== -1) return { action: "up-to-date", reason: "local is already >= latest" };
+  return { action: "install", reason: "local is behind latest" };
+}
+function pathIsInsidePluginRoot(here, root) {
+  if (!here || !root) return false;
+  try {
+    const rHere = path.resolve(here);
+    const rRoot = path.resolve(root);
+    return rHere === rRoot || rHere.startsWith(rRoot + path.sep);
+  } catch {
+    return false;
+  }
+}
+function isPluginBundledCopy() {
+  const root = process.env.CLAUDE_PLUGIN_ROOT;
+  if (!root) return false;
+  try {
+    const here = fileURLToPath6(new URL(".", import.meta.url));
+    return pathIsInsidePluginRoot(here, root);
+  } catch {
+    return false;
+  }
+}
+function printCheck(local, latest) {
+  const latestLabel = latest ?? "unknown (run: terminalhire refresh)";
+  console.log(`installed ${local ?? "unknown"}, latest ${latestLabel}`);
+  if (latest != null && local != null) {
+    const cmp = compareVersions(local, latest);
+    console.log(cmp === null ? "unable to compare versions" : cmp === -1 ? "update available" : "already on the latest");
+  }
+}
+function printManualFallback(reason) {
+  console.error(`update: ${reason} \u2014 run this manually:`);
+  console.error(`  npm install -g ${PACKAGE_SPEC}`);
+  console.error("  (may need `sudo` on some setups if this was a permission error)");
+}
+function runNpmInstall() {
+  console.log(`running: npm install -g ${PACKAGE_SPEC}`);
+  const result = spawnSync2("npm", INSTALL_ARGS, {
+    stdio: "inherit",
+    shell: process.platform === "win32"
+  });
+  if (result.error) {
+    printManualFallback(`auto-update didn't complete (${result.error.message ?? result.error})`);
+    return 1;
+  }
+  if (result.status !== 0) {
+    printManualFallback(`auto-update didn't complete (npm exited ${result.status})`);
+    return 1;
+  }
+  console.log("\u2713 update complete \u2014 the new version is active on your next terminalhire run.");
+  return 0;
+}
+async function run9(argv) {
+  try {
+    const args5 = argv ?? [];
+    const check = args5.includes("--check");
+    const force = args5.includes("--force");
+    if (isPluginBundledCopy()) {
+      console.log(
+        "terminalhire is bundled with the Claude Code plugin here and updates with the plugin.\nTo update a standalone install, run: npm install -g terminalhire@latest"
+      );
+      return 0;
+    }
+    const local = readLocalVersion();
+    const latest = readLatestVersionFromCache();
+    const decision = decideUpdate({ local, latest, force, check });
+    if (decision.action === "check") {
+      printCheck(local, latest);
+      return 0;
+    }
+    if (decision.action === "up-to-date") {
+      console.log(`\u2713 already on the latest (${local})`);
+      return 0;
+    }
+    return runNpmInstall();
+  } catch (err) {
+    printManualFallback(`unexpected error (${err instanceof Error ? err.message : String(err)})`);
+    return 1;
+  }
+}
+var PACKAGE_SPEC, INSTALL_ARGS;
+var init_jpi_update = __esm({
+  "bin/jpi-update.js"() {
+    "use strict";
+    init_version_nudge();
+    PACKAGE_SPEC = "terminalhire@latest";
+    INSTALL_ARGS = ["install", "-g", PACKAGE_SPEC];
+  }
+});
+
 // ../../packages/core/src/episodes/parser.ts
 function parseTranscript(text, opts = {}) {
   const nodes = [];
@@ -15157,7 +15264,7 @@ function computeCoverage(files, result) {
     nodeCountByPath.set(f.path, f.nodes.length);
   }
   const orphanedNodes = result.orphanedSidechainPaths.reduce(
-    (acc, path) => acc + (nodeCountByPath.get(path) ?? 0),
+    (acc, path2) => acc + (nodeCountByPath.get(path2) ?? 0),
     0
   );
   const attributedNodes = totalNodes - orphanedNodes;
@@ -15333,12 +15440,12 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
       continue;
     }
     spansConsidered++;
-    let run28 = 0;
+    let run29 = 0;
     const closeChain = () => {
-      if (run28 > 0) {
+      if (run29 > 0) {
         recoveryChains++;
-        totalDepth += run28;
-        run28 = 0;
+        totalDepth += run29;
+        run29 = 0;
       }
     };
     for (const uuid2 of episode.mainNodeUuids) {
@@ -15347,9 +15454,9 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
         continue;
       }
       if (node.kind === "tool_result" /* ToolResult */ && node.isError) {
-        run28++;
-        if (run28 > maxConsecutiveErrors) {
-          maxConsecutiveErrors = run28;
+        run29++;
+        if (run29 > maxConsecutiveErrors) {
+          maxConsecutiveErrors = run29;
         }
       } else if (node.kind === "tool_result" /* ToolResult */ && !node.isError) {
         closeChain();
@@ -15450,16 +15557,16 @@ function findJsonlFiles(dir) {
 }
 function loadCorpus(paths) {
   const files = [];
-  for (const path of paths) {
+  for (const path2 of paths) {
     let text;
     try {
-      text = readFileSync19(path, "utf8");
+      text = readFileSync19(path2, "utf8");
     } catch {
       continue;
     }
     const parsed = parseTranscript(text);
     const nodes = parsed.nodes.map(slimNode);
-    files.push({ path, nodes });
+    files.push({ path: path2, nodes });
   }
   return files;
 }
@@ -15837,9 +15944,9 @@ var init_trajectory = __esm({
 // bin/jpi-trajectory.js
 var jpi_trajectory_exports = {};
 __export(jpi_trajectory_exports, {
-  run: () => run9
+  run: () => run10
 });
-async function run9() {
+async function run10() {
   try {
     const args5 = process.argv.slice(2);
     if (args5.includes("--push")) {
@@ -16274,7 +16381,7 @@ var init_intro2 = __esm({
 // bin/jpi-intro.js
 var jpi_intro_exports = {};
 __export(jpi_intro_exports, {
-  run: () => run10
+  run: () => run11
 });
 function readOption(args5, name) {
   const i = args5.indexOf(name);
@@ -16282,7 +16389,7 @@ function readOption(args5, name) {
   const v = args5[i + 1];
   return typeof v === "string" && !v.startsWith("--") ? v : void 0;
 }
-async function run10() {
+async function run11() {
   try {
     const args5 = process.argv.slice(2);
     if (args5.includes("--list")) {
@@ -16388,13 +16495,13 @@ function createChatClient(overrides) {
     if (!cookie) throw new ChatNotLinkedError();
     return cookie;
   }
-  async function authedFetch(path, init) {
+  async function authedFetch(path2, init) {
     const cookie = requireCookie();
     const headers = {
       ...init.headers ?? {},
       Cookie: `${GH_SESSION_COOKIE4}=${cookie}`
     };
-    const res = await deps.fetchImpl(`${CHAT_BASE}${path}`, {
+    const res = await deps.fetchImpl(`${CHAT_BASE}${path2}`, {
       ...init,
       headers,
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
@@ -16579,8 +16686,8 @@ var init_chat_client = __esm({
     };
     ChatRequestError = class extends Error {
       status;
-      constructor(path, status, detail) {
-        super(`chat request to ${path} failed (${status})${detail ? `: ${detail}` : ""}`);
+      constructor(path2, status, detail) {
+        super(`chat request to ${path2} failed (${status})${detail ? `: ${detail}` : ""}`);
         this.name = "ChatRequestError";
         this.status = status;
       }
@@ -16708,27 +16815,27 @@ function diff(prev, next, cols) {
   if (!Number.isInteger(cols) || cols <= 0) return [];
   const ops = [];
   const len = next.length;
-  let run28 = null;
+  let run29 = null;
   for (let i = 0; i < len; i++) {
     const col = i % cols;
     const row = (i - col) / cols;
-    if (col === 0 && run28) {
-      ops.push(run28);
-      run28 = null;
+    if (col === 0 && run29) {
+      ops.push(run29);
+      run29 = null;
     }
     if (cellNe(prev[i], next[i])) {
-      if (run28 && run28.row === row && run28.col + run28.run.length === col) {
-        run28.run.push(next[i]);
+      if (run29 && run29.row === row && run29.col + run29.run.length === col) {
+        run29.run.push(next[i]);
       } else {
-        if (run28) ops.push(run28);
-        run28 = { row, col, run: [next[i]] };
+        if (run29) ops.push(run29);
+        run29 = { row, col, run: [next[i]] };
       }
-    } else if (run28) {
-      ops.push(run28);
-      run28 = null;
+    } else if (run29) {
+      ops.push(run29);
+      run29 = null;
     }
   }
-  if (run28) ops.push(run28);
+  if (run29) ops.push(run29);
   return ops;
 }
 function styleOf(cell) {
@@ -17363,7 +17470,7 @@ var jpi_inbox_exports = {};
 __export(jpi_inbox_exports, {
   defaultDecideIntro: () => defaultDecideIntro,
   formatInbox: () => formatInbox,
-  run: () => run11,
+  run: () => run12,
   runInboxPane: () => runInboxPane,
   runInboxTui: () => runInboxTui,
   sortConversations: () => sortConversations
@@ -17822,7 +17929,7 @@ async function runInboxTui(deps = {}) {
   }
   return { ok: true };
 }
-async function run11(opts = {}) {
+async function run12(opts = {}) {
   const {
     isTTY = process.stdout.isTTY,
     input = process.stdin,
@@ -17884,7 +17991,7 @@ __export(jpi_chat_exports, {
   formatThread: () => formatThread,
   readCachedSessionStale: () => readCachedSessionStale,
   relativeTime: () => relativeTime2,
-  run: () => run12,
+  run: () => run13,
   runBlockCommand: () => runBlockCommand,
   runChatPane: () => runChatPane,
   runNoticePane: () => runNoticePane,
@@ -18678,7 +18785,7 @@ async function runShareActivityCommand(opts = {}) {
   }
   return { ok: true, share };
 }
-async function run12() {
+async function run13() {
   const args5 = process.argv.slice(2);
   let login;
   let limit = 8;
@@ -18794,7 +18901,7 @@ var init_jpi_chat = __esm({
 // bin/jpi-hub.js
 var jpi_hub_exports = {};
 __export(jpi_hub_exports, {
-  run: () => run13,
+  run: () => run14,
   runHubTui: () => runHubTui
 });
 function stubRows(paneName) {
@@ -19719,7 +19826,7 @@ function printStatic(output = process.stdout) {
   out("  Panes: " + PANES.map((p) => sanitizeLine(p)).join(" \xB7 ") + "\n\n");
   out("  Run `terminalhire hub` in an interactive terminal to launch the full-screen hub.\n\n");
 }
-async function run13(opts = {}) {
+async function run14(opts = {}) {
   const {
     isTTY = process.stdout.isTTY,
     input = process.stdin,
@@ -20271,10 +20378,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path) {
-  if (!path)
+function getElementAtPath(obj, path2) {
+  if (!path2)
     return obj;
-  return path.reduce((acc, key) => acc?.[key], obj);
+  return path2.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -20602,11 +20709,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path, issues) {
+function prefixIssues(path2, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path);
+    iss.path.unshift(path2);
     return iss;
   });
 }
@@ -20824,16 +20931,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path = []) => {
+  const processError = (error3, path2 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path2, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path2, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path2, ...issue2.path]);
       } else {
-        const fullpath = [...path, ...issue2.path];
+        const fullpath = [...path2, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -31898,8 +32005,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path) {
-      let input = path;
+    function removeDotSegments(path2) {
+      let input = path2;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -32151,8 +32258,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path && path !== "/" ? path : void 0;
+        const [path2, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path2 && path2 !== "/" ? path2 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -42100,7 +42207,7 @@ __export(jpi_mcp_exports, {
   contributeResult: () => contributeResult,
   inboxResult: () => inboxResult,
   jobsResult: () => jobsResult,
-  run: () => run14
+  run: () => run15
 });
 function clampLimit(limit) {
   const n = Number(limit);
@@ -42171,7 +42278,7 @@ function buildToolResult(name, args5, entry, contributeEnabled) {
       return { status: "error", hint: `Unknown tool: ${name}` };
   }
 }
-async function run14() {
+async function run15() {
   const { Server: Server2 } = await Promise.resolve().then(() => (init_server2(), server_exports));
   const { StdioServerTransport: StdioServerTransport2 } = await Promise.resolve().then(() => (init_stdio2(), stdio_exports));
   const { ListToolsRequestSchema: ListToolsRequestSchema2, CallToolRequestSchema: CallToolRequestSchema2 } = await Promise.resolve().then(() => (init_types3(), types_exports));
@@ -42179,8 +42286,8 @@ async function run14() {
   try {
     const { readFileSync: readFileSync33, existsSync: existsSync25 } = await import("fs");
     const { join: join38 } = await import("path");
-    const { fileURLToPath: fileURLToPath11 } = await import("url");
-    const here = fileURLToPath11(new URL(".", import.meta.url));
+    const { fileURLToPath: fileURLToPath12 } = await import("url");
+    const here = fileURLToPath12(new URL(".", import.meta.url));
     for (const p of [join38(here, "..", "..", "package.json"), join38(here, "..", "package.json")]) {
       if (existsSync25(p)) {
         const pkg = JSON.parse(readFileSync33(p, "utf8"));
@@ -42273,9 +42380,9 @@ var init_jpi_mcp = __esm({
 // bin/jpi-connect.js
 var jpi_connect_exports = {};
 __export(jpi_connect_exports, {
-  run: () => run15
+  run: () => run16
 });
-async function run15() {
+async function run16() {
   const args5 = process.argv.slice(2).filter((a) => a !== "connect");
   if (args5.includes("--mute")) {
     writeConfig({ inboundNudgeMuted: true });
@@ -42504,9 +42611,9 @@ var init_link = __esm({
 // bin/jpi-link.js
 var jpi_link_exports = {};
 __export(jpi_link_exports, {
-  run: () => run16
+  run: () => run17
 });
-async function run16() {
+async function run17() {
   try {
     const args5 = process.argv.slice(2);
     if (args5.includes("--logout")) {
@@ -42533,7 +42640,7 @@ var init_jpi_link = __esm({
 // bin/jpi-protocol.js
 var jpi_protocol_exports = {};
 __export(jpi_protocol_exports, {
-  run: () => run17
+  run: () => run18
 });
 function printUsage() {
   console.log("");
@@ -42544,7 +42651,7 @@ function printUsage() {
   console.log("  status       Show whether claim links are currently registered");
   console.log("");
 }
-async function run17() {
+async function run18() {
   const args5 = process.argv.slice(2);
   const verb = args5[0];
   if (verb === "--help" || verb === "-h") {
@@ -42592,7 +42699,7 @@ var init_jpi_protocol = __esm({
 // bin/jpi-profile.js
 var jpi_profile_exports = {};
 __export(jpi_profile_exports, {
-  run: () => run18
+  run: () => run19
 });
 import { createInterface as createInterface10 } from "readline";
 function prompt4(question) {
@@ -42604,7 +42711,7 @@ function prompt4(question) {
     });
   });
 }
-async function run18() {
+async function run19() {
   const { readProfile: readProfile2, writeProfile: writeProfile2, deleteProfile: deleteProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
   const args5 = process.argv.slice(2);
   if (args5.includes("--show")) {
@@ -42705,16 +42812,16 @@ function isEmployerContext(cwd) {
   if (domain) return !PERSONAL_EMAIL_DOMAINS.has(domain);
   return false;
 }
-function readJsonSafe(path) {
+function readJsonSafe(path2) {
   try {
-    return JSON.parse(readFileSync25(path, "utf8"));
+    return JSON.parse(readFileSync25(path2, "utf8"));
   } catch {
     return null;
   }
 }
-function readFileSafe(path) {
+function readFileSafe(path2) {
   try {
-    return readFileSync25(path, "utf8");
+    return readFileSync25(path2, "utf8");
   } catch {
     return "";
   }
@@ -42937,9 +43044,9 @@ var init_signal = __esm({
 // bin/jpi-learn.js
 var jpi_learn_exports = {};
 __export(jpi_learn_exports, {
-  run: () => run19
+  run: () => run20
 });
-async function run19() {
+async function run20() {
   try {
     const args5 = process.argv.slice(2);
     const cwdIdx = args5.indexOf("--cwd");
@@ -42966,7 +43073,7 @@ var init_jpi_learn = __esm({
     "use strict";
     isMain = process.argv[1]?.endsWith("jpi-learn.js") || process.argv[1]?.endsWith("jpi-learn");
     if (isMain) {
-      run19();
+      run20();
     }
   }
 });
@@ -42974,7 +43081,7 @@ var init_jpi_learn = __esm({
 // bin/jpi-config.js
 var jpi_config_exports = {};
 __export(jpi_config_exports, {
-  run: () => run20
+  run: () => run21
 });
 import { join as join28 } from "path";
 import { homedir as homedir25 } from "os";
@@ -42984,7 +43091,7 @@ function parseNudgeMode2(raw) {
   if (m && parseInt(m[1], 10) >= 1) return raw;
   return null;
 }
-async function run20() {
+async function run21() {
   const args5 = process.argv.slice(2);
   const filtered = args5[0] === "config" ? args5.slice(1) : args5;
   if (filtered.includes("--show") || filtered.length === 0) {
@@ -43074,18 +43181,18 @@ function claudeSettingsPath() {
 function spinnerStateFilePath() {
   return join29(thDir(), "spinner-state.json");
 }
-function readJson(path, fallback) {
+function readJson(path2, fallback) {
   try {
-    return existsSync18(path) ? JSON.parse(readFileSync26(path, "utf8")) : fallback;
+    return existsSync18(path2) ? JSON.parse(readFileSync26(path2, "utf8")) : fallback;
   } catch {
     return fallback;
   }
 }
-function atomicWriteJson2(path, obj) {
-  mkdirSync18(dirname4(path), { recursive: true });
-  const tmp = `${path}.tmp-${process.pid}`;
+function atomicWriteJson2(path2, obj) {
+  mkdirSync18(dirname4(path2), { recursive: true });
+  const tmp = `${path2}.tmp-${process.pid}`;
   writeFileSync18(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
-  renameSync8(tmp, path);
+  renameSync8(tmp, path2);
 }
 function readState() {
   const SPINNER_STATE_FILE = spinnerStateFilePath();
@@ -43230,11 +43337,11 @@ function seenFilePath() {
   const dir = process.env["TERMINALHIRE_DIR"] || join31(homedir27(), ".terminalhire");
   return join31(dir, "seen-history.json");
 }
-function atomicWriteJson3(path, obj) {
-  mkdirSync19(dirname5(path), { recursive: true });
-  const tmp = `${path}.tmp-${process.pid}`;
+function atomicWriteJson3(path2, obj) {
+  mkdirSync19(dirname5(path2), { recursive: true });
+  const tmp = `${path2}.tmp-${process.pid}`;
   writeFileSync19(tmp, JSON.stringify(obj) + "\n", { encoding: "utf8", mode: 384 });
-  renameSync9(tmp, path);
+  renameSync9(tmp, path2);
 }
 function emptyHistory() {
   return { surface: 0, entries: {} };
@@ -43688,7 +43795,7 @@ var init_spinner = __esm({
 // bin/jpi-spinner.js
 var jpi_spinner_exports = {};
 __export(jpi_spinner_exports, {
-  run: () => run21
+  run: () => run22
 });
 import {
   readFileSync as readFileSync28,
@@ -43736,7 +43843,7 @@ function readTopMatches() {
     return [];
   }
 }
-async function run21() {
+async function run22() {
   const args5 = process.argv.slice(2).filter((a) => a !== "spinner");
   const has = (f) => args5.includes(f);
   const val = (f) => {
@@ -43883,7 +43990,7 @@ var init_jpi_spinner = __esm({
 // bin/jpi-sync.js
 var jpi_sync_exports = {};
 __export(jpi_sync_exports, {
-  run: () => run22
+  run: () => run23
 });
 import { readFileSync as readFileSync29, writeFileSync as writeFileSync21, mkdirSync as mkdirSync21, existsSync as existsSync20, rmSync as rmSync9 } from "fs";
 import { join as join33 } from "path";
@@ -44195,7 +44302,7 @@ async function runDelete() {
   clearMarker();
   console.log("\n  Synced profile deleted and local marker cleared.\n");
 }
-async function run22() {
+async function run23() {
   const args5 = process.argv.slice(2).filter((a) => a !== "sync");
   const has = (f) => args5.includes(f);
   if (has("--push") || has("--enable")) {
@@ -44239,13 +44346,13 @@ var init_jpi_sync = __esm({
 // bin/jpi-init.js
 var jpi_init_exports = {};
 __export(jpi_init_exports, {
-  run: () => run23
+  run: () => run24
 });
 import { existsSync as existsSync21 } from "fs";
 import { join as join34, resolve } from "path";
-import { fileURLToPath as fileURLToPath6, pathToFileURL } from "url";
+import { fileURLToPath as fileURLToPath7, pathToFileURL } from "url";
 import { createInterface as createInterface13 } from "readline";
-import { spawnSync as spawnSync2 } from "child_process";
+import { spawnSync as spawnSync3 } from "child_process";
 function resolveScript(name) {
   const distPath = resolve(join34(__dirname4, "..", "..", "dist", "bin", `${name}.js`));
   const legacyPath = resolve(join34(__dirname4, `${name}.js`));
@@ -44273,7 +44380,7 @@ function resolveStatuslineInstallJs() {
 function tokenizeInterest(raw) {
   return raw.split(/[,/]|\s+/).map((t) => t.trim()).filter(Boolean);
 }
-async function run23() {
+async function run24() {
   const rl = createInterface13({ input: process.stdin, output: process.stdout });
   const ask3 = (question) => new Promise((resolve2) => {
     let answered = false;
@@ -44320,7 +44427,7 @@ async function run23() {
     console.log("  Starting GitHub device flow...");
     const loginScript = resolveScript("jpi-login");
     rl.pause();
-    const child = spawnSync2(process.execPath, [loginScript, "login"], {
+    const child = spawnSync3(process.execPath, [loginScript, "login"], {
       stdio: ["ignore", "inherit", "inherit"],
       env: { ...process.env, JPI_SKIP_PEER_PROMPT: "1" }
     });
@@ -44358,7 +44465,7 @@ async function run23() {
   console.log("");
   console.log("  Fetching anonymous job index (no dev data sent)...");
   const jobsScript = resolveScript("jpi-jobs");
-  const seedChild = spawnSync2(
+  const seedChild = spawnSync3(
     process.execPath,
     [jobsScript, "--limit", "0"],
     {
@@ -44491,7 +44598,7 @@ var init_jpi_init = __esm({
   "bin/jpi-init.js"() {
     "use strict";
     init_directory2();
-    __dirname4 = fileURLToPath6(new URL(".", import.meta.url));
+    __dirname4 = fileURLToPath7(new URL(".", import.meta.url));
     INTEREST_PROMPT = "A language or domain you want to grow into? We'll point you to open-source and stretch roles there. (optional \u2014 press Enter to skip)";
   }
 });
@@ -44576,10 +44683,10 @@ var init_beta_nudge = __esm({
 // bin/jpi-refresh.js
 var jpi_refresh_exports = {};
 __export(jpi_refresh_exports, {
-  run: () => run24
+  run: () => run25
 });
-import { fileURLToPath as fileURLToPath7 } from "url";
-async function run24() {
+import { fileURLToPath as fileURLToPath8 } from "url";
+async function run25() {
   try {
     let index;
     for (let attempt = 1; ; attempt++) {
@@ -44896,7 +45003,7 @@ var init_jpi_refresh = __esm({
     init_config();
     init_web_session();
     GH_SESSION_COOKIE8 = "__jpi_gh_session";
-    __dirname5 = fileURLToPath7(new URL(".", import.meta.url));
+    __dirname5 = fileURLToPath8(new URL(".", import.meta.url));
     API_URL8 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
     CWD_SOFTTAGS_ENABLED = process.env["TH_CWD_SOFTTAGS"] !== "0";
     CWD_SOFTTAG_WEIGHT = 0.4;
@@ -44910,12 +45017,12 @@ var init_jpi_refresh = __esm({
 // bin/jpi-save.js
 var jpi_save_exports = {};
 __export(jpi_save_exports, {
-  run: () => run25
+  run: () => run26
 });
 import { readFileSync as readFileSync30, existsSync as existsSync22 } from "fs";
 import { join as join35 } from "path";
 import { homedir as homedir30 } from "os";
-import { fileURLToPath as fileURLToPath8 } from "url";
+import { fileURLToPath as fileURLToPath9 } from "url";
 function findJobInCache(jobId) {
   try {
     if (!existsSync22(INDEX_CACHE_FILE7)) return null;
@@ -44988,7 +45095,7 @@ async function cmdUnsave(jobId) {
     process.exit(1);
   }
 }
-async function run25() {
+async function run26() {
   const verb = process.argv[2];
   const jobId = process.argv[3];
   try {
@@ -45011,7 +45118,7 @@ var __dirname6, TERMINALHIRE_DIR20, INDEX_CACHE_FILE7;
 var init_jpi_save = __esm({
   "bin/jpi-save.js"() {
     "use strict";
-    __dirname6 = fileURLToPath8(new URL(".", import.meta.url));
+    __dirname6 = fileURLToPath9(new URL(".", import.meta.url));
     TERMINALHIRE_DIR20 = process.env.TERMINALHIRE_DIR || join35(homedir30(), ".terminalhire");
     INDEX_CACHE_FILE7 = join35(TERMINALHIRE_DIR20, "index-cache.json");
   }
@@ -45020,10 +45127,10 @@ var init_jpi_save = __esm({
 // bin/jpi-beta.js
 var jpi_beta_exports = {};
 __export(jpi_beta_exports, {
-  run: () => run26
+  run: () => run27
 });
 import { createInterface as createInterface14 } from "readline";
-async function run26() {
+async function run27() {
   const rl = createInterface14({ input: process.stdin, output: process.stdout });
   const ask3 = (question) => new Promise((resolve2) => {
     const onClose = () => resolve2(null);
@@ -45144,12 +45251,12 @@ var init_jpi_beta = __esm({
 // bin/jpi-feedback.js
 var jpi_feedback_exports = {};
 __export(jpi_feedback_exports, {
-  run: () => run27
+  run: () => run28
 });
 import { createInterface as createInterface15 } from "readline";
 import { readFileSync as readFileSync31, existsSync as existsSync23 } from "fs";
 import { join as join36 } from "path";
-import { fileURLToPath as fileURLToPath9 } from "url";
+import { fileURLToPath as fileURLToPath10 } from "url";
 function readLocalVersion3() {
   try {
     for (const p of [join36(__dirname7, "..", "..", "package.json"), join36(__dirname7, "..", "package.json")]) {
@@ -45162,7 +45269,7 @@ function readLocalVersion3() {
   }
   return null;
 }
-async function run27() {
+async function run28() {
   const rl = createInterface15({ input: process.stdin, output: process.stdout });
   const ask3 = (question) => new Promise((resolve2) => {
     const onClose = () => resolve2(null);
@@ -45278,7 +45385,7 @@ var init_jpi_feedback = __esm({
     init_web_session();
     init_config();
     FULL_FORM_INTERVAL_MS = 7 * 24 * 60 * 60 * 1e3;
-    __dirname7 = fileURLToPath9(new URL(".", import.meta.url));
+    __dirname7 = fileURLToPath10(new URL(".", import.meta.url));
     API_BASE3 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE10 = "__jpi_gh_session";
     CATEGORIES = ["onboarding", "linking", "match-quality", "claim-pr", "chat", "other"];
@@ -45288,10 +45395,10 @@ var init_jpi_feedback = __esm({
 });
 
 // bin/jpi-dispatch.js
-import { fileURLToPath as fileURLToPath10 } from "url";
+import { fileURLToPath as fileURLToPath11 } from "url";
 import { join as join37 } from "path";
 import { existsSync as existsSync24, readFileSync as readFileSync32 } from "fs";
-var __dirname8 = fileURLToPath10(new URL(".", import.meta.url));
+var __dirname8 = fileURLToPath11(new URL(".", import.meta.url));
 function readPackageVersion() {
   try {
     const candidates = [
@@ -45308,7 +45415,7 @@ function readPackageVersion() {
   }
   return "0.1.1";
 }
-var SUBCOMMANDS = ["jobs", "devs", "project", "bounties", "contribute", "claim", "repo", "trajectory", "mirror", "intro", "chat", "inbox", "hub", "mcp", "connect", "link", "protocol", "profile", "login", "logout", "learn", "config", "spinner", "statusline", "sync", "init", "refresh", "save", "saved", "unsave", "beta", "feedback", "help", "--help", "-h", "--version", "-v"];
+var SUBCOMMANDS = ["jobs", "devs", "project", "bounties", "contribute", "claim", "repo", "trajectory", "mirror", "intro", "chat", "inbox", "hub", "mcp", "connect", "link", "protocol", "profile", "login", "logout", "learn", "config", "spinner", "statusline", "sync", "init", "refresh", "save", "saved", "unsave", "update", "upgrade", "beta", "feedback", "help", "--help", "-h", "--version", "-v"];
 var firstArg = process.argv[2];
 if (!firstArg && !process.stdin.isTTY) {
   const { default: childProcess } = await import("child_process");
@@ -45414,6 +45521,7 @@ if (!firstArg || firstArg === "help" || firstArg === "--help" || firstArg === "-
   console.log("  terminalhire statusline --on                Connection-only statusLine (\u{1F4AC} unread + intro requests)");
   console.log("  terminalhire statusline --off               Remove it + restore your prior statusLine");
   console.log("  terminalhire refresh                        Fetch index + match locally, update cache (non-interactive)");
+  console.log("  terminalhire update                         Update to the latest release (npm installs auto; --check, --force)");
   console.log("  terminalhire save <jobId>                   Save a job locally (id shown in `jobs` output)");
   console.log("  terminalhire saved                          List all locally-saved jobs");
   console.log("  terminalhire unsave <jobId>                 Remove a saved job");
@@ -45500,6 +45608,11 @@ if (firstArg === "repo") {
   const mod2 = await Promise.resolve().then(() => (init_jpi_repo(), jpi_repo_exports));
   await mod2.run();
   process.exit(0);
+}
+if (firstArg === "update" || firstArg === "upgrade") {
+  const mod2 = await Promise.resolve().then(() => (init_jpi_update(), jpi_update_exports));
+  const code = await mod2.run(process.argv.slice(3));
+  process.exit(code ?? 0);
 }
 if (firstArg === "trajectory" || firstArg === "mirror") {
   process.argv.splice(2, 1);
@@ -45638,8 +45751,8 @@ if (firstArg === "statusline") {
   const fromDist = join37(__dirname8, "..", "..", "statusline-install.js");
   const fromBin = join37(__dirname8, "..", "statusline-install.js");
   const installer = existsSync24(fromDist) ? fromDist : fromBin;
-  const { spawnSync: spawnSync3 } = await import("child_process");
-  const child = spawnSync3(
+  const { spawnSync: spawnSync4 } = await import("child_process");
+  const child = spawnSync4(
     process.execPath,
     uninstall ? [installer, "--uninstall"] : [installer],
     { stdio: ["inherit", "inherit", "inherit"], env: process.env }
