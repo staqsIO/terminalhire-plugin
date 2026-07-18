@@ -1955,7 +1955,7 @@ import {
 import { homedir } from "os";
 import { join as join2 } from "path";
 function terminalhireDir() {
-  return join2(homedir(), ".terminalhire");
+  return process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
 }
 function webSessionFilePath() {
   return join2(terminalhireDir(), "web-session");
@@ -2138,7 +2138,7 @@ var TERMINALHIRE_DIR, KEY_FILE, KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, KEY_BYTES,
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
-    TERMINALHIRE_DIR = join3(homedir2(), ".terminalhire");
+    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
     KEY_FILE = join3(TERMINALHIRE_DIR, "key");
     KEYTAR_SERVICE = "terminalhire";
     KEYTAR_ACCOUNT = "profile-key";
@@ -2288,7 +2288,7 @@ var init_profile = __esm({
     "use strict";
     init_src();
     init_crypto_store();
-    TERMINALHIRE_DIR2 = join4(homedir3(), ".terminalhire");
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
     PROFILE_FILE = join4(TERMINALHIRE_DIR2, "profile.enc");
     profileStore = createEncryptedStore(PROFILE_FILE, {
       blank: blankProfile,
@@ -2510,7 +2510,7 @@ function renderMarkdown(view) {
   return lines.join("\n");
 }
 function writeExportArtifacts(score, markdown) {
-  const dir = join5(homedir4(), ".terminalhire");
+  const dir = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
   mkdirSync3(dir, { recursive: true });
   const jsonPath = join5(dir, "trajectory-export.json");
   const mdPath = join5(dir, "trajectory-export.md");

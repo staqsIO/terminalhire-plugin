@@ -21,7 +21,7 @@ import {
 import { homedir } from "os";
 import { join } from "path";
 function terminalhireDir() {
-  return join(homedir(), ".terminalhire");
+  return process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
 }
 function webSessionFilePath() {
   return join(terminalhireDir(), "web-session");
@@ -75,13 +75,19 @@ function writeConfig(config) {
   mkdirSync2(TERMINALHIRE_DIR, { recursive: true });
   const current = readConfig();
   const merged = { ...current, ...config };
+  if ("contributePrompted" in merged) {
+    if (merged.contributeEnabled === false && !("contributeEnabled" in config)) {
+      delete merged.contributeEnabled;
+    }
+    delete merged.contributePrompted;
+  }
   writeFileSync2(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 var TERMINALHIRE_DIR, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
-    TERMINALHIRE_DIR = join2(homedir2(), ".terminalhire");
+    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
     CONFIG_FILE = join2(TERMINALHIRE_DIR, "config.json");
     DEFAULT_CONFIG = {
       nudge: "session",
@@ -92,8 +98,7 @@ var init_config = __esm({
       chatShareActivity: false,
       inboundNudgeMuted: false,
       inboundNudgeDisclosed: false,
-      contributeEnabled: false,
-      contributePrompted: false,
+      contributeEnabled: true,
       betaOptIn: false,
       lastFullFeedbackAt: null,
       lastPulseAskAt: null,

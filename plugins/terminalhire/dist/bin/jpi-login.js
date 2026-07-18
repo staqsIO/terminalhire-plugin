@@ -296,7 +296,7 @@ var TERMINALHIRE_DIR, TOKEN_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, GITHUB_SC
 var init_github_auth = __esm({
   "src/github-auth.ts"() {
     "use strict";
-    TERMINALHIRE_DIR = join(homedir(), ".terminalhire");
+    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
     TOKEN_FILE = join(TERMINALHIRE_DIR, "github-token.enc");
     KEY_FILE = join(TERMINALHIRE_DIR, "key");
     ALGO = "aes-256-gcm";
@@ -4333,7 +4333,12 @@ function buildContributionJob(a) {
       // TERM-27: persist the repo's primary language so project curation can
       // exclude the repo's OWN language id (folded into every issue's tags) from
       // the distinct-skill signal. Same `repo` used by the tokenize() tag build.
-      language: a.repo.language ?? null
+      language: a.repo.language ?? null,
+      // TERM-35: stamp the search item's comment count (already in the response —
+      // zero extra egress). A NEUTRAL volume signal only: set solely when the
+      // search item carries a finite count >= 0; a failed/absent value leaves it
+      // undefined (never a fabricated 0), so a render's chip falls through cleanly.
+      commentsAtDiscovery: typeof a.issue.comments === "number" && Number.isFinite(a.issue.comments) && a.issue.comments >= 0 ? a.issue.comments : void 0
     },
     // Provenance: repo-first discovered items only (label-first omits the field).
     ...a.discovered ? { discovered: true } : {},
@@ -4849,6 +4854,15 @@ async function enrichWinnability(jobs, contribute, w) {
     );
   }
 }
+function hasClickableUrl(url) {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 async function buildIndex(opts) {
   const includePartners = opts?.includePartners ?? true;
   const publicJobs = await aggregate(opts);
@@ -4859,6 +4873,7 @@ async function buildIndex(opts) {
     ...opts?.partnerRoles ?? []
   ];
   for (const job of partnerJobs) {
+    if (!hasClickableUrl(job.url)) continue;
     if (!seen.has(job.id)) {
       seen.add(job.id);
       allJobs.push(job);
@@ -4940,7 +4955,8 @@ async function fetchIssueStatus(fullName, issueNumber, opts = {}) {
   for (const a of body.assignees ?? []) {
     if (a && typeof a.login === "string") assignees.add(a.login);
   }
-  return { state, assignees: [...assignees] };
+  const comments = typeof body.comments === "number" && Number.isFinite(body.comments) && body.comments >= 0 ? body.comments : null;
+  return { state, assignees: [...assignees], comments };
 }
 var GITHUB_API3, DEFAULT_ISSUE_STATUS_TIMEOUT_MS;
 var init_github_issue_status = __esm({
@@ -8860,7 +8876,7 @@ var TERMINALHIRE_DIR2, KEY_FILE2, KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO2, KEY_BYT
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
-    TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
     KEY_FILE2 = join3(TERMINALHIRE_DIR2, "key");
     KEYTAR_SERVICE = "terminalhire";
     KEYTAR_ACCOUNT = "profile-key";
@@ -9010,7 +9026,7 @@ var init_profile = __esm({
     "use strict";
     init_src();
     init_crypto_store();
-    TERMINALHIRE_DIR3 = join4(homedir3(), ".terminalhire");
+    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
     PROFILE_FILE = join4(TERMINALHIRE_DIR3, "profile.enc");
     profileStore = createEncryptedStore(PROFILE_FILE, {
       blank: blankProfile,
@@ -9057,13 +9073,19 @@ function writeConfig(config) {
   mkdirSync3(TERMINALHIRE_DIR4, { recursive: true });
   const current = readConfig();
   const merged = { ...current, ...config };
+  if ("contributePrompted" in merged) {
+    if (merged.contributeEnabled === false && !("contributeEnabled" in config)) {
+      delete merged.contributeEnabled;
+    }
+    delete merged.contributePrompted;
+  }
   writeFileSync3(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 var TERMINALHIRE_DIR4, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
-    TERMINALHIRE_DIR4 = join5(homedir4(), ".terminalhire");
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
     CONFIG_FILE = join5(TERMINALHIRE_DIR4, "config.json");
     DEFAULT_CONFIG = {
       nudge: "session",
@@ -9074,8 +9096,7 @@ var init_config = __esm({
       chatShareActivity: false,
       inboundNudgeMuted: false,
       inboundNudgeDisclosed: false,
-      contributeEnabled: false,
-      contributePrompted: false,
+      contributeEnabled: true,
       betaOptIn: false,
       lastFullFeedbackAt: null,
       lastPulseAskAt: null,

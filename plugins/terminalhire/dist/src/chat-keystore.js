@@ -2770,7 +2770,7 @@ import {
 } from "fs";
 import { join as join2 } from "path";
 import { homedir } from "os";
-var TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
 var TOKEN_FILE = join2(TERMINALHIRE_DIR, "github-token.enc");
 var KEY_FILE = join2(TERMINALHIRE_DIR, "key");
 var ALGO = "aes-256-gcm";
@@ -2817,7 +2817,7 @@ function decrypt(blob, key) {
 }
 
 // src/chat-keystore.ts
-var TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
+var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
 var IDENTITY_FILE = join3(TERMINALHIRE_DIR2, "chat-identity.enc");
 async function loadOrCreateIdentity() {
   const key = await loadKey();

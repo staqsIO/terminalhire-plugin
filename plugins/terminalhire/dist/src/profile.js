@@ -679,7 +679,7 @@ import {
 import { join as join2, dirname, basename } from "path";
 import { homedir } from "os";
 import { createRequire } from "module";
-var TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
 var KEY_FILE = join2(TERMINALHIRE_DIR, "key");
 var KEYTAR_SERVICE = "terminalhire";
 var KEYTAR_ACCOUNT = "profile-key";
@@ -808,7 +808,7 @@ function createEncryptedStore(filePath, opts) {
 }
 
 // src/profile.ts
-var TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
+var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
 var PROFILE_FILE = join3(TERMINALHIRE_DIR2, "profile.enc");
 function blankProfile() {
   return {

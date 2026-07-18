@@ -4608,7 +4608,12 @@ function buildContributionJob(a) {
       // TERM-27: persist the repo's primary language so project curation can
       // exclude the repo's OWN language id (folded into every issue's tags) from
       // the distinct-skill signal. Same `repo` used by the tokenize() tag build.
-      language: a.repo.language ?? null
+      language: a.repo.language ?? null,
+      // TERM-35: stamp the search item's comment count (already in the response —
+      // zero extra egress). A NEUTRAL volume signal only: set solely when the
+      // search item carries a finite count >= 0; a failed/absent value leaves it
+      // undefined (never a fabricated 0), so a render's chip falls through cleanly.
+      commentsAtDiscovery: typeof a.issue.comments === "number" && Number.isFinite(a.issue.comments) && a.issue.comments >= 0 ? a.issue.comments : void 0
     },
     // Provenance: repo-first discovered items only (label-first omits the field).
     ...a.discovered ? { discovered: true } : {},
@@ -5124,6 +5129,15 @@ async function enrichWinnability(jobs, contribute, w) {
     );
   }
 }
+function hasClickableUrl(url) {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 async function buildIndex(opts) {
   const includePartners = opts?.includePartners ?? true;
   const publicJobs = await aggregate(opts);
@@ -5134,6 +5148,7 @@ async function buildIndex(opts) {
     ...opts?.partnerRoles ?? []
   ];
   for (const job of partnerJobs) {
+    if (!hasClickableUrl(job.url)) continue;
     if (!seen.has(job.id)) {
       seen.add(job.id);
       allJobs.push(job);
@@ -5215,7 +5230,8 @@ async function fetchIssueStatus(fullName, issueNumber, opts = {}) {
   for (const a of body.assignees ?? []) {
     if (a && typeof a.login === "string") assignees.add(a.login);
   }
-  return { state, assignees: [...assignees] };
+  const comments = typeof body.comments === "number" && Number.isFinite(body.comments) && body.comments >= 0 ? body.comments : null;
+  return { state, assignees: [...assignees], comments };
 }
 var GITHUB_API3, DEFAULT_ISSUE_STATUS_TIMEOUT_MS;
 var init_github_issue_status = __esm({
@@ -9152,7 +9168,7 @@ var TERMINALHIRE_DIR2, KEY_FILE, KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, KEY_BYTES
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
-    TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
     KEY_FILE = join3(TERMINALHIRE_DIR2, "key");
     KEYTAR_SERVICE = "terminalhire";
     KEYTAR_ACCOUNT = "profile-key";
@@ -9302,7 +9318,7 @@ var init_profile = __esm({
     "use strict";
     init_src();
     init_crypto_store();
-    TERMINALHIRE_DIR3 = join4(homedir3(), ".terminalhire");
+    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
     PROFILE_FILE = join4(TERMINALHIRE_DIR3, "profile.enc");
     profileStore = createEncryptedStore(PROFILE_FILE, {
       blank: blankProfile,
@@ -9349,7 +9365,7 @@ var TERMINALHIRE_DIR4, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
-    TERMINALHIRE_DIR4 = join5(homedir4(), ".terminalhire");
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
     CONFIG_FILE = join5(TERMINALHIRE_DIR4, "config.json");
     DEFAULT_CONFIG = {
       nudge: "session",
@@ -9360,8 +9376,7 @@ var init_config = __esm({
       chatShareActivity: false,
       inboundNudgeMuted: false,
       inboundNudgeDisclosed: false,
-      contributeEnabled: false,
-      contributePrompted: false,
+      contributeEnabled: true,
       betaOptIn: false,
       lastFullFeedbackAt: null,
       lastPulseAskAt: null,
@@ -9430,7 +9445,7 @@ var TERMINALHIRE_DIR5, TOKEN_FILE, KEY_FILE2, ALGO2, KEY_BYTES2, IV_BYTES2;
 var init_github_auth = __esm({
   "src/github-auth.ts"() {
     "use strict";
-    TERMINALHIRE_DIR5 = join6(homedir5(), ".terminalhire");
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join6(homedir5(), ".terminalhire");
     TOKEN_FILE = join6(TERMINALHIRE_DIR5, "github-token.enc");
     KEY_FILE2 = join6(TERMINALHIRE_DIR5, "key");
     ALGO2 = "aes-256-gcm";
@@ -9461,7 +9476,7 @@ var init_chat_keystore = __esm({
     "use strict";
     init_src();
     init_github_auth();
-    TERMINALHIRE_DIR6 = join7(homedir6(), ".terminalhire");
+    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join7(homedir6(), ".terminalhire");
     IDENTITY_FILE = join7(TERMINALHIRE_DIR6, "chat-identity.enc");
   }
 });
@@ -9478,7 +9493,7 @@ import {
 import { homedir as homedir7 } from "os";
 import { join as join8 } from "path";
 function terminalhireDir() {
-  return join8(homedir7(), ".terminalhire");
+  return process.env.TERMINALHIRE_DIR || join8(homedir7(), ".terminalhire");
 }
 function webSessionFilePath() {
   return join8(terminalhireDir(), "web-session");
@@ -9703,7 +9718,7 @@ var init_chat_client = __esm({
     init_web_session();
     CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE = "__jpi_gh_session";
-    TERMINALHIRE_DIR7 = join9(homedir8(), ".terminalhire");
+    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join9(homedir8(), ".terminalhire");
     PEERS_FILE = join9(TERMINALHIRE_DIR7, "chat-peers.json");
     REQUEST_TIMEOUT_MS = 1e4;
     ChatNotLinkedError = class extends Error {
@@ -10602,6 +10617,7 @@ function excludeOwnCard(results, ownLogin) {
 // bin/match-slots.js
 var ROTATE_WINDOW_MS = 5 * 60 * 1e3;
 var ROLE_HEAD_ROTATE_MS = 60 * 60 * 1e3;
+var LEAD_ROTATE_MS = 25 * 60 * 1e3;
 function rotate(list, now, windowMs = ROTATE_WINDOW_MS) {
   if (!Array.isArray(list) || list.length === 0) return [];
   const idx = Math.floor(now / windowMs) % list.length;

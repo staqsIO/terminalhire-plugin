@@ -4031,7 +4031,12 @@ function buildContributionJob(a) {
       // TERM-27: persist the repo's primary language so project curation can
       // exclude the repo's OWN language id (folded into every issue's tags) from
       // the distinct-skill signal. Same `repo` used by the tokenize() tag build.
-      language: a.repo.language ?? null
+      language: a.repo.language ?? null,
+      // TERM-35: stamp the search item's comment count (already in the response —
+      // zero extra egress). A NEUTRAL volume signal only: set solely when the
+      // search item carries a finite count >= 0; a failed/absent value leaves it
+      // undefined (never a fabricated 0), so a render's chip falls through cleanly.
+      commentsAtDiscovery: typeof a.issue.comments === "number" && Number.isFinite(a.issue.comments) && a.issue.comments >= 0 ? a.issue.comments : void 0
     },
     // Provenance: repo-first discovered items only (label-first omits the field).
     ...a.discovered ? { discovered: true } : {},
@@ -4547,6 +4552,15 @@ async function enrichWinnability(jobs, contribute, w) {
     );
   }
 }
+function hasClickableUrl(url) {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 async function buildIndex(opts) {
   const includePartners = opts?.includePartners ?? true;
   const publicJobs = await aggregate(opts);
@@ -4557,6 +4571,7 @@ async function buildIndex(opts) {
     ...opts?.partnerRoles ?? []
   ];
   for (const job of partnerJobs) {
+    if (!hasClickableUrl(job.url)) continue;
     if (!seen.has(job.id)) {
       seen.add(job.id);
       allJobs.push(job);
@@ -4638,7 +4653,8 @@ async function fetchIssueStatus(fullName, issueNumber, opts = {}) {
   for (const a of body.assignees ?? []) {
     if (a && typeof a.login === "string") assignees.add(a.login);
   }
-  return { state, assignees: [...assignees] };
+  const comments = typeof body.comments === "number" && Number.isFinite(body.comments) && body.comments >= 0 ? body.comments : null;
+  return { state, assignees: [...assignees], comments };
 }
 var GITHUB_API3, DEFAULT_ISSUE_STATUS_TIMEOUT_MS;
 var init_github_issue_status = __esm({

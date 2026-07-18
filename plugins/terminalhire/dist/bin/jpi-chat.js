@@ -4211,7 +4211,7 @@ var TERMINALHIRE_DIR, TOKEN_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES;
 var init_github_auth = __esm({
   "src/github-auth.ts"() {
     "use strict";
-    TERMINALHIRE_DIR = join2(homedir(), ".terminalhire");
+    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
     TOKEN_FILE = join2(TERMINALHIRE_DIR, "github-token.enc");
     KEY_FILE = join2(TERMINALHIRE_DIR, "key");
     ALGO = "aes-256-gcm";
@@ -4242,7 +4242,7 @@ var init_chat_keystore = __esm({
     "use strict";
     init_src();
     init_github_auth();
-    TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
     IDENTITY_FILE = join3(TERMINALHIRE_DIR2, "chat-identity.enc");
   }
 });
@@ -4259,7 +4259,7 @@ import {
 import { homedir as homedir3 } from "os";
 import { join as join4 } from "path";
 function terminalhireDir() {
-  return join4(homedir3(), ".terminalhire");
+  return process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
 }
 function webSessionFilePath() {
   return join4(terminalhireDir(), "web-session");
@@ -4484,7 +4484,7 @@ var init_chat_client = __esm({
     init_web_session();
     CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE = "__jpi_gh_session";
-    TERMINALHIRE_DIR3 = join5(homedir4(), ".terminalhire");
+    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
     PEERS_FILE = join5(TERMINALHIRE_DIR3, "chat-peers.json");
     REQUEST_TIMEOUT_MS = 1e4;
     ChatNotLinkedError = class extends Error {
@@ -4544,13 +4544,19 @@ function writeConfig(config) {
   mkdirSync5(TERMINALHIRE_DIR4, { recursive: true });
   const current = readConfig();
   const merged = { ...current, ...config };
+  if ("contributePrompted" in merged) {
+    if (merged.contributeEnabled === false && !("contributeEnabled" in config)) {
+      delete merged.contributeEnabled;
+    }
+    delete merged.contributePrompted;
+  }
   writeFileSync5(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 var TERMINALHIRE_DIR4, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
-    TERMINALHIRE_DIR4 = join6(homedir5(), ".terminalhire");
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join6(homedir5(), ".terminalhire");
     CONFIG_FILE = join6(TERMINALHIRE_DIR4, "config.json");
     DEFAULT_CONFIG = {
       nudge: "session",
@@ -4561,8 +4567,7 @@ var init_config = __esm({
       chatShareActivity: false,
       inboundNudgeMuted: false,
       inboundNudgeDisclosed: false,
-      contributeEnabled: false,
-      contributePrompted: false,
+      contributeEnabled: true,
       betaOptIn: false,
       lastFullFeedbackAt: null,
       lastPulseAskAt: null,
@@ -5165,7 +5170,7 @@ var TERMINALHIRE_DIR6, KEY_FILE2, KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO2, KEY_BYT
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
-    TERMINALHIRE_DIR6 = join8(homedir7(), ".terminalhire");
+    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join8(homedir7(), ".terminalhire");
     KEY_FILE2 = join8(TERMINALHIRE_DIR6, "key");
     KEYTAR_SERVICE = "terminalhire";
     KEYTAR_ACCOUNT = "profile-key";
@@ -5315,7 +5320,7 @@ var init_profile = __esm({
     "use strict";
     init_src();
     init_crypto_store();
-    TERMINALHIRE_DIR7 = join9(homedir8(), ".terminalhire");
+    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join9(homedir8(), ".terminalhire");
     PROFILE_FILE = join9(TERMINALHIRE_DIR7, "profile.enc");
     profileStore = createEncryptedStore(PROFILE_FILE, {
       blank: blankProfile,

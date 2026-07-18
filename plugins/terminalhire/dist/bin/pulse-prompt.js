@@ -18,7 +18,7 @@ import {
 import { homedir } from "os";
 import { join } from "path";
 function terminalhireDir() {
-  return join(homedir(), ".terminalhire");
+  return process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
 }
 function webSessionFilePath() {
   return join(terminalhireDir(), "web-session");
@@ -44,7 +44,7 @@ function readWebSessionCookie() {
 import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, existsSync as existsSync2 } from "fs";
 import { join as join2 } from "path";
 import { homedir as homedir2 } from "os";
-var TERMINALHIRE_DIR = join2(homedir2(), ".terminalhire");
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
 var CONFIG_FILE = join2(TERMINALHIRE_DIR, "config.json");
 var DEFAULT_CONFIG = {
   nudge: "session",
@@ -55,8 +55,7 @@ var DEFAULT_CONFIG = {
   chatShareActivity: false,
   inboundNudgeMuted: false,
   inboundNudgeDisclosed: false,
-  contributeEnabled: false,
-  contributePrompted: false,
+  contributeEnabled: true,
   betaOptIn: false,
   lastFullFeedbackAt: null,
   lastPulseAskAt: null,
@@ -77,6 +76,12 @@ function writeConfig(config) {
   mkdirSync2(TERMINALHIRE_DIR, { recursive: true });
   const current = readConfig();
   const merged = { ...current, ...config };
+  if ("contributePrompted" in merged) {
+    if (merged.contributeEnabled === false && !("contributeEnabled" in config)) {
+      delete merged.contributeEnabled;
+    }
+    delete merged.contributePrompted;
+  }
   writeFileSync2(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 

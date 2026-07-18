@@ -58,7 +58,7 @@ import {
 import { join, dirname, basename } from "path";
 import { homedir } from "os";
 import { createRequire } from "module";
-var TERMINALHIRE_DIR = join(homedir(), ".terminalhire");
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
 var KEY_FILE = join(TERMINALHIRE_DIR, "key");
 var KEYTAR_SERVICE = "terminalhire";
 var KEYTAR_ACCOUNT = "profile-key";

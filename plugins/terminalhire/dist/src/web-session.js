@@ -10,7 +10,7 @@ import {
 import { homedir } from "os";
 import { join } from "path";
 function terminalhireDir() {
-  return join(homedir(), ".terminalhire");
+  return process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
 }
 function webSessionFilePath() {
   return join(terminalhireDir(), "web-session");

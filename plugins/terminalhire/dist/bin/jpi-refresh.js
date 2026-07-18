@@ -39,7 +39,6 @@ __export(config_exports, {
   getSurfaceMix: () => getSurfaceMix,
   isBetaOptIn: () => isBetaOptIn,
   isContributeEnabled: () => isContributeEnabled,
-  isContributePrompted: () => isContributePrompted,
   isInboundNudgeMuted: () => isInboundNudgeMuted,
   isPeerConnectEnabled: () => isPeerConnectEnabled,
   parseNudgeMode: () => parseNudgeMode,
@@ -64,6 +63,12 @@ function writeConfig(config) {
   mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
   const current = readConfig();
   const merged = { ...current, ...config };
+  if ("contributePrompted" in merged) {
+    if (merged.contributeEnabled === false && !("contributeEnabled" in config)) {
+      delete merged.contributeEnabled;
+    }
+    delete merged.contributePrompted;
+  }
   writeFileSync3(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function parseNudgeMode(raw) {
@@ -104,10 +109,8 @@ function isInboundNudgeMuted() {
   return readConfig().inboundNudgeMuted === true;
 }
 function isContributeEnabled() {
-  return readConfig().contributeEnabled === true;
-}
-function isContributePrompted() {
-  return readConfig().contributePrompted === true;
+  const cfg = readConfig();
+  return !(cfg.contributeEnabled === false && !("contributePrompted" in cfg));
 }
 function isBetaOptIn() {
   return readConfig().betaOptIn === true;
@@ -116,7 +119,7 @@ var TERMINALHIRE_DIR3, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
-    TERMINALHIRE_DIR3 = join3(homedir3(), ".terminalhire");
+    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join3(homedir3(), ".terminalhire");
     CONFIG_FILE = join3(TERMINALHIRE_DIR3, "config.json");
     DEFAULT_CONFIG = {
       nudge: "session",
@@ -127,8 +130,7 @@ var init_config = __esm({
       chatShareActivity: false,
       inboundNudgeMuted: false,
       inboundNudgeDisclosed: false,
-      contributeEnabled: false,
-      contributePrompted: false,
+      contributeEnabled: true,
       betaOptIn: false,
       lastFullFeedbackAt: null,
       lastPulseAskAt: null,
@@ -4160,7 +4162,12 @@ function buildContributionJob(a) {
       // TERM-27: persist the repo's primary language so project curation can
       // exclude the repo's OWN language id (folded into every issue's tags) from
       // the distinct-skill signal. Same `repo` used by the tokenize() tag build.
-      language: a.repo.language ?? null
+      language: a.repo.language ?? null,
+      // TERM-35: stamp the search item's comment count (already in the response —
+      // zero extra egress). A NEUTRAL volume signal only: set solely when the
+      // search item carries a finite count >= 0; a failed/absent value leaves it
+      // undefined (never a fabricated 0), so a render's chip falls through cleanly.
+      commentsAtDiscovery: typeof a.issue.comments === "number" && Number.isFinite(a.issue.comments) && a.issue.comments >= 0 ? a.issue.comments : void 0
     },
     // Provenance: repo-first discovered items only (label-first omits the field).
     ...a.discovered ? { discovered: true } : {},
@@ -4676,6 +4683,15 @@ async function enrichWinnability(jobs, contribute, w) {
     );
   }
 }
+function hasClickableUrl(url) {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 async function buildIndex(opts) {
   const includePartners = opts?.includePartners ?? true;
   const publicJobs = await aggregate(opts);
@@ -4686,6 +4702,7 @@ async function buildIndex(opts) {
     ...opts?.partnerRoles ?? []
   ];
   for (const job of partnerJobs) {
+    if (!hasClickableUrl(job.url)) continue;
     if (!seen.has(job.id)) {
       seen.add(job.id);
       allJobs.push(job);
@@ -4767,7 +4784,8 @@ async function fetchIssueStatus(fullName, issueNumber, opts = {}) {
   for (const a of body.assignees ?? []) {
     if (a && typeof a.login === "string") assignees.add(a.login);
   }
-  return { state, assignees: [...assignees] };
+  const comments = typeof body.comments === "number" && Number.isFinite(body.comments) && body.comments >= 0 ? body.comments : null;
+  return { state, assignees: [...assignees], comments };
 }
 var GITHUB_API3, DEFAULT_ISSUE_STATUS_TIMEOUT_MS;
 var init_github_issue_status = __esm({
@@ -8704,7 +8722,7 @@ var TERMINALHIRE_DIR4, KEY_FILE, KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, KEY_BYTES
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
-    TERMINALHIRE_DIR4 = join6(homedir5(), ".terminalhire");
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join6(homedir5(), ".terminalhire");
     KEY_FILE = join6(TERMINALHIRE_DIR4, "key");
     KEYTAR_SERVICE = "terminalhire";
     KEYTAR_ACCOUNT = "profile-key";
@@ -8854,7 +8872,7 @@ var init_profile = __esm({
     "use strict";
     init_src();
     init_crypto_store();
-    TERMINALHIRE_DIR5 = join7(homedir6(), ".terminalhire");
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join7(homedir6(), ".terminalhire");
     PROFILE_FILE = join7(TERMINALHIRE_DIR5, "profile.enc");
     profileStore = createEncryptedStore(PROFILE_FILE, {
       blank: blankProfile,
@@ -9634,14 +9652,6 @@ function buildIncomingIntroLine(incomingPending) {
   if (n < 1) return null;
   return n === 1 ? `\u2198 someone wants to connect \xB7 terminalhire intro --list` : `\u2198 ${n} people want to connect \xB7 terminalhire intro --list`;
 }
-function buildContributeNudgeLine(contributeNudge) {
-  const n = contributeNudge && typeof contributeNudge.count === "number" ? contributeNudge.count : 0;
-  if (n < 1) return null;
-  if (contributeNudge.onRamp === true) {
-    return n === 1 ? "\u2726 Build your Proof of Work \u2014 1 credential-building issue matched to your stack \xB7 terminalhire contribute" : `\u2726 Build your Proof of Work \u2014 ${n} credential-building issues matched to your stack \xB7 terminalhire contribute`;
-  }
-  return n === 1 ? "\u2726 an open-source issue that counts toward your r\xE9sum\xE9 \xB7 terminalhire contribute" : `\u2726 ${n} open-source issues that count toward your r\xE9sum\xE9 \xB7 terminalhire contribute`;
-}
 function buildSessionStaleLine(sessionStale) {
   return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
 }
@@ -9655,19 +9665,16 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
     topPeers,
     incomingPending,
     sessionStale,
-    contributeNudge,
     unpushedClaims,
     seenHistory
   } = opts;
   const staleLine = buildSessionStaleLine(sessionStale);
   const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
   const introLine = buildIncomingIntroLine(incomingPending);
-  const contributeLine = buildContributeNudgeLine(contributeNudge);
   const unpushedLine = buildUnpushedClaimsLine(unpushedClaims);
   const ranked = filterFreshMatches(rankBySessionTags(topMatches, sessionTags), seenHistory);
   if (!Array.isArray(ranked) || ranked.length === 0) {
     if (introLine) return withStale([introLine]);
-    if (contributeLine) return withStale([contributeLine]);
     if (unpushedLine) return withStale([unpushedLine]);
     const peerLine = buildPeerLine(topPeers);
     return withStale(peerLine ? [peerLine] : []);
@@ -9677,7 +9684,6 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   const cap = Math.max(1, verbCountForFrequency(frequency, ceiling));
   const pool = [...headers.slice(0, cap), ctaVerb()];
   if (introLine) pool.push(introLine);
-  if (contributeLine) pool.push(contributeLine);
   if (unpushedLine) pool.push(unpushedLine);
   return withStale(pool);
 }
@@ -9816,7 +9822,6 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
     topPeers: opts.topPeers,
     incomingPending: opts.incomingPending,
     sessionStale: opts.sessionStale,
-    contributeNudge: opts.contributeNudge,
     unpushedClaims: opts.unpushedClaims,
     seenHistory
   });
@@ -9850,7 +9855,6 @@ __export(spinner_exports, {
   applySpinnerTips: () => applySpinnerTips,
   applySpinnerVerbs: () => applySpinnerVerbs,
   buildContextVerbs: () => buildContextVerbs,
-  buildContributeNudgeLine: () => buildContributeNudgeLine,
   buildIncomingIntroLine: () => buildIncomingIntroLine,
   buildPeerLine: () => buildPeerLine,
   buildSessionStaleLine: () => buildSessionStaleLine,
@@ -9874,7 +9878,6 @@ var init_spinner = __esm({
     "use strict";
     init_spinner_config();
     init_spinner_config();
-    init_spinner_verbs();
     init_spinner_verbs();
     init_spinner_verbs();
     init_spinner_verbs();
@@ -9956,7 +9959,7 @@ var TERMINALHIRE_DIR7, TOKEN_FILE, KEY_FILE2, ALGO2, KEY_BYTES2, IV_BYTES2;
 var init_github_auth = __esm({
   "src/github-auth.ts"() {
     "use strict";
-    TERMINALHIRE_DIR7 = join13(homedir10(), ".terminalhire");
+    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join13(homedir10(), ".terminalhire");
     TOKEN_FILE = join13(TERMINALHIRE_DIR7, "github-token.enc");
     KEY_FILE2 = join13(TERMINALHIRE_DIR7, "key");
     ALGO2 = "aes-256-gcm";
@@ -10589,6 +10592,17 @@ var ROTATE_WINDOW_MS = 5 * 60 * 1e3;
 var ROLE_HEAD_POOL = 12;
 var ROLE_HEAD_ROTATE_MS = 60 * 60 * 1e3;
 var LEAD_ROTATE_ENV = "TH_LEAD_ROTATE";
+var LEAD_ROTATE_MS = 25 * 60 * 1e3;
+var ROTATE_PHASE_ENV = "TH_ROTATE_PHASE";
+function derivePhaseMs(key) {
+  if (typeof key !== "string" || key.length === 0) return 0;
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h % ROLE_HEAD_ROTATE_MS;
+}
 function rotate(list, now, windowMs = ROTATE_WINDOW_MS) {
   if (!Array.isArray(list) || list.length === 0) return [];
   const idx = Math.floor(now / windowMs) % list.length;
@@ -10604,9 +10618,11 @@ function budgetSlots(results, opts = {}) {
     interestPicks = [],
     interestJobPicks = [],
     interestJobSlots = INTEREST_JOB_SLOTS,
-    leadRotate = process.env[LEAD_ROTATE_ENV] !== "0"
+    leadRotate = process.env[LEAD_ROTATE_ENV] !== "0",
+    phaseMs = 0
   } = opts;
   const list = Array.isArray(results) ? results : [];
+  const rNow = now + (Number.isFinite(phaseMs) ? phaseMs : 0);
   const bountyMatches = list.filter(
     (r) => r && r.job && r.job.source === "bounty" && typeof r.score === "number" && r.score >= BOUNTY_MIN_MATCH
   );
@@ -10614,7 +10630,7 @@ function budgetSlots(results, opts = {}) {
   const contributeMatches = list.filter((r) => r && r.job && r.job.source === "contribute");
   const mixBaseline = Object.hasOwn(MIX_PRESETS, mix) ? MIX_PRESETS[mix] : MIX_PRESETS[DEFAULT_MIX];
   const contributeCap = thinProfile && contributeEnabled ? Math.max(mixBaseline, CONTRIBUTE_SLOTS_THIN) : mixBaseline;
-  const contributeTop = rotate(contributeMatches, now).slice(0, contributeCap);
+  const contributeTop = rotate(contributeMatches, rNow).slice(0, contributeCap);
   const reservedContributeIds = new Set(contributeTop.map((r) => r.job.id));
   const interestTop = (Array.isArray(interestPicks) ? interestPicks : []).filter((r) => r && r.job && !reservedContributeIds.has(r.job.id)).slice(0, INTEREST_CONTRIBUTE_SLOTS).map((r) => ({ ...r, interestLabel: INTEREST_SLOT_LABEL }));
   const surfacedIds = new Set(list.map((r) => r?.job?.id).filter(Boolean));
@@ -10630,17 +10646,20 @@ function budgetSlots(results, opts = {}) {
   const headPoolSize = Math.max(roleStable, ROLE_HEAD_POOL);
   const headPool = roleMatches.slice(0, headPoolSize);
   const headIndex = new Map(headPool.map((r, i) => [r, i]));
-  const selectedHead = rotate(headPool, now, ROLE_HEAD_ROTATE_MS).slice(0, roleStable).sort((a, b) => headIndex.get(a) - headIndex.get(b));
+  const selectedHead = rotate(headPool, rNow, ROLE_HEAD_ROTATE_MS).slice(0, roleStable).sort((a, b) => headIndex.get(a) - headIndex.get(b));
   let stableRoles = selectedHead;
   if (leadRotate && selectedHead.length > 0) {
-    const o = Math.floor(now / ROLE_HEAD_ROTATE_MS) % selectedHead.length;
+    const o = Math.floor(rNow / LEAD_ROTATE_MS) % selectedHead.length;
     stableRoles = [...selectedHead.slice(o), ...selectedHead.slice(0, o)];
   }
   const rotableRoles = roleMatches.slice(headPoolSize, headPoolSize + ROLE_ROTATE_WINDOW);
-  const rotatedRoles = rotate(rotableRoles, now);
+  const rotatedRoles = rotate(rotableRoles, rNow);
   const roleTop = [...stableRoles, ...rotatedRoles].slice(0, roleSlots);
   return { roleTop, bountyTop, contributeTop, interestTop, interestJobTop };
 }
+
+// bin/jpi-refresh.js
+import { hostname, homedir as osHomedir } from "os";
 
 // bin/interest-picks.js
 var INTEREST_PICKS_CAP = 5;
@@ -10707,7 +10726,7 @@ import {
 import { homedir as homedir4 } from "os";
 import { join as join4 } from "path";
 function terminalhireDir() {
-  return join4(homedir4(), ".terminalhire");
+  return process.env.TERMINALHIRE_DIR || join4(homedir4(), ".terminalhire");
 }
 function webSessionFilePath() {
   return join4(terminalhireDir(), "web-session");
@@ -10762,7 +10781,6 @@ async function run() {
     }
     const jobs = index?.jobs ?? [];
     const contribute = isContributeEnabled() && Array.isArray(index?.contribute) ? index.contribute : [];
-    const contributeNudge = !isContributeEnabled() && !isContributePrompted() && Array.isArray(index?.contribute) && index.contribute.length > 0 ? { count: index.contribute.length } : null;
     let matchCount = 0;
     let topMatches = [];
     let widenReserve = [];
@@ -10775,9 +10793,6 @@ async function run() {
       if (profile.skillTags.length > 0 && jobs.length > 0) {
         const fp = profileToFingerprint2(profile);
         const thinProfile = fp?.seniorityBand === "junior";
-        if (contributeNudge && thinProfile) {
-          contributeNudge.onRamp = true;
-        }
         const pool = contribute.length > 0 ? [...jobs, ...contribute] : jobs;
         let cwdSoftTags = [];
         if (CWD_SOFTTAGS_ENABLED) {
@@ -10834,7 +10849,11 @@ async function run() {
           contributeEnabled: isContributeEnabled(),
           mix: getSurfaceMix(),
           interestPicks,
-          interestJobPicks
+          interestJobPicks,
+          // 078b: de-sync rotation phase across installs (stable per machine,
+          // zero persistence, zero egress). TH_ROTATE_PHASE='0' restores the
+          // shared global wall-clock phase (pre-078b behavior).
+          phaseMs: process.env[ROTATE_PHASE_ENV] !== "0" ? derivePhaseMs(hostname() + osHomedir()) : 0
         });
         const toCard = (r) => ({
           id: r.job.id,
@@ -10965,12 +10984,7 @@ async function run() {
       incomingPending,
       unreadChat,
       sessionStale,
-      unpushedClaims,
-      // In-process-only despite being persisted: the render pass receives it as
-      // a function argument below. A future cache READER must not gate on this
-      // field without re-checking isContributeEnabled/isContributePrompted at
-      // read time — the persisted copy can be stale relative to the answer.
-      contributeNudge
+      unpushedClaims
     };
     updateIndexCache(cacheEntry);
     try {
@@ -11003,7 +11017,6 @@ async function run() {
         topPeers,
         incomingPending,
         sessionStale,
-        contributeNudge,
         unpushedClaims,
         baseUrl: API_URL2,
         seenHistory,

@@ -57,7 +57,7 @@ import {
 } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-var TERMINALHIRE_DIR = join(homedir(), ".terminalhire");
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
 var TOKEN_FILE = join(TERMINALHIRE_DIR, "github-token.enc");
 var KEY_FILE = join(TERMINALHIRE_DIR, "key");
 var ALGO = "aes-256-gcm";

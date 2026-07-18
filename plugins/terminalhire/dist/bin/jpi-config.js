@@ -8,7 +8,7 @@ import { homedir as homedir2 } from "os";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-var TERMINALHIRE_DIR = join(homedir(), ".terminalhire");
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
 var CONFIG_FILE = join(TERMINALHIRE_DIR, "config.json");
 var DEFAULT_CONFIG = {
   nudge: "session",
@@ -19,8 +19,7 @@ var DEFAULT_CONFIG = {
   chatShareActivity: false,
   inboundNudgeMuted: false,
   inboundNudgeDisclosed: false,
-  contributeEnabled: false,
-  contributePrompted: false,
+  contributeEnabled: true,
   betaOptIn: false,
   lastFullFeedbackAt: null,
   lastPulseAskAt: null,
@@ -41,6 +40,12 @@ function writeConfig(config) {
   mkdirSync(TERMINALHIRE_DIR, { recursive: true });
   const current = readConfig();
   const merged = { ...current, ...config };
+  if ("contributePrompted" in merged) {
+    if (merged.contributeEnabled === false && !("contributeEnabled" in config)) {
+      delete merged.contributeEnabled;
+    }
+    delete merged.contributePrompted;
+  }
   writeFileSync(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function parseSurfaceMix(raw) {

@@ -62,7 +62,7 @@ import {
 import { join, dirname, basename } from "path";
 import { homedir } from "os";
 import { createRequire } from "module";
-var TERMINALHIRE_DIR = join(homedir(), ".terminalhire");
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
 var KEY_FILE = join(TERMINALHIRE_DIR, "key");
 var KEYTAR_SERVICE = "terminalhire";
 var KEYTAR_ACCOUNT = "profile-key";
@@ -780,7 +780,7 @@ var KDF_INFO = Buffer.from("terminalhire-chat-v1");
 import { createHash as createHash2 } from "crypto";
 
 // src/profile.ts
-var TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
+var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
 var PROFILE_FILE = join3(TERMINALHIRE_DIR2, "profile.enc");
 function blankProfile() {
   return {

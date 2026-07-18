@@ -1633,7 +1633,7 @@ var TERMINALHIRE_DIR3, KEY_FILE, KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, KEY_BYTES
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
-    TERMINALHIRE_DIR3 = join4(homedir3(), ".terminalhire");
+    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
     KEY_FILE = join4(TERMINALHIRE_DIR3, "key");
     KEYTAR_SERVICE = "terminalhire";
     KEYTAR_ACCOUNT = "profile-key";
@@ -1783,7 +1783,7 @@ var init_profile = __esm({
     "use strict";
     init_src();
     init_crypto_store();
-    TERMINALHIRE_DIR4 = join5(homedir4(), ".terminalhire");
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
     PROFILE_FILE = join5(TERMINALHIRE_DIR4, "profile.enc");
     profileStore = createEncryptedStore(PROFILE_FILE, {
       blank: blankProfile,
@@ -2239,7 +2239,6 @@ init_src();
 import { readFileSync as readFileSync6 } from "fs";
 import { join as join8 } from "path";
 import { homedir as homedir7 } from "os";
-import { createInterface } from "readline";
 
 // bin/cache-store.js
 import { readFileSync as readFileSync2, writeFileSync, mkdirSync, renameSync } from "fs";
@@ -2275,7 +2274,7 @@ function updateIndexCache(patch) {
 import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, existsSync } from "fs";
 import { join as join3 } from "path";
 import { homedir as homedir2 } from "os";
-var TERMINALHIRE_DIR2 = join3(homedir2(), ".terminalhire");
+var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
 var CONFIG_FILE = join3(TERMINALHIRE_DIR2, "config.json");
 var DEFAULT_CONFIG = {
   nudge: "session",
@@ -2286,8 +2285,7 @@ var DEFAULT_CONFIG = {
   chatShareActivity: false,
   inboundNudgeMuted: false,
   inboundNudgeDisclosed: false,
-  contributeEnabled: false,
-  contributePrompted: false,
+  contributeEnabled: true,
   betaOptIn: false,
   lastFullFeedbackAt: null,
   lastPulseAskAt: null,
@@ -2304,14 +2302,9 @@ function readConfig() {
     return { ...DEFAULT_CONFIG };
   }
 }
-function writeConfig(config) {
-  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
-  const current = readConfig();
-  const merged = { ...current, ...config };
-  writeFileSync2(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
-}
 function isContributeEnabled() {
-  return readConfig().contributeEnabled === true;
+  const cfg = readConfig();
+  return !(cfg.contributeEnabled === false && !("contributePrompted" in cfg));
 }
 
 // bin/sanitize.js
@@ -2352,7 +2345,7 @@ var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
 var CONTINUITY_RANK_DISABLED = process.env["TERMINALHIRE_NO_CONTINUITY_RANK"] === "1";
 var HEADER = "Contribution opportunities \u2014 open issues where a merged PR actually counts toward your r\xE9sum\xE9.\nRepos \u226550\u2605 / \u226510 contributors \xB7 unassigned \xB7 merit-merge \xB7 matched to your stack.";
-var OPT_IN_PROMPT = "Contribute is off. Turn it on to see open issues where a merged PR would count toward your r\xE9sum\xE9 \u2014\nmatched to your stack. Your profile never leaves this machine. Enable? [y/N]";
+var CONTRIBUTE_OFF = "Contribute is off \u2014 you set contributeEnabled: false in ~/.terminalhire/config.json.\nRemove that line (or set it to true) to see open issues where a merged PR would count toward your r\xE9sum\xE9.";
 var EMPTY_STATE = "Nothing clears the bar right now. We only list issues where a merged PR actually counts toward\nyour r\xE9sum\xE9 \u2014 so the list stays honest. Try again after the next refresh.";
 function readIndexCache() {
   try {
@@ -2376,15 +2369,6 @@ async function fetchIndex(fetchImpl, useCache = true) {
   const index = await res.json();
   if (useCache) writeIndexCache(index);
   return index;
-}
-function defaultPrompt(question) {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim().toLowerCase());
-    });
-  });
 }
 var STRONG_THRESHOLD = 0.5;
 if (STRONG_THRESHOLD <= 0) {
@@ -2496,22 +2480,12 @@ ${line3}`;
 }
 async function run(opts = {}) {
   const log = opts.log ?? console.log;
-  const isTTY = opts.isTTY ?? Boolean(process.stdin.isTTY);
-  const promptImpl = opts.prompt ?? defaultPrompt;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   const useCache = opts.fetchImpl == null;
   try {
     if (!isContributeEnabled()) {
-      if (isTTY) {
-        const answer = await promptImpl(OPT_IN_PROMPT + " ");
-        const yes = answer === "y" || answer === "yes";
-        writeConfig(yes ? { contributeEnabled: true, contributePrompted: true } : { contributePrompted: true });
-        if (!yes) return;
-      } else {
-        log(OPT_IN_PROMPT);
-        writeConfig({ contributePrompted: true });
-        return;
-      }
+      log(CONTRIBUTE_OFF);
+      return;
     }
     const index = await fetchIndex(fetchImpl, useCache);
     const items = Array.isArray(index?.contribute) ? index.contribute : [];

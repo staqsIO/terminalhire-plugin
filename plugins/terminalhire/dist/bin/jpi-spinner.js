@@ -238,14 +238,6 @@ function buildIncomingIntroLine(incomingPending) {
   if (n < 1) return null;
   return n === 1 ? `\u2198 someone wants to connect \xB7 terminalhire intro --list` : `\u2198 ${n} people want to connect \xB7 terminalhire intro --list`;
 }
-function buildContributeNudgeLine(contributeNudge) {
-  const n = contributeNudge && typeof contributeNudge.count === "number" ? contributeNudge.count : 0;
-  if (n < 1) return null;
-  if (contributeNudge.onRamp === true) {
-    return n === 1 ? "\u2726 Build your Proof of Work \u2014 1 credential-building issue matched to your stack \xB7 terminalhire contribute" : `\u2726 Build your Proof of Work \u2014 ${n} credential-building issues matched to your stack \xB7 terminalhire contribute`;
-  }
-  return n === 1 ? "\u2726 an open-source issue that counts toward your r\xE9sum\xE9 \xB7 terminalhire contribute" : `\u2726 ${n} open-source issues that count toward your r\xE9sum\xE9 \xB7 terminalhire contribute`;
-}
 function buildSessionStaleLine(sessionStale) {
   return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
 }
@@ -259,19 +251,16 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
     topPeers,
     incomingPending,
     sessionStale,
-    contributeNudge,
     unpushedClaims,
     seenHistory
   } = opts;
   const staleLine = buildSessionStaleLine(sessionStale);
   const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
   const introLine = buildIncomingIntroLine(incomingPending);
-  const contributeLine = buildContributeNudgeLine(contributeNudge);
   const unpushedLine = buildUnpushedClaimsLine(unpushedClaims);
   const ranked = filterFreshMatches(rankBySessionTags(topMatches, sessionTags), seenHistory);
   if (!Array.isArray(ranked) || ranked.length === 0) {
     if (introLine) return withStale([introLine]);
-    if (contributeLine) return withStale([contributeLine]);
     if (unpushedLine) return withStale([unpushedLine]);
     const peerLine = buildPeerLine(topPeers);
     return withStale(peerLine ? [peerLine] : []);
@@ -281,7 +270,6 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   const cap = Math.max(1, verbCountForFrequency(frequency, ceiling));
   const pool = [...headers.slice(0, cap), ctaVerb()];
   if (introLine) pool.push(introLine);
-  if (contributeLine) pool.push(contributeLine);
   if (unpushedLine) pool.push(unpushedLine);
   return withStale(pool);
 }
