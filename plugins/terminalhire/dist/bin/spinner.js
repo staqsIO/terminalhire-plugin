@@ -990,6 +990,9 @@ function opportunityShortToken(id) {
   return createHash2("sha256").update(id, "utf8").digest("base64url").slice(0, 8);
 }
 var contributeShortToken = opportunityShortToken;
+function jobShortToken(id) {
+  return createHash2("sha256").update(`job:${id}`, "utf8").digest("base64url").slice(0, 8);
+}
 
 // bin/spinner-render.js
 function interleaveBySource(topMatches) {
@@ -1068,7 +1071,7 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
       if (title.length > 34) title = title.slice(0, 33).trimEnd() + "\u2026";
       const company = titleCase(companyRaw);
       const pct = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
-      const token = Buffer.from(String(m.id)).toString("base64url");
+      const token = jobShortToken(String(m.id));
       const url = `${base}/j/${token}`;
       if (source === "bounty") {
         const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";

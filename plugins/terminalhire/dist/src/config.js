@@ -18,7 +18,8 @@ var DEFAULT_CONFIG = {
   betaOptIn: false,
   lastFullFeedbackAt: null,
   lastPulseAskAt: null,
-  pulseDisclosed: false
+  pulseDisclosed: false,
+  mix: "balanced"
 };
 function readConfig() {
   try {
@@ -44,6 +45,19 @@ function parseNudgeMode(raw) {
     if (n >= 1) return `every:${n}`;
   }
   return null;
+}
+function parseSurfaceMix(raw) {
+  if (raw === "jobs" || raw === "balanced" || raw === "credential") return raw;
+  return null;
+}
+function getSurfaceMix() {
+  const envVal = process.env["TH_MIX"];
+  if (envVal) {
+    const parsed = parseSurfaceMix(envVal);
+    if (parsed) return parsed;
+  }
+  const config = readConfig();
+  return parseSurfaceMix(config.mix) ?? "balanced";
 }
 function getNudgeMode() {
   const envVal = process.env["TERMINALHIRE_NUDGE"];
@@ -71,12 +85,14 @@ function isBetaOptIn() {
 }
 export {
   getNudgeMode,
+  getSurfaceMix,
   isBetaOptIn,
   isContributeEnabled,
   isContributePrompted,
   isInboundNudgeMuted,
   isPeerConnectEnabled,
   parseNudgeMode,
+  parseSurfaceMix,
   readConfig,
   writeConfig
 };

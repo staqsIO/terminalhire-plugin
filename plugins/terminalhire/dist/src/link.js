@@ -108,7 +108,8 @@ var DEFAULT_CONFIG = {
   betaOptIn: false,
   lastFullFeedbackAt: null,
   lastPulseAskAt: null,
-  pulseDisclosed: false
+  pulseDisclosed: false,
+  mix: "balanced"
 };
 function readConfig() {
   try {

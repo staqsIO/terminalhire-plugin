@@ -97,7 +97,8 @@ var init_config = __esm({
       betaOptIn: false,
       lastFullFeedbackAt: null,
       lastPulseAskAt: null,
-      pulseDisclosed: false
+      pulseDisclosed: false,
+      mix: "balanced"
     };
   }
 });

@@ -4,16 +4,7 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
-  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
-}) : x)(function(x) {
-  if (typeof require !== "undefined") return require.apply(this, arguments);
-  throw Error('Dynamic require of "' + x + '" is not supported');
-});
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-};
-var __commonJS = (cb, mod) => function __require2() {
+var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
 var __copyProps = (to, from, except, desc) => {
@@ -33,61 +24,19 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// ../../node_modules/keytar/build/Release/keytar.node
-var keytar_default;
-var init_keytar = __esm({
-  "../../node_modules/keytar/build/Release/keytar.node"() {
-    keytar_default = "../keytar-KOAAH267.node";
-  }
-});
-
-// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/deeplink-wt/node_modules/keytar/build/Release/keytar.node
-var require_keytar = __commonJS({
-  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/deeplink-wt/node_modules/keytar/build/Release/keytar.node"(exports, module) {
-    "use strict";
-    init_keytar();
-    try {
-      module.exports = __require(keytar_default);
-    } catch {
-    }
-  }
-});
-
 // ../../node_modules/keytar/lib/keytar.js
-var require_keytar2 = __commonJS({
+var require_keytar = __commonJS({
   "../../node_modules/keytar/lib/keytar.js"(exports, module) {
     "use strict";
-    var keytar = require_keytar();
-    function checkRequired(val, name) {
-      if (!val || val.length <= 0) {
-        throw new Error(name + " is required.");
-      }
+    function disabled() {
+      throw new Error("keytar disabled in this dev checkout (keychain popup guard) \u2014 key-file fallback expected");
     }
     module.exports = {
-      getPassword: function(service, account) {
-        checkRequired(service, "Service");
-        checkRequired(account, "Account");
-        return keytar.getPassword(service, account);
-      },
-      setPassword: function(service, account, password) {
-        checkRequired(service, "Service");
-        checkRequired(account, "Account");
-        checkRequired(password, "Password");
-        return keytar.setPassword(service, account, password);
-      },
-      deletePassword: function(service, account) {
-        checkRequired(service, "Service");
-        checkRequired(account, "Account");
-        return keytar.deletePassword(service, account);
-      },
-      findPassword: function(service) {
-        checkRequired(service, "Service");
-        return keytar.findPassword(service);
-      },
-      findCredentials: function(service) {
-        checkRequired(service, "Service");
-        return keytar.findCredentials(service);
-      }
+      getPassword: disabled,
+      setPassword: disabled,
+      deletePassword: disabled,
+      findPassword: disabled,
+      findCredentials: disabled
     };
   }
 });
@@ -768,7 +717,7 @@ function skipKeychain() {
 async function tryLoadFromKeytar(policy) {
   if (forceKeytarUnavailableForTests || skipKeychain()) return null;
   try {
-    const kt = policy === "keychain-required" ? createRequire(import.meta.url)("keytar") : await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
+    const kt = policy === "keychain-required" ? createRequire(import.meta.url)("keytar") : await Promise.resolve().then(() => __toESM(require_keytar(), 1));
     const stored = await kt.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
     if (stored) {
       return Buffer.from(stored, "hex");
@@ -810,7 +759,7 @@ async function deleteKey() {
   }
   if (!forceKeytarUnavailableForTests && !skipKeychain()) {
     try {
-      const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
+      const kt = await Promise.resolve().then(() => __toESM(require_keytar(), 1));
       await kt.deletePassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
     } catch {
     }

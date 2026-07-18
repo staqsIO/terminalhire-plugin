@@ -5,16 +5,10 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
-  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
-}) : x)(function(x) {
-  if (typeof require !== "undefined") return require.apply(this, arguments);
-  throw Error('Dynamic require of "' + x + '" is not supported');
-});
 var __esm = (fn, res) => function __init() {
   return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
-var __commonJS = (cb, mod2) => function __require2() {
+var __commonJS = (cb, mod2) => function __require() {
   return mod2 || (0, cb[__getOwnPropNames(cb)[0]])((mod2 = { exports: {} }).exports, mod2), mod2.exports;
 };
 var __export = (target, all) => {
@@ -67,61 +61,19 @@ var init_open_url = __esm({
   }
 });
 
-// ../../node_modules/keytar/build/Release/keytar.node
-var keytar_default;
-var init_keytar = __esm({
-  "../../node_modules/keytar/build/Release/keytar.node"() {
-    keytar_default = "../keytar-KOAAH267.node";
-  }
-});
-
-// node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/deeplink-wt/node_modules/keytar/build/Release/keytar.node
-var require_keytar = __commonJS({
-  "node-file:/private/tmp/claude-501/-Users-ericgang-job-placement-inline/9716ff9c-0531-4844-adf4-286763cf8ab8/scratchpad/deeplink-wt/node_modules/keytar/build/Release/keytar.node"(exports, module) {
-    "use strict";
-    init_keytar();
-    try {
-      module.exports = __require(keytar_default);
-    } catch {
-    }
-  }
-});
-
 // ../../node_modules/keytar/lib/keytar.js
-var require_keytar2 = __commonJS({
+var require_keytar = __commonJS({
   "../../node_modules/keytar/lib/keytar.js"(exports, module) {
     "use strict";
-    var keytar = require_keytar();
-    function checkRequired(val, name) {
-      if (!val || val.length <= 0) {
-        throw new Error(name + " is required.");
-      }
+    function disabled() {
+      throw new Error("keytar disabled in this dev checkout (keychain popup guard) \u2014 key-file fallback expected");
     }
     module.exports = {
-      getPassword: function(service, account) {
-        checkRequired(service, "Service");
-        checkRequired(account, "Account");
-        return keytar.getPassword(service, account);
-      },
-      setPassword: function(service, account, password) {
-        checkRequired(service, "Service");
-        checkRequired(account, "Account");
-        checkRequired(password, "Password");
-        return keytar.setPassword(service, account, password);
-      },
-      deletePassword: function(service, account) {
-        checkRequired(service, "Service");
-        checkRequired(account, "Account");
-        return keytar.deletePassword(service, account);
-      },
-      findPassword: function(service) {
-        checkRequired(service, "Service");
-        return keytar.findPassword(service);
-      },
-      findCredentials: function(service) {
-        checkRequired(service, "Service");
-        return keytar.findCredentials(service);
-      }
+      getPassword: disabled,
+      setPassword: disabled,
+      deletePassword: disabled,
+      findPassword: disabled,
+      findCredentials: disabled
     };
   }
 });
@@ -161,7 +113,7 @@ function skipKeychain() {
 async function loadKey() {
   if (!skipKeychain()) {
     try {
-      const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
+      const kt = await Promise.resolve().then(() => __toESM(require_keytar(), 1));
       const stored = await kt.getPassword("terminalhire", "profile-key");
       if (stored) return Buffer.from(stored, "hex");
       const key2 = randomBytes(KEY_BYTES);
@@ -2055,6 +2007,25 @@ async function resolveClosingIssues(owner, name, number, body, token, signal, go
   let m;
   while ((m = re.exec(body)) !== null) nums.add(parseInt(m[1], 10));
   return { closesIssues: [...nums], linkageSource: nums.size ? "body-keyword" : "none" };
+}
+async function openPRClosingRefs(owner, name, token, signal, governor) {
+  const q = `query($o:String!,$n:String!){repository(owner:$o,name:$n){pullRequests(states:OPEN,first:100){totalCount nodes{number closingIssuesReferences(first:20){nodes{number}}}}}rateLimit{cost remaining}}`;
+  try {
+    const r = await ghGraphQL(q, { o: owner, n: name }, token, signal, governor);
+    if (r === null) return null;
+    if (!r.data?.repository) return null;
+    const prs = r.data.repository.pullRequests;
+    if (prs && prs.nodes !== void 0 && !Array.isArray(prs.nodes)) return null;
+    const nodes = prs?.nodes ?? [];
+    const refs = /* @__PURE__ */ new Set();
+    for (const node of nodes) {
+      for (const ref of node.closingIssuesReferences?.nodes ?? []) refs.add(ref.number);
+    }
+    const totalCount = prs?.totalCount ?? nodes.length;
+    return { refs, capHit: totalCount > nodes.length, totalCount };
+  } catch {
+    return null;
+  }
 }
 function makeScoringGovernor(governor) {
   return governor ?? makeGitHubGovernor(
@@ -4272,7 +4243,7 @@ function makeClient(fetchImpl, cfg) {
   async function probe(path) {
     return gov.probe(`${GITHUB_API2}${path}`, { headers: authHeaders2() });
   }
-  return { raw, json, probe, setSecondaryHint: gov.setSecondaryHint, getStats: gov.getStats };
+  return { raw, json, probe, governor: gov, setSecondaryHint: gov.setSecondaryHint, getStats: gov.getStats };
 }
 async function contributorCount(client, fullName) {
   const res = await client.raw(`/repos/${fullName}/contributors?per_page=1&anon=false`);
@@ -4288,14 +4259,27 @@ async function contributorCount(client, fullName) {
   }
 }
 async function openPRIssueRefs(client, fullName) {
+  const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
+  const [owner, name] = fullName.split("/");
+  if (token && owner && name) {
+    const res = await openPRClosingRefs(owner, name, token, void 0, client.governor);
+    if (res === null) return null;
+    if (res.capHit) {
+      console.warn(
+        `[contribute] open-PR closing-ref scan capped at 100/${res.totalCount} open PRs for ${fullName} (closing refs beyond the first 100 open PRs not scanned)`
+      );
+    }
+    return res.refs;
+  }
   const prs = await client.json(
     `/repos/${fullName}/pulls?state=open&per_page=100`
   );
   if (!Array.isArray(prs)) return null;
   const refs = /* @__PURE__ */ new Set();
   for (const pr of prs) {
-    for (const m of `${pr.title ?? ""}
-${pr.body ?? ""}`.matchAll(/#(\d+)\b/g)) {
+    const text = `${pr.title ?? ""}
+${pr.body ?? ""}`;
+    for (const m of text.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi)) {
       refs.add(Number(m[1]));
     }
   }
@@ -4673,6 +4657,7 @@ var init_contributions = __esm({
     init_contribution_gate();
     init_contribution_classify();
     init_github_bounties();
+    init_github();
     init_http();
     init_gh_governor();
     GITHUB_API2 = "https://api.github.com";
@@ -8521,11 +8506,35 @@ import { createHash as createHash2 } from "crypto";
 function opportunityShortToken(id) {
   return createHash2("sha256").update(id, "utf8").digest("base64url").slice(0, 8);
 }
-var contributeShortToken;
+function jobShortToken(id) {
+  return createHash2("sha256").update(`job:${id}`, "utf8").digest("base64url").slice(0, 8);
+}
+function jobTokenMap(index) {
+  const cached = jobTokenMaps.get(index);
+  if (cached) return cached;
+  const map = /* @__PURE__ */ new Map();
+  for (const job of index.jobs) {
+    const token = jobShortToken(job.id);
+    map.set(token, map.has(token) ? AMBIGUOUS_JOB_TOKEN : job);
+  }
+  jobTokenMaps.set(index, map);
+  return map;
+}
+function resolveJobToken(index, token) {
+  const hit = jobTokenMap(index).get(token);
+  return hit && hit !== AMBIGUOUS_JOB_TOKEN ? hit : null;
+}
+function _jobTokenMapForTests(index) {
+  return jobTokenMap(index);
+}
+var contributeShortToken, AMBIGUOUS_JOB_TOKEN, jobTokenMaps, _AMBIGUOUS_JOB_TOKEN_FOR_TESTS;
 var init_short_token = __esm({
   "../../packages/core/src/short-token.ts"() {
     "use strict";
     contributeShortToken = opportunityShortToken;
+    AMBIGUOUS_JOB_TOKEN = /* @__PURE__ */ Symbol("ambiguous-job-token");
+    jobTokenMaps = /* @__PURE__ */ new WeakMap();
+    _AMBIGUOUS_JOB_TOKEN_FOR_TESTS = AMBIGUOUS_JOB_TOKEN;
   }
 });
 
@@ -8573,6 +8582,8 @@ __export(src_exports, {
   VOCABULARY: () => VOCABULARY,
   VOCAB_NODES: () => VOCAB_NODES,
   WINNABILITY_NORM: () => WINNABILITY_NORM,
+  _AMBIGUOUS_JOB_TOKEN_FOR_TESTS: () => _AMBIGUOUS_JOB_TOKEN_FOR_TESTS,
+  _jobTokenMapForTests: () => _jobTokenMapForTests,
   acceptanceCountForDomains: () => acceptanceCountForDomains,
   aggregate: () => aggregate,
   aggregateBounties: () => aggregateBounties,
@@ -8639,6 +8650,7 @@ __export(src_exports, {
   isOverIntroLimit: () => isOverIntroLimit,
   isTrivialPRTitle: () => isTrivialPRTitle,
   isWinnableIssue: () => isWinnableIssue,
+  jobShortToken: () => jobShortToken,
   joinLabels: () => joinLabels,
   labelFor: () => labelFor,
   lever: () => lever,
@@ -8652,6 +8664,7 @@ __export(src_exports, {
   mergeProbability: () => mergeProbability,
   mmrRerank: () => mmrRerank,
   normalize: () => normalize,
+  openPRClosingRefs: () => openPRClosingRefs,
   opire: () => opire,
   opportunityShortToken: () => opportunityShortToken,
   pageMatches: () => pageMatches,
@@ -8666,6 +8679,7 @@ __export(src_exports, {
   recordClick: () => recordClick,
   rejectExtraIntroFields: () => rejectExtraIntroFields,
   relevanceScore: () => relevanceScore,
+  resolveJobToken: () => resolveJobToken,
   revealIntroContacts: () => revealIntroContacts,
   rosterActiveFromContribution: () => rosterActiveFromContribution,
   safetyNumber: () => safetyNumber,
@@ -8754,7 +8768,7 @@ function skipKeychain2() {
 async function tryLoadFromKeytar(policy) {
   if (forceKeytarUnavailableForTests || skipKeychain2()) return null;
   try {
-    const kt = policy === "keychain-required" ? createRequire(import.meta.url)("keytar") : await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
+    const kt = policy === "keychain-required" ? createRequire(import.meta.url)("keytar") : await Promise.resolve().then(() => __toESM(require_keytar(), 1));
     const stored = await kt.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
     if (stored) {
       return Buffer.from(stored, "hex");
@@ -8795,7 +8809,7 @@ async function deleteKey() {
   }
   if (!forceKeytarUnavailableForTests && !skipKeychain2()) {
     try {
-      const kt = await Promise.resolve().then(() => __toESM(require_keytar2(), 1));
+      const kt = await Promise.resolve().then(() => __toESM(require_keytar(), 1));
       await kt.deletePassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
     } catch {
     }
@@ -9065,7 +9079,8 @@ var init_config = __esm({
       betaOptIn: false,
       lastFullFeedbackAt: null,
       lastPulseAskAt: null,
-      pulseDisclosed: false
+      pulseDisclosed: false,
+      mix: "balanced"
     };
   }
 });
