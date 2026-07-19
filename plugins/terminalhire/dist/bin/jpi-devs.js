@@ -1,36 +1,13 @@
 #!/usr/bin/env node
-var __create = Object.create;
 var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __esm = (fn, res) => function __init() {
   return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-};
-var __commonJS = (cb, mod2) => function __require() {
-  return mod2 || (0, cb[__getOwnPropNames(cb)[0]])((mod2 = { exports: {} }).exports, mod2), mod2.exports;
 };
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__getProtoOf(mod2)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod2 || !mod2.__esModule ? __defProp(target, "default", { value: mod2, enumerable: true }) : target,
-  mod2
-));
 
 // ../../packages/core/src/types.ts
 function isBounty(job) {
@@ -8543,23 +8520,6 @@ var init_src = __esm({
   }
 });
 
-// ../../node_modules/keytar/lib/keytar.js
-var require_keytar = __commonJS({
-  "../../node_modules/keytar/lib/keytar.js"(exports, module) {
-    "use strict";
-    function disabled() {
-      throw new Error("keytar disabled in this dev checkout (keychain popup guard) \u2014 key-file fallback expected");
-    }
-    module.exports = {
-      getPassword: disabled,
-      setPassword: disabled,
-      deletePassword: disabled,
-      findPassword: disabled,
-      findCredentials: disabled
-    };
-  }
-});
-
 // src/crypto-store.ts
 import {
   createCipheriv,
@@ -8604,10 +8564,10 @@ function decrypt(blob, key) {
 function skipKeychain() {
   return process.env.TERMINALHIRE_NO_KEYCHAIN !== void 0 || process.env.CI !== void 0 || process.env.VITEST !== void 0 || process.env.NODE_ENV === "test";
 }
-async function tryLoadFromKeytar(policy) {
+async function tryLoadFromKeytar() {
   if (forceKeytarUnavailableForTests || skipKeychain()) return null;
   try {
-    const kt = policy === "keychain-required" ? createRequire(import.meta.url)("keytar") : await Promise.resolve().then(() => __toESM(require_keytar(), 1));
+    const kt = createRequire(import.meta.url)("keytar");
     const stored = await kt.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
     if (stored) {
       return Buffer.from(stored, "hex");
@@ -8648,7 +8608,7 @@ async function deleteKey() {
   }
   if (!forceKeytarUnavailableForTests && !skipKeychain()) {
     try {
-      const kt = await Promise.resolve().then(() => __toESM(require_keytar(), 1));
+      const kt = createRequire(import.meta.url)("keytar");
       await kt.deletePassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
     } catch {
     }
@@ -8660,15 +8620,13 @@ async function deleteKey() {
 }
 async function resolveKey(filePath, opts) {
   if (opts.keyPolicy === "keychain-required") {
-    const key = await tryLoadFromKeytar("keychain-required");
+    const key = await tryLoadFromKeytar();
     if (!key) {
       warnStderr(`crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`);
       return null;
     }
     return key;
   }
-  const fromKeytar = await tryLoadFromKeytar("keytar-first-file-fallback");
-  if (fromKeytar) return fromKeytar;
   return loadOrCreateFileKey();
 }
 function createEncryptedStore(filePath, opts) {

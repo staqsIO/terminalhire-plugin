@@ -4126,23 +4126,6 @@ var init_src = __esm({
   }
 });
 
-// ../../node_modules/keytar/lib/keytar.js
-var require_keytar = __commonJS({
-  "../../node_modules/keytar/lib/keytar.js"(exports, module) {
-    "use strict";
-    function disabled() {
-      throw new Error("keytar disabled in this dev checkout (keychain popup guard) \u2014 key-file fallback expected");
-    }
-    module.exports = {
-      getPassword: disabled,
-      setPassword: disabled,
-      deletePassword: disabled,
-      findPassword: disabled,
-      findCredentials: disabled
-    };
-  }
-});
-
 // src/github-auth.ts
 import {
   createCipheriv,
@@ -4159,21 +4142,7 @@ import {
 } from "fs";
 import { join as join2 } from "path";
 import { homedir } from "os";
-function skipKeychain() {
-  return process.env.TERMINALHIRE_NO_KEYCHAIN !== void 0 || process.env.CI !== void 0 || process.env.VITEST !== void 0 || process.env.NODE_ENV === "test";
-}
 async function loadKey() {
-  if (!skipKeychain()) {
-    try {
-      const kt = await Promise.resolve().then(() => __toESM(require_keytar(), 1));
-      const stored = await kt.getPassword("terminalhire", "profile-key");
-      if (stored) return Buffer.from(stored, "hex");
-      const key2 = randomBytes3(KEY_BYTES);
-      await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
-      return key2;
-    } catch {
-    }
-  }
   mkdirSync(TERMINALHIRE_DIR, { recursive: true, mode: 448 });
   if (existsSync(KEY_FILE)) {
     return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");

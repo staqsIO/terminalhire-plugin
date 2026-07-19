@@ -1,32 +1,8 @@
 #!/usr/bin/env node
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __esm = (fn, res) => function __init() {
   return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
-var __commonJS = (cb, mod2) => function __require() {
-  return mod2 || (0, cb[__getOwnPropNames(cb)[0]])((mod2 = { exports: {} }).exports, mod2), mod2.exports;
-};
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__getProtoOf(mod2)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod2 || !mod2.__esModule ? __defProp(target, "default", { value: mod2, enumerable: true }) : target,
-  mod2
-));
 
 // ../../packages/core/src/types.ts
 var init_types = __esm({
@@ -4122,23 +4098,6 @@ var init_src = __esm({
   }
 });
 
-// ../../node_modules/keytar/lib/keytar.js
-var require_keytar = __commonJS({
-  "../../node_modules/keytar/lib/keytar.js"(exports, module) {
-    "use strict";
-    function disabled() {
-      throw new Error("keytar disabled in this dev checkout (keychain popup guard) \u2014 key-file fallback expected");
-    }
-    module.exports = {
-      getPassword: disabled,
-      setPassword: disabled,
-      deletePassword: disabled,
-      findPassword: disabled,
-      findCredentials: disabled
-    };
-  }
-});
-
 // src/github-auth.ts
 import {
   createCipheriv,
@@ -4155,21 +4114,7 @@ import {
 } from "fs";
 import { join as join2 } from "path";
 import { homedir } from "os";
-function skipKeychain() {
-  return process.env.TERMINALHIRE_NO_KEYCHAIN !== void 0 || process.env.CI !== void 0 || process.env.VITEST !== void 0 || process.env.NODE_ENV === "test";
-}
 async function loadKey() {
-  if (!skipKeychain()) {
-    try {
-      const kt = await Promise.resolve().then(() => __toESM(require_keytar(), 1));
-      const stored = await kt.getPassword("terminalhire", "profile-key");
-      if (stored) return Buffer.from(stored, "hex");
-      const key2 = randomBytes3(KEY_BYTES);
-      await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
-      return key2;
-    } catch {
-    }
-  }
   mkdirSync(TERMINALHIRE_DIR, { recursive: true, mode: 448 });
   if (existsSync(KEY_FILE)) {
     return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");

@@ -806,23 +806,6 @@ var init_open_url = __esm({
   }
 });
 
-// ../../node_modules/keytar/lib/keytar.js
-var require_keytar = __commonJS({
-  "../../node_modules/keytar/lib/keytar.js"(exports, module) {
-    "use strict";
-    function disabled() {
-      throw new Error("keytar disabled in this dev checkout (keychain popup guard) \u2014 key-file fallback expected");
-    }
-    module.exports = {
-      getPassword: disabled,
-      setPassword: disabled,
-      deletePassword: disabled,
-      findPassword: disabled,
-      findCredentials: disabled
-    };
-  }
-});
-
 // src/github-auth.ts
 var github_auth_exports = {};
 __export(github_auth_exports, {
@@ -852,21 +835,7 @@ import {
 } from "fs";
 import { join as join5 } from "path";
 import { homedir as homedir5 } from "os";
-function skipKeychain() {
-  return process.env.TERMINALHIRE_NO_KEYCHAIN !== void 0 || process.env.CI !== void 0 || process.env.VITEST !== void 0 || process.env.NODE_ENV === "test";
-}
 async function loadKey() {
-  if (!skipKeychain()) {
-    try {
-      const kt = await Promise.resolve().then(() => __toESM(require_keytar(), 1));
-      const stored = await kt.getPassword("terminalhire", "profile-key");
-      if (stored) return Buffer.from(stored, "hex");
-      const key2 = randomBytes(KEY_BYTES);
-      await kt.setPassword("terminalhire", "profile-key", key2.toString("hex"));
-      return key2;
-    } catch {
-    }
-  }
   mkdirSync5(TERMINALHIRE_DIR2, { recursive: true, mode: 448 });
   if (existsSync5(KEY_FILE)) {
     return Buffer.from(readFileSync5(KEY_FILE, "utf8").trim(), "hex");
@@ -9900,13 +9869,13 @@ function decrypt2(blob, key) {
   ]);
   return plain.toString("utf8");
 }
-function skipKeychain2() {
+function skipKeychain() {
   return process.env.TERMINALHIRE_NO_KEYCHAIN !== void 0 || process.env.CI !== void 0 || process.env.VITEST !== void 0 || process.env.NODE_ENV === "test";
 }
-async function tryLoadFromKeytar(policy) {
-  if (forceKeytarUnavailableForTests || skipKeychain2()) return null;
+async function tryLoadFromKeytar() {
+  if (forceKeytarUnavailableForTests || skipKeychain()) return null;
   try {
-    const kt = policy === "keychain-required" ? createRequire(import.meta.url)("keytar") : await Promise.resolve().then(() => __toESM(require_keytar(), 1));
+    const kt = createRequire(import.meta.url)("keytar");
     const stored = await kt.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
     if (stored) {
       return Buffer.from(stored, "hex");
@@ -9945,9 +9914,9 @@ async function deleteKey() {
     } catch {
     }
   }
-  if (!forceKeytarUnavailableForTests && !skipKeychain2()) {
+  if (!forceKeytarUnavailableForTests && !skipKeychain()) {
     try {
-      const kt = await Promise.resolve().then(() => __toESM(require_keytar(), 1));
+      const kt = createRequire(import.meta.url)("keytar");
       await kt.deletePassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
     } catch {
     }
@@ -9959,15 +9928,13 @@ async function deleteKey() {
 }
 async function resolveKey(filePath, opts) {
   if (opts.keyPolicy === "keychain-required") {
-    const key = await tryLoadFromKeytar("keychain-required");
+    const key = await tryLoadFromKeytar();
     if (!key) {
       warnStderr(`crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`);
       return null;
     }
     return key;
   }
-  const fromKeytar = await tryLoadFromKeytar("keytar-first-file-fallback");
-  if (fromKeytar) return fromKeytar;
   return loadOrCreateFileKey();
 }
 function createEncryptedStore(filePath, opts) {
