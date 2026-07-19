@@ -834,7 +834,11 @@ var CONTRIB_LABEL_QUERIES = [
   'label:"good-first-issue" type:issue state:open',
   'label:"help wanted" type:issue state:open',
   'label:"help-wanted" type:issue state:open',
-  'label:"up-for-grabs" type:issue state:open'
+  'label:"up-for-grabs" type:issue state:open',
+  // supply-expansion D: two more first-contribution label families widen the
+  // global newest-first slice WITHOUT relaxing the credential gate.
+  'label:"beginner-friendly" type:issue state:open',
+  'label:"first-timers-only" type:issue state:open'
 ];
 var CONTRIB_LANGUAGE_QUERIES = [
   ...["rust", "go", "python", "c++", "ruby"].map(
@@ -842,6 +846,17 @@ var CONTRIB_LANGUAGE_QUERIES = [
   ),
   ...["rust", "go"].map(
     (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+  ),
+  // supply-expansion D: cover the high-volume web/enterprise ecosystems the
+  // original set omitted. TS/JS were previously left out of "good first issue"
+  // (the global slice over-represented them) but a LANGUAGE-scoped page surfaces
+  // DIFFERENT repos than the global newest-first slice, so re-including them widens
+  // distinct-repo coverage rather than duplicating it.
+  ...["typescript", "javascript", "java", "python"].map(
+    (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+  ),
+  ...["typescript", "javascript", "c#", "php"].map(
+    (lang) => `label:"help wanted" language:${lang} type:issue state:open`
   )
 ];
 var CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];

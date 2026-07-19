@@ -2302,6 +2302,32 @@ async function openPRClosingRefs(owner, name, token, signal, governor) {
     return null;
   }
 }
+async function issueCrossRefPRAttempts(owner, name, issueNumber, token, signal, governor) {
+  const url = `https://api.github.com/repos/${owner}/${name}/issues/${issueNumber}/timeline?per_page=100`;
+  try {
+    const res = governor ? await governor.get(url, { headers: ghHeaders(token), signal }) : await fetch(url, { headers: ghHeaders(token), signal });
+    if (!res || !res.ok) return null;
+    const link = res.headers?.get("link") ?? null;
+    const hasNextPage = link != null && /\brel="next"/.test(link);
+    const events = await res.json();
+    if (!Array.isArray(events)) return null;
+    if (hasNextPage || events.length >= 100) return null;
+    let hasOpenPR = false;
+    let hasClosedPR = false;
+    const prNumbers = [];
+    for (const ev of events) {
+      if (ev?.event !== "cross-referenced") continue;
+      const src = ev.source?.issue;
+      if (!src || src.pull_request == null) continue;
+      if (typeof src.number === "number") prNumbers.push(src.number);
+      if (src.state === "open") hasOpenPR = true;
+      else if (src.state === "closed") hasClosedPR = true;
+    }
+    return { hasOpenPR, hasClosedPR, prNumbers };
+  } catch {
+    return null;
+  }
+}
 function makeScoringGovernor(governor) {
   return governor ?? makeGitHubGovernor(
     ((url, init) => fetch(url, init)),
@@ -4479,6 +4505,30 @@ var init_feeds = __esm({
 });
 
 // ../../packages/core/src/feeds/contributions.ts
+function readSearchMaxPages() {
+  const raw = process.env["CONTRIB_SEARCH_MAX_PAGES"];
+  if (raw == null) return DEFAULT_SEARCH_MAX_PAGES;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_SEARCH_MAX_PAGES;
+  return Math.min(Math.max(n, MIN_SEARCH_MAX_PAGES), MAX_SEARCH_MAX_PAGES);
+}
+function readMaxContribItems() {
+  const raw = process.env["CONTRIB_MAX_ITEMS"];
+  if (raw == null) return DEFAULT_MAX_CONTRIB_ITEMS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_MAX_CONTRIB_ITEMS;
+  return Math.min(Math.max(n, MIN_MAX_CONTRIB_ITEMS), MAX_MAX_CONTRIB_ITEMS);
+}
+function readMaxContribIssuesScanned() {
+  const raw = process.env["CONTRIB_MAX_ISSUES_SCANNED"];
+  if (raw == null) return DEFAULT_MAX_CONTRIB_ISSUES_SCANNED;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_MAX_CONTRIB_ISSUES_SCANNED;
+  return Math.min(
+    Math.max(n, MIN_MAX_CONTRIB_ISSUES_SCANNED),
+    MAX_MAX_CONTRIB_ISSUES_SCANNED
+  );
+}
 function authHeaders2() {
   const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
   const h = {
@@ -4566,13 +4616,21 @@ async function fetchRateLimit(client) {
 }
 async function searchContribIssues(client, queries) {
   const byUrl = /* @__PURE__ */ new Map();
+  const maxPages = readSearchMaxPages();
   for (const q of queries) {
-    const res = await client.json(
-      `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE2}`
-    );
-    for (const it of res?.items ?? []) {
-      if (it.pull_request) continue;
-      if (!byUrl.has(it.html_url)) byUrl.set(it.html_url, it);
+    for (let page = 1; page <= maxPages; page++) {
+      const res = await client.json(
+        `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE2}&page=${page}`
+      );
+      const items = res?.items;
+      if (items == null) break;
+      for (const it of items) {
+        if (it.pull_request) continue;
+        if (!byUrl.has(it.html_url)) byUrl.set(it.html_url, it);
+      }
+      if (items.length < SEARCH_PER_PAGE2) break;
+      const stats = client.getStats();
+      if (stats.budgetAborted || stats.secondaryAborted) break;
     }
   }
   return [...byUrl.values()].sort(
@@ -4633,10 +4691,14 @@ async function aggregateContributions(opts = {}) {
     probeTimeoutMs: opts.fetchImpl ? null : PROBE_TIMEOUT_MS
   });
   const queries = opts.queries ?? CONTRIB_SEARCH_QUERIES;
+  const maxContribItems = readMaxContribItems();
   const startRl = await fetchRateLimit(client);
   const coreHealthyAtStart = (startRl?.core?.remaining ?? 0) >= 500;
   client.setSecondaryHint(coreHealthyAtStart);
-  const issues = (await searchContribIssues(client, queries)).slice(0, MAX_CONTRIB_ISSUES_SCANNED);
+  const issues = (await searchContribIssues(client, queries)).slice(
+    0,
+    readMaxContribIssuesScanned()
+  );
   const repoCache = /* @__PURE__ */ new Map();
   const contribCache = /* @__PURE__ */ new Map();
   const prRefsCache = /* @__PURE__ */ new Map();
@@ -4726,7 +4788,7 @@ async function aggregateContributions(opts = {}) {
   let contribUndefined = 0;
   let prRefsNull = 0;
   for (const issue of issues) {
-    if (jobs.length >= MAX_CONTRIB_ITEMS) break;
+    if (jobs.length >= maxContribItems) break;
     const fullName = repoFullNameFromApiUrl2(issue.repository_url);
     if (!fullName) continue;
     const id = `contribute:${repoKey(fullName)}#${issue.number}`;
@@ -4784,7 +4846,7 @@ async function aggregateContributions(opts = {}) {
   const doDiscovery = opts.discoverRepos ?? (opts.trendingSlugs != null || opts.vocabTerms != null);
   let discoveredEmitted = 0;
   let discoveryBudgetStopped = false;
-  if (doDiscovery && jobs.length < MAX_CONTRIB_ITEMS) {
+  if (doDiscovery && jobs.length < maxContribItems) {
     const maxRepos = Math.min(
       Math.max(0, opts.maxDiscoveredRepos ?? MAX_DISCOVERED_REPOS),
       MAX_DISCOVERED_REPOS
@@ -4837,7 +4899,7 @@ async function aggregateContributions(opts = {}) {
     }
     const scanned = candidates.slice(0, maxRepos);
     for (const fullName of scanned) {
-      if (jobs.length >= MAX_CONTRIB_ITEMS) break;
+      if (jobs.length >= maxContribItems) break;
       if (client.getStats().budgetAborted || client.getStats().secondaryAborted) {
         discoveryBudgetStopped = true;
         break;
@@ -4862,7 +4924,7 @@ async function aggregateContributions(opts = {}) {
       const repoIssues = (searchRes?.items ?? []).filter((it) => !it.pull_request);
       let perRepoDiscovered = 0;
       for (const issue of repoIssues) {
-        if (jobs.length >= MAX_CONTRIB_ITEMS) break;
+        if (jobs.length >= maxContribItems) break;
         if (perRepoDiscovered >= MAX_ISSUES_PER_DISCOVERED_REPO) break;
         if ((perRepo.get(repoKey(fullName)) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) break;
         const id = `contribute:${repoKey(fullName)}#${issue.number}`;
@@ -4927,7 +4989,7 @@ async function aggregateContributions(opts = {}) {
   }
   return jobs;
 }
-var GITHUB_API2, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, MAX_CONTRIB_ITEMS, MAX_CONTRIB_ISSUES_SCANNED, MAX_DISCOVERED_REPOS, MAX_ISSUES_PER_DISCOVERED_REPO, DISCOVERY_REPOS_PER_TERM, DISCOVERY_VOCAB_TERMS, DISCOVERY_ISSUE_LABELS, repoKey;
+var GITHUB_API2, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, DEFAULT_SEARCH_MAX_PAGES, MIN_SEARCH_MAX_PAGES, MAX_SEARCH_MAX_PAGES, DEFAULT_MAX_CONTRIB_ITEMS, MIN_MAX_CONTRIB_ITEMS, MAX_MAX_CONTRIB_ITEMS, DEFAULT_MAX_CONTRIB_ISSUES_SCANNED, MIN_MAX_CONTRIB_ISSUES_SCANNED, MAX_MAX_CONTRIB_ISSUES_SCANNED, MAX_DISCOVERED_REPOS, MAX_ISSUES_PER_DISCOVERED_REPO, DISCOVERY_REPOS_PER_TERM, DISCOVERY_VOCAB_TERMS, DISCOVERY_ISSUE_LABELS, repoKey;
 var init_contributions = __esm({
   "../../packages/core/src/feeds/contributions.ts"() {
     "use strict";
@@ -4946,7 +5008,11 @@ var init_contributions = __esm({
       'label:"good-first-issue" type:issue state:open',
       'label:"help wanted" type:issue state:open',
       'label:"help-wanted" type:issue state:open',
-      'label:"up-for-grabs" type:issue state:open'
+      'label:"up-for-grabs" type:issue state:open',
+      // supply-expansion D: two more first-contribution label families widen the
+      // global newest-first slice WITHOUT relaxing the credential gate.
+      'label:"beginner-friendly" type:issue state:open',
+      'label:"first-timers-only" type:issue state:open'
     ];
     CONTRIB_LANGUAGE_QUERIES = [
       ...["rust", "go", "python", "c++", "ruby"].map(
@@ -4954,12 +5020,30 @@ var init_contributions = __esm({
       ),
       ...["rust", "go"].map(
         (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+      ),
+      // supply-expansion D: cover the high-volume web/enterprise ecosystems the
+      // original set omitted. TS/JS were previously left out of "good first issue"
+      // (the global slice over-represented them) but a LANGUAGE-scoped page surfaces
+      // DIFFERENT repos than the global newest-first slice, so re-including them widens
+      // distinct-repo coverage rather than duplicating it.
+      ...["typescript", "javascript", "java", "python"].map(
+        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+      ),
+      ...["typescript", "javascript", "c#", "php"].map(
+        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
       )
     ];
     CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
     SEARCH_PER_PAGE2 = 100;
-    MAX_CONTRIB_ITEMS = 150;
-    MAX_CONTRIB_ISSUES_SCANNED = 600;
+    DEFAULT_SEARCH_MAX_PAGES = 1;
+    MIN_SEARCH_MAX_PAGES = 1;
+    MAX_SEARCH_MAX_PAGES = 5;
+    DEFAULT_MAX_CONTRIB_ITEMS = 400;
+    MIN_MAX_CONTRIB_ITEMS = 50;
+    MAX_MAX_CONTRIB_ITEMS = 1e3;
+    DEFAULT_MAX_CONTRIB_ISSUES_SCANNED = 1500;
+    MIN_MAX_CONTRIB_ISSUES_SCANNED = 100;
+    MAX_MAX_CONTRIB_ISSUES_SCANNED = 5e3;
     MAX_DISCOVERED_REPOS = 15;
     MAX_ISSUES_PER_DISCOVERED_REPO = 3;
     DISCOVERY_REPOS_PER_TERM = 20;
@@ -8941,6 +9025,7 @@ __export(src_exports, {
   isOverIntroLimit: () => isOverIntroLimit,
   isTrivialPRTitle: () => isTrivialPRTitle,
   isWinnableIssue: () => isWinnableIssue,
+  issueCrossRefPRAttempts: () => issueCrossRefPRAttempts,
   jobShortToken: () => jobShortToken,
   joinLabels: () => joinLabels,
   labelFor: () => labelFor,

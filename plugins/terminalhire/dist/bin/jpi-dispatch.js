@@ -2772,6 +2772,32 @@ async function openPRClosingRefs(owner, name, token, signal, governor) {
     return null;
   }
 }
+async function issueCrossRefPRAttempts(owner, name, issueNumber, token, signal, governor) {
+  const url = `https://api.github.com/repos/${owner}/${name}/issues/${issueNumber}/timeline?per_page=100`;
+  try {
+    const res = governor ? await governor.get(url, { headers: ghHeaders(token), signal }) : await fetch(url, { headers: ghHeaders(token), signal });
+    if (!res || !res.ok) return null;
+    const link = res.headers?.get("link") ?? null;
+    const hasNextPage = link != null && /\brel="next"/.test(link);
+    const events = await res.json();
+    if (!Array.isArray(events)) return null;
+    if (hasNextPage || events.length >= 100) return null;
+    let hasOpenPR = false;
+    let hasClosedPR = false;
+    const prNumbers = [];
+    for (const ev of events) {
+      if (ev?.event !== "cross-referenced") continue;
+      const src = ev.source?.issue;
+      if (!src || src.pull_request == null) continue;
+      if (typeof src.number === "number") prNumbers.push(src.number);
+      if (src.state === "open") hasOpenPR = true;
+      else if (src.state === "closed") hasClosedPR = true;
+    }
+    return { hasOpenPR, hasClosedPR, prNumbers };
+  } catch {
+    return null;
+  }
+}
 function makeScoringGovernor(governor) {
   return governor ?? makeGitHubGovernor(
     ((url, init) => fetch(url, init)),
@@ -3796,14 +3822,14 @@ async function mapWithConcurrency(items, limit, fn) {
   if (items.length === 0) return results;
   const workers = Math.max(1, Math.min(Math.floor(limit) || 1, items.length));
   let next = 0;
-  async function run29() {
+  async function run30() {
     for (; ; ) {
       const i = next++;
       if (i >= items.length) return;
       results[i] = await fn(items[i], i);
     }
   }
-  await Promise.all(Array.from({ length: workers }, run29));
+  await Promise.all(Array.from({ length: workers }, run30));
   return results;
 }
 var init_concurrency = __esm({
@@ -4949,6 +4975,30 @@ var init_feeds = __esm({
 });
 
 // ../../packages/core/src/feeds/contributions.ts
+function readSearchMaxPages() {
+  const raw = process.env["CONTRIB_SEARCH_MAX_PAGES"];
+  if (raw == null) return DEFAULT_SEARCH_MAX_PAGES;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_SEARCH_MAX_PAGES;
+  return Math.min(Math.max(n, MIN_SEARCH_MAX_PAGES), MAX_SEARCH_MAX_PAGES);
+}
+function readMaxContribItems() {
+  const raw = process.env["CONTRIB_MAX_ITEMS"];
+  if (raw == null) return DEFAULT_MAX_CONTRIB_ITEMS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_MAX_CONTRIB_ITEMS;
+  return Math.min(Math.max(n, MIN_MAX_CONTRIB_ITEMS), MAX_MAX_CONTRIB_ITEMS);
+}
+function readMaxContribIssuesScanned() {
+  const raw = process.env["CONTRIB_MAX_ISSUES_SCANNED"];
+  if (raw == null) return DEFAULT_MAX_CONTRIB_ISSUES_SCANNED;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_MAX_CONTRIB_ISSUES_SCANNED;
+  return Math.min(
+    Math.max(n, MIN_MAX_CONTRIB_ISSUES_SCANNED),
+    MAX_MAX_CONTRIB_ISSUES_SCANNED
+  );
+}
 function authHeaders2() {
   const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
   const h = {
@@ -5036,13 +5086,21 @@ async function fetchRateLimit(client) {
 }
 async function searchContribIssues(client, queries) {
   const byUrl = /* @__PURE__ */ new Map();
+  const maxPages = readSearchMaxPages();
   for (const q of queries) {
-    const res = await client.json(
-      `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE2}`
-    );
-    for (const it of res?.items ?? []) {
-      if (it.pull_request) continue;
-      if (!byUrl.has(it.html_url)) byUrl.set(it.html_url, it);
+    for (let page = 1; page <= maxPages; page++) {
+      const res = await client.json(
+        `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE2}&page=${page}`
+      );
+      const items = res?.items;
+      if (items == null) break;
+      for (const it of items) {
+        if (it.pull_request) continue;
+        if (!byUrl.has(it.html_url)) byUrl.set(it.html_url, it);
+      }
+      if (items.length < SEARCH_PER_PAGE2) break;
+      const stats = client.getStats();
+      if (stats.budgetAborted || stats.secondaryAborted) break;
     }
   }
   return [...byUrl.values()].sort(
@@ -5103,10 +5161,14 @@ async function aggregateContributions(opts = {}) {
     probeTimeoutMs: opts.fetchImpl ? null : PROBE_TIMEOUT_MS
   });
   const queries = opts.queries ?? CONTRIB_SEARCH_QUERIES;
+  const maxContribItems = readMaxContribItems();
   const startRl = await fetchRateLimit(client);
   const coreHealthyAtStart = (startRl?.core?.remaining ?? 0) >= 500;
   client.setSecondaryHint(coreHealthyAtStart);
-  const issues = (await searchContribIssues(client, queries)).slice(0, MAX_CONTRIB_ISSUES_SCANNED);
+  const issues = (await searchContribIssues(client, queries)).slice(
+    0,
+    readMaxContribIssuesScanned()
+  );
   const repoCache = /* @__PURE__ */ new Map();
   const contribCache = /* @__PURE__ */ new Map();
   const prRefsCache = /* @__PURE__ */ new Map();
@@ -5196,7 +5258,7 @@ async function aggregateContributions(opts = {}) {
   let contribUndefined = 0;
   let prRefsNull = 0;
   for (const issue2 of issues) {
-    if (jobs.length >= MAX_CONTRIB_ITEMS) break;
+    if (jobs.length >= maxContribItems) break;
     const fullName = repoFullNameFromApiUrl2(issue2.repository_url);
     if (!fullName) continue;
     const id = `contribute:${repoKey(fullName)}#${issue2.number}`;
@@ -5254,7 +5316,7 @@ async function aggregateContributions(opts = {}) {
   const doDiscovery = opts.discoverRepos ?? (opts.trendingSlugs != null || opts.vocabTerms != null);
   let discoveredEmitted = 0;
   let discoveryBudgetStopped = false;
-  if (doDiscovery && jobs.length < MAX_CONTRIB_ITEMS) {
+  if (doDiscovery && jobs.length < maxContribItems) {
     const maxRepos = Math.min(
       Math.max(0, opts.maxDiscoveredRepos ?? MAX_DISCOVERED_REPOS),
       MAX_DISCOVERED_REPOS
@@ -5307,7 +5369,7 @@ async function aggregateContributions(opts = {}) {
     }
     const scanned = candidates.slice(0, maxRepos);
     for (const fullName of scanned) {
-      if (jobs.length >= MAX_CONTRIB_ITEMS) break;
+      if (jobs.length >= maxContribItems) break;
       if (client.getStats().budgetAborted || client.getStats().secondaryAborted) {
         discoveryBudgetStopped = true;
         break;
@@ -5332,7 +5394,7 @@ async function aggregateContributions(opts = {}) {
       const repoIssues = (searchRes?.items ?? []).filter((it) => !it.pull_request);
       let perRepoDiscovered = 0;
       for (const issue2 of repoIssues) {
-        if (jobs.length >= MAX_CONTRIB_ITEMS) break;
+        if (jobs.length >= maxContribItems) break;
         if (perRepoDiscovered >= MAX_ISSUES_PER_DISCOVERED_REPO) break;
         if ((perRepo.get(repoKey(fullName)) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) break;
         const id = `contribute:${repoKey(fullName)}#${issue2.number}`;
@@ -5397,7 +5459,7 @@ async function aggregateContributions(opts = {}) {
   }
   return jobs;
 }
-var GITHUB_API2, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, MAX_CONTRIB_ITEMS, MAX_CONTRIB_ISSUES_SCANNED, MAX_DISCOVERED_REPOS, MAX_ISSUES_PER_DISCOVERED_REPO, DISCOVERY_REPOS_PER_TERM, DISCOVERY_VOCAB_TERMS, DISCOVERY_ISSUE_LABELS, repoKey;
+var GITHUB_API2, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, DEFAULT_SEARCH_MAX_PAGES, MIN_SEARCH_MAX_PAGES, MAX_SEARCH_MAX_PAGES, DEFAULT_MAX_CONTRIB_ITEMS, MIN_MAX_CONTRIB_ITEMS, MAX_MAX_CONTRIB_ITEMS, DEFAULT_MAX_CONTRIB_ISSUES_SCANNED, MIN_MAX_CONTRIB_ISSUES_SCANNED, MAX_MAX_CONTRIB_ISSUES_SCANNED, MAX_DISCOVERED_REPOS, MAX_ISSUES_PER_DISCOVERED_REPO, DISCOVERY_REPOS_PER_TERM, DISCOVERY_VOCAB_TERMS, DISCOVERY_ISSUE_LABELS, repoKey;
 var init_contributions = __esm({
   "../../packages/core/src/feeds/contributions.ts"() {
     "use strict";
@@ -5416,7 +5478,11 @@ var init_contributions = __esm({
       'label:"good-first-issue" type:issue state:open',
       'label:"help wanted" type:issue state:open',
       'label:"help-wanted" type:issue state:open',
-      'label:"up-for-grabs" type:issue state:open'
+      'label:"up-for-grabs" type:issue state:open',
+      // supply-expansion D: two more first-contribution label families widen the
+      // global newest-first slice WITHOUT relaxing the credential gate.
+      'label:"beginner-friendly" type:issue state:open',
+      'label:"first-timers-only" type:issue state:open'
     ];
     CONTRIB_LANGUAGE_QUERIES = [
       ...["rust", "go", "python", "c++", "ruby"].map(
@@ -5424,12 +5490,30 @@ var init_contributions = __esm({
       ),
       ...["rust", "go"].map(
         (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+      ),
+      // supply-expansion D: cover the high-volume web/enterprise ecosystems the
+      // original set omitted. TS/JS were previously left out of "good first issue"
+      // (the global slice over-represented them) but a LANGUAGE-scoped page surfaces
+      // DIFFERENT repos than the global newest-first slice, so re-including them widens
+      // distinct-repo coverage rather than duplicating it.
+      ...["typescript", "javascript", "java", "python"].map(
+        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+      ),
+      ...["typescript", "javascript", "c#", "php"].map(
+        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
       )
     ];
     CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
     SEARCH_PER_PAGE2 = 100;
-    MAX_CONTRIB_ITEMS = 150;
-    MAX_CONTRIB_ISSUES_SCANNED = 600;
+    DEFAULT_SEARCH_MAX_PAGES = 1;
+    MIN_SEARCH_MAX_PAGES = 1;
+    MAX_SEARCH_MAX_PAGES = 5;
+    DEFAULT_MAX_CONTRIB_ITEMS = 400;
+    MIN_MAX_CONTRIB_ITEMS = 50;
+    MAX_MAX_CONTRIB_ITEMS = 1e3;
+    DEFAULT_MAX_CONTRIB_ISSUES_SCANNED = 1500;
+    MIN_MAX_CONTRIB_ISSUES_SCANNED = 100;
+    MAX_MAX_CONTRIB_ISSUES_SCANNED = 5e3;
     MAX_DISCOVERED_REPOS = 15;
     MAX_ISSUES_PER_DISCOVERED_REPO = 3;
     DISCOVERY_REPOS_PER_TERM = 20;
@@ -9703,6 +9787,7 @@ __export(src_exports, {
   isOverIntroLimit: () => isOverIntroLimit,
   isTrivialPRTitle: () => isTrivialPRTitle,
   isWinnableIssue: () => isWinnableIssue,
+  issueCrossRefPRAttempts: () => issueCrossRefPRAttempts,
   jobShortToken: () => jobShortToken,
   joinLabels: () => joinLabels,
   labelFor: () => labelFor,
@@ -15610,12 +15695,12 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
       continue;
     }
     spansConsidered++;
-    let run29 = 0;
+    let run30 = 0;
     const closeChain = () => {
-      if (run29 > 0) {
+      if (run30 > 0) {
         recoveryChains++;
-        totalDepth += run29;
-        run29 = 0;
+        totalDepth += run30;
+        run30 = 0;
       }
     };
     for (const uuid2 of episode.mainNodeUuids) {
@@ -15624,9 +15709,9 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
         continue;
       }
       if (node.kind === "tool_result" /* ToolResult */ && node.isError) {
-        run29++;
-        if (run29 > maxConsecutiveErrors) {
-          maxConsecutiveErrors = run29;
+        run30++;
+        if (run30 > maxConsecutiveErrors) {
+          maxConsecutiveErrors = run30;
         }
       } else if (node.kind === "tool_result" /* ToolResult */ && !node.isError) {
         closeChain();
@@ -16985,27 +17070,27 @@ function diff(prev, next, cols) {
   if (!Number.isInteger(cols) || cols <= 0) return [];
   const ops = [];
   const len = next.length;
-  let run29 = null;
+  let run30 = null;
   for (let i = 0; i < len; i++) {
     const col = i % cols;
     const row = (i - col) / cols;
-    if (col === 0 && run29) {
-      ops.push(run29);
-      run29 = null;
+    if (col === 0 && run30) {
+      ops.push(run30);
+      run30 = null;
     }
     if (cellNe(prev[i], next[i])) {
-      if (run29 && run29.row === row && run29.col + run29.run.length === col) {
-        run29.run.push(next[i]);
+      if (run30 && run30.row === row && run30.col + run30.run.length === col) {
+        run30.run.push(next[i]);
       } else {
-        if (run29) ops.push(run29);
-        run29 = { row, col, run: [next[i]] };
+        if (run30) ops.push(run30);
+        run30 = { row, col, run: [next[i]] };
       }
-    } else if (run29) {
-      ops.push(run29);
-      run29 = null;
+    } else if (run30) {
+      ops.push(run30);
+      run30 = null;
     }
   }
-  if (run29) ops.push(run29);
+  if (run30) ops.push(run30);
   return ops;
 }
 function styleOf(cell) {
@@ -42547,12 +42632,211 @@ var init_jpi_mcp = __esm({
   }
 });
 
+// bin/jpi-mcp-chat.js
+var jpi_mcp_chat_exports = {};
+__export(jpi_mcp_chat_exports, {
+  SINK: () => SINK,
+  TOOL_NAMES: () => TOOL_NAMES2,
+  buildReplyPrompt: () => buildReplyPrompt,
+  chargeIfAllowed: () => chargeIfAllowed,
+  createRateState: () => createRateState,
+  run: () => run16,
+  runReply: () => runReply
+});
+function createRateState() {
+  return { lastAt: 0, count: 0 };
+}
+function chargeIfAllowed(state, now, opts = {}) {
+  const cooldownMs = opts.cooldownMs ?? DEFAULT_COOLDOWN_MS;
+  const maxPerSession = opts.maxPerSession ?? DEFAULT_MAX_PER_SESSION;
+  if (state.count >= maxPerSession) return { ok: false };
+  if (state.lastAt && now - state.lastAt < cooldownMs) return { ok: false };
+  state.count += 1;
+  state.lastAt = now;
+  return { ok: true };
+}
+function buildReplyPrompt(local = {}) {
+  const peerLogin = local.peerLogin;
+  const messages = Array.isArray(local.messages) ? local.messages : [];
+  const safePeer = sanitizeLine(peerLogin);
+  const divider = "\u2500".repeat(48);
+  const shown = messages.slice(Math.max(0, messages.length - MODAL_MAX_MESSAGES));
+  const threadLines = shown.length ? shown.map((m) => {
+    const who = m && m.senderLogin === peerLogin ? `@${safePeer}` : "you";
+    return `${who}: ${sanitizeLine(m && m.plaintext)}`;
+  }).join("\n") : "(no messages yet \u2014 say hi)";
+  const message = `Reply to @${safePeer} on Terminalhire
+This reply is composed on your machine and sent end-to-end encrypted. The AI assistant cannot see this conversation or what you type here.
+${divider}
+${threadLines}
+${divider}
+Type your reply below (leave empty / cancel to send nothing):`;
+  const requestedSchema = {
+    type: "object",
+    properties: {
+      reply: {
+        type: "string",
+        title: `Your reply to @${safePeer}`,
+        description: "Sent end-to-end encrypted from your device. The AI cannot read it."
+      }
+    },
+    required: ["reply"]
+  };
+  return { message, requestedSchema };
+}
+async function runReply(opts = {}) {
+  const {
+    login,
+    client = createChatClient(),
+    resolveConnection = defaultResolveConnection,
+    ensureDisclosure = ensureChatDisclosure,
+    // `send` reuses the vetted on-device encrypted send (jpi-chat-read.runSend).
+    send = runSend,
+    // `elicit` raises the native modal: (params) => Promise<{action, content?}>.
+    // REQUIRED in production (wired to server.elicitInput in run()).
+    elicit,
+    // Client-capability probe: () => capabilities object (or undefined).
+    getClientCapabilities = () => void 0,
+    // Session rate state + clock (V-6).
+    rateState = createRateState(),
+    now = () => Date.now(),
+    cooldownMs,
+    maxPerSession
+  } = opts;
+  const target = String(login ?? "").replace(/^@/, "").trim();
+  if (!target) return { status: "usage" };
+  const resolved = await resolveConnection(target);
+  if (!resolved || resolved.status !== "ok") {
+    const s = resolved && resolved.status ? resolved.status : "error";
+    if (s === "not-connected") return { status: "not_connected" };
+    if (s === "not-linked") return { status: "not_linked" };
+    if (s === "expired") return { status: "expired" };
+    return { status: "error" };
+  }
+  const { peerLogin } = resolved;
+  const ack = await ensureDisclosure({ output: SINK, input: { isTTY: false } });
+  if (!ack || ack.acknowledged !== true) return { status: "disclosure_required" };
+  const caps = getClientCapabilities();
+  if (!caps || !caps.elicitation) return { status: "unsupported" };
+  let messages = [];
+  try {
+    messages = await client.pollMessages(resolved.introId, peerLogin);
+    if (!Array.isArray(messages)) messages = [];
+  } catch {
+    messages = [];
+  }
+  const { message, requestedSchema } = buildReplyPrompt({ peerLogin, messages });
+  if (!chargeIfAllowed(rateState, now(), { cooldownMs, maxPerSession }).ok) {
+    return { status: "throttled" };
+  }
+  let res;
+  try {
+    res = await elicit({ message, requestedSchema });
+  } catch {
+    return { status: "timeout", messagesShown: messages.length };
+  }
+  const action = res && res.action;
+  if (action !== "accept") {
+    return { status: action === "decline" ? "declined" : "cancelled", messagesShown: messages.length };
+  }
+  const body = String((res && res.content && res.content.reply) ?? "").trim();
+  if (!body) return { status: "declined", messagesShown: messages.length };
+  const sent = await send({
+    login: peerLogin,
+    text: body,
+    output: SINK,
+    client,
+    resolveConnection,
+    ensureDisclosure
+  });
+  if (sent && sent.ok) return { status: "sent", messagesShown: messages.length };
+  return { status: "error", messagesShown: messages.length };
+}
+async function run16() {
+  const { Server: Server2 } = await Promise.resolve().then(() => (init_server2(), server_exports));
+  const { StdioServerTransport: StdioServerTransport2 } = await Promise.resolve().then(() => (init_stdio2(), stdio_exports));
+  const { ListToolsRequestSchema: ListToolsRequestSchema2, CallToolRequestSchema: CallToolRequestSchema2 } = await Promise.resolve().then(() => (init_types3(), types_exports));
+  let version2 = "0.0.0";
+  try {
+    const { readFileSync: readFileSync33, existsSync: existsSync25 } = await import("fs");
+    const { join: join38 } = await import("path");
+    const { fileURLToPath: fileURLToPath12 } = await import("url");
+    const here = fileURLToPath12(new URL(".", import.meta.url));
+    for (const p of [join38(here, "..", "..", "package.json"), join38(here, "..", "package.json")]) {
+      if (existsSync25(p)) {
+        const pkg = JSON.parse(readFileSync33(p, "utf8"));
+        if (pkg.version) {
+          version2 = pkg.version;
+          break;
+        }
+      }
+    }
+  } catch {
+  }
+  const server = new Server2(
+    { name: "terminalhire-chat", version: version2 },
+    { capabilities: { tools: {} } }
+  );
+  const rateState = createRateState();
+  server.setRequestHandler(ListToolsRequestSchema2, async () => ({ tools: TOOL_DEFS2 }));
+  server.setRequestHandler(CallToolRequestSchema2, async (req) => {
+    const name = req.params?.name;
+    if (name !== "reply") {
+      return { content: [{ type: "text", text: JSON.stringify({ status: "error", hint: `Unknown tool: ${name}` }) }] };
+    }
+    const args5 = req.params?.arguments ?? {};
+    const result = await runReply({
+      login: args5.login,
+      elicit: (params) => server.elicitInput(params),
+      getClientCapabilities: () => server.getClientCapabilities(),
+      rateState
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result) }] };
+  });
+  const transport = new StdioServerTransport2();
+  await server.connect(transport);
+}
+var TOOL_NAMES2, SINK, DEFAULT_COOLDOWN_MS, DEFAULT_MAX_PER_SESSION, MODAL_MAX_MESSAGES, REPLY_INPUT_SCHEMA, TOOL_DEFS2;
+var init_jpi_mcp_chat = __esm({
+  "bin/jpi-mcp-chat.js"() {
+    "use strict";
+    init_jpi_chat();
+    init_jpi_chat_read();
+    init_chat_client();
+    TOOL_NAMES2 = ["reply"];
+    SINK = { write() {
+      return true;
+    } };
+    DEFAULT_COOLDOWN_MS = 3e3;
+    DEFAULT_MAX_PER_SESSION = 20;
+    MODAL_MAX_MESSAGES = 20;
+    REPLY_INPUT_SCHEMA = {
+      type: "object",
+      properties: {
+        login: {
+          type: "string",
+          description: "GitHub login of an ACCEPTED connection to reply to. Non-accepted or unresolvable logins are refused before any modal or send."
+        }
+      },
+      required: ["login"],
+      additionalProperties: false
+    };
+    TOOL_DEFS2 = [
+      {
+        name: "reply",
+        description: "Reply to an ACCEPTED Terminalhire connection. Opens a NATIVE terminal modal showing the thread and capturing your reply \u2014 the conversation and your reply are never shown to the AI. Returns status + counts only, never message text.",
+        inputSchema: REPLY_INPUT_SCHEMA
+      }
+    ];
+  }
+});
+
 // bin/jpi-connect.js
 var jpi_connect_exports = {};
 __export(jpi_connect_exports, {
-  run: () => run16
+  run: () => run17
 });
-async function run16() {
+async function run17() {
   const args5 = process.argv.slice(2).filter((a) => a !== "connect");
   if (args5.includes("--mute")) {
     writeConfig({ inboundNudgeMuted: true });
@@ -42781,9 +43065,9 @@ var init_link = __esm({
 // bin/jpi-link.js
 var jpi_link_exports = {};
 __export(jpi_link_exports, {
-  run: () => run17
+  run: () => run18
 });
-async function run17() {
+async function run18() {
   try {
     const args5 = process.argv.slice(2);
     if (args5.includes("--logout")) {
@@ -42810,7 +43094,7 @@ var init_jpi_link = __esm({
 // bin/jpi-protocol.js
 var jpi_protocol_exports = {};
 __export(jpi_protocol_exports, {
-  run: () => run18
+  run: () => run19
 });
 function printUsage() {
   console.log("");
@@ -42821,7 +43105,7 @@ function printUsage() {
   console.log("  status       Show whether claim links are currently registered");
   console.log("");
 }
-async function run18() {
+async function run19() {
   const args5 = process.argv.slice(2);
   const verb = args5[0];
   if (verb === "--help" || verb === "-h") {
@@ -42869,7 +43153,7 @@ var init_jpi_protocol = __esm({
 // bin/jpi-profile.js
 var jpi_profile_exports = {};
 __export(jpi_profile_exports, {
-  run: () => run19
+  run: () => run20
 });
 import { createInterface as createInterface9 } from "readline";
 function prompt4(question) {
@@ -42881,7 +43165,7 @@ function prompt4(question) {
     });
   });
 }
-async function run19() {
+async function run20() {
   const { readProfile: readProfile2, writeProfile: writeProfile2, deleteProfile: deleteProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
   const args5 = process.argv.slice(2);
   if (args5.includes("--show")) {
@@ -43214,9 +43498,9 @@ var init_signal = __esm({
 // bin/jpi-learn.js
 var jpi_learn_exports = {};
 __export(jpi_learn_exports, {
-  run: () => run20
+  run: () => run21
 });
-async function run20() {
+async function run21() {
   try {
     const args5 = process.argv.slice(2);
     const cwdIdx = args5.indexOf("--cwd");
@@ -43243,7 +43527,7 @@ var init_jpi_learn = __esm({
     "use strict";
     isMain = process.argv[1]?.endsWith("jpi-learn.js") || process.argv[1]?.endsWith("jpi-learn");
     if (isMain) {
-      run20();
+      run21();
     }
   }
 });
@@ -43251,7 +43535,7 @@ var init_jpi_learn = __esm({
 // bin/jpi-config.js
 var jpi_config_exports = {};
 __export(jpi_config_exports, {
-  run: () => run21
+  run: () => run22
 });
 import { join as join28 } from "path";
 import { homedir as homedir25 } from "os";
@@ -43267,7 +43551,7 @@ function printMixValues() {
   console.log("    balanced   \u2014 rebalanced default (contribute 8, roles ~12)");
   console.log("    credential \u2014 contribution-forward (contribute 12, roles ~8)");
 }
-async function run21() {
+async function run22() {
   const args5 = process.argv.slice(2);
   const filtered = args5[0] === "config" ? args5.slice(1) : args5;
   if (filtered[0] === "get" && filtered[1] === "mix") {
@@ -43995,7 +44279,7 @@ var init_spinner = __esm({
 // bin/jpi-spinner.js
 var jpi_spinner_exports = {};
 __export(jpi_spinner_exports, {
-  run: () => run22
+  run: () => run23
 });
 import {
   readFileSync as readFileSync28,
@@ -44043,7 +44327,7 @@ function readTopMatches() {
     return [];
   }
 }
-async function run22() {
+async function run23() {
   const args5 = process.argv.slice(2).filter((a) => a !== "spinner");
   const has = (f) => args5.includes(f);
   const val = (f) => {
@@ -44190,7 +44474,7 @@ var init_jpi_spinner = __esm({
 // bin/jpi-sync.js
 var jpi_sync_exports = {};
 __export(jpi_sync_exports, {
-  run: () => run23
+  run: () => run24
 });
 import { readFileSync as readFileSync29, writeFileSync as writeFileSync21, mkdirSync as mkdirSync21, existsSync as existsSync20, rmSync as rmSync9 } from "fs";
 import { join as join33 } from "path";
@@ -44502,7 +44786,7 @@ async function runDelete() {
   clearMarker();
   console.log("\n  Synced profile deleted and local marker cleared.\n");
 }
-async function run23() {
+async function run24() {
   const args5 = process.argv.slice(2).filter((a) => a !== "sync");
   const has = (f) => args5.includes(f);
   if (has("--push") || has("--enable")) {
@@ -44546,7 +44830,7 @@ var init_jpi_sync = __esm({
 // bin/jpi-init.js
 var jpi_init_exports = {};
 __export(jpi_init_exports, {
-  run: () => run24
+  run: () => run25
 });
 import { existsSync as existsSync21 } from "fs";
 import { join as join34, resolve } from "path";
@@ -44580,7 +44864,7 @@ function resolveStatuslineInstallJs() {
 function tokenizeInterest(raw) {
   return raw.split(/[,/]|\s+/).map((t) => t.trim()).filter(Boolean);
 }
-async function run24() {
+async function run25() {
   const rl = createInterface12({ input: process.stdin, output: process.stdout });
   const ask3 = (question) => new Promise((resolve2) => {
     let answered = false;
@@ -44883,11 +45167,11 @@ var init_beta_nudge = __esm({
 // bin/jpi-refresh.js
 var jpi_refresh_exports = {};
 __export(jpi_refresh_exports, {
-  run: () => run25
+  run: () => run26
 });
 import { fileURLToPath as fileURLToPath8 } from "url";
 import { hostname, homedir as osHomedir } from "os";
-async function run25() {
+async function run26() {
   try {
     let index;
     for (let attempt = 1; ; attempt++) {
@@ -45213,7 +45497,7 @@ var init_jpi_refresh = __esm({
 // bin/jpi-save.js
 var jpi_save_exports = {};
 __export(jpi_save_exports, {
-  run: () => run26
+  run: () => run27
 });
 import { readFileSync as readFileSync30, existsSync as existsSync22 } from "fs";
 import { join as join35 } from "path";
@@ -45291,7 +45575,7 @@ async function cmdUnsave(jobId) {
     process.exit(1);
   }
 }
-async function run26() {
+async function run27() {
   const verb = process.argv[2];
   const jobId = process.argv[3];
   try {
@@ -45323,10 +45607,10 @@ var init_jpi_save = __esm({
 // bin/jpi-beta.js
 var jpi_beta_exports = {};
 __export(jpi_beta_exports, {
-  run: () => run27
+  run: () => run28
 });
 import { createInterface as createInterface13 } from "readline";
-async function run27() {
+async function run28() {
   const rl = createInterface13({ input: process.stdin, output: process.stdout });
   const ask3 = (question) => new Promise((resolve2) => {
     const onClose = () => resolve2(null);
@@ -45447,7 +45731,7 @@ var init_jpi_beta = __esm({
 // bin/jpi-feedback.js
 var jpi_feedback_exports = {};
 __export(jpi_feedback_exports, {
-  run: () => run28
+  run: () => run29
 });
 import { createInterface as createInterface14 } from "readline";
 import { readFileSync as readFileSync31, existsSync as existsSync23 } from "fs";
@@ -45465,7 +45749,7 @@ function readLocalVersion3() {
   }
   return null;
 }
-async function run28() {
+async function run29() {
   const rl = createInterface14({ input: process.stdin, output: process.stdout });
   const ask3 = (question) => new Promise((resolve2) => {
     const onClose = () => resolve2(null);
@@ -45611,7 +45895,7 @@ function readPackageVersion() {
   }
   return "0.1.1";
 }
-var SUBCOMMANDS = ["jobs", "devs", "project", "bounties", "contribute", "claim", "repo", "trajectory", "mirror", "intro", "chat", "inbox", "hub", "mcp", "connect", "link", "protocol", "profile", "login", "logout", "learn", "config", "spinner", "statusline", "sync", "init", "refresh", "save", "saved", "unsave", "update", "upgrade", "beta", "feedback", "help", "--help", "-h", "--version", "-v"];
+var SUBCOMMANDS = ["jobs", "devs", "project", "bounties", "contribute", "claim", "repo", "trajectory", "mirror", "intro", "chat", "inbox", "hub", "mcp", "mcp-chat", "connect", "link", "protocol", "profile", "login", "logout", "learn", "config", "spinner", "statusline", "sync", "init", "refresh", "save", "saved", "unsave", "update", "upgrade", "beta", "feedback", "help", "--help", "-h", "--version", "-v"];
 var firstArg = process.argv[2];
 if (!firstArg && !process.stdin.isTTY) {
   const { default: childProcess } = await import("child_process");
@@ -45886,6 +46170,31 @@ if (firstArg === "mcp") {
     process.exit(0);
   }
   const mod2 = await Promise.resolve().then(() => (init_jpi_mcp(), jpi_mcp_exports));
+  await mod2.run();
+}
+if (firstArg === "mcp-chat") {
+  const flags = process.argv.slice(3);
+  if (flags.includes("--help") || flags.includes("-h")) {
+    console.log("");
+    console.log("terminalhire mcp-chat \u2014 opt-in stdio MCP server (reply to an accepted connection)");
+    console.log("");
+    console.log("  Speaks the Model Context Protocol over stdio and exposes ONE tool, `reply`,");
+    console.log("  which opens a NATIVE Claude Code elicitation modal to show a connection's");
+    console.log("  thread and capture your reply. The conversation and your reply are NEVER");
+    console.log("  shown to the AI (the modal is model-blind; the tool result is metadata only).");
+    console.log("");
+    console.log("  Unlike `terminalhire mcp`, this server is NOT zero-egress (a reply is sent)");
+    console.log("  and NOT read-only. It is OPT-IN: add it yourself as a separate mcpServers");
+    console.log("  entry \u2014 `mcp` stays the default pure, read-only surface.");
+    console.log("");
+    console.log("  There is deliberately NO accept/consent tool: consented intros still require");
+    console.log("  a human-typed yes an LLM must not be able to satisfy. See docs/mcp-chat-tools.md.");
+    console.log("");
+    console.log("  Configure a host to run: terminalhire mcp-chat");
+    console.log("");
+    process.exit(0);
+  }
+  const mod2 = await Promise.resolve().then(() => (init_jpi_mcp_chat(), jpi_mcp_chat_exports));
   await mod2.run();
 }
 if (firstArg === "connect") {
