@@ -1,7 +1,8 @@
 // src/repo-policy.ts
+import { createHash } from "crypto";
 var GH_API = "https://api.github.com";
 var GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
-var MAX_REQUESTS = 4;
+var MAX_REQUESTS = 7;
 var POLICY_RULESET_VERSION = 2;
 var AI_SIGNAL_PATTERNS = [
   { label: "AI", re: /\bAI\b/i },
@@ -19,7 +20,10 @@ var PROHIBITED_PATTERNS = [
   new RegExp(`prohibit\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
   /did not write the code yourself/i,
   new RegExp(`(?:not|never|don'?t|won'?t)\\s+accept\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
-  new RegExp(`\\bno\\s+${AI_TERM}[^.\\n]{0,40}\\b(?:prs?|pull requests?|contributions?|code|patch(?:es)?|commits?|submissions?)\\b`, "i"),
+  new RegExp(
+    `\\bno\\s+${AI_TERM}[^.\\n]{0,40}\\b(?:prs?|pull requests?|contributions?|code|patch(?:es)?|commits?|submissions?)\\b`,
+    "i"
+  ),
   new RegExp(
     `\\b${AI_TERM}[^.\\n]{0,60}\\b(?:is|are|will be)\\s+(?:\\w+\\s+)?(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
     "i"
@@ -39,7 +43,10 @@ var REQUIREMENT_PATTERNS = [
   { kind: "assignment-required", re: /(?:request|ask|wait)[^.\n]{0,40}\bassign/i },
   { kind: "assignment-required", re: /\bassigned before\b/i },
   { kind: "assignment-required", re: /\bself[\s-]assign/i },
-  { kind: "assignment-required", re: /do not (?:open|submit)[^.\n]{0,40}\b(?:prs?|pull requests?)\b/i },
+  {
+    kind: "assignment-required",
+    re: /do not (?:open|submit)[^.\n]{0,40}\b(?:prs?|pull requests?)\b/i
+  },
   { kind: "cla-required", re: /\bCLA\b/ },
   { kind: "cla-required", re: /contributor licen[cs]e agreement/i },
   { kind: "discussion-first", re: /open an issue (?:first|before)/i },
@@ -63,8 +70,12 @@ async function fetchContentsFile(fetchImpl, repoFullName, path) {
     if (!res.ok) return { ok: false, missing: false, content: null };
     const body = await res.json();
     if (typeof body.content !== "string") return { ok: false, missing: false, content: null };
-    const decoded = Buffer.from(body.content.replace(/\n/g, ""), "base64").toString("utf8");
-    return { ok: true, missing: false, content: decoded };
+    if (body.encoding !== "base64") return { ok: false, missing: false, content: null };
+    const raw = Buffer.from(body.content.replace(/\n/g, ""), "base64");
+    if (typeof body.size === "number" && raw.length !== body.size) {
+      return { ok: false, missing: false, content: null };
+    }
+    return { ok: true, missing: false, content: raw.toString("utf8") };
   } catch {
     return { ok: false, missing: false, content: null };
   }
@@ -87,6 +98,14 @@ function excerptAround(lines, i) {
   const start = Math.max(0, i - 2);
   const end = Math.min(lines.length, i + 3);
   return sanitizeExcerpt(lines.slice(start, end).join("\n"));
+}
+function hashFiles(files) {
+  if (files.length === 0) return null;
+  const h = createHash("sha256");
+  for (const { file, content } of files) h.update(`${file}
+${content}
+`);
+  return h.digest("hex");
 }
 function auditContent(files) {
   const hits = [];
@@ -117,10 +136,14 @@ async function checkRepoPolicy(repoFullName, opts = {}) {
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   let requestsUsed = 0;
   let hadError = false;
+  let truncated = false;
   const files = [];
   outer: for (const group of CANDIDATE_GROUPS) {
     for (const path of group) {
-      if (requestsUsed >= MAX_REQUESTS) break outer;
+      if (requestsUsed >= MAX_REQUESTS) {
+        truncated = true;
+        break outer;
+      }
       requestsUsed++;
       const outcome = await fetchContentsFile(fetchImpl, repoFullName, path);
       if (!outcome.ok) {
@@ -129,17 +152,44 @@ async function checkRepoPolicy(repoFullName, opts = {}) {
       }
       if (outcome.missing) continue;
       if (outcome.content) files.push({ file: path, content: outcome.content });
-      break;
     }
   }
   const { hits, requirements, verdict, assignment } = auditContent(files);
+  const scanComplete = !hadError && !truncated;
   if (hits.length > 0) {
-    return { status: "flagged", verdict, hits, requirements, assignment, rulesetVersion: POLICY_RULESET_VERSION };
+    return {
+      status: "flagged",
+      verdict,
+      hits,
+      requirements,
+      assignment,
+      rulesetVersion: POLICY_RULESET_VERSION,
+      contentHash: hashFiles(files),
+      scanComplete
+    };
   }
   if (hadError) {
-    return { status: "unavailable", verdict: "unavailable", hits: [], requirements, assignment, rulesetVersion: POLICY_RULESET_VERSION };
+    return {
+      status: "unavailable",
+      verdict: "unavailable",
+      hits: [],
+      requirements,
+      assignment,
+      rulesetVersion: POLICY_RULESET_VERSION,
+      contentHash: hashFiles(files),
+      scanComplete
+    };
   }
-  return { status: "clean", verdict: "clean", hits: [], requirements, assignment, rulesetVersion: POLICY_RULESET_VERSION };
+  return {
+    status: "clean",
+    verdict: "clean",
+    hits: [],
+    requirements,
+    assignment,
+    rulesetVersion: POLICY_RULESET_VERSION,
+    contentHash: hashFiles(files),
+    scanComplete
+  };
 }
 export {
   POLICY_RULESET_VERSION,

@@ -71,7 +71,6 @@ function buildAuditView(lifecycle, facts) {
     outcome,
     mergedAt: lifecycle.mergedAt,
     closedUnmergedAt: lifecycle.closedUnmergedAt,
-    mergedByLogin: facts?.mergedByLogin ?? null,
     signals,
     timeline,
     completeness: { ...lifecycle.complete },

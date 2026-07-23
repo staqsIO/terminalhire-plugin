@@ -617,7 +617,15 @@ var init_vocabulary = __esm({
 });
 
 // ../../packages/core/src/feeds/bounty-gate.ts
-var FARM_REPO_DENYLIST, CURATION_EXCLUDED_REPOS, EXCLUDED_LC, AI_BAN_DENYLIST, AI_BAN_LC;
+function isExcludedRepo(fullName) {
+  return EXCLUDED_LC.has(fullName.toLowerCase());
+}
+function isAiBanRepo(fullName) {
+  const lc = fullName.toLowerCase();
+  const owner = lc.split("/")[0];
+  return AI_BAN_LC.has(lc) || AI_BAN_LC.has(owner);
+}
+var FARM_REPO_DENYLIST, CURATION_EXCLUDED_REPOS, EXCLUDED_LC, AI_BAN_DENYLIST, AI_BAN_LC, MAX_BOUNTIES_PER_DISCOVERED_REPO;
 var init_bounty_gate = __esm({
   "../../packages/core/src/feeds/bounty-gate.ts"() {
     "use strict";
@@ -663,22 +671,78 @@ var init_bounty_gate = __esm({
       // supply-side drop on. https://www.theregister.com/ai-and-ml/2026/05/29/qemu-mulls-relaxing-ai-contribution-ban/
     ];
     AI_BAN_LC = new Set(AI_BAN_DENYLIST.map((g) => g.toLowerCase()));
+    MAX_BOUNTIES_PER_DISCOVERED_REPO = 3;
   }
 });
 
 // ../../packages/core/src/feeds/contribution-gate.ts
+function passesContributionGate(input) {
+  if (input.contributors === void 0) return false;
+  if (isAiBanRepo(input.fullName)) return false;
+  return input.stars >= MIN_STARS && input.contributors >= MIN_CONTRIBUTORS && !TRIVIAL_PR_TITLE.test(input.title) && !input.archived && !input.fork;
+}
+var MIN_STARS, MIN_CONTRIBUTORS, TRIVIAL_PR_TITLE;
 var init_contribution_gate = __esm({
   "../../packages/core/src/feeds/contribution-gate.ts"() {
     "use strict";
     init_bounty_gate();
+    MIN_STARS = 50;
+    MIN_CONTRIBUTORS = 10;
+    TRIVIAL_PR_TITLE = /^\s*(fix\s+typo|typo\b|update\s+readme|readme\b|docs?:|docs?\(|chore:|chore\(|style:|ci:|build:|bump\b|update\s+dependenc)/i;
   }
 });
 
 // ../../packages/core/src/feeds/contribution-classify.ts
-var CONTENT_NOUN_STRONG, CONTENT_NOUN_BROAD, FARM_SEED_NOUN, CONTENT_ADD_RE, NUMBERED_SEED_RE, FARM_SEED_RE;
+function hasStrongCodeSignal(title, body, labels) {
+  if (labels.some((l) => CODE_LABEL_RE.test(l))) return true;
+  const text = `${title}
+${body}`;
+  if (CODE_TERM_RE.test(text)) return true;
+  if (CODE_EXCEPTION_RE.test(text)) return true;
+  if (CODE_FENCE_RE.test(body)) return true;
+  if (FILE_PATH_RE.test(text)) return true;
+  return false;
+}
+function hasContentSignal(title, body, labels) {
+  if (labels.some((l) => CONTENT_LABEL_RE.test(l))) return true;
+  const text = `${title}
+${body}`;
+  if (CONTENT_ADD_RE.test(text)) return true;
+  if (ADD_TO_CORPUS_RE.test(text)) return true;
+  const seedTitle = title.replace(DECORATION_SUFFIX_RE, "");
+  if (NUMBERED_SEED_RE.test(seedTitle)) return true;
+  if (TRANSLATE_RE.test(text)) return true;
+  if (TYPO_RE.test(text)) return true;
+  return false;
+}
+function isNumberedContentSeedTitle(title) {
+  const t = title ?? "";
+  if (hasStrongCodeSignal(t, "", [])) return false;
+  const seedTitle = t.replace(DECORATION_SUFFIX_RE, "");
+  return FARM_SEED_RE.test(seedTitle);
+}
+function classifyContributionKind(input) {
+  const title = input.title ?? "";
+  const body = input.body ?? "";
+  const labels = input.labels ?? [];
+  if (isNumberedContentSeedTitle(title)) return "content";
+  if (hasStrongCodeSignal(title, body, labels)) return "code";
+  if (hasContentSignal(title, body, labels)) return "content";
+  return "ambiguous";
+}
+function looksLikeContentTask(input) {
+  return classifyContributionKind(input) === "content";
+}
+var CONTENT_LABEL_RE, CODE_LABEL_RE, CODE_TERM_RE, CODE_EXCEPTION_RE, CODE_FENCE_RE, FILE_PATH_RE, CONTENT_NOUN_STRONG, CONTENT_NOUN_BROAD, FARM_SEED_NOUN, CONTENT_ADD_RE, NUMBERED_SEED_RE, FARM_SEED_RE, DECORATION_SUFFIX_RE, ADD_TO_CORPUS_RE, TRANSLATE_RE, TYPO_RE;
 var init_contribution_classify = __esm({
   "../../packages/core/src/feeds/contribution-classify.ts"() {
     "use strict";
+    CONTENT_LABEL_RE = /\b(content|copy|copywriting|wording|translation|translations|i18n|l10n|localization|localisation|data|dataset|documentation|docs)\b/i;
+    CODE_LABEL_RE = /\b(bug|bugfix|fix|enhancement|feature|refactor|refactoring|test|tests|testing|performance|perf|security|api|backend|frontend|typescript|javascript|golang|rust|python|build|ci)\b/i;
+    CODE_TERM_RE = /\b(bug|crash|crashes|crashing|exception|stack\s?trace|stacktrace|null\s?pointer|npe|segfault|refactor|implement|endpoint|api|component|function|method|class|module|compile|compiler|build\s+(?:error|fail)|runtime|regression|unit\s+test|integration\s+test|test\s+coverage|typecheck|lint|dependency|dependencies|import|async|await|race\s+condition|memory\s+leak|deadlock|parser|serialize|deserialize|schema|migration|websocket|http|json|sql|cli|sdk)\b/i;
+    CODE_EXCEPTION_RE = /exception|stacktrace|segfault|traceback/i;
+    CODE_FENCE_RE = /```|(?:^|\n)\s{4,}\S/;
+    FILE_PATH_RE = /\b[\w./-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|rb|go|rs|java|kt|scala|c|cc|cpp|cxx|h|hpp|cs|php|swift|m|mm|sh|bash|zsh|sql|graphql|proto|css|scss|sass|less|vue|svelte|toml|ini|gradle|dockerfile)\b/i;
     CONTENT_NOUN_STRONG = String.raw`proverbs?|words?|phrases?|sayings?|translations?|entry|entries|definitions?|terms?|idioms?|synonyms?|antonyms?|acronyms?|abbreviations?|nazonazo`;
     CONTENT_NOUN_BROAD = String.raw`trivia\s+questions?|grammar\s+points?|brain\s?teasers?|trivia|facts?|quotes?|quotations?|quiz(?:zes)?|riddles?|puzzles?|flash\s?cards?|vocab(?:ulary)?|lessons?|kanji`;
     FARM_SEED_NOUN = String.raw`trivia\s+questions?|grammar\s+points?|brain\s?teasers?|proverbs?|sayings?|idioms?|quotes?|quotations?|riddles?|nazonazo`;
@@ -694,6 +758,10 @@ var init_contribution_classify = __esm({
       String.raw`\badd(?:ing|s)?\s+(?:\w+\s+){0,4}?(?:${FARM_SEED_NOUN})\s*#?\s*(?!(?:19|20)\d{2}(?!\d))\d{1,5}\s*$`,
       "i"
     );
+    DECORATION_SUFFIX_RE = /\s*[-–—:]\s*(?:(?:beginner[-\s]?friendly|good[-\s]?first[-\s]?issue|open[-\s]?source\s+contribution|beginner\s+contribution)[\s\W]*)+$/i;
+    ADD_TO_CORPUS_RE = /\badd\b[\s\S]*?\bto\s+(?:the\s+)?(?:word\s?list|dictionary|glossary|phrasebook)\b/i;
+    TRANSLATE_RE = /\b(?:translate|translating|translation|localize|localise|localization|localisation)\b/i;
+    TYPO_RE = /\bfix(?:ing)?\s+(?:a\s+|the\s+|some\s+)?typos?\b/i;
   }
 });
 
@@ -713,13 +781,188 @@ var init_rigor = __esm({
 });
 
 // ../../packages/core/src/gh-governor.ts
+function readReqGapMs() {
+  const raw = process.env["CONTRIB_REQ_GAP_MS"];
+  if (raw == null) return DEFAULT_REQ_GAP_MS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_REQ_GAP_MS;
+  return Math.min(Math.max(n, 0), 1e3);
+}
+function readBuildBudgetMs() {
+  const raw = process.env["CONTRIB_BUILD_BUDGET_MS"];
+  if (raw == null) return DEFAULT_BUILD_BUDGET_MS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_BUILD_BUDGET_MS;
+  return Math.min(Math.max(n, MIN_BUILD_BUDGET_MS), MAX_BUILD_BUDGET_MS);
+}
+function makeGitHubGovernor(fetchImpl, cfg) {
+  const startedAt = cfg.now();
+  let lastRequestAt = 0;
+  let pacedMs = 0;
+  let secondaryHits = 0;
+  let aborted = false;
+  let secondaryAborted = false;
+  let budgetAborted = false;
+  let gqlCost = 0;
+  let gqlRemaining = null;
+  let coreHealthyAtStart = false;
+  async function noteAndMaybeBackOff(res) {
+    if (res.status !== 403) return;
+    const remaining = res.headers.get("x-ratelimit-remaining");
+    const retryAfter = res.headers.get("retry-after");
+    const positiveSecondary = retryAfter != null || remaining != null && remaining !== "0";
+    const isSecondary = positiveSecondary || coreHealthyAtStart;
+    if (!isSecondary) return;
+    await recordSecondaryStrike(retryAfter);
+  }
+  async function recordSecondaryStrike(retryAfter) {
+    secondaryHits++;
+    if (secondaryHits >= 2) {
+      aborted = true;
+      secondaryAborted = true;
+      return;
+    }
+    if (cfg.paceEnabled) {
+      const trimmed = (retryAfter ?? "").trim();
+      const parsed = trimmed.length === 0 ? Number.NaN : Number(trimmed);
+      const sec = Number.isNaN(parsed) ? SECONDARY_BACKOFF_CAP_S : Math.min(Math.max(parsed, 0), SECONDARY_BACKOFF_CAP_S);
+      const remainingBudget = Math.max(0, cfg.budgetMs - (cfg.now() - startedAt));
+      await cfg.sleep(Math.min(sec * 1e3, remainingBudget));
+    }
+  }
+  async function noteGraphQLAndMaybeBackOff(res, body) {
+    const b = body ?? {};
+    const rl = b.data?.rateLimit;
+    if (rl) {
+      if (typeof rl.cost === "number") gqlCost += rl.cost;
+      if (typeof rl.remaining === "number") gqlRemaining = rl.remaining;
+    }
+    const remainingHdr = res.headers?.get("x-ratelimit-remaining") ?? null;
+    const retryAfter = res.headers?.get("retry-after") ?? null;
+    const headerRate = retryAfter != null || remainingHdr === "0";
+    const errs = Array.isArray(b.errors) ? b.errors : [];
+    const bodyRate = errs.some((e) => e?.type === "RATE_LIMITED" || /rate limit/i.test(String(e?.message ?? ""))) || typeof rl?.remaining === "number" && rl.remaining <= 0;
+    if (headerRate || bodyRate) await recordSecondaryStrike(retryAfter);
+  }
+  async function preflight() {
+    if (aborted) return false;
+    if (cfg.now() - startedAt >= cfg.budgetMs) {
+      aborted = true;
+      budgetAborted = true;
+      return false;
+    }
+    if (cfg.paceEnabled && cfg.gapMs > 0) {
+      const wait = cfg.gapMs - (cfg.now() - lastRequestAt);
+      if (wait > 0) {
+        await cfg.sleep(wait);
+        pacedMs += wait;
+        if (cfg.now() - startedAt >= cfg.budgetMs) {
+          aborted = true;
+          budgetAborted = true;
+          return false;
+        }
+      }
+      lastRequestAt = cfg.now();
+    }
+    return true;
+  }
+  async function get(url, init) {
+    if (!await preflight()) return null;
+    try {
+      const res = await fetchImpl(url, init);
+      await noteAndMaybeBackOff(res);
+      return res;
+    } catch {
+      return null;
+    }
+  }
+  async function graphql(url, init) {
+    if (!await preflight()) return null;
+    let res;
+    try {
+      res = await fetchImpl(url, init);
+    } catch {
+      return null;
+    }
+    let body;
+    try {
+      body = await res.json();
+    } catch {
+      return null;
+    }
+    await noteGraphQLAndMaybeBackOff(res, body);
+    if (!res.ok) return null;
+    return body;
+  }
+  async function probe(url, init) {
+    const bound = cfg.probeTimeoutMs;
+    let timer;
+    const fetchP = fetchImpl(url, init).then(
+      (r) => r,
+      () => null
+    );
+    try {
+      const res = bound == null ? await fetchP : await Promise.race([
+        fetchP,
+        new Promise((resolve) => {
+          timer = setTimeout(() => resolve(null), bound);
+        })
+      ]);
+      if (!res || !res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  function setSecondaryHint(coreHealthy) {
+    coreHealthyAtStart = coreHealthy;
+  }
+  function getStats() {
+    return {
+      pacedMs,
+      secondaryAborted: secondaryAborted ? 1 : 0,
+      budgetAborted: budgetAborted ? 1 : 0,
+      elapsedMs: cfg.now() - startedAt,
+      gqlCost,
+      gqlRemaining
+    };
+  }
+  function tripped() {
+    return secondaryAborted;
+  }
+  function budgetExhausted() {
+    return budgetAborted || cfg.now() - startedAt >= cfg.budgetMs;
+  }
+  return { get, graphql, probe, setSecondaryHint, getStats, tripped, budgetExhausted };
+}
+var DEFAULT_REQ_GAP_MS, SECONDARY_BACKOFF_CAP_S, DEFAULT_BUILD_BUDGET_MS, MIN_BUILD_BUDGET_MS, MAX_BUILD_BUDGET_MS, PROBE_TIMEOUT_MS, realSleep;
 var init_gh_governor = __esm({
   "../../packages/core/src/gh-governor.ts"() {
     "use strict";
+    DEFAULT_REQ_GAP_MS = 75;
+    SECONDARY_BACKOFF_CAP_S = 30;
+    DEFAULT_BUILD_BUDGET_MS = 9e4;
+    MIN_BUILD_BUDGET_MS = 1e4;
+    MAX_BUILD_BUDGET_MS = 9e4;
+    PROBE_TIMEOUT_MS = 3e3;
+    realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }
 });
 
 // ../../packages/core/src/github.ts
+function ghHeaders(token) {
+  const headers = {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    // GitHub's REST API REQUIRES a User-Agent; serverless runtimes don't always
+    // send a default (omitting it yields a 403 "administrative rules" error).
+    "User-Agent": "terminalhire"
+  };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
+}
 function bestAcceptanceDomain(cred, domains) {
   if (cred.status !== "ok") return null;
   let best = null;
@@ -729,7 +972,45 @@ function bestAcceptanceDomain(cred, domains) {
   }
   return best;
 }
-var RESUME_DECAY_HALF_LIFE_MS;
+async function ghGraphQL(query, variables, token, signal, governor) {
+  const init = {
+    method: "POST",
+    headers: { ...ghHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify({ query, variables }),
+    signal
+  };
+  if (governor) {
+    const json2 = await governor.graphql(GITHUB_GRAPHQL_URL, init);
+    if (json2 === null) return null;
+    if (json2.errors?.length) throw new Error("GitHub GraphQL errors: " + JSON.stringify(json2.errors));
+    return json2;
+  }
+  const res = await fetch(GITHUB_GRAPHQL_URL, init);
+  if (!res.ok) throw new Error(`GitHub GraphQL: HTTP ${res.status}`);
+  const json = await res.json();
+  if (json.errors?.length) throw new Error("GitHub GraphQL errors: " + JSON.stringify(json.errors));
+  return json;
+}
+async function openPRClosingRefs(owner, name, token, signal, governor) {
+  const q = `query($o:String!,$n:String!){repository(owner:$o,name:$n){pullRequests(states:OPEN,first:100){totalCount nodes{number closingIssuesReferences(first:20){nodes{number}}}}}rateLimit{cost remaining}}`;
+  try {
+    const r = await ghGraphQL(q, { o: owner, n: name }, token, signal, governor);
+    if (r === null) return null;
+    if (!r.data?.repository) return null;
+    const prs = r.data.repository.pullRequests;
+    if (prs && prs.nodes !== void 0 && !Array.isArray(prs.nodes)) return null;
+    const nodes = prs?.nodes ?? [];
+    const refs = /* @__PURE__ */ new Set();
+    for (const node of nodes) {
+      for (const ref of node.closingIssuesReferences?.nodes ?? []) refs.add(ref.number);
+    }
+    const totalCount = prs?.totalCount ?? nodes.length;
+    return { refs, capHit: totalCount > nodes.length, totalCount };
+  } catch {
+    return null;
+  }
+}
+var RESUME_DECAY_HALF_LIFE_MS, GITHUB_GRAPHQL_URL;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
@@ -740,6 +1021,7 @@ var init_github = __esm({
     init_rigor();
     init_gh_governor();
     RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
+    GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
   }
 });
 
@@ -925,9 +1207,14 @@ var init_rerank = __esm({
 });
 
 // ../../packages/core/src/feeds/http.ts
+function fetchWithTimeout(input, init, timeoutMs = FEED_FETCH_TIMEOUT_MS) {
+  return fetch(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+}
+var FEED_FETCH_TIMEOUT_MS;
 var init_http = __esm({
   "../../packages/core/src/feeds/http.ts"() {
     "use strict";
+    FEED_FETCH_TIMEOUT_MS = 1e4;
   }
 });
 
@@ -968,9 +1255,29 @@ var init_himalayas = __esm({
 });
 
 // ../../packages/core/src/feeds/entities.ts
+function fromCodePoint(cp) {
+  if (!Number.isFinite(cp) || cp < 0 || cp > 1114111) return "";
+  try {
+    return String.fromCodePoint(cp);
+  } catch {
+    return "";
+  }
+}
+function decodeEntities(input) {
+  if (!input || !input.includes("&")) return input;
+  return input.replace(/&#(\d+);/g, (_, n) => fromCodePoint(parseInt(n, 10))).replace(/&#[xX]([0-9a-fA-F]+);/g, (_, h) => fromCodePoint(parseInt(h, 16))).replace(/&(lt|gt|quot|apos|nbsp);/g, (_, name) => NAMED[name] ?? `&${name};`).replace(/&amp;/g, "&");
+}
+var NAMED;
 var init_entities = __esm({
   "../../packages/core/src/feeds/entities.ts"() {
     "use strict";
+    NAMED = {
+      lt: "<",
+      gt: ">",
+      quot: '"',
+      apos: "'",
+      nbsp: " "
+    };
   }
 });
 
@@ -1009,6 +1316,9 @@ var init_effort = __esm({
 });
 
 // ../../packages/core/src/feeds/github-bounties.ts
+function isAssigned(issue) {
+  return !!issue.assignee || (issue.assignees?.length ?? 0) > 0;
+}
 var init_github_bounties = __esm({
   "../../packages/core/src/feeds/github-bounties.ts"() {
     "use strict";
@@ -1046,6 +1356,596 @@ var init_workable = __esm({
 var init_directory = __esm({
   "../../packages/core/src/feeds/directory.ts"() {
     "use strict";
+  }
+});
+
+// ../../packages/core/src/feeds/contributions.ts
+function readSearchMaxPages() {
+  const raw = process.env["CONTRIB_SEARCH_MAX_PAGES"];
+  if (raw == null) return DEFAULT_SEARCH_MAX_PAGES;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_SEARCH_MAX_PAGES;
+  return Math.min(Math.max(n, MIN_SEARCH_MAX_PAGES), MAX_SEARCH_MAX_PAGES);
+}
+function readMaxContribItems() {
+  const raw = process.env["CONTRIB_MAX_ITEMS"];
+  if (raw == null) return DEFAULT_MAX_CONTRIB_ITEMS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_MAX_CONTRIB_ITEMS;
+  return Math.min(Math.max(n, MIN_MAX_CONTRIB_ITEMS), MAX_MAX_CONTRIB_ITEMS);
+}
+function readMaxContribIssuesScanned() {
+  const raw = process.env["CONTRIB_MAX_ISSUES_SCANNED"];
+  if (raw == null) return DEFAULT_MAX_CONTRIB_ISSUES_SCANNED;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_MAX_CONTRIB_ISSUES_SCANNED;
+  return Math.min(
+    Math.max(n, MIN_MAX_CONTRIB_ISSUES_SCANNED),
+    MAX_MAX_CONTRIB_ISSUES_SCANNED
+  );
+}
+function authHeaders(token) {
+  const bearer = token ?? process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
+  const h = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "terminalhire",
+    "X-GitHub-Api-Version": "2022-11-28"
+  };
+  if (bearer) h["Authorization"] = `Bearer ${bearer}`;
+  return h;
+}
+function tokenize2(text) {
+  return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
+}
+function labelNames(labels) {
+  return (labels ?? []).map((l) => typeof l === "string" ? l : l.name ?? "").filter(Boolean);
+}
+function repoFullNameFromApiUrl(url) {
+  const m = url.match(/\/repos\/([^/]+)\/([^/]+)\/?$/);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+function makeClient(fetchImpl, cfg, token) {
+  const gov = makeGitHubGovernor(fetchImpl, cfg);
+  const effectiveToken = token ?? process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
+  const headers = authHeaders(effectiveToken);
+  async function raw(path) {
+    return gov.get(`${GITHUB_API}${path}`, { headers });
+  }
+  async function json(path) {
+    const res = await raw(path);
+    if (!res) return null;
+    if (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0") return null;
+    if (!res.ok) return null;
+    try {
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+  async function probe(path) {
+    return gov.probe(`${GITHUB_API}${path}`, { headers });
+  }
+  let supplyFailures = 0;
+  const noteSupplyFailure = () => {
+    supplyFailures += 1;
+  };
+  return {
+    raw,
+    json,
+    probe,
+    governor: gov,
+    token: effectiveToken,
+    setSecondaryHint: gov.setSecondaryHint,
+    noteSupplyFailure,
+    // Merge the client-level supply-failure count into the governor stats so callers
+    // read ONE stats object (the cron's metrics line + the B2 degraded check).
+    getStats: () => ({ ...gov.getStats(), supplyFailures })
+  };
+}
+async function contributorCount(client, fullName) {
+  const res = await client.raw(`/repos/${fullName}/contributors?per_page=1&anon=false`);
+  if (!res || !res.ok) return void 0;
+  const link = res.headers.get("link");
+  const m = link?.match(/[?&]page=(\d+)>;\s*rel="last"/);
+  if (m) return Number(m[1]);
+  try {
+    const body = await res.json();
+    return Array.isArray(body) ? body.length : 0;
+  } catch {
+    return void 0;
+  }
+}
+async function openPRIssueRefs(client, fullName) {
+  const token = client.token;
+  const [owner, name] = fullName.split("/");
+  if (token && owner && name) {
+    const res = await openPRClosingRefs(owner, name, token, void 0, client.governor);
+    if (res === null) return null;
+    if (res.capHit) {
+      console.warn(
+        `[contribute] open-PR closing-ref scan capped at 100/${res.totalCount} open PRs for ${fullName} (closing refs beyond the first 100 open PRs not scanned)`
+      );
+    }
+    return res.refs;
+  }
+  const prs = await client.json(
+    `/repos/${fullName}/pulls?state=open&per_page=100`
+  );
+  if (!Array.isArray(prs)) return null;
+  const refs = /* @__PURE__ */ new Set();
+  for (const pr of prs) {
+    const text = `${pr.title ?? ""}
+${pr.body ?? ""}`;
+    for (const m of text.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi)) {
+      refs.add(Number(m[1]));
+    }
+  }
+  return refs;
+}
+async function fetchRateLimit(client) {
+  const r = await client.probe("/rate_limit");
+  return r?.resources ?? null;
+}
+async function searchContribIssues(client, queries) {
+  const byUrl = /* @__PURE__ */ new Map();
+  const maxPages = readSearchMaxPages();
+  for (const q of queries) {
+    for (let page = 1; page <= maxPages; page++) {
+      const res = await client.json(
+        `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE}&page=${page}`
+      );
+      const items = res?.items;
+      if (items == null) {
+        const st = client.getStats();
+        if (!st.budgetAborted && !st.secondaryAborted) client.noteSupplyFailure();
+        break;
+      }
+      for (const it of items) {
+        if (it.pull_request) continue;
+        if (!byUrl.has(it.html_url)) byUrl.set(it.html_url, it);
+      }
+      if (items.length < SEARCH_PER_PAGE) break;
+      const stats = client.getStats();
+      if (stats.budgetAborted || stats.secondaryAborted) break;
+    }
+  }
+  return [...byUrl.values()].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+}
+function buildContributionJob(a) {
+  return {
+    id: a.id,
+    source: "contribute",
+    title: a.title,
+    company: a.repo.owner.login,
+    url: a.issue.html_url,
+    remote: true,
+    location: "Remote",
+    tags: a.tags,
+    roleType: "freelance",
+    postedAt: a.issue.created_at,
+    applyMode: "direct",
+    contribution: {
+      repoFullName: a.fullName,
+      repoStars: a.repo.stargazers_count,
+      repoContributors: a.contributors,
+      issueNumber: a.issue.number,
+      labels: a.labels,
+      issueUrl: a.issue.html_url,
+      issueBody: a.body.slice(0, 1e3) || void 0,
+      // Provably 0 open PRs ONLY when the open-PR check actually ran and returned a
+      // verified-empty/non-matching set; a failed check leaves it undefined (never a
+      // fabricated 0), so the claim path falls through to a live re-count.
+      openPRsAtDiscovery: a.openPRsAtDiscovery,
+      repoDescription: a.repo.description || null,
+      // TERM-27: persist the repo's primary language so project curation can
+      // exclude the repo's OWN language id (folded into every issue's tags) from
+      // the distinct-skill signal. Same `repo` used by the tokenize() tag build.
+      language: a.repo.language ?? null,
+      // TERM-35: stamp the search item's comment count (already in the response —
+      // zero extra egress). A NEUTRAL volume signal only: set solely when the
+      // search item carries a finite count >= 0; a failed/absent value leaves it
+      // undefined (never a fabricated 0), so a render's chip falls through cleanly.
+      commentsAtDiscovery: typeof a.issue.comments === "number" && Number.isFinite(a.issue.comments) && a.issue.comments >= 0 ? a.issue.comments : void 0
+    },
+    // Provenance: repo-first discovered items only (label-first omits the field).
+    ...a.discovered ? { discovered: true } : {},
+    raw: a.issue
+  };
+}
+async function aggregateContributions(opts = {}) {
+  const paceEnabled = opts.paceEnabled ?? !opts.fetchImpl;
+  const client = makeClient(opts.fetchImpl ?? fetchWithTimeout, {
+    paceEnabled,
+    gapMs: readReqGapMs(),
+    // Request-path callers (plan B2) can LOWER the budget but never raise it past the
+    // vetted default — take the min so a per-user pass caps its own wall-clock.
+    budgetMs: Math.min(opts.budgetMs ?? Infinity, readBuildBudgetMs()),
+    sleep: opts.sleepImpl ?? realSleep,
+    now: opts.nowImpl ?? Date.now,
+    // Bound the unguarded probe on the REAL network only; injected-fetch tests get
+    // null so the probe stays deterministic (and its shared spy sleeper untouched).
+    probeTimeoutMs: opts.fetchImpl ? null : PROBE_TIMEOUT_MS
+  }, opts.token);
+  const queries = opts.queries ?? CONTRIB_SEARCH_QUERIES;
+  const maxContribItems = readMaxContribItems();
+  const startRl = await fetchRateLimit(client);
+  const coreHealthyAtStart = (startRl?.core?.remaining ?? 0) >= 500;
+  client.setSecondaryHint(coreHealthyAtStart);
+  const issues = (await searchContribIssues(client, queries)).slice(
+    0,
+    readMaxContribIssuesScanned()
+  );
+  const repoCache = /* @__PURE__ */ new Map();
+  const contribCache = /* @__PURE__ */ new Map();
+  const prRefsCache = /* @__PURE__ */ new Map();
+  const xbuild = opts.repoMetaCache;
+  const servedFromXbuild = /* @__PURE__ */ new Set();
+  const persistedXbuild = /* @__PURE__ */ new Set();
+  const xbuildTried = /* @__PURE__ */ new Set();
+  async function primeFromXbuild(key, fullName) {
+    if (!xbuild || xbuildTried.has(key)) return;
+    xbuildTried.add(key);
+    if (repoCache.has(key) && contribCache.has(key)) return;
+    let cached = null;
+    try {
+      cached = await xbuild.get(key);
+    } catch {
+      return;
+    }
+    if (!cached) return;
+    if (!repoCache.has(key)) {
+      const owner = fullName.split("/")[0] ?? "";
+      repoCache.set(key, {
+        full_name: fullName,
+        stargazers_count: cached.stars,
+        archived: cached.archived,
+        disabled: cached.disabled,
+        fork: cached.fork,
+        language: cached.language,
+        description: cached.description,
+        owner: { login: owner }
+      });
+    }
+    if (!contribCache.has(key)) {
+      contribCache.set(key, cached.contributors);
+      servedFromXbuild.add(key);
+    }
+  }
+  async function persistRepoMeta(fullName, repo, contributors) {
+    if (!xbuild) return;
+    const key = repoKey(fullName);
+    if (servedFromXbuild.has(key) || persistedXbuild.has(key)) return;
+    if (contributors === void 0) return;
+    persistedXbuild.add(key);
+    try {
+      await xbuild.set(key, {
+        stars: repo.stargazers_count,
+        contributors,
+        language: repo.language,
+        archived: repo.archived,
+        fork: repo.fork,
+        disabled: repo.disabled,
+        description: repo.description || null
+      });
+    } catch {
+    }
+  }
+  async function repoMeta(fullName) {
+    const key = repoKey(fullName);
+    const hit = repoCache.get(key);
+    if (hit !== void 0) return hit;
+    await primeFromXbuild(key, fullName);
+    const primed = repoCache.get(key);
+    if (primed !== void 0) return primed;
+    const r = await client.json(`/repos/${fullName}`) ?? null;
+    repoCache.set(key, r);
+    return r;
+  }
+  async function repoContribCount(fullName) {
+    const key = repoKey(fullName);
+    if (contribCache.has(key)) return contribCache.get(key);
+    await primeFromXbuild(key, fullName);
+    if (contribCache.has(key)) return contribCache.get(key);
+    const n = await contributorCount(client, fullName);
+    contribCache.set(key, n);
+    return n;
+  }
+  async function repoPRRefs(fullName) {
+    const key = repoKey(fullName);
+    if (prRefsCache.has(key)) return prRefsCache.get(key) ?? null;
+    const refs = await openPRIssueRefs(client, fullName);
+    prRefsCache.set(key, refs);
+    return refs;
+  }
+  const jobs = [];
+  const seen = /* @__PURE__ */ new Set();
+  const perRepo = /* @__PURE__ */ new Map();
+  let metaNull = 0;
+  let contribUndefined = 0;
+  let prRefsNull = 0;
+  for (const issue of issues) {
+    if (jobs.length >= maxContribItems) break;
+    const fullName = repoFullNameFromApiUrl(issue.repository_url);
+    if (!fullName) continue;
+    const id = `contribute:${repoKey(fullName)}#${issue.number}`;
+    if (seen.has(id)) continue;
+    if (isExcludedRepo(fullName)) continue;
+    if (isAssigned(issue)) continue;
+    if ((perRepo.get(repoKey(fullName)) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) continue;
+    const title = decodeEntities(issue.title).trim();
+    const body = issue.body ? decodeEntities(issue.body) : "";
+    const labels = labelNames(issue.labels);
+    if (looksLikeContentTask({ title, body, labels })) continue;
+    const repo = await repoMeta(fullName);
+    if (!repo) {
+      metaNull++;
+      continue;
+    }
+    const contributors = await repoContribCount(fullName);
+    if (contributors === void 0) contribUndefined++;
+    await persistRepoMeta(fullName, repo, contributors);
+    if (!passesContributionGate({
+      fullName,
+      stars: repo.stargazers_count,
+      contributors,
+      title,
+      archived: repo.archived,
+      fork: repo.fork
+    })) {
+      continue;
+    }
+    if (repo.disabled) continue;
+    const prRefs = await repoPRRefs(fullName);
+    if (prRefs === null) prRefsNull++;
+    const openPRsAtDiscovery = prRefs ? prRefs.has(issue.number) ? 1 : 0 : void 0;
+    const tags = normalize(
+      tokenize2([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
+    );
+    seen.add(id);
+    perRepo.set(repoKey(fullName), (perRepo.get(repoKey(fullName)) ?? 0) + 1);
+    jobs.push(
+      buildContributionJob({
+        id,
+        fullName,
+        repo,
+        issue,
+        title,
+        body,
+        labels,
+        tags,
+        contributors,
+        // gate guarantees a number here
+        openPRsAtDiscovery
+      })
+    );
+  }
+  const doDiscovery = opts.discoverRepos ?? (opts.trendingSlugs != null || opts.vocabTerms != null || opts.seedSlugs != null);
+  let discoveredEmitted = 0;
+  let discoveryBudgetStopped = false;
+  if (doDiscovery && jobs.length < maxContribItems) {
+    const maxRepos = Math.min(
+      Math.max(0, opts.maxDiscoveredRepos ?? MAX_DISCOVERED_REPOS),
+      MAX_DISCOVERED_REPOS
+    );
+    const vocabTerms = (opts.vocabTerms ?? DISCOVERY_VOCAB_TERMS).slice(
+      0,
+      DISCOVERY_VOCAB_TERMS.length
+    );
+    const vocabCandidates = [];
+    for (const term of vocabTerms) {
+      if (client.getStats().budgetAborted || client.getStats().secondaryAborted) {
+        discoveryBudgetStopped = true;
+        break;
+      }
+      const res = await client.json(
+        `/search/repositories?q=${encodeURIComponent(term)}&sort=updated&order=desc&per_page=${DISCOVERY_REPOS_PER_TERM}`
+      );
+      for (const r of res?.items ?? []) {
+        if (!r?.full_name) continue;
+        if (!repoCache.has(repoKey(r.full_name))) {
+          repoCache.set(repoKey(r.full_name), {
+            full_name: r.full_name,
+            stargazers_count: r.stargazers_count,
+            archived: r.archived,
+            disabled: r.disabled ?? false,
+            fork: r.fork,
+            language: r.language,
+            description: r.description || null,
+            owner: r.owner
+          });
+        }
+        vocabCandidates.push({ fullName: r.full_name, stars: r.stargazers_count ?? 0 });
+      }
+    }
+    vocabCandidates.sort((a, b) => b.stars - a.stars);
+    const candidates = [];
+    const candSeen = /* @__PURE__ */ new Set();
+    for (const slug of opts.seedSlugs ?? []) {
+      const s = slug?.toLowerCase();
+      if (s && !candSeen.has(repoKey(s))) {
+        candSeen.add(repoKey(s));
+        candidates.push(s);
+      }
+    }
+    for (const slug of opts.trendingSlugs ?? []) {
+      const s = slug?.toLowerCase();
+      if (s && !candSeen.has(repoKey(s))) {
+        candSeen.add(repoKey(s));
+        candidates.push(s);
+      }
+    }
+    for (const { fullName } of vocabCandidates) {
+      if (!candSeen.has(repoKey(fullName))) {
+        candSeen.add(repoKey(fullName));
+        candidates.push(fullName);
+      }
+    }
+    const scanned = candidates.slice(0, maxRepos);
+    for (const fullName of scanned) {
+      if (jobs.length >= maxContribItems) break;
+      if (client.getStats().budgetAborted || client.getStats().secondaryAborted) {
+        discoveryBudgetStopped = true;
+        break;
+      }
+      if (isExcludedRepo(fullName)) continue;
+      const repo = await repoMeta(fullName);
+      if (!repo) {
+        metaNull++;
+        continue;
+      }
+      if (repo.disabled) continue;
+      const contributors = await repoContribCount(fullName);
+      if (contributors === void 0) contribUndefined++;
+      await persistRepoMeta(fullName, repo, contributors);
+      if (repo.archived || repo.fork || repo.stargazers_count < MIN_STARS || contributors === void 0 || contributors < MIN_CONTRIBUTORS) {
+        continue;
+      }
+      const q = `repo:${fullName} is:issue is:open label:${DISCOVERY_ISSUE_LABELS}`;
+      const searchRes = await client.json(
+        `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE}`
+      );
+      const repoIssues = (searchRes?.items ?? []).filter((it) => !it.pull_request);
+      let perRepoDiscovered = 0;
+      for (const issue of repoIssues) {
+        if (jobs.length >= maxContribItems) break;
+        if (perRepoDiscovered >= MAX_ISSUES_PER_DISCOVERED_REPO) break;
+        if ((perRepo.get(repoKey(fullName)) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) break;
+        const id = `contribute:${repoKey(fullName)}#${issue.number}`;
+        if (seen.has(id)) continue;
+        if (isAssigned(issue)) continue;
+        const title = decodeEntities(issue.title).trim();
+        if (!passesContributionGate({
+          fullName,
+          stars: repo.stargazers_count,
+          contributors,
+          title,
+          archived: repo.archived,
+          fork: repo.fork
+        })) {
+          continue;
+        }
+        const body = issue.body ? decodeEntities(issue.body) : "";
+        const labels = labelNames(issue.labels);
+        if (looksLikeContentTask({ title, body, labels })) continue;
+        const prRefs = await repoPRRefs(fullName);
+        if (prRefs === null) prRefsNull++;
+        const openPRsAtDiscovery = prRefs ? prRefs.has(issue.number) ? 1 : 0 : void 0;
+        const tags = normalize(
+          tokenize2([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
+        );
+        seen.add(id);
+        perRepo.set(repoKey(fullName), (perRepo.get(repoKey(fullName)) ?? 0) + 1);
+        perRepoDiscovered++;
+        discoveredEmitted++;
+        jobs.push(
+          buildContributionJob({
+            id,
+            fullName,
+            repo,
+            issue,
+            title,
+            body,
+            labels,
+            tags,
+            contributors,
+            openPRsAtDiscovery,
+            discovered: true
+          })
+        );
+      }
+    }
+  }
+  if (!opts.fetchImpl) {
+    const rl = await fetchRateLimit(client);
+    const core = rl?.core ? `${rl.core.remaining}/${rl.core.limit}` : "n/a";
+    const search = rl?.search ? `${rl.search.remaining}/${rl.search.limit}` : "n/a";
+    const noToken = !client.token;
+    const { pacedMs, secondaryAborted, budgetAborted, elapsedMs, gqlCost, gqlRemaining } = client.getStats();
+    console.info(
+      `[contribute] build metrics \u2014 scanned=${issues.length} reposDistinct=${repoCache.size} emitted=${jobs.length} discovered=${discoveredEmitted} metaNull=${metaNull} contribUndefined=${contribUndefined} prRefsNull=${prRefsNull} paced=${pacedMs} secondaryAborted=${secondaryAborted} budgetAborted=${budgetAborted} core=${core} search=${search} gqlCost=${gqlCost} gqlRemaining=${gqlRemaining ?? "n/a"} elapsed=${elapsedMs}` + (noToken ? " (NO TOKEN \u2192 60/hr)" : "")
+    );
+    if (discoveryBudgetStopped) {
+      console.warn(
+        `[contribute] repo-first discovery stopped early \u2014 build budget exhausted (emitted ${discoveredEmitted} discovered before the cap)`
+      );
+    }
+  }
+  if (opts.onStats) {
+    const { budgetAborted, secondaryAborted, supplyFailures } = client.getStats();
+    opts.onStats({
+      // A PARTIAL crawl from ANY cause: the governor's budget/secondary abort, an early
+      // discovery stop, OR an ordinary /search page failure (supplyFailures) that
+      // truncated the primary supply. Any of these ⇒ the pool is incomplete.
+      degraded: Boolean(budgetAborted || secondaryAborted || discoveryBudgetStopped || supplyFailures > 0),
+      emitted: jobs.length,
+      scanned: issues.length
+    });
+  }
+  return jobs;
+}
+var GITHUB_API, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE, DEFAULT_SEARCH_MAX_PAGES, MIN_SEARCH_MAX_PAGES, MAX_SEARCH_MAX_PAGES, DEFAULT_MAX_CONTRIB_ITEMS, MIN_MAX_CONTRIB_ITEMS, MAX_MAX_CONTRIB_ITEMS, DEFAULT_MAX_CONTRIB_ISSUES_SCANNED, MIN_MAX_CONTRIB_ISSUES_SCANNED, MAX_MAX_CONTRIB_ISSUES_SCANNED, MAX_DISCOVERED_REPOS, MAX_ISSUES_PER_DISCOVERED_REPO, DISCOVERY_REPOS_PER_TERM, DISCOVERY_VOCAB_TERMS, DISCOVERY_ISSUE_LABELS, repoKey;
+var init_contributions = __esm({
+  "../../packages/core/src/feeds/contributions.ts"() {
+    "use strict";
+    init_vocabulary();
+    init_entities();
+    init_bounty_gate();
+    init_contribution_gate();
+    init_contribution_classify();
+    init_github_bounties();
+    init_github();
+    init_http();
+    init_gh_governor();
+    GITHUB_API = "https://api.github.com";
+    CONTRIB_LABEL_QUERIES = [
+      'label:"good first issue" type:issue state:open',
+      'label:"good-first-issue" type:issue state:open',
+      'label:"help wanted" type:issue state:open',
+      'label:"help-wanted" type:issue state:open',
+      'label:"up-for-grabs" type:issue state:open',
+      // supply-expansion D: two more first-contribution label families widen the
+      // global newest-first slice WITHOUT relaxing the credential gate.
+      'label:"beginner-friendly" type:issue state:open',
+      'label:"first-timers-only" type:issue state:open'
+    ];
+    CONTRIB_LANGUAGE_QUERIES = [
+      ...["rust", "go", "python", "c++", "ruby"].map(
+        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+      ),
+      ...["rust", "go"].map(
+        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+      ),
+      // supply-expansion D: cover the high-volume web/enterprise ecosystems the
+      // original set omitted. TS/JS were previously left out of "good first issue"
+      // (the global slice over-represented them) but a LANGUAGE-scoped page surfaces
+      // DIFFERENT repos than the global newest-first slice, so re-including them widens
+      // distinct-repo coverage rather than duplicating it.
+      ...["typescript", "javascript", "java", "python"].map(
+        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+      ),
+      ...["typescript", "javascript", "c#", "php"].map(
+        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+      )
+    ];
+    CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
+    SEARCH_PER_PAGE = 100;
+    DEFAULT_SEARCH_MAX_PAGES = 1;
+    MIN_SEARCH_MAX_PAGES = 1;
+    MAX_SEARCH_MAX_PAGES = 5;
+    DEFAULT_MAX_CONTRIB_ITEMS = 400;
+    MIN_MAX_CONTRIB_ITEMS = 50;
+    MAX_MAX_CONTRIB_ITEMS = 1e3;
+    DEFAULT_MAX_CONTRIB_ISSUES_SCANNED = 1500;
+    MIN_MAX_CONTRIB_ISSUES_SCANNED = 100;
+    MAX_MAX_CONTRIB_ISSUES_SCANNED = 5e3;
+    MAX_DISCOVERED_REPOS = 15;
+    MAX_ISSUES_PER_DISCOVERED_REPO = 3;
+    DISCOVERY_REPOS_PER_TERM = 20;
+    DISCOVERY_VOCAB_TERMS = ["rust", "go", "python", "typescript"];
+    DISCOVERY_ISSUE_LABELS = '"good first issue","help wanted","good-first-issue","help-wanted"';
+    repoKey = (name) => name.toLowerCase();
   }
 });
 
@@ -1124,6 +2024,7 @@ var init_feeds = __esm({
     init_bounty_gate();
     init_contribution_gate();
     init_contribution_classify();
+    init_contributions();
     init_projectCuration();
     GREENHOUSE_SLUGS_BY_TIER = {
       bigco: [
@@ -1235,54 +2136,6 @@ var init_feeds = __esm({
       ashby: new Set(ASHBY_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase())),
       lever: new Set(LEVER_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase()))
     };
-  }
-});
-
-// ../../packages/core/src/feeds/contributions.ts
-var CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES;
-var init_contributions = __esm({
-  "../../packages/core/src/feeds/contributions.ts"() {
-    "use strict";
-    init_vocabulary();
-    init_entities();
-    init_bounty_gate();
-    init_contribution_gate();
-    init_contribution_classify();
-    init_github_bounties();
-    init_github();
-    init_http();
-    init_gh_governor();
-    CONTRIB_LABEL_QUERIES = [
-      'label:"good first issue" type:issue state:open',
-      'label:"good-first-issue" type:issue state:open',
-      'label:"help wanted" type:issue state:open',
-      'label:"help-wanted" type:issue state:open',
-      'label:"up-for-grabs" type:issue state:open',
-      // supply-expansion D: two more first-contribution label families widen the
-      // global newest-first slice WITHOUT relaxing the credential gate.
-      'label:"beginner-friendly" type:issue state:open',
-      'label:"first-timers-only" type:issue state:open'
-    ];
-    CONTRIB_LANGUAGE_QUERIES = [
-      ...["rust", "go", "python", "c++", "ruby"].map(
-        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
-      ),
-      ...["rust", "go"].map(
-        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
-      ),
-      // supply-expansion D: cover the high-volume web/enterprise ecosystems the
-      // original set omitted. TS/JS were previously left out of "good first issue"
-      // (the global slice over-represented them) but a LANGUAGE-scoped page surfaces
-      // DIFFERENT repos than the global newest-first slice, so re-including them widens
-      // distinct-repo coverage rather than duplicating it.
-      ...["typescript", "javascript", "java", "python"].map(
-        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
-      ),
-      ...["typescript", "javascript", "c#", "php"].map(
-        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
-      )
-    ];
-    CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
   }
 });
 
@@ -1431,6 +2284,118 @@ var init_legible_trajectory = __esm({
   }
 });
 
+// ../../packages/core/src/credential/sources.ts
+var SOURCE_CLASS, HUMAN_SET;
+var init_sources = __esm({
+  "../../packages/core/src/credential/sources.ts"() {
+    "use strict";
+    SOURCE_CLASS = {
+      /** `author_association` values that make a (non-bot, non-self) reviewer a
+       *  class-A independent human. Independence itself (is this maintainer affiliated
+       *  with the contributor?) is refined by the repo-provenance/independence layer
+       *  (TERM-46); this establishes the HUMAN class. */
+      HUMAN_ASSOCIATIONS: ["OWNER", "MEMBER", "COLLABORATOR"]
+    };
+    HUMAN_SET = new Set(
+      SOURCE_CLASS.HUMAN_ASSOCIATIONS.map((a) => a.toUpperCase())
+    );
+  }
+});
+
+// ../../packages/core/src/credential/independence.ts
+var init_independence = __esm({
+  "../../packages/core/src/credential/independence.ts"() {
+    "use strict";
+  }
+});
+
+// ../../packages/core/src/credential/redaction.ts
+var init_redaction = __esm({
+  "../../packages/core/src/credential/redaction.ts"() {
+    "use strict";
+  }
+});
+
+// ../../packages/core/src/credential/decisions.ts
+var init_decisions = __esm({
+  "../../packages/core/src/credential/decisions.ts"() {
+    "use strict";
+  }
+});
+
+// ../../packages/core/src/credential/metrics-hygiene.ts
+var init_metrics_hygiene = __esm({
+  "../../packages/core/src/credential/metrics-hygiene.ts"() {
+    "use strict";
+  }
+});
+
+// ../../packages/core/src/credential/dossier.ts
+var init_dossier = __esm({
+  "../../packages/core/src/credential/dossier.ts"() {
+    "use strict";
+    init_sources();
+    init_independence();
+    init_decisions();
+    init_metrics_hygiene();
+  }
+});
+
+// ../../packages/core/src/credential/synthesis.ts
+var COMPETENCY_NAMES, COMPETENCY_NAME_SET, COMPETENCY_GRADES, COMPETENCY_GRADE_SET, CITATION_CONTRACT, VERIFY_CONTRACT;
+var init_synthesis = __esm({
+  "../../packages/core/src/credential/synthesis.ts"() {
+    "use strict";
+    COMPETENCY_NAMES = [
+      "code-authorship",
+      "iterative-refinement",
+      "independent-review",
+      "defect-resolution",
+      "repository-standing",
+      "issue-linkage"
+    ];
+    COMPETENCY_NAME_SET = new Set(COMPETENCY_NAMES);
+    COMPETENCY_GRADES = [
+      "high",
+      "medium",
+      "process",
+      "no-signal"
+    ];
+    COMPETENCY_GRADE_SET = new Set(COMPETENCY_GRADES);
+    CITATION_CONTRACT = [
+      "You write ONE developer-contribution dossier section from STRUCTURED FACTS ONLY.",
+      "You are given a JSON `source` object of identity-free facts (pseudonym labels, enums,",
+      "counts, timestamps). You have NO other information. You must NOT invent, infer beyond,",
+      "or embellish these facts, and you must NOT name any person, account, email, or handle.",
+      "",
+      "Every claim you emit MUST carry one or more citations. A citation is the exact string",
+      "`env:<path>` pointing at the source value that proves the claim (e.g. `env:threadStats.resolved`,",
+      "`env:provenance.tier`, `env:reviewRounds`). Cite ONLY paths present in the provided",
+      "ALLOWED CITES list. A claim you cannot ground in a real path \u2014 DO NOT emit it. Prefer",
+      "fewer, fully-grounded claims over broad ones. If the facts support nothing, emit no claims.",
+      "",
+      'Return STRICT JSON: {"claims":[{"id":"c1","kind":"thesis|decision|competency|bullet",',
+      '"text":"...","cites":["env:..."],"competency":{"name":"<taxonomy>","grade":"high|medium|process|no-signal"}}]}',
+      'The `competency` field is present ONLY on kind="competency" claims. `id` is unique per claim.'
+    ].join("\n");
+    VERIFY_CONTRACT = [
+      "You are an ADVERSARIAL verifier. Your job is to DISPROVE claims, not to help.",
+      "For each claim you are given the claim text and the RESOLVED source excerpts its",
+      "citations point at (the actual values). Keep a claim ONLY if the excerpts",
+      "UNEQUIVOCALLY support every assertion in its text \u2014 the excerpts alone, with no",
+      "outside knowledge, no inference, no benefit of the doubt. If a claim overstates,",
+      "generalizes beyond the excerpt, names anyone, or is not fully entailed by the",
+      "excerpts: REJECT it. When in doubt, REJECT (default-to-fail).",
+      "",
+      "OUTPUT FORMAT \u2014 obey exactly: respond with ONLY the JSON object and NOTHING ELSE.",
+      "No preamble, no per-claim commentary, no reasoning prose, no markdown fence, no text",
+      "before or after. Decide internally; emit only the verdict:",
+      '{"supported":["c1","c3"]} \u2014 the ids of the claims that survive (omit all others; use',
+      '{"supported":[]} if none do). Any surviving id MUST be one you were given.'
+    ].join("\n");
+  }
+});
+
 // ../../packages/core/src/short-token.ts
 import { createHash as createHash2 } from "crypto";
 function opportunityShortToken(id) {
@@ -1465,24 +2430,74 @@ var init_src = __esm({
     init_legible();
     init_legible_trajectory();
     init_rigor();
+    init_sources();
+    init_independence();
+    init_redaction();
+    init_decisions();
+    init_metrics_hygiene();
+    init_dossier();
+    init_synthesis();
     init_short_token();
   }
 });
 
+// src/state-dir.ts
+import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
+function warnStateDirOnce(dir, message) {
+  if (warnedDirs.has(dir)) return;
+  warnedDirs.add(dir);
+  try {
+    process.stderr.write(message);
+  } catch {
+  }
+}
+function ensureStateDir(dir) {
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let fd;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | noFollow);
+  } catch (err) {
+    if (err?.code === "ELOOP") {
+      warnStateDirOnce(
+        dir,
+        `terminalhire: ${dir} is a symlink \u2014 leaving its permissions alone; the 0700 guarantee on the state directory is NOT enforced.
+`
+      );
+      return STATE_DIR_SYMLINK;
+    }
+    return STATE_DIR_UNVERIFIED;
+  }
+  try {
+    const currentMode = fstatSync(fd).mode & 511;
+    if ((currentMode & ~STATE_DIR_MODE) !== 0) {
+      fchmodSync(fd, currentMode & STATE_DIR_MODE);
+    }
+    return STATE_DIR_OK;
+  } catch {
+    return STATE_DIR_UNVERIFIED;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+    }
+  }
+}
+var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs;
+var init_state_dir = __esm({
+  "src/state-dir.ts"() {
+    "use strict";
+    STATE_DIR_MODE = 448;
+    STATE_DIR_OK = "ok";
+    STATE_DIR_SYMLINK = "symlink";
+    STATE_DIR_UNVERIFIED = "unverified";
+    warnedDirs = /* @__PURE__ */ new Set();
+  }
+});
+
 // src/crypto-store.ts
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes as randomBytes2
-} from "crypto";
-import {
-  readFileSync as readFileSync4,
-  writeFileSync as writeFileSync3,
-  mkdirSync as mkdirSync3,
-  existsSync as existsSync2,
-  renameSync as renameSync2,
-  rmSync
-} from "fs";
+import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, existsSync as existsSync2, renameSync as renameSync2, rmSync } from "fs";
 import { join as join4, dirname, basename } from "path";
 import { homedir as homedir3 } from "os";
 import { createRequire } from "module";
@@ -1498,11 +2513,7 @@ function encrypt(plaintext, key) {
   };
 }
 function decrypt(blob, key) {
-  const decipher = createDecipheriv(
-    ALGO,
-    key,
-    Buffer.from(blob.iv, "hex")
-  );
+  const decipher = createDecipheriv(ALGO, key, Buffer.from(blob.iv, "hex"));
   decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
   const plain = Buffer.concat([
     decipher.update(Buffer.from(blob.ciphertext, "hex")),
@@ -1529,7 +2540,7 @@ async function tryLoadFromKeytar() {
   }
 }
 function loadOrCreateFileKey() {
-  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR3);
   if (existsSync2(KEY_FILE)) {
     return Buffer.from(readFileSync4(KEY_FILE, "utf8").trim(), "hex");
   }
@@ -1543,8 +2554,11 @@ function warnStderr(message) {
 }
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname(filePath);
-  mkdirSync3(dir, { recursive: true, mode: 448 });
-  const tmp = join4(dir, `.${basename(filePath)}.tmp-${process.pid}-${randomBytes2(6).toString("hex")}`);
+  ensureStateDir(dir);
+  const tmp = join4(
+    dir,
+    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes2(6).toString("hex")}`
+  );
   writeFileSync3(tmp, content, { encoding: "utf8", mode: 384 });
   renameSync2(tmp, filePath);
 }
@@ -1571,7 +2585,9 @@ async function resolveKey(filePath, opts) {
   if (opts.keyPolicy === "keychain-required") {
     const key = await tryLoadFromKeytar();
     if (!key) {
-      warnStderr(`crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`);
+      warnStderr(
+        `crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`
+      );
       return null;
     }
     return key;
@@ -1606,6 +2622,7 @@ var TERMINALHIRE_DIR3, KEY_FILE, KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, KEY_BYTES
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
+    init_state_dir();
     TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
     KEY_FILE = join4(TERMINALHIRE_DIR3, "key");
     KEYTAR_SERVICE = "terminalhire";
@@ -1785,6 +2802,224 @@ var init_profile = __esm({
   }
 });
 
+// src/github-auth.ts
+var github_auth_exports = {};
+__export(github_auth_exports, {
+  GITHUB_SCOPE: () => GITHUB_SCOPE,
+  decrypt: () => decrypt2,
+  deleteGitHubToken: () => deleteGitHubToken,
+  encrypt: () => encrypt2,
+  hasGitHubToken: () => hasGitHubToken,
+  loadKey: () => loadKey,
+  readGitHubToken: () => readGitHubToken,
+  resolveStoredLogin: () => resolveStoredLogin,
+  runDeviceFlow: () => runDeviceFlow,
+  writeGitHubToken: () => writeGitHubToken
+});
+import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes3 } from "crypto";
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, existsSync as existsSync3, rmSync as rmSync2, renameSync as renameSync3 } from "fs";
+import { join as join6 } from "path";
+import { homedir as homedir5 } from "os";
+async function loadKey() {
+  ensureStateDir(TERMINALHIRE_DIR5);
+  if (existsSync3(KEY_FILE2)) {
+    return Buffer.from(readFileSync5(KEY_FILE2, "utf8").trim(), "hex");
+  }
+  const key = randomBytes3(KEY_BYTES2);
+  writeFileSync4(KEY_FILE2, key.toString("hex"), { mode: 384, encoding: "utf8" });
+  return key;
+}
+function encrypt2(plaintext, key) {
+  const iv = randomBytes3(IV_BYTES2);
+  const cipher = createCipheriv2(ALGO2, key, iv);
+  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return { iv: iv.toString("hex"), tag: tag.toString("hex"), ciphertext: ct.toString("hex") };
+}
+function decrypt2(blob, key) {
+  const decipher = createDecipheriv2(ALGO2, key, Buffer.from(blob.iv, "hex"));
+  decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
+  const plain = Buffer.concat([
+    decipher.update(Buffer.from(blob.ciphertext, "hex")),
+    decipher.final()
+  ]);
+  return plain.toString("utf8");
+}
+async function readGitHubToken() {
+  if (!existsSync3(TOKEN_FILE)) return void 0;
+  try {
+    const key = await loadKey();
+    const raw = readFileSync5(TOKEN_FILE, "utf8");
+    const blob = JSON.parse(raw);
+    return decrypt2(blob, key);
+  } catch {
+    return void 0;
+  }
+}
+async function writeGitHubToken(token) {
+  ensureStateDir(TERMINALHIRE_DIR5);
+  const key = await loadKey();
+  const blob = encrypt2(token, key);
+  const tmpFile = `${TOKEN_FILE}.${process.pid}.${randomBytes3(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync4(tmpFile, JSON.stringify(blob, null, 2), {
+      encoding: "utf8",
+      mode: 384,
+      flag: "wx"
+    });
+    renameSync3(tmpFile, TOKEN_FILE);
+  } catch (err) {
+    try {
+      rmSync2(tmpFile, { force: true });
+    } catch {
+    }
+    throw err;
+  }
+}
+async function deleteGitHubToken() {
+  try {
+    rmSync2(TOKEN_FILE);
+  } catch {
+  }
+}
+async function hasGitHubToken() {
+  return existsSync3(TOKEN_FILE);
+}
+async function runDeviceFlow() {
+  if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
+    console.log("\n[mock] GitHub OAuth skipped (JPI_GITHUB_MOCK=1)");
+    console.log(`[mock] Using fixture profile: ${MOCK_LOGIN}`);
+    await writeGitHubToken(MOCK_TOKEN);
+    return MOCK_LOGIN;
+  }
+  const clientId = process.env["GITHUB_DEVICE_CLIENT_ID"] ?? process.env["GITHUB_CLIENT_ID"] ?? BAKED_IN_CLIENT_ID;
+  if (clientId === "Iv1.PLACEHOLDER_REGISTER_YOUR_APP") {
+    console.warn("\nWarning: GITHUB_CLIENT_ID env var looks like a placeholder.");
+    console.warn(
+      "Remove it to use the baked-in client ID, or set it to your own OAuth App Client ID.\n"
+    );
+  }
+  const deviceRes = await fetch(DEVICE_CODE_URL, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({ client_id: clientId, scope: GITHUB_SCOPE }).toString(),
+    signal: AbortSignal.timeout(15e3)
+  });
+  if (!deviceRes.ok) {
+    throw new Error(`GitHub device code request failed: HTTP ${deviceRes.status}`);
+  }
+  const deviceData = await deviceRes.json();
+  console.log("");
+  console.log("  GitHub sign-in (device flow)");
+  console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+  console.log(`  1. Open: ${deviceData.verification_uri}`);
+  console.log(`  2. Enter code: ${deviceData.user_code}`);
+  console.log('  3. Authorize "Terminalhire" (scope: read:user \u2014 public data only)');
+  console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+  console.log("  Waiting for authorization...");
+  console.log("");
+  let intervalSecs = deviceData.interval ?? 5;
+  const expiresAt = Date.now() + (deviceData.expires_in ?? 900) * 1e3;
+  const clientSecret = process.env["GITHUB_CLIENT_SECRET"];
+  while (Date.now() < expiresAt) {
+    await sleep(intervalSecs * 1e3);
+    const body = new URLSearchParams({
+      client_id: clientId,
+      device_code: deviceData.device_code,
+      grant_type: "urn:ietf:params:oauth:grant-type:device_code"
+    });
+    if (clientSecret) body.set("client_secret", clientSecret);
+    const tokenRes = await fetch(ACCESS_TOKEN_URL, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: body.toString(),
+      signal: AbortSignal.timeout(15e3)
+    });
+    if (!tokenRes.ok) {
+      throw new Error(`GitHub token poll failed: HTTP ${tokenRes.status}`);
+    }
+    const tokenData = await tokenRes.json();
+    if (tokenData.access_token) {
+      await writeGitHubToken(tokenData.access_token);
+      const login = await fetchAuthedLogin(tokenData.access_token);
+      console.log(`  Authorized as: ${login}`);
+      return login;
+    }
+    if (tokenData.error === "authorization_pending") {
+      continue;
+    }
+    if (tokenData.error === "slow_down") {
+      intervalSecs = (tokenData.interval ?? intervalSecs) + 5;
+      continue;
+    }
+    if (tokenData.error === "expired_token") {
+      throw new Error("GitHub device code expired. Please run `terminalhire login` again.");
+    }
+    if (tokenData.error === "access_denied") {
+      throw new Error("GitHub authorization was denied by the user.");
+    }
+    throw new Error(
+      `GitHub device flow error: ${tokenData.error ?? "unknown"} \u2014 ${tokenData.error_description ?? ""}`
+    );
+  }
+  throw new Error(
+    "GitHub device code expired before authorization. Please run `terminalhire login` again."
+  );
+}
+async function fetchAuthedLogin(token) {
+  if (token === MOCK_TOKEN) return MOCK_LOGIN;
+  const res = await fetch("https://api.github.com/user", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28"
+    },
+    signal: AbortSignal.timeout(1e4)
+  });
+  if (!res.ok) throw new Error(`GitHub /user: HTTP ${res.status}`);
+  const data = await res.json();
+  return data.login;
+}
+async function resolveStoredLogin() {
+  if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1")
+    return MOCK_LOGIN;
+  const token = await readGitHubToken();
+  if (!token) return void 0;
+  try {
+    return await fetchAuthedLogin(token);
+  } catch {
+    return void 0;
+  }
+}
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+var TERMINALHIRE_DIR5, TOKEN_FILE, KEY_FILE2, ALGO2, KEY_BYTES2, IV_BYTES2, GITHUB_SCOPE, DEVICE_CODE_URL, ACCESS_TOKEN_URL, BAKED_IN_CLIENT_ID, MOCK_TOKEN, MOCK_LOGIN;
+var init_github_auth = __esm({
+  "src/github-auth.ts"() {
+    "use strict";
+    init_state_dir();
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join6(homedir5(), ".terminalhire");
+    TOKEN_FILE = join6(TERMINALHIRE_DIR5, "github-token.enc");
+    KEY_FILE2 = join6(TERMINALHIRE_DIR5, "key");
+    ALGO2 = "aes-256-gcm";
+    KEY_BYTES2 = 32;
+    IV_BYTES2 = 12;
+    GITHUB_SCOPE = "read:user";
+    DEVICE_CODE_URL = "https://github.com/login/device/code";
+    ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
+    BAKED_IN_CLIENT_ID = "Ov23lignE2ZSBe0J3a6B";
+    MOCK_TOKEN = "mock-github-token-jpi-dev";
+    MOCK_LOGIN = "janedev";
+  }
+});
+
 // src/repo-experience.ts
 var repo_experience_exports = {};
 __export(repo_experience_exports, {
@@ -1802,8 +3037,8 @@ __export(repo_experience_exports, {
   recordPolicySnapshot: () => recordPolicySnapshot,
   writeTombstone: () => writeTombstone
 });
-import { join as join6 } from "path";
-import { homedir as homedir5 } from "os";
+import { join as join7 } from "path";
+import { homedir as homedir6 } from "os";
 function blankFile() {
   return { version: 1, repos: {} };
 }
@@ -2004,14 +3239,14 @@ function briefingLines(params) {
   }
   return lines;
 }
-var TERMINALHIRE_DIR5, REPO_EXPERIENCE_FILE, MAX_REPOS, MAX_CULTURE_SAMPLES, MAX_NOTES, MAX_BACKFILL, store, activeStore;
+var TERMINALHIRE_DIR6, REPO_EXPERIENCE_FILE, MAX_REPOS, MAX_CULTURE_SAMPLES, MAX_NOTES, MAX_BACKFILL, store, activeStore;
 var init_repo_experience = __esm({
   "src/repo-experience.ts"() {
     "use strict";
     init_crypto_store();
     init_profile();
-    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join6(homedir5(), ".terminalhire");
-    REPO_EXPERIENCE_FILE = join6(TERMINALHIRE_DIR5, "repo-experience.enc");
+    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join7(homedir6(), ".terminalhire");
+    REPO_EXPERIENCE_FILE = join7(TERMINALHIRE_DIR6, "repo-experience.enc");
     MAX_REPOS = 100;
     MAX_CULTURE_SAMPLES = 12;
     MAX_NOTES = 10;
@@ -2038,24 +3273,32 @@ __export(claims_exports, {
   toPushedClaim: () => toPushedClaim,
   updateClaim: () => updateClaim
 });
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4, renameSync as renameSync3, existsSync as existsSync3, rmSync as rmSync2, statSync } from "fs";
-import { randomBytes as randomBytes3 } from "crypto";
-import { join as join7 } from "path";
-import { homedir as homedir6 } from "os";
+import {
+  readFileSync as readFileSync6,
+  writeFileSync as writeFileSync5,
+  mkdirSync as mkdirSync2,
+  renameSync as renameSync4,
+  existsSync as existsSync4,
+  rmSync as rmSync3,
+  statSync
+} from "fs";
+import { randomBytes as randomBytes4 } from "crypto";
+import { join as join8 } from "path";
+import { homedir as homedir7 } from "os";
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 function withClaimsLock(fn) {
-  mkdirSync4(TERMINALHIRE_DIR6, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR7);
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   for (; ; ) {
     try {
-      mkdirSync4(LOCK_DIR, { mode: 448 });
+      mkdirSync2(LOCK_DIR, { mode: 448 });
       break;
     } catch {
       try {
         if (Date.now() - statSync(LOCK_DIR).mtimeMs > LOCK_STALE_MS) {
-          rmSync2(LOCK_DIR, { recursive: true, force: true });
+          rmSync3(LOCK_DIR, { recursive: true, force: true });
           continue;
         }
       } catch {
@@ -2071,7 +3314,7 @@ function withClaimsLock(fn) {
   try {
     return fn();
   } finally {
-    rmSync2(LOCK_DIR, { recursive: true, force: true });
+    rmSync3(LOCK_DIR, { recursive: true, force: true });
   }
 }
 function toPushedClaim(claim) {
@@ -2096,8 +3339,8 @@ function normalizeClaim(c) {
 }
 function readClaims() {
   try {
-    if (!existsSync3(CLAIMS_FILE)) return [];
-    const data = JSON.parse(readFileSync5(CLAIMS_FILE, "utf8"));
+    if (!existsSync4(CLAIMS_FILE)) return [];
+    const data = JSON.parse(readFileSync6(CLAIMS_FILE, "utf8"));
     const claims = Array.isArray(data?.claims) ? data.claims : [];
     return claims.map(normalizeClaim);
   } catch {
@@ -2105,15 +3348,19 @@ function readClaims() {
   }
 }
 function writeClaims(claims) {
-  mkdirSync4(TERMINALHIRE_DIR6, { recursive: true, mode: 448 });
-  const tmp = `${CLAIMS_FILE}.${process.pid}.${randomBytes3(6).toString("hex")}.tmp`;
+  ensureStateDir(TERMINALHIRE_DIR7);
+  const tmp = `${CLAIMS_FILE}.${process.pid}.${randomBytes4(6).toString("hex")}.tmp`;
   const payload = { claims };
   try {
-    writeFileSync4(tmp, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 384, flag: "wx" });
-    renameSync3(tmp, CLAIMS_FILE);
+    writeFileSync5(tmp, JSON.stringify(payload, null, 2), {
+      encoding: "utf8",
+      mode: 384,
+      flag: "wx"
+    });
+    renameSync4(tmp, CLAIMS_FILE);
   } catch (err) {
     try {
-      rmSync2(tmp, { force: true });
+      rmSync3(tmp, { force: true });
     } catch {
     }
     throw err;
@@ -2179,12 +3426,13 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR6, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS;
+var TERMINALHIRE_DIR7, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
-    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join7(homedir6(), ".terminalhire");
-    CLAIMS_FILE = join7(TERMINALHIRE_DIR6, "claims.json");
+    init_state_dir();
+    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join8(homedir7(), ".terminalhire");
+    CLAIMS_FILE = join8(TERMINALHIRE_DIR7, "claims.json");
     LOCK_DIR = `${CLAIMS_FILE}.lock`;
     LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
     LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
@@ -2200,8 +3448,22 @@ var init_claims = __esm({
     ];
     TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
     POLL_TRANSITIONS = {
-      merged: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready", "submitted", "abandoned"]),
-      abandoned: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready", "submitted", "merged"]),
+      merged: /* @__PURE__ */ new Set([
+        "claimed",
+        "working",
+        "in-review",
+        "ready",
+        "submitted",
+        "abandoned"
+      ]),
+      abandoned: /* @__PURE__ */ new Set([
+        "claimed",
+        "working",
+        "in-review",
+        "ready",
+        "submitted",
+        "merged"
+      ]),
       submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
     };
   }
@@ -2209,12 +3471,14 @@ var init_claims = __esm({
 
 // bin/jpi-contribute.js
 init_src();
-import { readFileSync as readFileSync6 } from "fs";
-import { join as join8 } from "path";
-import { homedir as homedir7 } from "os";
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, renameSync as renameSync5 } from "fs";
+import { join as join9 } from "path";
+import { homedir as homedir8 } from "os";
+import { createHash as createHash3, randomBytes as randomBytes5 } from "crypto";
 
 // bin/cache-store.js
-import { readFileSync as readFileSync2, writeFileSync, mkdirSync, renameSync } from "fs";
+init_state_dir();
+import { readFileSync as readFileSync2, writeFileSync, renameSync } from "fs";
 import { join as join2 } from "path";
 import { homedir } from "os";
 var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
@@ -2229,7 +3493,7 @@ function readCacheEntry() {
   }
 }
 function updateIndexCache(patch) {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR);
   const existing = readCacheEntry() ?? {};
   const entry = {
     ...existing,
@@ -2244,7 +3508,8 @@ function updateIndexCache(patch) {
 }
 
 // src/config.ts
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, existsSync } from "fs";
+init_state_dir();
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, existsSync } from "fs";
 import { join as join3 } from "path";
 import { homedir as homedir2 } from "os";
 var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
@@ -2280,6 +3545,9 @@ function isContributeEnabled() {
   return !(cfg.contributeEnabled === false && !("contributePrompted" in cfg));
 }
 
+// bin/jpi-contribute.js
+init_state_dir();
+
 // bin/sanitize.js
 var CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
 function sanitizeText(s) {
@@ -2312,17 +3580,23 @@ function linkTitle(title, url) {
 }
 
 // bin/jpi-contribute.js
-var TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join8(homedir7(), ".terminalhire");
-var INDEX_CACHE_FILE2 = join8(TERMINALHIRE_DIR7, "index-cache.json");
+var TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join9(homedir8(), ".terminalhire");
+var INDEX_CACHE_FILE2 = join9(TERMINALHIRE_DIR8, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
 var CONTINUITY_RANK_DISABLED = process.env["TERMINALHIRE_NO_CONTINUITY_RANK"] === "1";
+var LOCAL_CONTRIB_CACHE_FILE = join9(TERMINALHIRE_DIR8, "contribute-local-cache.json");
+var LOCAL_DISCOVERY_TTL_MS = 6 * 60 * 60 * 1e3;
+var LOCAL_DISCOVERY_RETRY_TTL_MS = 15 * 60 * 1e3;
+var LOCAL_DISCOVERY_BUDGET_MS = 12e3;
+var LOCAL_CACHE_SCHEMA = 1;
+var LOCAL_DISCOVERY_DISABLED = process.env["TERMINALHIRE_NO_LOCAL_DISCOVERY"] === "1";
 var HEADER = "Contribution opportunities \u2014 open issues where a merged PR actually counts toward your r\xE9sum\xE9.\nRepos \u226550\u2605 / \u226510 contributors \xB7 unassigned \xB7 merit-merge \xB7 matched to your stack.";
 var CONTRIBUTE_OFF = "Contribute is off \u2014 you set contributeEnabled: false in ~/.terminalhire/config.json.\nRemove that line (or set it to true) to see open issues where a merged PR would count toward your r\xE9sum\xE9.";
 var EMPTY_STATE = "Nothing clears the bar right now. We only list issues where a merged PR actually counts toward\nyour r\xE9sum\xE9 \u2014 so the list stays honest. Try again after the next refresh.";
 function readIndexCache() {
   try {
-    const entry = JSON.parse(readFileSync6(INDEX_CACHE_FILE2, "utf8"));
+    const entry = JSON.parse(readFileSync7(INDEX_CACHE_FILE2, "utf8"));
     if (Date.now() - entry.ts < INDEX_TTL_MS) return entry.index;
     return null;
   } catch {
@@ -2371,6 +3645,131 @@ async function rankLocally(items, injectedFp) {
     }
   }
   return rankContributions(fp, items);
+}
+function stripRaw(job) {
+  if (!job || typeof job !== "object" || !("raw" in job)) return job;
+  const { raw: _raw, ...rest } = job;
+  return rest;
+}
+function mergeContribDedup(shared, local) {
+  const base = Array.isArray(shared) ? shared : [];
+  if (!Array.isArray(local) || local.length === 0) return base;
+  const seen = new Set(base.map((j) => j?.id));
+  const merged = base.slice();
+  for (const j of local) {
+    if (j && typeof j.id === "string" && !seen.has(j.id)) {
+      seen.add(j.id);
+      merged.push(j);
+    }
+  }
+  return merged;
+}
+var STARRED_PER_PAGE = 100;
+var STARRED_MAX_PAGES = 2;
+var MAX_SEEDS = 40;
+async function fetchStarredSlugs(token, fetchImpl = globalThis.fetch) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (let page = 1; page <= STARRED_MAX_PAGES; page++) {
+    let items = null;
+    try {
+      const res = await fetchImpl(
+        `https://api.github.com/user/starred?per_page=${STARRED_PER_PAGE}&sort=updated&direction=desc&page=${page}`,
+        {
+          headers: {
+            Accept: "application/vnd.github+json",
+            "User-Agent": "terminalhire",
+            "X-GitHub-Api-Version": "2022-11-28",
+            Authorization: `Bearer ${token}`
+          },
+          signal: AbortSignal.timeout(8e3)
+        }
+      );
+      if (!res.ok) break;
+      const body = await res.json();
+      items = Array.isArray(body) ? body : null;
+    } catch {
+      break;
+    }
+    if (!items || items.length === 0) break;
+    for (const it of items) {
+      const slug = typeof it?.full_name === "string" ? it.full_name.toLowerCase().trim() : null;
+      if (slug && /^[^/\s]+\/[^/\s]+$/.test(slug) && !seen.has(slug) && out.length < MAX_SEEDS) {
+        seen.add(slug);
+        out.push(slug);
+      }
+    }
+    if (out.length >= MAX_SEEDS) break;
+    if (items.length < STARRED_PER_PAGE) break;
+  }
+  return out;
+}
+function readLocalPoolCache() {
+  try {
+    return JSON.parse(readFileSync7(LOCAL_CONTRIB_CACHE_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function cacheKeyFor(login, token) {
+  if (typeof login === "string" && login.length > 0) return login;
+  return "tok:" + createHash3("sha256").update(String(token)).digest("hex").slice(0, 16);
+}
+function writeLocalPoolCache(entry) {
+  try {
+    ensureStateDir(TERMINALHIRE_DIR8);
+    const tmp = `${LOCAL_CONTRIB_CACHE_FILE}.${process.pid}.${randomBytes5(6).toString("hex")}.tmp`;
+    writeFileSync6(tmp, JSON.stringify({ v: LOCAL_CACHE_SCHEMA, ...entry }), {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 384
+    });
+    renameSync5(tmp, LOCAL_CONTRIB_CACHE_FILE);
+  } catch {
+  }
+}
+async function localContributionDiscovery({
+  token,
+  login = null,
+  now = Date.now,
+  discoverImpl = aggregateContributions,
+  seedImpl = fetchStarredSlugs,
+  stderr
+} = {}) {
+  if (!token) return [];
+  const key = cacheKeyFor(login, token);
+  const cached = readLocalPoolCache();
+  if (cached && cached.v === LOCAL_CACHE_SCHEMA && cached.key === key && typeof cached.ts === "number") {
+    const ttl = cached.degraded ? LOCAL_DISCOVERY_RETRY_TTL_MS : LOCAL_DISCOVERY_TTL_MS;
+    if (now() - cached.ts < ttl) return Array.isArray(cached.pool) ? cached.pool : [];
+  }
+  const seedSlugs = await Promise.resolve(seedImpl(token)).catch(() => []);
+  const err = stderr ?? process.stderr;
+  const showNote = !!err.isTTY;
+  if (showNote) err.write("\xB7 searching your GitHub for more matches\u2026\r");
+  let degraded = false;
+  let pool = [];
+  try {
+    const raw = await discoverImpl({
+      token,
+      discoverRepos: true,
+      seedSlugs: Array.isArray(seedSlugs) && seedSlugs.length ? seedSlugs : void 0,
+      // NO vocabTerms — profile-derived search terms must never cross the wire; the
+      // core default vocab does breadth backfill, the starred seeds diversify.
+      budgetMs: LOCAL_DISCOVERY_BUDGET_MS,
+      onStats: (s) => {
+        degraded = !!s?.degraded;
+      }
+    });
+    pool = (Array.isArray(raw) ? raw : []).map(stripRaw);
+  } catch {
+    degraded = true;
+    pool = [];
+  } finally {
+    if (showNote) err.write("\x1B[2K\r");
+  }
+  writeLocalPoolCache({ ts: now(), key, degraded, pool });
+  return pool;
 }
 function applyContinuityRank(results, continuityOf, { enabled = true } = {}) {
   if (!enabled) return results;
@@ -2461,8 +3860,44 @@ async function run(opts = {}) {
       return;
     }
     const index = await fetchIndex(fetchImpl, useCache);
-    const items = Array.isArray(index?.contribute) ? index.contribute : [];
-    const results = await rankLocally(items, opts.fingerprint);
+    let items = Array.isArray(index?.contribute) ? index.contribute : [];
+    let fp = opts.fingerprint;
+    if (!fp) {
+      try {
+        const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+        const profile = await readProfile2();
+        if (profile.skillTags?.length) fp = profileToFingerprint2(profile);
+      } catch {
+      }
+    }
+    if (fp?.skillTags?.length && !LOCAL_DISCOVERY_DISABLED && (opts.discoverContributions || useCache)) {
+      try {
+        let token = opts.token;
+        let login = opts.login ?? null;
+        if (token == null && useCache) {
+          const auth = await Promise.resolve().then(() => (init_github_auth(), github_auth_exports));
+          token = await auth.readGitHubToken();
+          if (token && login == null) {
+            login = await auth.resolveStoredLogin().catch(() => null);
+          }
+        }
+        if (token) {
+          const localPool = await localContributionDiscovery({
+            token,
+            login,
+            discoverImpl: opts.discoverContributions,
+            // Real runs seed from starred repos (default fetchStarredSlugs); a test
+            // that injects a discovery fn but no seeds gets an inert seeder so it
+            // never touches the network.
+            seedImpl: opts.discoverSeeds ?? (opts.discoverContributions ? () => [] : void 0),
+            stderr: opts.stderr
+          });
+          items = mergeContribDedup(items, localPool);
+        }
+      } catch {
+      }
+    }
+    const results = await rankLocally(items, fp);
     if (results.length === 0) {
       log(EMPTY_STATE);
       return;
@@ -2473,7 +3908,9 @@ async function run(opts = {}) {
         const { continuityForRepo: continuityForRepo2 } = await Promise.resolve().then(() => (init_repo_experience(), repo_experience_exports));
         const { readClaims: readClaims2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
         const claims = readClaims2();
-        const repos = [...new Set(results.map((r) => r.job.contribution?.repoFullName).filter(Boolean))];
+        const repos = [
+          ...new Set(results.map((r) => r.job.contribution?.repoFullName).filter(Boolean))
+        ];
         for (const repo of repos) {
           continuityByRepo.set(repo, await continuityForRepo2(repo, claims));
         }
@@ -2502,6 +3939,8 @@ async function run(opts = {}) {
 export {
   applyContinuityRank,
   continuityNoteForRow,
+  localContributionDiscovery,
+  mergeContribDedup,
   rankContributions,
   renderRow,
   run

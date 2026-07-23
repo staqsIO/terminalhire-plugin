@@ -8,6 +8,60 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// src/state-dir.ts
+import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
+function warnStateDirOnce(dir, message) {
+  if (warnedDirs.has(dir)) return;
+  warnedDirs.add(dir);
+  try {
+    process.stderr.write(message);
+  } catch {
+  }
+}
+function ensureStateDir(dir) {
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let fd;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | noFollow);
+  } catch (err) {
+    if (err?.code === "ELOOP") {
+      warnStateDirOnce(
+        dir,
+        `terminalhire: ${dir} is a symlink \u2014 leaving its permissions alone; the 0700 guarantee on the state directory is NOT enforced.
+`
+      );
+      return STATE_DIR_SYMLINK;
+    }
+    return STATE_DIR_UNVERIFIED;
+  }
+  try {
+    const currentMode = fstatSync(fd).mode & 511;
+    if ((currentMode & ~STATE_DIR_MODE) !== 0) {
+      fchmodSync(fd, currentMode & STATE_DIR_MODE);
+    }
+    return STATE_DIR_OK;
+  } catch {
+    return STATE_DIR_UNVERIFIED;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+    }
+  }
+}
+var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs;
+var init_state_dir = __esm({
+  "src/state-dir.ts"() {
+    "use strict";
+    STATE_DIR_MODE = 448;
+    STATE_DIR_OK = "ok";
+    STATE_DIR_SYMLINK = "symlink";
+    STATE_DIR_UNVERIFIED = "unverified";
+    warnedDirs = /* @__PURE__ */ new Set();
+  }
+});
+
 // src/claims.ts
 var claims_exports = {};
 __export(claims_exports, {
@@ -22,7 +76,15 @@ __export(claims_exports, {
   toPushedClaim: () => toPushedClaim,
   updateClaim: () => updateClaim
 });
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, renameSync as renameSync2, existsSync as existsSync2, rmSync as rmSync2, statSync } from "fs";
+import {
+  readFileSync as readFileSync2,
+  writeFileSync as writeFileSync2,
+  mkdirSync as mkdirSync2,
+  renameSync as renameSync2,
+  existsSync as existsSync2,
+  rmSync as rmSync2,
+  statSync
+} from "fs";
 import { randomBytes as randomBytes2 } from "crypto";
 import { join as join2 } from "path";
 import { homedir as homedir2 } from "os";
@@ -30,7 +92,7 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 function withClaimsLock(fn) {
-  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR2);
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   for (; ; ) {
     try {
@@ -89,11 +151,15 @@ function readClaims() {
   }
 }
 function writeClaims(claims) {
-  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR2);
   const tmp = `${CLAIMS_FILE}.${process.pid}.${randomBytes2(6).toString("hex")}.tmp`;
   const payload = { claims };
   try {
-    writeFileSync2(tmp, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 384, flag: "wx" });
+    writeFileSync2(tmp, JSON.stringify(payload, null, 2), {
+      encoding: "utf8",
+      mode: 384,
+      flag: "wx"
+    });
     renameSync2(tmp, CLAIMS_FILE);
   } catch (err) {
     try {
@@ -167,6 +233,7 @@ var TERMINALHIRE_DIR2, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
+    init_state_dir();
     TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
     CLAIMS_FILE = join2(TERMINALHIRE_DIR2, "claims.json");
     LOCK_DIR = `${CLAIMS_FILE}.lock`;
@@ -184,8 +251,22 @@ var init_claims = __esm({
     ];
     TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
     POLL_TRANSITIONS = {
-      merged: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready", "submitted", "abandoned"]),
-      abandoned: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready", "submitted", "merged"]),
+      merged: /* @__PURE__ */ new Set([
+        "claimed",
+        "working",
+        "in-review",
+        "ready",
+        "submitted",
+        "abandoned"
+      ]),
+      abandoned: /* @__PURE__ */ new Set([
+        "claimed",
+        "working",
+        "in-review",
+        "ready",
+        "submitted",
+        "merged"
+      ]),
       submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
     };
   }
@@ -193,24 +274,14 @@ var init_claims = __esm({
 
 // bin/claim-push-bg.js
 import { createHash } from "crypto";
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync as existsSync3, rmSync as rmSync3 } from "fs";
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, existsSync as existsSync3, rmSync as rmSync3 } from "fs";
 import { join as join3 } from "path";
 import { homedir as homedir3 } from "os";
 
 // src/github-auth.ts
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes
-} from "crypto";
-import {
-  readFileSync,
-  writeFileSync,
-  mkdirSync,
-  existsSync,
-  rmSync,
-  renameSync
-} from "fs";
+init_state_dir();
+import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
+import { readFileSync, writeFileSync, existsSync, rmSync, renameSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
@@ -220,7 +291,7 @@ var ALGO = "aes-256-gcm";
 var KEY_BYTES = 32;
 var IV_BYTES = 12;
 async function loadKey() {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR);
   if (existsSync(KEY_FILE)) {
     return Buffer.from(readFileSync(KEY_FILE, "utf8").trim(), "hex");
   }
@@ -246,6 +317,7 @@ function decrypt(blob, key) {
 }
 
 // bin/claim-push-bg.js
+init_state_dir();
 var TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join3(homedir3(), ".terminalhire");
 var CLAIM_PUSH_AUTO_MARKER = join3(TERMINALHIRE_DIR3, "claim-push-auto.json");
 var CLAIM_PUSH_TOKEN_FILE = join3(TERMINALHIRE_DIR3, "claim-push-token.enc");
@@ -254,7 +326,7 @@ var CLAIM_SYNC_BASE = "https://terminalhire.com";
 var AUTO_CONSENT_VERSION = 2;
 var AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
 async function writePushTokenEnc(rawToken) {
-  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR3);
   const key = await loadKey();
   const blob = encrypt(rawToken, key);
   writeFileSync3(CLAIM_PUSH_TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
@@ -283,7 +355,7 @@ function readAutoMarker() {
   }
 }
 function writeAutoMarker(marker) {
-  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR3);
   writeFileSync3(CLAIM_PUSH_AUTO_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearAutoMarker() {

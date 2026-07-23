@@ -26,7 +26,16 @@
  */
 
 import {
-  readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync,
+  readFileSync,
+  writeFileSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  fstatSync,
+  fchmodSync,
+  closeSync,
+  constants,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -41,6 +50,103 @@ const CONFIG_FILE = join(TERMINALHIRE_DIR, 'config.json');
 
 const UNINSTALL = process.argv.includes('--uninstall');
 
+// TERM-39 blocker 1: create + heal the state dir so it carries no group or other
+// permission bits, rather than the umask default (typically 0755). "Never looser
+// than 0700" — the heal MASKS, so a 0555 dir ends at 0500, not 0700. This installer SHIPS STANDALONE (package.json
+// `files`) and runs before any build guarantee — a fresh dev clone may not have
+// `dist/` yet, and the plugin-dist copy sits at a different relative depth than
+// the npm-published layout — so it cannot reliably dynamically import the
+// compiled ensureStateDir() the rest of the CLI shares (apps/cli/src/state-dir.ts).
+// Inlined instead, so it never depends on a build having happened. Keep this
+// byte-identical in behavior to state-dir.ts's ensureStateDir() — if you change
+// one, change both.
+/**
+ * One warning per exact `dir` STRING, per loaded copy of this helper — anomalous,
+ * but not worth a spew. Two things this deliberately does NOT promise:
+ *
+ *   - NOT once per directory. The key is the argument as passed, not a resolved
+ *     path, so `~/.th/link` and `~/.th/./link` are two keys for one directory and
+ *     warn twice. Callers derive the path at CALL time (`TERMINALHIRE_DIR` or
+ *     `homedir()`), which is deterministic within a process but is neither a
+ *     constant nor enforced; resolving would cost a syscall on every call to
+ *     dedupe a message that is already anomalous.
+ *   - NOT once per process. Each of the four copies owns its own `warnedDirs`,
+ *     and `bin/jpi-init.js` imports two of them in the same process.
+ */
+const warnedDirs = new Set();
+function warnStateDirOnce(dir, message) {
+  if (warnedDirs.has(dir)) return;
+  warnedDirs.add(dir);
+  try {
+    process.stderr.write(message);
+  } catch {
+    /* a closed stderr must never break a directory create */
+  }
+}
+
+function ensureStateDir(dir) {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+
+  // ONE atomic open decides both "is this a symlink?" and "what do we chmod?".
+  // The previous shape — lstatSync(dir).isSymbolicLink() and then openSync(dir)
+  // — was two separate path resolutions with a race between them: swap the path
+  // for a symlink in that window and the plain open FOLLOWS it, so the fd (and
+  // the fchmod below) lands on the attacker's target. O_NOFOLLOW fails with
+  // ELOOP when the final component is a symlink, which removes the window
+  // instead of narrowing it. O_NOFOLLOW is absent on Windows, where it degrades
+  // to a plain open — moot there, since opening a directory fails anyway and
+  // the whole path returns 'unverified'.
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let fd;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | noFollow);
+  } catch (err) {
+    if (err?.code === 'ELOOP') {
+      // We refuse to chmod a directory we do not own. Note what this does and
+      // does NOT buy: anyone who can plant this symlink can already read what
+      // we write through it, so refusing protects the unrelated target, not the
+      // token. Report it rather than continuing silently — but note that no
+      // production caller acts on this status today; it is a report, not a gate.
+      warnStateDirOnce(
+        dir,
+        `terminalhire: ${dir} is a symlink — leaving its permissions alone; ` +
+          `the 0700 guarantee on the state directory is NOT enforced.\n`,
+      );
+      return 'symlink';
+    }
+    // Could not inspect (Windows: opening a directory fails). Not an error, but
+    // explicitly NOT a guarantee either.
+    return 'unverified';
+  }
+
+  try {
+    const currentMode = fstatSync(fd).mode & 0o777;
+    // "Looser than 0700" = any permission bit set outside owner rwx (group/other
+    // read/write/execute, e.g. the default 0755). A stricter-or-equal mode is left
+    // alone — this only ever tightens.
+    if ((currentMode & ~0o700) !== 0) {
+      // Mask, never assign. `currentMode & 0o700` can only REMOVE bits
+      // the directory already had — e.g. 0555 (no owner-write) heals to 0500, not
+      // 0700, and 0755 heals to 0700 (its owner bits were already full rwx).
+      // Assigning 0o700 unconditionally would ADD an owner-write bit
+      // that was never there for a mode like 0555/0505 — not a "tighten."
+      fchmodSync(fd, currentMode & 0o700);
+    }
+    return 'ok';
+  } catch {
+    // The heal stays best-effort: a platform where fstat/fchmod are a no-op or
+    // throw must never crash an otherwise-successful create. But it is now
+    // REPORTED rather than swallowed.
+    return 'unverified';
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
 // Resolve the spinner module (dist preferred; bin fallback for the dev workspace).
 async function loadSpinnerModule() {
   const candidates = [
@@ -49,7 +155,11 @@ async function loadSpinnerModule() {
   ];
   for (const c of candidates) {
     if (existsSync(c)) {
-      try { return await import(pathToFileURL(c).href); } catch { /* try next */ }
+      try {
+        return await import(pathToFileURL(c).href);
+      } catch {
+        /* try next */
+      }
     }
   }
   return null;
@@ -63,7 +173,7 @@ function patchConfig(patch) {
   } catch {
     cfg = {};
   }
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR);
   writeFileSync(CONFIG_FILE, JSON.stringify({ ...cfg, ...patch }, null, 2) + '\n', 'utf8');
 }
 
@@ -88,11 +198,17 @@ function backupSettings() {
 function makeAsker(injected) {
   if (injected) return { ask: injected, close() {} };
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const ask = (question) => new Promise(res => {
-    let answered = false;
-    rl.question(question, answer => { answered = true; res((answer || '').trim().toLowerCase()); });
-    rl.once('close', () => { if (!answered) res(null); });
-  });
+  const ask = (question) =>
+    new Promise((res) => {
+      let answered = false;
+      rl.question(question, (answer) => {
+        answered = true;
+        res((answer || '').trim().toLowerCase());
+      });
+      rl.once('close', () => {
+        if (!answered) res(null);
+      });
+    });
   return { ask, close: () => rl.close() };
 }
 
@@ -122,13 +238,17 @@ async function install({ ask: injectedAsk } = {}) {
   console.log('     The "tip" line below it shows a ⌘-clickable link to open the listing');
   console.log('     (a terminalhire.com/j/… redirect — clicks are logged anonymously, no');
   console.log('     profile data). Uses official `spinnerVerbs`/`spinnerTipsOverride` settings');
-  console.log('     (no patching, Rule 7). Zero egress — profile never leaves the machine; only public job text.');
+  console.log(
+    '     (no patching, Rule 7). Zero egress — profile never leaves the machine; only public job text.',
+  );
   console.log('     This install does NOT write any statusLine — the spinner is the only surface.');
   console.log('     Turn it off any time:  terminalhire spinner --off');
   console.log('');
   console.log('YOUR LOCAL PROFILE (~/.terminalhire/profile.enc):');
   console.log('  • Encrypted at rest with AES-256-GCM (Node built-in crypto).');
-  console.log('  • Key stored at ~/.terminalhire/key (0600) or OS keychain if keytar is installed.');
+  console.log(
+    '  • Key stored at ~/.terminalhire/key (0600) or OS keychain if keytar is installed.',
+  );
   console.log('  • Accumulates closed-vocab skill tags from your personal project sessions.');
   console.log('  • Employer-repo sessions contribute LANGUAGE TAGS ONLY (e.g. "typescript").');
   console.log('    Fine-grained framework/infra tags are excluded in employer context.');
@@ -160,11 +280,15 @@ async function install({ ask: injectedAsk } = {}) {
   console.log('  • Wipe everything:          rm -rf ~/.terminalhire');
   console.log('');
 
-  const installAnswer = await ask('Enable the terminalhire ambient spinner job surface? Type "yes" to continue: ');
+  const installAnswer = await ask(
+    'Enable the terminalhire ambient spinner job surface? Type "yes" to continue: ',
+  );
   if (installAnswer === null && !process.stdin.isTTY) {
     // Non-interactive stdin with no input — do NOT silently proceed to a prompt that
     // resolves empty and fail-closes. Say so plainly and skip (explicit, not a fake abort).
-    console.log('\n  stdin is not interactive — run `terminalhire spinner --on` in a real terminal to enable.');
+    console.log(
+      '\n  stdin is not interactive — run `terminalhire spinner --on` in a real terminal to enable.',
+    );
     asker.close();
     return 0;
   }
@@ -189,7 +313,9 @@ async function install({ ask: injectedAsk } = {}) {
       try {
         const cache = JSON.parse(readFileSync(join(TERMINALHIRE_DIR, 'index-cache.json'), 'utf8'));
         if (Array.isArray(cache.topMatches)) topMatches = cache.topMatches;
-      } catch { /* no cache yet — monitor will populate it */ }
+      } catch {
+        /* no cache yet — monitor will populate it */
+      }
 
       const verbs = spinnerMod.buildSpinnerPool(topMatches, 6);
       if (verbs.length > 0) spinnerMod.applySpinnerVerbs(verbs, 'replace');
@@ -202,21 +328,25 @@ async function install({ ask: injectedAsk } = {}) {
           spinnerMod.applySpinnerTips(tips);
           tipsCount = tips.length;
         }
-      } catch { /* tips are best-effort */ }
+      } catch {
+        /* tips are best-effort */
+      }
 
       enabled = true;
       console.log(
         '  Spinner job surface: ENABLED' +
-        (verbs.length
-          ? ` (${verbs.length} match${verbs.length === 1 ? '' : 'es'} live now)`
-          : ' (matches appear after the first background refresh)')
+          (verbs.length
+            ? ` (${verbs.length} match${verbs.length === 1 ? '' : 'es'} live now)`
+            : ' (matches appear after the first background refresh)'),
       );
       if (tipsCount > 0) {
         console.log(`    Tip links: ${tipsCount} ⌘-clickable listing${tipsCount === 1 ? '' : 's'}`);
       }
       console.log('    Turn off any time: terminalhire spinner --off');
     }
-  } catch { /* spinner is best-effort; never block the install */ }
+  } catch {
+    /* spinner is best-effort; never block the install */
+  }
 
   if (backupPath) {
     console.log(`  Backup: ${backupPath}`);
@@ -235,9 +365,13 @@ async function install({ ask: injectedAsk } = {}) {
   console.log('  with a ⌘-clickable tip link to open the listing.');
   console.log('');
   console.log('  Other commands:');
-  console.log('    terminalhire login            — sign in with GitHub (enriches profile instantly)');
+  console.log(
+    '    terminalhire login            — sign in with GitHub (enriches profile instantly)',
+  );
   console.log('    terminalhire logout           — clear GitHub token');
-  console.log('    terminalhire jobs             — fetch index, browse roles matched to your profile');
+  console.log(
+    '    terminalhire jobs             — fetch index, browse roles matched to your profile',
+  );
   console.log('    terminalhire spinner --off    — disable the ambient spinner surface');
   console.log('    terminalhire profile --show   — inspect your encrypted profile');
   console.log('    terminalhire profile --edit   — set displayName, contactEmail, prefs');
@@ -260,7 +394,9 @@ async function uninstall({ ask: injectedAsk } = {}) {
   console.log('  It does NOT touch settings.statusLine.');
   console.log('');
 
-  const answer = await ask('Disable the terminalhire spinner job surface? Type "yes" to continue: ');
+  const answer = await ask(
+    'Disable the terminalhire spinner job surface? Type "yes" to continue: ',
+  );
   if (answer !== 'yes') {
     console.log('\nAborted — nothing was changed.');
     asker.close();
@@ -282,17 +418,23 @@ async function uninstall({ ask: injectedAsk } = {}) {
       const vres = spinnerMod.clearSpinnerVerbs();
       console.log(
         '  Removed spinner job verbs' +
-        (vres && vres.keptUserVerbs ? ` (kept ${vres.keptUserVerbs} of your own)` : '') + '.'
+          (vres && vres.keptUserVerbs ? ` (kept ${vres.keptUserVerbs} of your own)` : '') +
+          '.',
       );
       try {
         const tres = spinnerMod.clearSpinnerTips();
         console.log(
           '  Removed spinner tip links' +
-          (tres && tres.keptUserTips ? ` (kept ${tres.keptUserTips} of your own)` : '') + '.'
+            (tres && tres.keptUserTips ? ` (kept ${tres.keptUserTips} of your own)` : '') +
+            '.',
         );
-      } catch { /* tips clear is best-effort */ }
+      } catch {
+        /* tips clear is best-effort */
+      }
     }
-  } catch { /* best-effort */ }
+  } catch {
+    /* best-effort */
+  }
 
   console.log('');
   console.log('  Your profile is untouched. To also delete it:');
@@ -313,8 +455,8 @@ const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv
 if (isMain) {
   const run = UNINSTALL ? uninstall : install;
   run()
-    .then(code => process.exit(typeof code === 'number' ? code : 0))
-    .catch(err => {
+    .then((code) => process.exit(typeof code === 'number' ? code : 0))
+    .catch((err) => {
       console.error(`${UNINSTALL ? 'Uninstall' : 'Install'} error:`, err.message);
       process.exit(1);
     });

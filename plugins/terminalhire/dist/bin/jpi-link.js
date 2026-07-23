@@ -9,15 +9,62 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// src/state-dir.ts
+import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
+function warnStateDirOnce(dir, message) {
+  if (warnedDirs.has(dir)) return;
+  warnedDirs.add(dir);
+  try {
+    process.stderr.write(message);
+  } catch {
+  }
+}
+function ensureStateDir(dir) {
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let fd;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | noFollow);
+  } catch (err) {
+    if (err?.code === "ELOOP") {
+      warnStateDirOnce(
+        dir,
+        `terminalhire: ${dir} is a symlink \u2014 leaving its permissions alone; the 0700 guarantee on the state directory is NOT enforced.
+`
+      );
+      return STATE_DIR_SYMLINK;
+    }
+    return STATE_DIR_UNVERIFIED;
+  }
+  try {
+    const currentMode = fstatSync(fd).mode & 511;
+    if ((currentMode & ~STATE_DIR_MODE) !== 0) {
+      fchmodSync(fd, currentMode & STATE_DIR_MODE);
+    }
+    return STATE_DIR_OK;
+  } catch {
+    return STATE_DIR_UNVERIFIED;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+    }
+  }
+}
+var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs;
+var init_state_dir = __esm({
+  "src/state-dir.ts"() {
+    "use strict";
+    STATE_DIR_MODE = 448;
+    STATE_DIR_OK = "ok";
+    STATE_DIR_SYMLINK = "symlink";
+    STATE_DIR_UNVERIFIED = "unverified";
+    warnedDirs = /* @__PURE__ */ new Set();
+  }
+});
+
 // src/web-session.ts
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync
-} from "fs";
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 function terminalhireDir() {
@@ -37,7 +84,7 @@ function readWebSessionFile() {
   }
 }
 function writeWebSessionFile(token) {
-  mkdirSync(terminalhireDir(), { recursive: true });
+  ensureStateDir(terminalhireDir());
   const path = webSessionFilePath();
   writeFileSync(path, token, { mode: 384, encoding: "utf8" });
   try {
@@ -54,11 +101,12 @@ function clearWebSessionFile() {
 var init_web_session = __esm({
   "src/web-session.ts"() {
     "use strict";
+    init_state_dir();
   }
 });
 
 // src/config.ts
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, existsSync as existsSync2 } from "fs";
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync2 } from "fs";
 import { join as join2 } from "path";
 import { homedir as homedir2 } from "os";
 function readConfig() {
@@ -72,7 +120,7 @@ function readConfig() {
   }
 }
 function writeConfig(config) {
-  mkdirSync2(TERMINALHIRE_DIR, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR);
   const current = readConfig();
   const merged = { ...current, ...config };
   if ("contributePrompted" in merged) {
@@ -87,6 +135,7 @@ var TERMINALHIRE_DIR, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
+    init_state_dir();
     TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
     CONFIG_FILE = join2(TERMINALHIRE_DIR, "config.json");
     DEFAULT_CONFIG = {
@@ -339,7 +388,7 @@ __export(cache_store_exports, {
   readCacheEntry: () => readCacheEntry,
   updateIndexCache: () => updateIndexCache
 });
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, renameSync } from "fs";
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, renameSync } from "fs";
 import { join as join3 } from "path";
 import { homedir as homedir3 } from "os";
 function readCacheEntry() {
@@ -350,7 +399,7 @@ function readCacheEntry() {
   }
 }
 function updateIndexCache(patch) {
-  mkdirSync3(TERMINALHIRE_DIR2, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR2);
   const existing = readCacheEntry() ?? {};
   const entry = {
     ...existing,
@@ -367,6 +416,7 @@ var TERMINALHIRE_DIR2, INDEX_CACHE_FILE, SCHEMA_VERSION, tmpCounter;
 var init_cache_store = __esm({
   "bin/cache-store.js"() {
     "use strict";
+    init_state_dir();
     TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir3(), ".terminalhire");
     INDEX_CACHE_FILE = join3(TERMINALHIRE_DIR2, "index-cache.json");
     SCHEMA_VERSION = 1;

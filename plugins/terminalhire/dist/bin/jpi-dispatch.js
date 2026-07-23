@@ -32,6 +32,60 @@ var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__
   mod2
 ));
 
+// src/state-dir.ts
+import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
+function warnStateDirOnce(dir, message) {
+  if (warnedDirs.has(dir)) return;
+  warnedDirs.add(dir);
+  try {
+    process.stderr.write(message);
+  } catch {
+  }
+}
+function ensureStateDir(dir) {
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let fd;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | noFollow);
+  } catch (err) {
+    if (err?.code === "ELOOP") {
+      warnStateDirOnce(
+        dir,
+        `terminalhire: ${dir} is a symlink \u2014 leaving its permissions alone; the 0700 guarantee on the state directory is NOT enforced.
+`
+      );
+      return STATE_DIR_SYMLINK;
+    }
+    return STATE_DIR_UNVERIFIED;
+  }
+  try {
+    const currentMode = fstatSync(fd).mode & 511;
+    if ((currentMode & ~STATE_DIR_MODE) !== 0) {
+      fchmodSync(fd, currentMode & STATE_DIR_MODE);
+    }
+    return STATE_DIR_OK;
+  } catch {
+    return STATE_DIR_UNVERIFIED;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+    }
+  }
+}
+var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs;
+var init_state_dir = __esm({
+  "src/state-dir.ts"() {
+    "use strict";
+    STATE_DIR_MODE = 448;
+    STATE_DIR_OK = "ok";
+    STATE_DIR_SYMLINK = "symlink";
+    STATE_DIR_UNVERIFIED = "unverified";
+    warnedDirs = /* @__PURE__ */ new Set();
+  }
+});
+
 // src/web-session.ts
 var web_session_exports = {};
 __export(web_session_exports, {
@@ -41,14 +95,7 @@ __export(web_session_exports, {
   webSessionFilePath: () => webSessionFilePath,
   writeWebSessionFile: () => writeWebSessionFile
 });
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync
-} from "fs";
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 function terminalhireDir() {
@@ -74,7 +121,7 @@ function readWebSessionCookie() {
   return typeof env === "string" && env.length > 0 ? env : null;
 }
 function writeWebSessionFile(token) {
-  mkdirSync(terminalhireDir(), { recursive: true });
+  ensureStateDir(terminalhireDir());
   const path2 = webSessionFilePath();
   writeFileSync(path2, token, { mode: 384, encoding: "utf8" });
   try {
@@ -91,6 +138,7 @@ function clearWebSessionFile() {
 var init_web_session = __esm({
   "src/web-session.ts"() {
     "use strict";
+    init_state_dir();
   }
 });
 
@@ -108,7 +156,7 @@ __export(config_exports, {
   readConfig: () => readConfig,
   writeConfig: () => writeConfig
 });
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, existsSync as existsSync2 } from "fs";
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync2 } from "fs";
 import { join as join2 } from "path";
 import { homedir as homedir2 } from "os";
 function readConfig() {
@@ -122,7 +170,7 @@ function readConfig() {
   }
 }
 function writeConfig(config2) {
-  mkdirSync2(TERMINALHIRE_DIR, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR);
   const current = readConfig();
   const merged = { ...current, ...config2 };
   if ("contributePrompted" in merged) {
@@ -181,6 +229,7 @@ var TERMINALHIRE_DIR, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
+    init_state_dir();
     TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
     CONFIG_FILE = join2(TERMINALHIRE_DIR, "config.json");
     DEFAULT_CONFIG = {
@@ -217,7 +266,7 @@ __export(protocol_exports, {
   unregisterScheme: () => unregisterScheme
 });
 import { spawn, spawnSync } from "child_process";
-import { existsSync as existsSync3, mkdirSync as mkdirSync3, readFileSync as readFileSync3, rmSync as rmSync2, writeFileSync as writeFileSync3, renameSync } from "fs";
+import { existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync3, rmSync as rmSync2, writeFileSync as writeFileSync3, renameSync } from "fs";
 import { homedir as homedir3 } from "os";
 import { join as join3 } from "path";
 import { fileURLToPath } from "url";
@@ -241,7 +290,10 @@ function defaultProtocolDeps() {
     spawn: (command, args5, options) => spawn(command, args5, options),
     existsSync: (path2) => existsSync3(path2),
     mkdirSync: (path2) => {
-      mkdirSync3(path2, { recursive: true });
+      mkdirSync2(path2, { recursive: true });
+    },
+    ensureStateDir: (path2) => {
+      ensureStateDir(path2);
     },
     writeFileSync: (path2, contents) => {
       writeFileSync3(path2, contents, "utf8");
@@ -338,7 +390,7 @@ function darwinAppPaths(deps) {
 }
 function darwinRegister(deps) {
   const dir = stateDir(deps);
-  deps.mkdirSync(dir);
+  deps.ensureStateDir(dir);
   const { appDir, appPath, plistPath } = darwinAppPaths(deps);
   deps.mkdirSync(appDir);
   const scriptPath = join3(dir, "handler.applescript");
@@ -348,17 +400,41 @@ function darwinRegister(deps) {
   if (compile.status !== 0) {
     return { ok: false, reason: "osacompile_failed" };
   }
-  const setId = deps.spawnSync(PLISTBUDDY, ["-c", "Set :CFBundleIdentifier com.terminalhire.handler", plistPath]);
+  const setId = deps.spawnSync(PLISTBUDDY, [
+    "-c",
+    "Set :CFBundleIdentifier com.terminalhire.handler",
+    plistPath
+  ]);
   if (setId.status !== 0) {
-    deps.spawnSync(PLISTBUDDY, ["-c", "Add :CFBundleIdentifier string com.terminalhire.handler", plistPath]);
+    deps.spawnSync(PLISTBUDDY, [
+      "-c",
+      "Add :CFBundleIdentifier string com.terminalhire.handler",
+      plistPath
+    ]);
   }
   const urlTypeAdds = [
     deps.spawnSync(PLISTBUDDY, ["-c", "Add :CFBundleURLTypes array", plistPath]),
     deps.spawnSync(PLISTBUDDY, ["-c", "Add :CFBundleURLTypes:0 dict", plistPath]),
-    deps.spawnSync(PLISTBUDDY, ["-c", "Add :CFBundleURLTypes:0:CFBundleURLName string Terminalhire Claim", plistPath]),
-    deps.spawnSync(PLISTBUDDY, ["-c", "Add :CFBundleURLTypes:0:CFBundleURLSchemes array", plistPath]),
-    deps.spawnSync(PLISTBUDDY, ["-c", "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string th", plistPath]),
-    deps.spawnSync(PLISTBUDDY, ["-c", "Add :CFBundleURLTypes:0:CFBundleURLSchemes:1 string terminalhire", plistPath])
+    deps.spawnSync(PLISTBUDDY, [
+      "-c",
+      "Add :CFBundleURLTypes:0:CFBundleURLName string Terminalhire Claim",
+      plistPath
+    ]),
+    deps.spawnSync(PLISTBUDDY, [
+      "-c",
+      "Add :CFBundleURLTypes:0:CFBundleURLSchemes array",
+      plistPath
+    ]),
+    deps.spawnSync(PLISTBUDDY, [
+      "-c",
+      "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string th",
+      plistPath
+    ]),
+    deps.spawnSync(PLISTBUDDY, [
+      "-c",
+      "Add :CFBundleURLTypes:0:CFBundleURLSchemes:1 string terminalhire",
+      plistPath
+    ])
   ];
   if (urlTypeAdds.some((r) => r.status !== 0)) {
     return { ok: false, reason: "plist_url_types_failed" };
@@ -387,7 +463,12 @@ function darwinStatus(deps) {
 }
 function darwinOpenPreviewTerminal(token, deps) {
   const doScript = `do script ${appleScriptStringLiteral(buildPreviewShellCommand(token, deps))}`;
-  const res = deps.spawnSync("osascript", ["-e", 'tell application "Terminal" to activate', "-e", doScript]);
+  const res = deps.spawnSync("osascript", [
+    "-e",
+    'tell application "Terminal" to activate',
+    "-e",
+    doScript
+  ]);
   return res.status === 0;
 }
 function win32Register(deps) {
@@ -398,7 +479,14 @@ function win32Register(deps) {
     const r2 = deps.spawnSync("reg", ["add", key, "/v", "URL Protocol", "/d", "", "/f"]);
     if (r2.status !== 0) return { ok: false, reason: "reg_add_failed" };
     const cmdValue = `"${deps.execPath}" "${deps.dispatchPath}" handle-url "%1"`;
-    const r3 = deps.spawnSync("reg", ["add", `${key}\\shell\\open\\command`, "/ve", "/d", cmdValue, "/f"]);
+    const r3 = deps.spawnSync("reg", [
+      "add",
+      `${key}\\shell\\open\\command`,
+      "/ve",
+      "/d",
+      cmdValue,
+      "/f"
+    ]);
     if (r3.status !== 0) return { ok: false, reason: "reg_add_failed" };
   }
   return { ok: true };
@@ -438,8 +526,16 @@ function linuxRegister(deps) {
   const dir = linuxDesktopDir(deps);
   deps.mkdirSync(dir);
   deps.writeFileSync(linuxDesktopFile(deps), buildDesktopEntry(deps.execPath, deps.dispatchPath));
-  const r1 = deps.spawnSync("xdg-mime", ["default", "terminalhire-handler.desktop", "x-scheme-handler/th"]);
-  const r2 = deps.spawnSync("xdg-mime", ["default", "terminalhire-handler.desktop", "x-scheme-handler/terminalhire"]);
+  const r1 = deps.spawnSync("xdg-mime", [
+    "default",
+    "terminalhire-handler.desktop",
+    "x-scheme-handler/th"
+  ]);
+  const r2 = deps.spawnSync("xdg-mime", [
+    "default",
+    "terminalhire-handler.desktop",
+    "x-scheme-handler/terminalhire"
+  ]);
   deps.spawnSync("update-desktop-database", [dir]);
   if (r1.status !== 0 || r2.status !== 0) return { ok: false, reason: "xdg_mime_failed" };
   return { ok: true };
@@ -469,7 +565,7 @@ function readHandlerTemplateVersion(deps) {
   }
 }
 function writeHandlerTemplateVersion(deps) {
-  deps.mkdirSync(stateDir(deps));
+  deps.ensureStateDir(stateDir(deps));
   deps.writeFileSync(handlerTemplateVersionPath(deps), String(HANDLER_TEMPLATE_VERSION));
 }
 function registerScheme(deps = defaultProtocolDeps()) {
@@ -544,7 +640,7 @@ function readPendingClaims(deps) {
 }
 function appendPendingClaim(deps, entry) {
   try {
-    deps.mkdirSync(stateDir(deps));
+    deps.ensureStateDir(stateDir(deps));
     const existing = readPendingClaims(deps).filter((c) => c.token !== entry.token);
     const next = [...existing, entry].slice(-PENDING_CLAIMS_CAP);
     const finalPath = pendingClaimsPath(deps);
@@ -607,7 +703,14 @@ async function tryHeadlessOpen(token, deps) {
     ]);
   }
   for (const [bin, prefixArgs] of LINUX_TERMINAL_CANDIDATES) {
-    const ok = await trySpawnDetached(deps, bin, [...prefixArgs, deps.execPath, deps.dispatchPath, "claim", "preview", token]);
+    const ok = await trySpawnDetached(deps, bin, [
+      ...prefixArgs,
+      deps.execPath,
+      deps.dispatchPath,
+      "claim",
+      "preview",
+      token
+    ]);
     if (ok) return true;
   }
   return false;
@@ -621,7 +724,9 @@ async function handleUrl(raw, deps = defaultProtocolDeps()) {
   }
   const { token } = parsed;
   if (deps.isTTY()) {
-    const res = deps.spawnSync(deps.execPath, [deps.dispatchPath, "claim", "preview", token], { stdio: "inherit" });
+    const res = deps.spawnSync(deps.execPath, [deps.dispatchPath, "claim", "preview", token], {
+      stdio: "inherit"
+    });
     deps.exit(res.status ?? 1);
     return;
   }
@@ -642,6 +747,7 @@ var CLAIM_URL_RE, PLISTBUDDY, LSREGISTER, WIN32_SCHEMES, LINUX_TERMINAL_CANDIDAT
 var init_protocol = __esm({
   "src/protocol.ts"() {
     "use strict";
+    init_state_dir();
     CLAIM_URL_RE = /^(th|terminalhire):\/\/claim\/([A-Za-z0-9_-]{8})\/?$/i;
     PLISTBUDDY = "/usr/libexec/PlistBuddy";
     LSREGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
@@ -671,7 +777,7 @@ __export(version_nudge_exports, {
   recordNag: () => recordNag,
   shouldNag: () => shouldNag
 });
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4, existsSync as existsSync4 } from "fs";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync4, existsSync as existsSync4 } from "fs";
 import { join as join4 } from "path";
 import { homedir as homedir4 } from "os";
 import { fileURLToPath as fileURLToPath2 } from "url";
@@ -746,12 +852,16 @@ function shouldNag(now = Date.now()) {
 }
 function recordNag(now = Date.now()) {
   try {
-    mkdirSync4(stateDir2(), { recursive: true });
+    ensureStateDir(stateDir2());
     writeFileSync4(nudgeStateFile(), JSON.stringify({ lastNaggedAt: now }) + "\n", "utf8");
   } catch {
   }
 }
-function emitInteractiveNudge({ now = Date.now(), stream = process.stderr, localVersion } = {}) {
+function emitInteractiveNudge({
+  now = Date.now(),
+  stream = process.stderr,
+  localVersion
+} = {}) {
   try {
     const nudge = cachedStaleNudge(localVersion);
     if (!nudge) return false;
@@ -768,6 +878,7 @@ var __dirname, NAG_INTERVAL_MS;
 var init_version_nudge = __esm({
   "bin/version-nudge.js"() {
     "use strict";
+    init_state_dir();
     __dirname = fileURLToPath2(new URL(".", import.meta.url));
     NAG_INTERVAL_MS = 24 * 60 * 60 * 1e3;
   }
@@ -820,23 +931,12 @@ __export(github_auth_exports, {
   runDeviceFlow: () => runDeviceFlow,
   writeGitHubToken: () => writeGitHubToken
 });
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes
-} from "crypto";
-import {
-  readFileSync as readFileSync5,
-  writeFileSync as writeFileSync5,
-  mkdirSync as mkdirSync5,
-  existsSync as existsSync5,
-  rmSync as rmSync3,
-  renameSync as renameSync2
-} from "fs";
+import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync5, existsSync as existsSync5, rmSync as rmSync3, renameSync as renameSync2 } from "fs";
 import { join as join5 } from "path";
 import { homedir as homedir5 } from "os";
 async function loadKey() {
-  mkdirSync5(TERMINALHIRE_DIR2, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR2);
   if (existsSync5(KEY_FILE)) {
     return Buffer.from(readFileSync5(KEY_FILE, "utf8").trim(), "hex");
   }
@@ -872,12 +972,16 @@ async function readGitHubToken() {
   }
 }
 async function writeGitHubToken(token) {
-  mkdirSync5(TERMINALHIRE_DIR2, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR2);
   const key = await loadKey();
   const blob = encrypt(token, key);
   const tmpFile = `${TOKEN_FILE}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
   try {
-    writeFileSync5(tmpFile, JSON.stringify(blob, null, 2), { encoding: "utf8", mode: 384, flag: "wx" });
+    writeFileSync5(tmpFile, JSON.stringify(blob, null, 2), {
+      encoding: "utf8",
+      mode: 384,
+      flag: "wx"
+    });
     renameSync2(tmpFile, TOKEN_FILE);
   } catch (err) {
     try {
@@ -906,7 +1010,9 @@ async function runDeviceFlow() {
   const clientId = process.env["GITHUB_DEVICE_CLIENT_ID"] ?? process.env["GITHUB_CLIENT_ID"] ?? BAKED_IN_CLIENT_ID;
   if (clientId === "Iv1.PLACEHOLDER_REGISTER_YOUR_APP") {
     console.warn("\nWarning: GITHUB_CLIENT_ID env var looks like a placeholder.");
-    console.warn("Remove it to use the baked-in client ID, or set it to your own OAuth App Client ID.\n");
+    console.warn(
+      "Remove it to use the baked-in client ID, or set it to your own OAuth App Client ID.\n"
+    );
   }
   const deviceRes = await fetch(DEVICE_CODE_URL, {
     method: "POST",
@@ -977,7 +1083,9 @@ async function runDeviceFlow() {
       `GitHub device flow error: ${tokenData.error ?? "unknown"} \u2014 ${tokenData.error_description ?? ""}`
     );
   }
-  throw new Error("GitHub device code expired before authorization. Please run `terminalhire login` again.");
+  throw new Error(
+    "GitHub device code expired before authorization. Please run `terminalhire login` again."
+  );
 }
 async function fetchAuthedLogin(token) {
   if (token === MOCK_TOKEN) return MOCK_LOGIN;
@@ -994,7 +1102,8 @@ async function fetchAuthedLogin(token) {
   return data.login;
 }
 async function resolveStoredLogin() {
-  if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") return MOCK_LOGIN;
+  if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1")
+    return MOCK_LOGIN;
   const token = await readGitHubToken();
   if (!token) return void 0;
   try {
@@ -1004,12 +1113,13 @@ async function resolveStoredLogin() {
   }
 }
 function sleep(ms) {
-  return new Promise((resolve2) => setTimeout(resolve2, ms));
+  return new Promise((resolve3) => setTimeout(resolve3, ms));
 }
 var TERMINALHIRE_DIR2, TOKEN_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, GITHUB_SCOPE, DEVICE_CODE_URL, ACCESS_TOKEN_URL, BAKED_IN_CLIENT_ID, MOCK_TOKEN, MOCK_LOGIN;
 var init_github_auth = __esm({
   "src/github-auth.ts"() {
     "use strict";
+    init_state_dir();
     TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join5(homedir5(), ".terminalhire");
     TOKEN_FILE = join5(TERMINALHIRE_DIR2, "github-token.enc");
     KEY_FILE = join5(TERMINALHIRE_DIR2, "key");
@@ -2070,8 +2180,8 @@ function makeGitHubGovernor(fetchImpl, cfg) {
     try {
       const res = bound == null ? await fetchP : await Promise.race([
         fetchP,
-        new Promise((resolve2) => {
-          timer = setTimeout(() => resolve2(null), bound);
+        new Promise((resolve3) => {
+          timer = setTimeout(() => resolve3(null), bound);
         })
       ]);
       if (!res || !res.ok) return null;
@@ -2773,6 +2883,27 @@ function makeScoringGovernor(governor) {
     makeDefaultGovernorConfig({ paceEnabled: false })
   );
 }
+function reviewerPseudonym(repoFullName, reviewerId) {
+  const s = `${repoFullName}:${reviewerId}`;
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return `R${h.toString(16).padStart(8, "0")}`;
+}
+async function fetchPublicOrgsOrNull(login, token, sig) {
+  try {
+    const orgs = await ghFetch(
+      `/users/${encodeURIComponent(login)}/orgs?per_page=100`,
+      token,
+      sig
+    );
+    return new Set(orgs.map((o) => o.login.toLowerCase()));
+  } catch {
+    return null;
+  }
+}
 async function fetchPRScoringFacts(prUrl, token, signal, governor) {
   const ref = parseGitHubRef(prUrl);
   if (!ref || ref.kind !== "pull") return null;
@@ -2796,6 +2927,7 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
   const contributors = gov.tripped() || gov.budgetExhausted() ? null : await repoContributorCount(owner, repo, token, sig);
   const { closesIssues, linkageSource } = await resolveClosingIssues(owner, repo, number3, pr.body ?? "", token, sig, gov);
   let reviewerAssociations;
+  let reviewSources;
   if (!gov.tripped() && !gov.budgetExhausted()) {
     try {
       const reviews = await ghFetch(
@@ -2804,8 +2936,78 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
         sig
       );
       reviewerAssociations = reviews.map((r) => r.author_association);
+      reviewSources = reviews.map((r) => ({
+        association: r.author_association,
+        isBot: isLifecycleBot(r.user ?? null),
+        isSelf: r.user?.id != null && pr.user?.id != null && r.user.id === pr.user.id,
+        ...r.user?.id != null ? { pseudonym: reviewerPseudonym(`${owner}/${repo}`, r.user.id) } : {},
+        ...r.state ? { state: r.state } : {},
+        submittedAt: r.submitted_at ?? null
+      }));
+      const authorLogin = pr.user?.login;
+      if (authorLogin && !gov.tripped() && !gov.budgetExhausted()) {
+        const authorOrgs = await fetchPublicOrgsOrNull(authorLogin, token, sig);
+        if (authorOrgs != null) {
+          const humanReviewers = /* @__PURE__ */ new Map();
+          for (const r of reviews) {
+            if (r.user?.id == null || r.user.login == null) continue;
+            if (isLifecycleBot(r.user) || pr.user?.id != null && r.user.id === pr.user.id) continue;
+            const p = reviewerPseudonym(`${owner}/${repo}`, r.user.id);
+            if (!humanReviewers.has(p) && humanReviewers.size < AFFILIATION_REVIEWER_CAP) {
+              humanReviewers.set(p, r.user.login);
+            }
+          }
+          const shared = /* @__PURE__ */ new Map();
+          for (const [p, login] of humanReviewers) {
+            if (gov.tripped() || gov.budgetExhausted()) break;
+            const reviewerOrgs = await fetchPublicOrgsOrNull(login, token, sig);
+            if (reviewerOrgs == null) continue;
+            shared.set(p, [...reviewerOrgs].some((o) => authorOrgs.has(o)));
+          }
+          for (const src of reviewSources) {
+            if (src.pseudonym && shared.has(src.pseudonym)) {
+              src.sharedOrgWithAuthor = shared.get(src.pseudonym);
+            }
+          }
+        }
+      }
     } catch {
       reviewerAssociations = void 0;
+      reviewSources = void 0;
+    }
+  }
+  let commits;
+  if (!gov.tripped() && !gov.budgetExhausted()) {
+    try {
+      const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${number3}/commits?per_page=100`;
+      const res = await gov.get(url, { headers: ghHeaders(token), signal: sig });
+      if (res && res.ok) {
+        const rawCommits = await res.json();
+        commits = !Array.isArray(rawCommits) || rawCommits.length === 100 ? void 0 : rawCommits.map((c) => ({
+          sha: c.sha,
+          committedAt: c.commit?.committer?.date ?? c.commit?.author?.date ?? null
+        }));
+      }
+    } catch {
+      commits = void 0;
+    }
+  }
+  let reviewThreadStats;
+  if (token && !gov.tripped() && !gov.budgetExhausted()) {
+    try {
+      const q = `query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){reviewThreads(first:100){totalCount nodes{isResolved}}}}rateLimit{cost remaining}}`;
+      const r = await ghGraphQL(q, { o: owner, n: repo, p: number3 }, token, sig, gov);
+      const threads = r?.data?.repository?.pullRequest?.reviewThreads;
+      if (threads && typeof threads.totalCount === "number" && threads.totalCount <= 100 && Array.isArray(threads.nodes)) {
+        const resolved = threads.nodes.filter((t) => t.isResolved).length;
+        reviewThreadStats = {
+          total: threads.totalCount,
+          resolved,
+          unresolved: threads.totalCount - resolved
+        };
+      }
+    } catch {
+      reviewThreadStats = void 0;
     }
   }
   return {
@@ -2824,12 +3026,25 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
     repoContributors: contributors ?? null,
     repoArchived: !!repoMeta?.archived,
     repoFork: !!repoMeta?.fork,
-    repoPrivate: !!repoMeta?.private,
+    // TERM-46: preserve UNKNOWN when the repo-meta read failed/was skipped — do NOT
+    // coerce a missing read to `false` (public), which would fail OPEN in the
+    // provenance gate. A successful read reports the real flag (GitHub always sends it).
+    repoPrivate: repoMeta ? repoMeta.private ?? false : null,
     additions: pr.additions ?? null,
     deletions: pr.deletions ?? null,
     changedFiles: pr.changed_files ?? null,
     repoForks: repoMeta?.forks_count ?? null,
     reviewerAssociations,
+    reviewSources,
+    // TERM-46 provenance RAW inputs. `created_at` rides the existing repo read;
+    // repoOrgVerified / repoDependents are deferred (extra API) → left undefined.
+    repoCreatedAt: repoMeta?.created_at ?? null,
+    // TERM-50: PR creation rides the existing detail read; null = unknown (older
+    // callers / list shapes) → time-to-merge honestly absent, never fabricated.
+    prCreatedAt: pr.created_at ?? null,
+    // §7 PR-A: commit + review-thread enrichment (undefined when degraded/truncated).
+    commits,
+    reviewThreadStats,
     fetchedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
@@ -2978,7 +3193,7 @@ async function fetchPRLifecycle(prUrl, token, signal, governor) {
     complete
   };
 }
-var TRACTION_TOP_N, MAINTAINER_ENRICH_MAX, CANDIDATE_PR_PAGE, MAX_ENRICH_PRS, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE, RECEPTIVITY_RECENCY_DAYS, RECEPTIVITY_RECENCY_FLOOR, GITHUB_GRAPHQL_URL, LIFECYCLE_BOT_LOGINS;
+var TRACTION_TOP_N, MAINTAINER_ENRICH_MAX, CANDIDATE_PR_PAGE, MAX_ENRICH_PRS, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE, RECEPTIVITY_RECENCY_DAYS, RECEPTIVITY_RECENCY_FLOOR, GITHUB_GRAPHQL_URL, AFFILIATION_REVIEWER_CAP, LIFECYCLE_BOT_LOGINS;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
@@ -2999,6 +3214,7 @@ var init_github = __esm({
     RECEPTIVITY_RECENCY_DAYS = 180;
     RECEPTIVITY_RECENCY_FLOOR = 0.1;
     GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
+    AFFILIATION_REVIEWER_CAP = 5;
     LIFECYCLE_BOT_LOGINS = /* @__PURE__ */ new Set([
       "mergify",
       "mergify[bot]",
@@ -4418,6 +4634,596 @@ var init_directory = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/contributions.ts
+function readSearchMaxPages() {
+  const raw = process.env["CONTRIB_SEARCH_MAX_PAGES"];
+  if (raw == null) return DEFAULT_SEARCH_MAX_PAGES;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_SEARCH_MAX_PAGES;
+  return Math.min(Math.max(n, MIN_SEARCH_MAX_PAGES), MAX_SEARCH_MAX_PAGES);
+}
+function readMaxContribItems() {
+  const raw = process.env["CONTRIB_MAX_ITEMS"];
+  if (raw == null) return DEFAULT_MAX_CONTRIB_ITEMS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_MAX_CONTRIB_ITEMS;
+  return Math.min(Math.max(n, MIN_MAX_CONTRIB_ITEMS), MAX_MAX_CONTRIB_ITEMS);
+}
+function readMaxContribIssuesScanned() {
+  const raw = process.env["CONTRIB_MAX_ISSUES_SCANNED"];
+  if (raw == null) return DEFAULT_MAX_CONTRIB_ISSUES_SCANNED;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_MAX_CONTRIB_ISSUES_SCANNED;
+  return Math.min(
+    Math.max(n, MIN_MAX_CONTRIB_ISSUES_SCANNED),
+    MAX_MAX_CONTRIB_ISSUES_SCANNED
+  );
+}
+function authHeaders2(token) {
+  const bearer = token ?? process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
+  const h = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "terminalhire",
+    "X-GitHub-Api-Version": "2022-11-28"
+  };
+  if (bearer) h["Authorization"] = `Bearer ${bearer}`;
+  return h;
+}
+function tokenize4(text) {
+  return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
+}
+function labelNames2(labels) {
+  return (labels ?? []).map((l) => typeof l === "string" ? l : l.name ?? "").filter(Boolean);
+}
+function repoFullNameFromApiUrl2(url) {
+  const m = url.match(/\/repos\/([^/]+)\/([^/]+)\/?$/);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+function makeClient(fetchImpl, cfg, token) {
+  const gov = makeGitHubGovernor(fetchImpl, cfg);
+  const effectiveToken = token ?? process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
+  const headers = authHeaders2(effectiveToken);
+  async function raw(path2) {
+    return gov.get(`${GITHUB_API2}${path2}`, { headers });
+  }
+  async function json(path2) {
+    const res = await raw(path2);
+    if (!res) return null;
+    if (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0") return null;
+    if (!res.ok) return null;
+    try {
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+  async function probe(path2) {
+    return gov.probe(`${GITHUB_API2}${path2}`, { headers });
+  }
+  let supplyFailures = 0;
+  const noteSupplyFailure = () => {
+    supplyFailures += 1;
+  };
+  return {
+    raw,
+    json,
+    probe,
+    governor: gov,
+    token: effectiveToken,
+    setSecondaryHint: gov.setSecondaryHint,
+    noteSupplyFailure,
+    // Merge the client-level supply-failure count into the governor stats so callers
+    // read ONE stats object (the cron's metrics line + the B2 degraded check).
+    getStats: () => ({ ...gov.getStats(), supplyFailures })
+  };
+}
+async function contributorCount(client, fullName) {
+  const res = await client.raw(`/repos/${fullName}/contributors?per_page=1&anon=false`);
+  if (!res || !res.ok) return void 0;
+  const link = res.headers.get("link");
+  const m = link?.match(/[?&]page=(\d+)>;\s*rel="last"/);
+  if (m) return Number(m[1]);
+  try {
+    const body = await res.json();
+    return Array.isArray(body) ? body.length : 0;
+  } catch {
+    return void 0;
+  }
+}
+async function openPRIssueRefs(client, fullName) {
+  const token = client.token;
+  const [owner, name] = fullName.split("/");
+  if (token && owner && name) {
+    const res = await openPRClosingRefs(owner, name, token, void 0, client.governor);
+    if (res === null) return null;
+    if (res.capHit) {
+      console.warn(
+        `[contribute] open-PR closing-ref scan capped at 100/${res.totalCount} open PRs for ${fullName} (closing refs beyond the first 100 open PRs not scanned)`
+      );
+    }
+    return res.refs;
+  }
+  const prs = await client.json(
+    `/repos/${fullName}/pulls?state=open&per_page=100`
+  );
+  if (!Array.isArray(prs)) return null;
+  const refs = /* @__PURE__ */ new Set();
+  for (const pr of prs) {
+    const text = `${pr.title ?? ""}
+${pr.body ?? ""}`;
+    for (const m of text.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi)) {
+      refs.add(Number(m[1]));
+    }
+  }
+  return refs;
+}
+async function fetchRateLimit(client) {
+  const r = await client.probe("/rate_limit");
+  return r?.resources ?? null;
+}
+async function searchContribIssues(client, queries) {
+  const byUrl = /* @__PURE__ */ new Map();
+  const maxPages = readSearchMaxPages();
+  for (const q of queries) {
+    for (let page = 1; page <= maxPages; page++) {
+      const res = await client.json(
+        `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE2}&page=${page}`
+      );
+      const items = res?.items;
+      if (items == null) {
+        const st = client.getStats();
+        if (!st.budgetAborted && !st.secondaryAborted) client.noteSupplyFailure();
+        break;
+      }
+      for (const it of items) {
+        if (it.pull_request) continue;
+        if (!byUrl.has(it.html_url)) byUrl.set(it.html_url, it);
+      }
+      if (items.length < SEARCH_PER_PAGE2) break;
+      const stats = client.getStats();
+      if (stats.budgetAborted || stats.secondaryAborted) break;
+    }
+  }
+  return [...byUrl.values()].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+}
+function buildContributionJob(a) {
+  return {
+    id: a.id,
+    source: "contribute",
+    title: a.title,
+    company: a.repo.owner.login,
+    url: a.issue.html_url,
+    remote: true,
+    location: "Remote",
+    tags: a.tags,
+    roleType: "freelance",
+    postedAt: a.issue.created_at,
+    applyMode: "direct",
+    contribution: {
+      repoFullName: a.fullName,
+      repoStars: a.repo.stargazers_count,
+      repoContributors: a.contributors,
+      issueNumber: a.issue.number,
+      labels: a.labels,
+      issueUrl: a.issue.html_url,
+      issueBody: a.body.slice(0, 1e3) || void 0,
+      // Provably 0 open PRs ONLY when the open-PR check actually ran and returned a
+      // verified-empty/non-matching set; a failed check leaves it undefined (never a
+      // fabricated 0), so the claim path falls through to a live re-count.
+      openPRsAtDiscovery: a.openPRsAtDiscovery,
+      repoDescription: a.repo.description || null,
+      // TERM-27: persist the repo's primary language so project curation can
+      // exclude the repo's OWN language id (folded into every issue's tags) from
+      // the distinct-skill signal. Same `repo` used by the tokenize() tag build.
+      language: a.repo.language ?? null,
+      // TERM-35: stamp the search item's comment count (already in the response —
+      // zero extra egress). A NEUTRAL volume signal only: set solely when the
+      // search item carries a finite count >= 0; a failed/absent value leaves it
+      // undefined (never a fabricated 0), so a render's chip falls through cleanly.
+      commentsAtDiscovery: typeof a.issue.comments === "number" && Number.isFinite(a.issue.comments) && a.issue.comments >= 0 ? a.issue.comments : void 0
+    },
+    // Provenance: repo-first discovered items only (label-first omits the field).
+    ...a.discovered ? { discovered: true } : {},
+    raw: a.issue
+  };
+}
+async function aggregateContributions(opts = {}) {
+  const paceEnabled = opts.paceEnabled ?? !opts.fetchImpl;
+  const client = makeClient(opts.fetchImpl ?? fetchWithTimeout, {
+    paceEnabled,
+    gapMs: readReqGapMs(),
+    // Request-path callers (plan B2) can LOWER the budget but never raise it past the
+    // vetted default — take the min so a per-user pass caps its own wall-clock.
+    budgetMs: Math.min(opts.budgetMs ?? Infinity, readBuildBudgetMs()),
+    sleep: opts.sleepImpl ?? realSleep,
+    now: opts.nowImpl ?? Date.now,
+    // Bound the unguarded probe on the REAL network only; injected-fetch tests get
+    // null so the probe stays deterministic (and its shared spy sleeper untouched).
+    probeTimeoutMs: opts.fetchImpl ? null : PROBE_TIMEOUT_MS
+  }, opts.token);
+  const queries = opts.queries ?? CONTRIB_SEARCH_QUERIES;
+  const maxContribItems = readMaxContribItems();
+  const startRl = await fetchRateLimit(client);
+  const coreHealthyAtStart = (startRl?.core?.remaining ?? 0) >= 500;
+  client.setSecondaryHint(coreHealthyAtStart);
+  const issues = (await searchContribIssues(client, queries)).slice(
+    0,
+    readMaxContribIssuesScanned()
+  );
+  const repoCache = /* @__PURE__ */ new Map();
+  const contribCache = /* @__PURE__ */ new Map();
+  const prRefsCache = /* @__PURE__ */ new Map();
+  const xbuild = opts.repoMetaCache;
+  const servedFromXbuild = /* @__PURE__ */ new Set();
+  const persistedXbuild = /* @__PURE__ */ new Set();
+  const xbuildTried = /* @__PURE__ */ new Set();
+  async function primeFromXbuild(key, fullName) {
+    if (!xbuild || xbuildTried.has(key)) return;
+    xbuildTried.add(key);
+    if (repoCache.has(key) && contribCache.has(key)) return;
+    let cached2 = null;
+    try {
+      cached2 = await xbuild.get(key);
+    } catch {
+      return;
+    }
+    if (!cached2) return;
+    if (!repoCache.has(key)) {
+      const owner = fullName.split("/")[0] ?? "";
+      repoCache.set(key, {
+        full_name: fullName,
+        stargazers_count: cached2.stars,
+        archived: cached2.archived,
+        disabled: cached2.disabled,
+        fork: cached2.fork,
+        language: cached2.language,
+        description: cached2.description,
+        owner: { login: owner }
+      });
+    }
+    if (!contribCache.has(key)) {
+      contribCache.set(key, cached2.contributors);
+      servedFromXbuild.add(key);
+    }
+  }
+  async function persistRepoMeta(fullName, repo, contributors) {
+    if (!xbuild) return;
+    const key = repoKey(fullName);
+    if (servedFromXbuild.has(key) || persistedXbuild.has(key)) return;
+    if (contributors === void 0) return;
+    persistedXbuild.add(key);
+    try {
+      await xbuild.set(key, {
+        stars: repo.stargazers_count,
+        contributors,
+        language: repo.language,
+        archived: repo.archived,
+        fork: repo.fork,
+        disabled: repo.disabled,
+        description: repo.description || null
+      });
+    } catch {
+    }
+  }
+  async function repoMeta(fullName) {
+    const key = repoKey(fullName);
+    const hit = repoCache.get(key);
+    if (hit !== void 0) return hit;
+    await primeFromXbuild(key, fullName);
+    const primed = repoCache.get(key);
+    if (primed !== void 0) return primed;
+    const r = await client.json(`/repos/${fullName}`) ?? null;
+    repoCache.set(key, r);
+    return r;
+  }
+  async function repoContribCount(fullName) {
+    const key = repoKey(fullName);
+    if (contribCache.has(key)) return contribCache.get(key);
+    await primeFromXbuild(key, fullName);
+    if (contribCache.has(key)) return contribCache.get(key);
+    const n = await contributorCount(client, fullName);
+    contribCache.set(key, n);
+    return n;
+  }
+  async function repoPRRefs(fullName) {
+    const key = repoKey(fullName);
+    if (prRefsCache.has(key)) return prRefsCache.get(key) ?? null;
+    const refs = await openPRIssueRefs(client, fullName);
+    prRefsCache.set(key, refs);
+    return refs;
+  }
+  const jobs = [];
+  const seen = /* @__PURE__ */ new Set();
+  const perRepo = /* @__PURE__ */ new Map();
+  let metaNull = 0;
+  let contribUndefined = 0;
+  let prRefsNull = 0;
+  for (const issue2 of issues) {
+    if (jobs.length >= maxContribItems) break;
+    const fullName = repoFullNameFromApiUrl2(issue2.repository_url);
+    if (!fullName) continue;
+    const id = `contribute:${repoKey(fullName)}#${issue2.number}`;
+    if (seen.has(id)) continue;
+    if (isExcludedRepo(fullName)) continue;
+    if (isAssigned(issue2)) continue;
+    if ((perRepo.get(repoKey(fullName)) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) continue;
+    const title = decodeEntities(issue2.title).trim();
+    const body = issue2.body ? decodeEntities(issue2.body) : "";
+    const labels = labelNames2(issue2.labels);
+    if (looksLikeContentTask({ title, body, labels })) continue;
+    const repo = await repoMeta(fullName);
+    if (!repo) {
+      metaNull++;
+      continue;
+    }
+    const contributors = await repoContribCount(fullName);
+    if (contributors === void 0) contribUndefined++;
+    await persistRepoMeta(fullName, repo, contributors);
+    if (!passesContributionGate({
+      fullName,
+      stars: repo.stargazers_count,
+      contributors,
+      title,
+      archived: repo.archived,
+      fork: repo.fork
+    })) {
+      continue;
+    }
+    if (repo.disabled) continue;
+    const prRefs = await repoPRRefs(fullName);
+    if (prRefs === null) prRefsNull++;
+    const openPRsAtDiscovery = prRefs ? prRefs.has(issue2.number) ? 1 : 0 : void 0;
+    const tags = normalize(
+      tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
+    );
+    seen.add(id);
+    perRepo.set(repoKey(fullName), (perRepo.get(repoKey(fullName)) ?? 0) + 1);
+    jobs.push(
+      buildContributionJob({
+        id,
+        fullName,
+        repo,
+        issue: issue2,
+        title,
+        body,
+        labels,
+        tags,
+        contributors,
+        // gate guarantees a number here
+        openPRsAtDiscovery
+      })
+    );
+  }
+  const doDiscovery = opts.discoverRepos ?? (opts.trendingSlugs != null || opts.vocabTerms != null || opts.seedSlugs != null);
+  let discoveredEmitted = 0;
+  let discoveryBudgetStopped = false;
+  if (doDiscovery && jobs.length < maxContribItems) {
+    const maxRepos = Math.min(
+      Math.max(0, opts.maxDiscoveredRepos ?? MAX_DISCOVERED_REPOS),
+      MAX_DISCOVERED_REPOS
+    );
+    const vocabTerms = (opts.vocabTerms ?? DISCOVERY_VOCAB_TERMS).slice(
+      0,
+      DISCOVERY_VOCAB_TERMS.length
+    );
+    const vocabCandidates = [];
+    for (const term of vocabTerms) {
+      if (client.getStats().budgetAborted || client.getStats().secondaryAborted) {
+        discoveryBudgetStopped = true;
+        break;
+      }
+      const res = await client.json(
+        `/search/repositories?q=${encodeURIComponent(term)}&sort=updated&order=desc&per_page=${DISCOVERY_REPOS_PER_TERM}`
+      );
+      for (const r of res?.items ?? []) {
+        if (!r?.full_name) continue;
+        if (!repoCache.has(repoKey(r.full_name))) {
+          repoCache.set(repoKey(r.full_name), {
+            full_name: r.full_name,
+            stargazers_count: r.stargazers_count,
+            archived: r.archived,
+            disabled: r.disabled ?? false,
+            fork: r.fork,
+            language: r.language,
+            description: r.description || null,
+            owner: r.owner
+          });
+        }
+        vocabCandidates.push({ fullName: r.full_name, stars: r.stargazers_count ?? 0 });
+      }
+    }
+    vocabCandidates.sort((a, b) => b.stars - a.stars);
+    const candidates = [];
+    const candSeen = /* @__PURE__ */ new Set();
+    for (const slug of opts.seedSlugs ?? []) {
+      const s = slug?.toLowerCase();
+      if (s && !candSeen.has(repoKey(s))) {
+        candSeen.add(repoKey(s));
+        candidates.push(s);
+      }
+    }
+    for (const slug of opts.trendingSlugs ?? []) {
+      const s = slug?.toLowerCase();
+      if (s && !candSeen.has(repoKey(s))) {
+        candSeen.add(repoKey(s));
+        candidates.push(s);
+      }
+    }
+    for (const { fullName } of vocabCandidates) {
+      if (!candSeen.has(repoKey(fullName))) {
+        candSeen.add(repoKey(fullName));
+        candidates.push(fullName);
+      }
+    }
+    const scanned = candidates.slice(0, maxRepos);
+    for (const fullName of scanned) {
+      if (jobs.length >= maxContribItems) break;
+      if (client.getStats().budgetAborted || client.getStats().secondaryAborted) {
+        discoveryBudgetStopped = true;
+        break;
+      }
+      if (isExcludedRepo(fullName)) continue;
+      const repo = await repoMeta(fullName);
+      if (!repo) {
+        metaNull++;
+        continue;
+      }
+      if (repo.disabled) continue;
+      const contributors = await repoContribCount(fullName);
+      if (contributors === void 0) contribUndefined++;
+      await persistRepoMeta(fullName, repo, contributors);
+      if (repo.archived || repo.fork || repo.stargazers_count < MIN_STARS || contributors === void 0 || contributors < MIN_CONTRIBUTORS) {
+        continue;
+      }
+      const q = `repo:${fullName} is:issue is:open label:${DISCOVERY_ISSUE_LABELS}`;
+      const searchRes = await client.json(
+        `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE2}`
+      );
+      const repoIssues = (searchRes?.items ?? []).filter((it) => !it.pull_request);
+      let perRepoDiscovered = 0;
+      for (const issue2 of repoIssues) {
+        if (jobs.length >= maxContribItems) break;
+        if (perRepoDiscovered >= MAX_ISSUES_PER_DISCOVERED_REPO) break;
+        if ((perRepo.get(repoKey(fullName)) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) break;
+        const id = `contribute:${repoKey(fullName)}#${issue2.number}`;
+        if (seen.has(id)) continue;
+        if (isAssigned(issue2)) continue;
+        const title = decodeEntities(issue2.title).trim();
+        if (!passesContributionGate({
+          fullName,
+          stars: repo.stargazers_count,
+          contributors,
+          title,
+          archived: repo.archived,
+          fork: repo.fork
+        })) {
+          continue;
+        }
+        const body = issue2.body ? decodeEntities(issue2.body) : "";
+        const labels = labelNames2(issue2.labels);
+        if (looksLikeContentTask({ title, body, labels })) continue;
+        const prRefs = await repoPRRefs(fullName);
+        if (prRefs === null) prRefsNull++;
+        const openPRsAtDiscovery = prRefs ? prRefs.has(issue2.number) ? 1 : 0 : void 0;
+        const tags = normalize(
+          tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
+        );
+        seen.add(id);
+        perRepo.set(repoKey(fullName), (perRepo.get(repoKey(fullName)) ?? 0) + 1);
+        perRepoDiscovered++;
+        discoveredEmitted++;
+        jobs.push(
+          buildContributionJob({
+            id,
+            fullName,
+            repo,
+            issue: issue2,
+            title,
+            body,
+            labels,
+            tags,
+            contributors,
+            openPRsAtDiscovery,
+            discovered: true
+          })
+        );
+      }
+    }
+  }
+  if (!opts.fetchImpl) {
+    const rl = await fetchRateLimit(client);
+    const core = rl?.core ? `${rl.core.remaining}/${rl.core.limit}` : "n/a";
+    const search = rl?.search ? `${rl.search.remaining}/${rl.search.limit}` : "n/a";
+    const noToken = !client.token;
+    const { pacedMs, secondaryAborted, budgetAborted, elapsedMs, gqlCost, gqlRemaining } = client.getStats();
+    console.info(
+      `[contribute] build metrics \u2014 scanned=${issues.length} reposDistinct=${repoCache.size} emitted=${jobs.length} discovered=${discoveredEmitted} metaNull=${metaNull} contribUndefined=${contribUndefined} prRefsNull=${prRefsNull} paced=${pacedMs} secondaryAborted=${secondaryAborted} budgetAborted=${budgetAborted} core=${core} search=${search} gqlCost=${gqlCost} gqlRemaining=${gqlRemaining ?? "n/a"} elapsed=${elapsedMs}` + (noToken ? " (NO TOKEN \u2192 60/hr)" : "")
+    );
+    if (discoveryBudgetStopped) {
+      console.warn(
+        `[contribute] repo-first discovery stopped early \u2014 build budget exhausted (emitted ${discoveredEmitted} discovered before the cap)`
+      );
+    }
+  }
+  if (opts.onStats) {
+    const { budgetAborted, secondaryAborted, supplyFailures } = client.getStats();
+    opts.onStats({
+      // A PARTIAL crawl from ANY cause: the governor's budget/secondary abort, an early
+      // discovery stop, OR an ordinary /search page failure (supplyFailures) that
+      // truncated the primary supply. Any of these ⇒ the pool is incomplete.
+      degraded: Boolean(budgetAborted || secondaryAborted || discoveryBudgetStopped || supplyFailures > 0),
+      emitted: jobs.length,
+      scanned: issues.length
+    });
+  }
+  return jobs;
+}
+var GITHUB_API2, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, DEFAULT_SEARCH_MAX_PAGES, MIN_SEARCH_MAX_PAGES, MAX_SEARCH_MAX_PAGES, DEFAULT_MAX_CONTRIB_ITEMS, MIN_MAX_CONTRIB_ITEMS, MAX_MAX_CONTRIB_ITEMS, DEFAULT_MAX_CONTRIB_ISSUES_SCANNED, MIN_MAX_CONTRIB_ISSUES_SCANNED, MAX_MAX_CONTRIB_ISSUES_SCANNED, MAX_DISCOVERED_REPOS, MAX_ISSUES_PER_DISCOVERED_REPO, DISCOVERY_REPOS_PER_TERM, DISCOVERY_VOCAB_TERMS, DISCOVERY_ISSUE_LABELS, repoKey;
+var init_contributions = __esm({
+  "../../packages/core/src/feeds/contributions.ts"() {
+    "use strict";
+    init_vocabulary();
+    init_entities();
+    init_bounty_gate();
+    init_contribution_gate();
+    init_contribution_classify();
+    init_github_bounties();
+    init_github();
+    init_http();
+    init_gh_governor();
+    GITHUB_API2 = "https://api.github.com";
+    CONTRIB_LABEL_QUERIES = [
+      'label:"good first issue" type:issue state:open',
+      'label:"good-first-issue" type:issue state:open',
+      'label:"help wanted" type:issue state:open',
+      'label:"help-wanted" type:issue state:open',
+      'label:"up-for-grabs" type:issue state:open',
+      // supply-expansion D: two more first-contribution label families widen the
+      // global newest-first slice WITHOUT relaxing the credential gate.
+      'label:"beginner-friendly" type:issue state:open',
+      'label:"first-timers-only" type:issue state:open'
+    ];
+    CONTRIB_LANGUAGE_QUERIES = [
+      ...["rust", "go", "python", "c++", "ruby"].map(
+        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+      ),
+      ...["rust", "go"].map(
+        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+      ),
+      // supply-expansion D: cover the high-volume web/enterprise ecosystems the
+      // original set omitted. TS/JS were previously left out of "good first issue"
+      // (the global slice over-represented them) but a LANGUAGE-scoped page surfaces
+      // DIFFERENT repos than the global newest-first slice, so re-including them widens
+      // distinct-repo coverage rather than duplicating it.
+      ...["typescript", "javascript", "java", "python"].map(
+        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+      ),
+      ...["typescript", "javascript", "c#", "php"].map(
+        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+      )
+    ];
+    CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
+    SEARCH_PER_PAGE2 = 100;
+    DEFAULT_SEARCH_MAX_PAGES = 1;
+    MIN_SEARCH_MAX_PAGES = 1;
+    MAX_SEARCH_MAX_PAGES = 5;
+    DEFAULT_MAX_CONTRIB_ITEMS = 400;
+    MIN_MAX_CONTRIB_ITEMS = 50;
+    MAX_MAX_CONTRIB_ITEMS = 1e3;
+    DEFAULT_MAX_CONTRIB_ISSUES_SCANNED = 1500;
+    MIN_MAX_CONTRIB_ISSUES_SCANNED = 100;
+    MAX_MAX_CONTRIB_ISSUES_SCANNED = 5e3;
+    MAX_DISCOVERED_REPOS = 15;
+    MAX_ISSUES_PER_DISCOVERED_REPO = 3;
+    DISCOVERY_REPOS_PER_TERM = 20;
+    DISCOVERY_VOCAB_TERMS = ["rust", "go", "python", "typescript"];
+    DISCOVERY_ISSUE_LABELS = '"good first issue","help wanted","good-first-issue","help-wanted"';
+    repoKey = (name) => name.toLowerCase();
+  }
+});
+
 // ../../packages/core/src/winnability.ts
 function clamp01(n) {
   if (!Number.isFinite(n)) return 0;
@@ -4826,6 +5632,7 @@ var init_feeds = __esm({
     init_bounty_gate();
     init_contribution_gate();
     init_contribution_classify();
+    init_contributions();
     init_projectCuration();
     FEEDS = [greenhouse, ashby, lever, workable, himalayas, wwr, hn];
     GREENHOUSE_SLUGS_BY_TIER = {
@@ -4940,555 +5747,6 @@ var init_feeds = __esm({
       ashby: new Set(ASHBY_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase())),
       lever: new Set(LEVER_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase()))
     };
-  }
-});
-
-// ../../packages/core/src/feeds/contributions.ts
-function readSearchMaxPages() {
-  const raw = process.env["CONTRIB_SEARCH_MAX_PAGES"];
-  if (raw == null) return DEFAULT_SEARCH_MAX_PAGES;
-  const n = Number.parseInt(raw, 10);
-  if (Number.isNaN(n)) return DEFAULT_SEARCH_MAX_PAGES;
-  return Math.min(Math.max(n, MIN_SEARCH_MAX_PAGES), MAX_SEARCH_MAX_PAGES);
-}
-function readMaxContribItems() {
-  const raw = process.env["CONTRIB_MAX_ITEMS"];
-  if (raw == null) return DEFAULT_MAX_CONTRIB_ITEMS;
-  const n = Number.parseInt(raw, 10);
-  if (Number.isNaN(n)) return DEFAULT_MAX_CONTRIB_ITEMS;
-  return Math.min(Math.max(n, MIN_MAX_CONTRIB_ITEMS), MAX_MAX_CONTRIB_ITEMS);
-}
-function readMaxContribIssuesScanned() {
-  const raw = process.env["CONTRIB_MAX_ISSUES_SCANNED"];
-  if (raw == null) return DEFAULT_MAX_CONTRIB_ISSUES_SCANNED;
-  const n = Number.parseInt(raw, 10);
-  if (Number.isNaN(n)) return DEFAULT_MAX_CONTRIB_ISSUES_SCANNED;
-  return Math.min(
-    Math.max(n, MIN_MAX_CONTRIB_ISSUES_SCANNED),
-    MAX_MAX_CONTRIB_ISSUES_SCANNED
-  );
-}
-function authHeaders2() {
-  const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
-  const h = {
-    Accept: "application/vnd.github+json",
-    "User-Agent": "terminalhire",
-    "X-GitHub-Api-Version": "2022-11-28"
-  };
-  if (token) h["Authorization"] = `Bearer ${token}`;
-  return h;
-}
-function tokenize4(text) {
-  return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
-}
-function labelNames2(labels) {
-  return (labels ?? []).map((l) => typeof l === "string" ? l : l.name ?? "").filter(Boolean);
-}
-function repoFullNameFromApiUrl2(url) {
-  const m = url.match(/\/repos\/([^/]+)\/([^/]+)\/?$/);
-  return m ? `${m[1]}/${m[2]}` : null;
-}
-function makeClient(fetchImpl, cfg) {
-  const gov = makeGitHubGovernor(fetchImpl, cfg);
-  async function raw(path2) {
-    return gov.get(`${GITHUB_API2}${path2}`, { headers: authHeaders2() });
-  }
-  async function json(path2) {
-    const res = await raw(path2);
-    if (!res) return null;
-    if (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0") return null;
-    if (!res.ok) return null;
-    try {
-      return await res.json();
-    } catch {
-      return null;
-    }
-  }
-  async function probe(path2) {
-    return gov.probe(`${GITHUB_API2}${path2}`, { headers: authHeaders2() });
-  }
-  return { raw, json, probe, governor: gov, setSecondaryHint: gov.setSecondaryHint, getStats: gov.getStats };
-}
-async function contributorCount(client, fullName) {
-  const res = await client.raw(`/repos/${fullName}/contributors?per_page=1&anon=false`);
-  if (!res || !res.ok) return void 0;
-  const link = res.headers.get("link");
-  const m = link?.match(/[?&]page=(\d+)>;\s*rel="last"/);
-  if (m) return Number(m[1]);
-  try {
-    const body = await res.json();
-    return Array.isArray(body) ? body.length : 0;
-  } catch {
-    return void 0;
-  }
-}
-async function openPRIssueRefs(client, fullName) {
-  const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
-  const [owner, name] = fullName.split("/");
-  if (token && owner && name) {
-    const res = await openPRClosingRefs(owner, name, token, void 0, client.governor);
-    if (res === null) return null;
-    if (res.capHit) {
-      console.warn(
-        `[contribute] open-PR closing-ref scan capped at 100/${res.totalCount} open PRs for ${fullName} (closing refs beyond the first 100 open PRs not scanned)`
-      );
-    }
-    return res.refs;
-  }
-  const prs = await client.json(
-    `/repos/${fullName}/pulls?state=open&per_page=100`
-  );
-  if (!Array.isArray(prs)) return null;
-  const refs = /* @__PURE__ */ new Set();
-  for (const pr of prs) {
-    const text = `${pr.title ?? ""}
-${pr.body ?? ""}`;
-    for (const m of text.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi)) {
-      refs.add(Number(m[1]));
-    }
-  }
-  return refs;
-}
-async function fetchRateLimit(client) {
-  const r = await client.probe("/rate_limit");
-  return r?.resources ?? null;
-}
-async function searchContribIssues(client, queries) {
-  const byUrl = /* @__PURE__ */ new Map();
-  const maxPages = readSearchMaxPages();
-  for (const q of queries) {
-    for (let page = 1; page <= maxPages; page++) {
-      const res = await client.json(
-        `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE2}&page=${page}`
-      );
-      const items = res?.items;
-      if (items == null) break;
-      for (const it of items) {
-        if (it.pull_request) continue;
-        if (!byUrl.has(it.html_url)) byUrl.set(it.html_url, it);
-      }
-      if (items.length < SEARCH_PER_PAGE2) break;
-      const stats = client.getStats();
-      if (stats.budgetAborted || stats.secondaryAborted) break;
-    }
-  }
-  return [...byUrl.values()].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  );
-}
-function buildContributionJob(a) {
-  return {
-    id: a.id,
-    source: "contribute",
-    title: a.title,
-    company: a.repo.owner.login,
-    url: a.issue.html_url,
-    remote: true,
-    location: "Remote",
-    tags: a.tags,
-    roleType: "freelance",
-    postedAt: a.issue.created_at,
-    applyMode: "direct",
-    contribution: {
-      repoFullName: a.fullName,
-      repoStars: a.repo.stargazers_count,
-      repoContributors: a.contributors,
-      issueNumber: a.issue.number,
-      labels: a.labels,
-      issueUrl: a.issue.html_url,
-      issueBody: a.body.slice(0, 1e3) || void 0,
-      // Provably 0 open PRs ONLY when the open-PR check actually ran and returned a
-      // verified-empty/non-matching set; a failed check leaves it undefined (never a
-      // fabricated 0), so the claim path falls through to a live re-count.
-      openPRsAtDiscovery: a.openPRsAtDiscovery,
-      repoDescription: a.repo.description || null,
-      // TERM-27: persist the repo's primary language so project curation can
-      // exclude the repo's OWN language id (folded into every issue's tags) from
-      // the distinct-skill signal. Same `repo` used by the tokenize() tag build.
-      language: a.repo.language ?? null,
-      // TERM-35: stamp the search item's comment count (already in the response —
-      // zero extra egress). A NEUTRAL volume signal only: set solely when the
-      // search item carries a finite count >= 0; a failed/absent value leaves it
-      // undefined (never a fabricated 0), so a render's chip falls through cleanly.
-      commentsAtDiscovery: typeof a.issue.comments === "number" && Number.isFinite(a.issue.comments) && a.issue.comments >= 0 ? a.issue.comments : void 0
-    },
-    // Provenance: repo-first discovered items only (label-first omits the field).
-    ...a.discovered ? { discovered: true } : {},
-    raw: a.issue
-  };
-}
-async function aggregateContributions(opts = {}) {
-  const paceEnabled = opts.paceEnabled ?? !opts.fetchImpl;
-  const client = makeClient(opts.fetchImpl ?? fetchWithTimeout, {
-    paceEnabled,
-    gapMs: readReqGapMs(),
-    budgetMs: readBuildBudgetMs(),
-    sleep: opts.sleepImpl ?? realSleep,
-    now: opts.nowImpl ?? Date.now,
-    // Bound the unguarded probe on the REAL network only; injected-fetch tests get
-    // null so the probe stays deterministic (and its shared spy sleeper untouched).
-    probeTimeoutMs: opts.fetchImpl ? null : PROBE_TIMEOUT_MS
-  });
-  const queries = opts.queries ?? CONTRIB_SEARCH_QUERIES;
-  const maxContribItems = readMaxContribItems();
-  const startRl = await fetchRateLimit(client);
-  const coreHealthyAtStart = (startRl?.core?.remaining ?? 0) >= 500;
-  client.setSecondaryHint(coreHealthyAtStart);
-  const issues = (await searchContribIssues(client, queries)).slice(
-    0,
-    readMaxContribIssuesScanned()
-  );
-  const repoCache = /* @__PURE__ */ new Map();
-  const contribCache = /* @__PURE__ */ new Map();
-  const prRefsCache = /* @__PURE__ */ new Map();
-  const xbuild = opts.repoMetaCache;
-  const servedFromXbuild = /* @__PURE__ */ new Set();
-  const persistedXbuild = /* @__PURE__ */ new Set();
-  const xbuildTried = /* @__PURE__ */ new Set();
-  async function primeFromXbuild(key, fullName) {
-    if (!xbuild || xbuildTried.has(key)) return;
-    xbuildTried.add(key);
-    if (repoCache.has(key) && contribCache.has(key)) return;
-    let cached2 = null;
-    try {
-      cached2 = await xbuild.get(key);
-    } catch {
-      return;
-    }
-    if (!cached2) return;
-    if (!repoCache.has(key)) {
-      const owner = fullName.split("/")[0] ?? "";
-      repoCache.set(key, {
-        full_name: fullName,
-        stargazers_count: cached2.stars,
-        archived: cached2.archived,
-        disabled: cached2.disabled,
-        fork: cached2.fork,
-        language: cached2.language,
-        description: cached2.description,
-        owner: { login: owner }
-      });
-    }
-    if (!contribCache.has(key)) {
-      contribCache.set(key, cached2.contributors);
-      servedFromXbuild.add(key);
-    }
-  }
-  async function persistRepoMeta(fullName, repo, contributors) {
-    if (!xbuild) return;
-    const key = repoKey(fullName);
-    if (servedFromXbuild.has(key) || persistedXbuild.has(key)) return;
-    if (contributors === void 0) return;
-    persistedXbuild.add(key);
-    try {
-      await xbuild.set(key, {
-        stars: repo.stargazers_count,
-        contributors,
-        language: repo.language,
-        archived: repo.archived,
-        fork: repo.fork,
-        disabled: repo.disabled,
-        description: repo.description || null
-      });
-    } catch {
-    }
-  }
-  async function repoMeta(fullName) {
-    const key = repoKey(fullName);
-    const hit = repoCache.get(key);
-    if (hit !== void 0) return hit;
-    await primeFromXbuild(key, fullName);
-    const primed = repoCache.get(key);
-    if (primed !== void 0) return primed;
-    const r = await client.json(`/repos/${fullName}`) ?? null;
-    repoCache.set(key, r);
-    return r;
-  }
-  async function repoContribCount(fullName) {
-    const key = repoKey(fullName);
-    if (contribCache.has(key)) return contribCache.get(key);
-    await primeFromXbuild(key, fullName);
-    if (contribCache.has(key)) return contribCache.get(key);
-    const n = await contributorCount(client, fullName);
-    contribCache.set(key, n);
-    return n;
-  }
-  async function repoPRRefs(fullName) {
-    const key = repoKey(fullName);
-    if (prRefsCache.has(key)) return prRefsCache.get(key) ?? null;
-    const refs = await openPRIssueRefs(client, fullName);
-    prRefsCache.set(key, refs);
-    return refs;
-  }
-  const jobs = [];
-  const seen = /* @__PURE__ */ new Set();
-  const perRepo = /* @__PURE__ */ new Map();
-  let metaNull = 0;
-  let contribUndefined = 0;
-  let prRefsNull = 0;
-  for (const issue2 of issues) {
-    if (jobs.length >= maxContribItems) break;
-    const fullName = repoFullNameFromApiUrl2(issue2.repository_url);
-    if (!fullName) continue;
-    const id = `contribute:${repoKey(fullName)}#${issue2.number}`;
-    if (seen.has(id)) continue;
-    if (isExcludedRepo(fullName)) continue;
-    if (isAssigned(issue2)) continue;
-    if ((perRepo.get(repoKey(fullName)) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) continue;
-    const title = decodeEntities(issue2.title).trim();
-    const body = issue2.body ? decodeEntities(issue2.body) : "";
-    const labels = labelNames2(issue2.labels);
-    if (looksLikeContentTask({ title, body, labels })) continue;
-    const repo = await repoMeta(fullName);
-    if (!repo) {
-      metaNull++;
-      continue;
-    }
-    const contributors = await repoContribCount(fullName);
-    if (contributors === void 0) contribUndefined++;
-    await persistRepoMeta(fullName, repo, contributors);
-    if (!passesContributionGate({
-      fullName,
-      stars: repo.stargazers_count,
-      contributors,
-      title,
-      archived: repo.archived,
-      fork: repo.fork
-    })) {
-      continue;
-    }
-    if (repo.disabled) continue;
-    const prRefs = await repoPRRefs(fullName);
-    if (prRefs === null) prRefsNull++;
-    const openPRsAtDiscovery = prRefs ? prRefs.has(issue2.number) ? 1 : 0 : void 0;
-    const tags = normalize(
-      tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
-    );
-    seen.add(id);
-    perRepo.set(repoKey(fullName), (perRepo.get(repoKey(fullName)) ?? 0) + 1);
-    jobs.push(
-      buildContributionJob({
-        id,
-        fullName,
-        repo,
-        issue: issue2,
-        title,
-        body,
-        labels,
-        tags,
-        contributors,
-        // gate guarantees a number here
-        openPRsAtDiscovery
-      })
-    );
-  }
-  const doDiscovery = opts.discoverRepos ?? (opts.trendingSlugs != null || opts.vocabTerms != null);
-  let discoveredEmitted = 0;
-  let discoveryBudgetStopped = false;
-  if (doDiscovery && jobs.length < maxContribItems) {
-    const maxRepos = Math.min(
-      Math.max(0, opts.maxDiscoveredRepos ?? MAX_DISCOVERED_REPOS),
-      MAX_DISCOVERED_REPOS
-    );
-    const vocabTerms = (opts.vocabTerms ?? DISCOVERY_VOCAB_TERMS).slice(
-      0,
-      DISCOVERY_VOCAB_TERMS.length
-    );
-    const vocabCandidates = [];
-    for (const term of vocabTerms) {
-      if (client.getStats().budgetAborted || client.getStats().secondaryAborted) {
-        discoveryBudgetStopped = true;
-        break;
-      }
-      const res = await client.json(
-        `/search/repositories?q=${encodeURIComponent(term)}&sort=updated&order=desc&per_page=${DISCOVERY_REPOS_PER_TERM}`
-      );
-      for (const r of res?.items ?? []) {
-        if (!r?.full_name) continue;
-        if (!repoCache.has(repoKey(r.full_name))) {
-          repoCache.set(repoKey(r.full_name), {
-            full_name: r.full_name,
-            stargazers_count: r.stargazers_count,
-            archived: r.archived,
-            disabled: r.disabled ?? false,
-            fork: r.fork,
-            language: r.language,
-            description: r.description || null,
-            owner: r.owner
-          });
-        }
-        vocabCandidates.push({ fullName: r.full_name, stars: r.stargazers_count ?? 0 });
-      }
-    }
-    vocabCandidates.sort((a, b) => b.stars - a.stars);
-    const candidates = [];
-    const candSeen = /* @__PURE__ */ new Set();
-    for (const slug of opts.trendingSlugs ?? []) {
-      const s = slug?.toLowerCase();
-      if (s && !candSeen.has(repoKey(s))) {
-        candSeen.add(repoKey(s));
-        candidates.push(s);
-      }
-    }
-    for (const { fullName } of vocabCandidates) {
-      if (!candSeen.has(repoKey(fullName))) {
-        candSeen.add(repoKey(fullName));
-        candidates.push(fullName);
-      }
-    }
-    const scanned = candidates.slice(0, maxRepos);
-    for (const fullName of scanned) {
-      if (jobs.length >= maxContribItems) break;
-      if (client.getStats().budgetAborted || client.getStats().secondaryAborted) {
-        discoveryBudgetStopped = true;
-        break;
-      }
-      if (isExcludedRepo(fullName)) continue;
-      const repo = await repoMeta(fullName);
-      if (!repo) {
-        metaNull++;
-        continue;
-      }
-      if (repo.disabled) continue;
-      const contributors = await repoContribCount(fullName);
-      if (contributors === void 0) contribUndefined++;
-      await persistRepoMeta(fullName, repo, contributors);
-      if (repo.archived || repo.fork || repo.stargazers_count < MIN_STARS || contributors === void 0 || contributors < MIN_CONTRIBUTORS) {
-        continue;
-      }
-      const q = `repo:${fullName} is:issue is:open label:${DISCOVERY_ISSUE_LABELS}`;
-      const searchRes = await client.json(
-        `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE2}`
-      );
-      const repoIssues = (searchRes?.items ?? []).filter((it) => !it.pull_request);
-      let perRepoDiscovered = 0;
-      for (const issue2 of repoIssues) {
-        if (jobs.length >= maxContribItems) break;
-        if (perRepoDiscovered >= MAX_ISSUES_PER_DISCOVERED_REPO) break;
-        if ((perRepo.get(repoKey(fullName)) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) break;
-        const id = `contribute:${repoKey(fullName)}#${issue2.number}`;
-        if (seen.has(id)) continue;
-        if (isAssigned(issue2)) continue;
-        const title = decodeEntities(issue2.title).trim();
-        if (!passesContributionGate({
-          fullName,
-          stars: repo.stargazers_count,
-          contributors,
-          title,
-          archived: repo.archived,
-          fork: repo.fork
-        })) {
-          continue;
-        }
-        const body = issue2.body ? decodeEntities(issue2.body) : "";
-        const labels = labelNames2(issue2.labels);
-        if (looksLikeContentTask({ title, body, labels })) continue;
-        const prRefs = await repoPRRefs(fullName);
-        if (prRefs === null) prRefsNull++;
-        const openPRsAtDiscovery = prRefs ? prRefs.has(issue2.number) ? 1 : 0 : void 0;
-        const tags = normalize(
-          tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
-        );
-        seen.add(id);
-        perRepo.set(repoKey(fullName), (perRepo.get(repoKey(fullName)) ?? 0) + 1);
-        perRepoDiscovered++;
-        discoveredEmitted++;
-        jobs.push(
-          buildContributionJob({
-            id,
-            fullName,
-            repo,
-            issue: issue2,
-            title,
-            body,
-            labels,
-            tags,
-            contributors,
-            openPRsAtDiscovery,
-            discovered: true
-          })
-        );
-      }
-    }
-  }
-  if (!opts.fetchImpl) {
-    const rl = await fetchRateLimit(client);
-    const core = rl?.core ? `${rl.core.remaining}/${rl.core.limit}` : "n/a";
-    const search = rl?.search ? `${rl.search.remaining}/${rl.search.limit}` : "n/a";
-    const noToken = !(process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"]);
-    const { pacedMs, secondaryAborted, budgetAborted, elapsedMs, gqlCost, gqlRemaining } = client.getStats();
-    console.info(
-      `[contribute] build metrics \u2014 scanned=${issues.length} reposDistinct=${repoCache.size} emitted=${jobs.length} discovered=${discoveredEmitted} metaNull=${metaNull} contribUndefined=${contribUndefined} prRefsNull=${prRefsNull} paced=${pacedMs} secondaryAborted=${secondaryAborted} budgetAborted=${budgetAborted} core=${core} search=${search} gqlCost=${gqlCost} gqlRemaining=${gqlRemaining ?? "n/a"} elapsed=${elapsedMs}` + (noToken ? " (NO TOKEN \u2192 60/hr)" : "")
-    );
-    if (discoveryBudgetStopped) {
-      console.warn(
-        `[contribute] repo-first discovery stopped early \u2014 build budget exhausted (emitted ${discoveredEmitted} discovered before the cap)`
-      );
-    }
-  }
-  return jobs;
-}
-var GITHUB_API2, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, DEFAULT_SEARCH_MAX_PAGES, MIN_SEARCH_MAX_PAGES, MAX_SEARCH_MAX_PAGES, DEFAULT_MAX_CONTRIB_ITEMS, MIN_MAX_CONTRIB_ITEMS, MAX_MAX_CONTRIB_ITEMS, DEFAULT_MAX_CONTRIB_ISSUES_SCANNED, MIN_MAX_CONTRIB_ISSUES_SCANNED, MAX_MAX_CONTRIB_ISSUES_SCANNED, MAX_DISCOVERED_REPOS, MAX_ISSUES_PER_DISCOVERED_REPO, DISCOVERY_REPOS_PER_TERM, DISCOVERY_VOCAB_TERMS, DISCOVERY_ISSUE_LABELS, repoKey;
-var init_contributions = __esm({
-  "../../packages/core/src/feeds/contributions.ts"() {
-    "use strict";
-    init_vocabulary();
-    init_entities();
-    init_bounty_gate();
-    init_contribution_gate();
-    init_contribution_classify();
-    init_github_bounties();
-    init_github();
-    init_http();
-    init_gh_governor();
-    GITHUB_API2 = "https://api.github.com";
-    CONTRIB_LABEL_QUERIES = [
-      'label:"good first issue" type:issue state:open',
-      'label:"good-first-issue" type:issue state:open',
-      'label:"help wanted" type:issue state:open',
-      'label:"help-wanted" type:issue state:open',
-      'label:"up-for-grabs" type:issue state:open',
-      // supply-expansion D: two more first-contribution label families widen the
-      // global newest-first slice WITHOUT relaxing the credential gate.
-      'label:"beginner-friendly" type:issue state:open',
-      'label:"first-timers-only" type:issue state:open'
-    ];
-    CONTRIB_LANGUAGE_QUERIES = [
-      ...["rust", "go", "python", "c++", "ruby"].map(
-        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
-      ),
-      ...["rust", "go"].map(
-        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
-      ),
-      // supply-expansion D: cover the high-volume web/enterprise ecosystems the
-      // original set omitted. TS/JS were previously left out of "good first issue"
-      // (the global slice over-represented them) but a LANGUAGE-scoped page surfaces
-      // DIFFERENT repos than the global newest-first slice, so re-including them widens
-      // distinct-repo coverage rather than duplicating it.
-      ...["typescript", "javascript", "java", "python"].map(
-        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
-      ),
-      ...["typescript", "javascript", "c#", "php"].map(
-        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
-      )
-    ];
-    CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
-    SEARCH_PER_PAGE2 = 100;
-    DEFAULT_SEARCH_MAX_PAGES = 1;
-    MIN_SEARCH_MAX_PAGES = 1;
-    MAX_SEARCH_MAX_PAGES = 5;
-    DEFAULT_MAX_CONTRIB_ITEMS = 400;
-    MIN_MAX_CONTRIB_ITEMS = 50;
-    MAX_MAX_CONTRIB_ITEMS = 1e3;
-    DEFAULT_MAX_CONTRIB_ISSUES_SCANNED = 1500;
-    MIN_MAX_CONTRIB_ISSUES_SCANNED = 100;
-    MAX_MAX_CONTRIB_ISSUES_SCANNED = 5e3;
-    MAX_DISCOVERED_REPOS = 15;
-    MAX_ISSUES_PER_DISCOVERED_REPO = 3;
-    DISCOVERY_REPOS_PER_TERM = 20;
-    DISCOVERY_VOCAB_TERMS = ["rust", "go", "python", "typescript"];
-    DISCOVERY_ISSUE_LABELS = '"good first issue","help wanted","good-first-issue","help-wanted"';
-    repoKey = (name) => name.toLowerCase();
   }
 });
 
@@ -5724,8 +5982,8 @@ async function getWithTimeout(governor, url, token, timeoutMs) {
   try {
     const res = await Promise.race([
       getP,
-      new Promise((resolve2) => {
-        timer = setTimeout(() => resolve2(null), timeoutMs);
+      new Promise((resolve3) => {
+        timer = setTimeout(() => resolve3(null), timeoutMs);
       })
     ]);
     if (res === null) controller.abort();
@@ -7522,7 +7780,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   });
   const { prehash } = eddsaOpts;
   const { BASE, Fp: Fp2, Fn: Fn2 } = Point;
-  const randomBytes7 = eddsaOpts.randomBytes || randomBytes2;
+  const randomBytes8 = eddsaOpts.randomBytes || randomBytes2;
   const adjustScalarBytes2 = eddsaOpts.adjustScalarBytes || ((bytes) => bytes);
   const domain = eddsaOpts.domain || ((data, ctx, phflag) => {
     _abool2(phflag, "phflag");
@@ -7604,7 +7862,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
     signature: 2 * _size2,
     seed: _size2
   };
-  function randomSecretKey(seed = randomBytes7(lengths.seed)) {
+  function randomSecretKey(seed = randomBytes8(lengths.seed)) {
     return _abytes2(seed, lengths.seed, "seed");
   }
   function keygen(seed) {
@@ -9607,6 +9865,936 @@ var init_legible_trajectory = __esm({
   }
 });
 
+// ../../packages/core/src/credential/sources.ts
+function classifyOne(src) {
+  if (src.isSelf) return "C";
+  if (src.isBot) return "B";
+  if (src.association !== void 0 && HUMAN_SET.has(src.association.toUpperCase())) return "A";
+  return "B";
+}
+function classifyReviewSources(input) {
+  if (input.reviewSources === void 0) return void 0;
+  return input.reviewSources.map((src) => {
+    const cls = classifyOne(src);
+    return { class: cls, association: src.association, label: CLASS_LABEL[cls] };
+  });
+}
+var SOURCE_CLASS, HUMAN_SET, CLASS_LABEL;
+var init_sources = __esm({
+  "../../packages/core/src/credential/sources.ts"() {
+    "use strict";
+    SOURCE_CLASS = {
+      /** `author_association` values that make a (non-bot, non-self) reviewer a
+       *  class-A independent human. Independence itself (is this maintainer affiliated
+       *  with the contributor?) is refined by the repo-provenance/independence layer
+       *  (TERM-46); this establishes the HUMAN class. */
+      HUMAN_ASSOCIATIONS: ["OWNER", "MEMBER", "COLLABORATOR"]
+    };
+    HUMAN_SET = new Set(
+      SOURCE_CLASS.HUMAN_ASSOCIATIONS.map((a) => a.toUpperCase())
+    );
+    CLASS_LABEL = {
+      A: "independent-human",
+      B: "automation",
+      C: "self-review"
+    };
+  }
+});
+
+// ../../packages/core/src/credential/independence.ts
+function repoOwner(repo) {
+  const owner = repo.split("/")[0];
+  return owner ? owner.toLowerCase() : null;
+}
+function computeRepoProvenance(facts) {
+  const reasons = [];
+  const owner = repoOwner(facts.repo);
+  const selfOwned = owner != null && facts.authorLogin != null && owner === facts.authorLogin.toLowerCase();
+  let ageDays2 = null;
+  if (facts.repoCreatedAt) {
+    const created = Date.parse(facts.repoCreatedAt);
+    const seen = Date.parse(facts.fetchedAt);
+    if (!Number.isNaN(created) && !Number.isNaN(seen)) ageDays2 = (seen - created) / MS_PER_DAY;
+  }
+  const dayOld = ageDays2 != null && ageDays2 < PROVENANCE.MIN_AGE_DAYS;
+  if (dayOld) reasons.push(`repo is ${Math.max(0, Math.floor(ageDays2))}d old (< ${PROVENANCE.MIN_AGE_DAYS}d)`);
+  if (selfOwned) reasons.push("repo is owned by the contributor (self-owned)");
+  if (facts.repoPrivate === true) reasons.push("repo is private (not a public OSS signal)");
+  if (selfOwned || dayOld || facts.repoPrivate === true) {
+    return { tier: "flagged", reasons };
+  }
+  if (facts.repoFork) reasons.push("repo is a fork");
+  const stars = facts.repoStars ?? 0;
+  const contributors = facts.repoContributors ?? 0;
+  const strongStars = facts.repoStars != null && stars >= PROVENANCE.STAR_FLOOR;
+  const strongContribs = facts.repoContributors != null && contributors >= PROVENANCE.CONTRIB_FLOOR;
+  const knownPublic = facts.repoPrivate === false;
+  const ageEstablished = ageDays2 != null && ageDays2 >= PROVENANCE.MIN_AGE_DAYS;
+  if (strongStars && strongContribs && knownPublic && ageEstablished) {
+    reasons.push(`${stars}\u2605, ${contributors}+ contributors, public, ${Math.floor(ageDays2)}d old`);
+    return { tier: "established", reasons };
+  }
+  reasons.push("external signals unknown or below floor");
+  return { tier: "weak", reasons };
+}
+function computeEventIndependence(facts) {
+  if (!facts.merged) return void 0;
+  if (facts.mergedById == null || facts.authorId == null) {
+    return {
+      merger: {
+        party: "merger",
+        independence: "unverified",
+        reasons: ["merger or author identity unresolved"]
+      }
+    };
+  }
+  if (facts.mergedById === facts.authorId) {
+    return {
+      merger: {
+        party: "merger",
+        independence: "affiliated",
+        reasons: ["self-merged (merger id === author id)"]
+      }
+    };
+  }
+  return {
+    merger: {
+      party: "merger",
+      independence: "independent",
+      reasons: ["distinct merger id (identity check only; deeper affiliation not yet verified)"]
+    }
+  };
+}
+function eventCountsAtFullWeight(event, provenance) {
+  return event.independence === "independent" && provenance.tier === "established";
+}
+function computeReviewerIndependence(signals) {
+  if (signals.isSelf) {
+    return { party: "reviewer", independence: "affiliated", reasons: ["self-review (reviewer is the contributor)"] };
+  }
+  if (signals.isBot) {
+    return { party: "reviewer", independence: "unverified", reasons: ["automated reviewer \u2014 not an independent human party"] };
+  }
+  if (signals.sharedOrgWithAuthor === true) {
+    return { party: "reviewer", independence: "affiliated", reasons: ["shares a public org with the author"] };
+  }
+  if (signals.sharedOrgWithAuthor === false) {
+    return {
+      party: "reviewer",
+      independence: "independent",
+      reasons: ["no shared public org with the author (public-org check only; external-history check deferred)"]
+    };
+  }
+  return { party: "reviewer", independence: "unverified", reasons: ["affiliation signal absent (read failed/skipped)"] };
+}
+var PROVENANCE, MS_PER_DAY;
+var init_independence = __esm({
+  "../../packages/core/src/credential/independence.ts"() {
+    "use strict";
+    PROVENANCE = {
+      /** A repo younger than this (days) is "day-old" → flagged (can't have earned
+       *  external trust yet). */
+      MIN_AGE_DAYS: 30,
+      /** Stars floor for an `established` external signal. */
+      STAR_FLOOR: 50,
+      /** Distinct-contributor floor for an `established` external signal (matches the
+       *  ≥5 external-contributor maintainer gate, plan 062). */
+      CONTRIB_FLOOR: 5
+    };
+    MS_PER_DAY = 864e5;
+  }
+});
+
+// ../../packages/core/src/credential/redaction.ts
+function redactThirdParty(party, consent) {
+  const c = consent ?? DENY_CONSENT;
+  const showIdentity = c.identityOptIn === true && c.erased === false;
+  return {
+    label: showIdentity ? party.login : ANON_MAINTAINER_LABEL,
+    identity: showIdentity ? party.login : null
+  };
+}
+function renderMaintainerQuote(quote, consent) {
+  const c = consent ?? DENY_CONSENT;
+  if (quote && c.quoteOptIn === true && c.erased === false) {
+    return { text: quote, kind: "verbatim" };
+  }
+  return { text: "", kind: "omitted" };
+}
+var ANON_MAINTAINER_LABEL, DENY_CONSENT;
+var init_redaction = __esm({
+  "../../packages/core/src/credential/redaction.ts"() {
+    "use strict";
+    ANON_MAINTAINER_LABEL = "a repo maintainer";
+    DENY_CONSENT = {
+      identityOptIn: false,
+      quoteOptIn: false,
+      erased: false
+    };
+  }
+});
+
+// ../../packages/core/src/credential/decisions.ts
+function classifyDecisionEvidence(facts) {
+  const d = facts.defense;
+  const defenseQualifies = d != null && d.substantiveCorrectness === true && d.maintainerVerified === true && d.reviewerIndependence === "independent" && facts.provenance.tier === "established";
+  if (defenseQualifies) return "defended_finding";
+  const frictionless = facts.defense == null && facts.humanChangeRequests === 0 && facts.merger?.independence === "independent" && facts.provenance.tier === "established";
+  if (frictionless) return "frictionless_merge";
+  const engaged = facts.humanChangeRequests != null && facts.humanChangeRequests > 0 || d != null;
+  return engaged ? "responsive" : "none";
+}
+var DECISION_LABEL;
+var init_decisions = __esm({
+  "../../packages/core/src/credential/decisions.ts"() {
+    "use strict";
+    DECISION_LABEL = {
+      frictionless_merge: "clean execution \u2014 merged with zero human change-requests",
+      defended_finding: "defended finding \u2014 verified by the maintainer",
+      responsive: "responsive to review",
+      none: "no decision evidence"
+    };
+  }
+});
+
+// ../../packages/core/src/credential/metrics-hygiene.ts
+function knownCount(v) {
+  return v != null && Number.isFinite(v) && v >= 0;
+}
+function hoursBetween(startIso, endIso) {
+  if (!startIso || !endIso) return null;
+  const start = Date.parse(startIso);
+  const end = Date.parse(endIso);
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return null;
+  return (end - start) / MS_PER_HOUR;
+}
+function deriveHygienicMetrics(facts) {
+  const reasons = [];
+  const sized = knownCount(facts.additions) && knownCount(facts.deletions);
+  const totalLines = sized ? facts.additions + facts.deletions : null;
+  let sizeClass;
+  if (totalLines != null) {
+    sizeClass = totalLines >= METRICS.LARGE_DIFF_LINES ? "large" : totalLines < METRICS.SMALL_DIFF_LINES ? "small" : "medium";
+  }
+  const deletionHeavy = sized ? facts.deletions >= METRICS.DELETION_HEAVY_FLOOR && facts.deletions > facts.additions * 2 : void 0;
+  const hours = hoursBetween(facts.prCreatedAt, facts.mergedAt);
+  const median2 = facts.repoMedianHoursToMerge != null && Number.isFinite(facts.repoMedianHoursToMerge) ? facts.repoMedianHoursToMerge : null;
+  let timeToMerge;
+  if (hours != null && median2 != null && median2 > 0) {
+    timeToMerge = { hours, repoMedianHours: median2, ratio: hours / median2 };
+  }
+  const fastAbsolute = hours != null && hours <= METRICS.FAST_MERGE_HOURS;
+  const fastVsBaseline = timeToMerge != null && timeToMerge.ratio <= METRICS.FAST_VS_MEDIAN_RATIO;
+  const riskySurface = sizeClass === "large" || facts.securitySensitive === true;
+  const rubberStampRisk = (fastAbsolute || fastVsBaseline) && riskySurface;
+  if (rubberStampRisk) {
+    if (fastAbsolute) reasons.push(`merged in ${hours.toFixed(2)}h (\u2264 ${METRICS.FAST_MERGE_HOURS}h)`);
+    if (fastVsBaseline) reasons.push(`merged at ${timeToMerge.ratio.toFixed(2)}\xD7 the repo median`);
+    if (sizeClass === "large") reasons.push("large diff");
+    if (facts.securitySensitive === true) reasons.push("security-sensitive paths");
+  }
+  return {
+    ...timeToMerge ? { timeToMerge } : {},
+    ...sizeClass ? { sizeClass } : {},
+    ...deletionHeavy !== void 0 ? { deletionHeavy } : {},
+    rubberStampRisk,
+    rubberStampReasons: reasons
+  };
+}
+var METRICS, MS_PER_HOUR;
+var init_metrics_hygiene = __esm({
+  "../../packages/core/src/credential/metrics-hygiene.ts"() {
+    "use strict";
+    METRICS = {
+      /** Total changed lines at/above which a diff is `large`. */
+      LARGE_DIFF_LINES: 400,
+      /** Total changed lines below which a diff is `small`. */
+      SMALL_DIFF_LINES: 50,
+      /** A merge at/under this many hours is "fast" in absolute terms. */
+      FAST_MERGE_HOURS: 1,
+      /** A merge at/under this fraction of the repo median is "fast" vs baseline. */
+      FAST_VS_MEDIAN_RATIO: 0.1,
+      /** Deletions must be at least this many lines AND exceed additions×2 to count as
+       *  deletion-heavy (avoids flagging trivial cleanups). */
+      DELETION_HEAVY_FLOOR: 50
+    };
+    MS_PER_HOUR = 36e5;
+  }
+});
+
+// ../../packages/core/src/credential/dossier.ts
+function toMs(iso) {
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? null : t;
+}
+function buildTimeline(facts, sourceClasses) {
+  const { prCreatedAt, commits } = facts;
+  const sources = facts.reviewSources;
+  if (prCreatedAt == null) return {};
+  if (commits == null) return {};
+  if (sources == null || sourceClasses == null) return {};
+  if (!sources.every((s) => s.submittedAt != null)) return {};
+  if (!commits.every((c) => c.committedAt != null)) return {};
+  const events = [];
+  const openedMs = toMs(prCreatedAt);
+  if (openedMs == null) return {};
+  events.push({ at: openedMs, rank: TIMELINE_TIE_RANK.opened, isReview: false, isSelf: false, node: { kind: "opened", at: prCreatedAt } });
+  for (const c of commits) {
+    const cm = toMs(c.committedAt);
+    if (cm == null) return {};
+    events.push({ at: cm, rank: TIMELINE_TIE_RANK.commit, isReview: false, isSelf: false, node: { kind: "commit", at: c.committedAt, shortSha: c.sha.slice(0, 8) } });
+  }
+  for (let i = 0; i < sources.length; i++) {
+    const s = sources[i];
+    const rm = toMs(s.submittedAt);
+    if (rm == null) return {};
+    events.push({
+      at: rm,
+      rank: TIMELINE_TIE_RANK.review,
+      isReview: true,
+      isSelf: s.isSelf === true,
+      node: {
+        kind: "review",
+        at: s.submittedAt,
+        class: sourceClasses[i]?.class ?? "B",
+        ...s.pseudonym ? { pseudonym: s.pseudonym } : {},
+        ...s.state ? { state: s.state } : {}
+      }
+    });
+  }
+  if (facts.merged && facts.mergedAt) {
+    const mm = toMs(facts.mergedAt);
+    if (mm != null) events.push({ at: mm, rank: TIMELINE_TIE_RANK.merged, isReview: false, isSelf: false, node: { kind: "merged", at: facts.mergedAt } });
+  }
+  events.sort((a, b) => a.at - b.at || a.rank - b.rank);
+  let reviewRounds = 0;
+  let runHasNonSelf = false;
+  for (const e of events) {
+    if (e.node.kind === "commit") {
+      if (runHasNonSelf) reviewRounds++;
+      runHasNonSelf = false;
+    } else if (e.isReview && !e.isSelf) {
+      runHasNonSelf = true;
+    }
+  }
+  if (runHasNonSelf) reviewRounds++;
+  return { timeline: events.map((e) => e.node), reviewRounds };
+}
+function buildDossierEnvelope(facts, defense) {
+  const provenance = computeRepoProvenance(facts);
+  const event = computeEventIndependence(facts);
+  const merger = event?.merger;
+  const sourceClasses = classifyReviewSources({ reviewSources: facts.reviewSources });
+  let humanChangeRequests;
+  const sources = facts.reviewSources;
+  if (sources != null && sources.every((s) => s.state != null)) {
+    humanChangeRequests = sources.filter(
+      (s) => !s.isBot && !s.isSelf && s.state === "CHANGES_REQUESTED"
+    ).length;
+  }
+  const reviewThread = sources != null && sourceClasses != null ? sources.map((s, i) => ({
+    ...s.pseudonym ? { pseudonym: s.pseudonym } : {},
+    class: sourceClasses[i]?.class ?? "B",
+    ...s.state ? { state: s.state } : {},
+    submittedAt: s.submittedAt ?? null,
+    independence: computeReviewerIndependence(s).independence
+  })) : void 0;
+  const decisionEvidence = classifyDecisionEvidence({
+    humanChangeRequests,
+    merger,
+    provenance,
+    defense
+  });
+  const hygienicMetrics = deriveHygienicMetrics({
+    prCreatedAt: facts.prCreatedAt,
+    mergedAt: facts.mergedAt,
+    additions: facts.additions,
+    deletions: facts.deletions
+    // Repo-median baseline is deferred (governor-budget review, plan risk #5) —
+    // absent baseline ⇒ time-to-merge honestly omitted by the deriver.
+  });
+  const prStats = knownCount(facts.additions) && knownCount(facts.deletions) && knownCount(facts.changedFiles) ? { additions: facts.additions, deletions: facts.deletions, changedFiles: facts.changedFiles } : void 0;
+  const linkage = facts.closesIssues.length > 0 && facts.linkageSource !== "none" ? { closesIssues: [...facts.closesIssues], linkageSource: facts.linkageSource } : void 0;
+  const { timeline, reviewRounds } = buildTimeline(facts, sourceClasses);
+  const threadStats = facts.reviewThreadStats ? {
+    total: facts.reviewThreadStats.total,
+    resolved: facts.reviewThreadStats.resolved,
+    unresolved: facts.reviewThreadStats.unresolved
+  } : void 0;
+  return {
+    v: "dossier/1",
+    provenance,
+    ...merger ? { merger } : {},
+    fullWeight: merger != null && eventCountsAtFullWeight(merger, provenance),
+    ...sourceClasses ? { sourceClasses } : {},
+    ...reviewThread ? { reviewThread } : {},
+    ...humanChangeRequests !== void 0 ? { humanChangeRequests } : {},
+    decisionEvidence,
+    hygienicMetrics,
+    ...prStats ? { prStats } : {},
+    ...linkage ? linkage : {},
+    ...timeline ? { timeline } : {},
+    ...reviewRounds !== void 0 ? { reviewRounds } : {},
+    ...threadStats ? { threadStats } : {}
+  };
+}
+var TIMELINE_TIE_RANK;
+var init_dossier = __esm({
+  "../../packages/core/src/credential/dossier.ts"() {
+    "use strict";
+    init_sources();
+    init_independence();
+    init_decisions();
+    init_metrics_hygiene();
+    TIMELINE_TIE_RANK = { opened: 0, commit: 1, review: 2, merged: 3 };
+  }
+});
+
+// ../../packages/core/src/credential/synthesis.ts
+function parsePath(path2) {
+  if (path2.length === 0) return null;
+  const segments = [];
+  for (const part of path2.split(".")) {
+    const m = part.match(/^([^[\]]*)((?:\[\d+\])*)$/);
+    if (!m) return null;
+    const base = m[1];
+    if (base.length > 0) {
+      if (FORBIDDEN_SEGMENTS.has(base)) return null;
+      segments.push(base);
+    } else if (m[2].length === 0) {
+      return null;
+    }
+    const idx = m[2];
+    if (idx) {
+      for (const g of idx.matchAll(/\[(\d+)\]/g)) segments.push(g[1]);
+    }
+  }
+  return segments.length > 0 ? segments : null;
+}
+function resolveCitation(source, cite) {
+  if (typeof cite !== "string" || !cite.startsWith(CITE_PREFIX)) {
+    return { cite: String(cite), path: "", resolved: false };
+  }
+  const path2 = cite.slice(CITE_PREFIX.length);
+  const segments = parsePath(path2);
+  if (!segments) return { cite, path: path2, resolved: false };
+  let cur = source;
+  for (const seg of segments) {
+    if (cur == null || typeof cur !== "object") return { cite, path: path2, resolved: false };
+    if (Array.isArray(cur)) {
+      const i = Number(seg);
+      if (!Number.isInteger(i) || i < 0 || i >= cur.length) return { cite, path: path2, resolved: false };
+      cur = cur[i];
+    } else {
+      if (!Object.prototype.hasOwnProperty.call(cur, seg)) return { cite, path: path2, resolved: false };
+      cur = cur[seg];
+    }
+  }
+  if (cur === void 0) return { cite, path: path2, resolved: false };
+  return { cite, path: path2, resolved: true, value: cur };
+}
+function resolveCitations(source, cites) {
+  return cites.map((c) => resolveCitation(source, c));
+}
+function citeSourceClass(source, cite) {
+  if (typeof cite !== "string") return null;
+  const m = cite.match(/^env:(sourceClasses|reviewThread)\[(\d+)\]/);
+  if (!m) return null;
+  const r = resolveCitation(source, `${CITE_PREFIX}${m[1]}[${m[2]}].class`);
+  const v = r.resolved ? r.value : void 0;
+  return v === "A" || v === "B" || v === "C" ? v : null;
+}
+function citesConverge(source, cites) {
+  if (!Array.isArray(cites)) return false;
+  const classes = /* @__PURE__ */ new Set();
+  for (const c of cites) {
+    const cls = citeSourceClass(source, c);
+    if (cls) classes.add(cls);
+  }
+  return classes.size >= 2;
+}
+function claimFullyResolves(source, claim) {
+  if (claim.cites.length === 0) return false;
+  return claim.cites.every((c) => resolveCitation(source, c).resolved);
+}
+function citablePaths(source, prefix = "", depth = 0) {
+  if (depth > 6 || source == null || typeof source !== "object") return [];
+  const out = [];
+  const push = (p, v) => {
+    out.push(`${CITE_PREFIX}${p}`);
+    if (v != null && typeof v === "object") out.push(...citablePaths(v, p, depth + 1));
+  };
+  if (Array.isArray(source)) {
+    source.forEach((v, i) => push(prefix ? `${prefix}[${i}]` : `[${i}]`, v));
+  } else {
+    for (const [k, v] of Object.entries(source)) {
+      if (v === void 0) continue;
+      push(prefix ? `${prefix}.${k}` : k, v);
+    }
+  }
+  return out;
+}
+function projectForSynthesis(env) {
+  if (env == null || typeof env !== "object") return null;
+  const tier = enumOf(env.provenance?.tier, TIER_SET);
+  const decisionEvidence = enumOf(env.decisionEvidence, DECISION_SET);
+  const rubberStampRisk = typeof env.hygienicMetrics?.rubberStampRisk === "boolean" ? env.hygienicMetrics.rubberStampRisk : void 0;
+  if (tier === void 0 || typeof env.fullWeight !== "boolean" || decisionEvidence === void 0 || rubberStampRisk === void 0) {
+    return null;
+  }
+  const src = {
+    provenance: { tier },
+    fullWeight: env.fullWeight,
+    decisionEvidence,
+    hygienicMetrics: { rubberStampRisk }
+  };
+  const hm = env.hygienicMetrics;
+  const sizeClass = enumOf(hm.sizeClass, SIZE_CLASS_SET);
+  if (sizeClass !== void 0) src.hygienicMetrics.sizeClass = sizeClass;
+  if (typeof hm.deletionHeavy === "boolean") src.hygienicMetrics.deletionHeavy = hm.deletionHeavy;
+  if (hm.timeToMerge) {
+    const hours = boundedNum(hm.timeToMerge.hours);
+    const repoMedianHours = boundedNum(hm.timeToMerge.repoMedianHours);
+    const ratio = boundedNum(hm.timeToMerge.ratio);
+    if (hours !== void 0 && repoMedianHours !== void 0 && ratio !== void 0) {
+      src.hygienicMetrics.timeToMerge = { hours, repoMedianHours, ratio };
+    }
+  }
+  if (env.merger) {
+    const party = enumOf(env.merger.party, PARTY_SET);
+    const independence = enumOf(env.merger.independence, INDEPENDENCE_SET);
+    if (party !== void 0 && independence !== void 0) src.merger = { party, independence };
+  }
+  if (Array.isArray(env.sourceClasses)) {
+    const out = [];
+    for (const s of env.sourceClasses) {
+      const cls = enumOf(s?.class, /* @__PURE__ */ new Set(["A", "B", "C"]));
+      const label = enumOf(s?.label, LABEL_SET);
+      if (cls === void 0 || label === void 0) continue;
+      const entry = { class: cls, label };
+      const association = enumOf(s.association, ASSOCIATION_SET);
+      if (association !== void 0) entry.association = association;
+      out.push(entry);
+    }
+    if (out.length > 0) src.sourceClasses = out;
+  }
+  if (Array.isArray(env.reviewThread)) {
+    const out = [];
+    for (const t of env.reviewThread) {
+      const cls = enumOf(t?.class, /* @__PURE__ */ new Set(["A", "B", "C"]));
+      const independence = enumOf(t?.independence, INDEPENDENCE_SET);
+      if (cls === void 0 || independence === void 0) continue;
+      const entry = { class: cls, independence };
+      const pseudonym = validPseudonym(t.pseudonym);
+      if (pseudonym !== void 0) entry.pseudonym = pseudonym;
+      const state = enumOf(t.state, REVIEW_STATE_SET);
+      if (state !== void 0) entry.state = state;
+      const submittedAt = validTs(t.submittedAt);
+      if (submittedAt !== void 0) entry.submittedAt = submittedAt;
+      out.push(entry);
+    }
+    if (out.length > 0) src.reviewThread = out;
+  }
+  const hcr = boundedCount(env.humanChangeRequests);
+  if (hcr !== void 0) src.humanChangeRequests = hcr;
+  if (env.prStats) {
+    const additions = boundedCount(env.prStats.additions);
+    const deletions = boundedCount(env.prStats.deletions);
+    const changedFiles = boundedCount(env.prStats.changedFiles);
+    if (additions !== void 0 && deletions !== void 0 && changedFiles !== void 0) {
+      src.prStats = { additions, deletions, changedFiles };
+    }
+  }
+  if (Array.isArray(env.closesIssues)) {
+    const nums = env.closesIssues.filter((n) => boundedCount(n) !== void 0);
+    const linkageSource = enumOf(env.linkageSource, LINKAGE_SET);
+    if (nums.length > 0 && nums.length === env.closesIssues.length && linkageSource !== void 0) {
+      src.closesIssues = nums;
+      src.linkageSource = linkageSource;
+    }
+  }
+  if (Array.isArray(env.timeline)) {
+    const out = [];
+    let ok = true;
+    for (const node of env.timeline) {
+      const kind = enumOf(node?.kind, /* @__PURE__ */ new Set(["opened", "commit", "review", "merged"]));
+      const at = validTs(node?.at);
+      if (kind === void 0 || at === void 0) {
+        ok = false;
+        break;
+      }
+      const n = { kind, at };
+      if (kind === "commit") {
+        const shortSha = typeof node.shortSha === "string" && SHORT_SHA_RE.test(node.shortSha) ? node.shortSha : void 0;
+        if (shortSha === void 0) {
+          ok = false;
+          break;
+        }
+        n.shortSha = shortSha;
+      } else if (kind === "review") {
+        const cls = enumOf(node.class, /* @__PURE__ */ new Set(["A", "B", "C"]));
+        if (cls === void 0) {
+          ok = false;
+          break;
+        }
+        n.class = cls;
+        const pseudonym = validPseudonym(node.pseudonym);
+        if (pseudonym !== void 0) n.pseudonym = pseudonym;
+        const state = enumOf(node.state, REVIEW_STATE_SET);
+        if (state !== void 0) n.state = state;
+      }
+      out.push(n);
+    }
+    if (ok && out.length > 0) src.timeline = out;
+  }
+  const reviewRounds = boundedCount(env.reviewRounds);
+  if (reviewRounds !== void 0) src.reviewRounds = reviewRounds;
+  if (env.threadStats) {
+    const total = boundedCount(env.threadStats.total);
+    const resolved = boundedCount(env.threadStats.resolved);
+    const unresolved = boundedCount(env.threadStats.unresolved);
+    if (total !== void 0 && resolved !== void 0 && unresolved !== void 0) {
+      src.threadStats = { total, resolved, unresolved };
+    }
+  }
+  return src;
+}
+function buildRollupSource(baseRepo, inputs) {
+  let fullWeightCount = 0;
+  let totalAdditions = 0;
+  let totalDeletions = 0;
+  let totalChangedFiles = 0;
+  let reviewRoundsTotal = 0;
+  let independentReviewCount = 0;
+  let defendedFindingCount = 0;
+  let issueLinkedCount = 0;
+  let bestTier = "weak";
+  const tierRank = {
+    flagged: 0,
+    weak: 1,
+    established: 2
+  };
+  const gradeMap = /* @__PURE__ */ new Map();
+  for (const it of inputs) {
+    const env = it.env;
+    if (env.fullWeight) fullWeightCount += 1;
+    const tier = env.provenance?.tier;
+    if ((tier === "established" || tier === "weak" || tier === "flagged") && tierRank[tier] > tierRank[bestTier]) {
+      bestTier = tier;
+    }
+    if (env.prStats) {
+      totalAdditions += env.prStats.additions;
+      totalDeletions += env.prStats.deletions;
+      totalChangedFiles += env.prStats.changedFiles;
+    }
+    if (typeof env.reviewRounds === "number") reviewRoundsTotal += env.reviewRounds;
+    if (env.merger?.independence === "independent") independentReviewCount += 1;
+    if (env.decisionEvidence === "defended_finding") defendedFindingCount += 1;
+    if (env.closesIssues && env.closesIssues.length > 0) issueLinkedCount += 1;
+    const gradeRank = {
+      "no-signal": 0,
+      process: 1,
+      medium: 2,
+      high: 3
+    };
+    for (const c of it.sections?.competencies ?? []) {
+      const prev = gradeMap.get(c.name);
+      if (!prev || gradeRank[c.grade] > gradeRank[prev.grade]) {
+        gradeMap.set(c.name, { name: c.name, grade: c.grade });
+      }
+    }
+  }
+  return {
+    baseRepo,
+    prCount: inputs.length,
+    fullWeightCount,
+    repoTier: bestTier,
+    totalAdditions,
+    totalDeletions,
+    totalChangedFiles,
+    reviewRoundsTotal,
+    independentReviewCount,
+    defendedFindingCount,
+    issueLinkedCount,
+    competencyGrades: COMPETENCY_NAMES.map((n) => gradeMap.get(n)).filter(
+      (g) => g !== void 0
+    )
+  };
+}
+function buildPass1System(kind) {
+  const hygiene = HYGIENE_PRINCIPLES_S6.map((p, i) => `${i + 1}. ${p}`).join("\n");
+  const taxonomy = kind === "pr" ? `
+
+COMPETENCY TAXONOMY (use these names ONLY, never free text): ${COMPETENCY_NAMES.join(", ")}.
+Grades: ${COMPETENCY_GRADES.join(", ")}. Grade "process" = procedural/engagement-level signal (e.g. a review round occurred), NOT strong competence; "no-signal" = the facts carry nothing for it (omit rather than pad).` : '\n\nEmit EXACTLY one claim of kind="bullet": a single, plain, non-inflated r\xE9sum\xE9 bullet for this repository rollup. No superlatives, no unverifiable scope.';
+  const framing = kind === "pr" ? 'Produce: one kind="thesis" claim (what the contribution was), one kind="decision" claim (how it was reviewed/decided), and zero or more kind="competency" claims.' : "Produce the single r\xE9sum\xE9 bullet described below.";
+  return `${CITATION_CONTRACT}
+
+METRICS-HYGIENE PRINCIPLES (obey all \u2014 the render enforces the same rails):
+${hygiene}${taxonomy}
+
+${framing}`;
+}
+function buildPass1User(source, kind) {
+  const allowed = citablePaths(source);
+  return [
+    `KIND: ${kind}`,
+    "SOURCE (the only facts you may use):",
+    JSON.stringify(source),
+    "",
+    "ALLOWED CITES (cite ONLY from this list):",
+    allowed.join("\n")
+  ].join("\n");
+}
+function buildPass2System() {
+  return VERIFY_CONTRACT;
+}
+function buildPass2User(claims, source) {
+  const blocks = claims.map((cl) => {
+    const resolved = resolveCitations(source, cl.cites).map((r) => `  ${r.cite} = ${r.resolved ? JSON.stringify(r.value) : "<UNRESOLVED>"}`).join("\n");
+    const comp = cl.competency ? ` [competency ${cl.competency.name}=${cl.competency.grade}]` : "";
+    return `CLAIM ${cl.id} (${cl.kind})${comp}:
+  text: ${JSON.stringify(cl.text)}
+  evidence:
+${resolved}`;
+  });
+  return `Verify each claim against ITS evidence excerpts only.
+
+${blocks.join("\n\n")}`;
+}
+function extractJson(text) {
+  if (typeof text !== "string") return null;
+  const start = text.indexOf("{");
+  if (start < 0) return null;
+  let depth = 0;
+  let inStr = false;
+  let esc2 = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (esc2) esc2 = false;
+      else if (ch === "\\") esc2 = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          return JSON.parse(text.slice(start, i + 1));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+function parsePass1(raw) {
+  const obj = typeof raw === "string" ? extractJson(raw) : raw;
+  if (obj == null || typeof obj !== "object" || !Array.isArray(obj.claims)) {
+    return { claims: [] };
+  }
+  const claims = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const c of obj.claims) {
+    if (c == null || typeof c !== "object") continue;
+    const o = c;
+    const kind = o.kind;
+    if (kind !== "thesis" && kind !== "decision" && kind !== "competency" && kind !== "bullet") continue;
+    const text = typeof o.text === "string" ? o.text.trim() : "";
+    if (text.length === 0) continue;
+    const cites = Array.isArray(o.cites) ? o.cites.filter((x) => typeof x === "string") : [];
+    let id = typeof o.id === "string" && o.id.length > 0 ? o.id : `c${claims.length + 1}`;
+    while (seen.has(id)) id = `${id}_`;
+    seen.add(id);
+    const claim = { id, kind, text, cites };
+    if (kind === "competency") {
+      const comp = o.competency;
+      if (!comp || !isCompetencyName(comp.name) || !isCompetencyGrade(comp.grade)) continue;
+      claim.competency = { name: comp.name, grade: comp.grade };
+    }
+    claims.push(claim);
+  }
+  return { claims };
+}
+function parseVerdict(raw) {
+  const obj = typeof raw === "string" ? extractJson(raw) : raw;
+  const supported = obj != null && typeof obj === "object" && Array.isArray(obj.supported) ? obj.supported.filter((x) => typeof x === "string") : [];
+  return { supported };
+}
+function applyVerdict(claims, verdict) {
+  const ok = new Set(verdict.supported);
+  const kept = claims.filter((c) => ok.has(c.id));
+  return { kept, dropped: claims.length - kept.length };
+}
+function dropUnresolvableCites(source, claims) {
+  const kept = claims.filter((c) => claimFullyResolves(source, c));
+  return { kept, dropped: claims.length - kept.length };
+}
+function words(text) {
+  return text.toLowerCase().match(/[a-z0-9_]+/g) ?? [];
+}
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function textContainsLogin(text, login) {
+  if (typeof text !== "string" || typeof login !== "string") return false;
+  const f = login.trim();
+  if (f.length === 0) return false;
+  return new RegExp(`(^|[^a-z0-9-])${escapeRegex(f)}([^a-z0-9-]|$)`, "i").test(text);
+}
+function dropIdentityTokens(forbidden, claims) {
+  const logins = forbidden.filter((f) => typeof f === "string" && f.trim().length > 0).map((f) => f.trim());
+  if (logins.length === 0) return { kept: claims, dropped: 0 };
+  const patterns = logins.map((f) => new RegExp(`(^|[^a-z0-9-])${escapeRegex(f)}([^a-z0-9-]|$)`, "i"));
+  const kept = claims.filter((c) => !patterns.some((re) => re.test(c.text)));
+  return { kept, dropped: claims.length - kept.length };
+}
+function dropNgramOverlap(promptSources, claims, maxRun = 10) {
+  const windowLen = maxRun + 1;
+  const sourceGrams = /* @__PURE__ */ new Set();
+  for (const src of promptSources) {
+    const toks = words(src);
+    for (let i = 0; i + windowLen <= toks.length; i++) {
+      sourceGrams.add(toks.slice(i, i + windowLen).join(" "));
+    }
+  }
+  if (sourceGrams.size === 0) return { kept: claims, dropped: 0 };
+  const overlaps = (text) => {
+    const toks = words(text);
+    for (let i = 0; i + windowLen <= toks.length; i++) {
+      if (sourceGrams.has(toks.slice(i, i + windowLen).join(" "))) return true;
+    }
+    return false;
+  };
+  const kept = claims.filter((c) => !overlaps(c.text));
+  return { kept, dropped: claims.length - kept.length };
+}
+function assembleSections(kept) {
+  const thesis = kept.find((c) => c.kind === "thesis");
+  const decision = kept.find((c) => c.kind === "decision");
+  const gradeRank = {
+    "no-signal": 0,
+    process: 1,
+    medium: 2,
+    high: 3
+  };
+  const byName = /* @__PURE__ */ new Map();
+  for (const c of kept) {
+    if (c.kind !== "competency" || !c.competency) continue;
+    const entry = { name: c.competency.name, grade: c.competency.grade, cites: c.cites, text: c.text };
+    const prev = byName.get(entry.name);
+    if (!prev || gradeRank[entry.grade] > gradeRank[prev.grade]) byName.set(entry.name, entry);
+  }
+  const competencies = COMPETENCY_NAMES.map((n) => byName.get(n)).filter(
+    (c) => c !== void 0
+  );
+  return {
+    thesisContribution: thesis?.text ?? "",
+    decisionNarrative: decision?.text ?? "",
+    competencies
+  };
+}
+function assembleRollup(kept) {
+  const bullet = kept.find((c) => c.kind === "bullet");
+  return { resumeBullet: bullet?.text ?? "" };
+}
+var SYNTHESIS_MODEL, SYNTHESIS_VERSION, ROLLUP_VERSION, CITE_PREFIX, COMPETENCY_NAMES, COMPETENCY_NAME_SET, isCompetencyName, COMPETENCY_GRADES, COMPETENCY_GRADE_SET, isCompetencyGrade, FORBIDDEN_SEGMENTS, TIER_SET, DECISION_SET, INDEPENDENCE_SET, PARTY_SET, LABEL_SET, ASSOCIATION_SET, REVIEW_STATE_SET, SIZE_CLASS_SET, LINKAGE_SET, SYN_PSEUDONYM_RE, SHORT_SHA_RE, ISO_TS_RE, enumOf, boundedCount, boundedNum, validTs, validPseudonym, HYGIENE_PRINCIPLES_S6, CITATION_CONTRACT, VERIFY_CONTRACT;
+var init_synthesis = __esm({
+  "../../packages/core/src/credential/synthesis.ts"() {
+    "use strict";
+    SYNTHESIS_MODEL = "claude-sonnet-5";
+    SYNTHESIS_VERSION = "synthesis/1";
+    ROLLUP_VERSION = "rollup/1";
+    CITE_PREFIX = "env:";
+    COMPETENCY_NAMES = [
+      "code-authorship",
+      "iterative-refinement",
+      "independent-review",
+      "defect-resolution",
+      "repository-standing",
+      "issue-linkage"
+    ];
+    COMPETENCY_NAME_SET = new Set(COMPETENCY_NAMES);
+    isCompetencyName = (v) => typeof v === "string" && COMPETENCY_NAME_SET.has(v);
+    COMPETENCY_GRADES = [
+      "high",
+      "medium",
+      "process",
+      "no-signal"
+    ];
+    COMPETENCY_GRADE_SET = new Set(COMPETENCY_GRADES);
+    isCompetencyGrade = (v) => typeof v === "string" && COMPETENCY_GRADE_SET.has(v);
+    FORBIDDEN_SEGMENTS = /* @__PURE__ */ new Set(["__proto__", "prototype", "constructor"]);
+    TIER_SET = /* @__PURE__ */ new Set(["established", "weak", "flagged"]);
+    DECISION_SET = /* @__PURE__ */ new Set(["frictionless_merge", "defended_finding", "responsive", "none"]);
+    INDEPENDENCE_SET = /* @__PURE__ */ new Set(["independent", "affiliated", "unverified"]);
+    PARTY_SET = /* @__PURE__ */ new Set(["merger", "reviewer"]);
+    LABEL_SET = /* @__PURE__ */ new Set(["independent-human", "automation", "self-review"]);
+    ASSOCIATION_SET = /* @__PURE__ */ new Set([
+      "COLLABORATOR",
+      "CONTRIBUTOR",
+      "FIRST_TIMER",
+      "FIRST_TIME_CONTRIBUTOR",
+      "MANNEQUIN",
+      "MEMBER",
+      "NONE",
+      "OWNER"
+    ]);
+    REVIEW_STATE_SET = /* @__PURE__ */ new Set(["APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED", "PENDING"]);
+    SIZE_CLASS_SET = /* @__PURE__ */ new Set(["small", "medium", "large"]);
+    LINKAGE_SET = /* @__PURE__ */ new Set(["graphql", "body-keyword"]);
+    SYN_PSEUDONYM_RE = /^R[0-9a-f]{8}$/;
+    SHORT_SHA_RE = /^[0-9a-f]{4,40}$/i;
+    ISO_TS_RE = /^\d{4}-\d{2}-\d{2}T[0-9:.]+(?:Z|[+-]\d{2}:?\d{2})?$/;
+    enumOf = (v, set) => typeof v === "string" && set.has(v) ? v : void 0;
+    boundedCount = (v) => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 1e9 ? v : void 0;
+    boundedNum = (v) => typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= 1e9 ? v : void 0;
+    validTs = (v) => typeof v === "string" && v.length <= 40 && ISO_TS_RE.test(v) && !Number.isNaN(Date.parse(v)) ? v : void 0;
+    validPseudonym = (v) => typeof v === "string" && SYN_PSEUDONYM_RE.test(v) ? v : void 0;
+    HYGIENE_PRINCIPLES_S6 = [
+      "Time-to-merge demoted from headline. If shown, contextualized against the repo\u2019s historical average for similar-size PRs; an abnormally fast merge of a large/security diff is flagged as a risk (possible rubber-stamp), not an achievement.",
+      "Value over volume \u2014 no raw +LOC celebration; normalize by impact; treat large deletions/refactors as potentially high-value.",
+      'Explicit scope statement on every dossier: "Reflects merged public-repo code contributions. Does not capture private, non-code, or correct-but-overruled work." Names the survivorship limit up front.',
+      "reviewRounds + threadStats are ENGAGEMENT metrics, never validation. A review round and a thread-resolution tally describe how much back-and-forth a PR drew \u2014 not whether the work was vetted. They render with honest absence and the render never fuses human + automation into one review count."
+    ];
+    CITATION_CONTRACT = [
+      "You write ONE developer-contribution dossier section from STRUCTURED FACTS ONLY.",
+      "You are given a JSON `source` object of identity-free facts (pseudonym labels, enums,",
+      "counts, timestamps). You have NO other information. You must NOT invent, infer beyond,",
+      "or embellish these facts, and you must NOT name any person, account, email, or handle.",
+      "",
+      "Every claim you emit MUST carry one or more citations. A citation is the exact string",
+      "`env:<path>` pointing at the source value that proves the claim (e.g. `env:threadStats.resolved`,",
+      "`env:provenance.tier`, `env:reviewRounds`). Cite ONLY paths present in the provided",
+      "ALLOWED CITES list. A claim you cannot ground in a real path \u2014 DO NOT emit it. Prefer",
+      "fewer, fully-grounded claims over broad ones. If the facts support nothing, emit no claims.",
+      "",
+      'Return STRICT JSON: {"claims":[{"id":"c1","kind":"thesis|decision|competency|bullet",',
+      '"text":"...","cites":["env:..."],"competency":{"name":"<taxonomy>","grade":"high|medium|process|no-signal"}}]}',
+      'The `competency` field is present ONLY on kind="competency" claims. `id` is unique per claim.'
+    ].join("\n");
+    VERIFY_CONTRACT = [
+      "You are an ADVERSARIAL verifier. Your job is to DISPROVE claims, not to help.",
+      "For each claim you are given the claim text and the RESOLVED source excerpts its",
+      "citations point at (the actual values). Keep a claim ONLY if the excerpts",
+      "UNEQUIVOCALLY support every assertion in its text \u2014 the excerpts alone, with no",
+      "outside knowledge, no inference, no benefit of the doubt. If a claim overstates,",
+      "generalizes beyond the excerpt, names anyone, or is not fully entailed by the",
+      "excerpts: REJECT it. When in doubt, REJECT (default-to-fail).",
+      "",
+      "OUTPUT FORMAT \u2014 obey exactly: respond with ONLY the JSON object and NOTHING ELSE.",
+      "No preamble, no per-claim commentary, no reasoning prose, no markdown fence, no text",
+      "before or after. Decide internally; emit only the verdict:",
+      '{"supported":["c1","c3"]} \u2014 the ids of the claims that survive (omit all others; use',
+      '{"supported":[]} if none do). Any surviving id MUST be one you were given.'
+    ].join("\n");
+  }
+});
+
 // ../../packages/core/src/short-token.ts
 import { createHash as createHash2 } from "crypto";
 function opportunityShortToken(id) {
@@ -9648,23 +10836,30 @@ var init_short_token = __esm({
 var src_exports = {};
 __export(src_exports, {
   AI_BAN_DENYLIST: () => AI_BAN_DENYLIST,
+  ANON_MAINTAINER_LABEL: () => ANON_MAINTAINER_LABEL,
   ASHBY_SLUGS_BY_TIER: () => ASHBY_SLUGS_BY_TIER,
   CAP_LABELS: () => CAP_LABELS,
+  CITE_PREFIX: () => CITE_PREFIX,
+  COMPETENCY_GRADES: () => COMPETENCY_GRADES,
+  COMPETENCY_NAMES: () => COMPETENCY_NAMES,
   CREDENTIAL_WEIGHTS: () => CREDENTIAL_WEIGHTS,
   CURATION_NORM: () => CURATION_NORM,
   CURATION_WEIGHTS: () => CURATION_WEIGHTS,
   DECAY_FLOOR: () => DECAY_FLOOR,
+  DECISION_LABEL: () => DECISION_LABEL,
   DEFAULT_ASHBY_SLUGS: () => DEFAULT_ASHBY_SLUGS,
   DEFAULT_BOUNTY_REPOS: () => DEFAULT_BOUNTY_REPOS,
   DEFAULT_GREENHOUSE_SLUGS: () => DEFAULT_GREENHOUSE_SLUGS,
   DEFAULT_ISSUE_STATUS_TIMEOUT_MS: () => DEFAULT_ISSUE_STATUS_TIMEOUT_MS,
   DEFAULT_LEVER_SLUGS: () => DEFAULT_LEVER_SLUGS,
   DEFAULT_WORKABLE_SLUGS: () => DEFAULT_WORKABLE_SLUGS,
+  DENY_CONSENT: () => DENY_CONSENT,
   DISPLAY_DELTA_FLOOR: () => DISPLAY_DELTA_FLOOR,
   EXAMPLE_BUYER: () => EXAMPLE_BUYER,
   FEEDS: () => FEEDS,
   GRAPH: () => GRAPH,
   GREENHOUSE_SLUGS_BY_TIER: () => GREENHOUSE_SLUGS_BY_TIER,
+  HYGIENE_PRINCIPLES_S6: () => HYGIENE_PRINCIPLES_S6,
   IDF_BACKGROUND: () => IDF_BACKGROUND,
   INTEREST_CAP: () => INTEREST_CAP,
   INTRO_ACCEPTED_TTL_MS: () => INTRO_ACCEPTED_TTL_MS,
@@ -9675,15 +10870,21 @@ __export(src_exports, {
   MAX_JOBS_PER_COMPANY: () => MAX_JOBS_PER_COMPANY,
   MENTION_DELTA: () => MENTION_DELTA,
   MERGE_PROBABILITY: () => MERGE_PROBABILITY,
+  METRICS: () => METRICS,
   MIN_CONTRIBUTORS: () => MIN_CONTRIBUTORS,
   MIN_STARS: () => MIN_STARS,
   PROBE_TIMEOUT_MS: () => PROBE_TIMEOUT_MS,
+  PROVENANCE: () => PROVENANCE,
   RIGOR: () => RIGOR,
+  ROLLUP_VERSION: () => ROLLUP_VERSION,
   SKILL_DENSITY_SATURATION: () => SKILL_DENSITY_SATURATION,
   SKILL_FLOOR_ENABLED: () => SKILL_FLOOR_ENABLED,
   SKILL_FLOOR_MIN: () => SKILL_FLOOR_MIN,
+  SOURCE_CLASS: () => SOURCE_CLASS,
   STRONG_MATCH_THRESHOLD: () => STRONG_MATCH_THRESHOLD,
   SYNONYMS: () => SYNONYMS,
+  SYNTHESIS_MODEL: () => SYNTHESIS_MODEL,
+  SYNTHESIS_VERSION: () => SYNTHESIS_VERSION,
   TRIVIAL_PR_TITLE: () => TRIVIAL_PR_TITLE,
   VOCABULARY: () => VOCABULARY,
   VOCAB_NODES: () => VOCAB_NODES,
@@ -9693,17 +10894,33 @@ __export(src_exports, {
   acceptanceCountForDomains: () => acceptanceCountForDomains,
   aggregate: () => aggregate,
   aggregateBounties: () => aggregateBounties,
+  aggregateContributions: () => aggregateContributions,
+  applyVerdict: () => applyVerdict,
   ashby: () => ashby,
+  assembleRollup: () => assembleRollup,
+  assembleSections: () => assembleSections,
   authorizeIntroDecision: () => authorizeIntroDecision,
   authorizeIntroDeletion: () => authorizeIntroDeletion,
   bestAcceptanceDomain: () => bestAcceptanceDomain,
   buildDirectoryIndex: () => buildDirectoryIndex,
+  buildDossierEnvelope: () => buildDossierEnvelope,
   buildGraph: () => buildGraph,
   buildIndex: () => buildIndex,
   buildIntroListItem: () => buildIntroListItem,
   buildIntroPayload: () => buildIntroPayload,
+  buildPass1System: () => buildPass1System,
+  buildPass1User: () => buildPass1User,
+  buildPass2System: () => buildPass2System,
+  buildPass2User: () => buildPass2User,
   buildReason: () => buildReason,
+  buildRollupSource: () => buildRollupSource,
   capJobsPerCompany: () => capJobsPerCompany,
+  citablePaths: () => citablePaths,
+  citeSourceClass: () => citeSourceClass,
+  citesConverge: () => citesConverge,
+  claimFullyResolves: () => claimFullyResolves,
+  classifyDecisionEvidence: () => classifyDecisionEvidence,
+  classifyReviewSources: () => classifyReviewSources,
   classifyToken: () => classifyToken,
   classifyTokens: () => classifyTokens,
   companyTierForJob: () => companyTierForJob,
@@ -9711,6 +10928,9 @@ __export(src_exports, {
   composeIntroEmail: () => composeIntroEmail,
   computeAcceptanceCredential: () => computeAcceptanceCredential,
   computeAcceptanceCredentialPublic: () => computeAcceptanceCredentialPublic,
+  computeEventIndependence: () => computeEventIndependence,
+  computeRepoProvenance: () => computeRepoProvenance,
+  computeReviewerIndependence: () => computeReviewerIndependence,
   computeWinnability: () => computeWinnability,
   contributeShortToken: () => contributeShortToken,
   coreTagsFromTitle: () => coreTagsFromTitle,
@@ -9718,14 +10938,20 @@ __export(src_exports, {
   curateProjects: () => curateProjects,
   decorate: () => decorate,
   decryptMessage: () => decryptMessage,
+  deriveHygienicMetrics: () => deriveHygienicMetrics,
   deriveLegibleProfile: () => deriveLegibleProfile,
   deriveResumeTrend: () => deriveResumeTrend,
   deriveRigorTiers: () => deriveRigorTiers,
   deriveSharedKey: () => deriveSharedKey,
   deriveTrajectoryNarrative: () => deriveTrajectoryNarrative,
   displayableDrift: () => displayableDrift,
+  dropIdentityTokens: () => dropIdentityTokens,
+  dropNgramOverlap: () => dropNgramOverlap,
+  dropUnresolvableCites: () => dropUnresolvableCites,
   encryptMessage: () => encryptMessage,
+  eventCountsAtFullWeight: () => eventCountsAtFullWeight,
   expandWeighted: () => expandWeighted,
+  extractJson: () => extractJson,
   extractSkillTags: () => extractSkillTags,
   fetchGitHubProfile: () => fetchGitHubProfile,
   fetchIssueStatus: () => fetchIssueStatus,
@@ -9751,6 +10977,8 @@ __export(src_exports, {
   introRetentionAction: () => introRetentionAction,
   isAiBanRepo: () => isAiBanRepo,
   isBounty: () => isBounty,
+  isCompetencyGrade: () => isCompetencyGrade,
+  isCompetencyName: () => isCompetencyName,
   isContribution: () => isContribution,
   isExcludedRepo: () => isExcludedRepo,
   isOverIntroLimit: () => isOverIntroLimit,
@@ -9759,6 +10987,7 @@ __export(src_exports, {
   issueCrossRefPRAttempts: () => issueCrossRefPRAttempts,
   jobShortToken: () => jobShortToken,
   joinLabels: () => joinLabels,
+  knownCount: () => knownCount,
   labelFor: () => labelFor,
   lever: () => lever,
   loadPartnerRoles: () => loadPartnerRoles,
@@ -9776,16 +11005,23 @@ __export(src_exports, {
   opportunityShortToken: () => opportunityShortToken,
   pageMatches: () => pageMatches,
   parseGitHubRef: () => parseGitHubRef,
+  parsePass1: () => parsePass1,
+  parseVerdict: () => parseVerdict,
   passesContributionGate: () => passesContributionGate,
   passesMaturityGate: () => passesMaturityGate,
   personCardToJob: () => personCardToJob,
   projectCardToJob: () => projectCardToJob,
+  projectForSynthesis: () => projectForSynthesis,
   readBuildBudgetMs: () => readBuildBudgetMs,
   readReqGapMs: () => readReqGapMs,
   realSleep: () => realSleep,
   recordClick: () => recordClick,
+  redactThirdParty: () => redactThirdParty,
   rejectExtraIntroFields: () => rejectExtraIntroFields,
   relevanceScore: () => relevanceScore,
+  renderMaintainerQuote: () => renderMaintainerQuote,
+  resolveCitation: () => resolveCitation,
+  resolveCitations: () => resolveCitations,
   resolveJobToken: () => resolveJobToken,
   revealIntroContacts: () => revealIntroContacts,
   rosterActiveFromContribution: () => rosterActiveFromContribution,
@@ -9794,6 +11030,7 @@ __export(src_exports, {
   setStatus: () => setStatus,
   signalLabel: () => signalLabel,
   tagDissimilarity: () => tagDissimilarity,
+  textContainsLogin: () => textContainsLogin,
   tokenize: () => tokenize,
   validateGraph: () => validateGraph,
   validateIntroPayload: () => validateIntroPayload,
@@ -9824,24 +11061,20 @@ var init_src = __esm({
     init_legible();
     init_legible_trajectory();
     init_rigor();
+    init_sources();
+    init_independence();
+    init_redaction();
+    init_decisions();
+    init_metrics_hygiene();
+    init_dossier();
+    init_synthesis();
     init_short_token();
   }
 });
 
 // src/crypto-store.ts
-import {
-  createCipheriv as createCipheriv2,
-  createDecipheriv as createDecipheriv2,
-  randomBytes as randomBytes4
-} from "crypto";
-import {
-  readFileSync as readFileSync7,
-  writeFileSync as writeFileSync6,
-  mkdirSync as mkdirSync6,
-  existsSync as existsSync6,
-  renameSync as renameSync3,
-  rmSync as rmSync4
-} from "fs";
+import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes4 } from "crypto";
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, existsSync as existsSync6, renameSync as renameSync3, rmSync as rmSync4 } from "fs";
 import { join as join7, dirname, basename } from "path";
 import { homedir as homedir6 } from "os";
 import { createRequire } from "module";
@@ -9857,11 +11090,7 @@ function encrypt2(plaintext, key) {
   };
 }
 function decrypt2(blob, key) {
-  const decipher = createDecipheriv2(
-    ALGO2,
-    key,
-    Buffer.from(blob.iv, "hex")
-  );
+  const decipher = createDecipheriv2(ALGO2, key, Buffer.from(blob.iv, "hex"));
   decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
   const plain = Buffer.concat([
     decipher.update(Buffer.from(blob.ciphertext, "hex")),
@@ -9888,7 +11117,7 @@ async function tryLoadFromKeytar() {
   }
 }
 function loadOrCreateFileKey() {
-  mkdirSync6(TERMINALHIRE_DIR3, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR3);
   if (existsSync6(KEY_FILE2)) {
     return Buffer.from(readFileSync7(KEY_FILE2, "utf8").trim(), "hex");
   }
@@ -9902,8 +11131,11 @@ function warnStderr(message) {
 }
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname(filePath);
-  mkdirSync6(dir, { recursive: true, mode: 448 });
-  const tmp = join7(dir, `.${basename(filePath)}.tmp-${process.pid}-${randomBytes4(6).toString("hex")}`);
+  ensureStateDir(dir);
+  const tmp = join7(
+    dir,
+    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes4(6).toString("hex")}`
+  );
   writeFileSync6(tmp, content, { encoding: "utf8", mode: 384 });
   renameSync3(tmp, filePath);
 }
@@ -9930,7 +11162,9 @@ async function resolveKey(filePath, opts) {
   if (opts.keyPolicy === "keychain-required") {
     const key = await tryLoadFromKeytar();
     if (!key) {
-      warnStderr(`crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`);
+      warnStderr(
+        `crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`
+      );
       return null;
     }
     return key;
@@ -9965,6 +11199,7 @@ var TERMINALHIRE_DIR3, KEY_FILE2, KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO2, KEY_BYT
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
+    init_state_dir();
     TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join7(homedir6(), ".terminalhire");
     KEY_FILE2 = join7(TERMINALHIRE_DIR3, "key");
     KEYTAR_SERVICE = "terminalhire";
@@ -10171,10 +11406,10 @@ async function maybePromptPeerConnect({
 } = {}) {
   const promptOnce = ask3 ? async (q) => String(await ask3(q) ?? "").trim().toLowerCase() : async (q) => {
     const rl = createInterface({ input, output });
-    const a = await new Promise((resolve2) => {
+    const a = await new Promise((resolve3) => {
       rl.question(q, (x) => {
         rl.close();
-        resolve2(x);
+        resolve3(x);
       });
     });
     return String(a).trim().toLowerCase();
@@ -10288,11 +11523,11 @@ async function runLogin() {
     let ghProfile;
     if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
       const { fileURLToPath: fileURLToPath12 } = await import("url");
-      const { join: join38 } = await import("path");
+      const { join: join39 } = await import("path");
       const __dirname9 = fileURLToPath12(new URL(".", import.meta.url));
-      const fixturePath = join38(__dirname9, "../../fixtures/github-sample.json");
-      const { readFileSync: readFileSync33 } = await import("fs");
-      ghProfile = JSON.parse(readFileSync33(fixturePath, "utf8"));
+      const fixturePath = join39(__dirname9, "../../fixtures/github-sample.json");
+      const { readFileSync: readFileSync34 } = await import("fs");
+      ghProfile = JSON.parse(readFileSync34(fixturePath, "utf8"));
     } else {
       ghProfile = await fetchGitHubProfile2(login, token);
     }
@@ -10421,11 +11656,10 @@ import {
   readFileSync as readFileSync8,
   writeFileSync as writeFileSync7,
   renameSync as renameSync4,
-  mkdirSync as mkdirSync7,
   existsSync as existsSync7,
   copyFileSync,
-  openSync,
-  closeSync,
+  openSync as openSync2,
+  closeSync as closeSync2,
   unlinkSync
 } from "fs";
 import { join as join9, dirname as dirname2 } from "path";
@@ -10434,7 +11668,7 @@ function statusFilePath() {
   return STATUS_FILE;
 }
 function atomicWriteJson(path2, obj) {
-  mkdirSync7(dirname2(path2), { recursive: true });
+  ensureStateDir(dirname2(path2));
   const tmp = `${path2}.tmp-${process.pid}`;
   writeFileSync7(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
   renameSync4(tmp, path2);
@@ -10453,8 +11687,8 @@ function withLock(fn) {
   for (; ; ) {
     let fd;
     try {
-      mkdirSync7(dirname2(LOCK_FILE), { recursive: true });
-      fd = openSync(LOCK_FILE, "wx");
+      ensureStateDir(dirname2(LOCK_FILE));
+      fd = openSync2(LOCK_FILE, "wx");
     } catch (err) {
       if (err && err.code === "EEXIST") {
         if (Date.now() > deadline) {
@@ -10473,7 +11707,7 @@ function withLock(fn) {
       return fn();
     } finally {
       try {
-        closeSync(fd);
+        closeSync2(fd);
       } catch {
       }
       try {
@@ -10506,7 +11740,10 @@ function readStatusMap() {
 function markStatus(id, status) {
   return withLock(() => {
     const current = readStatusMap();
-    const next = status === "claimed" ? { ...current, [id]: { ...current[id], status: "claimed", markedAt: (/* @__PURE__ */ new Date()).toISOString() } } : setStatus(current, id, status);
+    const next = status === "claimed" ? {
+      ...current,
+      [id]: { ...current[id], status: "claimed", markedAt: (/* @__PURE__ */ new Date()).toISOString() }
+    } : setStatus(current, id, status);
     atomicWriteJson(STATUS_FILE, next);
     return next[id];
   });
@@ -10524,6 +11761,7 @@ var init_job_status_store = __esm({
   "bin/job-status-store.js"() {
     "use strict";
     init_src();
+    init_state_dir();
     TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join9(homedir8(), ".terminalhire");
     STATUS_FILE = join9(TERMINALHIRE_DIR5, "job-status.json");
     LOCK_FILE = `${STATUS_FILE}.lock`;
@@ -10537,7 +11775,7 @@ __export(cache_store_exports, {
   readCacheEntry: () => readCacheEntry,
   updateIndexCache: () => updateIndexCache
 });
-import { readFileSync as readFileSync9, writeFileSync as writeFileSync8, mkdirSync as mkdirSync8, renameSync as renameSync5 } from "fs";
+import { readFileSync as readFileSync9, writeFileSync as writeFileSync8, renameSync as renameSync5 } from "fs";
 import { join as join10 } from "path";
 import { homedir as homedir9 } from "os";
 function readCacheEntry() {
@@ -10548,7 +11786,7 @@ function readCacheEntry() {
   }
 }
 function updateIndexCache(patch) {
-  mkdirSync8(TERMINALHIRE_DIR6, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR6);
   const existing = readCacheEntry() ?? {};
   const entry = {
     ...existing,
@@ -10565,6 +11803,7 @@ var TERMINALHIRE_DIR6, INDEX_CACHE_FILE, SCHEMA_VERSION2, tmpCounter;
 var init_cache_store = __esm({
   "bin/cache-store.js"() {
     "use strict";
+    init_state_dir();
     TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join10(homedir9(), ".terminalhire");
     INDEX_CACHE_FILE = join10(TERMINALHIRE_DIR6, "index-cache.json");
     SCHEMA_VERSION2 = 1;
@@ -10609,20 +11848,664 @@ var init_sanitize = __esm({
   }
 });
 
+// bin/spinner-io.js
+import { readFileSync as readFileSync10, writeFileSync as writeFileSync9, existsSync as existsSync8, mkdirSync as mkdirSync3, renameSync as renameSync6 } from "fs";
+import { join as join11, dirname as dirname3, resolve } from "path";
+import { homedir as homedir10 } from "os";
+function thDir() {
+  const raw = process.env["TERMINALHIRE_DIR"] || join11(homedir10(), ".terminalhire");
+  return resolve(raw);
+}
+function claudeSettingsPath() {
+  return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join11(homedir10(), ".claude", "settings.json");
+}
+function spinnerStateFilePath() {
+  return join11(thDir(), "spinner-state.json");
+}
+function readJson(path2, fallback) {
+  try {
+    return existsSync8(path2) ? JSON.parse(readFileSync10(path2, "utf8")) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function atomicWriteJson2(path2, obj) {
+  if (dirname3(path2) === thDir()) {
+    ensureStateDir(thDir());
+  } else {
+    mkdirSync3(dirname3(path2), { recursive: true });
+  }
+  const tmp = `${path2}.tmp-${process.pid}`;
+  writeFileSync9(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  renameSync6(tmp, path2);
+}
+function readState() {
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  return readJson(SPINNER_STATE_FILE, { verbs: [], mode: "replace" });
+}
+function applySpinnerVerbs(ourVerbs, mode = "replace") {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const verbs = (Array.isArray(ourVerbs) ? ourVerbs : []).filter(Boolean);
+  if (verbs.length === 0) return clearSpinnerVerbs();
+  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
+  const existing = settings.spinnerVerbs && typeof settings.spinnerVerbs === "object" ? settings.spinnerVerbs : null;
+  const prevOurs = new Set(readState().verbs || []);
+  const userVerbs = existing && Array.isArray(existing.verbs) ? existing.verbs.filter((v) => !prevOurs.has(v)) : [];
+  const newVerbs = [...verbs, ...userVerbs];
+  settings.spinnerVerbs = { mode: mode === "append" ? "append" : "replace", verbs: newVerbs };
+  atomicWriteJson2(CLAUDE_SETTINGS, settings);
+  const st = readState();
+  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
+  return { applied: verbs.length, total: newVerbs.length };
+}
+function clearSpinnerVerbs() {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const settings = readJson(CLAUDE_SETTINGS, null);
+  const prevOurs = new Set(readState().verbs || []);
+  let keptUserVerbs = 0;
+  if (settings && settings.spinnerVerbs && Array.isArray(settings.spinnerVerbs.verbs)) {
+    const userVerbs = settings.spinnerVerbs.verbs.filter((v) => !prevOurs.has(v));
+    keptUserVerbs = userVerbs.length;
+    if (userVerbs.length > 0) {
+      settings.spinnerVerbs = {
+        mode: settings.spinnerVerbs.mode === "append" ? "append" : "replace",
+        verbs: userVerbs
+      };
+    } else {
+      delete settings.spinnerVerbs;
+    }
+    atomicWriteJson2(CLAUDE_SETTINGS, settings);
+  }
+  try {
+    const st = readState();
+    atomicWriteJson2(SPINNER_STATE_FILE, {
+      ...st,
+      verbs: [],
+      mode: st.mode || "replace",
+      ts: Date.now()
+    });
+  } catch {
+  }
+  return { cleared: true, keptUserVerbs };
+}
+function applySpinnerTips(ourTips) {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const tips = (Array.isArray(ourTips) ? ourTips : []).filter(Boolean);
+  if (tips.length === 0) return clearSpinnerTips();
+  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
+  const existing = settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips) ? settings.spinnerTipsOverride.tips : [];
+  const prevOurs = new Set(readState().tips || []);
+  const userTips = existing.filter((t) => !prevOurs.has(t));
+  settings.spinnerTipsEnabled = true;
+  settings.spinnerTipsOverride = { excludeDefault: true, tips: [...tips, ...userTips] };
+  atomicWriteJson2(CLAUDE_SETTINGS, settings);
+  const st = readState();
+  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
+  return { applied: tips.length };
+}
+function clearSpinnerTips() {
+  const CLAUDE_SETTINGS = claudeSettingsPath();
+  const SPINNER_STATE_FILE = spinnerStateFilePath();
+  const settings = readJson(CLAUDE_SETTINGS, null);
+  const prevOurs = new Set(readState().tips || []);
+  if (settings && settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips)) {
+    const userTips = settings.spinnerTipsOverride.tips.filter((t) => !prevOurs.has(t));
+    if (userTips.length > 0) {
+      settings.spinnerTipsOverride = {
+        excludeDefault: settings.spinnerTipsOverride.excludeDefault === true,
+        tips: userTips
+      };
+    } else {
+      delete settings.spinnerTipsOverride;
+      delete settings.spinnerTipsEnabled;
+    }
+    atomicWriteJson2(CLAUDE_SETTINGS, settings);
+  }
+  try {
+    const st = readState();
+    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
+  } catch {
+  }
+  return { cleared: true };
+}
+var init_spinner_io = __esm({
+  "bin/spinner-io.js"() {
+    "use strict";
+    init_state_dir();
+  }
+});
+
+// bin/spinner-config.js
+import { join as join12 } from "path";
+function configFilePath() {
+  return join12(thDir(), "config.json");
+}
+function readSpinnerConfig() {
+  const CONFIG_FILE4 = configFilePath();
+  const cfg = readJson(CONFIG_FILE4, {});
+  const spinner = cfg && typeof cfg.spinner === "object" ? cfg.spinner : {};
+  const merged = { ...SPINNER_DEFAULTS, ...spinner };
+  if (merged.mode !== "append" && merged.mode !== "replace") merged.mode = SPINNER_DEFAULTS.mode;
+  merged.max = Math.max(1, Math.min(12, Number(merged.max) || SPINNER_DEFAULTS.max));
+  merged.enabled = merged.enabled === true;
+  if (!["always", "sometimes", "rare"].includes(merged.frequency)) {
+    merged.frequency = SPINNER_DEFAULTS.frequency;
+  }
+  return merged;
+}
+var SPINNER_DEFAULTS;
+var init_spinner_config = __esm({
+  "bin/spinner-config.js"() {
+    "use strict";
+    init_spinner_io();
+    SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
+  }
+});
+
+// bin/spinner-seen.js
+var spinner_seen_exports = {};
+__export(spinner_seen_exports, {
+  SEEN_MAX_ENTRIES: () => SEEN_MAX_ENTRIES,
+  SEEN_MAX_WIDTHS: () => SEEN_MAX_WIDTHS,
+  SEEN_TTL_MS: () => SEEN_TTL_MS,
+  SEEN_WINDOW_SURFACES: () => SEEN_WINDOW_SURFACES,
+  isSuppressed: () => isSuppressed,
+  loadSeenHistory: () => loadSeenHistory,
+  recordSurface: () => recordSurface,
+  seenFilePath: () => seenFilePath
+});
+import { readFileSync as readFileSync11, writeFileSync as writeFileSync10, renameSync as renameSync7 } from "fs";
+import { join as join13, dirname as dirname4 } from "path";
+import { homedir as homedir11 } from "os";
+function seenFilePath() {
+  const dir = process.env["TERMINALHIRE_DIR"] || join13(homedir11(), ".terminalhire");
+  return join13(dir, "seen-history.json");
+}
+function atomicWriteJson3(path2, obj) {
+  ensureStateDir(dirname4(path2));
+  const tmp = `${path2}.tmp-${process.pid}`;
+  writeFileSync10(tmp, JSON.stringify(obj) + "\n", { encoding: "utf8", mode: 384 });
+  renameSync7(tmp, path2);
+}
+function emptyHistory() {
+  return { surface: 0, entries: {}, widths: {} };
+}
+function capWidths(widths) {
+  const keys = Object.keys(widths);
+  if (keys.length <= SEEN_MAX_WIDTHS) return widths;
+  keys.sort((a, b) => Number(b) - Number(a));
+  const out = {};
+  for (const k of keys.slice(0, SEEN_MAX_WIDTHS)) out[k] = widths[k];
+  return out;
+}
+function isFiniteNonNegative(n) {
+  return typeof n === "number" && Number.isFinite(n) && n >= 0;
+}
+function pruneEntries(entries, now) {
+  const out = {};
+  for (const [id, e] of Object.entries(entries)) {
+    if (!e || !isFiniteNonNegative(e.lastSurface) || !isFiniteNonNegative(e.lastSeenAt)) continue;
+    if (now - e.lastSeenAt > SEEN_TTL_MS) continue;
+    out[id] = { lastSurface: e.lastSurface, lastSeenAt: e.lastSeenAt };
+  }
+  return out;
+}
+function capEntries(entries) {
+  const ids = Object.keys(entries);
+  if (ids.length <= SEEN_MAX_ENTRIES) return entries;
+  ids.sort(
+    (a, b) => entries[b].lastSurface - entries[a].lastSurface || entries[b].lastSeenAt - entries[a].lastSeenAt
+  );
+  const out = {};
+  for (const id of ids.slice(0, SEEN_MAX_ENTRIES)) out[id] = entries[id];
+  return out;
+}
+function loadSeenHistory(now = Date.now()) {
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync11(seenFilePath(), "utf8"));
+  } catch {
+    return emptyHistory();
+  }
+  if (!raw || typeof raw !== "object") return emptyHistory();
+  const surface = isFiniteNonNegative(raw.surface) ? Math.floor(raw.surface) : 0;
+  const entries = raw.entries && typeof raw.entries === "object" && !Array.isArray(raw.entries) ? pruneEntries(raw.entries, now) : {};
+  const widths = raw.widths && typeof raw.widths === "object" && !Array.isArray(raw.widths) ? capWidths(
+    Object.fromEntries(
+      Object.entries(raw.widths).filter(
+        ([s, n]) => isFiniteNonNegative(Number(s)) && isFiniteNonNegative(n)
+      )
+    )
+  ) : {};
+  return { surface, entries, widths };
+}
+function isSuppressed(id, history) {
+  const e = history.entries[id];
+  if (!e) return false;
+  return history.surface - e.lastSurface < SEEN_WINDOW_SURFACES;
+}
+function recordSurface(ids, now = Date.now()) {
+  const history = loadSeenHistory(now);
+  const surface = history.surface + 1;
+  const entries = { ...history.entries };
+  for (const id of ids) {
+    if (typeof id !== "string" || id.length === 0) continue;
+    entries[id] = { lastSurface: surface, lastSeenAt: now };
+  }
+  const stamped = new Set(
+    (Array.isArray(ids) ? ids : []).filter((id) => typeof id === "string" && id.length > 0)
+  );
+  const widths = capWidths({ ...history.widths, [surface]: stamped.size });
+  const next = { surface, entries: capEntries(pruneEntries(entries, now)), widths };
+  try {
+    atomicWriteJson3(seenFilePath(), next);
+  } catch {
+  }
+  return next;
+}
+var SEEN_WINDOW_SURFACES, SEEN_TTL_MS, SEEN_MAX_ENTRIES, SEEN_MAX_WIDTHS;
+var init_spinner_seen = __esm({
+  "bin/spinner-seen.js"() {
+    "use strict";
+    init_state_dir();
+    SEEN_WINDOW_SURFACES = 10;
+    SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
+    SEEN_MAX_ENTRIES = 500;
+    SEEN_MAX_WIDTHS = 200;
+  }
+});
+
+// bin/spinner-select.js
+function filterFreshMatches(matches, history, getId = defaultGetId) {
+  const { eligible, suppressed } = partitionFreshMatches(matches, history, getId);
+  return suppressed.length === 0 ? matches : [...eligible, ...suppressed];
+}
+function partitionFreshMatches(matches, history, getId = defaultGetId) {
+  const list = Array.isArray(matches) ? matches : [];
+  if (!history || !history.entries || Object.keys(history.entries).length === 0) {
+    return { eligible: list, suppressed: [] };
+  }
+  const eligible = [];
+  const suppressed = [];
+  for (const m of list) {
+    const id = getId(m);
+    if (m && id != null && isSuppressed(String(id), history)) suppressed.push(m);
+    else eligible.push(m);
+  }
+  const stamp = (m) => history.entries[String(getId(m))].lastSurface;
+  suppressed.sort((a, b) => stamp(a) - stamp(b));
+  return { eligible, suppressed };
+}
+function widenFreshCandidates(matches, history, need, widen) {
+  const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
+  if (!(need > 0)) return [];
+  if (!widen || !Array.isArray(widen.reserve) || typeof widen.getAdjacent !== "function") return [];
+  const suppressed = (m) => !!history && !!history.entries && m.id != null && isSuppressed(String(m.id), history);
+  const counts = /* @__PURE__ */ new Map();
+  for (const m of list) {
+    for (const t of Array.isArray(m.matchedTags) ? m.matchedTags : []) {
+      const tag = String(t).toLowerCase();
+      counts.set(tag, (counts.get(tag) || 0) + 1);
+    }
+  }
+  const maxCount = Math.max(0, ...counts.values());
+  if (maxCount === 0) return [];
+  const dominant = [...counts.entries()].filter(([, c]) => c === maxCount).map(([t]) => t);
+  const inPool = new Set(list.map((m) => String(m.id)));
+  const fresh = (m) => m && m.id != null && !inPool.has(String(m.id)) && !suppressed(m);
+  const tagged = (m, adj) => (Array.isArray(m.matchedTags) ? m.matchedTags : []).some(
+    (t) => adj.has(String(t).toLowerCase())
+  );
+  const ringCandidates = (hops) => {
+    const adj = new Set(dominant.flatMap((d) => widen.getAdjacent(d, hops)));
+    if (adj.size === 0) return [];
+    return widen.reserve.filter((m) => fresh(m) && tagged(m, adj));
+  };
+  let widened = ringCandidates(1);
+  if (widened.length === 0) widened = ringCandidates(2);
+  if (widened.length === 0) {
+    widened = widen.reserve.filter(
+      (m) => fresh(m) && (m.source === "bounty" || m.source === "contribute")
+    );
+  }
+  return widened.slice(0, need);
+}
+var defaultGetId;
+var init_spinner_select = __esm({
+  "bin/spinner-select.js"() {
+    "use strict";
+    init_spinner_seen();
+    defaultGetId = (m) => m?.id;
+  }
+});
+
+// bin/spinner-verbs.js
+function titleCase(s) {
+  return String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+function ctaVerb() {
+  return "\u2605 jobs that fit you \xB7 run: terminalhire jobs";
+}
+function rankBySessionTags(topMatches, sessionTags) {
+  const tags = Array.isArray(sessionTags) ? sessionTags.filter(Boolean) : [];
+  if (tags.length === 0 || !Array.isArray(topMatches)) return topMatches;
+  const normalized = tags.map((t) => String(t).toLowerCase().trim());
+  return topMatches.map((m, originalIndex) => {
+    const haystack = `${String(m.title || "").toLowerCase()} ${String(m.company || "").toLowerCase()}`;
+    const hits = normalized.reduce((n, tag) => n + (haystack.includes(tag) ? 1 : 0), 0);
+    return { m, hits, originalIndex };
+  }).sort((a, b) => b.hits - a.hits || a.originalIndex - b.originalIndex).map(({ m }) => m);
+}
+function verbCountForFrequency(frequency, max) {
+  switch (frequency) {
+    case "always":
+      return max;
+    case "rare":
+      return 1;
+    case "sometimes":
+    default:
+      return 2;
+  }
+}
+function buildContextVerbs(topMatches, sessionTags) {
+  const sess = (Array.isArray(sessionTags) ? sessionTags : []).map((t) => String(t).toLowerCase().trim()).filter(Boolean);
+  const roleTags = /* @__PURE__ */ new Set();
+  for (const m of Array.isArray(topMatches) ? topMatches : []) {
+    const mt = m && Array.isArray(m.matchedTags) ? m.matchedTags : [];
+    for (const t of mt) roleTags.add(String(t).toLowerCase().trim());
+  }
+  const overlap = [];
+  for (const t of sess) {
+    if (roleTags.has(t) && !overlap.includes(t)) overlap.push(t);
+  }
+  let headers;
+  if (overlap.length >= 2) {
+    const a = titleCase(overlap[0]);
+    const b = titleCase(overlap[1]);
+    headers = [`\u2726 Fits your ${a} + ${b} work`, `\u2726 A match for what you're building \u2014 link below`];
+  } else if (overlap.length === 1) {
+    const a = titleCase(overlap[0]);
+    headers = [`\u2726 Work in your ${a} stack \u2014 link below`, `\u2726 Your ${a} work \u2014 link in the tip below`];
+  } else {
+    headers = [`\u2726 Work that fits your stack`, `\u2726 A match for you \u2014 link in the tip below`];
+  }
+  return headers;
+}
+function buildPeerLine(topPeers) {
+  const n = (Array.isArray(topPeers) ? topPeers : []).filter(Boolean).length;
+  if (n < 1) return null;
+  return n === 1 ? `\u25C6 1 builder matches what you're building \xB7 terminalhire devs` : `\u25C6 ${n} builders match what you're building \xB7 terminalhire devs`;
+}
+function buildIncomingIntroLine(incomingPending) {
+  const n = incomingPending && typeof incomingPending.count === "number" ? incomingPending.count : 0;
+  if (n < 1) return null;
+  return n === 1 ? `\u2198 someone wants to connect \xB7 terminalhire intro --list` : `\u2198 ${n} people want to connect \xB7 terminalhire intro --list`;
+}
+function buildSessionStaleLine(sessionStale) {
+  return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
+}
+function buildUnpushedClaimsLine(unpushedClaims) {
+  return unpushedClaims === true ? "\u26A0 new claims not yet on your dashboard \u2014 run: terminalhire claim --push --keep-updated" : null;
+}
+function buildSpinnerPool(topMatches, max = 6, opts = {}) {
+  const {
+    sessionTags,
+    frequency = "always",
+    topPeers,
+    incomingPending,
+    sessionStale,
+    unpushedClaims,
+    seenHistory
+  } = opts;
+  const staleLine = buildSessionStaleLine(sessionStale);
+  const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
+  const introLine = buildIncomingIntroLine(incomingPending);
+  const unpushedLine = buildUnpushedClaimsLine(unpushedClaims);
+  const ranked = filterFreshMatches(rankBySessionTags(topMatches, sessionTags), seenHistory);
+  if (!Array.isArray(ranked) || ranked.length === 0) {
+    if (introLine) return withStale([introLine]);
+    if (unpushedLine) return withStale([unpushedLine]);
+    const peerLine = buildPeerLine(topPeers);
+    return withStale(peerLine ? [peerLine] : []);
+  }
+  const headers = buildContextVerbs(ranked, sessionTags);
+  const ceiling = Math.min(headers.length, Math.max(1, Number(max) || 6));
+  const cap = Math.max(1, verbCountForFrequency(frequency, ceiling));
+  const pool = [...headers.slice(0, cap), ctaVerb()];
+  if (introLine) pool.push(introLine);
+  if (unpushedLine) pool.push(unpushedLine);
+  return withStale(pool);
+}
+var init_spinner_verbs = __esm({
+  "bin/spinner-verbs.js"() {
+    "use strict";
+    init_spinner_select();
+  }
+});
+
+// bin/spinner-render.js
+function interleaveBySource(topMatches) {
+  if (!Array.isArray(topMatches) || topMatches.length === 0) return topMatches;
+  const buckets = /* @__PURE__ */ new Map();
+  const order = [];
+  for (const m of topMatches) {
+    const id = m && m.id ? String(m.id) : "";
+    const idx = id.indexOf(":");
+    const source = idx > 0 ? id.slice(0, idx) : "_";
+    if (!buckets.has(source)) {
+      buckets.set(source, []);
+      order.push(source);
+    }
+    buckets.get(source).push(m);
+  }
+  const out = [];
+  let remaining = topMatches.length;
+  while (remaining > 0) {
+    for (const source of order) {
+      const b = buckets.get(source);
+      if (b && b.length) {
+        out.push(b.shift());
+        remaining--;
+      }
+    }
+  }
+  return out;
+}
+function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
+  const base = String(baseUrl || "https://terminalhire.com").replace(/\/+$/, "");
+  const out = [];
+  const surfacedIds = [];
+  const seenRole = /* @__PURE__ */ new Set();
+  const perCompany = /* @__PURE__ */ new Map();
+  const COMPANY_CAP = 2;
+  const { eligible, suppressed } = partitionFreshMatches(
+    Array.isArray(topMatches) ? topMatches : [],
+    opts.seenHistory
+  );
+  const orderForEmit = (list) => {
+    const bountyQ = list.filter((m) => m && m.source === "bounty");
+    const contributeQ = list.filter((m) => m && m.source === "contribute");
+    const roleQ = interleaveBySource(
+      list.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
+    );
+    const ordered = [];
+    let bi = 0;
+    let ri = 0;
+    let ci = 0;
+    while (bi < bountyQ.length || ri < roleQ.length || ci < contributeQ.length) {
+      if (ri < roleQ.length) ordered.push(roleQ[ri++]);
+      if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
+      if (ci < contributeQ.length) ordered.push(contributeQ[ci++]);
+    }
+    return ordered;
+  };
+  const emit = (list) => {
+    for (const m of orderForEmit(list)) {
+      if (out.length >= max) return;
+      if (!m || !m.title || !m.company || !m.id) continue;
+      const idx = String(m.id).indexOf(":");
+      if (idx <= 0) continue;
+      const source = String(m.id).slice(0, idx);
+      const ext = String(m.id).slice(idx + 1);
+      if (!source || !ext) continue;
+      const companyRaw = String(m.company).trim().replace(/\s+/g, " ");
+      const titleRaw = String(m.title).trim().replace(/\s+/g, " ");
+      const roleKey = `${titleRaw.toLowerCase()}@${companyRaw.toLowerCase()}`;
+      const coKey = companyRaw.toLowerCase();
+      if (seenRole.has(roleKey)) continue;
+      if ((perCompany.get(coKey) || 0) >= COMPANY_CAP) continue;
+      seenRole.add(roleKey);
+      perCompany.set(coKey, (perCompany.get(coKey) || 0) + 1);
+      let title = titleRaw;
+      if (title.length > 34) title = title.slice(0, 33).trimEnd() + "\u2026";
+      const company = titleCase(companyRaw);
+      const pct2 = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
+      const token = jobShortToken(String(m.id));
+      const url = `${base}/j/${token}`;
+      if (source === "bounty") {
+        const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
+        const repo = m.repo || companyRaw;
+        out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct2}% \u2014 ${url}`);
+      } else if (source === "contribute") {
+        const repoFull = m.repo || companyRaw;
+        const slashIdx = repoFull.indexOf("/");
+        const repoName = slashIdx >= 0 ? repoFull.slice(slashIdx + 1) : repoFull;
+        const num = m.issueNumber != null ? ` #${m.issueNumber}` : "";
+        const shortUrl = `${base}/c/${contributeShortToken(String(m.id))}`;
+        const fit = m.interest ? m.interest : `${pct2}%`;
+        out.push(`\u2197 contribute \xB7 ${repoName}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${fit} \u2014 ${shortUrl}`);
+      } else {
+        const fit = m.interest ? m.interest : `${pct2}%`;
+        out.push(`\u2197 ${title} @ ${company} \xB7 ${fit} \u2014 ${url}`);
+      }
+      surfacedIds.push(String(m.id));
+    }
+  };
+  emit(eligible);
+  if (out.length < max && opts.widen) {
+    const widened = widenFreshCandidates(
+      Array.isArray(topMatches) ? topMatches : [],
+      opts.seenHistory,
+      max - out.length,
+      opts.widen
+    );
+    if (widened.length > 0) emit(widened);
+  }
+  if (out.length < max) emit(suppressed);
+  return { tips: out, surfacedIds };
+}
+function buildTips(topMatches, baseUrl, max = 8, opts = {}) {
+  return buildTipsDetailed(topMatches, baseUrl, max, opts).tips;
+}
+function renderRefreshSurface(topMatches, sc, opts = {}) {
+  if (!sc || sc.enabled !== true) {
+    clearSpinnerVerbs();
+    clearSpinnerTips();
+    return { verbs: [], tips: [], surfacedIds: [] };
+  }
+  const seenHistory = opts.seenHistory || loadSeenHistory();
+  const ranked = rankBySessionTags(topMatches, opts.sessionTags);
+  const verbs = buildSpinnerPool(ranked, sc.max, {
+    sessionTags: opts.sessionTags,
+    frequency: sc.frequency,
+    topPeers: opts.topPeers,
+    incomingPending: opts.incomingPending,
+    sessionStale: opts.sessionStale,
+    unpushedClaims: opts.unpushedClaims,
+    seenHistory
+  });
+  if (verbs.length > 0) applySpinnerVerbs(verbs, sc.mode);
+  else clearSpinnerVerbs();
+  const { tips, surfacedIds } = buildTipsDetailed(ranked, opts.baseUrl, 8, {
+    seenHistory,
+    widen: opts.widen,
+    clickCatcher: opts.clickCatcher
+  });
+  if (tips.length > 0) applySpinnerTips(tips);
+  else clearSpinnerTips();
+  if (verbs.length > 0 || tips.length > 0) recordSurface(surfacedIds);
+  return { verbs, tips, surfacedIds };
+}
+var init_spinner_render = __esm({
+  "bin/spinner-render.js"() {
+    "use strict";
+    init_spinner_select();
+    init_spinner_verbs();
+    init_spinner_seen();
+    init_spinner_io();
+    init_src();
+  }
+});
+
+// bin/spinner.js
+var spinner_exports = {};
+__export(spinner_exports, {
+  SPINNER_DEFAULTS: () => SPINNER_DEFAULTS,
+  applySpinnerTips: () => applySpinnerTips,
+  applySpinnerVerbs: () => applySpinnerVerbs,
+  buildContextVerbs: () => buildContextVerbs,
+  buildIncomingIntroLine: () => buildIncomingIntroLine,
+  buildPeerLine: () => buildPeerLine,
+  buildSessionStaleLine: () => buildSessionStaleLine,
+  buildSpinnerPool: () => buildSpinnerPool,
+  buildTips: () => buildTips,
+  buildTipsDetailed: () => buildTipsDetailed,
+  buildUnpushedClaimsLine: () => buildUnpushedClaimsLine,
+  clearSpinnerTips: () => clearSpinnerTips,
+  clearSpinnerVerbs: () => clearSpinnerVerbs,
+  ctaVerb: () => ctaVerb,
+  filterFreshMatches: () => filterFreshMatches,
+  interleaveBySource: () => interleaveBySource,
+  partitionFreshMatches: () => partitionFreshMatches,
+  rankBySessionTags: () => rankBySessionTags,
+  readSpinnerConfig: () => readSpinnerConfig,
+  renderRefreshSurface: () => renderRefreshSurface,
+  widenFreshCandidates: () => widenFreshCandidates
+});
+var init_spinner = __esm({
+  "bin/spinner.js"() {
+    "use strict";
+    init_spinner_config();
+    init_spinner_config();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_verbs();
+    init_spinner_select();
+    init_spinner_select();
+    init_spinner_select();
+    init_spinner_io();
+    init_spinner_io();
+    init_spinner_io();
+    init_spinner_io();
+    init_spinner_render();
+    init_spinner_render();
+    init_spinner_render();
+    init_spinner_render();
+  }
+});
+
 // bin/pulse-prompt.js
 var pulse_prompt_exports = {};
 __export(pulse_prompt_exports, {
   maybeAskPulse: () => maybeAskPulse
 });
 import { createInterface as createInterface2 } from "readline";
-import { readFileSync as readFileSync10, existsSync as existsSync8 } from "fs";
-import { join as join11 } from "path";
+import { readFileSync as readFileSync12, existsSync as existsSync9 } from "fs";
+import { join as join14 } from "path";
 import { fileURLToPath as fileURLToPath4 } from "url";
 function readLocalVersion2() {
   try {
-    for (const p of [join11(__dirname2, "..", "..", "package.json"), join11(__dirname2, "..", "package.json")]) {
-      if (existsSync8(p)) {
-        const pkg = JSON.parse(readFileSync10(p, "utf8"));
+    for (const p of [join14(__dirname2, "..", "..", "package.json"), join14(__dirname2, "..", "package.json")]) {
+      if (existsSync9(p)) {
+        const pkg = JSON.parse(readFileSync12(p, "utf8"));
         if (pkg.version) return pkg.version;
       }
     }
@@ -10648,12 +12531,12 @@ async function maybeAskPulse() {
   }
   writeConfig({ lastPulseAskAt: (/* @__PURE__ */ new Date()).toISOString() });
   const rl = createInterface2({ input: process.stdin, output: process.stdout });
-  const ask3 = (question) => new Promise((resolve2) => {
-    const onClose = () => resolve2(null);
+  const ask3 = (question) => new Promise((resolve3) => {
+    const onClose = () => resolve3(null);
     rl.once("close", onClose);
     rl.question(question, (answer2) => {
       rl.removeListener("close", onClose);
-      resolve2((answer2 || "").trim());
+      resolve3((answer2 || "").trim());
     });
   });
   const answer = await ask3(
@@ -10703,16 +12586,21 @@ var jpi_jobs_exports = {};
 __export(jpi_jobs_exports, {
   VALID_STATUS_FILTERS: () => VALID_STATUS_FILTERS,
   appliedThisWeek: () => appliedThisWeek,
+  applyFreshView: () => applyFreshView,
   applyStatusView: () => applyStatusView,
   getJobMatches: () => getJobMatches,
+  recordShown: () => recordShown,
   run: () => run2,
   statusLabel: () => statusLabel
 });
-import { readFileSync as readFileSync11 } from "fs";
-import { join as join12 } from "path";
-import { homedir as homedir10 } from "os";
+import { readFileSync as readFileSync13 } from "fs";
+import { join as join15 } from "path";
+import { homedir as homedir12 } from "os";
 import { createInterface as createInterface3 } from "readline";
 import { fileURLToPath as fileURLToPath5 } from "url";
+function isRotatingView() {
+  return !SHOW_ALL && PAGE === null && STATUS_FILTER === null && !STABLE;
+}
 function applyStatusView(decorated, filter) {
   if (!filter) return decorated.filter((d) => d.jobStatus?.status !== "dismissed");
   switch (filter) {
@@ -10723,12 +12611,29 @@ function applyStatusView(decorated, filter) {
     case "clicked":
       return decorated.filter((d) => d.jobStatus?.clicked === true);
     case "unactioned":
-      return decorated.filter(
-        (d) => !d.jobStatus || !d.jobStatus.clicked && !d.jobStatus.status
-      );
+      return decorated.filter((d) => !d.jobStatus || !d.jobStatus.clicked && !d.jobStatus.status);
     default:
       return decorated;
   }
+}
+async function applyFreshView(view, deps = {}) {
+  try {
+    const { filterFreshMatches: filterFreshMatches2 } = deps.filterFreshMatches ? deps : await Promise.resolve().then(() => (init_spinner(), spinner_exports));
+    const { loadSeenHistory: loadSeenHistory2 } = deps.loadSeenHistory ? deps : await Promise.resolve().then(() => (init_spinner_seen(), spinner_seen_exports));
+    return filterFreshMatches2(view, loadSeenHistory2(), decoratedId);
+  } catch {
+    return view;
+  }
+}
+async function recordShown(shown, deps = {}) {
+  const ids = (Array.isArray(shown) ? shown : []).map((d) => decoratedId(d)).filter((id) => id != null && id !== "").map(String);
+  if (ids.length === 0) return [];
+  try {
+    const { recordSurface: recordSurface2 } = deps.recordSurface ? deps : await Promise.resolve().then(() => (init_spinner_seen(), spinner_seen_exports));
+    recordSurface2(ids);
+  } catch {
+  }
+  return ids;
 }
 function statusLabel(rec) {
   if (!rec) return "";
@@ -10748,7 +12653,7 @@ function appliedThisWeek(statusMap, now = Date.now()) {
 }
 function readIndexCache() {
   try {
-    const raw = readFileSync11(INDEX_CACHE_FILE2, "utf8");
+    const raw = readFileSync13(INDEX_CACHE_FILE2, "utf8");
     const entry = JSON.parse(raw);
     if (Date.now() - entry.ts < INDEX_TTL_MS) return entry.index;
     return null;
@@ -10772,10 +12677,10 @@ async function fetchIndex() {
 }
 function prompt(question) {
   const rl = createInterface3({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve2) => {
+  return new Promise((resolve3) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve2(answer.trim().toLowerCase());
+      resolve3(answer.trim().toLowerCase());
     });
   });
 }
@@ -10852,7 +12757,9 @@ ${i + 1}. ${titleStr} \u2014 ${sanitizeText(job.company)}${mode}${label}`);
   console.log(`   ${reason}`);
   console.log(`   Tags matched: ${matchedTags.slice(0, 5).join(", ")}`);
   if (acceptance && acceptance.status === "ok" && acceptance.count > 0) {
-    console.log(`   \u2713 proof-of-work: ${acceptance.count} merged PR${acceptance.count === 1 ? "" : "s"} into external ${acceptance.domain} repos`);
+    console.log(
+      `   \u2713 proof-of-work: ${acceptance.count} merged PR${acceptance.count === 1 ? "" : "s"} into external ${acceptance.domain} repos`
+    );
   }
   if (job.applyMode === "direct") {
     console.log(`   Apply: ${sanitizeText(job.url)}`);
@@ -10926,9 +12833,19 @@ async function getJobMatches({ quiet = false, offline = false } = {}) {
   }
   const fp = profileToFingerprint2(profile);
   if (REMOTE_ONLY) fp.prefs = { ...fp.prefs, remoteOnly: true };
-  const ranked = match2(fp, jobs, jobs.length, Date.now(), {
+  let ranked = match2(fp, jobs, jobs.length, Date.now(), {
     acceptance: profile.acceptance
   });
+  if (MMR_RERANK_ENABLED) {
+    try {
+      const { mmrRerank: mmrRerank2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+      const isRoleResult = (r) => r?.job?.source !== "bounty" && r?.job?.source !== "contribute";
+      const roleResults = ranked.filter(isRoleResult);
+      const otherResults = ranked.filter((r) => !isRoleResult(r));
+      ranked = [...mmrRerank2(roleResults, { lambda: MMR_LAMBDA, k: MMR_K }), ...otherResults];
+    } catch {
+    }
+  }
   try {
     updateIndexCache({ matchCount: ranked.length });
   } catch {
@@ -10971,11 +12888,13 @@ async function run2() {
     const { decorate: decorate2, pageMatches: pageMatches2, funnelCounts: funnelCounts2 } = await Promise.resolve().then(() => (init_src(), src_exports));
     const statusMap = readStatusMap();
     const decorated = decorate2(ranked, statusMap);
-    const view = applyStatusView(decorated, STATUS_FILTER);
+    let view = applyStatusView(decorated, STATUS_FILTER);
+    if (isRotatingView()) view = await applyFreshView(view);
     const pageSize = SHOW_ALL ? Math.max(1, view.length) : LIMIT;
     const pageNum = SHOW_ALL ? 1 : PAGE ?? 1;
     const pageInfo = pageMatches2(view, pageNum, pageSize);
     const shown = pageInfo.items;
+    if (isRotatingView()) await recordShown(shown);
     const filterNote = STATUS_FILTER ? ` (--status ${STATUS_FILTER})` : "";
     console.log(
       `
@@ -11013,21 +12932,25 @@ async function run2() {
       return;
     }
     console.log("\n" + "\u2500".repeat(70));
-    console.log("  Tip: terminalhire jobs mark <id> applied|saved|dismissed  to track your funnel.");
-    const pick2 = await prompt(
-      `
-Enter a number to act on a role, or press Enter to exit: `
+    console.log(
+      "  Tip: terminalhire jobs mark <id> applied|saved|dismissed  to track your funnel."
     );
+    const pick2 = await prompt(`
+Enter a number to act on a role, or press Enter to exit: `);
     const absIdx = parseInt(pick2, 10) - 1;
     const localIdx = absIdx - (pageInfo.page - 1) * pageInfo.limit;
     if (!isNaN(absIdx) && localIdx >= 0 && localIdx < shown.length) {
       const chosen = shown[localIdx];
       if (chosen.job.applyMode === "direct") {
         markClicked(chosen.job.id);
-        console.log(`
+        console.log(
+          `
 Open this URL to apply directly (no data shared):
-  ${sanitizeText(chosen.job.url)}`);
-        console.log(`  (marked "clicked" locally \u2014 mark it applied with: terminalhire jobs mark ${chosen.job.id} applied)`);
+  ${sanitizeText(chosen.job.url)}`
+        );
+        console.log(
+          `  (marked "clicked" locally \u2014 mark it applied with: terminalhire jobs mark ${chosen.job.id} applied)`
+        );
       } else if (chosen.job.applyMode === "buyer-lead") {
         await handleBuyerLead(chosen.job, profile);
       }
@@ -11042,7 +12965,7 @@ Open this URL to apply directly (no data shared):
     process.exit(1);
   }
 }
-var __dirname3, TERMINALHIRE_DIR7, INDEX_CACHE_FILE2, INDEX_TTL_MS, API_URL, DEFAULT_LIMIT, args, limitArg, LIMIT, REMOTE_ONLY, SHOW_ALL, pageArg, PAGE, statusArg, STATUS_FILTER, VALID_STATUS_FILTERS;
+var __dirname3, TERMINALHIRE_DIR7, INDEX_CACHE_FILE2, INDEX_TTL_MS, API_URL, DEFAULT_LIMIT, args, limitArg, LIMIT, REMOTE_ONLY, SHOW_ALL, pageArg, PAGE, statusArg, STATUS_FILTER, STABLE, MMR_RERANK_ENABLED, MMR_LAMBDA, MMR_K, VALID_STATUS_FILTERS, decoratedId;
 var init_jpi_jobs = __esm({
   "bin/jpi-jobs.js"() {
     "use strict";
@@ -11050,8 +12973,8 @@ var init_jpi_jobs = __esm({
     init_cache_store();
     init_sanitize();
     __dirname3 = fileURLToPath5(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join12(homedir10(), ".terminalhire");
-    INDEX_CACHE_FILE2 = join12(TERMINALHIRE_DIR7, "index-cache.json");
+    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join15(homedir12(), ".terminalhire");
+    INDEX_CACHE_FILE2 = join15(TERMINALHIRE_DIR7, "index-cache.json");
     INDEX_TTL_MS = 15 * 60 * 1e3;
     API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
     DEFAULT_LIMIT = 10;
@@ -11064,17 +12987,22 @@ var init_jpi_jobs = __esm({
     PAGE = pageArg !== -1 ? parseInt(args[pageArg + 1] ?? "1", 10) : null;
     statusArg = args.indexOf("--status");
     STATUS_FILTER = statusArg !== -1 ? args[statusArg + 1] ?? "" : null;
+    STABLE = args.includes("--stable");
+    MMR_RERANK_ENABLED = process.env["TH_MMR_RERANK"] !== "0";
+    MMR_LAMBDA = 0.8;
+    MMR_K = 8;
     VALID_STATUS_FILTERS = ["applied", "saved", "dismissed", "clicked", "unactioned"];
+    decoratedId = (m) => m?.job?.id;
   }
 });
 
 // bin/directory.js
-import { readFileSync as readFileSync12, writeFileSync as writeFileSync9, mkdirSync as mkdirSync9, renameSync as renameSync6 } from "fs";
-import { join as join13 } from "path";
-import { homedir as homedir11 } from "os";
+import { readFileSync as readFileSync14, writeFileSync as writeFileSync11, renameSync as renameSync8 } from "fs";
+import { join as join16 } from "path";
+import { homedir as homedir13 } from "os";
 function readDirectoryCache() {
   try {
-    const entry = JSON.parse(readFileSync12(DIRECTORY_CACHE_FILE, "utf8"));
+    const entry = JSON.parse(readFileSync14(DIRECTORY_CACHE_FILE, "utf8"));
     if (typeof entry.ts === "number" && Number.isFinite(entry.ts) && Date.now() - entry.ts < INDEX_TTL_MS2) {
       return { index: entry.index, ts: entry.ts };
     }
@@ -11084,12 +13012,12 @@ function readDirectoryCache() {
   }
 }
 function writeDirectoryCache(index) {
-  mkdirSync9(TERMINALHIRE_DIR8, { recursive: true });
-  writeFileSync9(DIRECTORY_CACHE_FILE, JSON.stringify({ ts: Date.now(), index }), "utf8");
+  ensureStateDir(TERMINALHIRE_DIR8);
+  writeFileSync11(DIRECTORY_CACHE_FILE, JSON.stringify({ ts: Date.now(), index }), "utf8");
 }
 function readProject() {
   try {
-    return JSON.parse(readFileSync12(PROJECT_FILE, "utf8"));
+    return JSON.parse(readFileSync14(PROJECT_FILE, "utf8"));
   } catch {
     return null;
   }
@@ -11098,10 +13026,10 @@ function writeProject(patch) {
   const existing = readProject() ?? {};
   const merged = { ...existing, ...patch };
   if (!merged.createdAt) merged.createdAt = (/* @__PURE__ */ new Date()).toISOString();
-  mkdirSync9(TERMINALHIRE_DIR8, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR8);
   const tmpFile = `${PROJECT_FILE}.tmp`;
-  writeFileSync9(tmpFile, JSON.stringify(merged, null, 2), "utf8");
-  renameSync6(tmpFile, PROJECT_FILE);
+  writeFileSync11(tmpFile, JSON.stringify(merged, null, 2), "utf8");
+  renameSync8(tmpFile, PROJECT_FILE);
   return merged;
 }
 function relativeTime(ts) {
@@ -11156,9 +13084,10 @@ var TERMINALHIRE_DIR8, DIRECTORY_CACHE_FILE, PROJECT_FILE, INDEX_TTL_MS2, API_UR
 var init_directory2 = __esm({
   "bin/directory.js"() {
     "use strict";
-    TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join13(homedir11(), ".terminalhire");
-    DIRECTORY_CACHE_FILE = join13(TERMINALHIRE_DIR8, "directory-cache.json");
-    PROJECT_FILE = join13(TERMINALHIRE_DIR8, "project.json");
+    init_state_dir();
+    TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join16(homedir13(), ".terminalhire");
+    DIRECTORY_CACHE_FILE = join16(TERMINALHIRE_DIR8, "directory-cache.json");
+    PROJECT_FILE = join16(TERMINALHIRE_DIR8, "project.json");
     INDEX_TTL_MS2 = 15 * 60 * 1e3;
     API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
   }
@@ -11286,10 +13215,10 @@ __export(jpi_devs_exports, {
 import { createInterface as createInterface4 } from "readline";
 function prompt2(question) {
   const rl = createInterface4({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve2) => {
+  return new Promise((resolve3) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve2(answer.trim().toLowerCase());
+      resolve3(answer.trim().toLowerCase());
     });
   });
 }
@@ -11419,23 +13348,23 @@ var jpi_project_exports = {};
 __export(jpi_project_exports, {
   run: () => run4
 });
-import { readFileSync as readFileSync13 } from "fs";
-import { join as join14 } from "path";
-import { homedir as homedir12 } from "os";
+import { readFileSync as readFileSync15 } from "fs";
+import { join as join17 } from "path";
+import { homedir as homedir14 } from "os";
 import { createInterface as createInterface5 } from "readline";
 function readProject2() {
   try {
-    return JSON.parse(readFileSync13(PROJECT_FILE2, "utf8"));
+    return JSON.parse(readFileSync15(PROJECT_FILE2, "utf8"));
   } catch {
     return null;
   }
 }
 function promptRaw(question) {
   const rl = createInterface5({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve2) => {
+  return new Promise((resolve3) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve2(answer.trim());
+      resolve3(answer.trim());
     });
   });
 }
@@ -11556,8 +13485,8 @@ var init_jpi_project = __esm({
   "bin/jpi-project.js"() {
     "use strict";
     init_directory2();
-    TERMINALHIRE_DIR9 = process.env.TERMINALHIRE_DIR || join14(homedir12(), ".terminalhire");
-    PROJECT_FILE2 = join14(TERMINALHIRE_DIR9, "project.json");
+    TERMINALHIRE_DIR9 = process.env.TERMINALHIRE_DIR || join17(homedir14(), ".terminalhire");
+    PROJECT_FILE2 = join17(TERMINALHIRE_DIR9, "project.json");
     args3 = process.argv.slice(2);
     SHOW = args3.includes("--show");
     declarationArg = args3.filter((a) => !a.startsWith("--")).join(" ").trim();
@@ -11581,8 +13510,8 @@ __export(repo_experience_exports, {
   recordPolicySnapshot: () => recordPolicySnapshot,
   writeTombstone: () => writeTombstone
 });
-import { join as join15 } from "path";
-import { homedir as homedir13 } from "os";
+import { join as join18 } from "path";
+import { homedir as homedir15 } from "os";
 function blankFile() {
   return { version: 1, repos: {} };
 }
@@ -11789,8 +13718,8 @@ var init_repo_experience = __esm({
     "use strict";
     init_crypto_store();
     init_profile();
-    TERMINALHIRE_DIR10 = process.env.TERMINALHIRE_DIR || join15(homedir13(), ".terminalhire");
-    REPO_EXPERIENCE_FILE = join15(TERMINALHIRE_DIR10, "repo-experience.enc");
+    TERMINALHIRE_DIR10 = process.env.TERMINALHIRE_DIR || join18(homedir15(), ".terminalhire");
+    REPO_EXPERIENCE_FILE = join18(TERMINALHIRE_DIR10, "repo-experience.enc");
     MAX_REPOS = 100;
     MAX_CULTURE_SAMPLES = 12;
     MAX_NOTES = 10;
@@ -11817,19 +13746,27 @@ __export(claims_exports, {
   toPushedClaim: () => toPushedClaim,
   updateClaim: () => updateClaim
 });
-import { readFileSync as readFileSync14, writeFileSync as writeFileSync10, mkdirSync as mkdirSync10, renameSync as renameSync7, existsSync as existsSync9, rmSync as rmSync5, statSync } from "fs";
+import {
+  readFileSync as readFileSync16,
+  writeFileSync as writeFileSync12,
+  mkdirSync as mkdirSync4,
+  renameSync as renameSync9,
+  existsSync as existsSync10,
+  rmSync as rmSync5,
+  statSync
+} from "fs";
 import { randomBytes as randomBytes5 } from "crypto";
-import { join as join16 } from "path";
-import { homedir as homedir14 } from "os";
+import { join as join19 } from "path";
+import { homedir as homedir16 } from "os";
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 function withClaimsLock(fn) {
-  mkdirSync10(TERMINALHIRE_DIR11, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR11);
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   for (; ; ) {
     try {
-      mkdirSync10(LOCK_DIR, { mode: 448 });
+      mkdirSync4(LOCK_DIR, { mode: 448 });
       break;
     } catch {
       try {
@@ -11875,8 +13812,8 @@ function normalizeClaim(c) {
 }
 function readClaims() {
   try {
-    if (!existsSync9(CLAIMS_FILE)) return [];
-    const data = JSON.parse(readFileSync14(CLAIMS_FILE, "utf8"));
+    if (!existsSync10(CLAIMS_FILE)) return [];
+    const data = JSON.parse(readFileSync16(CLAIMS_FILE, "utf8"));
     const claims = Array.isArray(data?.claims) ? data.claims : [];
     return claims.map(normalizeClaim);
   } catch {
@@ -11884,12 +13821,16 @@ function readClaims() {
   }
 }
 function writeClaims(claims) {
-  mkdirSync10(TERMINALHIRE_DIR11, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR11);
   const tmp = `${CLAIMS_FILE}.${process.pid}.${randomBytes5(6).toString("hex")}.tmp`;
   const payload = { claims };
   try {
-    writeFileSync10(tmp, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 384, flag: "wx" });
-    renameSync7(tmp, CLAIMS_FILE);
+    writeFileSync12(tmp, JSON.stringify(payload, null, 2), {
+      encoding: "utf8",
+      mode: 384,
+      flag: "wx"
+    });
+    renameSync9(tmp, CLAIMS_FILE);
   } catch (err) {
     try {
       rmSync5(tmp, { force: true });
@@ -11962,8 +13903,9 @@ var TERMINALHIRE_DIR11, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOC
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
-    TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join16(homedir14(), ".terminalhire");
-    CLAIMS_FILE = join16(TERMINALHIRE_DIR11, "claims.json");
+    init_state_dir();
+    TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join19(homedir16(), ".terminalhire");
+    CLAIMS_FILE = join19(TERMINALHIRE_DIR11, "claims.json");
     LOCK_DIR = `${CLAIMS_FILE}.lock`;
     LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
     LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
@@ -11979,8 +13921,22 @@ var init_claims = __esm({
     ];
     TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
     POLL_TRANSITIONS = {
-      merged: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready", "submitted", "abandoned"]),
-      abandoned: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready", "submitted", "merged"]),
+      merged: /* @__PURE__ */ new Set([
+        "claimed",
+        "working",
+        "in-review",
+        "ready",
+        "submitted",
+        "abandoned"
+      ]),
+      abandoned: /* @__PURE__ */ new Set([
+        "claimed",
+        "working",
+        "in-review",
+        "ready",
+        "submitted",
+        "merged"
+      ]),
       submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
     };
   }
@@ -11998,13 +13954,13 @@ __export(jpi_bounties_exports, {
   rankBounties: () => rankBounties,
   run: () => run5
 });
-import { readFileSync as readFileSync15 } from "fs";
-import { join as join17 } from "path";
-import { homedir as homedir15 } from "os";
+import { readFileSync as readFileSync17 } from "fs";
+import { join as join20 } from "path";
+import { homedir as homedir17 } from "os";
 import { createInterface as createInterface6 } from "readline";
 function readIndexCache2() {
   try {
-    const entry = JSON.parse(readFileSync15(INDEX_CACHE_FILE3, "utf8"));
+    const entry = JSON.parse(readFileSync17(INDEX_CACHE_FILE3, "utf8"));
     if (Date.now() - entry.ts < INDEX_TTL_MS3) return entry.index;
     return null;
   } catch {
@@ -12025,10 +13981,10 @@ async function fetchIndex2() {
 }
 function prompt3(question) {
   const rl = createInterface6({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve2) => {
+  return new Promise((resolve3) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve2(answer.trim().toLowerCase());
+      resolve3(answer.trim().toLowerCase());
     });
   });
 }
@@ -12214,8 +14170,8 @@ var init_jpi_bounties = __esm({
     init_src();
     init_cache_store();
     init_sanitize();
-    TERMINALHIRE_DIR12 = process.env.TERMINALHIRE_DIR || join17(homedir15(), ".terminalhire");
-    INDEX_CACHE_FILE3 = join17(TERMINALHIRE_DIR12, "index-cache.json");
+    TERMINALHIRE_DIR12 = process.env.TERMINALHIRE_DIR || join20(homedir17(), ".terminalhire");
+    INDEX_CACHE_FILE3 = join20(TERMINALHIRE_DIR12, "index-cache.json");
     INDEX_TTL_MS3 = 15 * 60 * 1e3;
     API_URL4 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
     RANK_MODE = process.env["TERMINALHIRE_BOUNTY_RANK"] ?? "winnability";
@@ -12236,16 +14192,19 @@ var jpi_contribute_exports = {};
 __export(jpi_contribute_exports, {
   applyContinuityRank: () => applyContinuityRank2,
   continuityNoteForRow: () => continuityNoteForRow2,
+  localContributionDiscovery: () => localContributionDiscovery,
+  mergeContribDedup: () => mergeContribDedup,
   rankContributions: () => rankContributions,
   renderRow: () => renderRow,
   run: () => run6
 });
-import { readFileSync as readFileSync16 } from "fs";
-import { join as join18 } from "path";
-import { homedir as homedir16 } from "os";
+import { readFileSync as readFileSync18, writeFileSync as writeFileSync13, renameSync as renameSync10 } from "fs";
+import { join as join21 } from "path";
+import { homedir as homedir18 } from "os";
+import { createHash as createHash3, randomBytes as randomBytes6 } from "crypto";
 function readIndexCache3() {
   try {
-    const entry = JSON.parse(readFileSync16(INDEX_CACHE_FILE4, "utf8"));
+    const entry = JSON.parse(readFileSync18(INDEX_CACHE_FILE4, "utf8"));
     if (Date.now() - entry.ts < INDEX_TTL_MS4) return entry.index;
     return null;
   } catch {
@@ -12290,6 +14249,128 @@ async function rankLocally(items, injectedFp) {
     }
   }
   return rankContributions(fp, items);
+}
+function stripRaw(job) {
+  if (!job || typeof job !== "object" || !("raw" in job)) return job;
+  const { raw: _raw, ...rest } = job;
+  return rest;
+}
+function mergeContribDedup(shared, local) {
+  const base = Array.isArray(shared) ? shared : [];
+  if (!Array.isArray(local) || local.length === 0) return base;
+  const seen = new Set(base.map((j) => j?.id));
+  const merged = base.slice();
+  for (const j of local) {
+    if (j && typeof j.id === "string" && !seen.has(j.id)) {
+      seen.add(j.id);
+      merged.push(j);
+    }
+  }
+  return merged;
+}
+async function fetchStarredSlugs(token, fetchImpl = globalThis.fetch) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (let page = 1; page <= STARRED_MAX_PAGES; page++) {
+    let items = null;
+    try {
+      const res = await fetchImpl(
+        `https://api.github.com/user/starred?per_page=${STARRED_PER_PAGE}&sort=updated&direction=desc&page=${page}`,
+        {
+          headers: {
+            Accept: "application/vnd.github+json",
+            "User-Agent": "terminalhire",
+            "X-GitHub-Api-Version": "2022-11-28",
+            Authorization: `Bearer ${token}`
+          },
+          signal: AbortSignal.timeout(8e3)
+        }
+      );
+      if (!res.ok) break;
+      const body = await res.json();
+      items = Array.isArray(body) ? body : null;
+    } catch {
+      break;
+    }
+    if (!items || items.length === 0) break;
+    for (const it of items) {
+      const slug = typeof it?.full_name === "string" ? it.full_name.toLowerCase().trim() : null;
+      if (slug && /^[^/\s]+\/[^/\s]+$/.test(slug) && !seen.has(slug) && out.length < MAX_SEEDS) {
+        seen.add(slug);
+        out.push(slug);
+      }
+    }
+    if (out.length >= MAX_SEEDS) break;
+    if (items.length < STARRED_PER_PAGE) break;
+  }
+  return out;
+}
+function readLocalPoolCache() {
+  try {
+    return JSON.parse(readFileSync18(LOCAL_CONTRIB_CACHE_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function cacheKeyFor(login, token) {
+  if (typeof login === "string" && login.length > 0) return login;
+  return "tok:" + createHash3("sha256").update(String(token)).digest("hex").slice(0, 16);
+}
+function writeLocalPoolCache(entry) {
+  try {
+    ensureStateDir(TERMINALHIRE_DIR13);
+    const tmp = `${LOCAL_CONTRIB_CACHE_FILE}.${process.pid}.${randomBytes6(6).toString("hex")}.tmp`;
+    writeFileSync13(tmp, JSON.stringify({ v: LOCAL_CACHE_SCHEMA, ...entry }), {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 384
+    });
+    renameSync10(tmp, LOCAL_CONTRIB_CACHE_FILE);
+  } catch {
+  }
+}
+async function localContributionDiscovery({
+  token,
+  login = null,
+  now = Date.now,
+  discoverImpl = aggregateContributions,
+  seedImpl = fetchStarredSlugs,
+  stderr
+} = {}) {
+  if (!token) return [];
+  const key = cacheKeyFor(login, token);
+  const cached2 = readLocalPoolCache();
+  if (cached2 && cached2.v === LOCAL_CACHE_SCHEMA && cached2.key === key && typeof cached2.ts === "number") {
+    const ttl = cached2.degraded ? LOCAL_DISCOVERY_RETRY_TTL_MS : LOCAL_DISCOVERY_TTL_MS;
+    if (now() - cached2.ts < ttl) return Array.isArray(cached2.pool) ? cached2.pool : [];
+  }
+  const seedSlugs = await Promise.resolve(seedImpl(token)).catch(() => []);
+  const err = stderr ?? process.stderr;
+  const showNote = !!err.isTTY;
+  if (showNote) err.write("\xB7 searching your GitHub for more matches\u2026\r");
+  let degraded = false;
+  let pool = [];
+  try {
+    const raw = await discoverImpl({
+      token,
+      discoverRepos: true,
+      seedSlugs: Array.isArray(seedSlugs) && seedSlugs.length ? seedSlugs : void 0,
+      // NO vocabTerms — profile-derived search terms must never cross the wire; the
+      // core default vocab does breadth backfill, the starred seeds diversify.
+      budgetMs: LOCAL_DISCOVERY_BUDGET_MS,
+      onStats: (s) => {
+        degraded = !!s?.degraded;
+      }
+    });
+    pool = (Array.isArray(raw) ? raw : []).map(stripRaw);
+  } catch {
+    degraded = true;
+    pool = [];
+  } finally {
+    if (showNote) err.write("\x1B[2K\r");
+  }
+  writeLocalPoolCache({ ts: now(), key, degraded, pool });
+  return pool;
 }
 function applyContinuityRank2(results, continuityOf, { enabled = true } = {}) {
   if (!enabled) return results;
@@ -12342,8 +14423,44 @@ async function run6(opts = {}) {
       return;
     }
     const index = await fetchIndex3(fetchImpl, useCache);
-    const items = Array.isArray(index?.contribute) ? index.contribute : [];
-    const results = await rankLocally(items, opts.fingerprint);
+    let items = Array.isArray(index?.contribute) ? index.contribute : [];
+    let fp = opts.fingerprint;
+    if (!fp) {
+      try {
+        const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+        const profile = await readProfile2();
+        if (profile.skillTags?.length) fp = profileToFingerprint2(profile);
+      } catch {
+      }
+    }
+    if (fp?.skillTags?.length && !LOCAL_DISCOVERY_DISABLED && (opts.discoverContributions || useCache)) {
+      try {
+        let token = opts.token;
+        let login = opts.login ?? null;
+        if (token == null && useCache) {
+          const auth = await Promise.resolve().then(() => (init_github_auth(), github_auth_exports));
+          token = await auth.readGitHubToken();
+          if (token && login == null) {
+            login = await auth.resolveStoredLogin().catch(() => null);
+          }
+        }
+        if (token) {
+          const localPool = await localContributionDiscovery({
+            token,
+            login,
+            discoverImpl: opts.discoverContributions,
+            // Real runs seed from starred repos (default fetchStarredSlugs); a test
+            // that injects a discovery fn but no seeds gets an inert seeder so it
+            // never touches the network.
+            seedImpl: opts.discoverSeeds ?? (opts.discoverContributions ? () => [] : void 0),
+            stderr: opts.stderr
+          });
+          items = mergeContribDedup(items, localPool);
+        }
+      } catch {
+      }
+    }
+    const results = await rankLocally(items, fp);
     if (results.length === 0) {
       log(EMPTY_STATE);
       return;
@@ -12354,7 +14471,9 @@ async function run6(opts = {}) {
         const { continuityForRepo: continuityForRepo2 } = await Promise.resolve().then(() => (init_repo_experience(), repo_experience_exports));
         const { readClaims: readClaims2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
         const claims = readClaims2();
-        const repos = [...new Set(results.map((r) => r.job.contribution?.repoFullName).filter(Boolean))];
+        const repos = [
+          ...new Set(results.map((r) => r.job.contribution?.repoFullName).filter(Boolean))
+        ];
         for (const repo of repos) {
           continuityByRepo.set(repo, await continuityForRepo2(repo, claims));
         }
@@ -12380,19 +14499,26 @@ async function run6(opts = {}) {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR13, INDEX_CACHE_FILE4, INDEX_TTL_MS4, API_URL5, CONTINUITY_RANK_DISABLED2, HEADER, CONTRIBUTE_OFF, EMPTY_STATE, STRONG_THRESHOLD, LANGUAGES;
+var TERMINALHIRE_DIR13, INDEX_CACHE_FILE4, INDEX_TTL_MS4, API_URL5, CONTINUITY_RANK_DISABLED2, LOCAL_CONTRIB_CACHE_FILE, LOCAL_DISCOVERY_TTL_MS, LOCAL_DISCOVERY_RETRY_TTL_MS, LOCAL_DISCOVERY_BUDGET_MS, LOCAL_CACHE_SCHEMA, LOCAL_DISCOVERY_DISABLED, HEADER, CONTRIBUTE_OFF, EMPTY_STATE, STRONG_THRESHOLD, STARRED_PER_PAGE, STARRED_MAX_PAGES, MAX_SEEDS, LANGUAGES;
 var init_jpi_contribute = __esm({
   "bin/jpi-contribute.js"() {
     "use strict";
     init_src();
     init_cache_store();
     init_config();
+    init_state_dir();
     init_sanitize();
-    TERMINALHIRE_DIR13 = process.env.TERMINALHIRE_DIR || join18(homedir16(), ".terminalhire");
-    INDEX_CACHE_FILE4 = join18(TERMINALHIRE_DIR13, "index-cache.json");
+    TERMINALHIRE_DIR13 = process.env.TERMINALHIRE_DIR || join21(homedir18(), ".terminalhire");
+    INDEX_CACHE_FILE4 = join21(TERMINALHIRE_DIR13, "index-cache.json");
     INDEX_TTL_MS4 = 15 * 60 * 1e3;
     API_URL5 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
     CONTINUITY_RANK_DISABLED2 = process.env["TERMINALHIRE_NO_CONTINUITY_RANK"] === "1";
+    LOCAL_CONTRIB_CACHE_FILE = join21(TERMINALHIRE_DIR13, "contribute-local-cache.json");
+    LOCAL_DISCOVERY_TTL_MS = 6 * 60 * 60 * 1e3;
+    LOCAL_DISCOVERY_RETRY_TTL_MS = 15 * 60 * 1e3;
+    LOCAL_DISCOVERY_BUDGET_MS = 12e3;
+    LOCAL_CACHE_SCHEMA = 1;
+    LOCAL_DISCOVERY_DISABLED = process.env["TERMINALHIRE_NO_LOCAL_DISCOVERY"] === "1";
     HEADER = "Contribution opportunities \u2014 open issues where a merged PR actually counts toward your r\xE9sum\xE9.\nRepos \u226550\u2605 / \u226510 contributors \xB7 unassigned \xB7 merit-merge \xB7 matched to your stack.";
     CONTRIBUTE_OFF = "Contribute is off \u2014 you set contributeEnabled: false in ~/.terminalhire/config.json.\nRemove that line (or set it to true) to see open issues where a merged PR would count toward your r\xE9sum\xE9.";
     EMPTY_STATE = "Nothing clears the bar right now. We only list issues where a merged PR actually counts toward\nyour r\xE9sum\xE9 \u2014 so the list stays honest. Try again after the next refresh.";
@@ -12400,6 +14526,9 @@ var init_jpi_contribute = __esm({
     if (STRONG_THRESHOLD <= 0) {
       throw new Error("STRONG_THRESHOLD must be > 0 or the contested-issue fail-safe breaks");
     }
+    STARRED_PER_PAGE = 100;
+    STARRED_MAX_PAGES = 2;
+    MAX_SEEDS = 40;
     LANGUAGES = /* @__PURE__ */ new Set([
       "typescript",
       "javascript",
@@ -12441,6 +14570,70 @@ var init_jpi_contribute = __esm({
   }
 });
 
+// src/policy-acks.ts
+import { lstatSync, readFileSync as readFileSync19, writeFileSync as writeFileSync14 } from "fs";
+import { join as join22 } from "path";
+import { homedir as homedir19 } from "os";
+function isSymlink(path2) {
+  try {
+    return lstatSync(path2).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+function storeIsRedirected() {
+  return isSymlink(ACKS_FILE) || isSymlink(TERMINALHIRE_DIR14);
+}
+function isValidAck(value, repoKey2) {
+  if (!value || typeof value !== "object") return false;
+  const a = value;
+  return a.repo === repoKey2 && // the row must belong to the key it is filed under
+  typeof a.contentHash === "string" && HEX64.test(a.contentHash) && typeof a.rulesetVersion === "number" && typeof a.verdict === "string" && REMEMBERABLE_VERDICTS.has(a.verdict) && // never honor a forged prohibited/clean
+  typeof a.ackedAt === "string";
+}
+function readAcks() {
+  if (storeIsRedirected()) return {};
+  try {
+    const parsed = JSON.parse(readFileSync19(ACKS_FILE, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+function findPolicyAck(repo, contentHash, rulesetVersion) {
+  if (!contentHash) return null;
+  const ack = readAcks()[repo];
+  if (!isValidAck(ack, repo)) return null;
+  if (ack.contentHash !== contentHash) return null;
+  if (ack.rulesetVersion !== rulesetVersion) return null;
+  return ack;
+}
+function rememberPolicyAck(ack) {
+  if (!ack.contentHash) return;
+  if (!REMEMBERABLE_VERDICTS.has(ack.verdict)) return;
+  if (storeIsRedirected()) return;
+  try {
+    ensureStateDir(TERMINALHIRE_DIR14);
+    const all = readAcks();
+    all[ack.repo] = ack;
+    writeFileSync14(ACKS_FILE, `${JSON.stringify(all, null, 2)}
+`, { mode: 384 });
+  } catch {
+  }
+}
+var TERMINALHIRE_DIR14, ACKS_FILE, REMEMBERABLE_VERDICTS, HEX64;
+var init_policy_acks = __esm({
+  "src/policy-acks.ts"() {
+    "use strict";
+    init_state_dir();
+    TERMINALHIRE_DIR14 = process.env.TERMINALHIRE_DIR || join22(homedir19(), ".terminalhire");
+    ACKS_FILE = join22(TERMINALHIRE_DIR14, "policy-acks.json");
+    REMEMBERABLE_VERDICTS = /* @__PURE__ */ new Set(["ai-mentioned", "disclosure-required"]);
+    HEX64 = /^[0-9a-f]{64}$/;
+  }
+});
+
 // bin/claim-push-bg.js
 var claim_push_bg_exports = {};
 __export(claim_push_bg_exports, {
@@ -12461,21 +14654,21 @@ __export(claim_push_bg_exports, {
   writeAutoMarker: () => writeAutoMarker,
   writePushTokenEnc: () => writePushTokenEnc
 });
-import { createHash as createHash3 } from "crypto";
-import { readFileSync as readFileSync17, writeFileSync as writeFileSync11, mkdirSync as mkdirSync11, existsSync as existsSync10, rmSync as rmSync6 } from "fs";
-import { join as join19 } from "path";
-import { homedir as homedir17 } from "os";
+import { createHash as createHash4 } from "crypto";
+import { readFileSync as readFileSync20, writeFileSync as writeFileSync15, existsSync as existsSync11, rmSync as rmSync6 } from "fs";
+import { join as join23 } from "path";
+import { homedir as homedir20 } from "os";
 async function writePushTokenEnc(rawToken) {
-  mkdirSync11(TERMINALHIRE_DIR14, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR15);
   const key = await loadKey();
   const blob = encrypt(rawToken, key);
-  writeFileSync11(CLAIM_PUSH_TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+  writeFileSync15(CLAIM_PUSH_TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 async function readPushTokenEnc() {
-  if (!existsSync10(CLAIM_PUSH_TOKEN_FILE)) return void 0;
+  if (!existsSync11(CLAIM_PUSH_TOKEN_FILE)) return void 0;
   try {
     const key = await loadKey();
-    const blob = JSON.parse(readFileSync17(CLAIM_PUSH_TOKEN_FILE, "utf8"));
+    const blob = JSON.parse(readFileSync20(CLAIM_PUSH_TOKEN_FILE, "utf8"));
     return decrypt(blob, key);
   } catch {
     return void 0;
@@ -12489,14 +14682,14 @@ function clearPushTokenEnc() {
 }
 function readAutoMarker() {
   try {
-    return existsSync10(CLAIM_PUSH_AUTO_MARKER) ? JSON.parse(readFileSync17(CLAIM_PUSH_AUTO_MARKER, "utf8")) : null;
+    return existsSync11(CLAIM_PUSH_AUTO_MARKER) ? JSON.parse(readFileSync20(CLAIM_PUSH_AUTO_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
 }
 function writeAutoMarker(marker) {
-  mkdirSync11(TERMINALHIRE_DIR14, { recursive: true });
-  writeFileSync11(CLAIM_PUSH_AUTO_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  ensureStateDir(TERMINALHIRE_DIR15);
+  writeFileSync15(CLAIM_PUSH_AUTO_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearAutoMarker() {
   try {
@@ -12505,7 +14698,7 @@ function clearAutoMarker() {
   }
 }
 function computeSnapshotHash(pushed) {
-  return createHash3("sha256").update(JSON.stringify(pushed)).digest("hex");
+  return createHash4("sha256").update(JSON.stringify(pushed)).digest("hex");
 }
 function backgroundPushGate(params) {
   const {
@@ -12550,13 +14743,13 @@ async function shouldNudgeUnpushed() {
     const currentHash = computeSnapshotHash(pushed);
     let manual = null;
     try {
-      manual = existsSync10(CLAIM_PUSH_MANUAL_MARKER) ? JSON.parse(readFileSync17(CLAIM_PUSH_MANUAL_MARKER, "utf8")) : null;
+      manual = existsSync11(CLAIM_PUSH_MANUAL_MARKER) ? JSON.parse(readFileSync20(CLAIM_PUSH_MANUAL_MARKER, "utf8")) : null;
     } catch {
       manual = null;
     }
     return unpushedNudgeGate({
-      autoMarkerExists: existsSync10(CLAIM_PUSH_AUTO_MARKER),
-      tokenFileExists: existsSync10(CLAIM_PUSH_TOKEN_FILE),
+      autoMarkerExists: existsSync11(CLAIM_PUSH_AUTO_MARKER),
+      tokenFileExists: existsSync11(CLAIM_PUSH_TOKEN_FILE),
       manualMarkerExists: !!manual,
       lastSnapshotHash: manual?.lastSnapshotHash ?? null,
       currentHash,
@@ -12568,7 +14761,7 @@ async function shouldNudgeUnpushed() {
 }
 async function runBackgroundClaimPush({ now = Date.now() } = {}) {
   try {
-    if (!existsSync10(CLAIM_PUSH_AUTO_MARKER) || !existsSync10(CLAIM_PUSH_TOKEN_FILE)) return;
+    if (!existsSync11(CLAIM_PUSH_AUTO_MARKER) || !existsSync11(CLAIM_PUSH_TOKEN_FILE)) return;
     const marker = readAutoMarker();
     if (!marker || !marker.autoConsentedAt) return;
     const { listClaims: listClaims2, toPushedClaim: toPushedClaim2, PUSHED_CLAIM_FIELDS: PUSHED_CLAIM_FIELDS2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -12606,15 +14799,16 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
   } catch {
   }
 }
-var TERMINALHIRE_DIR14, CLAIM_PUSH_AUTO_MARKER, CLAIM_PUSH_TOKEN_FILE, CLAIM_PUSH_MANUAL_MARKER, CLAIM_SYNC_BASE, AUTO_CONSENT_VERSION, AUTO_PUSH_THROTTLE_MS;
+var TERMINALHIRE_DIR15, CLAIM_PUSH_AUTO_MARKER, CLAIM_PUSH_TOKEN_FILE, CLAIM_PUSH_MANUAL_MARKER, CLAIM_SYNC_BASE, AUTO_CONSENT_VERSION, AUTO_PUSH_THROTTLE_MS;
 var init_claim_push_bg = __esm({
   "bin/claim-push-bg.js"() {
     "use strict";
     init_github_auth();
-    TERMINALHIRE_DIR14 = process.env.TERMINALHIRE_DIR || join19(homedir17(), ".terminalhire");
-    CLAIM_PUSH_AUTO_MARKER = join19(TERMINALHIRE_DIR14, "claim-push-auto.json");
-    CLAIM_PUSH_TOKEN_FILE = join19(TERMINALHIRE_DIR14, "claim-push-token.enc");
-    CLAIM_PUSH_MANUAL_MARKER = join19(TERMINALHIRE_DIR14, "claim-push.json");
+    init_state_dir();
+    TERMINALHIRE_DIR15 = process.env.TERMINALHIRE_DIR || join23(homedir20(), ".terminalhire");
+    CLAIM_PUSH_AUTO_MARKER = join23(TERMINALHIRE_DIR15, "claim-push-auto.json");
+    CLAIM_PUSH_TOKEN_FILE = join23(TERMINALHIRE_DIR15, "claim-push-token.enc");
+    CLAIM_PUSH_MANUAL_MARKER = join23(TERMINALHIRE_DIR15, "claim-push.json");
     CLAIM_SYNC_BASE = "https://terminalhire.com";
     AUTO_CONSENT_VERSION = 2;
     AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
@@ -12628,6 +14822,7 @@ __export(repo_policy_exports, {
   auditContent: () => auditContent,
   checkRepoPolicy: () => checkRepoPolicy
 });
+import { createHash as createHash5 } from "crypto";
 async function fetchContentsFile(fetchImpl, repoFullName, path2) {
   try {
     const res = await fetchImpl(`${GH_API}/repos/${repoFullName}/contents/${path2}`, {
@@ -12641,8 +14836,12 @@ async function fetchContentsFile(fetchImpl, repoFullName, path2) {
     if (!res.ok) return { ok: false, missing: false, content: null };
     const body = await res.json();
     if (typeof body.content !== "string") return { ok: false, missing: false, content: null };
-    const decoded = Buffer.from(body.content.replace(/\n/g, ""), "base64").toString("utf8");
-    return { ok: true, missing: false, content: decoded };
+    if (body.encoding !== "base64") return { ok: false, missing: false, content: null };
+    const raw = Buffer.from(body.content.replace(/\n/g, ""), "base64");
+    if (typeof body.size === "number" && raw.length !== body.size) {
+      return { ok: false, missing: false, content: null };
+    }
+    return { ok: true, missing: false, content: raw.toString("utf8") };
   } catch {
     return { ok: false, missing: false, content: null };
   }
@@ -12660,6 +14859,14 @@ function excerptAround(lines, i) {
   const start = Math.max(0, i - 2);
   const end = Math.min(lines.length, i + 3);
   return sanitizeExcerpt(lines.slice(start, end).join("\n"));
+}
+function hashFiles(files) {
+  if (files.length === 0) return null;
+  const h = createHash5("sha256");
+  for (const { file, content } of files) h.update(`${file}
+${content}
+`);
+  return h.digest("hex");
 }
 function auditContent(files) {
   const hits = [];
@@ -12690,10 +14897,14 @@ async function checkRepoPolicy(repoFullName, opts = {}) {
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   let requestsUsed = 0;
   let hadError = false;
+  let truncated = false;
   const files = [];
   outer: for (const group of CANDIDATE_GROUPS) {
     for (const path2 of group) {
-      if (requestsUsed >= MAX_REQUESTS) break outer;
+      if (requestsUsed >= MAX_REQUESTS) {
+        truncated = true;
+        break outer;
+      }
       requestsUsed++;
       const outcome = await fetchContentsFile(fetchImpl, repoFullName, path2);
       if (!outcome.ok) {
@@ -12702,17 +14913,44 @@ async function checkRepoPolicy(repoFullName, opts = {}) {
       }
       if (outcome.missing) continue;
       if (outcome.content) files.push({ file: path2, content: outcome.content });
-      break;
     }
   }
   const { hits, requirements, verdict, assignment } = auditContent(files);
+  const scanComplete = !hadError && !truncated;
   if (hits.length > 0) {
-    return { status: "flagged", verdict, hits, requirements, assignment, rulesetVersion: POLICY_RULESET_VERSION };
+    return {
+      status: "flagged",
+      verdict,
+      hits,
+      requirements,
+      assignment,
+      rulesetVersion: POLICY_RULESET_VERSION,
+      contentHash: hashFiles(files),
+      scanComplete
+    };
   }
   if (hadError) {
-    return { status: "unavailable", verdict: "unavailable", hits: [], requirements, assignment, rulesetVersion: POLICY_RULESET_VERSION };
+    return {
+      status: "unavailable",
+      verdict: "unavailable",
+      hits: [],
+      requirements,
+      assignment,
+      rulesetVersion: POLICY_RULESET_VERSION,
+      contentHash: hashFiles(files),
+      scanComplete
+    };
   }
-  return { status: "clean", verdict: "clean", hits: [], requirements, assignment, rulesetVersion: POLICY_RULESET_VERSION };
+  return {
+    status: "clean",
+    verdict: "clean",
+    hits: [],
+    requirements,
+    assignment,
+    rulesetVersion: POLICY_RULESET_VERSION,
+    contentHash: hashFiles(files),
+    scanComplete
+  };
 }
 var GH_API, GH_HEADERS, MAX_REQUESTS, POLICY_RULESET_VERSION, AI_SIGNAL_PATTERNS, AI_TERM, PROHIBITED_PATTERNS, DISCLOSURE_PATTERNS, REQUIREMENT_PATTERNS, CANDIDATE_GROUPS, VERDICT_SEVERITY;
 var init_repo_policy = __esm({
@@ -12720,7 +14958,7 @@ var init_repo_policy = __esm({
     "use strict";
     GH_API = "https://api.github.com";
     GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
-    MAX_REQUESTS = 4;
+    MAX_REQUESTS = 7;
     POLICY_RULESET_VERSION = 2;
     AI_SIGNAL_PATTERNS = [
       { label: "AI", re: /\bAI\b/i },
@@ -12738,7 +14976,10 @@ var init_repo_policy = __esm({
       new RegExp(`prohibit\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
       /did not write the code yourself/i,
       new RegExp(`(?:not|never|don'?t|won'?t)\\s+accept\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
-      new RegExp(`\\bno\\s+${AI_TERM}[^.\\n]{0,40}\\b(?:prs?|pull requests?|contributions?|code|patch(?:es)?|commits?|submissions?)\\b`, "i"),
+      new RegExp(
+        `\\bno\\s+${AI_TERM}[^.\\n]{0,40}\\b(?:prs?|pull requests?|contributions?|code|patch(?:es)?|commits?|submissions?)\\b`,
+        "i"
+      ),
       new RegExp(
         `\\b${AI_TERM}[^.\\n]{0,60}\\b(?:is|are|will be)\\s+(?:\\w+\\s+)?(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
         "i"
@@ -12758,7 +14999,10 @@ var init_repo_policy = __esm({
       { kind: "assignment-required", re: /(?:request|ask|wait)[^.\n]{0,40}\bassign/i },
       { kind: "assignment-required", re: /\bassigned before\b/i },
       { kind: "assignment-required", re: /\bself[\s-]assign/i },
-      { kind: "assignment-required", re: /do not (?:open|submit)[^.\n]{0,40}\b(?:prs?|pull requests?)\b/i },
+      {
+        kind: "assignment-required",
+        re: /do not (?:open|submit)[^.\n]{0,40}\b(?:prs?|pull requests?)\b/i
+      },
       { kind: "cla-required", re: /\bCLA\b/ },
       { kind: "cla-required", re: /contributor licen[cs]e agreement/i },
       { kind: "discussion-first", re: /open an issue (?:first|before)/i },
@@ -12900,7 +15144,7 @@ function byTime(a, b) {
   if (a.source_id > b.source_id) return 1;
   return 0;
 }
-function hoursBetween(a, b) {
+function hoursBetween2(a, b) {
   if (!a || !b) return null;
   const ta = Date.parse(a);
   const tb = Date.parse(b);
@@ -12926,8 +15170,8 @@ function buildAuditView(lifecycle, facts) {
     distinctCounterparties: counterpartyIds.size,
     maintainerReviews,
     iterationsAfterFirstResponse,
-    hoursToFirstResponse: hoursBetween(lifecycle.openedAt, firstResponseAt),
-    hoursToMerge: hoursBetween(lifecycle.openedAt, lifecycle.mergedAt)
+    hoursToFirstResponse: hoursBetween2(lifecycle.openedAt, firstResponseAt),
+    hoursToMerge: hoursBetween2(lifecycle.openedAt, lifecycle.mergedAt)
   };
   const timeline = events.map((e) => ({
     at: e.occurred_at,
@@ -12947,7 +15191,6 @@ function buildAuditView(lifecycle, facts) {
     outcome,
     mergedAt: lifecycle.mergedAt,
     closedUnmergedAt: lifecycle.closedUnmergedAt,
-    mergedByLogin: facts?.mergedByLogin ?? null,
     signals,
     timeline,
     completeness: { ...lifecycle.complete },
@@ -13001,15 +15244,15 @@ __export(jpi_claim_exports, {
   startBranchFor: () => startBranchFor,
   workDirFor: () => workDirFor
 });
-import { readFileSync as readFileSync18, writeFileSync as writeFileSync12, mkdirSync as mkdirSync12, existsSync as existsSync11, rmSync as rmSync7 } from "fs";
-import { join as join20 } from "path";
-import { homedir as homedir18, hostname as osHostname } from "os";
+import { readFileSync as readFileSync21, writeFileSync as writeFileSync16, mkdirSync as mkdirSync5, existsSync as existsSync12, rmSync as rmSync7 } from "fs";
+import { join as join24 } from "path";
+import { homedir as homedir21, hostname as osHostname } from "os";
 import { execFile as execFile2 } from "child_process";
 import { promisify as promisify2 } from "util";
 import { createInterface as createInterface7 } from "readline";
 function readNudgedClaimIds() {
   try {
-    const raw = JSON.parse(readFileSync18(REPO_CONTINUITY_NUDGE_MARKER, "utf8"));
+    const raw = JSON.parse(readFileSync21(REPO_CONTINUITY_NUDGE_MARKER, "utf8"));
     return new Set(Array.isArray(raw.claimIds) ? raw.claimIds : []);
   } catch {
     return /* @__PURE__ */ new Set();
@@ -13019,8 +15262,8 @@ function markClaimNudged(id) {
   try {
     const ids = readNudgedClaimIds();
     ids.add(id);
-    mkdirSync12(TERMINALHIRE_DIR15, { recursive: true });
-    writeFileSync12(REPO_CONTINUITY_NUDGE_MARKER, JSON.stringify({ claimIds: [...ids] }), "utf8");
+    ensureStateDir(TERMINALHIRE_DIR16);
+    writeFileSync16(REPO_CONTINUITY_NUDGE_MARKER, JSON.stringify({ claimIds: [...ids] }), "utf8");
   } catch {
   }
 }
@@ -13041,15 +15284,23 @@ function buildSubmitBody(issueNumber, opts = {}) {
 function printPolicySection(policy) {
   const verdict = policy.verdict ?? (policy.status === "flagged" ? "ai-mentioned" : policy.status);
   if (verdict === "prohibited") {
-    console.log("\n  POLICY: \u2717 this repo PROHIBITS AI-generated contributions \u2014 READ BEFORE CLAIMING:");
+    console.log(
+      "\n  POLICY: \u2717 this repo PROHIBITS AI-generated contributions \u2014 READ BEFORE CLAIMING:"
+    );
   } else if (verdict === "disclosure-required") {
     console.log("\n  POLICY: \u26A0 this repo requires disclosing AI assistance \u2014 READ BEFORE WORKING:");
   } else if (verdict === "ai-mentioned") {
-    console.log("\n  POLICY: \u26A0 possible AI-assistance policy language found \u2014 READ BEFORE WORKING:");
+    console.log(
+      "\n  POLICY: \u26A0 possible AI-assistance policy language found \u2014 READ BEFORE WORKING:"
+    );
   } else if (policy.status === "unavailable") {
-    console.log("\n  POLICY: could not read this repo's CONTRIBUTING/PR-template/AGENTS docs (rate-limited or unreachable) \u2014 read them yourself before working.");
+    console.log(
+      "\n  POLICY: could not read this repo's CONTRIBUTING/PR-template/AGENTS docs (rate-limited or unreachable) \u2014 read them yourself before working."
+    );
   } else {
-    console.log("  policy: no AI-assistance policy language detected in CONTRIBUTING/PR-template/AGENTS docs");
+    console.log(
+      "  policy: no AI-assistance policy language detected in CONTRIBUTING/PR-template/AGENTS docs"
+    );
   }
   for (const hit of policy.hits ?? []) {
     console.log(`    [${hit.file}]`);
@@ -13065,21 +15316,31 @@ function printPolicySection(policy) {
   }
   const assignment = policy.assignment ?? "none";
   if (assignment === "take-bot") {
-    console.log("  assignment: repo self-assigns via a /take comment \u2014 `claim start` will post `/take` on the issue");
+    console.log(
+      "  assignment: repo self-assigns via a /take comment \u2014 `claim start` will post `/take` on the issue"
+    );
   } else if (assignment === "required") {
-    console.log("  assignment: repo expects you to request assignment \u2014 `claim start` will post a request comment on the issue");
+    console.log(
+      "  assignment: repo expects you to request assignment \u2014 `claim start` will post a request comment on the issue"
+    );
   } else {
-    console.log("  assignment: no assignment expectation found in repo docs \u2014 `claim start` will not comment (pass --assign to request anyway)");
+    console.log(
+      "  assignment: no assignment expectation found in repo docs \u2014 `claim start` will not comment (pass --assign to request anyway)"
+    );
   }
 }
 async function sh(cmd, args5, opts = {}) {
-  const { stdout } = await pExecFile(cmd, args5, { ...opts, shell: false, maxBuffer: 16 * 1024 * 1024 });
+  const { stdout } = await pExecFile(cmd, args5, {
+    ...opts,
+    shell: false,
+    maxBuffer: 16 * 1024 * 1024
+  });
   return String(stdout).trim();
 }
 async function confirm(question) {
   const rl = createInterface7({ input: process.stdin, output: process.stdout });
   try {
-    const ans = await new Promise((resolve2) => rl.question(question, resolve2));
+    const ans = await new Promise((resolve3) => rl.question(question, resolve3));
     return /^y(es)?$/i.test(String(ans).trim());
   } finally {
     rl.close();
@@ -13163,8 +15424,8 @@ function pickExistingPr(prListJson, ghUser) {
   return match2 && typeof match2.url === "string" ? match2.url : null;
 }
 function readClaimablePool() {
-  if (!existsSync11(INDEX_CACHE_FILE5)) return [];
-  const entry = JSON.parse(readFileSync18(INDEX_CACHE_FILE5, "utf8"));
+  if (!existsSync12(INDEX_CACHE_FILE5)) return [];
+  const entry = JSON.parse(readFileSync21(INDEX_CACHE_FILE5, "utf8"));
   const bounties = (entry?.index?.jobs ?? []).filter((j) => j.source === "bounty");
   const contributions = (entry?.index?.contribute ?? []).filter((j) => j.source === "contribute");
   return [...bounties, ...contributions];
@@ -13322,7 +15583,8 @@ async function fetchIssue(repoFullName, issueNumber) {
     const issue2 = await res.json();
     const state = issue2.state === "open" ? "open" : issue2.state === "closed" ? "closed" : null;
     const logins = /* @__PURE__ */ new Set();
-    if (issue2.assignee && typeof issue2.assignee.login === "string") logins.add(issue2.assignee.login);
+    if (issue2.assignee && typeof issue2.assignee.login === "string")
+      logins.add(issue2.assignee.login);
     if (Array.isArray(issue2.assignees)) {
       for (const a of issue2.assignees) {
         if (a && typeof a.login === "string") logins.add(a.login);
@@ -13367,7 +15629,9 @@ function shouldRequestAssignment(claim, flags = {}) {
 }
 async function requestIssueAssignment(claim, flags = {}, ghUser) {
   if (flags["no-assign"]) {
-    console.log("  (--no-assign \u2014 skipping the assignment request; request it manually before working)");
+    console.log(
+      "  (--no-assign \u2014 skipping the assignment request; request it manually before working)"
+    );
     return;
   }
   const parsed = parseGitHubUrl(claim.issueUrl);
@@ -13375,7 +15639,9 @@ async function requestIssueAssignment(claim, flags = {}, ghUser) {
   const { repoFullName, number: number3 } = parsed;
   const expectation = shouldRequestAssignment(claim, flags);
   if (!expectation.post) {
-    console.log("  (no assignment expectation found in repo docs \u2014 pass --assign to request assignment anyway)");
+    console.log(
+      "  (no assignment expectation found in repo docs \u2014 pass --assign to request assignment anyway)"
+    );
     return;
   }
   let login = ghUser;
@@ -13383,7 +15649,9 @@ async function requestIssueAssignment(claim, flags = {}, ghUser) {
     try {
       login = await sh("gh", ["api", "user", "-q", ".login"]);
     } catch {
-      console.log("  (assignment not requested: 'gh' not authenticated \u2014 comment on the issue manually before working)");
+      console.log(
+        "  (assignment not requested: 'gh' not authenticated \u2014 comment on the issue manually before working)"
+      );
       return;
     }
   }
@@ -13392,7 +15660,9 @@ async function requestIssueAssignment(claim, flags = {}, ghUser) {
     console.log(`  \u2713 Already assigned to @${login} on ${repoFullName}#${number3}.`);
     return;
   }
-  const { usesTakeBot, body } = buildAssignmentComment(repoFullName, { takeBot: expectation.takeBot });
+  const { usesTakeBot, body } = buildAssignmentComment(repoFullName, {
+    takeBot: expectation.takeBot
+  });
   if (!usesTakeBot && await hasPriorAssignmentRequest(repoFullName, number3, login)) {
     console.log(`  \u2713 Assignment already requested on ${repoFullName}#${number3}.`);
     return;
@@ -13413,7 +15683,9 @@ async function requestIssueAssignment(claim, flags = {}, ghUser) {
       usesTakeBot ? `  \u2713 Requested assignment via /take on ${repoFullName}#${number3}.` : `  \u2713 Requested assignment on ${repoFullName}#${number3}.`
     );
   } catch (err) {
-    console.log(`  (could not post the assignment request: ${err.stderr || err.message || err} \u2014 do it manually before working)`);
+    console.log(
+      `  (could not post the assignment request: ${err.stderr || err.message || err} \u2014 do it manually before working)`
+    );
   }
 }
 async function pollPR(prUrl) {
@@ -13539,14 +15811,18 @@ function fmtContestedWarning(b) {
 async function cmdRecord(arg, flags = {}) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
   if (!arg) {
-    console.error("Usage: terminalhire claim record <bountyId|issueUrl> [--ack-policy] [--ack-policy-prohibited] [--ack-contested]");
+    console.error(
+      "Usage: terminalhire claim record <bountyId|issueUrl> [--ack-policy] [--ack-policy-prohibited] [--ack-contested]"
+    );
     console.error("  Run `terminalhire bounties` first to populate the local index cache,");
     console.error("  then pass the id shown in its output \u2014 or pass a GitHub issue URL directly.");
     process.exit(1);
   }
   const b = await resolveBounty(arg);
   if (!b) {
-    console.error(`terminalhire claim: '${arg}' is not in the index cache and is not a GitHub issue URL.`);
+    console.error(
+      `terminalhire claim: '${arg}' is not in the index cache and is not a GitHub issue URL.`
+    );
     console.error("  Run `terminalhire bounties` to populate the cache, or pass a full issue URL.");
     process.exit(1);
   }
@@ -13580,7 +15856,11 @@ ${contestedWarning}`);
     try {
       const { getRepoEntry: getRepoEntry2, briefingLines: briefingLines2 } = await Promise.resolve().then(() => (init_repo_experience(), repo_experience_exports));
       const entry = await getRepoEntry2(b.repoFullName);
-      const lines = briefingLines2({ repoFullName: b.repoFullName, entry, claims: claims.readClaims() });
+      const lines = briefingLines2({
+        repoFullName: b.repoFullName,
+        entry,
+        claims: claims.readClaims()
+      });
       if (lines.length > 0) console.log(`
   ${lines.join(" \xB7 ")}`);
     } catch {
@@ -13605,21 +15885,41 @@ terminalhire claim: refusing to record \u2014 ${b.repoFullName} prohibits AI-gen
     }
     ackedAt = (/* @__PURE__ */ new Date()).toISOString();
   } else if (policy.status === "flagged" || policy.status === "unavailable") {
-    const reason = policy.status === "flagged" ? "This repo has AI-assistance policy language" : "This repo's contribution policy could not be checked";
-    let acked = Boolean(flags["ack-policy"]);
-    if (!acked && process.stdin.isTTY) {
-      acked = await confirm(`
-  ${reason} \u2014 read it before working. Acknowledge and proceed? (y/N) `);
-    }
-    if (!acked) {
-      console.error(
+    const prior = policy.scanComplete ? findPolicyAck(b.repoFullName, policy.contentHash, policy.rulesetVersion) : null;
+    if (prior) {
+      console.log(
         `
+  policy unchanged since you acknowledged it on ${prior.ackedAt.slice(0, 10)} \u2014 not asking again.`
+      );
+      ackedAt = prior.ackedAt;
+    } else {
+      const reason = policy.status === "flagged" ? "This repo has AI-assistance policy language" : "This repo's contribution policy could not be checked";
+      let acked = Boolean(flags["ack-policy"]);
+      if (!acked && process.stdin.isTTY) {
+        acked = await confirm(
+          `
+  ${reason} \u2014 read it before working. Acknowledge and proceed? (y/N) `
+        );
+      }
+      if (!acked) {
+        console.error(
+          `
 terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribution policy first.
   Re-run with --ack-policy once you have (or confirm interactively).`
-      );
-      process.exit(1);
+        );
+        process.exit(1);
+      }
+      ackedAt = (/* @__PURE__ */ new Date()).toISOString();
+      if (policy.status === "flagged" && policy.scanComplete) {
+        rememberPolicyAck({
+          repo: b.repoFullName,
+          contentHash: policy.contentHash,
+          rulesetVersion: policy.rulesetVersion,
+          verdict: policy.verdict,
+          ackedAt
+        });
+      }
     }
-    ackedAt = (/* @__PURE__ */ new Date()).toISOString();
   } else {
     console.log("  (default AI-assistance disclosure still applies at submit)");
   }
@@ -13670,11 +15970,19 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
   console.log(`  issue:  ${claim.issueUrl}`);
   console.log(fmtOpenPRsLine(b));
   console.log("\n  Executor constraints (enforce when spawning the background agent):");
-  console.log("   \u2022 work in an ISOLATED git worktree; scrub the subprocess env (no token/profile inheritance)");
-  console.log("   \u2022 MUST NOT `git push` or `gh pr` \u2014 pushing happens only via `terminalhire submit`");
-  console.log("   \u2022 clone + static analysis + patch only; NO test/build execution without explicit approval");
+  console.log(
+    "   \u2022 work in an ISOLATED git worktree; scrub the subprocess env (no token/profile inheritance)"
+  );
+  console.log(
+    "   \u2022 MUST NOT `git push` or `gh pr` \u2014 pushing happens only via `terminalhire submit`"
+  );
+  console.log(
+    "   \u2022 clone + static analysis + patch only; NO test/build execution without explicit approval"
+  );
   console.log("   \u2022 no access to ~/.terminalhire (the executor never needs your profile)");
-  console.log("\n  Next \u2014 start work (forks + clones into an isolated worktree; your terminal stays put):");
+  console.log(
+    "\n  Next \u2014 start work (forks + clones into an isolated worktree; your terminal stays put):"
+  );
   console.log("    terminalhire claim start " + claim.id);
   console.log("  Then publish when it is done (the only step that pushes + opens the PR):");
   console.log("    terminalhire claim submit " + claim.id);
@@ -13695,7 +16003,9 @@ async function cmdPreview(arg, { json } = {}) {
   }
   const b = await resolveBounty(arg);
   if (!b) {
-    console.error(`terminalhire claim: '${arg}' is not in the index cache and is not a GitHub issue URL.`);
+    console.error(
+      `terminalhire claim: '${arg}' is not in the index cache and is not a GitHub issue URL.`
+    );
     console.error("  Run `terminalhire bounties` to populate the cache, or pass a full issue URL.");
     process.exit(1);
   }
@@ -13732,7 +16042,9 @@ async function cmdPreview(arg, { json } = {}) {
   console.log(`  amount: ${fmtAmount(b.amountUSD)}`);
   console.log(`  issue:  ${b.issueUrl}`);
   if (b.issueState === "closed") {
-    console.log("  \u2717 CLOSED \u2014 not claimable (the pool drops closed issues; likely a stale cache entry)");
+    console.log(
+      "  \u2717 CLOSED \u2014 not claimable (the pool drops closed issues; likely a stale cache entry)"
+    );
   }
   console.log(fmtOpenPRsLine(b));
   const previewContested = fmtContestedWarning(b);
@@ -13743,19 +16055,27 @@ async function cmdPreview(arg, { json } = {}) {
       const { getRepoEntry: getRepoEntry2, briefingLines: briefingLines2 } = await Promise.resolve().then(() => (init_repo_experience(), repo_experience_exports));
       const claimsForBrief = await Promise.resolve().then(() => (init_claims(), claims_exports));
       const entry = await getRepoEntry2(b.repoFullName);
-      const lines = briefingLines2({ repoFullName: b.repoFullName, entry, claims: claimsForBrief.readClaims() });
+      const lines = briefingLines2({
+        repoFullName: b.repoFullName,
+        entry,
+        claims: claimsForBrief.readClaims()
+      });
       if (lines.length > 0) console.log(`
   ${lines.join(" \xB7 ")}`);
     } catch {
     }
   }
-  console.log("\n  Preview only \u2014 NOT claimed. Run `terminalhire claim record " + arg + "` to claim it.");
+  console.log(
+    "\n  Preview only \u2014 NOT claimed. Run `terminalhire claim record " + arg + "` to claim it."
+  );
 }
 async function cmdList(active) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
   const list = claims.listClaims({ active });
   if (list.length === 0) {
-    console.log(active ? "No active claims." : "No claims yet. Use `terminalhire claim record <bountyId>`.");
+    console.log(
+      active ? "No active claims." : "No claims yet. Use `terminalhire claim record <bountyId>`."
+    );
     return;
   }
   console.log(`
@@ -13769,7 +16089,9 @@ ${list.length} ${active ? "active " : ""}claim${list.length === 1 ? "" : "s"}:
   printMetric(claims.acceptedPRRate());
   try {
     if (await shouldNudgeUnpushed()) {
-      console.log("\n  \u26A0 new claims not yet on your dashboard \u2014 run: terminalhire claim --push --keep-updated");
+      console.log(
+        "\n  \u26A0 new claims not yet on your dashboard \u2014 run: terminalhire claim --push --keep-updated"
+      );
     }
   } catch {
   }
@@ -13806,7 +16128,9 @@ async function cmdStatus(id) {
       console.log(`  \u26A0 contention: ${prs.length} ${label} this issue \u2014 ${c.title}`);
       for (const pr of prs) console.log(fmtContentionPr(pr, nowMs, newSet.has(pr.number)));
     }
-    claims.updateClaim(c.id, { contention: { checkedAt: new Date(nowMs).toISOString(), prNumbers: curNumbers } });
+    claims.updateClaim(c.id, {
+      contention: { checkedAt: new Date(nowMs).toISOString(), prNumbers: curNumbers }
+    });
     return prs.length > 0;
   };
   let polled = 0;
@@ -13829,7 +16153,8 @@ async function cmdStatus(id) {
     polled++;
     let observed = c.state;
     if (res.merged) observed = "merged";
-    else if (res.state === "closed") observed = "abandoned";
+    else if (res.state === "closed")
+      observed = "abandoned";
     else observed = "submitted";
     const next = claims.nextPolledState(c.state, observed);
     const isNewMerge = next === "merged" && c.state !== "merged";
@@ -13845,10 +16170,17 @@ async function cmdStatus(id) {
           const { getRepoEntry: getRepoEntry2, projectOutcomes: projectOutcomes2, continuity: continuity2 } = await Promise.resolve().then(() => (init_repo_experience(), repo_experience_exports));
           const entry = await getRepoEntry2(c.repoFullName);
           const allClaims = claims.readClaims();
-          const projection = projectOutcomes2(allClaims, entry?.tombstones ?? [], c.repoFullName, entry?.backfill ?? []);
+          const projection = projectOutcomes2(
+            allClaims,
+            entry?.tombstones ?? [],
+            c.repoFullName,
+            entry?.backfill ?? []
+          );
           const result = continuity2(projection);
           if (result.score > 0) {
-            console.log(`  \u24D8 ${result.reasons.join(" \xB7 ")} \u2014 building continuity in ${c.repoFullName}`);
+            console.log(
+              `  \u24D8 ${result.reasons.join(" \xB7 ")} \u2014 building continuity in ${c.repoFullName}`
+            );
           }
           markClaimNudged(c.id);
         }
@@ -13862,7 +16194,10 @@ async function cmdStatus(id) {
       if (result) renderContention(c, result, { excludeNumber: ourNum });
     }
   }
-  if (polled === 0) console.log("  No submitted claims with a PR URL yet. Set one via `claim update <id> submitted` after `submit`.");
+  if (polled === 0)
+    console.log(
+      "  No submitted claims with a PR URL yet. Set one via `claim update <id> submitted` after `submit`."
+    );
   printMetric(claims.acceptedPRRate());
 }
 async function cmdUpdate(id, state, prUrl) {
@@ -13887,14 +16222,19 @@ async function cmdUpdate(id, state, prUrl) {
       const core = await Promise.resolve().then(() => (init_src(), src_exports));
       const facts = await core.fetchPRScoringFacts(prUrl, process.env.GITHUB_TOKEN || void 0);
       if (facts) {
-        if (!facts.merged) console.log("  \u24D8 heads-up: that PR is not merged yet \u2014 it will not count until it is.");
+        if (!facts.merged)
+          console.log("  \u24D8 heads-up: that PR is not merged yet \u2014 it will not count until it is.");
         if (facts.mergedById != null && facts.authorId != null && facts.mergedById === facts.authorId)
-          console.log("  \u24D8 heads-up: that PR was merged by its own author \u2014 self-merges are not external acceptance.");
+          console.log(
+            "  \u24D8 heads-up: that PR was merged by its own author \u2014 self-merges are not external acceptance."
+          );
         const claim = claims.findClaim(id);
         const claimedIssueRef = claim && claim.issueUrl ? parseGitHubUrl(claim.issueUrl) : null;
         const claimedIssue = claimedIssueRef ? claimedIssueRef.number : null;
         if (claimedIssue != null && facts.closesIssues.length && !facts.closesIssues.includes(claimedIssue))
-          console.log(`  \u24D8 heads-up: that PR closes ${facts.closesIssues.map((n) => "#" + n).join(", ")}, not the issue you claimed (#${claimedIssue}).`);
+          console.log(
+            `  \u24D8 heads-up: that PR closes ${facts.closesIssues.map((n) => "#" + n).join(", ")}, not the issue you claimed (#${claimedIssue}).`
+          );
       }
     } catch {
     }
@@ -13916,7 +16256,11 @@ async function cmdRelease(id) {
   if (target) {
     try {
       const { writeTombstone: writeTombstone2 } = await Promise.resolve().then(() => (init_repo_experience(), repo_experience_exports));
-      await writeTombstone2(target.repoFullName, id, target.state === "merged" ? "merged" : "abandoned");
+      await writeTombstone2(
+        target.repoFullName,
+        id,
+        target.state === "merged" ? "merged" : "abandoned"
+      );
     } catch {
     }
   }
@@ -13928,7 +16272,9 @@ async function cmdAttach(id, worktree, branch) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
   if (!id || !worktree || !branch) {
     console.error("Usage: terminalhire claim attach <id> --worktree <path> --branch <branchName>");
-    console.error("  Records the worktree + branch so `terminalhire claim submit` can verify identity before pushing.");
+    console.error(
+      "  Records the worktree + branch so `terminalhire claim submit` can verify identity before pushing."
+    );
     process.exit(1);
   }
   if (!claims.findClaim(id)) {
@@ -13948,7 +16294,7 @@ async function cmdAttach(id, worktree, branch) {
 function workDirFor(repoFullName, issueNumber) {
   const [owner, repo] = String(repoFullName).split("/");
   const suffix = issueNumber ? `-${issueNumber}` : "";
-  return join20(homedir18(), "terminalhire", "work", `${owner}-${repo}${suffix}`);
+  return join24(homedir21(), "terminalhire", "work", `${owner}-${repo}${suffix}`);
 }
 function startBranchFor(repoFullName, issueNumber) {
   const repo = String(repoFullName).split("/")[1] || "claim";
@@ -13978,9 +16324,11 @@ async function cmdStart(id, flags = {}) {
       console.log("No claims ready to start. Claim one first:  terminalhire claim <ref>");
       return;
     }
-    console.log(`
+    console.log(
+      `
 ${startable.length} claim${startable.length === 1 ? "" : "s"} ready to start:
-`);
+`
+    );
     for (const c of startable) {
       console.log(`  ${c.title}`);
       console.log(`    terminalhire claim start ${c.id}`);
@@ -14017,13 +16365,17 @@ When it's done:  terminalhire claim submit ${id}`);
   try {
     ghUser = await sh("gh", ["api", "user", "-q", ".login"]);
   } catch {
-    console.error("terminalhire claim: 'gh' CLI not available or not authenticated. Run 'gh auth login'.");
+    console.error(
+      "terminalhire claim: 'gh' CLI not available or not authenticated. Run 'gh auth login'."
+    );
     process.exit(1);
   }
   let consented = explicitForkConsent(flags);
   if (!consented && process.stdin.isTTY) {
-    consented = await confirm(`
-  Fork ${claim.repoFullName} to @${ghUser} and clone it to start? (y/N) `);
+    consented = await confirm(
+      `
+  Fork ${claim.repoFullName} to @${ghUser} and clone it to start? (y/N) `
+    );
   }
   if (!consented) {
     console.error(
@@ -14035,19 +16387,21 @@ terminalhire claim: not started \u2014 starting forks ${claim.repoFullName} to y
   }
   const issueNumber = (parseGitHubUrl(claim.issueUrl) || {}).number;
   const destDir = workDirFor(claim.repoFullName, issueNumber);
-  if (existsSync11(destDir)) {
+  if (existsSync12(destDir)) {
     console.error(
       `terminalhire claim: ${destDir} already exists \u2014 refusing to clobber it.
   Remove it and retry, or attach it: terminalhire claim attach ${id} --worktree ${destDir} --branch <branch>`
     );
     process.exit(1);
   }
-  mkdirSync12(join20(homedir18(), "terminalhire", "work"), { recursive: true });
+  mkdirSync5(join24(homedir21(), "terminalhire", "work"), { recursive: true });
   let forkFullName;
   try {
     forkFullName = await ensureForkExists(claim.repoFullName, ghUser);
   } catch (err) {
-    console.error(`terminalhire claim: could not create your fork of ${claim.repoFullName}. ${err.message ?? err}`);
+    console.error(
+      `terminalhire claim: could not create your fork of ${claim.repoFullName}. ${err.message ?? err}`
+    );
     process.exit(1);
   }
   try {
@@ -14057,14 +16411,23 @@ terminalhire claim: not started \u2014 starting forks ${claim.repoFullName} to y
       rmSync7(destDir, { recursive: true, force: true });
     } catch {
     }
-    console.error(`terminalhire claim: clone of ${forkFullName} failed. ${err.stderr || err.message || err}`);
+    console.error(
+      `terminalhire claim: clone of ${forkFullName} failed. ${err.stderr || err.message || err}`
+    );
     process.exit(1);
   }
   try {
     await sh("git", ["-C", destDir, "remote", "get-url", "upstream"]);
   } catch {
     try {
-      await sh("git", ["-C", destDir, "remote", "add", "upstream", `https://github.com/${claim.repoFullName}.git`]);
+      await sh("git", [
+        "-C",
+        destDir,
+        "remote",
+        "add",
+        "upstream",
+        `https://github.com/${claim.repoFullName}.git`
+      ]);
     } catch {
     }
   }
@@ -14101,7 +16464,13 @@ async function cmdStartHere(claims, claim, flags = {}) {
     );
     process.exit(1);
   }
-  const dirty = await sh("git", ["-C", toplevel, "status", "--porcelain", "--untracked-files=no"]).catch(() => "");
+  const dirty = await sh("git", [
+    "-C",
+    toplevel,
+    "status",
+    "--porcelain",
+    "--untracked-files=no"
+  ]).catch(() => "");
   if (dirty) {
     console.error(
       "terminalhire claim: --here needs a clean working tree (claim work must not mix with your current changes).\n  Commit or stash first, or use `terminalhire claim start` for an isolated worktree."
@@ -14142,7 +16511,9 @@ async function cmdSubmit(id, flags = {}) {
     process.exit(1);
   }
   if (claim.review && claim.review.verdict === "revise") {
-    console.error(`terminalhire claim: ${id} review verdict is 'revise' \u2014 the gate said do not submit. Resolve blockers and re-review first.`);
+    console.error(
+      `terminalhire claim: ${id} review verdict is 'revise' \u2014 the gate said do not submit. Resolve blockers and re-review first.`
+    );
     process.exit(1);
   }
   if (!claim.worktreePath || !claim.branch) {
@@ -14186,7 +16557,9 @@ async function cmdSubmit(id, flags = {}) {
   } catch {
   }
   if (defaultBranch && claim.branch === defaultBranch) {
-    console.error(`terminalhire claim: '${claim.branch}' is the default branch \u2014 open the PR from a feature branch.`);
+    console.error(
+      `terminalhire claim: '${claim.branch}' is the default branch \u2014 open the PR from a feature branch.`
+    );
     process.exit(1);
   }
   if (defaultBranch) {
@@ -14197,18 +16570,28 @@ async function cmdSubmit(id, flags = {}) {
       ahead = "1";
     }
     if (ahead === "0") {
-      console.error(`terminalhire claim: branch has no commits ahead of origin/${defaultBranch} \u2014 nothing to submit.`);
+      console.error(
+        `terminalhire claim: branch has no commits ahead of origin/${defaultBranch} \u2014 nothing to submit.`
+      );
       process.exit(1);
     }
   }
   const dirty = await sh("git", ["-C", wt, "status", "--porcelain", "--untracked-files=no"]);
   if (dirty) {
-    console.error("terminalhire claim: working tree is not clean \u2014 commit or stash before submitting (submit pushes what was reviewed).");
+    console.error(
+      "terminalhire claim: working tree is not clean \u2014 commit or stash before submitting (submit pushes what was reviewed)."
+    );
     process.exit(1);
   }
   let untrackedFiles = [];
   try {
-    const untrackedOut = await sh("git", ["-C", wt, "status", "--porcelain", "--untracked-files=normal"]);
+    const untrackedOut = await sh("git", [
+      "-C",
+      wt,
+      "status",
+      "--porcelain",
+      "--untracked-files=normal"
+    ]);
     untrackedFiles = untrackedOut.split("\n").filter((l) => l.startsWith("?? ")).map((l) => l.slice(3).trim()).filter(Boolean);
   } catch {
   }
@@ -14216,7 +16599,9 @@ async function cmdSubmit(id, flags = {}) {
   try {
     ghUser = await sh("gh", ["api", "user", "-q", ".login"]);
   } catch {
-    console.error("terminalhire claim: 'gh' CLI not available or not authenticated. Run 'gh auth login'.");
+    console.error(
+      "terminalhire claim: 'gh' CLI not available or not authenticated. Run 'gh auth login'."
+    );
     process.exit(1);
   }
   const collectRemotes = async () => {
@@ -14263,7 +16648,9 @@ async function cmdSubmit(id, flags = {}) {
         try {
           await sh("gh", ["repo", "fork", claim.repoFullName, "--clone=false"]);
         } catch (err) {
-          console.error(`terminalhire claim: 'gh repo fork' failed. ${err.stderr || err.message || err}`);
+          console.error(
+            `terminalhire claim: 'gh repo fork' failed. ${err.stderr || err.message || err}`
+          );
           noForkError();
           process.exit(1);
         }
@@ -14275,7 +16662,9 @@ async function cmdSubmit(id, flags = {}) {
         }
         if (!verified) {
           noForkError();
-          console.error("  (fork created but could not be verified \u2014 add it as a remote manually.)");
+          console.error(
+            "  (fork created but could not be verified \u2014 add it as a remote manually.)"
+          );
           process.exit(1);
         }
         if (remoteNames.includes("fork")) {
@@ -14285,9 +16674,18 @@ async function cmdSubmit(id, flags = {}) {
           process.exit(1);
         }
         try {
-          await sh("git", ["-C", wt, "remote", "add", "fork", `https://github.com/${forkFullName}.git`]);
+          await sh("git", [
+            "-C",
+            wt,
+            "remote",
+            "add",
+            "fork",
+            `https://github.com/${forkFullName}.git`
+          ]);
         } catch (err) {
-          console.error(`terminalhire claim: could not add the 'fork' remote. ${err.stderr || err.message || err}`);
+          console.error(
+            `terminalhire claim: could not add the 'fork' remote. ${err.stderr || err.message || err}`
+          );
           process.exit(1);
         }
         console.log(`  \u2713 Forked ${claim.repoFullName} \u2192 ${forkFullName} and added remote 'fork'.`);
@@ -14305,24 +16703,26 @@ async function cmdSubmit(id, flags = {}) {
   const head = `${ghUser}:${claim.branch}`;
   const title = flags.title || claim.title;
   const noBody = Boolean(flags["no-body"]);
-  const prBodyPath = join20(wt, "PR-BODY.md");
+  const prBodyPath = join24(wt, "PR-BODY.md");
   const bodySource = pickBodySource({
     bodyFileFlag: flags["body-file"],
     noBody,
-    prBodyExists: existsSync11(prBodyPath)
+    prBodyExists: existsSync12(prBodyPath)
   });
   let bodyText;
   let bodyDescr;
   if (bodySource === "body-file") {
     try {
-      bodyText = readFileSync18(flags["body-file"], "utf8");
+      bodyText = readFileSync21(flags["body-file"], "utf8");
     } catch (err) {
-      console.error(`terminalhire claim: could not read --body-file '${flags["body-file"]}': ${err.message ?? err}`);
+      console.error(
+        `terminalhire claim: could not read --body-file '${flags["body-file"]}': ${err.message ?? err}`
+      );
       process.exit(1);
     }
     bodyDescr = `--body-file ${flags["body-file"]}`;
   } else if (bodySource === "pr-body") {
-    bodyText = readFileSync18(prBodyPath, "utf8");
+    bodyText = readFileSync21(prBodyPath, "utf8");
     bodyDescr = "PR-BODY.md (auto-detected)";
   } else {
     bodyDescr = "(default: Closes + disclosure)";
@@ -14338,7 +16738,9 @@ async function cmdSubmit(id, flags = {}) {
   console.log(`  title:    ${title}`);
   console.log(`  body:     ${bodyDescr} (+ disclosure)`);
   if (untrackedFiles.length > 0) {
-    console.log(`  note:     ${untrackedFiles.length} untracked file(s) present (never pushed): ${untrackedFiles.join(", ")}`);
+    console.log(
+      `  note:     ${untrackedFiles.length} untracked file(s) present (never pushed): ${untrackedFiles.join(", ")}`
+    );
   }
   {
     const issueNo = (parseGitHubUrl(claim.issueUrl) || {}).number;
@@ -14372,8 +16774,10 @@ terminalhire claim: refusing to submit \u2014 ${competing.length} open PR(s) by 
     );
     process.exit(1);
   } else {
-    ok = await confirm(`
-  Push '${claim.branch}' to ${originRepo} and open a PR against ${upstream}? (y/N) `);
+    ok = await confirm(
+      `
+  Push '${claim.branch}' to ${originRepo} and open a PR against ${upstream}? (y/N) `
+    );
   }
   if (!ok) {
     console.log("Aborted \u2014 nothing pushed.");
@@ -14382,13 +16786,28 @@ terminalhire claim: refusing to submit \u2014 ${competing.length} open PR(s) by 
   try {
     await sh("git", ["-C", wt, "push", pushRemote.name, claim.branch]);
   } catch (err) {
-    console.error(`terminalhire claim: git push failed (NOT force-pushed). ${err.stderr || err.message || err}`);
-    console.error(`  Resolve and retry, or open the PR manually then: terminalhire claim update ${id} submitted <prUrl>`);
+    console.error(
+      `terminalhire claim: git push failed (NOT force-pushed). ${err.stderr || err.message || err}`
+    );
+    console.error(
+      `  Resolve and retry, or open the PR manually then: terminalhire claim update ${id} submitted <prUrl>`
+    );
     process.exit(1);
   }
   let prUrl = null;
   try {
-    const out = await sh("gh", ["pr", "list", "--repo", upstream, "--head", claim.branch, "--state", "open", "--json", "url,headRepositoryOwner"]);
+    const out = await sh("gh", [
+      "pr",
+      "list",
+      "--repo",
+      upstream,
+      "--head",
+      claim.branch,
+      "--state",
+      "open",
+      "--json",
+      "url,headRepositoryOwner"
+    ]);
     prUrl = pickExistingPr(JSON.parse(out || "[]"), ghUser);
     if (prUrl) console.log(`  Found existing open PR \u2014 adopting: ${prUrl}`);
   } catch {
@@ -14397,13 +16816,35 @@ terminalhire claim: refusing to submit \u2014 ${competing.length} open PR(s) by 
     const issueNum = (parseGitHubUrl(claim.issueUrl) || {}).number;
     const body = buildSubmitBody(issueNum, { bodyText, noCloses });
     try {
-      const out = await sh("gh", ["pr", "create", "--repo", upstream, "--head", head, "--title", title, "--body", body]);
+      const out = await sh("gh", [
+        "pr",
+        "create",
+        "--repo",
+        upstream,
+        "--head",
+        head,
+        "--title",
+        title,
+        "--body",
+        body
+      ]);
       prUrl = out.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("https://github.com/")).pop() || null;
     } catch (err) {
       const stderrText = err.stderr || err.message || String(err);
       if (/already exists/i.test(stderrText)) {
         try {
-          const retryOut = await sh("gh", ["pr", "list", "--repo", upstream, "--head", claim.branch, "--state", "open", "--json", "url,headRepositoryOwner"]);
+          const retryOut = await sh("gh", [
+            "pr",
+            "list",
+            "--repo",
+            upstream,
+            "--head",
+            claim.branch,
+            "--state",
+            "open",
+            "--json",
+            "url,headRepositoryOwner"
+          ]);
           const recovered = pickExistingPr(JSON.parse(retryOut || "[]"), ghUser);
           if (recovered) {
             prUrl = recovered;
@@ -14413,21 +16854,33 @@ terminalhire claim: refusing to submit \u2014 ${competing.length} open PR(s) by 
         }
       }
       if (!prUrl) {
-        console.error(`terminalhire claim: branch pushed, but 'gh pr create' failed. ${stderrText}`);
-        console.error(`  Open the PR manually (gh pr create / web UI), then: terminalhire claim update ${id} submitted <prUrl>`);
+        console.error(
+          `terminalhire claim: branch pushed, but 'gh pr create' failed. ${stderrText}`
+        );
+        console.error(
+          `  Open the PR manually (gh pr create / web UI), then: terminalhire claim update ${id} submitted <prUrl>`
+        );
         process.exit(1);
       }
     }
   }
   if (!prUrl || !parseGitHubUrl(prUrl)) {
-    console.error(`terminalhire claim: could not determine the PR URL. Set it manually: terminalhire claim update ${id} submitted <prUrl>`);
+    console.error(
+      `terminalhire claim: could not determine the PR URL. Set it manually: terminalhire claim update ${id} submitted <prUrl>`
+    );
     process.exit(1);
   }
   let review;
   try {
     if (defaultBranch) {
       const { scoreDiffAcceptance: scoreDiffAcceptance2 } = await Promise.resolve().then(() => (init_acceptance_score(), acceptance_score_exports));
-      const numstat = await sh("git", ["-C", wt, "diff", "--numstat", `origin/${defaultBranch}...HEAD`]);
+      const numstat = await sh("git", [
+        "-C",
+        wt,
+        "diff",
+        "--numstat",
+        `origin/${defaultBranch}...HEAD`
+      ]);
       let filesChanged = 0;
       let linesChanged = 0;
       let touchesTests = false;
@@ -14438,7 +16891,8 @@ terminalhire claim: refusing to submit \u2014 ${competing.length} open PR(s) by 
         const path2 = pathParts.join("	");
         filesChanged += 1;
         linesChanged += (added === "-" ? 0 : parseInt(added, 10) || 0) + (deleted === "-" ? 0 : parseInt(deleted, 10) || 0);
-        if (/(^|\/)(tests?|__tests__|spec|specs)\//i.test(path2) || /\.(test|spec)\./i.test(path2)) touchesTests = true;
+        if (/(^|\/)(tests?|__tests__|spec|specs)\//i.test(path2) || /\.(test|spec)\./i.test(path2))
+          touchesTests = true;
       }
       const result = scoreDiffAcceptance2({
         competingOpenPRs: claim.openPRsAtClaim ?? 0,
@@ -14448,7 +16902,9 @@ terminalhire claim: refusing to submit \u2014 ${competing.length} open PR(s) by 
         matchesIssueArea: null
         // issue-area match is not resolved at submit time
       });
-      console.log(`  acceptance forecast: ${result.score.toFixed(2)} \u2014 ${result.reasons.map((r) => r.text).join(", ")}`);
+      console.log(
+        `  acceptance forecast: ${result.score.toFixed(2)} \u2014 ${result.reasons.map((r) => r.text).join(", ")}`
+      );
       review = {
         verdict: claim.review?.verdict ?? null,
         blockers: claim.review?.blockers ?? [],
@@ -14458,31 +16914,38 @@ terminalhire claim: refusing to submit \u2014 ${competing.length} open PR(s) by 
     }
   } catch {
   }
-  claims.updateClaim(id, review ? { state: "submitted", prUrl, review } : { state: "submitted", prUrl });
+  claims.updateClaim(
+    id,
+    review ? { state: "submitted", prUrl, review } : { state: "submitted", prUrl }
+  );
   console.log(`
 \u2713 Submitted ${id} \u2192 ${prUrl}`);
-  console.log(`  Run 'terminalhire claim status ${id}' after the maintainer acts to fold the merge into your accepted-PR rate.`);
+  console.log(
+    `  Run 'terminalhire claim status ${id}' after the maintainer acts to fold the merge into your accepted-PR rate.`
+  );
 }
 function askYes(question) {
   const rl = createInterface7({ input: process.stdin, output: process.stdout });
-  return new Promise((res) => rl.question(question, (a) => {
-    rl.close();
-    res(String(a).trim().toLowerCase());
-  }));
+  return new Promise(
+    (res) => rl.question(question, (a) => {
+      rl.close();
+      res(String(a).trim().toLowerCase());
+    })
+  );
 }
 function claimSleep(ms) {
   return new Promise((res) => setTimeout(res, ms));
 }
 function readClaimPushMarker() {
   try {
-    return existsSync11(CLAIM_PUSH_MARKER) ? JSON.parse(readFileSync18(CLAIM_PUSH_MARKER, "utf8")) : null;
+    return existsSync12(CLAIM_PUSH_MARKER) ? JSON.parse(readFileSync21(CLAIM_PUSH_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
 }
 function writeClaimPushMarker(marker) {
-  mkdirSync12(TERMINALHIRE_DIR15, { recursive: true });
-  writeFileSync12(CLAIM_PUSH_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  ensureStateDir(TERMINALHIRE_DIR16);
+  writeFileSync16(CLAIM_PUSH_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearClaimPushMarker() {
   try {
@@ -14494,7 +16957,9 @@ function renderClaimConsent(pushed, login) {
   console.log("");
   console.log("  terminalhire \u2014 show your claims on your dashboard (opt-in)");
   console.log("");
-  console.log(`  As @${login}, the following SCORE-FREE fields of your ${pushed.length} claim${pushed.length === 1 ? "" : "s"}`);
+  console.log(
+    `  As @${login}, the following SCORE-FREE fields of your ${pushed.length} claim${pushed.length === 1 ? "" : "s"}`
+  );
   console.log("  will be shared with staqs (terminalhire.com) after you confirm in the browser:");
   console.log("");
   for (const f of PUSHED_CLAIM_FIELDS) console.log(`    - ${f}`);
@@ -14577,14 +17042,18 @@ async function cmdPush({ keepUpdated = false } = {}) {
         detail = (await r.json())?.message || "";
       } catch {
       }
-      console.error(`
-  Could not start claim sync: /api/claim-sync/begin returned ${r.status}. ${detail}`);
+      console.error(
+        `
+  Could not start claim sync: /api/claim-sync/begin returned ${r.status}. ${detail}`
+      );
       process.exit(1);
     }
     begin = await r.json();
   } catch (err) {
-    console.error(`
-  Could not start claim sync: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(
+      `
+  Could not start claim sync: ${err instanceof Error ? err.message : String(err)}`
+    );
     process.exit(1);
   }
   const { challenge, verifyUrl } = begin || {};
@@ -14627,7 +17096,11 @@ async function cmdPush({ keepUpdated = false } = {}) {
     console.error("  Re-run `terminalhire claim --push` to try again.\n");
     process.exit(1);
   }
-  const consentReceipt = { consentedAt, version: CLAIM_CONSENT_VERSION, fields: PUSHED_CLAIM_FIELDS };
+  const consentReceipt = {
+    consentedAt,
+    version: CLAIM_CONSENT_VERSION,
+    fields: PUSHED_CLAIM_FIELDS
+  };
   console.log("\n  Verified. Sharing your claims...");
   let res;
   try {
@@ -14636,7 +17109,12 @@ async function cmdPush({ keepUpdated = false } = {}) {
       headers: { "Content-Type": "application/json" },
       // autoConsent is included ONLY when the dev opted into background updates —
       // the server mints the pushToken in the same push when it is present + valid.
-      body: JSON.stringify({ consentToken: consentReceipt, claims: pushed, proofToken, ...autoConsent ? { autoConsent } : {} }),
+      body: JSON.stringify({
+        consentToken: consentReceipt,
+        claims: pushed,
+        proofToken,
+        ...autoConsent ? { autoConsent } : {}
+      }),
       signal: AbortSignal.timeout(1e4)
     });
   } catch (err) {
@@ -14686,7 +17164,9 @@ async function cmdPush({ keepUpdated = false } = {}) {
       console.log("    Re-run `terminalhire claim --push --keep-updated` to retry.");
     }
   } else if (backgroundEnableFailed(autoConsent, pushToken)) {
-    console.log("\n  \u2713 Pushed, but background updates could NOT be enabled (server did not issue a token).");
+    console.log(
+      "\n  \u2713 Pushed, but background updates could NOT be enabled (server did not issue a token)."
+    );
     console.log("    Re-run `terminalhire claim --push --keep-updated` to retry.");
   }
   console.log("\n  \u2713 Your claims now show on your dashboard: https://terminalhire.com/dashboard");
@@ -14707,7 +17187,9 @@ async function cmdRevoke() {
     clearPushTokenEnc();
     clearAutoMarker();
     console.log("\n  No claim-push marker found on this machine.");
-    console.log("  Deletion must run from the machine that pushed (the delete token is stored there),");
+    console.log(
+      "  Deletion must run from the machine that pushed (the delete token is stored there),"
+    );
     console.log('  or use the "delete my pushed claims" button on your dashboard.\n');
     process.exit(1);
   }
@@ -14732,13 +17214,17 @@ async function cmdRevoke() {
       clearClaimPushMarker();
       clearPushTokenEnc();
       clearAutoMarker();
-      console.log(`
+      console.log(
+        `
   Nothing to delete server-side (${res.status}); local marker and background updates cleared.
-`);
+`
+      );
       console.log("  Background updates (if any) have been stopped.\n");
     } else if (res.status === 401 || res.status === 403) {
-      console.error(`
-  Server refused the delete (${res.status}); local marker NOT cleared \u2014 the pushToken may still be live.`);
+      console.error(
+        `
+  Server refused the delete (${res.status}); local marker NOT cleared \u2014 the pushToken may still be live.`
+      );
       console.error("  Re-authenticate (terminalhire login) and retry.\n");
     } else {
       console.error(`
@@ -14779,11 +17265,13 @@ function renderAudit(view) {
   console.log(`
   Audit \u2014 ${view.repo || "repo"} #${view.prNumber}`);
   console.log(`  ${view.prUrl}`);
-  console.log(`  Outcome: ${outcomeLabel[view.outcome] ?? view.outcome}` + (view.mergedByLogin ? `  (merged by @${view.mergedByLogin})` : ""));
+  console.log(`  Outcome: ${outcomeLabel[view.outcome] ?? view.outcome}`);
   console.log("\n  Engagement (raw counts \u2014 not a score):");
   console.log(`    Independent counterparties engaged : ${view.signals.distinctCounterparties}`);
   console.log(`    Maintainer reviews                 : ${view.signals.maintainerReviews}`);
-  console.log(`    Your commits after first response  : ${view.signals.iterationsAfterFirstResponse}`);
+  console.log(
+    `    Your commits after first response  : ${view.signals.iterationsAfterFirstResponse}`
+  );
   console.log(`    Time to first maintainer response  : ${hrs(view.signals.hoursToFirstResponse)}`);
   console.log(`    Time to merge                      : ${hrs(view.signals.hoursToMerge)}`);
   console.log("\n  Timeline:");
@@ -14814,13 +17302,17 @@ async function cmdAudit(id, flags = {}) {
     process.exit(1);
   }
   if (!claim.prUrl) {
-    console.log(`Claim '${id}' has no submitted PR yet \u2014 nothing to audit. Submit first: terminalhire claim submit ${id}`);
+    console.log(
+      `Claim '${id}' has no submitted PR yet \u2014 nothing to audit. Submit first: terminalhire claim submit ${id}`
+    );
     return;
   }
   const { resolveCallerIdentity: resolveCallerIdentity2 } = await Promise.resolve().then(() => (init_identity(), identity_exports));
   const identity = await resolveCallerIdentity2();
   if (!identity) {
-    console.error("terminalhire claim audit: could not verify your GitHub identity (`gh api user`). Run `gh auth login` and retry.");
+    console.error(
+      "terminalhire claim audit: could not verify your GitHub identity (`gh api user`). Run `gh auth login` and retry."
+    );
     process.exit(1);
   }
   let token;
@@ -14832,11 +17324,15 @@ async function cmdAudit(id, flags = {}) {
   const { gatherAudit: gatherAudit2 } = await Promise.resolve().then(() => (init_fetch(), fetch_exports));
   const { lifecycle, facts } = await gatherAudit2(claim.prUrl, token || void 0);
   if (!lifecycle) {
-    console.error(`terminalhire claim audit: could not fetch the PR lifecycle for ${claim.prUrl} (private, deleted, rate-limited, or not a PR).`);
+    console.error(
+      `terminalhire claim audit: could not fetch the PR lifecycle for ${claim.prUrl} (private, deleted, rate-limited, or not a PR).`
+    );
     process.exit(1);
   }
   if (lifecycle.authorId !== identity.id) {
-    console.error(`terminalhire claim audit: PR ${claim.prUrl} was not authored by you (@${identity.login}); the audit only covers your own PRs.`);
+    console.error(
+      `terminalhire claim audit: PR ${claim.prUrl} was not authored by you (@${identity.login}); the audit only covers your own PRs.`
+    );
     process.exit(1);
   }
   const { buildAuditView: buildAuditView2 } = await Promise.resolve().then(() => (init_audit(), audit_exports));
@@ -14908,7 +17404,9 @@ async function run7() {
         await cmdAudit(positional[0], flags);
         break;
       default:
-        console.error(`terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | list | status | update | submit | audit | release`);
+        console.error(
+          `terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | list | status | update | submit | audit | release`
+        );
         process.exit(1);
     }
   } catch (err) {
@@ -14916,18 +17414,20 @@ async function run7() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR15, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL6, CLAIM_SYNC_BASE2, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, GH_API2, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, TAKE_BOT_REPOS;
+var TERMINALHIRE_DIR16, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL6, CLAIM_SYNC_BASE2, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, GH_API2, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, TAKE_BOT_REPOS;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
     init_src();
     init_open_url();
+    init_policy_acks();
     init_claims();
+    init_state_dir();
     init_claim_push_bg();
-    TERMINALHIRE_DIR15 = process.env.TERMINALHIRE_DIR || join20(homedir18(), ".terminalhire");
-    INDEX_CACHE_FILE5 = join20(TERMINALHIRE_DIR15, "index-cache.json");
-    CLAIM_PUSH_MARKER = join20(TERMINALHIRE_DIR15, "claim-push.json");
-    REPO_CONTINUITY_NUDGE_MARKER = join20(TERMINALHIRE_DIR15, "repo-continuity-nudged.json");
+    TERMINALHIRE_DIR16 = process.env.TERMINALHIRE_DIR || join24(homedir21(), ".terminalhire");
+    INDEX_CACHE_FILE5 = join24(TERMINALHIRE_DIR16, "index-cache.json");
+    CLAIM_PUSH_MARKER = join24(TERMINALHIRE_DIR16, "claim-push.json");
+    REPO_CONTINUITY_NUDGE_MARKER = join24(TERMINALHIRE_DIR16, "repo-continuity-nudged.json");
     API_URL6 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
     CLAIM_SYNC_BASE2 = "https://terminalhire.com";
     CLAIM_CONSENT_VERSION = 1;
@@ -15367,7 +17867,7 @@ function finalize(build) {
   };
 }
 function reconstruct(files, opts = {}) {
-  const join38 = opts.joinSidechains !== false;
+  const join39 = opts.joinSidechains !== false;
   const mains = [];
   const sidechains = [];
   for (const file of files) {
@@ -15392,7 +17892,7 @@ function reconstruct(files, opts = {}) {
   }
   const orphanedSidechainPaths = [];
   const joinedPaths = /* @__PURE__ */ new Set();
-  if (join38) {
+  if (join39) {
     const sidechainsBySession = /* @__PURE__ */ new Map();
     for (const sc of sidechains) {
       const acc = sidechainsBySession.get(sc.sessionId) ?? [];
@@ -15728,15 +18228,9 @@ __export(trajectory_exports, {
   runTrajectory: () => runTrajectory,
   runTrajectoryPush: () => runTrajectoryPush
 });
-import {
-  existsSync as existsSync12,
-  mkdirSync as mkdirSync13,
-  readFileSync as readFileSync19,
-  readdirSync,
-  writeFileSync as writeFileSync13
-} from "fs";
-import { homedir as homedir19 } from "os";
-import { join as join21 } from "path";
+import { existsSync as existsSync13, readFileSync as readFileSync22, readdirSync, writeFileSync as writeFileSync17 } from "fs";
+import { homedir as homedir22 } from "os";
+import { join as join25 } from "path";
 function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -15768,7 +18262,7 @@ function findJsonlFiles(dir) {
     return out;
   }
   for (const entry of entries) {
-    const full = join21(dir, entry.name);
+    const full = join25(dir, entry.name);
     if (entry.isDirectory()) {
       out.push(...findJsonlFiles(full));
     } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
@@ -15782,7 +18276,7 @@ function loadCorpus(paths) {
   for (const path2 of paths) {
     let text;
     try {
-      text = readFileSync19(path2, "utf8");
+      text = readFileSync22(path2, "utf8");
     } catch {
       continue;
     }
@@ -15866,12 +18360,21 @@ function renderMarkdown(view) {
   lines.push("");
   lines.push("## Stack (languages)");
   lines.push("");
-  lines.push(`- **Live** (used this quarter): ${prettyList(view.score.liveStack.filter(isLang), 64)}`);
-  lines.push(`- **Dormant** (90d+ untouched): ${prettyList(view.score.dormantStack.filter(isLang), 64)}`);
+  lines.push(
+    `- **Live** (used this quarter): ${prettyList(view.score.liveStack.filter(isLang), 64)}`
+  );
+  lines.push(
+    `- **Dormant** (90d+ untouched): ${prettyList(view.score.dormantStack.filter(isLang), 64)}`
+  );
   lines.push("");
   lines.push("## Capabilities (tools & integrations)");
   lines.push("");
-  lines.push(`- ${prettyList(view.score.liveStack.filter((s) => !isLang(s)), 64)}`);
+  lines.push(
+    `- ${prettyList(
+      view.score.liveStack.filter((s) => !isLang(s)),
+      64
+    )}`
+  );
   lines.push("");
   lines.push("## Scope");
   lines.push("");
@@ -15880,12 +18383,12 @@ function renderMarkdown(view) {
   return lines.join("\n");
 }
 function writeExportArtifacts(score, markdown) {
-  const dir = process.env.TERMINALHIRE_DIR || join21(homedir19(), ".terminalhire");
-  mkdirSync13(dir, { recursive: true });
-  const jsonPath = join21(dir, "trajectory-export.json");
-  const mdPath = join21(dir, "trajectory-export.md");
-  writeFileSync13(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
-  writeFileSync13(mdPath, markdown, "utf8");
+  const dir = process.env.TERMINALHIRE_DIR || join25(homedir22(), ".terminalhire");
+  ensureStateDir(dir);
+  const jsonPath = join25(dir, "trajectory-export.json");
+  const mdPath = join25(dir, "trajectory-export.md");
+  writeFileSync17(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
+  writeFileSync17(mdPath, markdown, "utf8");
   return { jsonPath, mdPath };
 }
 function renderInward(allNodes, view, files) {
@@ -15904,8 +18407,8 @@ function renderInward(allNodes, view, files) {
   console.log("");
 }
 function buildTrajectory() {
-  const projectsDir = join21(homedir19(), ".claude", "projects");
-  if (!existsSync12(projectsDir)) return null;
+  const projectsDir = join25(homedir22(), ".claude", "projects");
+  if (!existsSync13(projectsDir)) return null;
   const paths = findJsonlFiles(projectsDir);
   if (paths.length === 0) return null;
   const files = loadCorpus(paths);
@@ -16041,7 +18544,9 @@ async function runTrajectoryPush(opts, overrides) {
   }
   const cookie = deps.sessionCookie();
   if (opts.delete) {
-    const answer2 = await deps.prompt('  Unlink your trajectory from terminalhire.com? Type "yes" to confirm: ');
+    const answer2 = await deps.prompt(
+      '  Unlink your trajectory from terminalhire.com? Type "yes" to confirm: '
+    );
     if (answer2 !== "yes") {
       deps.log("\n  Aborted \u2014 nothing was changed.\n");
       deps.exit(0);
@@ -16088,7 +18593,9 @@ async function runTrajectoryPush(opts, overrides) {
     return;
   }
   renderConsentCard(score, login, deps.log);
-  const answer = await deps.prompt('  Type "yes" to link your trajectory (anything else cancels): ');
+  const answer = await deps.prompt(
+    '  Type "yes" to link your trajectory (anything else cancels): '
+  );
   const consented = answer === "yes";
   if (!consented) {
     deps.log("\n  Cancelled \u2014 nothing was sent.\n");
@@ -16098,8 +18605,10 @@ async function runTrajectoryPush(opts, overrides) {
   const serialized = JSON.stringify(score);
   const hits = scanDenylist(serialized);
   if (hits.length > 0) {
-    deps.errorLog(`
-  Aborted: the derived score unexpectedly contains a private field (${hits.join(", ")}).`);
+    deps.errorLog(
+      `
+  Aborted: the derived score unexpectedly contains a private field (${hits.join(", ")}).`
+    );
     deps.errorLog("  This should never happen \u2014 nothing was sent. Please report this.\n");
     deps.exit(1);
     return;
@@ -16155,11 +18664,19 @@ var init_trajectory = __esm({
     init_episodes();
     init_src();
     init_web_session();
+    init_state_dir();
     prettySignal = signalLabel;
     LINK_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     OAUTH_BASE2 = "https://terminalhire.com";
     GH_SESSION_COOKIE2 = "__jpi_gh_session";
-    PUSH_DENYLIST = ["rework", "recovery", "within_session", "fatigue", "vector", "mcp__"];
+    PUSH_DENYLIST = [
+      "rework",
+      "recovery",
+      "within_session",
+      "fatigue",
+      "vector",
+      "mcp__"
+    ];
   }
 });
 
@@ -16651,40 +19168,41 @@ var init_jpi_intro = __esm({
 });
 
 // src/chat-keystore.ts
-import { existsSync as existsSync13, mkdirSync as mkdirSync14, readFileSync as readFileSync20, writeFileSync as writeFileSync14, rmSync as rmSync8 } from "fs";
-import { homedir as homedir20 } from "os";
-import { join as join22 } from "path";
+import { existsSync as existsSync14, readFileSync as readFileSync23, writeFileSync as writeFileSync18, rmSync as rmSync8 } from "fs";
+import { homedir as homedir23 } from "os";
+import { join as join26 } from "path";
 async function loadOrCreateIdentity() {
   const key = await loadKey();
-  if (existsSync13(IDENTITY_FILE)) {
-    const blob2 = JSON.parse(readFileSync20(IDENTITY_FILE, "utf8"));
+  if (existsSync14(IDENTITY_FILE)) {
+    const blob2 = JSON.parse(readFileSync23(IDENTITY_FILE, "utf8"));
     return JSON.parse(decrypt(blob2, key));
   }
   const keypair = generateIdentityKeypair();
-  mkdirSync14(TERMINALHIRE_DIR16, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR17);
   const blob = encrypt(JSON.stringify(keypair), key);
-  writeFileSync14(IDENTITY_FILE, JSON.stringify(blob, null, 2), { mode: 384, encoding: "utf8" });
+  writeFileSync18(IDENTITY_FILE, JSON.stringify(blob, null, 2), { mode: 384, encoding: "utf8" });
   return keypair;
 }
-var TERMINALHIRE_DIR16, IDENTITY_FILE;
+var TERMINALHIRE_DIR17, IDENTITY_FILE;
 var init_chat_keystore = __esm({
   "src/chat-keystore.ts"() {
     "use strict";
     init_src();
     init_github_auth();
-    TERMINALHIRE_DIR16 = process.env.TERMINALHIRE_DIR || join22(homedir20(), ".terminalhire");
-    IDENTITY_FILE = join22(TERMINALHIRE_DIR16, "chat-identity.enc");
+    init_state_dir();
+    TERMINALHIRE_DIR17 = process.env.TERMINALHIRE_DIR || join26(homedir23(), ".terminalhire");
+    IDENTITY_FILE = join26(TERMINALHIRE_DIR17, "chat-identity.enc");
   }
 });
 
 // src/chat-client.ts
-import { existsSync as existsSync14, mkdirSync as mkdirSync15, readFileSync as readFileSync21, writeFileSync as writeFileSync15 } from "fs";
-import { homedir as homedir21 } from "os";
-import { join as join23 } from "path";
+import { existsSync as existsSync15, readFileSync as readFileSync24, writeFileSync as writeFileSync19 } from "fs";
+import { homedir as homedir24 } from "os";
+import { join as join27 } from "path";
 function defaultReadPeerPins() {
   try {
-    if (!existsSync14(PEERS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync21(PEERS_FILE, "utf8"));
+    if (!existsSync15(PEERS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync24(PEERS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, key] of Object.entries(parsed)) {
@@ -16696,8 +19214,8 @@ function defaultReadPeerPins() {
   }
 }
 function defaultWritePeerPins(pins) {
-  mkdirSync15(TERMINALHIRE_DIR17, { recursive: true });
-  writeFileSync15(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
+  ensureStateDir(TERMINALHIRE_DIR18);
+  writeFileSync19(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
 }
 function defaultChatClientDeps() {
   return {
@@ -16767,7 +19285,11 @@ function createChatClient(overrides) {
   async function sendMessage(introId, peerLogin, plaintext) {
     const peerPublicKey = await fetchPeerKey(peerLogin);
     const identity = await deps.loadIdentity();
-    const encrypted = encryptMessage(plaintext, identity.privateKey, peerPublicKey);
+    const encrypted = encryptMessage(
+      plaintext,
+      identity.privateKey,
+      peerPublicKey
+    );
     const res = await authedFetch("/api/chat/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -16798,7 +19320,11 @@ function createChatClient(overrides) {
     return messages.map((m) => ({
       id: m.id,
       senderLogin: m.senderLogin,
-      plaintext: decryptMessage({ ciphertext: m.ciphertext, nonce: m.nonce }, identity.privateKey, peerPublicKey),
+      plaintext: decryptMessage(
+        { ciphertext: m.ciphertext, nonce: m.nonce },
+        identity.privateKey,
+        peerPublicKey
+      ),
       createdAt: m.createdAt
     }));
   }
@@ -16866,17 +19392,18 @@ function createChatClient(overrides) {
     getSafetyNumber
   };
 }
-var CHAT_BASE, GH_SESSION_COOKIE4, TERMINALHIRE_DIR17, PEERS_FILE, REQUEST_TIMEOUT_MS, ChatNotLinkedError, ChatSessionExpiredError, SafetyNumberChangedError, ChatRequestError;
+var CHAT_BASE, GH_SESSION_COOKIE4, TERMINALHIRE_DIR18, PEERS_FILE, REQUEST_TIMEOUT_MS, ChatNotLinkedError, ChatSessionExpiredError, SafetyNumberChangedError, ChatRequestError;
 var init_chat_client = __esm({
   "src/chat-client.ts"() {
     "use strict";
     init_src();
     init_chat_keystore();
     init_web_session();
+    init_state_dir();
     CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE4 = "__jpi_gh_session";
-    TERMINALHIRE_DIR17 = process.env.TERMINALHIRE_DIR || join23(homedir21(), ".terminalhire");
-    PEERS_FILE = join23(TERMINALHIRE_DIR17, "chat-peers.json");
+    TERMINALHIRE_DIR18 = process.env.TERMINALHIRE_DIR || join27(homedir24(), ".terminalhire");
+    PEERS_FILE = join27(TERMINALHIRE_DIR18, "chat-peers.json");
     REQUEST_TIMEOUT_MS = 1e4;
     ChatNotLinkedError = class extends Error {
       constructor() {
@@ -16899,7 +19426,9 @@ var init_chat_client = __esm({
       pinnedKey;
       servedKey;
       constructor(peerLogin, pinnedKey, servedKey) {
-        super(`\u26A0 safety number changed for @${peerLogin} \u2014 the key on file does not match the server. Verify before continuing.`);
+        super(
+          `\u26A0 safety number changed for @${peerLogin} \u2014 the key on file does not match the server. Verify before continuing.`
+        );
         this.name = "SafetyNumberChangedError";
         this.peerLogin = peerLogin;
         this.pinnedKey = pinnedKey;
@@ -17304,16 +19833,16 @@ __export(jpi_chat_read_exports, {
   syncUnreadBadge: () => syncUnreadBadge,
   writeReadCursor: () => writeReadCursor
 });
-import { existsSync as existsSync15, mkdirSync as mkdirSync16, readFileSync as readFileSync22, writeFileSync as writeFileSync16 } from "fs";
-import { homedir as homedir22 } from "os";
-import { join as join24 } from "path";
+import { existsSync as existsSync16, readFileSync as readFileSync25, writeFileSync as writeFileSync20 } from "fs";
+import { homedir as homedir25 } from "os";
+import { join as join28 } from "path";
 async function syncUnreadBadge(deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   const cacheFile = deps.cacheFile ?? INDEX_CACHE_FILE6;
   try {
     const cookie = readCookie();
-    if (!cookie || !existsSync15(cacheFile)) return;
+    if (!cookie || !existsSync16(cacheFile)) return;
     const res = await fetchImpl(`${CHAT_BASE2}/api/chat/inbox`, {
       method: "GET",
       headers: { Cookie: `${GH_SESSION_COOKIE5}=${cookie}` },
@@ -17326,16 +19855,16 @@ async function syncUnreadBadge(deps = {}) {
       (sum, it) => sum + (it && typeof it.unreadCount === "number" && it.unreadCount > 0 ? it.unreadCount : 0),
       0
     );
-    const entry = JSON.parse(readFileSync22(cacheFile, "utf8"));
+    const entry = JSON.parse(readFileSync25(cacheFile, "utf8"));
     entry.unreadChat = { count: total };
-    writeFileSync16(cacheFile, JSON.stringify(entry), "utf8");
+    writeFileSync20(cacheFile, JSON.stringify(entry), "utf8");
   } catch {
   }
 }
 function readReadCursors() {
   try {
-    if (!existsSync15(READS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync22(READS_FILE, "utf8"));
+    if (!existsSync16(READS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync25(READS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, iso] of Object.entries(parsed)) {
@@ -17352,8 +19881,8 @@ function writeReadCursor(login, iso, deps = {}) {
   const prev = cursors[login];
   if (prev && iso <= prev) return;
   cursors[login] = iso;
-  mkdirSync16(TERMINALHIRE_DIR18, { recursive: true });
-  writeFileSync16(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
+  ensureStateDir(TERMINALHIRE_DIR19);
+  writeFileSync20(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
 }
 async function postReadCursor(peerLogin, lastReadAt, deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
@@ -17386,7 +19915,20 @@ function formatStamp(iso, now = /* @__PURE__ */ new Date()) {
   if (Number.isNaN(d.getTime())) return "";
   const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
   if (sameDay) return formatClock(iso);
-  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const MONTHS = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec"
+  ];
   return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
 function truncate2(s, n) {
@@ -17402,7 +19944,9 @@ function renderInbox(items, invites = []) {
     for (const iv of invites) {
       const login = sanitizeLine(iv.login);
       const handle = `@${login}`;
-      lines.push(`  \u2198 ${handle.padEnd(18)} wants to connect \xB7 terminalhire intro --accept ${handle}`);
+      lines.push(
+        `  \u2198 ${handle.padEnd(18)} wants to connect \xB7 terminalhire intro --accept ${handle}`
+      );
     }
     lines.push("  " + "\u2500".repeat(64));
   }
@@ -17421,7 +19965,9 @@ function renderInbox(items, invites = []) {
     }
   }
   lines.push("  " + "\u2500".repeat(64));
-  lines.push('  read: terminalhire chat <login> --read   \xB7   reply: terminalhire chat <login> --send "\u2026"');
+  lines.push(
+    '  read: terminalhire chat <login> --read   \xB7   reply: terminalhire chat <login> --send "\u2026"'
+  );
   return lines.join("\n") + "\n";
 }
 function renderThread(state) {
@@ -17429,16 +19975,16 @@ function renderThread(state) {
   const safePeer = sanitizeLine(peerLogin);
   const status = formatPresence(presence);
   const lines = [];
-  lines.push(
-    `  @${safePeer}  ${status}` + (safety ? `  \xB7 safety# ${sanitizeLine(safety)}` : "")
-  );
+  lines.push(`  @${safePeer}  ${status}` + (safety ? `  \xB7 safety# ${sanitizeLine(safety)}` : ""));
   lines.push("  " + "\u2500".repeat(64));
   if (!messages || messages.length === 0) {
     lines.push(`  (no messages yet \u2014 say hi: terminalhire chat ${safePeer} --send "\u2026")`);
   } else {
     for (const m of messages) {
       const who = m.senderLogin === peerLogin ? `@${safePeer}` : "you";
-      lines.push(`  ${formatClock(m.createdAt).padStart(6)}  ${who.padEnd(16)} ${sanitizeLine(m.plaintext)}`);
+      lines.push(
+        `  ${formatClock(m.createdAt).padStart(6)}  ${who.padEnd(16)} ${sanitizeLine(m.plaintext)}`
+      );
     }
   }
   lines.push("  " + "\u2500".repeat(64));
@@ -17473,10 +20019,12 @@ function writeProblem(output, result, target) {
       );
       return "not-connected";
     default:
-      output.write(`
+      output.write(
+        `
   Could not reach your connections: ${sanitizeLine(result.message ?? "unknown error")}
 
-`);
+`
+      );
       return "error";
   }
 }
@@ -17582,10 +20130,12 @@ async function runReadThread(opts = {}) {
   try {
     messages = await client.pollMessages(introId, peerLogin);
   } catch (err) {
-    output.write(`
+    output.write(
+      `
   Could not read the thread: ${sanitizeLine(err instanceof Error ? err.message : String(err))}
 
-`);
+`
+    );
     return { ok: false, reason: "error" };
   }
   const total = messages.length;
@@ -17598,7 +20148,15 @@ async function runReadThread(opts = {}) {
       safety = "";
     }
   }
-  output.write(renderThread({ peerLogin, presence: REACHABLE_DISPLAY, safety, messages: shownMessages, total }));
+  output.write(
+    renderThread({
+      peerLogin,
+      presence: REACHABLE_DISPLAY,
+      safety,
+      messages: shownMessages,
+      total
+    })
+  );
   if (total > 0) {
     const newest = messages[total - 1];
     if (newest && newest.createdAt) {
@@ -17643,10 +20201,12 @@ async function runSend(opts = {}) {
     if (typeof client.ensureKeyPublished === "function") await client.ensureKeyPublished();
     await client.sendMessage(introId, peerLogin, body);
   } catch (err) {
-    output.write(`
+    output.write(
+      `
   Could not send to @${sanitizeLine(peerLogin)}: ${sanitizeLine(err instanceof Error ? err.message : String(err))}
 
-`);
+`
+    );
     return { ok: false, reason: "error" };
   }
   const nowIso = (/* @__PURE__ */ new Date()).toISOString();
@@ -17671,18 +20231,19 @@ async function runSend(opts = {}) {
   );
   return { ok: true };
 }
-var CHAT_BASE2, GH_SESSION_COOKIE5, TERMINALHIRE_DIR18, READS_FILE, INDEX_CACHE_FILE6, REACHABLE_DISPLAY;
+var CHAT_BASE2, GH_SESSION_COOKIE5, TERMINALHIRE_DIR19, READS_FILE, INDEX_CACHE_FILE6, REACHABLE_DISPLAY;
 var init_jpi_chat_read = __esm({
   "bin/jpi-chat-read.js"() {
     "use strict";
     init_chat_client();
     init_web_session();
+    init_state_dir();
     init_jpi_chat();
     CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE5 = "__jpi_gh_session";
-    TERMINALHIRE_DIR18 = process.env.TERMINALHIRE_DIR || join24(homedir22(), ".terminalhire");
-    READS_FILE = join24(TERMINALHIRE_DIR18, "chat-reads.json");
-    INDEX_CACHE_FILE6 = join24(TERMINALHIRE_DIR18, "index-cache.json");
+    TERMINALHIRE_DIR19 = process.env.TERMINALHIRE_DIR || join28(homedir25(), ".terminalhire");
+    READS_FILE = join28(TERMINALHIRE_DIR19, "chat-reads.json");
+    INDEX_CACHE_FILE6 = join28(TERMINALHIRE_DIR19, "index-cache.json");
     REACHABLE_DISPLAY = { shareActivity: false, optin: false, lastSeen: null };
   }
 });
@@ -17817,7 +20378,7 @@ async function runInboxPane(opts = {}) {
     clearTimer = (t) => clearInterval(t),
     refreshMs = DEFAULT_REFRESH_MS
   } = opts;
-  return await new Promise((resolve2) => {
+  return await new Promise((resolve3) => {
     let rows = [];
     let inviteCount = 0;
     let selected = 0;
@@ -18085,7 +20646,7 @@ async function runInboxPane(opts = {}) {
     function finish(result) {
       if (cleaned) return;
       cleanup();
-      resolve2(result);
+      resolve3(result);
     }
     function onSignal() {
       finish({ action: "quit" });
@@ -18123,7 +20684,7 @@ async function runInboxPane(opts = {}) {
   Inbox error: ${err instanceof Error ? err.message : String(err)}
 
 `);
-      resolve2({ action: "quit" });
+      resolve3({ action: "quit" });
     }
   });
 }
@@ -18221,16 +20782,16 @@ __export(jpi_chat_exports, {
   sanitizeLine: () => sanitizeLine
 });
 import { createInterface as createInterface8 } from "readline";
-import { existsSync as existsSync16, readFileSync as readFileSync23 } from "fs";
-import { homedir as homedir23 } from "os";
-import { join as join25 } from "path";
+import { existsSync as existsSync17, readFileSync as readFileSync26 } from "fs";
+import { homedir as homedir26 } from "os";
+import { join as join29 } from "path";
 function defaultPromptAck({ input = process.stdin, output = process.stdout } = {}) {
   if (!input || input.isTTY !== true) return Promise.resolve(false);
   const rl = createInterface8({ input, output });
-  return new Promise((resolve2) => {
+  return new Promise((resolve3) => {
     rl.question("  Press Enter to acknowledge and continue (Ctrl-C to cancel): ", () => {
       rl.close();
-      resolve2(true);
+      resolve3(true);
     });
   });
 }
@@ -18389,9 +20950,9 @@ function mergeMessages(existing, incoming) {
 }
 function readCachedSessionStale() {
   try {
-    const p = join25(process.env.TERMINALHIRE_DIR || join25(homedir23(), ".terminalhire"), "index-cache.json");
-    if (!existsSync16(p)) return false;
-    const cache = JSON.parse(readFileSync23(p, "utf8"));
+    const p = join29(process.env.TERMINALHIRE_DIR || join29(homedir26(), ".terminalhire"), "index-cache.json");
+    if (!existsSync17(p)) return false;
+    const cache = JSON.parse(readFileSync26(p, "utf8"));
     return cache?.sessionStale === true;
   } catch {
     return false;
@@ -18413,7 +20974,7 @@ function runNoticePane(opts = {}) {
     output = process.stdout,
     signals = process
   } = opts;
-  return new Promise((resolve2) => {
+  return new Promise((resolve3) => {
     let cleaned = false;
     const body = String(message ?? "").replace(/^\n+/, "").replace(/\n+$/, "");
     function render() {
@@ -18452,7 +21013,7 @@ function runNoticePane(opts = {}) {
     function onDismiss() {
       if (cleaned) return;
       cleanup();
-      resolve2();
+      resolve3();
     }
     function onUncaught(err) {
       cleanup();
@@ -18491,7 +21052,7 @@ function runNoticePane(opts = {}) {
   ${err instanceof Error ? err.message : String(err)}
 
 `);
-      resolve2();
+      resolve3();
     }
   });
 }
@@ -18629,7 +21190,7 @@ async function runChatPane(opts = {}) {
     selfShareActivity = readConfig().chatShareActivity === true;
   } catch {
   }
-  return await new Promise((resolve2) => {
+  return await new Promise((resolve3) => {
     let messages = [];
     let inputBuffer = "";
     let presence = null;
@@ -18698,7 +21259,7 @@ async function runChatPane(opts = {}) {
       exitReason = reason;
       cleanup();
       output.write(DEPOSIT_CTA);
-      resolve2({ entered: true, reason });
+      resolve3({ entered: true, reason });
     }
     async function doPoll() {
       if (polling || cleaned) return;
@@ -18739,7 +21300,7 @@ async function runChatPane(opts = {}) {
   ${err.message}
 
 `);
-            resolve2({ entered: true, reason: "session-expired" });
+            resolve3({ entered: true, reason: "session-expired" });
           }
           return;
         }
@@ -18793,7 +21354,7 @@ async function runChatPane(opts = {}) {
   ${err.message}
 
 `);
-              resolve2({ entered: true, reason: "session-expired" });
+              resolve3({ entered: true, reason: "session-expired" });
             }
             return;
           }
@@ -18811,7 +21372,7 @@ async function runChatPane(opts = {}) {
 
 `
           );
-          resolve2({ entered: true, reason: "blocked" });
+          resolve3({ entered: true, reason: "blocked" });
         }
         return;
       }
@@ -18827,7 +21388,7 @@ async function runChatPane(opts = {}) {
   ${err.message}
 
 `);
-            resolve2({ entered: true, reason: "session-expired" });
+            resolve3({ entered: true, reason: "session-expired" });
           }
           return;
         }
@@ -18914,7 +21475,7 @@ async function runChatPane(opts = {}) {
   Chat pane error: ${err instanceof Error ? err.message : String(err)}
 
 `);
-      resolve2({ entered: true, reason: "error" });
+      resolve3({ entered: true, reason: "error" });
     }
   });
 }
@@ -19172,7 +21733,7 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
     // tests override with a tiny value to exercise auto-dismiss without a real wait.
     splashMs: _splashMs = DEFAULT_SPLASH_MS
   } = deps;
-  return new Promise((resolve2) => {
+  return new Promise((resolve3) => {
     const level = detectColorLevel(
       typeof process !== "undefined" ? process.env : {},
       output && output.isTTY
@@ -20019,7 +22580,7 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
       } catch {
       }
       runtime.cleanup();
-      resolve2({ ok: true, lastVerb });
+      resolve3({ ok: true, lastVerb });
     }
     runtime.enter();
     splashTimer = setTimeout(() => {
@@ -20128,16 +22689,16 @@ __export(mcp_config_exports, {
   tomlSnippet: () => tomlSnippet,
   writeServerToFile: () => writeServerToFile
 });
-import { homedir as homedir24 } from "os";
-import { join as join26 } from "path";
-import { existsSync as existsSync17, readFileSync as readFileSync24, copyFileSync as copyFileSync2, writeFileSync as writeFileSync17, mkdirSync as mkdirSync17 } from "fs";
-import { dirname as dirname3 } from "path";
+import { homedir as homedir27 } from "os";
+import { join as join30 } from "path";
+import { existsSync as existsSync18, readFileSync as readFileSync27, copyFileSync as copyFileSync2, writeFileSync as writeFileSync21, mkdirSync as mkdirSync6 } from "fs";
+import { dirname as dirname5 } from "path";
 function serverEntry() {
   return { command: SERVER_COMMAND, args: [...SERVER_ARGS] };
 }
-function hostConfigPath(host, home = homedir24()) {
+function hostConfigPath(host, home = homedir27()) {
   if (!host || !Array.isArray(host.relPath)) return null;
-  return join26(home, ...host.relPath);
+  return join30(home, ...host.relPath);
 }
 function jsonSnippet(host) {
   const entry = serverEntry();
@@ -20221,8 +22782,8 @@ function mergeServerIntoJson(existingText, serversKey, entry = serverEntry()) {
 `, added: !already };
 }
 function writeServerToFile(configPath, serversKey, entry = serverEntry()) {
-  const fileExists = existsSync17(configPath);
-  const existingText = fileExists ? readFileSync24(configPath, "utf8") : "";
+  const fileExists = existsSync18(configPath);
+  const existingText = fileExists ? readFileSync27(configPath, "utf8") : "";
   const merged = mergeServerIntoJson(existingText, serversKey, entry);
   if (!merged.ok) {
     return { status: "skipped", reason: merged.reason };
@@ -20233,15 +22794,15 @@ function writeServerToFile(configPath, serversKey, entry = serverEntry()) {
     backupPath = `${configPath}.terminalhire-backup-${ts}`;
     copyFileSync2(configPath, backupPath);
   } else {
-    mkdirSync17(dirname3(configPath), { recursive: true });
+    mkdirSync6(dirname5(configPath), { recursive: true });
   }
-  writeFileSync17(configPath, merged.text, "utf8");
+  writeFileSync21(configPath, merged.text, "utf8");
   return { status: "written", backupPath, added: merged.added };
 }
 async function initMcpStep({
   ask: ask3,
   isTTY = process.stdin.isTTY,
-  home = homedir24(),
+  home = homedir27(),
   out = console.log
 } = {}) {
   out("  Expose your LOCAL matches to your editor / CLI as an MCP server.");
@@ -20264,7 +22825,7 @@ async function initMcpStep({
     return;
   }
   const writableHosts = HOSTS.filter((h) => h.writable);
-  const detected = writableHosts.filter((h) => existsSync17(hostConfigPath(h, home)));
+  const detected = writableHosts.filter((h) => existsSync18(hostConfigPath(h, home)));
   if (detected.length === 0) {
     out("");
     out("  No editor/CLI config detected (looked for ~/.cursor/mcp.json, ~/.gemini/settings.json).");
@@ -20459,7 +23020,7 @@ __export(util_exports, {
   createTransparentProxy: () => createTransparentProxy,
   defineLazy: () => defineLazy,
   esc: () => esc,
-  escapeRegex: () => escapeRegex,
+  escapeRegex: () => escapeRegex2,
   explicitlyAborted: () => explicitlyAborted,
   extend: () => extend,
   finalizeIssue: () => finalizeIssue,
@@ -20669,7 +23230,7 @@ function numKeys(data) {
   }
   return keyCount;
 }
-function escapeRegex(str) {
+function escapeRegex2(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function clone(inst, def, params) {
@@ -21687,7 +24248,7 @@ var init_checks = __esm({
     });
     $ZodCheckIncludes = /* @__PURE__ */ $constructor("$ZodCheckIncludes", (inst, def) => {
       $ZodCheck.init(inst, def);
-      const escapedRegex = escapeRegex(def.includes);
+      const escapedRegex = escapeRegex2(def.includes);
       const pattern = new RegExp(typeof def.position === "number" ? `^.{${def.position}}${escapedRegex}` : escapedRegex);
       def.pattern = pattern;
       inst._zod.onattach.push((inst2) => {
@@ -21711,7 +24272,7 @@ var init_checks = __esm({
     });
     $ZodCheckStartsWith = /* @__PURE__ */ $constructor("$ZodCheckStartsWith", (inst, def) => {
       $ZodCheck.init(inst, def);
-      const pattern = new RegExp(`^${escapeRegex(def.prefix)}.*`);
+      const pattern = new RegExp(`^${escapeRegex2(def.prefix)}.*`);
       def.pattern ?? (def.pattern = pattern);
       inst._zod.onattach.push((inst2) => {
         const bag = inst2._zod.bag;
@@ -21734,7 +24295,7 @@ var init_checks = __esm({
     });
     $ZodCheckEndsWith = /* @__PURE__ */ $constructor("$ZodCheckEndsWith", (inst, def) => {
       $ZodCheck.init(inst, def);
-      const pattern = new RegExp(`.*${escapeRegex(def.suffix)}$`);
+      const pattern = new RegExp(`.*${escapeRegex2(def.suffix)}$`);
       def.pattern ?? (def.pattern = pattern);
       inst._zod.onattach.push((inst2) => {
         const bag = inst2._zod.bag;
@@ -23053,7 +25614,7 @@ var init_schemas = __esm({
       const values = getEnumValues(def.entries);
       const valuesSet = new Set(values);
       inst._zod.values = valuesSet;
-      inst._zod.pattern = new RegExp(`^(${values.filter((k) => propertyKeyTypes.has(typeof k)).map((o) => typeof o === "string" ? escapeRegex(o) : o.toString()).join("|")})$`);
+      inst._zod.pattern = new RegExp(`^(${values.filter((k) => propertyKeyTypes.has(typeof k)).map((o) => typeof o === "string" ? escapeRegex2(o) : o.toString()).join("|")})$`);
       inst._zod.parse = (payload, _ctx) => {
         const input = payload.value;
         if (valuesSet.has(input)) {
@@ -23075,7 +25636,7 @@ var init_schemas = __esm({
       }
       const values = new Set(def.values);
       inst._zod.values = values;
-      inst._zod.pattern = new RegExp(`^(${def.values.map((o) => typeof o === "string" ? escapeRegex(o) : o ? escapeRegex(o.toString()) : String(o)).join("|")})$`);
+      inst._zod.pattern = new RegExp(`^(${def.values.map((o) => typeof o === "string" ? escapeRegex2(o) : o ? escapeRegex2(o.toString()) : String(o)).join("|")})$`);
       inst._zod.parse = (payload, _ctx) => {
         const input = payload.value;
         if (values.has(input)) {
@@ -28594,7 +31155,7 @@ var init_protocol2 = __esm({
               return;
             }
             const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-            await new Promise((resolve2) => setTimeout(resolve2, pollInterval));
+            await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
             options?.signal?.throwIfAborted();
           }
         } catch (error2) {
@@ -28611,7 +31172,7 @@ var init_protocol2 = __esm({
        */
       request(request, resultSchema, options) {
         const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-        return new Promise((resolve2, reject) => {
+        return new Promise((resolve3, reject) => {
           const earlyReject = (error2) => {
             reject(error2);
           };
@@ -28689,7 +31250,7 @@ var init_protocol2 = __esm({
               if (!parseResult.success) {
                 reject(parseResult.error);
               } else {
-                resolve2(parseResult.data);
+                resolve3(parseResult.data);
               }
             } catch (error2) {
               reject(error2);
@@ -28950,12 +31511,12 @@ var init_protocol2 = __esm({
           }
         } catch {
         }
-        return new Promise((resolve2, reject) => {
+        return new Promise((resolve3, reject) => {
           if (signal.aborted) {
             reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
             return;
           }
-          const timeoutId = setTimeout(resolve2, interval);
+          const timeoutId = setTimeout(resolve3, interval);
           signal.addEventListener("abort", () => {
             clearTimeout(timeoutId);
             reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -29031,9 +31592,9 @@ var init_protocol2 = __esm({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/codegen/code.js
+// ../../node_modules/ajv/dist/compile/codegen/code.js
 var require_code = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/codegen/code.js"(exports) {
+  "../../node_modules/ajv/dist/compile/codegen/code.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.regexpCode = exports.getEsmExportName = exports.getProperty = exports.safeStringify = exports.stringify = exports.strConcat = exports.addCodeArg = exports.str = exports._ = exports.nil = exports._Code = exports.Name = exports.IDENTIFIER = exports._CodeOrName = void 0;
@@ -29185,9 +31746,9 @@ var require_code = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/codegen/scope.js
+// ../../node_modules/ajv/dist/compile/codegen/scope.js
 var require_scope = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/codegen/scope.js"(exports) {
+  "../../node_modules/ajv/dist/compile/codegen/scope.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.ValueScope = exports.ValueScopeName = exports.Scope = exports.varKinds = exports.UsedValueState = void 0;
@@ -29330,9 +31891,9 @@ var require_scope = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/codegen/index.js
+// ../../node_modules/ajv/dist/compile/codegen/index.js
 var require_codegen = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/codegen/index.js"(exports) {
+  "../../node_modules/ajv/dist/compile/codegen/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.or = exports.and = exports.not = exports.CodeGen = exports.operators = exports.varKinds = exports.ValueScopeName = exports.ValueScope = exports.Scope = exports.Name = exports.regexpCode = exports.stringify = exports.getProperty = exports.nil = exports.strConcat = exports.str = exports._ = void 0;
@@ -29408,11 +31969,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants);
+          this.rhs = optimizeExpr(this.rhs, names, constants2);
         return this;
       }
       get names() {
@@ -29429,10 +31990,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants);
+        this.rhs = optimizeExpr(this.rhs, names, constants2);
         return this;
       }
       get names() {
@@ -29493,8 +32054,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants) {
-        this.code = optimizeExpr(this.code, names, constants);
+      optimizeNames(names, constants2) {
+        this.code = optimizeExpr(this.code, names, constants2);
         return this;
       }
       get names() {
@@ -29523,12 +32084,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         const { nodes } = this;
         let i = nodes.length;
         while (i--) {
           const n = nodes[i];
-          if (n.optimizeNames(names, constants))
+          if (n.optimizeNames(names, constants2))
             continue;
           subtractNames(names, n.names);
           nodes.splice(i, 1);
@@ -29581,12 +32142,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         var _a3;
-        this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants);
-        if (!(super.optimizeNames(names, constants) || this.else))
+        this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants2);
+        if (!(super.optimizeNames(names, constants2) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants);
+        this.condition = optimizeExpr(this.condition, names, constants2);
         return this;
       }
       get names() {
@@ -29609,10 +32170,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants) {
-        if (!super.optimizeNames(names, constants))
+      optimizeNames(names, constants2) {
+        if (!super.optimizeNames(names, constants2))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants);
+        this.iteration = optimizeExpr(this.iteration, names, constants2);
         return this;
       }
       get names() {
@@ -29648,10 +32209,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants) {
-        if (!super.optimizeNames(names, constants))
+      optimizeNames(names, constants2) {
+        if (!super.optimizeNames(names, constants2))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants);
+        this.iterable = optimizeExpr(this.iterable, names, constants2);
         return this;
       }
       get names() {
@@ -29693,11 +32254,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         var _a3, _b;
-        super.optimizeNames(names, constants);
-        (_a3 = this.catch) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants);
+        super.optimizeNames(names, constants2);
+        (_a3 = this.catch) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants2);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants2);
         return this;
       }
       get names() {
@@ -29998,7 +32559,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants) {
+    function optimizeExpr(expr, names, constants2) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -30013,14 +32574,14 @@ var require_codegen = __commonJS({
         return items;
       }, []));
       function replaceName(n) {
-        const c = constants[n.str];
+        const c = constants2[n.str];
         if (c === void 0 || names[n.str] !== 1)
           return n;
         delete names[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants2[c.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -30050,9 +32611,9 @@ var require_codegen = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/util.js
+// ../../node_modules/ajv/dist/compile/util.js
 var require_util = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/util.js"(exports) {
+  "../../node_modules/ajv/dist/compile/util.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.checkStrictMode = exports.getErrorPath = exports.Type = exports.useFunc = exports.setEvaluated = exports.evaluatedPropsToName = exports.mergeEvaluated = exports.eachItem = exports.unescapeJsonPointer = exports.escapeJsonPointer = exports.escapeFragment = exports.unescapeFragment = exports.schemaRefOrVal = exports.schemaHasRulesButRef = exports.schemaHasRules = exports.checkUnknownRules = exports.alwaysValidSchema = exports.toHash = void 0;
@@ -30217,9 +32778,9 @@ var require_util = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/names.js
+// ../../node_modules/ajv/dist/compile/names.js
 var require_names = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/names.js"(exports) {
+  "../../node_modules/ajv/dist/compile/names.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -30256,9 +32817,9 @@ var require_names = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/errors.js
+// ../../node_modules/ajv/dist/compile/errors.js
 var require_errors = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/errors.js"(exports) {
+  "../../node_modules/ajv/dist/compile/errors.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.extendErrors = exports.resetErrorsCount = exports.reportExtraError = exports.reportError = exports.keyword$DataError = exports.keywordError = void 0;
@@ -30378,9 +32939,9 @@ var require_errors = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/boolSchema.js
+// ../../node_modules/ajv/dist/compile/validate/boolSchema.js
 var require_boolSchema = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/boolSchema.js"(exports) {
+  "../../node_modules/ajv/dist/compile/validate/boolSchema.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.boolOrEmptySchema = exports.topBoolOrEmptySchema = void 0;
@@ -30429,9 +32990,9 @@ var require_boolSchema = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/rules.js
+// ../../node_modules/ajv/dist/compile/rules.js
 var require_rules = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/rules.js"(exports) {
+  "../../node_modules/ajv/dist/compile/rules.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.getRules = exports.isJSONType = void 0;
@@ -30460,9 +33021,9 @@ var require_rules = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/applicability.js
+// ../../node_modules/ajv/dist/compile/validate/applicability.js
 var require_applicability = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/applicability.js"(exports) {
+  "../../node_modules/ajv/dist/compile/validate/applicability.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.shouldUseRule = exports.shouldUseGroup = exports.schemaHasRulesForType = void 0;
@@ -30483,9 +33044,9 @@ var require_applicability = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/dataType.js
+// ../../node_modules/ajv/dist/compile/validate/dataType.js
 var require_dataType = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/dataType.js"(exports) {
+  "../../node_modules/ajv/dist/compile/validate/dataType.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.reportTypeError = exports.checkDataTypes = exports.checkDataType = exports.coerceAndCheckDataType = exports.getJSONTypes = exports.getSchemaTypes = exports.DataType = void 0;
@@ -30667,9 +33228,9 @@ var require_dataType = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/defaults.js
+// ../../node_modules/ajv/dist/compile/validate/defaults.js
 var require_defaults = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/defaults.js"(exports) {
+  "../../node_modules/ajv/dist/compile/validate/defaults.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.assignDefaults = void 0;
@@ -30704,9 +33265,9 @@ var require_defaults = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/code.js
+// ../../node_modules/ajv/dist/vocabularies/code.js
 var require_code2 = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/code.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/code.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateUnion = exports.validateArray = exports.usePattern = exports.callValidateCode = exports.schemaProperties = exports.allSchemaProperties = exports.noPropertyInData = exports.propertyInData = exports.isOwnProperty = exports.hasPropFunc = exports.reportMissingProp = exports.checkMissingProp = exports.checkReportMissingProp = void 0;
@@ -30837,9 +33398,9 @@ var require_code2 = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/keyword.js
+// ../../node_modules/ajv/dist/compile/validate/keyword.js
 var require_keyword = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/keyword.js"(exports) {
+  "../../node_modules/ajv/dist/compile/validate/keyword.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateKeywordUsage = exports.validSchemaType = exports.funcKeywordCode = exports.macroKeywordCode = void 0;
@@ -30955,9 +33516,9 @@ var require_keyword = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/subschema.js
+// ../../node_modules/ajv/dist/compile/validate/subschema.js
 var require_subschema = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/subschema.js"(exports) {
+  "../../node_modules/ajv/dist/compile/validate/subschema.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.extendSubschemaMode = exports.extendSubschemaData = exports.getSubschema = void 0;
@@ -31073,9 +33634,9 @@ var require_fast_deep_equal = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/json-schema-traverse/index.js
+// ../../node_modules/json-schema-traverse/index.js
 var require_json_schema_traverse = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/json-schema-traverse/index.js"(exports, module) {
+  "../../node_modules/json-schema-traverse/index.js"(exports, module) {
     "use strict";
     var traverse = module.exports = function(schema, opts, cb) {
       if (typeof opts == "function") {
@@ -31161,9 +33722,9 @@ var require_json_schema_traverse = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/resolve.js
+// ../../node_modules/ajv/dist/compile/resolve.js
 var require_resolve = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/resolve.js"(exports) {
+  "../../node_modules/ajv/dist/compile/resolve.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.getSchemaRefs = exports.resolveUrl = exports.normalizeId = exports._getFullPath = exports.getFullPath = exports.inlineRef = void 0;
@@ -31317,9 +33878,9 @@ var require_resolve = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/index.js
+// ../../node_modules/ajv/dist/compile/validate/index.js
 var require_validate = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/index.js"(exports) {
+  "../../node_modules/ajv/dist/compile/validate/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.getData = exports.KeywordCxt = exports.validateFunctionCode = void 0;
@@ -31825,9 +34386,9 @@ var require_validate = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/validation_error.js
+// ../../node_modules/ajv/dist/runtime/validation_error.js
 var require_validation_error = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/validation_error.js"(exports) {
+  "../../node_modules/ajv/dist/runtime/validation_error.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var ValidationError = class extends Error {
@@ -31841,9 +34402,9 @@ var require_validation_error = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/ref_error.js
+// ../../node_modules/ajv/dist/compile/ref_error.js
 var require_ref_error = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/ref_error.js"(exports) {
+  "../../node_modules/ajv/dist/compile/ref_error.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var resolve_1 = require_resolve();
@@ -31858,9 +34419,9 @@ var require_ref_error = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/index.js
+// ../../node_modules/ajv/dist/compile/index.js
 var require_compile = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/index.js"(exports) {
+  "../../node_modules/ajv/dist/compile/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.resolveSchema = exports.getCompilingSchema = exports.resolveRef = exports.compileSchema = exports.SchemaEnv = void 0;
@@ -31982,7 +34543,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve2.call(this, root, ref);
+      let _sch = resolve3.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -32009,7 +34570,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve2(root, ref) {
+    function resolve3(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -32082,9 +34643,9 @@ var require_compile = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/refs/data.json
+// ../../node_modules/ajv/dist/refs/data.json
 var require_data = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/refs/data.json"(exports, module) {
+  "../../node_modules/ajv/dist/refs/data.json"(exports, module) {
     module.exports = {
       $id: "https://raw.githubusercontent.com/ajv-validator/ajv/master/lib/refs/data.json#",
       description: "Meta-schema for $data reference (JSON AnySchema extension proposal)",
@@ -32640,7 +35201,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve2(baseURI, relativeURI, options) {
+    function resolve3(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -32898,7 +35459,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize: normalize2,
-      resolve: resolve2,
+      resolve: resolve3,
       resolveComponent,
       equal,
       serialize,
@@ -32910,9 +35471,9 @@ var require_fast_uri = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/uri.js
+// ../../node_modules/ajv/dist/runtime/uri.js
 var require_uri = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/uri.js"(exports) {
+  "../../node_modules/ajv/dist/runtime/uri.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var uri = require_fast_uri();
@@ -32921,9 +35482,9 @@ var require_uri = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/core.js
+// ../../node_modules/ajv/dist/core.js
 var require_core = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/core.js"(exports) {
+  "../../node_modules/ajv/dist/core.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.CodeGen = exports.Name = exports.nil = exports.stringify = exports.str = exports._ = exports.KeywordCxt = void 0;
@@ -33532,9 +36093,9 @@ var require_core = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/core/id.js
+// ../../node_modules/ajv/dist/vocabularies/core/id.js
 var require_id = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/core/id.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/core/id.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var def = {
@@ -33547,9 +36108,9 @@ var require_id = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/core/ref.js
+// ../../node_modules/ajv/dist/vocabularies/core/ref.js
 var require_ref = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/core/ref.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/core/ref.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.callRef = exports.getValidate = void 0;
@@ -33669,9 +36230,9 @@ var require_ref = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/core/index.js
+// ../../node_modules/ajv/dist/vocabularies/core/index.js
 var require_core2 = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/core/index.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/core/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var id_1 = require_id();
@@ -33690,9 +36251,9 @@ var require_core2 = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitNumber.js
+// ../../node_modules/ajv/dist/vocabularies/validation/limitNumber.js
 var require_limitNumber = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitNumber.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/validation/limitNumber.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -33722,9 +36283,9 @@ var require_limitNumber = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/multipleOf.js
+// ../../node_modules/ajv/dist/vocabularies/validation/multipleOf.js
 var require_multipleOf = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/multipleOf.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/validation/multipleOf.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -33750,9 +36311,9 @@ var require_multipleOf = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/ucs2length.js
+// ../../node_modules/ajv/dist/runtime/ucs2length.js
 var require_ucs2length = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/ucs2length.js"(exports) {
+  "../../node_modules/ajv/dist/runtime/ucs2length.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     function ucs2length(str) {
@@ -33776,9 +36337,9 @@ var require_ucs2length = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitLength.js
+// ../../node_modules/ajv/dist/vocabularies/validation/limitLength.js
 var require_limitLength = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitLength.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/validation/limitLength.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -33808,9 +36369,9 @@ var require_limitLength = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/pattern.js
+// ../../node_modules/ajv/dist/vocabularies/validation/pattern.js
 var require_pattern = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/pattern.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/validation/pattern.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -33845,9 +36406,9 @@ var require_pattern = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitProperties.js
+// ../../node_modules/ajv/dist/vocabularies/validation/limitProperties.js
 var require_limitProperties = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitProperties.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/validation/limitProperties.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -33874,9 +36435,9 @@ var require_limitProperties = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/required.js
+// ../../node_modules/ajv/dist/vocabularies/validation/required.js
 var require_required = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/required.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/validation/required.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -33956,9 +36517,9 @@ var require_required = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitItems.js
+// ../../node_modules/ajv/dist/vocabularies/validation/limitItems.js
 var require_limitItems = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitItems.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/validation/limitItems.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -33985,9 +36546,9 @@ var require_limitItems = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/equal.js
+// ../../node_modules/ajv/dist/runtime/equal.js
 var require_equal = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/equal.js"(exports) {
+  "../../node_modules/ajv/dist/runtime/equal.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var equal = require_fast_deep_equal();
@@ -33996,9 +36557,9 @@ var require_equal = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/uniqueItems.js
+// ../../node_modules/ajv/dist/vocabularies/validation/uniqueItems.js
 var require_uniqueItems = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/uniqueItems.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/validation/uniqueItems.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var dataType_1 = require_dataType();
@@ -34063,9 +36624,9 @@ var require_uniqueItems = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/const.js
+// ../../node_modules/ajv/dist/vocabularies/validation/const.js
 var require_const = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/const.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/validation/const.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -34092,9 +36653,9 @@ var require_const = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/enum.js
+// ../../node_modules/ajv/dist/vocabularies/validation/enum.js
 var require_enum = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/enum.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/validation/enum.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -34141,9 +36702,9 @@ var require_enum = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/index.js
+// ../../node_modules/ajv/dist/vocabularies/validation/index.js
 var require_validation = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/index.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/validation/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var limitNumber_1 = require_limitNumber();
@@ -34179,9 +36740,9 @@ var require_validation = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/additionalItems.js
+// ../../node_modules/ajv/dist/vocabularies/applicator/additionalItems.js
 var require_additionalItems = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/additionalItems.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/applicator/additionalItems.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateAdditionalItems = void 0;
@@ -34232,9 +36793,9 @@ var require_additionalItems = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/items.js
+// ../../node_modules/ajv/dist/vocabularies/applicator/items.js
 var require_items = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/items.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/applicator/items.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateTuple = void 0;
@@ -34289,9 +36850,9 @@ var require_items = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/prefixItems.js
+// ../../node_modules/ajv/dist/vocabularies/applicator/prefixItems.js
 var require_prefixItems = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/prefixItems.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/applicator/prefixItems.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var items_1 = require_items();
@@ -34306,9 +36867,9 @@ var require_prefixItems = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/items2020.js
+// ../../node_modules/ajv/dist/vocabularies/applicator/items2020.js
 var require_items2020 = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/items2020.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/applicator/items2020.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -34341,9 +36902,9 @@ var require_items2020 = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/contains.js
+// ../../node_modules/ajv/dist/vocabularies/applicator/contains.js
 var require_contains = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/contains.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/applicator/contains.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -34435,9 +36996,9 @@ var require_contains = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/dependencies.js
+// ../../node_modules/ajv/dist/vocabularies/applicator/dependencies.js
 var require_dependencies = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/dependencies.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/applicator/dependencies.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateSchemaDeps = exports.validatePropertyDeps = exports.error = void 0;
@@ -34529,9 +37090,9 @@ var require_dependencies = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/propertyNames.js
+// ../../node_modules/ajv/dist/vocabularies/applicator/propertyNames.js
 var require_propertyNames = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/propertyNames.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/applicator/propertyNames.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -34572,9 +37133,9 @@ var require_propertyNames = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js
+// ../../node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js
 var require_additionalProperties = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -34678,9 +37239,9 @@ var require_additionalProperties = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/properties.js
+// ../../node_modules/ajv/dist/vocabularies/applicator/properties.js
 var require_properties = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/properties.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/applicator/properties.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var validate_1 = require_validate();
@@ -34736,9 +37297,9 @@ var require_properties = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/patternProperties.js
+// ../../node_modules/ajv/dist/vocabularies/applicator/patternProperties.js
 var require_patternProperties = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/patternProperties.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/applicator/patternProperties.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -34810,9 +37371,9 @@ var require_patternProperties = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/not.js
+// ../../node_modules/ajv/dist/vocabularies/applicator/not.js
 var require_not = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/not.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/applicator/not.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var util_1 = require_util();
@@ -34841,9 +37402,9 @@ var require_not = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/anyOf.js
+// ../../node_modules/ajv/dist/vocabularies/applicator/anyOf.js
 var require_anyOf = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/anyOf.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/applicator/anyOf.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -34858,9 +37419,9 @@ var require_anyOf = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/oneOf.js
+// ../../node_modules/ajv/dist/vocabularies/applicator/oneOf.js
 var require_oneOf = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/oneOf.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/applicator/oneOf.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -34916,9 +37477,9 @@ var require_oneOf = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/allOf.js
+// ../../node_modules/ajv/dist/vocabularies/applicator/allOf.js
 var require_allOf = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/allOf.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/applicator/allOf.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var util_1 = require_util();
@@ -34943,9 +37504,9 @@ var require_allOf = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/if.js
+// ../../node_modules/ajv/dist/vocabularies/applicator/if.js
 var require_if = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/if.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/applicator/if.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -35012,9 +37573,9 @@ var require_if = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/thenElse.js
+// ../../node_modules/ajv/dist/vocabularies/applicator/thenElse.js
 var require_thenElse = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/thenElse.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/applicator/thenElse.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var util_1 = require_util();
@@ -35030,9 +37591,9 @@ var require_thenElse = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/index.js
+// ../../node_modules/ajv/dist/vocabularies/applicator/index.js
 var require_applicator = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/index.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/applicator/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var additionalItems_1 = require_additionalItems();
@@ -35078,9 +37639,9 @@ var require_applicator = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/format/format.js
+// ../../node_modules/ajv/dist/vocabularies/format/format.js
 var require_format = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/format/format.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/format/format.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -35168,9 +37729,9 @@ var require_format = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/format/index.js
+// ../../node_modules/ajv/dist/vocabularies/format/index.js
 var require_format2 = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/format/index.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/format/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var format_1 = require_format();
@@ -35179,9 +37740,9 @@ var require_format2 = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/metadata.js
+// ../../node_modules/ajv/dist/vocabularies/metadata.js
 var require_metadata = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/metadata.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/metadata.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.contentVocabulary = exports.metadataVocabulary = void 0;
@@ -35202,9 +37763,9 @@ var require_metadata = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/draft7.js
+// ../../node_modules/ajv/dist/vocabularies/draft7.js
 var require_draft7 = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/draft7.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/draft7.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var core_1 = require_core2();
@@ -35224,9 +37785,9 @@ var require_draft7 = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/discriminator/types.js
+// ../../node_modules/ajv/dist/vocabularies/discriminator/types.js
 var require_types = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/discriminator/types.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/discriminator/types.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.DiscrError = void 0;
@@ -35238,9 +37799,9 @@ var require_types = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/discriminator/index.js
+// ../../node_modules/ajv/dist/vocabularies/discriminator/index.js
 var require_discriminator = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/discriminator/index.js"(exports) {
+  "../../node_modules/ajv/dist/vocabularies/discriminator/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -35343,9 +37904,9 @@ var require_discriminator = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/refs/json-schema-draft-07.json
+// ../../node_modules/ajv/dist/refs/json-schema-draft-07.json
 var require_json_schema_draft_07 = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/refs/json-schema-draft-07.json"(exports, module) {
+  "../../node_modules/ajv/dist/refs/json-schema-draft-07.json"(exports, module) {
     module.exports = {
       $schema: "http://json-schema.org/draft-07/schema#",
       $id: "http://json-schema.org/draft-07/schema#",
@@ -35500,9 +38061,9 @@ var require_json_schema_draft_07 = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/ajv.js
+// ../../node_modules/ajv/dist/ajv.js
 var require_ajv = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/ajv.js"(exports, module) {
+  "../../node_modules/ajv/dist/ajv.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.MissingRefError = exports.ValidationError = exports.CodeGen = exports.Name = exports.nil = exports.stringify = exports.str = exports._ = exports.KeywordCxt = exports.Ajv = void 0;
@@ -35773,5709 +38334,14 @@ var require_formats = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/codegen/code.js
-var require_code3 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/codegen/code.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.regexpCode = exports.getEsmExportName = exports.getProperty = exports.safeStringify = exports.stringify = exports.strConcat = exports.addCodeArg = exports.str = exports._ = exports.nil = exports._Code = exports.Name = exports.IDENTIFIER = exports._CodeOrName = void 0;
-    var _CodeOrName = class {
-    };
-    exports._CodeOrName = _CodeOrName;
-    exports.IDENTIFIER = /^[a-z$_][a-z$_0-9]*$/i;
-    var Name = class extends _CodeOrName {
-      constructor(s) {
-        super();
-        if (!exports.IDENTIFIER.test(s))
-          throw new Error("CodeGen: name must be a valid identifier");
-        this.str = s;
-      }
-      toString() {
-        return this.str;
-      }
-      emptyStr() {
-        return false;
-      }
-      get names() {
-        return { [this.str]: 1 };
-      }
-    };
-    exports.Name = Name;
-    var _Code = class extends _CodeOrName {
-      constructor(code) {
-        super();
-        this._items = typeof code === "string" ? [code] : code;
-      }
-      toString() {
-        return this.str;
-      }
-      emptyStr() {
-        if (this._items.length > 1)
-          return false;
-        const item = this._items[0];
-        return item === "" || item === '""';
-      }
-      get str() {
-        var _a3;
-        return (_a3 = this._str) !== null && _a3 !== void 0 ? _a3 : this._str = this._items.reduce((s, c) => `${s}${c}`, "");
-      }
-      get names() {
-        var _a3;
-        return (_a3 = this._names) !== null && _a3 !== void 0 ? _a3 : this._names = this._items.reduce((names, c) => {
-          if (c instanceof Name)
-            names[c.str] = (names[c.str] || 0) + 1;
-          return names;
-        }, {});
-      }
-    };
-    exports._Code = _Code;
-    exports.nil = new _Code("");
-    function _(strs, ...args5) {
-      const code = [strs[0]];
-      let i = 0;
-      while (i < args5.length) {
-        addCodeArg(code, args5[i]);
-        code.push(strs[++i]);
-      }
-      return new _Code(code);
-    }
-    exports._ = _;
-    var plus = new _Code("+");
-    function str(strs, ...args5) {
-      const expr = [safeStringify(strs[0])];
-      let i = 0;
-      while (i < args5.length) {
-        expr.push(plus);
-        addCodeArg(expr, args5[i]);
-        expr.push(plus, safeStringify(strs[++i]));
-      }
-      optimize(expr);
-      return new _Code(expr);
-    }
-    exports.str = str;
-    function addCodeArg(code, arg) {
-      if (arg instanceof _Code)
-        code.push(...arg._items);
-      else if (arg instanceof Name)
-        code.push(arg);
-      else
-        code.push(interpolate(arg));
-    }
-    exports.addCodeArg = addCodeArg;
-    function optimize(expr) {
-      let i = 1;
-      while (i < expr.length - 1) {
-        if (expr[i] === plus) {
-          const res = mergeExprItems(expr[i - 1], expr[i + 1]);
-          if (res !== void 0) {
-            expr.splice(i - 1, 3, res);
-            continue;
-          }
-          expr[i++] = "+";
-        }
-        i++;
-      }
-    }
-    function mergeExprItems(a, b) {
-      if (b === '""')
-        return a;
-      if (a === '""')
-        return b;
-      if (typeof a == "string") {
-        if (b instanceof Name || a[a.length - 1] !== '"')
-          return;
-        if (typeof b != "string")
-          return `${a.slice(0, -1)}${b}"`;
-        if (b[0] === '"')
-          return a.slice(0, -1) + b.slice(1);
-        return;
-      }
-      if (typeof b == "string" && b[0] === '"' && !(a instanceof Name))
-        return `"${a}${b.slice(1)}`;
-      return;
-    }
-    function strConcat(c1, c2) {
-      return c2.emptyStr() ? c1 : c1.emptyStr() ? c2 : str`${c1}${c2}`;
-    }
-    exports.strConcat = strConcat;
-    function interpolate(x) {
-      return typeof x == "number" || typeof x == "boolean" || x === null ? x : safeStringify(Array.isArray(x) ? x.join(",") : x);
-    }
-    function stringify(x) {
-      return new _Code(safeStringify(x));
-    }
-    exports.stringify = stringify;
-    function safeStringify(x) {
-      return JSON.stringify(x).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
-    }
-    exports.safeStringify = safeStringify;
-    function getProperty(key) {
-      return typeof key == "string" && exports.IDENTIFIER.test(key) ? new _Code(`.${key}`) : _`[${key}]`;
-    }
-    exports.getProperty = getProperty;
-    function getEsmExportName(key) {
-      if (typeof key == "string" && exports.IDENTIFIER.test(key)) {
-        return new _Code(`${key}`);
-      }
-      throw new Error(`CodeGen: invalid export name: ${key}, use explicit $id name mapping`);
-    }
-    exports.getEsmExportName = getEsmExportName;
-    function regexpCode(rx) {
-      return new _Code(rx.toString());
-    }
-    exports.regexpCode = regexpCode;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/codegen/scope.js
-var require_scope2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/codegen/scope.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.ValueScope = exports.ValueScopeName = exports.Scope = exports.varKinds = exports.UsedValueState = void 0;
-    var code_1 = require_code3();
-    var ValueError = class extends Error {
-      constructor(name) {
-        super(`CodeGen: "code" for ${name} not defined`);
-        this.value = name.value;
-      }
-    };
-    var UsedValueState;
-    (function(UsedValueState2) {
-      UsedValueState2[UsedValueState2["Started"] = 0] = "Started";
-      UsedValueState2[UsedValueState2["Completed"] = 1] = "Completed";
-    })(UsedValueState || (exports.UsedValueState = UsedValueState = {}));
-    exports.varKinds = {
-      const: new code_1.Name("const"),
-      let: new code_1.Name("let"),
-      var: new code_1.Name("var")
-    };
-    var Scope = class {
-      constructor({ prefixes, parent } = {}) {
-        this._names = {};
-        this._prefixes = prefixes;
-        this._parent = parent;
-      }
-      toName(nameOrPrefix) {
-        return nameOrPrefix instanceof code_1.Name ? nameOrPrefix : this.name(nameOrPrefix);
-      }
-      name(prefix) {
-        return new code_1.Name(this._newName(prefix));
-      }
-      _newName(prefix) {
-        const ng = this._names[prefix] || this._nameGroup(prefix);
-        return `${prefix}${ng.index++}`;
-      }
-      _nameGroup(prefix) {
-        var _a3, _b;
-        if (((_b = (_a3 = this._parent) === null || _a3 === void 0 ? void 0 : _a3._prefixes) === null || _b === void 0 ? void 0 : _b.has(prefix)) || this._prefixes && !this._prefixes.has(prefix)) {
-          throw new Error(`CodeGen: prefix "${prefix}" is not allowed in this scope`);
-        }
-        return this._names[prefix] = { prefix, index: 0 };
-      }
-    };
-    exports.Scope = Scope;
-    var ValueScopeName = class extends code_1.Name {
-      constructor(prefix, nameStr) {
-        super(nameStr);
-        this.prefix = prefix;
-      }
-      setValue(value, { property, itemIndex }) {
-        this.value = value;
-        this.scopePath = (0, code_1._)`.${new code_1.Name(property)}[${itemIndex}]`;
-      }
-    };
-    exports.ValueScopeName = ValueScopeName;
-    var line = (0, code_1._)`\n`;
-    var ValueScope = class extends Scope {
-      constructor(opts) {
-        super(opts);
-        this._values = {};
-        this._scope = opts.scope;
-        this.opts = { ...opts, _n: opts.lines ? line : code_1.nil };
-      }
-      get() {
-        return this._scope;
-      }
-      name(prefix) {
-        return new ValueScopeName(prefix, this._newName(prefix));
-      }
-      value(nameOrPrefix, value) {
-        var _a3;
-        if (value.ref === void 0)
-          throw new Error("CodeGen: ref must be passed in value");
-        const name = this.toName(nameOrPrefix);
-        const { prefix } = name;
-        const valueKey = (_a3 = value.key) !== null && _a3 !== void 0 ? _a3 : value.ref;
-        let vs = this._values[prefix];
-        if (vs) {
-          const _name = vs.get(valueKey);
-          if (_name)
-            return _name;
-        } else {
-          vs = this._values[prefix] = /* @__PURE__ */ new Map();
-        }
-        vs.set(valueKey, name);
-        const s = this._scope[prefix] || (this._scope[prefix] = []);
-        const itemIndex = s.length;
-        s[itemIndex] = value.ref;
-        name.setValue(value, { property: prefix, itemIndex });
-        return name;
-      }
-      getValue(prefix, keyOrRef) {
-        const vs = this._values[prefix];
-        if (!vs)
-          return;
-        return vs.get(keyOrRef);
-      }
-      scopeRefs(scopeName, values = this._values) {
-        return this._reduceValues(values, (name) => {
-          if (name.scopePath === void 0)
-            throw new Error(`CodeGen: name "${name}" has no value`);
-          return (0, code_1._)`${scopeName}${name.scopePath}`;
-        });
-      }
-      scopeCode(values = this._values, usedValues, getCode) {
-        return this._reduceValues(values, (name) => {
-          if (name.value === void 0)
-            throw new Error(`CodeGen: name "${name}" has no value`);
-          return name.value.code;
-        }, usedValues, getCode);
-      }
-      _reduceValues(values, valueCode, usedValues = {}, getCode) {
-        let code = code_1.nil;
-        for (const prefix in values) {
-          const vs = values[prefix];
-          if (!vs)
-            continue;
-          const nameSet = usedValues[prefix] = usedValues[prefix] || /* @__PURE__ */ new Map();
-          vs.forEach((name) => {
-            if (nameSet.has(name))
-              return;
-            nameSet.set(name, UsedValueState.Started);
-            let c = valueCode(name);
-            if (c) {
-              const def = this.opts.es5 ? exports.varKinds.var : exports.varKinds.const;
-              code = (0, code_1._)`${code}${def} ${name} = ${c};${this.opts._n}`;
-            } else if (c = getCode === null || getCode === void 0 ? void 0 : getCode(name)) {
-              code = (0, code_1._)`${code}${c}${this.opts._n}`;
-            } else {
-              throw new ValueError(name);
-            }
-            nameSet.set(name, UsedValueState.Completed);
-          });
-        }
-        return code;
-      }
-    };
-    exports.ValueScope = ValueScope;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/codegen/index.js
-var require_codegen2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/codegen/index.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.or = exports.and = exports.not = exports.CodeGen = exports.operators = exports.varKinds = exports.ValueScopeName = exports.ValueScope = exports.Scope = exports.Name = exports.regexpCode = exports.stringify = exports.getProperty = exports.nil = exports.strConcat = exports.str = exports._ = void 0;
-    var code_1 = require_code3();
-    var scope_1 = require_scope2();
-    var code_2 = require_code3();
-    Object.defineProperty(exports, "_", { enumerable: true, get: function() {
-      return code_2._;
-    } });
-    Object.defineProperty(exports, "str", { enumerable: true, get: function() {
-      return code_2.str;
-    } });
-    Object.defineProperty(exports, "strConcat", { enumerable: true, get: function() {
-      return code_2.strConcat;
-    } });
-    Object.defineProperty(exports, "nil", { enumerable: true, get: function() {
-      return code_2.nil;
-    } });
-    Object.defineProperty(exports, "getProperty", { enumerable: true, get: function() {
-      return code_2.getProperty;
-    } });
-    Object.defineProperty(exports, "stringify", { enumerable: true, get: function() {
-      return code_2.stringify;
-    } });
-    Object.defineProperty(exports, "regexpCode", { enumerable: true, get: function() {
-      return code_2.regexpCode;
-    } });
-    Object.defineProperty(exports, "Name", { enumerable: true, get: function() {
-      return code_2.Name;
-    } });
-    var scope_2 = require_scope2();
-    Object.defineProperty(exports, "Scope", { enumerable: true, get: function() {
-      return scope_2.Scope;
-    } });
-    Object.defineProperty(exports, "ValueScope", { enumerable: true, get: function() {
-      return scope_2.ValueScope;
-    } });
-    Object.defineProperty(exports, "ValueScopeName", { enumerable: true, get: function() {
-      return scope_2.ValueScopeName;
-    } });
-    Object.defineProperty(exports, "varKinds", { enumerable: true, get: function() {
-      return scope_2.varKinds;
-    } });
-    exports.operators = {
-      GT: new code_1._Code(">"),
-      GTE: new code_1._Code(">="),
-      LT: new code_1._Code("<"),
-      LTE: new code_1._Code("<="),
-      EQ: new code_1._Code("==="),
-      NEQ: new code_1._Code("!=="),
-      NOT: new code_1._Code("!"),
-      OR: new code_1._Code("||"),
-      AND: new code_1._Code("&&"),
-      ADD: new code_1._Code("+")
-    };
-    var Node = class {
-      optimizeNodes() {
-        return this;
-      }
-      optimizeNames(_names, _constants) {
-        return this;
-      }
-    };
-    var Def = class extends Node {
-      constructor(varKind, name, rhs) {
-        super();
-        this.varKind = varKind;
-        this.name = name;
-        this.rhs = rhs;
-      }
-      render({ es5, _n }) {
-        const varKind = es5 ? scope_1.varKinds.var : this.varKind;
-        const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
-        return `${varKind} ${this.name}${rhs};` + _n;
-      }
-      optimizeNames(names, constants) {
-        if (!names[this.name.str])
-          return;
-        if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants);
-        return this;
-      }
-      get names() {
-        return this.rhs instanceof code_1._CodeOrName ? this.rhs.names : {};
-      }
-    };
-    var Assign = class extends Node {
-      constructor(lhs, rhs, sideEffects) {
-        super();
-        this.lhs = lhs;
-        this.rhs = rhs;
-        this.sideEffects = sideEffects;
-      }
-      render({ _n }) {
-        return `${this.lhs} = ${this.rhs};` + _n;
-      }
-      optimizeNames(names, constants) {
-        if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
-          return;
-        this.rhs = optimizeExpr(this.rhs, names, constants);
-        return this;
-      }
-      get names() {
-        const names = this.lhs instanceof code_1.Name ? {} : { ...this.lhs.names };
-        return addExprNames(names, this.rhs);
-      }
-    };
-    var AssignOp = class extends Assign {
-      constructor(lhs, op, rhs, sideEffects) {
-        super(lhs, rhs, sideEffects);
-        this.op = op;
-      }
-      render({ _n }) {
-        return `${this.lhs} ${this.op}= ${this.rhs};` + _n;
-      }
-    };
-    var Label = class extends Node {
-      constructor(label) {
-        super();
-        this.label = label;
-        this.names = {};
-      }
-      render({ _n }) {
-        return `${this.label}:` + _n;
-      }
-    };
-    var Break = class extends Node {
-      constructor(label) {
-        super();
-        this.label = label;
-        this.names = {};
-      }
-      render({ _n }) {
-        const label = this.label ? ` ${this.label}` : "";
-        return `break${label};` + _n;
-      }
-    };
-    var Throw = class extends Node {
-      constructor(error2) {
-        super();
-        this.error = error2;
-      }
-      render({ _n }) {
-        return `throw ${this.error};` + _n;
-      }
-      get names() {
-        return this.error.names;
-      }
-    };
-    var AnyCode = class extends Node {
-      constructor(code) {
-        super();
-        this.code = code;
-      }
-      render({ _n }) {
-        return `${this.code};` + _n;
-      }
-      optimizeNodes() {
-        return `${this.code}` ? this : void 0;
-      }
-      optimizeNames(names, constants) {
-        this.code = optimizeExpr(this.code, names, constants);
-        return this;
-      }
-      get names() {
-        return this.code instanceof code_1._CodeOrName ? this.code.names : {};
-      }
-    };
-    var ParentNode = class extends Node {
-      constructor(nodes = []) {
-        super();
-        this.nodes = nodes;
-      }
-      render(opts) {
-        return this.nodes.reduce((code, n) => code + n.render(opts), "");
-      }
-      optimizeNodes() {
-        const { nodes } = this;
-        let i = nodes.length;
-        while (i--) {
-          const n = nodes[i].optimizeNodes();
-          if (Array.isArray(n))
-            nodes.splice(i, 1, ...n);
-          else if (n)
-            nodes[i] = n;
-          else
-            nodes.splice(i, 1);
-        }
-        return nodes.length > 0 ? this : void 0;
-      }
-      optimizeNames(names, constants) {
-        const { nodes } = this;
-        let i = nodes.length;
-        while (i--) {
-          const n = nodes[i];
-          if (n.optimizeNames(names, constants))
-            continue;
-          subtractNames(names, n.names);
-          nodes.splice(i, 1);
-        }
-        return nodes.length > 0 ? this : void 0;
-      }
-      get names() {
-        return this.nodes.reduce((names, n) => addNames(names, n.names), {});
-      }
-    };
-    var BlockNode = class extends ParentNode {
-      render(opts) {
-        return "{" + opts._n + super.render(opts) + "}" + opts._n;
-      }
-    };
-    var Root = class extends ParentNode {
-    };
-    var Else = class extends BlockNode {
-    };
-    Else.kind = "else";
-    var If = class _If extends BlockNode {
-      constructor(condition, nodes) {
-        super(nodes);
-        this.condition = condition;
-      }
-      render(opts) {
-        let code = `if(${this.condition})` + super.render(opts);
-        if (this.else)
-          code += "else " + this.else.render(opts);
-        return code;
-      }
-      optimizeNodes() {
-        super.optimizeNodes();
-        const cond = this.condition;
-        if (cond === true)
-          return this.nodes;
-        let e = this.else;
-        if (e) {
-          const ns = e.optimizeNodes();
-          e = this.else = Array.isArray(ns) ? new Else(ns) : ns;
-        }
-        if (e) {
-          if (cond === false)
-            return e instanceof _If ? e : e.nodes;
-          if (this.nodes.length)
-            return this;
-          return new _If(not(cond), e instanceof _If ? [e] : e.nodes);
-        }
-        if (cond === false || !this.nodes.length)
-          return void 0;
-        return this;
-      }
-      optimizeNames(names, constants) {
-        var _a3;
-        this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants);
-        if (!(super.optimizeNames(names, constants) || this.else))
-          return;
-        this.condition = optimizeExpr(this.condition, names, constants);
-        return this;
-      }
-      get names() {
-        const names = super.names;
-        addExprNames(names, this.condition);
-        if (this.else)
-          addNames(names, this.else.names);
-        return names;
-      }
-    };
-    If.kind = "if";
-    var For = class extends BlockNode {
-    };
-    For.kind = "for";
-    var ForLoop = class extends For {
-      constructor(iteration) {
-        super();
-        this.iteration = iteration;
-      }
-      render(opts) {
-        return `for(${this.iteration})` + super.render(opts);
-      }
-      optimizeNames(names, constants) {
-        if (!super.optimizeNames(names, constants))
-          return;
-        this.iteration = optimizeExpr(this.iteration, names, constants);
-        return this;
-      }
-      get names() {
-        return addNames(super.names, this.iteration.names);
-      }
-    };
-    var ForRange = class extends For {
-      constructor(varKind, name, from, to) {
-        super();
-        this.varKind = varKind;
-        this.name = name;
-        this.from = from;
-        this.to = to;
-      }
-      render(opts) {
-        const varKind = opts.es5 ? scope_1.varKinds.var : this.varKind;
-        const { name, from, to } = this;
-        return `for(${varKind} ${name}=${from}; ${name}<${to}; ${name}++)` + super.render(opts);
-      }
-      get names() {
-        const names = addExprNames(super.names, this.from);
-        return addExprNames(names, this.to);
-      }
-    };
-    var ForIter = class extends For {
-      constructor(loop, varKind, name, iterable) {
-        super();
-        this.loop = loop;
-        this.varKind = varKind;
-        this.name = name;
-        this.iterable = iterable;
-      }
-      render(opts) {
-        return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
-      }
-      optimizeNames(names, constants) {
-        if (!super.optimizeNames(names, constants))
-          return;
-        this.iterable = optimizeExpr(this.iterable, names, constants);
-        return this;
-      }
-      get names() {
-        return addNames(super.names, this.iterable.names);
-      }
-    };
-    var Func = class extends BlockNode {
-      constructor(name, args5, async) {
-        super();
-        this.name = name;
-        this.args = args5;
-        this.async = async;
-      }
-      render(opts) {
-        const _async = this.async ? "async " : "";
-        return `${_async}function ${this.name}(${this.args})` + super.render(opts);
-      }
-    };
-    Func.kind = "func";
-    var Return = class extends ParentNode {
-      render(opts) {
-        return "return " + super.render(opts);
-      }
-    };
-    Return.kind = "return";
-    var Try = class extends BlockNode {
-      render(opts) {
-        let code = "try" + super.render(opts);
-        if (this.catch)
-          code += this.catch.render(opts);
-        if (this.finally)
-          code += this.finally.render(opts);
-        return code;
-      }
-      optimizeNodes() {
-        var _a3, _b;
-        super.optimizeNodes();
-        (_a3 = this.catch) === null || _a3 === void 0 ? void 0 : _a3.optimizeNodes();
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
-        return this;
-      }
-      optimizeNames(names, constants) {
-        var _a3, _b;
-        super.optimizeNames(names, constants);
-        (_a3 = this.catch) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants);
-        return this;
-      }
-      get names() {
-        const names = super.names;
-        if (this.catch)
-          addNames(names, this.catch.names);
-        if (this.finally)
-          addNames(names, this.finally.names);
-        return names;
-      }
-    };
-    var Catch = class extends BlockNode {
-      constructor(error2) {
-        super();
-        this.error = error2;
-      }
-      render(opts) {
-        return `catch(${this.error})` + super.render(opts);
-      }
-    };
-    Catch.kind = "catch";
-    var Finally = class extends BlockNode {
-      render(opts) {
-        return "finally" + super.render(opts);
-      }
-    };
-    Finally.kind = "finally";
-    var CodeGen = class {
-      constructor(extScope, opts = {}) {
-        this._values = {};
-        this._blockStarts = [];
-        this._constants = {};
-        this.opts = { ...opts, _n: opts.lines ? "\n" : "" };
-        this._extScope = extScope;
-        this._scope = new scope_1.Scope({ parent: extScope });
-        this._nodes = [new Root()];
-      }
-      toString() {
-        return this._root.render(this.opts);
-      }
-      // returns unique name in the internal scope
-      name(prefix) {
-        return this._scope.name(prefix);
-      }
-      // reserves unique name in the external scope
-      scopeName(prefix) {
-        return this._extScope.name(prefix);
-      }
-      // reserves unique name in the external scope and assigns value to it
-      scopeValue(prefixOrName, value) {
-        const name = this._extScope.value(prefixOrName, value);
-        const vs = this._values[name.prefix] || (this._values[name.prefix] = /* @__PURE__ */ new Set());
-        vs.add(name);
-        return name;
-      }
-      getScopeValue(prefix, keyOrRef) {
-        return this._extScope.getValue(prefix, keyOrRef);
-      }
-      // return code that assigns values in the external scope to the names that are used internally
-      // (same names that were returned by gen.scopeName or gen.scopeValue)
-      scopeRefs(scopeName) {
-        return this._extScope.scopeRefs(scopeName, this._values);
-      }
-      scopeCode() {
-        return this._extScope.scopeCode(this._values);
-      }
-      _def(varKind, nameOrPrefix, rhs, constant) {
-        const name = this._scope.toName(nameOrPrefix);
-        if (rhs !== void 0 && constant)
-          this._constants[name.str] = rhs;
-        this._leafNode(new Def(varKind, name, rhs));
-        return name;
-      }
-      // `const` declaration (`var` in es5 mode)
-      const(nameOrPrefix, rhs, _constant) {
-        return this._def(scope_1.varKinds.const, nameOrPrefix, rhs, _constant);
-      }
-      // `let` declaration with optional assignment (`var` in es5 mode)
-      let(nameOrPrefix, rhs, _constant) {
-        return this._def(scope_1.varKinds.let, nameOrPrefix, rhs, _constant);
-      }
-      // `var` declaration with optional assignment
-      var(nameOrPrefix, rhs, _constant) {
-        return this._def(scope_1.varKinds.var, nameOrPrefix, rhs, _constant);
-      }
-      // assignment code
-      assign(lhs, rhs, sideEffects) {
-        return this._leafNode(new Assign(lhs, rhs, sideEffects));
-      }
-      // `+=` code
-      add(lhs, rhs) {
-        return this._leafNode(new AssignOp(lhs, exports.operators.ADD, rhs));
-      }
-      // appends passed SafeExpr to code or executes Block
-      code(c) {
-        if (typeof c == "function")
-          c();
-        else if (c !== code_1.nil)
-          this._leafNode(new AnyCode(c));
-        return this;
-      }
-      // returns code for object literal for the passed argument list of key-value pairs
-      object(...keyValues) {
-        const code = ["{"];
-        for (const [key, value] of keyValues) {
-          if (code.length > 1)
-            code.push(",");
-          code.push(key);
-          if (key !== value || this.opts.es5) {
-            code.push(":");
-            (0, code_1.addCodeArg)(code, value);
-          }
-        }
-        code.push("}");
-        return new code_1._Code(code);
-      }
-      // `if` clause (or statement if `thenBody` and, optionally, `elseBody` are passed)
-      if(condition, thenBody, elseBody) {
-        this._blockNode(new If(condition));
-        if (thenBody && elseBody) {
-          this.code(thenBody).else().code(elseBody).endIf();
-        } else if (thenBody) {
-          this.code(thenBody).endIf();
-        } else if (elseBody) {
-          throw new Error('CodeGen: "else" body without "then" body');
-        }
-        return this;
-      }
-      // `else if` clause - invalid without `if` or after `else` clauses
-      elseIf(condition) {
-        return this._elseNode(new If(condition));
-      }
-      // `else` clause - only valid after `if` or `else if` clauses
-      else() {
-        return this._elseNode(new Else());
-      }
-      // end `if` statement (needed if gen.if was used only with condition)
-      endIf() {
-        return this._endBlockNode(If, Else);
-      }
-      _for(node, forBody) {
-        this._blockNode(node);
-        if (forBody)
-          this.code(forBody).endFor();
-        return this;
-      }
-      // a generic `for` clause (or statement if `forBody` is passed)
-      for(iteration, forBody) {
-        return this._for(new ForLoop(iteration), forBody);
-      }
-      // `for` statement for a range of values
-      forRange(nameOrPrefix, from, to, forBody, varKind = this.opts.es5 ? scope_1.varKinds.var : scope_1.varKinds.let) {
-        const name = this._scope.toName(nameOrPrefix);
-        return this._for(new ForRange(varKind, name, from, to), () => forBody(name));
-      }
-      // `for-of` statement (in es5 mode replace with a normal for loop)
-      forOf(nameOrPrefix, iterable, forBody, varKind = scope_1.varKinds.const) {
-        const name = this._scope.toName(nameOrPrefix);
-        if (this.opts.es5) {
-          const arr = iterable instanceof code_1.Name ? iterable : this.var("_arr", iterable);
-          return this.forRange("_i", 0, (0, code_1._)`${arr}.length`, (i) => {
-            this.var(name, (0, code_1._)`${arr}[${i}]`);
-            forBody(name);
-          });
-        }
-        return this._for(new ForIter("of", varKind, name, iterable), () => forBody(name));
-      }
-      // `for-in` statement.
-      // With option `ownProperties` replaced with a `for-of` loop for object keys
-      forIn(nameOrPrefix, obj, forBody, varKind = this.opts.es5 ? scope_1.varKinds.var : scope_1.varKinds.const) {
-        if (this.opts.ownProperties) {
-          return this.forOf(nameOrPrefix, (0, code_1._)`Object.keys(${obj})`, forBody);
-        }
-        const name = this._scope.toName(nameOrPrefix);
-        return this._for(new ForIter("in", varKind, name, obj), () => forBody(name));
-      }
-      // end `for` loop
-      endFor() {
-        return this._endBlockNode(For);
-      }
-      // `label` statement
-      label(label) {
-        return this._leafNode(new Label(label));
-      }
-      // `break` statement
-      break(label) {
-        return this._leafNode(new Break(label));
-      }
-      // `return` statement
-      return(value) {
-        const node = new Return();
-        this._blockNode(node);
-        this.code(value);
-        if (node.nodes.length !== 1)
-          throw new Error('CodeGen: "return" should have one node');
-        return this._endBlockNode(Return);
-      }
-      // `try` statement
-      try(tryBody, catchCode, finallyCode) {
-        if (!catchCode && !finallyCode)
-          throw new Error('CodeGen: "try" without "catch" and "finally"');
-        const node = new Try();
-        this._blockNode(node);
-        this.code(tryBody);
-        if (catchCode) {
-          const error2 = this.name("e");
-          this._currNode = node.catch = new Catch(error2);
-          catchCode(error2);
-        }
-        if (finallyCode) {
-          this._currNode = node.finally = new Finally();
-          this.code(finallyCode);
-        }
-        return this._endBlockNode(Catch, Finally);
-      }
-      // `throw` statement
-      throw(error2) {
-        return this._leafNode(new Throw(error2));
-      }
-      // start self-balancing block
-      block(body, nodeCount) {
-        this._blockStarts.push(this._nodes.length);
-        if (body)
-          this.code(body).endBlock(nodeCount);
-        return this;
-      }
-      // end the current self-balancing block
-      endBlock(nodeCount) {
-        const len = this._blockStarts.pop();
-        if (len === void 0)
-          throw new Error("CodeGen: not in self-balancing block");
-        const toClose = this._nodes.length - len;
-        if (toClose < 0 || nodeCount !== void 0 && toClose !== nodeCount) {
-          throw new Error(`CodeGen: wrong number of nodes: ${toClose} vs ${nodeCount} expected`);
-        }
-        this._nodes.length = len;
-        return this;
-      }
-      // `function` heading (or definition if funcBody is passed)
-      func(name, args5 = code_1.nil, async, funcBody) {
-        this._blockNode(new Func(name, args5, async));
-        if (funcBody)
-          this.code(funcBody).endFunc();
-        return this;
-      }
-      // end function definition
-      endFunc() {
-        return this._endBlockNode(Func);
-      }
-      optimize(n = 1) {
-        while (n-- > 0) {
-          this._root.optimizeNodes();
-          this._root.optimizeNames(this._root.names, this._constants);
-        }
-      }
-      _leafNode(node) {
-        this._currNode.nodes.push(node);
-        return this;
-      }
-      _blockNode(node) {
-        this._currNode.nodes.push(node);
-        this._nodes.push(node);
-      }
-      _endBlockNode(N1, N2) {
-        const n = this._currNode;
-        if (n instanceof N1 || N2 && n instanceof N2) {
-          this._nodes.pop();
-          return this;
-        }
-        throw new Error(`CodeGen: not in block "${N2 ? `${N1.kind}/${N2.kind}` : N1.kind}"`);
-      }
-      _elseNode(node) {
-        const n = this._currNode;
-        if (!(n instanceof If)) {
-          throw new Error('CodeGen: "else" without "if"');
-        }
-        this._currNode = n.else = node;
-        return this;
-      }
-      get _root() {
-        return this._nodes[0];
-      }
-      get _currNode() {
-        const ns = this._nodes;
-        return ns[ns.length - 1];
-      }
-      set _currNode(node) {
-        const ns = this._nodes;
-        ns[ns.length - 1] = node;
-      }
-    };
-    exports.CodeGen = CodeGen;
-    function addNames(names, from) {
-      for (const n in from)
-        names[n] = (names[n] || 0) + (from[n] || 0);
-      return names;
-    }
-    function addExprNames(names, from) {
-      return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
-    }
-    function optimizeExpr(expr, names, constants) {
-      if (expr instanceof code_1.Name)
-        return replaceName(expr);
-      if (!canOptimize(expr))
-        return expr;
-      return new code_1._Code(expr._items.reduce((items, c) => {
-        if (c instanceof code_1.Name)
-          c = replaceName(c);
-        if (c instanceof code_1._Code)
-          items.push(...c._items);
-        else
-          items.push(c);
-        return items;
-      }, []));
-      function replaceName(n) {
-        const c = constants[n.str];
-        if (c === void 0 || names[n.str] !== 1)
-          return n;
-        delete names[n.str];
-        return c;
-      }
-      function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants[c.str] !== void 0);
-      }
-    }
-    function subtractNames(names, from) {
-      for (const n in from)
-        names[n] = (names[n] || 0) - (from[n] || 0);
-    }
-    function not(x) {
-      return typeof x == "boolean" || typeof x == "number" || x === null ? !x : (0, code_1._)`!${par(x)}`;
-    }
-    exports.not = not;
-    var andCode = mappend(exports.operators.AND);
-    function and(...args5) {
-      return args5.reduce(andCode);
-    }
-    exports.and = and;
-    var orCode = mappend(exports.operators.OR);
-    function or(...args5) {
-      return args5.reduce(orCode);
-    }
-    exports.or = or;
-    function mappend(op) {
-      return (x, y) => x === code_1.nil ? y : y === code_1.nil ? x : (0, code_1._)`${par(x)} ${op} ${par(y)}`;
-    }
-    function par(x) {
-      return x instanceof code_1.Name ? x : (0, code_1._)`(${x})`;
-    }
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/util.js
-var require_util2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/util.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.checkStrictMode = exports.getErrorPath = exports.Type = exports.useFunc = exports.setEvaluated = exports.evaluatedPropsToName = exports.mergeEvaluated = exports.eachItem = exports.unescapeJsonPointer = exports.escapeJsonPointer = exports.escapeFragment = exports.unescapeFragment = exports.schemaRefOrVal = exports.schemaHasRulesButRef = exports.schemaHasRules = exports.checkUnknownRules = exports.alwaysValidSchema = exports.toHash = void 0;
-    var codegen_1 = require_codegen2();
-    var code_1 = require_code3();
-    function toHash(arr) {
-      const hash = {};
-      for (const item of arr)
-        hash[item] = true;
-      return hash;
-    }
-    exports.toHash = toHash;
-    function alwaysValidSchema(it, schema) {
-      if (typeof schema == "boolean")
-        return schema;
-      if (Object.keys(schema).length === 0)
-        return true;
-      checkUnknownRules(it, schema);
-      return !schemaHasRules(schema, it.self.RULES.all);
-    }
-    exports.alwaysValidSchema = alwaysValidSchema;
-    function checkUnknownRules(it, schema = it.schema) {
-      const { opts, self } = it;
-      if (!opts.strictSchema)
-        return;
-      if (typeof schema === "boolean")
-        return;
-      const rules = self.RULES.keywords;
-      for (const key in schema) {
-        if (!rules[key])
-          checkStrictMode(it, `unknown keyword: "${key}"`);
-      }
-    }
-    exports.checkUnknownRules = checkUnknownRules;
-    function schemaHasRules(schema, rules) {
-      if (typeof schema == "boolean")
-        return !schema;
-      for (const key in schema)
-        if (rules[key])
-          return true;
-      return false;
-    }
-    exports.schemaHasRules = schemaHasRules;
-    function schemaHasRulesButRef(schema, RULES) {
-      if (typeof schema == "boolean")
-        return !schema;
-      for (const key in schema)
-        if (key !== "$ref" && RULES.all[key])
-          return true;
-      return false;
-    }
-    exports.schemaHasRulesButRef = schemaHasRulesButRef;
-    function schemaRefOrVal({ topSchemaRef, schemaPath }, schema, keyword, $data) {
-      if (!$data) {
-        if (typeof schema == "number" || typeof schema == "boolean")
-          return schema;
-        if (typeof schema == "string")
-          return (0, codegen_1._)`${schema}`;
-      }
-      return (0, codegen_1._)`${topSchemaRef}${schemaPath}${(0, codegen_1.getProperty)(keyword)}`;
-    }
-    exports.schemaRefOrVal = schemaRefOrVal;
-    function unescapeFragment(str) {
-      return unescapeJsonPointer(decodeURIComponent(str));
-    }
-    exports.unescapeFragment = unescapeFragment;
-    function escapeFragment(str) {
-      return encodeURIComponent(escapeJsonPointer(str));
-    }
-    exports.escapeFragment = escapeFragment;
-    function escapeJsonPointer(str) {
-      if (typeof str == "number")
-        return `${str}`;
-      return str.replace(/~/g, "~0").replace(/\//g, "~1");
-    }
-    exports.escapeJsonPointer = escapeJsonPointer;
-    function unescapeJsonPointer(str) {
-      return str.replace(/~1/g, "/").replace(/~0/g, "~");
-    }
-    exports.unescapeJsonPointer = unescapeJsonPointer;
-    function eachItem(xs, f) {
-      if (Array.isArray(xs)) {
-        for (const x of xs)
-          f(x);
-      } else {
-        f(xs);
-      }
-    }
-    exports.eachItem = eachItem;
-    function makeMergeEvaluated({ mergeNames, mergeToName, mergeValues: mergeValues2, resultToName }) {
-      return (gen, from, to, toName) => {
-        const res = to === void 0 ? from : to instanceof codegen_1.Name ? (from instanceof codegen_1.Name ? mergeNames(gen, from, to) : mergeToName(gen, from, to), to) : from instanceof codegen_1.Name ? (mergeToName(gen, to, from), from) : mergeValues2(from, to);
-        return toName === codegen_1.Name && !(res instanceof codegen_1.Name) ? resultToName(gen, res) : res;
-      };
-    }
-    exports.mergeEvaluated = {
-      props: makeMergeEvaluated({
-        mergeNames: (gen, from, to) => gen.if((0, codegen_1._)`${to} !== true && ${from} !== undefined`, () => {
-          gen.if((0, codegen_1._)`${from} === true`, () => gen.assign(to, true), () => gen.assign(to, (0, codegen_1._)`${to} || {}`).code((0, codegen_1._)`Object.assign(${to}, ${from})`));
-        }),
-        mergeToName: (gen, from, to) => gen.if((0, codegen_1._)`${to} !== true`, () => {
-          if (from === true) {
-            gen.assign(to, true);
-          } else {
-            gen.assign(to, (0, codegen_1._)`${to} || {}`);
-            setEvaluated(gen, to, from);
-          }
-        }),
-        mergeValues: (from, to) => from === true ? true : { ...from, ...to },
-        resultToName: evaluatedPropsToName
-      }),
-      items: makeMergeEvaluated({
-        mergeNames: (gen, from, to) => gen.if((0, codegen_1._)`${to} !== true && ${from} !== undefined`, () => gen.assign(to, (0, codegen_1._)`${from} === true ? true : ${to} > ${from} ? ${to} : ${from}`)),
-        mergeToName: (gen, from, to) => gen.if((0, codegen_1._)`${to} !== true`, () => gen.assign(to, from === true ? true : (0, codegen_1._)`${to} > ${from} ? ${to} : ${from}`)),
-        mergeValues: (from, to) => from === true ? true : Math.max(from, to),
-        resultToName: (gen, items) => gen.var("items", items)
-      })
-    };
-    function evaluatedPropsToName(gen, ps) {
-      if (ps === true)
-        return gen.var("props", true);
-      const props = gen.var("props", (0, codegen_1._)`{}`);
-      if (ps !== void 0)
-        setEvaluated(gen, props, ps);
-      return props;
-    }
-    exports.evaluatedPropsToName = evaluatedPropsToName;
-    function setEvaluated(gen, props, ps) {
-      Object.keys(ps).forEach((p) => gen.assign((0, codegen_1._)`${props}${(0, codegen_1.getProperty)(p)}`, true));
-    }
-    exports.setEvaluated = setEvaluated;
-    var snippets = {};
-    function useFunc(gen, f) {
-      return gen.scopeValue("func", {
-        ref: f,
-        code: snippets[f.code] || (snippets[f.code] = new code_1._Code(f.code))
-      });
-    }
-    exports.useFunc = useFunc;
-    var Type;
-    (function(Type2) {
-      Type2[Type2["Num"] = 0] = "Num";
-      Type2[Type2["Str"] = 1] = "Str";
-    })(Type || (exports.Type = Type = {}));
-    function getErrorPath(dataProp, dataPropType, jsPropertySyntax) {
-      if (dataProp instanceof codegen_1.Name) {
-        const isNumber = dataPropType === Type.Num;
-        return jsPropertySyntax ? isNumber ? (0, codegen_1._)`"[" + ${dataProp} + "]"` : (0, codegen_1._)`"['" + ${dataProp} + "']"` : isNumber ? (0, codegen_1._)`"/" + ${dataProp}` : (0, codegen_1._)`"/" + ${dataProp}.replace(/~/g, "~0").replace(/\\//g, "~1")`;
-      }
-      return jsPropertySyntax ? (0, codegen_1.getProperty)(dataProp).toString() : "/" + escapeJsonPointer(dataProp);
-    }
-    exports.getErrorPath = getErrorPath;
-    function checkStrictMode(it, msg, mode = it.opts.strictSchema) {
-      if (!mode)
-        return;
-      msg = `strict mode: ${msg}`;
-      if (mode === true)
-        throw new Error(msg);
-      it.self.logger.warn(msg);
-    }
-    exports.checkStrictMode = checkStrictMode;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/names.js
-var require_names2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/names.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var codegen_1 = require_codegen2();
-    var names = {
-      // validation function arguments
-      data: new codegen_1.Name("data"),
-      // data passed to validation function
-      // args passed from referencing schema
-      valCxt: new codegen_1.Name("valCxt"),
-      // validation/data context - should not be used directly, it is destructured to the names below
-      instancePath: new codegen_1.Name("instancePath"),
-      parentData: new codegen_1.Name("parentData"),
-      parentDataProperty: new codegen_1.Name("parentDataProperty"),
-      rootData: new codegen_1.Name("rootData"),
-      // root data - same as the data passed to the first/top validation function
-      dynamicAnchors: new codegen_1.Name("dynamicAnchors"),
-      // used to support recursiveRef and dynamicRef
-      // function scoped variables
-      vErrors: new codegen_1.Name("vErrors"),
-      // null or array of validation errors
-      errors: new codegen_1.Name("errors"),
-      // counter of validation errors
-      this: new codegen_1.Name("this"),
-      // "globals"
-      self: new codegen_1.Name("self"),
-      scope: new codegen_1.Name("scope"),
-      // JTD serialize/parse name for JSON string and position
-      json: new codegen_1.Name("json"),
-      jsonPos: new codegen_1.Name("jsonPos"),
-      jsonLen: new codegen_1.Name("jsonLen"),
-      jsonPart: new codegen_1.Name("jsonPart")
-    };
-    exports.default = names;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/errors.js
-var require_errors2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/errors.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.extendErrors = exports.resetErrorsCount = exports.reportExtraError = exports.reportError = exports.keyword$DataError = exports.keywordError = void 0;
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    var names_1 = require_names2();
-    exports.keywordError = {
-      message: ({ keyword }) => (0, codegen_1.str)`must pass "${keyword}" keyword validation`
-    };
-    exports.keyword$DataError = {
-      message: ({ keyword, schemaType }) => schemaType ? (0, codegen_1.str)`"${keyword}" keyword must be ${schemaType} ($data)` : (0, codegen_1.str)`"${keyword}" keyword is invalid ($data)`
-    };
-    function reportError(cxt, error2 = exports.keywordError, errorPaths, overrideAllErrors) {
-      const { it } = cxt;
-      const { gen, compositeRule, allErrors } = it;
-      const errObj = errorObjectCode(cxt, error2, errorPaths);
-      if (overrideAllErrors !== null && overrideAllErrors !== void 0 ? overrideAllErrors : compositeRule || allErrors) {
-        addError(gen, errObj);
-      } else {
-        returnErrors(it, (0, codegen_1._)`[${errObj}]`);
-      }
-    }
-    exports.reportError = reportError;
-    function reportExtraError(cxt, error2 = exports.keywordError, errorPaths) {
-      const { it } = cxt;
-      const { gen, compositeRule, allErrors } = it;
-      const errObj = errorObjectCode(cxt, error2, errorPaths);
-      addError(gen, errObj);
-      if (!(compositeRule || allErrors)) {
-        returnErrors(it, names_1.default.vErrors);
-      }
-    }
-    exports.reportExtraError = reportExtraError;
-    function resetErrorsCount(gen, errsCount) {
-      gen.assign(names_1.default.errors, errsCount);
-      gen.if((0, codegen_1._)`${names_1.default.vErrors} !== null`, () => gen.if(errsCount, () => gen.assign((0, codegen_1._)`${names_1.default.vErrors}.length`, errsCount), () => gen.assign(names_1.default.vErrors, null)));
-    }
-    exports.resetErrorsCount = resetErrorsCount;
-    function extendErrors({ gen, keyword, schemaValue, data, errsCount, it }) {
-      if (errsCount === void 0)
-        throw new Error("ajv implementation error");
-      const err = gen.name("err");
-      gen.forRange("i", errsCount, names_1.default.errors, (i) => {
-        gen.const(err, (0, codegen_1._)`${names_1.default.vErrors}[${i}]`);
-        gen.if((0, codegen_1._)`${err}.instancePath === undefined`, () => gen.assign((0, codegen_1._)`${err}.instancePath`, (0, codegen_1.strConcat)(names_1.default.instancePath, it.errorPath)));
-        gen.assign((0, codegen_1._)`${err}.schemaPath`, (0, codegen_1.str)`${it.errSchemaPath}/${keyword}`);
-        if (it.opts.verbose) {
-          gen.assign((0, codegen_1._)`${err}.schema`, schemaValue);
-          gen.assign((0, codegen_1._)`${err}.data`, data);
-        }
-      });
-    }
-    exports.extendErrors = extendErrors;
-    function addError(gen, errObj) {
-      const err = gen.const("err", errObj);
-      gen.if((0, codegen_1._)`${names_1.default.vErrors} === null`, () => gen.assign(names_1.default.vErrors, (0, codegen_1._)`[${err}]`), (0, codegen_1._)`${names_1.default.vErrors}.push(${err})`);
-      gen.code((0, codegen_1._)`${names_1.default.errors}++`);
-    }
-    function returnErrors(it, errs) {
-      const { gen, validateName, schemaEnv } = it;
-      if (schemaEnv.$async) {
-        gen.throw((0, codegen_1._)`new ${it.ValidationError}(${errs})`);
-      } else {
-        gen.assign((0, codegen_1._)`${validateName}.errors`, errs);
-        gen.return(false);
-      }
-    }
-    var E = {
-      keyword: new codegen_1.Name("keyword"),
-      schemaPath: new codegen_1.Name("schemaPath"),
-      // also used in JTD errors
-      params: new codegen_1.Name("params"),
-      propertyName: new codegen_1.Name("propertyName"),
-      message: new codegen_1.Name("message"),
-      schema: new codegen_1.Name("schema"),
-      parentSchema: new codegen_1.Name("parentSchema")
-    };
-    function errorObjectCode(cxt, error2, errorPaths) {
-      const { createErrors } = cxt.it;
-      if (createErrors === false)
-        return (0, codegen_1._)`{}`;
-      return errorObject(cxt, error2, errorPaths);
-    }
-    function errorObject(cxt, error2, errorPaths = {}) {
-      const { gen, it } = cxt;
-      const keyValues = [
-        errorInstancePath(it, errorPaths),
-        errorSchemaPath(cxt, errorPaths)
-      ];
-      extraErrorProps(cxt, error2, keyValues);
-      return gen.object(...keyValues);
-    }
-    function errorInstancePath({ errorPath }, { instancePath }) {
-      const instPath = instancePath ? (0, codegen_1.str)`${errorPath}${(0, util_1.getErrorPath)(instancePath, util_1.Type.Str)}` : errorPath;
-      return [names_1.default.instancePath, (0, codegen_1.strConcat)(names_1.default.instancePath, instPath)];
-    }
-    function errorSchemaPath({ keyword, it: { errSchemaPath } }, { schemaPath, parentSchema }) {
-      let schPath = parentSchema ? errSchemaPath : (0, codegen_1.str)`${errSchemaPath}/${keyword}`;
-      if (schemaPath) {
-        schPath = (0, codegen_1.str)`${schPath}${(0, util_1.getErrorPath)(schemaPath, util_1.Type.Str)}`;
-      }
-      return [E.schemaPath, schPath];
-    }
-    function extraErrorProps(cxt, { params, message }, keyValues) {
-      const { keyword, data, schemaValue, it } = cxt;
-      const { opts, propertyName, topSchemaRef, schemaPath } = it;
-      keyValues.push([E.keyword, keyword], [E.params, typeof params == "function" ? params(cxt) : params || (0, codegen_1._)`{}`]);
-      if (opts.messages) {
-        keyValues.push([E.message, typeof message == "function" ? message(cxt) : message]);
-      }
-      if (opts.verbose) {
-        keyValues.push([E.schema, schemaValue], [E.parentSchema, (0, codegen_1._)`${topSchemaRef}${schemaPath}`], [names_1.default.data, data]);
-      }
-      if (propertyName)
-        keyValues.push([E.propertyName, propertyName]);
-    }
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/boolSchema.js
-var require_boolSchema2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/boolSchema.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.boolOrEmptySchema = exports.topBoolOrEmptySchema = void 0;
-    var errors_1 = require_errors2();
-    var codegen_1 = require_codegen2();
-    var names_1 = require_names2();
-    var boolError = {
-      message: "boolean schema is false"
-    };
-    function topBoolOrEmptySchema(it) {
-      const { gen, schema, validateName } = it;
-      if (schema === false) {
-        falseSchemaError(it, false);
-      } else if (typeof schema == "object" && schema.$async === true) {
-        gen.return(names_1.default.data);
-      } else {
-        gen.assign((0, codegen_1._)`${validateName}.errors`, null);
-        gen.return(true);
-      }
-    }
-    exports.topBoolOrEmptySchema = topBoolOrEmptySchema;
-    function boolOrEmptySchema(it, valid) {
-      const { gen, schema } = it;
-      if (schema === false) {
-        gen.var(valid, false);
-        falseSchemaError(it);
-      } else {
-        gen.var(valid, true);
-      }
-    }
-    exports.boolOrEmptySchema = boolOrEmptySchema;
-    function falseSchemaError(it, overrideAllErrors) {
-      const { gen, data } = it;
-      const cxt = {
-        gen,
-        keyword: "false schema",
-        data,
-        schema: false,
-        schemaCode: false,
-        schemaValue: false,
-        params: {},
-        it
-      };
-      (0, errors_1.reportError)(cxt, boolError, void 0, overrideAllErrors);
-    }
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/rules.js
-var require_rules2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/rules.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.getRules = exports.isJSONType = void 0;
-    var _jsonTypes = ["string", "number", "integer", "boolean", "null", "object", "array"];
-    var jsonTypes = new Set(_jsonTypes);
-    function isJSONType(x) {
-      return typeof x == "string" && jsonTypes.has(x);
-    }
-    exports.isJSONType = isJSONType;
-    function getRules() {
-      const groups = {
-        number: { type: "number", rules: [] },
-        string: { type: "string", rules: [] },
-        array: { type: "array", rules: [] },
-        object: { type: "object", rules: [] }
-      };
-      return {
-        types: { ...groups, integer: true, boolean: true, null: true },
-        rules: [{ rules: [] }, groups.number, groups.string, groups.array, groups.object],
-        post: { rules: [] },
-        all: {},
-        keywords: {}
-      };
-    }
-    exports.getRules = getRules;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/applicability.js
-var require_applicability2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/applicability.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.shouldUseRule = exports.shouldUseGroup = exports.schemaHasRulesForType = void 0;
-    function schemaHasRulesForType({ schema, self }, type) {
-      const group = self.RULES.types[type];
-      return group && group !== true && shouldUseGroup(schema, group);
-    }
-    exports.schemaHasRulesForType = schemaHasRulesForType;
-    function shouldUseGroup(schema, group) {
-      return group.rules.some((rule) => shouldUseRule(schema, rule));
-    }
-    exports.shouldUseGroup = shouldUseGroup;
-    function shouldUseRule(schema, rule) {
-      var _a3;
-      return schema[rule.keyword] !== void 0 || ((_a3 = rule.definition.implements) === null || _a3 === void 0 ? void 0 : _a3.some((kwd) => schema[kwd] !== void 0));
-    }
-    exports.shouldUseRule = shouldUseRule;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/dataType.js
-var require_dataType2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/dataType.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.reportTypeError = exports.checkDataTypes = exports.checkDataType = exports.coerceAndCheckDataType = exports.getJSONTypes = exports.getSchemaTypes = exports.DataType = void 0;
-    var rules_1 = require_rules2();
-    var applicability_1 = require_applicability2();
-    var errors_1 = require_errors2();
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    var DataType;
-    (function(DataType2) {
-      DataType2[DataType2["Correct"] = 0] = "Correct";
-      DataType2[DataType2["Wrong"] = 1] = "Wrong";
-    })(DataType || (exports.DataType = DataType = {}));
-    function getSchemaTypes(schema) {
-      const types = getJSONTypes(schema.type);
-      const hasNull = types.includes("null");
-      if (hasNull) {
-        if (schema.nullable === false)
-          throw new Error("type: null contradicts nullable: false");
-      } else {
-        if (!types.length && schema.nullable !== void 0) {
-          throw new Error('"nullable" cannot be used without "type"');
-        }
-        if (schema.nullable === true)
-          types.push("null");
-      }
-      return types;
-    }
-    exports.getSchemaTypes = getSchemaTypes;
-    function getJSONTypes(ts) {
-      const types = Array.isArray(ts) ? ts : ts ? [ts] : [];
-      if (types.every(rules_1.isJSONType))
-        return types;
-      throw new Error("type must be JSONType or JSONType[]: " + types.join(","));
-    }
-    exports.getJSONTypes = getJSONTypes;
-    function coerceAndCheckDataType(it, types) {
-      const { gen, data, opts } = it;
-      const coerceTo = coerceToTypes(types, opts.coerceTypes);
-      const checkTypes = types.length > 0 && !(coerceTo.length === 0 && types.length === 1 && (0, applicability_1.schemaHasRulesForType)(it, types[0]));
-      if (checkTypes) {
-        const wrongType = checkDataTypes(types, data, opts.strictNumbers, DataType.Wrong);
-        gen.if(wrongType, () => {
-          if (coerceTo.length)
-            coerceData(it, types, coerceTo);
-          else
-            reportTypeError(it);
-        });
-      }
-      return checkTypes;
-    }
-    exports.coerceAndCheckDataType = coerceAndCheckDataType;
-    var COERCIBLE = /* @__PURE__ */ new Set(["string", "number", "integer", "boolean", "null"]);
-    function coerceToTypes(types, coerceTypes) {
-      return coerceTypes ? types.filter((t) => COERCIBLE.has(t) || coerceTypes === "array" && t === "array") : [];
-    }
-    function coerceData(it, types, coerceTo) {
-      const { gen, data, opts } = it;
-      const dataType = gen.let("dataType", (0, codegen_1._)`typeof ${data}`);
-      const coerced = gen.let("coerced", (0, codegen_1._)`undefined`);
-      if (opts.coerceTypes === "array") {
-        gen.if((0, codegen_1._)`${dataType} == 'object' && Array.isArray(${data}) && ${data}.length == 1`, () => gen.assign(data, (0, codegen_1._)`${data}[0]`).assign(dataType, (0, codegen_1._)`typeof ${data}`).if(checkDataTypes(types, data, opts.strictNumbers), () => gen.assign(coerced, data)));
-      }
-      gen.if((0, codegen_1._)`${coerced} !== undefined`);
-      for (const t of coerceTo) {
-        if (COERCIBLE.has(t) || t === "array" && opts.coerceTypes === "array") {
-          coerceSpecificType(t);
-        }
-      }
-      gen.else();
-      reportTypeError(it);
-      gen.endIf();
-      gen.if((0, codegen_1._)`${coerced} !== undefined`, () => {
-        gen.assign(data, coerced);
-        assignParentData(it, coerced);
-      });
-      function coerceSpecificType(t) {
-        switch (t) {
-          case "string":
-            gen.elseIf((0, codegen_1._)`${dataType} == "number" || ${dataType} == "boolean"`).assign(coerced, (0, codegen_1._)`"" + ${data}`).elseIf((0, codegen_1._)`${data} === null`).assign(coerced, (0, codegen_1._)`""`);
-            return;
-          case "number":
-            gen.elseIf((0, codegen_1._)`${dataType} == "boolean" || ${data} === null
-              || (${dataType} == "string" && ${data} && ${data} == +${data})`).assign(coerced, (0, codegen_1._)`+${data}`);
-            return;
-          case "integer":
-            gen.elseIf((0, codegen_1._)`${dataType} === "boolean" || ${data} === null
-              || (${dataType} === "string" && ${data} && ${data} == +${data} && !(${data} % 1))`).assign(coerced, (0, codegen_1._)`+${data}`);
-            return;
-          case "boolean":
-            gen.elseIf((0, codegen_1._)`${data} === "false" || ${data} === 0 || ${data} === null`).assign(coerced, false).elseIf((0, codegen_1._)`${data} === "true" || ${data} === 1`).assign(coerced, true);
-            return;
-          case "null":
-            gen.elseIf((0, codegen_1._)`${data} === "" || ${data} === 0 || ${data} === false`);
-            gen.assign(coerced, null);
-            return;
-          case "array":
-            gen.elseIf((0, codegen_1._)`${dataType} === "string" || ${dataType} === "number"
-              || ${dataType} === "boolean" || ${data} === null`).assign(coerced, (0, codegen_1._)`[${data}]`);
-        }
-      }
-    }
-    function assignParentData({ gen, parentData, parentDataProperty }, expr) {
-      gen.if((0, codegen_1._)`${parentData} !== undefined`, () => gen.assign((0, codegen_1._)`${parentData}[${parentDataProperty}]`, expr));
-    }
-    function checkDataType(dataType, data, strictNums, correct = DataType.Correct) {
-      const EQ = correct === DataType.Correct ? codegen_1.operators.EQ : codegen_1.operators.NEQ;
-      let cond;
-      switch (dataType) {
-        case "null":
-          return (0, codegen_1._)`${data} ${EQ} null`;
-        case "array":
-          cond = (0, codegen_1._)`Array.isArray(${data})`;
-          break;
-        case "object":
-          cond = (0, codegen_1._)`${data} && typeof ${data} == "object" && !Array.isArray(${data})`;
-          break;
-        case "integer":
-          cond = numCond((0, codegen_1._)`!(${data} % 1) && !isNaN(${data})`);
-          break;
-        case "number":
-          cond = numCond();
-          break;
-        default:
-          return (0, codegen_1._)`typeof ${data} ${EQ} ${dataType}`;
-      }
-      return correct === DataType.Correct ? cond : (0, codegen_1.not)(cond);
-      function numCond(_cond = codegen_1.nil) {
-        return (0, codegen_1.and)((0, codegen_1._)`typeof ${data} == "number"`, _cond, strictNums ? (0, codegen_1._)`isFinite(${data})` : codegen_1.nil);
-      }
-    }
-    exports.checkDataType = checkDataType;
-    function checkDataTypes(dataTypes, data, strictNums, correct) {
-      if (dataTypes.length === 1) {
-        return checkDataType(dataTypes[0], data, strictNums, correct);
-      }
-      let cond;
-      const types = (0, util_1.toHash)(dataTypes);
-      if (types.array && types.object) {
-        const notObj = (0, codegen_1._)`typeof ${data} != "object"`;
-        cond = types.null ? notObj : (0, codegen_1._)`!${data} || ${notObj}`;
-        delete types.null;
-        delete types.array;
-        delete types.object;
-      } else {
-        cond = codegen_1.nil;
-      }
-      if (types.number)
-        delete types.integer;
-      for (const t in types)
-        cond = (0, codegen_1.and)(cond, checkDataType(t, data, strictNums, correct));
-      return cond;
-    }
-    exports.checkDataTypes = checkDataTypes;
-    var typeError = {
-      message: ({ schema }) => `must be ${schema}`,
-      params: ({ schema, schemaValue }) => typeof schema == "string" ? (0, codegen_1._)`{type: ${schema}}` : (0, codegen_1._)`{type: ${schemaValue}}`
-    };
-    function reportTypeError(it) {
-      const cxt = getTypeErrorContext(it);
-      (0, errors_1.reportError)(cxt, typeError);
-    }
-    exports.reportTypeError = reportTypeError;
-    function getTypeErrorContext(it) {
-      const { gen, data, schema } = it;
-      const schemaCode = (0, util_1.schemaRefOrVal)(it, schema, "type");
-      return {
-        gen,
-        keyword: "type",
-        data,
-        schema: schema.type,
-        schemaCode,
-        schemaValue: schemaCode,
-        parentSchema: schema,
-        params: {},
-        it
-      };
-    }
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/defaults.js
-var require_defaults2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/defaults.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.assignDefaults = void 0;
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    function assignDefaults(it, ty) {
-      const { properties, items } = it.schema;
-      if (ty === "object" && properties) {
-        for (const key in properties) {
-          assignDefault(it, key, properties[key].default);
-        }
-      } else if (ty === "array" && Array.isArray(items)) {
-        items.forEach((sch, i) => assignDefault(it, i, sch.default));
-      }
-    }
-    exports.assignDefaults = assignDefaults;
-    function assignDefault(it, prop, defaultValue) {
-      const { gen, compositeRule, data, opts } = it;
-      if (defaultValue === void 0)
-        return;
-      const childData = (0, codegen_1._)`${data}${(0, codegen_1.getProperty)(prop)}`;
-      if (compositeRule) {
-        (0, util_1.checkStrictMode)(it, `default is ignored for: ${childData}`);
-        return;
-      }
-      let condition = (0, codegen_1._)`${childData} === undefined`;
-      if (opts.useDefaults === "empty") {
-        condition = (0, codegen_1._)`${condition} || ${childData} === null || ${childData} === ""`;
-      }
-      gen.if(condition, (0, codegen_1._)`${childData} = ${(0, codegen_1.stringify)(defaultValue)}`);
-    }
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/code.js
-var require_code4 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/code.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.validateUnion = exports.validateArray = exports.usePattern = exports.callValidateCode = exports.schemaProperties = exports.allSchemaProperties = exports.noPropertyInData = exports.propertyInData = exports.isOwnProperty = exports.hasPropFunc = exports.reportMissingProp = exports.checkMissingProp = exports.checkReportMissingProp = void 0;
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    var names_1 = require_names2();
-    var util_2 = require_util2();
-    function checkReportMissingProp(cxt, prop) {
-      const { gen, data, it } = cxt;
-      gen.if(noPropertyInData(gen, data, prop, it.opts.ownProperties), () => {
-        cxt.setParams({ missingProperty: (0, codegen_1._)`${prop}` }, true);
-        cxt.error();
-      });
-    }
-    exports.checkReportMissingProp = checkReportMissingProp;
-    function checkMissingProp({ gen, data, it: { opts } }, properties, missing) {
-      return (0, codegen_1.or)(...properties.map((prop) => (0, codegen_1.and)(noPropertyInData(gen, data, prop, opts.ownProperties), (0, codegen_1._)`${missing} = ${prop}`)));
-    }
-    exports.checkMissingProp = checkMissingProp;
-    function reportMissingProp(cxt, missing) {
-      cxt.setParams({ missingProperty: missing }, true);
-      cxt.error();
-    }
-    exports.reportMissingProp = reportMissingProp;
-    function hasPropFunc(gen) {
-      return gen.scopeValue("func", {
-        // eslint-disable-next-line @typescript-eslint/unbound-method
-        ref: Object.prototype.hasOwnProperty,
-        code: (0, codegen_1._)`Object.prototype.hasOwnProperty`
-      });
-    }
-    exports.hasPropFunc = hasPropFunc;
-    function isOwnProperty(gen, data, property) {
-      return (0, codegen_1._)`${hasPropFunc(gen)}.call(${data}, ${property})`;
-    }
-    exports.isOwnProperty = isOwnProperty;
-    function propertyInData(gen, data, property, ownProperties) {
-      const cond = (0, codegen_1._)`${data}${(0, codegen_1.getProperty)(property)} !== undefined`;
-      return ownProperties ? (0, codegen_1._)`${cond} && ${isOwnProperty(gen, data, property)}` : cond;
-    }
-    exports.propertyInData = propertyInData;
-    function noPropertyInData(gen, data, property, ownProperties) {
-      const cond = (0, codegen_1._)`${data}${(0, codegen_1.getProperty)(property)} === undefined`;
-      return ownProperties ? (0, codegen_1.or)(cond, (0, codegen_1.not)(isOwnProperty(gen, data, property))) : cond;
-    }
-    exports.noPropertyInData = noPropertyInData;
-    function allSchemaProperties(schemaMap) {
-      return schemaMap ? Object.keys(schemaMap).filter((p) => p !== "__proto__") : [];
-    }
-    exports.allSchemaProperties = allSchemaProperties;
-    function schemaProperties(it, schemaMap) {
-      return allSchemaProperties(schemaMap).filter((p) => !(0, util_1.alwaysValidSchema)(it, schemaMap[p]));
-    }
-    exports.schemaProperties = schemaProperties;
-    function callValidateCode({ schemaCode, data, it: { gen, topSchemaRef, schemaPath, errorPath }, it }, func, context, passSchema) {
-      const dataAndSchema = passSchema ? (0, codegen_1._)`${schemaCode}, ${data}, ${topSchemaRef}${schemaPath}` : data;
-      const valCxt = [
-        [names_1.default.instancePath, (0, codegen_1.strConcat)(names_1.default.instancePath, errorPath)],
-        [names_1.default.parentData, it.parentData],
-        [names_1.default.parentDataProperty, it.parentDataProperty],
-        [names_1.default.rootData, names_1.default.rootData]
-      ];
-      if (it.opts.dynamicRef)
-        valCxt.push([names_1.default.dynamicAnchors, names_1.default.dynamicAnchors]);
-      const args5 = (0, codegen_1._)`${dataAndSchema}, ${gen.object(...valCxt)}`;
-      return context !== codegen_1.nil ? (0, codegen_1._)`${func}.call(${context}, ${args5})` : (0, codegen_1._)`${func}(${args5})`;
-    }
-    exports.callValidateCode = callValidateCode;
-    var newRegExp = (0, codegen_1._)`new RegExp`;
-    function usePattern({ gen, it: { opts } }, pattern) {
-      const u = opts.unicodeRegExp ? "u" : "";
-      const { regExp } = opts.code;
-      const rx = regExp(pattern, u);
-      return gen.scopeValue("pattern", {
-        key: rx.toString(),
-        ref: rx,
-        code: (0, codegen_1._)`${regExp.code === "new RegExp" ? newRegExp : (0, util_2.useFunc)(gen, regExp)}(${pattern}, ${u})`
-      });
-    }
-    exports.usePattern = usePattern;
-    function validateArray(cxt) {
-      const { gen, data, keyword, it } = cxt;
-      const valid = gen.name("valid");
-      if (it.allErrors) {
-        const validArr = gen.let("valid", true);
-        validateItems(() => gen.assign(validArr, false));
-        return validArr;
-      }
-      gen.var(valid, true);
-      validateItems(() => gen.break());
-      return valid;
-      function validateItems(notValid) {
-        const len = gen.const("len", (0, codegen_1._)`${data}.length`);
-        gen.forRange("i", 0, len, (i) => {
-          cxt.subschema({
-            keyword,
-            dataProp: i,
-            dataPropType: util_1.Type.Num
-          }, valid);
-          gen.if((0, codegen_1.not)(valid), notValid);
-        });
-      }
-    }
-    exports.validateArray = validateArray;
-    function validateUnion(cxt) {
-      const { gen, schema, keyword, it } = cxt;
-      if (!Array.isArray(schema))
-        throw new Error("ajv implementation error");
-      const alwaysValid = schema.some((sch) => (0, util_1.alwaysValidSchema)(it, sch));
-      if (alwaysValid && !it.opts.unevaluated)
-        return;
-      const valid = gen.let("valid", false);
-      const schValid = gen.name("_valid");
-      gen.block(() => schema.forEach((_sch, i) => {
-        const schCxt = cxt.subschema({
-          keyword,
-          schemaProp: i,
-          compositeRule: true
-        }, schValid);
-        gen.assign(valid, (0, codegen_1._)`${valid} || ${schValid}`);
-        const merged = cxt.mergeValidEvaluated(schCxt, schValid);
-        if (!merged)
-          gen.if((0, codegen_1.not)(valid));
-      }));
-      cxt.result(valid, () => cxt.reset(), () => cxt.error(true));
-    }
-    exports.validateUnion = validateUnion;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/keyword.js
-var require_keyword2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/keyword.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.validateKeywordUsage = exports.validSchemaType = exports.funcKeywordCode = exports.macroKeywordCode = void 0;
-    var codegen_1 = require_codegen2();
-    var names_1 = require_names2();
-    var code_1 = require_code4();
-    var errors_1 = require_errors2();
-    function macroKeywordCode(cxt, def) {
-      const { gen, keyword, schema, parentSchema, it } = cxt;
-      const macroSchema = def.macro.call(it.self, schema, parentSchema, it);
-      const schemaRef = useKeyword(gen, keyword, macroSchema);
-      if (it.opts.validateSchema !== false)
-        it.self.validateSchema(macroSchema, true);
-      const valid = gen.name("valid");
-      cxt.subschema({
-        schema: macroSchema,
-        schemaPath: codegen_1.nil,
-        errSchemaPath: `${it.errSchemaPath}/${keyword}`,
-        topSchemaRef: schemaRef,
-        compositeRule: true
-      }, valid);
-      cxt.pass(valid, () => cxt.error(true));
-    }
-    exports.macroKeywordCode = macroKeywordCode;
-    function funcKeywordCode(cxt, def) {
-      var _a3;
-      const { gen, keyword, schema, parentSchema, $data, it } = cxt;
-      checkAsyncKeyword(it, def);
-      const validate = !$data && def.compile ? def.compile.call(it.self, schema, parentSchema, it) : def.validate;
-      const validateRef = useKeyword(gen, keyword, validate);
-      const valid = gen.let("valid");
-      cxt.block$data(valid, validateKeyword);
-      cxt.ok((_a3 = def.valid) !== null && _a3 !== void 0 ? _a3 : valid);
-      function validateKeyword() {
-        if (def.errors === false) {
-          assignValid();
-          if (def.modifying)
-            modifyData(cxt);
-          reportErrs(() => cxt.error());
-        } else {
-          const ruleErrs = def.async ? validateAsync() : validateSync();
-          if (def.modifying)
-            modifyData(cxt);
-          reportErrs(() => addErrs(cxt, ruleErrs));
-        }
-      }
-      function validateAsync() {
-        const ruleErrs = gen.let("ruleErrs", null);
-        gen.try(() => assignValid((0, codegen_1._)`await `), (e) => gen.assign(valid, false).if((0, codegen_1._)`${e} instanceof ${it.ValidationError}`, () => gen.assign(ruleErrs, (0, codegen_1._)`${e}.errors`), () => gen.throw(e)));
-        return ruleErrs;
-      }
-      function validateSync() {
-        const validateErrs = (0, codegen_1._)`${validateRef}.errors`;
-        gen.assign(validateErrs, null);
-        assignValid(codegen_1.nil);
-        return validateErrs;
-      }
-      function assignValid(_await = def.async ? (0, codegen_1._)`await ` : codegen_1.nil) {
-        const passCxt = it.opts.passContext ? names_1.default.this : names_1.default.self;
-        const passSchema = !("compile" in def && !$data || def.schema === false);
-        gen.assign(valid, (0, codegen_1._)`${_await}${(0, code_1.callValidateCode)(cxt, validateRef, passCxt, passSchema)}`, def.modifying);
-      }
-      function reportErrs(errors) {
-        var _a4;
-        gen.if((0, codegen_1.not)((_a4 = def.valid) !== null && _a4 !== void 0 ? _a4 : valid), errors);
-      }
-    }
-    exports.funcKeywordCode = funcKeywordCode;
-    function modifyData(cxt) {
-      const { gen, data, it } = cxt;
-      gen.if(it.parentData, () => gen.assign(data, (0, codegen_1._)`${it.parentData}[${it.parentDataProperty}]`));
-    }
-    function addErrs(cxt, errs) {
-      const { gen } = cxt;
-      gen.if((0, codegen_1._)`Array.isArray(${errs})`, () => {
-        gen.assign(names_1.default.vErrors, (0, codegen_1._)`${names_1.default.vErrors} === null ? ${errs} : ${names_1.default.vErrors}.concat(${errs})`).assign(names_1.default.errors, (0, codegen_1._)`${names_1.default.vErrors}.length`);
-        (0, errors_1.extendErrors)(cxt);
-      }, () => cxt.error());
-    }
-    function checkAsyncKeyword({ schemaEnv }, def) {
-      if (def.async && !schemaEnv.$async)
-        throw new Error("async keyword in sync schema");
-    }
-    function useKeyword(gen, keyword, result) {
-      if (result === void 0)
-        throw new Error(`keyword "${keyword}" failed to compile`);
-      return gen.scopeValue("keyword", typeof result == "function" ? { ref: result } : { ref: result, code: (0, codegen_1.stringify)(result) });
-    }
-    function validSchemaType(schema, schemaType, allowUndefined = false) {
-      return !schemaType.length || schemaType.some((st) => st === "array" ? Array.isArray(schema) : st === "object" ? schema && typeof schema == "object" && !Array.isArray(schema) : typeof schema == st || allowUndefined && typeof schema == "undefined");
-    }
-    exports.validSchemaType = validSchemaType;
-    function validateKeywordUsage({ schema, opts, self, errSchemaPath }, def, keyword) {
-      if (Array.isArray(def.keyword) ? !def.keyword.includes(keyword) : def.keyword !== keyword) {
-        throw new Error("ajv implementation error");
-      }
-      const deps = def.dependencies;
-      if (deps === null || deps === void 0 ? void 0 : deps.some((kwd) => !Object.prototype.hasOwnProperty.call(schema, kwd))) {
-        throw new Error(`parent schema must have dependencies of ${keyword}: ${deps.join(",")}`);
-      }
-      if (def.validateSchema) {
-        const valid = def.validateSchema(schema[keyword]);
-        if (!valid) {
-          const msg = `keyword "${keyword}" value is invalid at path "${errSchemaPath}": ` + self.errorsText(def.validateSchema.errors);
-          if (opts.validateSchema === "log")
-            self.logger.error(msg);
-          else
-            throw new Error(msg);
-        }
-      }
-    }
-    exports.validateKeywordUsage = validateKeywordUsage;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/subschema.js
-var require_subschema2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/subschema.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.extendSubschemaMode = exports.extendSubschemaData = exports.getSubschema = void 0;
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    function getSubschema(it, { keyword, schemaProp, schema, schemaPath, errSchemaPath, topSchemaRef }) {
-      if (keyword !== void 0 && schema !== void 0) {
-        throw new Error('both "keyword" and "schema" passed, only one allowed');
-      }
-      if (keyword !== void 0) {
-        const sch = it.schema[keyword];
-        return schemaProp === void 0 ? {
-          schema: sch,
-          schemaPath: (0, codegen_1._)`${it.schemaPath}${(0, codegen_1.getProperty)(keyword)}`,
-          errSchemaPath: `${it.errSchemaPath}/${keyword}`
-        } : {
-          schema: sch[schemaProp],
-          schemaPath: (0, codegen_1._)`${it.schemaPath}${(0, codegen_1.getProperty)(keyword)}${(0, codegen_1.getProperty)(schemaProp)}`,
-          errSchemaPath: `${it.errSchemaPath}/${keyword}/${(0, util_1.escapeFragment)(schemaProp)}`
-        };
-      }
-      if (schema !== void 0) {
-        if (schemaPath === void 0 || errSchemaPath === void 0 || topSchemaRef === void 0) {
-          throw new Error('"schemaPath", "errSchemaPath" and "topSchemaRef" are required with "schema"');
-        }
-        return {
-          schema,
-          schemaPath,
-          topSchemaRef,
-          errSchemaPath
-        };
-      }
-      throw new Error('either "keyword" or "schema" must be passed');
-    }
-    exports.getSubschema = getSubschema;
-    function extendSubschemaData(subschema, it, { dataProp, dataPropType: dpType, data, dataTypes, propertyName }) {
-      if (data !== void 0 && dataProp !== void 0) {
-        throw new Error('both "data" and "dataProp" passed, only one allowed');
-      }
-      const { gen } = it;
-      if (dataProp !== void 0) {
-        const { errorPath, dataPathArr, opts } = it;
-        const nextData = gen.let("data", (0, codegen_1._)`${it.data}${(0, codegen_1.getProperty)(dataProp)}`, true);
-        dataContextProps(nextData);
-        subschema.errorPath = (0, codegen_1.str)`${errorPath}${(0, util_1.getErrorPath)(dataProp, dpType, opts.jsPropertySyntax)}`;
-        subschema.parentDataProperty = (0, codegen_1._)`${dataProp}`;
-        subschema.dataPathArr = [...dataPathArr, subschema.parentDataProperty];
-      }
-      if (data !== void 0) {
-        const nextData = data instanceof codegen_1.Name ? data : gen.let("data", data, true);
-        dataContextProps(nextData);
-        if (propertyName !== void 0)
-          subschema.propertyName = propertyName;
-      }
-      if (dataTypes)
-        subschema.dataTypes = dataTypes;
-      function dataContextProps(_nextData) {
-        subschema.data = _nextData;
-        subschema.dataLevel = it.dataLevel + 1;
-        subschema.dataTypes = [];
-        it.definedProperties = /* @__PURE__ */ new Set();
-        subschema.parentData = it.data;
-        subschema.dataNames = [...it.dataNames, _nextData];
-      }
-    }
-    exports.extendSubschemaData = extendSubschemaData;
-    function extendSubschemaMode(subschema, { jtdDiscriminator, jtdMetadata, compositeRule, createErrors, allErrors }) {
-      if (compositeRule !== void 0)
-        subschema.compositeRule = compositeRule;
-      if (createErrors !== void 0)
-        subschema.createErrors = createErrors;
-      if (allErrors !== void 0)
-        subschema.allErrors = allErrors;
-      subschema.jtdDiscriminator = jtdDiscriminator;
-      subschema.jtdMetadata = jtdMetadata;
-    }
-    exports.extendSubschemaMode = extendSubschemaMode;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/json-schema-traverse/index.js
-var require_json_schema_traverse2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/json-schema-traverse/index.js"(exports, module) {
-    "use strict";
-    var traverse = module.exports = function(schema, opts, cb) {
-      if (typeof opts == "function") {
-        cb = opts;
-        opts = {};
-      }
-      cb = opts.cb || cb;
-      var pre = typeof cb == "function" ? cb : cb.pre || function() {
-      };
-      var post = cb.post || function() {
-      };
-      _traverse(opts, pre, post, schema, "", schema);
-    };
-    traverse.keywords = {
-      additionalItems: true,
-      items: true,
-      contains: true,
-      additionalProperties: true,
-      propertyNames: true,
-      not: true,
-      if: true,
-      then: true,
-      else: true
-    };
-    traverse.arrayKeywords = {
-      items: true,
-      allOf: true,
-      anyOf: true,
-      oneOf: true
-    };
-    traverse.propsKeywords = {
-      $defs: true,
-      definitions: true,
-      properties: true,
-      patternProperties: true,
-      dependencies: true
-    };
-    traverse.skipKeywords = {
-      default: true,
-      enum: true,
-      const: true,
-      required: true,
-      maximum: true,
-      minimum: true,
-      exclusiveMaximum: true,
-      exclusiveMinimum: true,
-      multipleOf: true,
-      maxLength: true,
-      minLength: true,
-      pattern: true,
-      format: true,
-      maxItems: true,
-      minItems: true,
-      uniqueItems: true,
-      maxProperties: true,
-      minProperties: true
-    };
-    function _traverse(opts, pre, post, schema, jsonPtr, rootSchema, parentJsonPtr, parentKeyword, parentSchema, keyIndex) {
-      if (schema && typeof schema == "object" && !Array.isArray(schema)) {
-        pre(schema, jsonPtr, rootSchema, parentJsonPtr, parentKeyword, parentSchema, keyIndex);
-        for (var key in schema) {
-          var sch = schema[key];
-          if (Array.isArray(sch)) {
-            if (key in traverse.arrayKeywords) {
-              for (var i = 0; i < sch.length; i++)
-                _traverse(opts, pre, post, sch[i], jsonPtr + "/" + key + "/" + i, rootSchema, jsonPtr, key, schema, i);
-            }
-          } else if (key in traverse.propsKeywords) {
-            if (sch && typeof sch == "object") {
-              for (var prop in sch)
-                _traverse(opts, pre, post, sch[prop], jsonPtr + "/" + key + "/" + escapeJsonPtr(prop), rootSchema, jsonPtr, key, schema, prop);
-            }
-          } else if (key in traverse.keywords || opts.allKeys && !(key in traverse.skipKeywords)) {
-            _traverse(opts, pre, post, sch, jsonPtr + "/" + key, rootSchema, jsonPtr, key, schema);
-          }
-        }
-        post(schema, jsonPtr, rootSchema, parentJsonPtr, parentKeyword, parentSchema, keyIndex);
-      }
-    }
-    function escapeJsonPtr(str) {
-      return str.replace(/~/g, "~0").replace(/\//g, "~1");
-    }
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/resolve.js
-var require_resolve2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/resolve.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.getSchemaRefs = exports.resolveUrl = exports.normalizeId = exports._getFullPath = exports.getFullPath = exports.inlineRef = void 0;
-    var util_1 = require_util2();
-    var equal = require_fast_deep_equal();
-    var traverse = require_json_schema_traverse2();
-    var SIMPLE_INLINED = /* @__PURE__ */ new Set([
-      "type",
-      "format",
-      "pattern",
-      "maxLength",
-      "minLength",
-      "maxProperties",
-      "minProperties",
-      "maxItems",
-      "minItems",
-      "maximum",
-      "minimum",
-      "uniqueItems",
-      "multipleOf",
-      "required",
-      "enum",
-      "const"
-    ]);
-    function inlineRef(schema, limit = true) {
-      if (typeof schema == "boolean")
-        return true;
-      if (limit === true)
-        return !hasRef(schema);
-      if (!limit)
-        return false;
-      return countKeys(schema) <= limit;
-    }
-    exports.inlineRef = inlineRef;
-    var REF_KEYWORDS = /* @__PURE__ */ new Set([
-      "$ref",
-      "$recursiveRef",
-      "$recursiveAnchor",
-      "$dynamicRef",
-      "$dynamicAnchor"
-    ]);
-    function hasRef(schema) {
-      for (const key in schema) {
-        if (REF_KEYWORDS.has(key))
-          return true;
-        const sch = schema[key];
-        if (Array.isArray(sch) && sch.some(hasRef))
-          return true;
-        if (typeof sch == "object" && hasRef(sch))
-          return true;
-      }
-      return false;
-    }
-    function countKeys(schema) {
-      let count = 0;
-      for (const key in schema) {
-        if (key === "$ref")
-          return Infinity;
-        count++;
-        if (SIMPLE_INLINED.has(key))
-          continue;
-        if (typeof schema[key] == "object") {
-          (0, util_1.eachItem)(schema[key], (sch) => count += countKeys(sch));
-        }
-        if (count === Infinity)
-          return Infinity;
-      }
-      return count;
-    }
-    function getFullPath(resolver, id = "", normalize2) {
-      if (normalize2 !== false)
-        id = normalizeId(id);
-      const p = resolver.parse(id);
-      return _getFullPath(resolver, p);
-    }
-    exports.getFullPath = getFullPath;
-    function _getFullPath(resolver, p) {
-      const serialized = resolver.serialize(p);
-      return serialized.split("#")[0] + "#";
-    }
-    exports._getFullPath = _getFullPath;
-    var TRAILING_SLASH_HASH = /#\/?$/;
-    function normalizeId(id) {
-      return id ? id.replace(TRAILING_SLASH_HASH, "") : "";
-    }
-    exports.normalizeId = normalizeId;
-    function resolveUrl(resolver, baseId, id) {
-      id = normalizeId(id);
-      return resolver.resolve(baseId, id);
-    }
-    exports.resolveUrl = resolveUrl;
-    var ANCHOR = /^[a-z_][-a-z0-9._]*$/i;
-    function getSchemaRefs(schema, baseId) {
-      if (typeof schema == "boolean")
-        return {};
-      const { schemaId, uriResolver } = this.opts;
-      const schId = normalizeId(schema[schemaId] || baseId);
-      const baseIds = { "": schId };
-      const pathPrefix = getFullPath(uriResolver, schId, false);
-      const localRefs = {};
-      const schemaRefs = /* @__PURE__ */ new Set();
-      traverse(schema, { allKeys: true }, (sch, jsonPtr, _, parentJsonPtr) => {
-        if (parentJsonPtr === void 0)
-          return;
-        const fullPath = pathPrefix + jsonPtr;
-        let innerBaseId = baseIds[parentJsonPtr];
-        if (typeof sch[schemaId] == "string")
-          innerBaseId = addRef.call(this, sch[schemaId]);
-        addAnchor.call(this, sch.$anchor);
-        addAnchor.call(this, sch.$dynamicAnchor);
-        baseIds[jsonPtr] = innerBaseId;
-        function addRef(ref) {
-          const _resolve = this.opts.uriResolver.resolve;
-          ref = normalizeId(innerBaseId ? _resolve(innerBaseId, ref) : ref);
-          if (schemaRefs.has(ref))
-            throw ambiguos(ref);
-          schemaRefs.add(ref);
-          let schOrRef = this.refs[ref];
-          if (typeof schOrRef == "string")
-            schOrRef = this.refs[schOrRef];
-          if (typeof schOrRef == "object") {
-            checkAmbiguosRef(sch, schOrRef.schema, ref);
-          } else if (ref !== normalizeId(fullPath)) {
-            if (ref[0] === "#") {
-              checkAmbiguosRef(sch, localRefs[ref], ref);
-              localRefs[ref] = sch;
-            } else {
-              this.refs[ref] = fullPath;
-            }
-          }
-          return ref;
-        }
-        function addAnchor(anchor) {
-          if (typeof anchor == "string") {
-            if (!ANCHOR.test(anchor))
-              throw new Error(`invalid anchor "${anchor}"`);
-            addRef.call(this, `#${anchor}`);
-          }
-        }
-      });
-      return localRefs;
-      function checkAmbiguosRef(sch1, sch2, ref) {
-        if (sch2 !== void 0 && !equal(sch1, sch2))
-          throw ambiguos(ref);
-      }
-      function ambiguos(ref) {
-        return new Error(`reference "${ref}" resolves to more than one schema`);
-      }
-    }
-    exports.getSchemaRefs = getSchemaRefs;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/index.js
-var require_validate2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/index.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.getData = exports.KeywordCxt = exports.validateFunctionCode = void 0;
-    var boolSchema_1 = require_boolSchema2();
-    var dataType_1 = require_dataType2();
-    var applicability_1 = require_applicability2();
-    var dataType_2 = require_dataType2();
-    var defaults_1 = require_defaults2();
-    var keyword_1 = require_keyword2();
-    var subschema_1 = require_subschema2();
-    var codegen_1 = require_codegen2();
-    var names_1 = require_names2();
-    var resolve_1 = require_resolve2();
-    var util_1 = require_util2();
-    var errors_1 = require_errors2();
-    function validateFunctionCode(it) {
-      if (isSchemaObj(it)) {
-        checkKeywords(it);
-        if (schemaCxtHasRules(it)) {
-          topSchemaObjCode(it);
-          return;
-        }
-      }
-      validateFunction(it, () => (0, boolSchema_1.topBoolOrEmptySchema)(it));
-    }
-    exports.validateFunctionCode = validateFunctionCode;
-    function validateFunction({ gen, validateName, schema, schemaEnv, opts }, body) {
-      if (opts.code.es5) {
-        gen.func(validateName, (0, codegen_1._)`${names_1.default.data}, ${names_1.default.valCxt}`, schemaEnv.$async, () => {
-          gen.code((0, codegen_1._)`"use strict"; ${funcSourceUrl(schema, opts)}`);
-          destructureValCxtES5(gen, opts);
-          gen.code(body);
-        });
-      } else {
-        gen.func(validateName, (0, codegen_1._)`${names_1.default.data}, ${destructureValCxt(opts)}`, schemaEnv.$async, () => gen.code(funcSourceUrl(schema, opts)).code(body));
-      }
-    }
-    function destructureValCxt(opts) {
-      return (0, codegen_1._)`{${names_1.default.instancePath}="", ${names_1.default.parentData}, ${names_1.default.parentDataProperty}, ${names_1.default.rootData}=${names_1.default.data}${opts.dynamicRef ? (0, codegen_1._)`, ${names_1.default.dynamicAnchors}={}` : codegen_1.nil}}={}`;
-    }
-    function destructureValCxtES5(gen, opts) {
-      gen.if(names_1.default.valCxt, () => {
-        gen.var(names_1.default.instancePath, (0, codegen_1._)`${names_1.default.valCxt}.${names_1.default.instancePath}`);
-        gen.var(names_1.default.parentData, (0, codegen_1._)`${names_1.default.valCxt}.${names_1.default.parentData}`);
-        gen.var(names_1.default.parentDataProperty, (0, codegen_1._)`${names_1.default.valCxt}.${names_1.default.parentDataProperty}`);
-        gen.var(names_1.default.rootData, (0, codegen_1._)`${names_1.default.valCxt}.${names_1.default.rootData}`);
-        if (opts.dynamicRef)
-          gen.var(names_1.default.dynamicAnchors, (0, codegen_1._)`${names_1.default.valCxt}.${names_1.default.dynamicAnchors}`);
-      }, () => {
-        gen.var(names_1.default.instancePath, (0, codegen_1._)`""`);
-        gen.var(names_1.default.parentData, (0, codegen_1._)`undefined`);
-        gen.var(names_1.default.parentDataProperty, (0, codegen_1._)`undefined`);
-        gen.var(names_1.default.rootData, names_1.default.data);
-        if (opts.dynamicRef)
-          gen.var(names_1.default.dynamicAnchors, (0, codegen_1._)`{}`);
-      });
-    }
-    function topSchemaObjCode(it) {
-      const { schema, opts, gen } = it;
-      validateFunction(it, () => {
-        if (opts.$comment && schema.$comment)
-          commentKeyword(it);
-        checkNoDefault(it);
-        gen.let(names_1.default.vErrors, null);
-        gen.let(names_1.default.errors, 0);
-        if (opts.unevaluated)
-          resetEvaluated(it);
-        typeAndKeywords(it);
-        returnResults(it);
-      });
-      return;
-    }
-    function resetEvaluated(it) {
-      const { gen, validateName } = it;
-      it.evaluated = gen.const("evaluated", (0, codegen_1._)`${validateName}.evaluated`);
-      gen.if((0, codegen_1._)`${it.evaluated}.dynamicProps`, () => gen.assign((0, codegen_1._)`${it.evaluated}.props`, (0, codegen_1._)`undefined`));
-      gen.if((0, codegen_1._)`${it.evaluated}.dynamicItems`, () => gen.assign((0, codegen_1._)`${it.evaluated}.items`, (0, codegen_1._)`undefined`));
-    }
-    function funcSourceUrl(schema, opts) {
-      const schId = typeof schema == "object" && schema[opts.schemaId];
-      return schId && (opts.code.source || opts.code.process) ? (0, codegen_1._)`/*# sourceURL=${schId} */` : codegen_1.nil;
-    }
-    function subschemaCode(it, valid) {
-      if (isSchemaObj(it)) {
-        checkKeywords(it);
-        if (schemaCxtHasRules(it)) {
-          subSchemaObjCode(it, valid);
-          return;
-        }
-      }
-      (0, boolSchema_1.boolOrEmptySchema)(it, valid);
-    }
-    function schemaCxtHasRules({ schema, self }) {
-      if (typeof schema == "boolean")
-        return !schema;
-      for (const key in schema)
-        if (self.RULES.all[key])
-          return true;
-      return false;
-    }
-    function isSchemaObj(it) {
-      return typeof it.schema != "boolean";
-    }
-    function subSchemaObjCode(it, valid) {
-      const { schema, gen, opts } = it;
-      if (opts.$comment && schema.$comment)
-        commentKeyword(it);
-      updateContext(it);
-      checkAsyncSchema(it);
-      const errsCount = gen.const("_errs", names_1.default.errors);
-      typeAndKeywords(it, errsCount);
-      gen.var(valid, (0, codegen_1._)`${errsCount} === ${names_1.default.errors}`);
-    }
-    function checkKeywords(it) {
-      (0, util_1.checkUnknownRules)(it);
-      checkRefsAndKeywords(it);
-    }
-    function typeAndKeywords(it, errsCount) {
-      if (it.opts.jtd)
-        return schemaKeywords(it, [], false, errsCount);
-      const types = (0, dataType_1.getSchemaTypes)(it.schema);
-      const checkedTypes = (0, dataType_1.coerceAndCheckDataType)(it, types);
-      schemaKeywords(it, types, !checkedTypes, errsCount);
-    }
-    function checkRefsAndKeywords(it) {
-      const { schema, errSchemaPath, opts, self } = it;
-      if (schema.$ref && opts.ignoreKeywordsWithRef && (0, util_1.schemaHasRulesButRef)(schema, self.RULES)) {
-        self.logger.warn(`$ref: keywords ignored in schema at path "${errSchemaPath}"`);
-      }
-    }
-    function checkNoDefault(it) {
-      const { schema, opts } = it;
-      if (schema.default !== void 0 && opts.useDefaults && opts.strictSchema) {
-        (0, util_1.checkStrictMode)(it, "default is ignored in the schema root");
-      }
-    }
-    function updateContext(it) {
-      const schId = it.schema[it.opts.schemaId];
-      if (schId)
-        it.baseId = (0, resolve_1.resolveUrl)(it.opts.uriResolver, it.baseId, schId);
-    }
-    function checkAsyncSchema(it) {
-      if (it.schema.$async && !it.schemaEnv.$async)
-        throw new Error("async schema in sync schema");
-    }
-    function commentKeyword({ gen, schemaEnv, schema, errSchemaPath, opts }) {
-      const msg = schema.$comment;
-      if (opts.$comment === true) {
-        gen.code((0, codegen_1._)`${names_1.default.self}.logger.log(${msg})`);
-      } else if (typeof opts.$comment == "function") {
-        const schemaPath = (0, codegen_1.str)`${errSchemaPath}/$comment`;
-        const rootName = gen.scopeValue("root", { ref: schemaEnv.root });
-        gen.code((0, codegen_1._)`${names_1.default.self}.opts.$comment(${msg}, ${schemaPath}, ${rootName}.schema)`);
-      }
-    }
-    function returnResults(it) {
-      const { gen, schemaEnv, validateName, ValidationError, opts } = it;
-      if (schemaEnv.$async) {
-        gen.if((0, codegen_1._)`${names_1.default.errors} === 0`, () => gen.return(names_1.default.data), () => gen.throw((0, codegen_1._)`new ${ValidationError}(${names_1.default.vErrors})`));
-      } else {
-        gen.assign((0, codegen_1._)`${validateName}.errors`, names_1.default.vErrors);
-        if (opts.unevaluated)
-          assignEvaluated(it);
-        gen.return((0, codegen_1._)`${names_1.default.errors} === 0`);
-      }
-    }
-    function assignEvaluated({ gen, evaluated, props, items }) {
-      if (props instanceof codegen_1.Name)
-        gen.assign((0, codegen_1._)`${evaluated}.props`, props);
-      if (items instanceof codegen_1.Name)
-        gen.assign((0, codegen_1._)`${evaluated}.items`, items);
-    }
-    function schemaKeywords(it, types, typeErrors, errsCount) {
-      const { gen, schema, data, allErrors, opts, self } = it;
-      const { RULES } = self;
-      if (schema.$ref && (opts.ignoreKeywordsWithRef || !(0, util_1.schemaHasRulesButRef)(schema, RULES))) {
-        gen.block(() => keywordCode(it, "$ref", RULES.all.$ref.definition));
-        return;
-      }
-      if (!opts.jtd)
-        checkStrictTypes(it, types);
-      gen.block(() => {
-        for (const group of RULES.rules)
-          groupKeywords(group);
-        groupKeywords(RULES.post);
-      });
-      function groupKeywords(group) {
-        if (!(0, applicability_1.shouldUseGroup)(schema, group))
-          return;
-        if (group.type) {
-          gen.if((0, dataType_2.checkDataType)(group.type, data, opts.strictNumbers));
-          iterateKeywords(it, group);
-          if (types.length === 1 && types[0] === group.type && typeErrors) {
-            gen.else();
-            (0, dataType_2.reportTypeError)(it);
-          }
-          gen.endIf();
-        } else {
-          iterateKeywords(it, group);
-        }
-        if (!allErrors)
-          gen.if((0, codegen_1._)`${names_1.default.errors} === ${errsCount || 0}`);
-      }
-    }
-    function iterateKeywords(it, group) {
-      const { gen, schema, opts: { useDefaults } } = it;
-      if (useDefaults)
-        (0, defaults_1.assignDefaults)(it, group.type);
-      gen.block(() => {
-        for (const rule of group.rules) {
-          if ((0, applicability_1.shouldUseRule)(schema, rule)) {
-            keywordCode(it, rule.keyword, rule.definition, group.type);
-          }
-        }
-      });
-    }
-    function checkStrictTypes(it, types) {
-      if (it.schemaEnv.meta || !it.opts.strictTypes)
-        return;
-      checkContextTypes(it, types);
-      if (!it.opts.allowUnionTypes)
-        checkMultipleTypes(it, types);
-      checkKeywordTypes(it, it.dataTypes);
-    }
-    function checkContextTypes(it, types) {
-      if (!types.length)
-        return;
-      if (!it.dataTypes.length) {
-        it.dataTypes = types;
-        return;
-      }
-      types.forEach((t) => {
-        if (!includesType(it.dataTypes, t)) {
-          strictTypesError(it, `type "${t}" not allowed by context "${it.dataTypes.join(",")}"`);
-        }
-      });
-      narrowSchemaTypes(it, types);
-    }
-    function checkMultipleTypes(it, ts) {
-      if (ts.length > 1 && !(ts.length === 2 && ts.includes("null"))) {
-        strictTypesError(it, "use allowUnionTypes to allow union type keyword");
-      }
-    }
-    function checkKeywordTypes(it, ts) {
-      const rules = it.self.RULES.all;
-      for (const keyword in rules) {
-        const rule = rules[keyword];
-        if (typeof rule == "object" && (0, applicability_1.shouldUseRule)(it.schema, rule)) {
-          const { type } = rule.definition;
-          if (type.length && !type.some((t) => hasApplicableType(ts, t))) {
-            strictTypesError(it, `missing type "${type.join(",")}" for keyword "${keyword}"`);
-          }
-        }
-      }
-    }
-    function hasApplicableType(schTs, kwdT) {
-      return schTs.includes(kwdT) || kwdT === "number" && schTs.includes("integer");
-    }
-    function includesType(ts, t) {
-      return ts.includes(t) || t === "integer" && ts.includes("number");
-    }
-    function narrowSchemaTypes(it, withTypes) {
-      const ts = [];
-      for (const t of it.dataTypes) {
-        if (includesType(withTypes, t))
-          ts.push(t);
-        else if (withTypes.includes("integer") && t === "number")
-          ts.push("integer");
-      }
-      it.dataTypes = ts;
-    }
-    function strictTypesError(it, msg) {
-      const schemaPath = it.schemaEnv.baseId + it.errSchemaPath;
-      msg += ` at "${schemaPath}" (strictTypes)`;
-      (0, util_1.checkStrictMode)(it, msg, it.opts.strictTypes);
-    }
-    var KeywordCxt = class {
-      constructor(it, def, keyword) {
-        (0, keyword_1.validateKeywordUsage)(it, def, keyword);
-        this.gen = it.gen;
-        this.allErrors = it.allErrors;
-        this.keyword = keyword;
-        this.data = it.data;
-        this.schema = it.schema[keyword];
-        this.$data = def.$data && it.opts.$data && this.schema && this.schema.$data;
-        this.schemaValue = (0, util_1.schemaRefOrVal)(it, this.schema, keyword, this.$data);
-        this.schemaType = def.schemaType;
-        this.parentSchema = it.schema;
-        this.params = {};
-        this.it = it;
-        this.def = def;
-        if (this.$data) {
-          this.schemaCode = it.gen.const("vSchema", getData(this.$data, it));
-        } else {
-          this.schemaCode = this.schemaValue;
-          if (!(0, keyword_1.validSchemaType)(this.schema, def.schemaType, def.allowUndefined)) {
-            throw new Error(`${keyword} value must be ${JSON.stringify(def.schemaType)}`);
-          }
-        }
-        if ("code" in def ? def.trackErrors : def.errors !== false) {
-          this.errsCount = it.gen.const("_errs", names_1.default.errors);
-        }
-      }
-      result(condition, successAction, failAction) {
-        this.failResult((0, codegen_1.not)(condition), successAction, failAction);
-      }
-      failResult(condition, successAction, failAction) {
-        this.gen.if(condition);
-        if (failAction)
-          failAction();
-        else
-          this.error();
-        if (successAction) {
-          this.gen.else();
-          successAction();
-          if (this.allErrors)
-            this.gen.endIf();
-        } else {
-          if (this.allErrors)
-            this.gen.endIf();
-          else
-            this.gen.else();
-        }
-      }
-      pass(condition, failAction) {
-        this.failResult((0, codegen_1.not)(condition), void 0, failAction);
-      }
-      fail(condition) {
-        if (condition === void 0) {
-          this.error();
-          if (!this.allErrors)
-            this.gen.if(false);
-          return;
-        }
-        this.gen.if(condition);
-        this.error();
-        if (this.allErrors)
-          this.gen.endIf();
-        else
-          this.gen.else();
-      }
-      fail$data(condition) {
-        if (!this.$data)
-          return this.fail(condition);
-        const { schemaCode } = this;
-        this.fail((0, codegen_1._)`${schemaCode} !== undefined && (${(0, codegen_1.or)(this.invalid$data(), condition)})`);
-      }
-      error(append, errorParams, errorPaths) {
-        if (errorParams) {
-          this.setParams(errorParams);
-          this._error(append, errorPaths);
-          this.setParams({});
-          return;
-        }
-        this._error(append, errorPaths);
-      }
-      _error(append, errorPaths) {
-        ;
-        (append ? errors_1.reportExtraError : errors_1.reportError)(this, this.def.error, errorPaths);
-      }
-      $dataError() {
-        (0, errors_1.reportError)(this, this.def.$dataError || errors_1.keyword$DataError);
-      }
-      reset() {
-        if (this.errsCount === void 0)
-          throw new Error('add "trackErrors" to keyword definition');
-        (0, errors_1.resetErrorsCount)(this.gen, this.errsCount);
-      }
-      ok(cond) {
-        if (!this.allErrors)
-          this.gen.if(cond);
-      }
-      setParams(obj, assign) {
-        if (assign)
-          Object.assign(this.params, obj);
-        else
-          this.params = obj;
-      }
-      block$data(valid, codeBlock, $dataValid = codegen_1.nil) {
-        this.gen.block(() => {
-          this.check$data(valid, $dataValid);
-          codeBlock();
-        });
-      }
-      check$data(valid = codegen_1.nil, $dataValid = codegen_1.nil) {
-        if (!this.$data)
-          return;
-        const { gen, schemaCode, schemaType, def } = this;
-        gen.if((0, codegen_1.or)((0, codegen_1._)`${schemaCode} === undefined`, $dataValid));
-        if (valid !== codegen_1.nil)
-          gen.assign(valid, true);
-        if (schemaType.length || def.validateSchema) {
-          gen.elseIf(this.invalid$data());
-          this.$dataError();
-          if (valid !== codegen_1.nil)
-            gen.assign(valid, false);
-        }
-        gen.else();
-      }
-      invalid$data() {
-        const { gen, schemaCode, schemaType, def, it } = this;
-        return (0, codegen_1.or)(wrong$DataType(), invalid$DataSchema());
-        function wrong$DataType() {
-          if (schemaType.length) {
-            if (!(schemaCode instanceof codegen_1.Name))
-              throw new Error("ajv implementation error");
-            const st = Array.isArray(schemaType) ? schemaType : [schemaType];
-            return (0, codegen_1._)`${(0, dataType_2.checkDataTypes)(st, schemaCode, it.opts.strictNumbers, dataType_2.DataType.Wrong)}`;
-          }
-          return codegen_1.nil;
-        }
-        function invalid$DataSchema() {
-          if (def.validateSchema) {
-            const validateSchemaRef = gen.scopeValue("validate$data", { ref: def.validateSchema });
-            return (0, codegen_1._)`!${validateSchemaRef}(${schemaCode})`;
-          }
-          return codegen_1.nil;
-        }
-      }
-      subschema(appl, valid) {
-        const subschema = (0, subschema_1.getSubschema)(this.it, appl);
-        (0, subschema_1.extendSubschemaData)(subschema, this.it, appl);
-        (0, subschema_1.extendSubschemaMode)(subschema, appl);
-        const nextContext = { ...this.it, ...subschema, items: void 0, props: void 0 };
-        subschemaCode(nextContext, valid);
-        return nextContext;
-      }
-      mergeEvaluated(schemaCxt, toName) {
-        const { it, gen } = this;
-        if (!it.opts.unevaluated)
-          return;
-        if (it.props !== true && schemaCxt.props !== void 0) {
-          it.props = util_1.mergeEvaluated.props(gen, schemaCxt.props, it.props, toName);
-        }
-        if (it.items !== true && schemaCxt.items !== void 0) {
-          it.items = util_1.mergeEvaluated.items(gen, schemaCxt.items, it.items, toName);
-        }
-      }
-      mergeValidEvaluated(schemaCxt, valid) {
-        const { it, gen } = this;
-        if (it.opts.unevaluated && (it.props !== true || it.items !== true)) {
-          gen.if(valid, () => this.mergeEvaluated(schemaCxt, codegen_1.Name));
-          return true;
-        }
-      }
-    };
-    exports.KeywordCxt = KeywordCxt;
-    function keywordCode(it, keyword, def, ruleType) {
-      const cxt = new KeywordCxt(it, def, keyword);
-      if ("code" in def) {
-        def.code(cxt, ruleType);
-      } else if (cxt.$data && def.validate) {
-        (0, keyword_1.funcKeywordCode)(cxt, def);
-      } else if ("macro" in def) {
-        (0, keyword_1.macroKeywordCode)(cxt, def);
-      } else if (def.compile || def.validate) {
-        (0, keyword_1.funcKeywordCode)(cxt, def);
-      }
-    }
-    var JSON_POINTER = /^\/(?:[^~]|~0|~1)*$/;
-    var RELATIVE_JSON_POINTER = /^([0-9]+)(#|\/(?:[^~]|~0|~1)*)?$/;
-    function getData($data, { dataLevel, dataNames, dataPathArr }) {
-      let jsonPointer;
-      let data;
-      if ($data === "")
-        return names_1.default.rootData;
-      if ($data[0] === "/") {
-        if (!JSON_POINTER.test($data))
-          throw new Error(`Invalid JSON-pointer: ${$data}`);
-        jsonPointer = $data;
-        data = names_1.default.rootData;
-      } else {
-        const matches = RELATIVE_JSON_POINTER.exec($data);
-        if (!matches)
-          throw new Error(`Invalid JSON-pointer: ${$data}`);
-        const up = +matches[1];
-        jsonPointer = matches[2];
-        if (jsonPointer === "#") {
-          if (up >= dataLevel)
-            throw new Error(errorMsg("property/index", up));
-          return dataPathArr[dataLevel - up];
-        }
-        if (up > dataLevel)
-          throw new Error(errorMsg("data", up));
-        data = dataNames[dataLevel - up];
-        if (!jsonPointer)
-          return data;
-      }
-      let expr = data;
-      const segments = jsonPointer.split("/");
-      for (const segment of segments) {
-        if (segment) {
-          data = (0, codegen_1._)`${data}${(0, codegen_1.getProperty)((0, util_1.unescapeJsonPointer)(segment))}`;
-          expr = (0, codegen_1._)`${expr} && ${data}`;
-        }
-      }
-      return expr;
-      function errorMsg(pointerType, up) {
-        return `Cannot access ${pointerType} ${up} levels up, current level is ${dataLevel}`;
-      }
-    }
-    exports.getData = getData;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/runtime/validation_error.js
-var require_validation_error2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/runtime/validation_error.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var ValidationError = class extends Error {
-      constructor(errors) {
-        super("validation failed");
-        this.errors = errors;
-        this.ajv = this.validation = true;
-      }
-    };
-    exports.default = ValidationError;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/ref_error.js
-var require_ref_error2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/ref_error.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var resolve_1 = require_resolve2();
-    var MissingRefError = class extends Error {
-      constructor(resolver, baseId, ref, msg) {
-        super(msg || `can't resolve reference ${ref} from id ${baseId}`);
-        this.missingRef = (0, resolve_1.resolveUrl)(resolver, baseId, ref);
-        this.missingSchema = (0, resolve_1.normalizeId)((0, resolve_1.getFullPath)(resolver, this.missingRef));
-      }
-    };
-    exports.default = MissingRefError;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/index.js
-var require_compile2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/index.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.resolveSchema = exports.getCompilingSchema = exports.resolveRef = exports.compileSchema = exports.SchemaEnv = void 0;
-    var codegen_1 = require_codegen2();
-    var validation_error_1 = require_validation_error2();
-    var names_1 = require_names2();
-    var resolve_1 = require_resolve2();
-    var util_1 = require_util2();
-    var validate_1 = require_validate2();
-    var SchemaEnv = class {
-      constructor(env) {
-        var _a3;
-        this.refs = {};
-        this.dynamicAnchors = {};
-        let schema;
-        if (typeof env.schema == "object")
-          schema = env.schema;
-        this.schema = env.schema;
-        this.schemaId = env.schemaId;
-        this.root = env.root || this;
-        this.baseId = (_a3 = env.baseId) !== null && _a3 !== void 0 ? _a3 : (0, resolve_1.normalizeId)(schema === null || schema === void 0 ? void 0 : schema[env.schemaId || "$id"]);
-        this.schemaPath = env.schemaPath;
-        this.localRefs = env.localRefs;
-        this.meta = env.meta;
-        this.$async = schema === null || schema === void 0 ? void 0 : schema.$async;
-        this.refs = {};
-      }
-    };
-    exports.SchemaEnv = SchemaEnv;
-    function compileSchema(sch) {
-      const _sch = getCompilingSchema.call(this, sch);
-      if (_sch)
-        return _sch;
-      const rootId = (0, resolve_1.getFullPath)(this.opts.uriResolver, sch.root.baseId);
-      const { es5, lines } = this.opts.code;
-      const { ownProperties } = this.opts;
-      const gen = new codegen_1.CodeGen(this.scope, { es5, lines, ownProperties });
-      let _ValidationError;
-      if (sch.$async) {
-        _ValidationError = gen.scopeValue("Error", {
-          ref: validation_error_1.default,
-          code: (0, codegen_1._)`require("ajv/dist/runtime/validation_error").default`
-        });
-      }
-      const validateName = gen.scopeName("validate");
-      sch.validateName = validateName;
-      const schemaCxt = {
-        gen,
-        allErrors: this.opts.allErrors,
-        data: names_1.default.data,
-        parentData: names_1.default.parentData,
-        parentDataProperty: names_1.default.parentDataProperty,
-        dataNames: [names_1.default.data],
-        dataPathArr: [codegen_1.nil],
-        // TODO can its length be used as dataLevel if nil is removed?
-        dataLevel: 0,
-        dataTypes: [],
-        definedProperties: /* @__PURE__ */ new Set(),
-        topSchemaRef: gen.scopeValue("schema", this.opts.code.source === true ? { ref: sch.schema, code: (0, codegen_1.stringify)(sch.schema) } : { ref: sch.schema }),
-        validateName,
-        ValidationError: _ValidationError,
-        schema: sch.schema,
-        schemaEnv: sch,
-        rootId,
-        baseId: sch.baseId || rootId,
-        schemaPath: codegen_1.nil,
-        errSchemaPath: sch.schemaPath || (this.opts.jtd ? "" : "#"),
-        errorPath: (0, codegen_1._)`""`,
-        opts: this.opts,
-        self: this
-      };
-      let sourceCode;
-      try {
-        this._compilations.add(sch);
-        (0, validate_1.validateFunctionCode)(schemaCxt);
-        gen.optimize(this.opts.code.optimize);
-        const validateCode = gen.toString();
-        sourceCode = `${gen.scopeRefs(names_1.default.scope)}return ${validateCode}`;
-        if (this.opts.code.process)
-          sourceCode = this.opts.code.process(sourceCode, sch);
-        const makeValidate = new Function(`${names_1.default.self}`, `${names_1.default.scope}`, sourceCode);
-        const validate = makeValidate(this, this.scope.get());
-        this.scope.value(validateName, { ref: validate });
-        validate.errors = null;
-        validate.schema = sch.schema;
-        validate.schemaEnv = sch;
-        if (sch.$async)
-          validate.$async = true;
-        if (this.opts.code.source === true) {
-          validate.source = { validateName, validateCode, scopeValues: gen._values };
-        }
-        if (this.opts.unevaluated) {
-          const { props, items } = schemaCxt;
-          validate.evaluated = {
-            props: props instanceof codegen_1.Name ? void 0 : props,
-            items: items instanceof codegen_1.Name ? void 0 : items,
-            dynamicProps: props instanceof codegen_1.Name,
-            dynamicItems: items instanceof codegen_1.Name
-          };
-          if (validate.source)
-            validate.source.evaluated = (0, codegen_1.stringify)(validate.evaluated);
-        }
-        sch.validate = validate;
-        return sch;
-      } catch (e) {
-        delete sch.validate;
-        delete sch.validateName;
-        if (sourceCode)
-          this.logger.error("Error compiling schema, function code:", sourceCode);
-        throw e;
-      } finally {
-        this._compilations.delete(sch);
-      }
-    }
-    exports.compileSchema = compileSchema;
-    function resolveRef(root, baseId, ref) {
-      var _a3;
-      ref = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, ref);
-      const schOrFunc = root.refs[ref];
-      if (schOrFunc)
-        return schOrFunc;
-      let _sch = resolve2.call(this, root, ref);
-      if (_sch === void 0) {
-        const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
-        const { schemaId } = this.opts;
-        if (schema)
-          _sch = new SchemaEnv({ schema, schemaId, root, baseId });
-      }
-      if (_sch === void 0)
-        return;
-      return root.refs[ref] = inlineOrCompile.call(this, _sch);
-    }
-    exports.resolveRef = resolveRef;
-    function inlineOrCompile(sch) {
-      if ((0, resolve_1.inlineRef)(sch.schema, this.opts.inlineRefs))
-        return sch.schema;
-      return sch.validate ? sch : compileSchema.call(this, sch);
-    }
-    function getCompilingSchema(schEnv) {
-      for (const sch of this._compilations) {
-        if (sameSchemaEnv(sch, schEnv))
-          return sch;
-      }
-    }
-    exports.getCompilingSchema = getCompilingSchema;
-    function sameSchemaEnv(s1, s2) {
-      return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
-    }
-    function resolve2(root, ref) {
-      let sch;
-      while (typeof (sch = this.refs[ref]) == "string")
-        ref = sch;
-      return sch || this.schemas[ref] || resolveSchema.call(this, root, ref);
-    }
-    function resolveSchema(root, ref) {
-      const p = this.opts.uriResolver.parse(ref);
-      const refPath = (0, resolve_1._getFullPath)(this.opts.uriResolver, p);
-      let baseId = (0, resolve_1.getFullPath)(this.opts.uriResolver, root.baseId, void 0);
-      if (Object.keys(root.schema).length > 0 && refPath === baseId) {
-        return getJsonPointer.call(this, p, root);
-      }
-      const id = (0, resolve_1.normalizeId)(refPath);
-      const schOrRef = this.refs[id] || this.schemas[id];
-      if (typeof schOrRef == "string") {
-        const sch = resolveSchema.call(this, root, schOrRef);
-        if (typeof (sch === null || sch === void 0 ? void 0 : sch.schema) !== "object")
-          return;
-        return getJsonPointer.call(this, p, sch);
-      }
-      if (typeof (schOrRef === null || schOrRef === void 0 ? void 0 : schOrRef.schema) !== "object")
-        return;
-      if (!schOrRef.validate)
-        compileSchema.call(this, schOrRef);
-      if (id === (0, resolve_1.normalizeId)(ref)) {
-        const { schema } = schOrRef;
-        const { schemaId } = this.opts;
-        const schId = schema[schemaId];
-        if (schId)
-          baseId = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, schId);
-        return new SchemaEnv({ schema, schemaId, root, baseId });
-      }
-      return getJsonPointer.call(this, p, schOrRef);
-    }
-    exports.resolveSchema = resolveSchema;
-    var PREVENT_SCOPE_CHANGE = /* @__PURE__ */ new Set([
-      "properties",
-      "patternProperties",
-      "enum",
-      "dependencies",
-      "definitions"
-    ]);
-    function getJsonPointer(parsedRef, { baseId, schema, root }) {
-      var _a3;
-      if (((_a3 = parsedRef.fragment) === null || _a3 === void 0 ? void 0 : _a3[0]) !== "/")
-        return;
-      for (const part of parsedRef.fragment.slice(1).split("/")) {
-        if (typeof schema === "boolean")
-          return;
-        const partSchema = schema[(0, util_1.unescapeFragment)(part)];
-        if (partSchema === void 0)
-          return;
-        schema = partSchema;
-        const schId = typeof schema === "object" && schema[this.opts.schemaId];
-        if (!PREVENT_SCOPE_CHANGE.has(part) && schId) {
-          baseId = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, schId);
-        }
-      }
-      let env;
-      if (typeof schema != "boolean" && schema.$ref && !(0, util_1.schemaHasRulesButRef)(schema, this.RULES)) {
-        const $ref = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, schema.$ref);
-        env = resolveSchema.call(this, root, $ref);
-      }
-      const { schemaId } = this.opts;
-      env = env || new SchemaEnv({ schema, schemaId, root, baseId });
-      if (env.schema !== env.root.schema)
-        return env;
-      return void 0;
-    }
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/refs/data.json
-var require_data2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/refs/data.json"(exports, module) {
-    module.exports = {
-      $id: "https://raw.githubusercontent.com/ajv-validator/ajv/master/lib/refs/data.json#",
-      description: "Meta-schema for $data reference (JSON AnySchema extension proposal)",
-      type: "object",
-      required: ["$data"],
-      properties: {
-        $data: {
-          type: "string",
-          anyOf: [{ format: "relative-json-pointer" }, { format: "json-pointer" }]
-        }
-      },
-      additionalProperties: false
-    };
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/runtime/uri.js
-var require_uri2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/runtime/uri.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var uri = require_fast_uri();
-    uri.code = 'require("ajv/dist/runtime/uri").default';
-    exports.default = uri;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/core.js
-var require_core3 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/core.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.CodeGen = exports.Name = exports.nil = exports.stringify = exports.str = exports._ = exports.KeywordCxt = void 0;
-    var validate_1 = require_validate2();
-    Object.defineProperty(exports, "KeywordCxt", { enumerable: true, get: function() {
-      return validate_1.KeywordCxt;
-    } });
-    var codegen_1 = require_codegen2();
-    Object.defineProperty(exports, "_", { enumerable: true, get: function() {
-      return codegen_1._;
-    } });
-    Object.defineProperty(exports, "str", { enumerable: true, get: function() {
-      return codegen_1.str;
-    } });
-    Object.defineProperty(exports, "stringify", { enumerable: true, get: function() {
-      return codegen_1.stringify;
-    } });
-    Object.defineProperty(exports, "nil", { enumerable: true, get: function() {
-      return codegen_1.nil;
-    } });
-    Object.defineProperty(exports, "Name", { enumerable: true, get: function() {
-      return codegen_1.Name;
-    } });
-    Object.defineProperty(exports, "CodeGen", { enumerable: true, get: function() {
-      return codegen_1.CodeGen;
-    } });
-    var validation_error_1 = require_validation_error2();
-    var ref_error_1 = require_ref_error2();
-    var rules_1 = require_rules2();
-    var compile_1 = require_compile2();
-    var codegen_2 = require_codegen2();
-    var resolve_1 = require_resolve2();
-    var dataType_1 = require_dataType2();
-    var util_1 = require_util2();
-    var $dataRefSchema = require_data2();
-    var uri_1 = require_uri2();
-    var defaultRegExp = (str, flags) => new RegExp(str, flags);
-    defaultRegExp.code = "new RegExp";
-    var META_IGNORE_OPTIONS = ["removeAdditional", "useDefaults", "coerceTypes"];
-    var EXT_SCOPE_NAMES = /* @__PURE__ */ new Set([
-      "validate",
-      "serialize",
-      "parse",
-      "wrapper",
-      "root",
-      "schema",
-      "keyword",
-      "pattern",
-      "formats",
-      "validate$data",
-      "func",
-      "obj",
-      "Error"
-    ]);
-    var removedOptions = {
-      errorDataPath: "",
-      format: "`validateFormats: false` can be used instead.",
-      nullable: '"nullable" keyword is supported by default.',
-      jsonPointers: "Deprecated jsPropertySyntax can be used instead.",
-      extendRefs: "Deprecated ignoreKeywordsWithRef can be used instead.",
-      missingRefs: "Pass empty schema with $id that should be ignored to ajv.addSchema.",
-      processCode: "Use option `code: {process: (code, schemaEnv: object) => string}`",
-      sourceCode: "Use option `code: {source: true}`",
-      strictDefaults: "It is default now, see option `strict`.",
-      strictKeywords: "It is default now, see option `strict`.",
-      uniqueItems: '"uniqueItems" keyword is always validated.',
-      unknownFormats: "Disable strict mode or pass `true` to `ajv.addFormat` (or `formats` option).",
-      cache: "Map is used as cache, schema object as key.",
-      serialize: "Map is used as cache, schema object as key.",
-      ajvErrors: "It is default now."
-    };
-    var deprecatedOptions = {
-      ignoreKeywordsWithRef: "",
-      jsPropertySyntax: "",
-      unicode: '"minLength"/"maxLength" account for unicode characters by default.'
-    };
-    var MAX_EXPRESSION = 200;
-    function requiredOptions(o) {
-      var _a3, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0;
-      const s = o.strict;
-      const _optz = (_a3 = o.code) === null || _a3 === void 0 ? void 0 : _a3.optimize;
-      const optimize = _optz === true || _optz === void 0 ? 1 : _optz || 0;
-      const regExp = (_c = (_b = o.code) === null || _b === void 0 ? void 0 : _b.regExp) !== null && _c !== void 0 ? _c : defaultRegExp;
-      const uriResolver = (_d = o.uriResolver) !== null && _d !== void 0 ? _d : uri_1.default;
-      return {
-        strictSchema: (_f = (_e = o.strictSchema) !== null && _e !== void 0 ? _e : s) !== null && _f !== void 0 ? _f : true,
-        strictNumbers: (_h = (_g = o.strictNumbers) !== null && _g !== void 0 ? _g : s) !== null && _h !== void 0 ? _h : true,
-        strictTypes: (_k = (_j = o.strictTypes) !== null && _j !== void 0 ? _j : s) !== null && _k !== void 0 ? _k : "log",
-        strictTuples: (_m = (_l = o.strictTuples) !== null && _l !== void 0 ? _l : s) !== null && _m !== void 0 ? _m : "log",
-        strictRequired: (_p = (_o = o.strictRequired) !== null && _o !== void 0 ? _o : s) !== null && _p !== void 0 ? _p : false,
-        code: o.code ? { ...o.code, optimize, regExp } : { optimize, regExp },
-        loopRequired: (_q = o.loopRequired) !== null && _q !== void 0 ? _q : MAX_EXPRESSION,
-        loopEnum: (_r = o.loopEnum) !== null && _r !== void 0 ? _r : MAX_EXPRESSION,
-        meta: (_s = o.meta) !== null && _s !== void 0 ? _s : true,
-        messages: (_t = o.messages) !== null && _t !== void 0 ? _t : true,
-        inlineRefs: (_u = o.inlineRefs) !== null && _u !== void 0 ? _u : true,
-        schemaId: (_v = o.schemaId) !== null && _v !== void 0 ? _v : "$id",
-        addUsedSchema: (_w = o.addUsedSchema) !== null && _w !== void 0 ? _w : true,
-        validateSchema: (_x = o.validateSchema) !== null && _x !== void 0 ? _x : true,
-        validateFormats: (_y = o.validateFormats) !== null && _y !== void 0 ? _y : true,
-        unicodeRegExp: (_z = o.unicodeRegExp) !== null && _z !== void 0 ? _z : true,
-        int32range: (_0 = o.int32range) !== null && _0 !== void 0 ? _0 : true,
-        uriResolver
-      };
-    }
-    var Ajv2 = class {
-      constructor(opts = {}) {
-        this.schemas = {};
-        this.refs = {};
-        this.formats = /* @__PURE__ */ Object.create(null);
-        this._compilations = /* @__PURE__ */ new Set();
-        this._loading = {};
-        this._cache = /* @__PURE__ */ new Map();
-        opts = this.opts = { ...opts, ...requiredOptions(opts) };
-        const { es5, lines } = this.opts.code;
-        this.scope = new codegen_2.ValueScope({ scope: {}, prefixes: EXT_SCOPE_NAMES, es5, lines });
-        this.logger = getLogger(opts.logger);
-        const formatOpt = opts.validateFormats;
-        opts.validateFormats = false;
-        this.RULES = (0, rules_1.getRules)();
-        checkOptions.call(this, removedOptions, opts, "NOT SUPPORTED");
-        checkOptions.call(this, deprecatedOptions, opts, "DEPRECATED", "warn");
-        this._metaOpts = getMetaSchemaOptions.call(this);
-        if (opts.formats)
-          addInitialFormats.call(this);
-        this._addVocabularies();
-        this._addDefaultMetaSchema();
-        if (opts.keywords)
-          addInitialKeywords.call(this, opts.keywords);
-        if (typeof opts.meta == "object")
-          this.addMetaSchema(opts.meta);
-        addInitialSchemas.call(this);
-        opts.validateFormats = formatOpt;
-      }
-      _addVocabularies() {
-        this.addKeyword("$async");
-      }
-      _addDefaultMetaSchema() {
-        const { $data, meta: meta2, schemaId } = this.opts;
-        let _dataRefSchema = $dataRefSchema;
-        if (schemaId === "id") {
-          _dataRefSchema = { ...$dataRefSchema };
-          _dataRefSchema.id = _dataRefSchema.$id;
-          delete _dataRefSchema.$id;
-        }
-        if (meta2 && $data)
-          this.addMetaSchema(_dataRefSchema, _dataRefSchema[schemaId], false);
-      }
-      defaultMeta() {
-        const { meta: meta2, schemaId } = this.opts;
-        return this.opts.defaultMeta = typeof meta2 == "object" ? meta2[schemaId] || meta2 : void 0;
-      }
-      validate(schemaKeyRef, data) {
-        let v;
-        if (typeof schemaKeyRef == "string") {
-          v = this.getSchema(schemaKeyRef);
-          if (!v)
-            throw new Error(`no schema with key or ref "${schemaKeyRef}"`);
-        } else {
-          v = this.compile(schemaKeyRef);
-        }
-        const valid = v(data);
-        if (!("$async" in v))
-          this.errors = v.errors;
-        return valid;
-      }
-      compile(schema, _meta) {
-        const sch = this._addSchema(schema, _meta);
-        return sch.validate || this._compileSchemaEnv(sch);
-      }
-      compileAsync(schema, meta2) {
-        if (typeof this.opts.loadSchema != "function") {
-          throw new Error("options.loadSchema should be a function");
-        }
-        const { loadSchema } = this.opts;
-        return runCompileAsync.call(this, schema, meta2);
-        async function runCompileAsync(_schema, _meta) {
-          await loadMetaSchema.call(this, _schema.$schema);
-          const sch = this._addSchema(_schema, _meta);
-          return sch.validate || _compileAsync.call(this, sch);
-        }
-        async function loadMetaSchema($ref) {
-          if ($ref && !this.getSchema($ref)) {
-            await runCompileAsync.call(this, { $ref }, true);
-          }
-        }
-        async function _compileAsync(sch) {
-          try {
-            return this._compileSchemaEnv(sch);
-          } catch (e) {
-            if (!(e instanceof ref_error_1.default))
-              throw e;
-            checkLoaded.call(this, e);
-            await loadMissingSchema.call(this, e.missingSchema);
-            return _compileAsync.call(this, sch);
-          }
-        }
-        function checkLoaded({ missingSchema: ref, missingRef }) {
-          if (this.refs[ref]) {
-            throw new Error(`AnySchema ${ref} is loaded but ${missingRef} cannot be resolved`);
-          }
-        }
-        async function loadMissingSchema(ref) {
-          const _schema = await _loadSchema.call(this, ref);
-          if (!this.refs[ref])
-            await loadMetaSchema.call(this, _schema.$schema);
-          if (!this.refs[ref])
-            this.addSchema(_schema, ref, meta2);
-        }
-        async function _loadSchema(ref) {
-          const p = this._loading[ref];
-          if (p)
-            return p;
-          try {
-            return await (this._loading[ref] = loadSchema(ref));
-          } finally {
-            delete this._loading[ref];
-          }
-        }
-      }
-      // Adds schema to the instance
-      addSchema(schema, key, _meta, _validateSchema = this.opts.validateSchema) {
-        if (Array.isArray(schema)) {
-          for (const sch of schema)
-            this.addSchema(sch, void 0, _meta, _validateSchema);
-          return this;
-        }
-        let id;
-        if (typeof schema === "object") {
-          const { schemaId } = this.opts;
-          id = schema[schemaId];
-          if (id !== void 0 && typeof id != "string") {
-            throw new Error(`schema ${schemaId} must be string`);
-          }
-        }
-        key = (0, resolve_1.normalizeId)(key || id);
-        this._checkUnique(key);
-        this.schemas[key] = this._addSchema(schema, _meta, key, _validateSchema, true);
-        return this;
-      }
-      // Add schema that will be used to validate other schemas
-      // options in META_IGNORE_OPTIONS are alway set to false
-      addMetaSchema(schema, key, _validateSchema = this.opts.validateSchema) {
-        this.addSchema(schema, key, true, _validateSchema);
-        return this;
-      }
-      //  Validate schema against its meta-schema
-      validateSchema(schema, throwOrLogError) {
-        if (typeof schema == "boolean")
-          return true;
-        let $schema;
-        $schema = schema.$schema;
-        if ($schema !== void 0 && typeof $schema != "string") {
-          throw new Error("$schema must be a string");
-        }
-        $schema = $schema || this.opts.defaultMeta || this.defaultMeta();
-        if (!$schema) {
-          this.logger.warn("meta-schema not available");
-          this.errors = null;
-          return true;
-        }
-        const valid = this.validate($schema, schema);
-        if (!valid && throwOrLogError) {
-          const message = "schema is invalid: " + this.errorsText();
-          if (this.opts.validateSchema === "log")
-            this.logger.error(message);
-          else
-            throw new Error(message);
-        }
-        return valid;
-      }
-      // Get compiled schema by `key` or `ref`.
-      // (`key` that was passed to `addSchema` or full schema reference - `schema.$id` or resolved id)
-      getSchema(keyRef) {
-        let sch;
-        while (typeof (sch = getSchEnv.call(this, keyRef)) == "string")
-          keyRef = sch;
-        if (sch === void 0) {
-          const { schemaId } = this.opts;
-          const root = new compile_1.SchemaEnv({ schema: {}, schemaId });
-          sch = compile_1.resolveSchema.call(this, root, keyRef);
-          if (!sch)
-            return;
-          this.refs[keyRef] = sch;
-        }
-        return sch.validate || this._compileSchemaEnv(sch);
-      }
-      // Remove cached schema(s).
-      // If no parameter is passed all schemas but meta-schemas are removed.
-      // If RegExp is passed all schemas with key/id matching pattern but meta-schemas are removed.
-      // Even if schema is referenced by other schemas it still can be removed as other schemas have local references.
-      removeSchema(schemaKeyRef) {
-        if (schemaKeyRef instanceof RegExp) {
-          this._removeAllSchemas(this.schemas, schemaKeyRef);
-          this._removeAllSchemas(this.refs, schemaKeyRef);
-          return this;
-        }
-        switch (typeof schemaKeyRef) {
-          case "undefined":
-            this._removeAllSchemas(this.schemas);
-            this._removeAllSchemas(this.refs);
-            this._cache.clear();
-            return this;
-          case "string": {
-            const sch = getSchEnv.call(this, schemaKeyRef);
-            if (typeof sch == "object")
-              this._cache.delete(sch.schema);
-            delete this.schemas[schemaKeyRef];
-            delete this.refs[schemaKeyRef];
-            return this;
-          }
-          case "object": {
-            const cacheKey = schemaKeyRef;
-            this._cache.delete(cacheKey);
-            let id = schemaKeyRef[this.opts.schemaId];
-            if (id) {
-              id = (0, resolve_1.normalizeId)(id);
-              delete this.schemas[id];
-              delete this.refs[id];
-            }
-            return this;
-          }
-          default:
-            throw new Error("ajv.removeSchema: invalid parameter");
-        }
-      }
-      // add "vocabulary" - a collection of keywords
-      addVocabulary(definitions) {
-        for (const def of definitions)
-          this.addKeyword(def);
-        return this;
-      }
-      addKeyword(kwdOrDef, def) {
-        let keyword;
-        if (typeof kwdOrDef == "string") {
-          keyword = kwdOrDef;
-          if (typeof def == "object") {
-            this.logger.warn("these parameters are deprecated, see docs for addKeyword");
-            def.keyword = keyword;
-          }
-        } else if (typeof kwdOrDef == "object" && def === void 0) {
-          def = kwdOrDef;
-          keyword = def.keyword;
-          if (Array.isArray(keyword) && !keyword.length) {
-            throw new Error("addKeywords: keyword must be string or non-empty array");
-          }
-        } else {
-          throw new Error("invalid addKeywords parameters");
-        }
-        checkKeyword.call(this, keyword, def);
-        if (!def) {
-          (0, util_1.eachItem)(keyword, (kwd) => addRule.call(this, kwd));
-          return this;
-        }
-        keywordMetaschema.call(this, def);
-        const definition = {
-          ...def,
-          type: (0, dataType_1.getJSONTypes)(def.type),
-          schemaType: (0, dataType_1.getJSONTypes)(def.schemaType)
-        };
-        (0, util_1.eachItem)(keyword, definition.type.length === 0 ? (k) => addRule.call(this, k, definition) : (k) => definition.type.forEach((t) => addRule.call(this, k, definition, t)));
-        return this;
-      }
-      getKeyword(keyword) {
-        const rule = this.RULES.all[keyword];
-        return typeof rule == "object" ? rule.definition : !!rule;
-      }
-      // Remove keyword
-      removeKeyword(keyword) {
-        const { RULES } = this;
-        delete RULES.keywords[keyword];
-        delete RULES.all[keyword];
-        for (const group of RULES.rules) {
-          const i = group.rules.findIndex((rule) => rule.keyword === keyword);
-          if (i >= 0)
-            group.rules.splice(i, 1);
-        }
-        return this;
-      }
-      // Add format
-      addFormat(name, format) {
-        if (typeof format == "string")
-          format = new RegExp(format);
-        this.formats[name] = format;
-        return this;
-      }
-      errorsText(errors = this.errors, { separator = ", ", dataVar = "data" } = {}) {
-        if (!errors || errors.length === 0)
-          return "No errors";
-        return errors.map((e) => `${dataVar}${e.instancePath} ${e.message}`).reduce((text, msg) => text + separator + msg);
-      }
-      $dataMetaSchema(metaSchema, keywordsJsonPointers) {
-        const rules = this.RULES.all;
-        metaSchema = JSON.parse(JSON.stringify(metaSchema));
-        for (const jsonPointer of keywordsJsonPointers) {
-          const segments = jsonPointer.split("/").slice(1);
-          let keywords = metaSchema;
-          for (const seg of segments)
-            keywords = keywords[seg];
-          for (const key in rules) {
-            const rule = rules[key];
-            if (typeof rule != "object")
-              continue;
-            const { $data } = rule.definition;
-            const schema = keywords[key];
-            if ($data && schema)
-              keywords[key] = schemaOrData(schema);
-          }
-        }
-        return metaSchema;
-      }
-      _removeAllSchemas(schemas, regex) {
-        for (const keyRef in schemas) {
-          const sch = schemas[keyRef];
-          if (!regex || regex.test(keyRef)) {
-            if (typeof sch == "string") {
-              delete schemas[keyRef];
-            } else if (sch && !sch.meta) {
-              this._cache.delete(sch.schema);
-              delete schemas[keyRef];
-            }
-          }
-        }
-      }
-      _addSchema(schema, meta2, baseId, validateSchema = this.opts.validateSchema, addSchema = this.opts.addUsedSchema) {
-        let id;
-        const { schemaId } = this.opts;
-        if (typeof schema == "object") {
-          id = schema[schemaId];
-        } else {
-          if (this.opts.jtd)
-            throw new Error("schema must be object");
-          else if (typeof schema != "boolean")
-            throw new Error("schema must be object or boolean");
-        }
-        let sch = this._cache.get(schema);
-        if (sch !== void 0)
-          return sch;
-        baseId = (0, resolve_1.normalizeId)(id || baseId);
-        const localRefs = resolve_1.getSchemaRefs.call(this, schema, baseId);
-        sch = new compile_1.SchemaEnv({ schema, schemaId, meta: meta2, baseId, localRefs });
-        this._cache.set(sch.schema, sch);
-        if (addSchema && !baseId.startsWith("#")) {
-          if (baseId)
-            this._checkUnique(baseId);
-          this.refs[baseId] = sch;
-        }
-        if (validateSchema)
-          this.validateSchema(schema, true);
-        return sch;
-      }
-      _checkUnique(id) {
-        if (this.schemas[id] || this.refs[id]) {
-          throw new Error(`schema with key or id "${id}" already exists`);
-        }
-      }
-      _compileSchemaEnv(sch) {
-        if (sch.meta)
-          this._compileMetaSchema(sch);
-        else
-          compile_1.compileSchema.call(this, sch);
-        if (!sch.validate)
-          throw new Error("ajv implementation error");
-        return sch.validate;
-      }
-      _compileMetaSchema(sch) {
-        const currentOpts = this.opts;
-        this.opts = this._metaOpts;
-        try {
-          compile_1.compileSchema.call(this, sch);
-        } finally {
-          this.opts = currentOpts;
-        }
-      }
-    };
-    Ajv2.ValidationError = validation_error_1.default;
-    Ajv2.MissingRefError = ref_error_1.default;
-    exports.default = Ajv2;
-    function checkOptions(checkOpts2, options, msg, log = "error") {
-      for (const key in checkOpts2) {
-        const opt = key;
-        if (opt in options)
-          this.logger[log](`${msg}: option ${key}. ${checkOpts2[opt]}`);
-      }
-    }
-    function getSchEnv(keyRef) {
-      keyRef = (0, resolve_1.normalizeId)(keyRef);
-      return this.schemas[keyRef] || this.refs[keyRef];
-    }
-    function addInitialSchemas() {
-      const optsSchemas = this.opts.schemas;
-      if (!optsSchemas)
-        return;
-      if (Array.isArray(optsSchemas))
-        this.addSchema(optsSchemas);
-      else
-        for (const key in optsSchemas)
-          this.addSchema(optsSchemas[key], key);
-    }
-    function addInitialFormats() {
-      for (const name in this.opts.formats) {
-        const format = this.opts.formats[name];
-        if (format)
-          this.addFormat(name, format);
-      }
-    }
-    function addInitialKeywords(defs) {
-      if (Array.isArray(defs)) {
-        this.addVocabulary(defs);
-        return;
-      }
-      this.logger.warn("keywords option as map is deprecated, pass array");
-      for (const keyword in defs) {
-        const def = defs[keyword];
-        if (!def.keyword)
-          def.keyword = keyword;
-        this.addKeyword(def);
-      }
-    }
-    function getMetaSchemaOptions() {
-      const metaOpts = { ...this.opts };
-      for (const opt of META_IGNORE_OPTIONS)
-        delete metaOpts[opt];
-      return metaOpts;
-    }
-    var noLogs = { log() {
-    }, warn() {
-    }, error() {
-    } };
-    function getLogger(logger) {
-      if (logger === false)
-        return noLogs;
-      if (logger === void 0)
-        return console;
-      if (logger.log && logger.warn && logger.error)
-        return logger;
-      throw new Error("logger must implement log, warn and error methods");
-    }
-    var KEYWORD_NAME = /^[a-z_$][a-z0-9_$:-]*$/i;
-    function checkKeyword(keyword, def) {
-      const { RULES } = this;
-      (0, util_1.eachItem)(keyword, (kwd) => {
-        if (RULES.keywords[kwd])
-          throw new Error(`Keyword ${kwd} is already defined`);
-        if (!KEYWORD_NAME.test(kwd))
-          throw new Error(`Keyword ${kwd} has invalid name`);
-      });
-      if (!def)
-        return;
-      if (def.$data && !("code" in def || "validate" in def)) {
-        throw new Error('$data keyword must have "code" or "validate" function');
-      }
-    }
-    function addRule(keyword, definition, dataType) {
-      var _a3;
-      const post = definition === null || definition === void 0 ? void 0 : definition.post;
-      if (dataType && post)
-        throw new Error('keyword with "post" flag cannot have "type"');
-      const { RULES } = this;
-      let ruleGroup = post ? RULES.post : RULES.rules.find(({ type: t }) => t === dataType);
-      if (!ruleGroup) {
-        ruleGroup = { type: dataType, rules: [] };
-        RULES.rules.push(ruleGroup);
-      }
-      RULES.keywords[keyword] = true;
-      if (!definition)
-        return;
-      const rule = {
-        keyword,
-        definition: {
-          ...definition,
-          type: (0, dataType_1.getJSONTypes)(definition.type),
-          schemaType: (0, dataType_1.getJSONTypes)(definition.schemaType)
-        }
-      };
-      if (definition.before)
-        addBeforeRule.call(this, ruleGroup, rule, definition.before);
-      else
-        ruleGroup.rules.push(rule);
-      RULES.all[keyword] = rule;
-      (_a3 = definition.implements) === null || _a3 === void 0 ? void 0 : _a3.forEach((kwd) => this.addKeyword(kwd));
-    }
-    function addBeforeRule(ruleGroup, rule, before) {
-      const i = ruleGroup.rules.findIndex((_rule) => _rule.keyword === before);
-      if (i >= 0) {
-        ruleGroup.rules.splice(i, 0, rule);
-      } else {
-        ruleGroup.rules.push(rule);
-        this.logger.warn(`rule ${before} is not defined`);
-      }
-    }
-    function keywordMetaschema(def) {
-      let { metaSchema } = def;
-      if (metaSchema === void 0)
-        return;
-      if (def.$data && this.opts.$data)
-        metaSchema = schemaOrData(metaSchema);
-      def.validateSchema = this.compile(metaSchema, true);
-    }
-    var $dataRef = {
-      $ref: "https://raw.githubusercontent.com/ajv-validator/ajv/master/lib/refs/data.json#"
-    };
-    function schemaOrData(schema) {
-      return { anyOf: [schema, $dataRef] };
-    }
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/core/id.js
-var require_id2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/core/id.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var def = {
-      keyword: "id",
-      code() {
-        throw new Error('NOT SUPPORTED: keyword "id", use "$id" for schema ID');
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/core/ref.js
-var require_ref2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/core/ref.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.callRef = exports.getValidate = void 0;
-    var ref_error_1 = require_ref_error2();
-    var code_1 = require_code4();
-    var codegen_1 = require_codegen2();
-    var names_1 = require_names2();
-    var compile_1 = require_compile2();
-    var util_1 = require_util2();
-    var def = {
-      keyword: "$ref",
-      schemaType: "string",
-      code(cxt) {
-        const { gen, schema: $ref, it } = cxt;
-        const { baseId, schemaEnv: env, validateName, opts, self } = it;
-        const { root } = env;
-        if (($ref === "#" || $ref === "#/") && baseId === root.baseId)
-          return callRootRef();
-        const schOrEnv = compile_1.resolveRef.call(self, root, baseId, $ref);
-        if (schOrEnv === void 0)
-          throw new ref_error_1.default(it.opts.uriResolver, baseId, $ref);
-        if (schOrEnv instanceof compile_1.SchemaEnv)
-          return callValidate(schOrEnv);
-        return inlineRefSchema(schOrEnv);
-        function callRootRef() {
-          if (env === root)
-            return callRef(cxt, validateName, env, env.$async);
-          const rootName = gen.scopeValue("root", { ref: root });
-          return callRef(cxt, (0, codegen_1._)`${rootName}.validate`, root, root.$async);
-        }
-        function callValidate(sch) {
-          const v = getValidate(cxt, sch);
-          callRef(cxt, v, sch, sch.$async);
-        }
-        function inlineRefSchema(sch) {
-          const schName = gen.scopeValue("schema", opts.code.source === true ? { ref: sch, code: (0, codegen_1.stringify)(sch) } : { ref: sch });
-          const valid = gen.name("valid");
-          const schCxt = cxt.subschema({
-            schema: sch,
-            dataTypes: [],
-            schemaPath: codegen_1.nil,
-            topSchemaRef: schName,
-            errSchemaPath: $ref
-          }, valid);
-          cxt.mergeEvaluated(schCxt);
-          cxt.ok(valid);
-        }
-      }
-    };
-    function getValidate(cxt, sch) {
-      const { gen } = cxt;
-      return sch.validate ? gen.scopeValue("validate", { ref: sch.validate }) : (0, codegen_1._)`${gen.scopeValue("wrapper", { ref: sch })}.validate`;
-    }
-    exports.getValidate = getValidate;
-    function callRef(cxt, v, sch, $async) {
-      const { gen, it } = cxt;
-      const { allErrors, schemaEnv: env, opts } = it;
-      const passCxt = opts.passContext ? names_1.default.this : codegen_1.nil;
-      if ($async)
-        callAsyncRef();
-      else
-        callSyncRef();
-      function callAsyncRef() {
-        if (!env.$async)
-          throw new Error("async schema referenced by sync schema");
-        const valid = gen.let("valid");
-        gen.try(() => {
-          gen.code((0, codegen_1._)`await ${(0, code_1.callValidateCode)(cxt, v, passCxt)}`);
-          addEvaluatedFrom(v);
-          if (!allErrors)
-            gen.assign(valid, true);
-        }, (e) => {
-          gen.if((0, codegen_1._)`!(${e} instanceof ${it.ValidationError})`, () => gen.throw(e));
-          addErrorsFrom(e);
-          if (!allErrors)
-            gen.assign(valid, false);
-        });
-        cxt.ok(valid);
-      }
-      function callSyncRef() {
-        cxt.result((0, code_1.callValidateCode)(cxt, v, passCxt), () => addEvaluatedFrom(v), () => addErrorsFrom(v));
-      }
-      function addErrorsFrom(source) {
-        const errs = (0, codegen_1._)`${source}.errors`;
-        gen.assign(names_1.default.vErrors, (0, codegen_1._)`${names_1.default.vErrors} === null ? ${errs} : ${names_1.default.vErrors}.concat(${errs})`);
-        gen.assign(names_1.default.errors, (0, codegen_1._)`${names_1.default.vErrors}.length`);
-      }
-      function addEvaluatedFrom(source) {
-        var _a3;
-        if (!it.opts.unevaluated)
-          return;
-        const schEvaluated = (_a3 = sch === null || sch === void 0 ? void 0 : sch.validate) === null || _a3 === void 0 ? void 0 : _a3.evaluated;
-        if (it.props !== true) {
-          if (schEvaluated && !schEvaluated.dynamicProps) {
-            if (schEvaluated.props !== void 0) {
-              it.props = util_1.mergeEvaluated.props(gen, schEvaluated.props, it.props);
-            }
-          } else {
-            const props = gen.var("props", (0, codegen_1._)`${source}.evaluated.props`);
-            it.props = util_1.mergeEvaluated.props(gen, props, it.props, codegen_1.Name);
-          }
-        }
-        if (it.items !== true) {
-          if (schEvaluated && !schEvaluated.dynamicItems) {
-            if (schEvaluated.items !== void 0) {
-              it.items = util_1.mergeEvaluated.items(gen, schEvaluated.items, it.items);
-            }
-          } else {
-            const items = gen.var("items", (0, codegen_1._)`${source}.evaluated.items`);
-            it.items = util_1.mergeEvaluated.items(gen, items, it.items, codegen_1.Name);
-          }
-        }
-      }
-    }
-    exports.callRef = callRef;
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/core/index.js
-var require_core4 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/core/index.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var id_1 = require_id2();
-    var ref_1 = require_ref2();
-    var core = [
-      "$schema",
-      "$id",
-      "$defs",
-      "$vocabulary",
-      { keyword: "$comment" },
-      "definitions",
-      id_1.default,
-      ref_1.default
-    ];
-    exports.default = core;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitNumber.js
-var require_limitNumber2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitNumber.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var codegen_1 = require_codegen2();
-    var ops = codegen_1.operators;
-    var KWDs = {
-      maximum: { okStr: "<=", ok: ops.LTE, fail: ops.GT },
-      minimum: { okStr: ">=", ok: ops.GTE, fail: ops.LT },
-      exclusiveMaximum: { okStr: "<", ok: ops.LT, fail: ops.GTE },
-      exclusiveMinimum: { okStr: ">", ok: ops.GT, fail: ops.LTE }
-    };
-    var error2 = {
-      message: ({ keyword, schemaCode }) => (0, codegen_1.str)`must be ${KWDs[keyword].okStr} ${schemaCode}`,
-      params: ({ keyword, schemaCode }) => (0, codegen_1._)`{comparison: ${KWDs[keyword].okStr}, limit: ${schemaCode}}`
-    };
-    var def = {
-      keyword: Object.keys(KWDs),
-      type: "number",
-      schemaType: "number",
-      $data: true,
-      error: error2,
-      code(cxt) {
-        const { keyword, data, schemaCode } = cxt;
-        cxt.fail$data((0, codegen_1._)`${data} ${KWDs[keyword].fail} ${schemaCode} || isNaN(${data})`);
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/multipleOf.js
-var require_multipleOf2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/multipleOf.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var codegen_1 = require_codegen2();
-    var error2 = {
-      message: ({ schemaCode }) => (0, codegen_1.str)`must be multiple of ${schemaCode}`,
-      params: ({ schemaCode }) => (0, codegen_1._)`{multipleOf: ${schemaCode}}`
-    };
-    var def = {
-      keyword: "multipleOf",
-      type: "number",
-      schemaType: "number",
-      $data: true,
-      error: error2,
-      code(cxt) {
-        const { gen, data, schemaCode, it } = cxt;
-        const prec = it.opts.multipleOfPrecision;
-        const res = gen.let("res");
-        const invalid = prec ? (0, codegen_1._)`Math.abs(Math.round(${res}) - ${res}) > 1e-${prec}` : (0, codegen_1._)`${res} !== parseInt(${res})`;
-        cxt.fail$data((0, codegen_1._)`(${schemaCode} === 0 || (${res} = ${data}/${schemaCode}, ${invalid}))`);
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/runtime/ucs2length.js
-var require_ucs2length2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/runtime/ucs2length.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    function ucs2length(str) {
-      const len = str.length;
-      let length = 0;
-      let pos = 0;
-      let value;
-      while (pos < len) {
-        length++;
-        value = str.charCodeAt(pos++);
-        if (value >= 55296 && value <= 56319 && pos < len) {
-          value = str.charCodeAt(pos);
-          if ((value & 64512) === 56320)
-            pos++;
-        }
-      }
-      return length;
-    }
-    exports.default = ucs2length;
-    ucs2length.code = 'require("ajv/dist/runtime/ucs2length").default';
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitLength.js
-var require_limitLength2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitLength.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    var ucs2length_1 = require_ucs2length2();
-    var error2 = {
-      message({ keyword, schemaCode }) {
-        const comp = keyword === "maxLength" ? "more" : "fewer";
-        return (0, codegen_1.str)`must NOT have ${comp} than ${schemaCode} characters`;
-      },
-      params: ({ schemaCode }) => (0, codegen_1._)`{limit: ${schemaCode}}`
-    };
-    var def = {
-      keyword: ["maxLength", "minLength"],
-      type: "string",
-      schemaType: "number",
-      $data: true,
-      error: error2,
-      code(cxt) {
-        const { keyword, data, schemaCode, it } = cxt;
-        const op = keyword === "maxLength" ? codegen_1.operators.GT : codegen_1.operators.LT;
-        const len = it.opts.unicode === false ? (0, codegen_1._)`${data}.length` : (0, codegen_1._)`${(0, util_1.useFunc)(cxt.gen, ucs2length_1.default)}(${data})`;
-        cxt.fail$data((0, codegen_1._)`${len} ${op} ${schemaCode}`);
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/pattern.js
-var require_pattern2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/pattern.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var code_1 = require_code4();
-    var util_1 = require_util2();
-    var codegen_1 = require_codegen2();
-    var error2 = {
-      message: ({ schemaCode }) => (0, codegen_1.str)`must match pattern "${schemaCode}"`,
-      params: ({ schemaCode }) => (0, codegen_1._)`{pattern: ${schemaCode}}`
-    };
-    var def = {
-      keyword: "pattern",
-      type: "string",
-      schemaType: "string",
-      $data: true,
-      error: error2,
-      code(cxt) {
-        const { gen, data, $data, schema, schemaCode, it } = cxt;
-        const u = it.opts.unicodeRegExp ? "u" : "";
-        if ($data) {
-          const { regExp } = it.opts.code;
-          const regExpCode = regExp.code === "new RegExp" ? (0, codegen_1._)`new RegExp` : (0, util_1.useFunc)(gen, regExp);
-          const valid = gen.let("valid");
-          gen.try(() => gen.assign(valid, (0, codegen_1._)`${regExpCode}(${schemaCode}, ${u}).test(${data})`), () => gen.assign(valid, false));
-          cxt.fail$data((0, codegen_1._)`!${valid}`);
-        } else {
-          const regExp = (0, code_1.usePattern)(cxt, schema);
-          cxt.fail$data((0, codegen_1._)`!${regExp}.test(${data})`);
-        }
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitProperties.js
-var require_limitProperties2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitProperties.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var codegen_1 = require_codegen2();
-    var error2 = {
-      message({ keyword, schemaCode }) {
-        const comp = keyword === "maxProperties" ? "more" : "fewer";
-        return (0, codegen_1.str)`must NOT have ${comp} than ${schemaCode} properties`;
-      },
-      params: ({ schemaCode }) => (0, codegen_1._)`{limit: ${schemaCode}}`
-    };
-    var def = {
-      keyword: ["maxProperties", "minProperties"],
-      type: "object",
-      schemaType: "number",
-      $data: true,
-      error: error2,
-      code(cxt) {
-        const { keyword, data, schemaCode } = cxt;
-        const op = keyword === "maxProperties" ? codegen_1.operators.GT : codegen_1.operators.LT;
-        cxt.fail$data((0, codegen_1._)`Object.keys(${data}).length ${op} ${schemaCode}`);
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/required.js
-var require_required2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/required.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var code_1 = require_code4();
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    var error2 = {
-      message: ({ params: { missingProperty } }) => (0, codegen_1.str)`must have required property '${missingProperty}'`,
-      params: ({ params: { missingProperty } }) => (0, codegen_1._)`{missingProperty: ${missingProperty}}`
-    };
-    var def = {
-      keyword: "required",
-      type: "object",
-      schemaType: "array",
-      $data: true,
-      error: error2,
-      code(cxt) {
-        const { gen, schema, schemaCode, data, $data, it } = cxt;
-        const { opts } = it;
-        if (!$data && schema.length === 0)
-          return;
-        const useLoop = schema.length >= opts.loopRequired;
-        if (it.allErrors)
-          allErrorsMode();
-        else
-          exitOnErrorMode();
-        if (opts.strictRequired) {
-          const props = cxt.parentSchema.properties;
-          const { definedProperties } = cxt.it;
-          for (const requiredKey of schema) {
-            if ((props === null || props === void 0 ? void 0 : props[requiredKey]) === void 0 && !definedProperties.has(requiredKey)) {
-              const schemaPath = it.schemaEnv.baseId + it.errSchemaPath;
-              const msg = `required property "${requiredKey}" is not defined at "${schemaPath}" (strictRequired)`;
-              (0, util_1.checkStrictMode)(it, msg, it.opts.strictRequired);
-            }
-          }
-        }
-        function allErrorsMode() {
-          if (useLoop || $data) {
-            cxt.block$data(codegen_1.nil, loopAllRequired);
-          } else {
-            for (const prop of schema) {
-              (0, code_1.checkReportMissingProp)(cxt, prop);
-            }
-          }
-        }
-        function exitOnErrorMode() {
-          const missing = gen.let("missing");
-          if (useLoop || $data) {
-            const valid = gen.let("valid", true);
-            cxt.block$data(valid, () => loopUntilMissing(missing, valid));
-            cxt.ok(valid);
-          } else {
-            gen.if((0, code_1.checkMissingProp)(cxt, schema, missing));
-            (0, code_1.reportMissingProp)(cxt, missing);
-            gen.else();
-          }
-        }
-        function loopAllRequired() {
-          gen.forOf("prop", schemaCode, (prop) => {
-            cxt.setParams({ missingProperty: prop });
-            gen.if((0, code_1.noPropertyInData)(gen, data, prop, opts.ownProperties), () => cxt.error());
-          });
-        }
-        function loopUntilMissing(missing, valid) {
-          cxt.setParams({ missingProperty: missing });
-          gen.forOf(missing, schemaCode, () => {
-            gen.assign(valid, (0, code_1.propertyInData)(gen, data, missing, opts.ownProperties));
-            gen.if((0, codegen_1.not)(valid), () => {
-              cxt.error();
-              gen.break();
-            });
-          }, codegen_1.nil);
-        }
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitItems.js
-var require_limitItems2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitItems.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var codegen_1 = require_codegen2();
-    var error2 = {
-      message({ keyword, schemaCode }) {
-        const comp = keyword === "maxItems" ? "more" : "fewer";
-        return (0, codegen_1.str)`must NOT have ${comp} than ${schemaCode} items`;
-      },
-      params: ({ schemaCode }) => (0, codegen_1._)`{limit: ${schemaCode}}`
-    };
-    var def = {
-      keyword: ["maxItems", "minItems"],
-      type: "array",
-      schemaType: "number",
-      $data: true,
-      error: error2,
-      code(cxt) {
-        const { keyword, data, schemaCode } = cxt;
-        const op = keyword === "maxItems" ? codegen_1.operators.GT : codegen_1.operators.LT;
-        cxt.fail$data((0, codegen_1._)`${data}.length ${op} ${schemaCode}`);
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/runtime/equal.js
-var require_equal2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/runtime/equal.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var equal = require_fast_deep_equal();
-    equal.code = 'require("ajv/dist/runtime/equal").default';
-    exports.default = equal;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/uniqueItems.js
-var require_uniqueItems2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/uniqueItems.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var dataType_1 = require_dataType2();
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    var equal_1 = require_equal2();
-    var error2 = {
-      message: ({ params: { i, j } }) => (0, codegen_1.str)`must NOT have duplicate items (items ## ${j} and ${i} are identical)`,
-      params: ({ params: { i, j } }) => (0, codegen_1._)`{i: ${i}, j: ${j}}`
-    };
-    var def = {
-      keyword: "uniqueItems",
-      type: "array",
-      schemaType: "boolean",
-      $data: true,
-      error: error2,
-      code(cxt) {
-        const { gen, data, $data, schema, parentSchema, schemaCode, it } = cxt;
-        if (!$data && !schema)
-          return;
-        const valid = gen.let("valid");
-        const itemTypes = parentSchema.items ? (0, dataType_1.getSchemaTypes)(parentSchema.items) : [];
-        cxt.block$data(valid, validateUniqueItems, (0, codegen_1._)`${schemaCode} === false`);
-        cxt.ok(valid);
-        function validateUniqueItems() {
-          const i = gen.let("i", (0, codegen_1._)`${data}.length`);
-          const j = gen.let("j");
-          cxt.setParams({ i, j });
-          gen.assign(valid, true);
-          gen.if((0, codegen_1._)`${i} > 1`, () => (canOptimize() ? loopN : loopN2)(i, j));
-        }
-        function canOptimize() {
-          return itemTypes.length > 0 && !itemTypes.some((t) => t === "object" || t === "array");
-        }
-        function loopN(i, j) {
-          const item = gen.name("item");
-          const wrongType = (0, dataType_1.checkDataTypes)(itemTypes, item, it.opts.strictNumbers, dataType_1.DataType.Wrong);
-          const indices = gen.const("indices", (0, codegen_1._)`{}`);
-          gen.for((0, codegen_1._)`;${i}--;`, () => {
-            gen.let(item, (0, codegen_1._)`${data}[${i}]`);
-            gen.if(wrongType, (0, codegen_1._)`continue`);
-            if (itemTypes.length > 1)
-              gen.if((0, codegen_1._)`typeof ${item} == "string"`, (0, codegen_1._)`${item} += "_"`);
-            gen.if((0, codegen_1._)`typeof ${indices}[${item}] == "number"`, () => {
-              gen.assign(j, (0, codegen_1._)`${indices}[${item}]`);
-              cxt.error();
-              gen.assign(valid, false).break();
-            }).code((0, codegen_1._)`${indices}[${item}] = ${i}`);
-          });
-        }
-        function loopN2(i, j) {
-          const eql = (0, util_1.useFunc)(gen, equal_1.default);
-          const outer = gen.name("outer");
-          gen.label(outer).for((0, codegen_1._)`;${i}--;`, () => gen.for((0, codegen_1._)`${j} = ${i}; ${j}--;`, () => gen.if((0, codegen_1._)`${eql}(${data}[${i}], ${data}[${j}])`, () => {
-            cxt.error();
-            gen.assign(valid, false).break(outer);
-          })));
-        }
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/const.js
-var require_const2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/const.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    var equal_1 = require_equal2();
-    var error2 = {
-      message: "must be equal to constant",
-      params: ({ schemaCode }) => (0, codegen_1._)`{allowedValue: ${schemaCode}}`
-    };
-    var def = {
-      keyword: "const",
-      $data: true,
-      error: error2,
-      code(cxt) {
-        const { gen, data, $data, schemaCode, schema } = cxt;
-        if ($data || schema && typeof schema == "object") {
-          cxt.fail$data((0, codegen_1._)`!${(0, util_1.useFunc)(gen, equal_1.default)}(${data}, ${schemaCode})`);
-        } else {
-          cxt.fail((0, codegen_1._)`${schema} !== ${data}`);
-        }
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/enum.js
-var require_enum2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/enum.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    var equal_1 = require_equal2();
-    var error2 = {
-      message: "must be equal to one of the allowed values",
-      params: ({ schemaCode }) => (0, codegen_1._)`{allowedValues: ${schemaCode}}`
-    };
-    var def = {
-      keyword: "enum",
-      schemaType: "array",
-      $data: true,
-      error: error2,
-      code(cxt) {
-        const { gen, data, $data, schema, schemaCode, it } = cxt;
-        if (!$data && schema.length === 0)
-          throw new Error("enum must have non-empty array");
-        const useLoop = schema.length >= it.opts.loopEnum;
-        let eql;
-        const getEql = () => eql !== null && eql !== void 0 ? eql : eql = (0, util_1.useFunc)(gen, equal_1.default);
-        let valid;
-        if (useLoop || $data) {
-          valid = gen.let("valid");
-          cxt.block$data(valid, loopEnum);
-        } else {
-          if (!Array.isArray(schema))
-            throw new Error("ajv implementation error");
-          const vSchema = gen.const("vSchema", schemaCode);
-          valid = (0, codegen_1.or)(...schema.map((_x, i) => equalCode(vSchema, i)));
-        }
-        cxt.pass(valid);
-        function loopEnum() {
-          gen.assign(valid, false);
-          gen.forOf("v", schemaCode, (v) => gen.if((0, codegen_1._)`${getEql()}(${data}, ${v})`, () => gen.assign(valid, true).break()));
-        }
-        function equalCode(vSchema, i) {
-          const sch = schema[i];
-          return typeof sch === "object" && sch !== null ? (0, codegen_1._)`${getEql()}(${data}, ${vSchema}[${i}])` : (0, codegen_1._)`${data} === ${sch}`;
-        }
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/index.js
-var require_validation2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/index.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var limitNumber_1 = require_limitNumber2();
-    var multipleOf_1 = require_multipleOf2();
-    var limitLength_1 = require_limitLength2();
-    var pattern_1 = require_pattern2();
-    var limitProperties_1 = require_limitProperties2();
-    var required_1 = require_required2();
-    var limitItems_1 = require_limitItems2();
-    var uniqueItems_1 = require_uniqueItems2();
-    var const_1 = require_const2();
-    var enum_1 = require_enum2();
-    var validation = [
-      // number
-      limitNumber_1.default,
-      multipleOf_1.default,
-      // string
-      limitLength_1.default,
-      pattern_1.default,
-      // object
-      limitProperties_1.default,
-      required_1.default,
-      // array
-      limitItems_1.default,
-      uniqueItems_1.default,
-      // any
-      { keyword: "type", schemaType: ["string", "array"] },
-      { keyword: "nullable", schemaType: "boolean" },
-      const_1.default,
-      enum_1.default
-    ];
-    exports.default = validation;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/additionalItems.js
-var require_additionalItems2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/additionalItems.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.validateAdditionalItems = void 0;
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    var error2 = {
-      message: ({ params: { len } }) => (0, codegen_1.str)`must NOT have more than ${len} items`,
-      params: ({ params: { len } }) => (0, codegen_1._)`{limit: ${len}}`
-    };
-    var def = {
-      keyword: "additionalItems",
-      type: "array",
-      schemaType: ["boolean", "object"],
-      before: "uniqueItems",
-      error: error2,
-      code(cxt) {
-        const { parentSchema, it } = cxt;
-        const { items } = parentSchema;
-        if (!Array.isArray(items)) {
-          (0, util_1.checkStrictMode)(it, '"additionalItems" is ignored when "items" is not an array of schemas');
-          return;
-        }
-        validateAdditionalItems(cxt, items);
-      }
-    };
-    function validateAdditionalItems(cxt, items) {
-      const { gen, schema, data, keyword, it } = cxt;
-      it.items = true;
-      const len = gen.const("len", (0, codegen_1._)`${data}.length`);
-      if (schema === false) {
-        cxt.setParams({ len: items.length });
-        cxt.pass((0, codegen_1._)`${len} <= ${items.length}`);
-      } else if (typeof schema == "object" && !(0, util_1.alwaysValidSchema)(it, schema)) {
-        const valid = gen.var("valid", (0, codegen_1._)`${len} <= ${items.length}`);
-        gen.if((0, codegen_1.not)(valid), () => validateItems(valid));
-        cxt.ok(valid);
-      }
-      function validateItems(valid) {
-        gen.forRange("i", items.length, len, (i) => {
-          cxt.subschema({ keyword, dataProp: i, dataPropType: util_1.Type.Num }, valid);
-          if (!it.allErrors)
-            gen.if((0, codegen_1.not)(valid), () => gen.break());
-        });
-      }
-    }
-    exports.validateAdditionalItems = validateAdditionalItems;
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/items.js
-var require_items2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/items.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.validateTuple = void 0;
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    var code_1 = require_code4();
-    var def = {
-      keyword: "items",
-      type: "array",
-      schemaType: ["object", "array", "boolean"],
-      before: "uniqueItems",
-      code(cxt) {
-        const { schema, it } = cxt;
-        if (Array.isArray(schema))
-          return validateTuple(cxt, "additionalItems", schema);
-        it.items = true;
-        if ((0, util_1.alwaysValidSchema)(it, schema))
-          return;
-        cxt.ok((0, code_1.validateArray)(cxt));
-      }
-    };
-    function validateTuple(cxt, extraItems, schArr = cxt.schema) {
-      const { gen, parentSchema, data, keyword, it } = cxt;
-      checkStrictTuple(parentSchema);
-      if (it.opts.unevaluated && schArr.length && it.items !== true) {
-        it.items = util_1.mergeEvaluated.items(gen, schArr.length, it.items);
-      }
-      const valid = gen.name("valid");
-      const len = gen.const("len", (0, codegen_1._)`${data}.length`);
-      schArr.forEach((sch, i) => {
-        if ((0, util_1.alwaysValidSchema)(it, sch))
-          return;
-        gen.if((0, codegen_1._)`${len} > ${i}`, () => cxt.subschema({
-          keyword,
-          schemaProp: i,
-          dataProp: i
-        }, valid));
-        cxt.ok(valid);
-      });
-      function checkStrictTuple(sch) {
-        const { opts, errSchemaPath } = it;
-        const l = schArr.length;
-        const fullTuple = l === sch.minItems && (l === sch.maxItems || sch[extraItems] === false);
-        if (opts.strictTuples && !fullTuple) {
-          const msg = `"${keyword}" is ${l}-tuple, but minItems or maxItems/${extraItems} are not specified or different at path "${errSchemaPath}"`;
-          (0, util_1.checkStrictMode)(it, msg, opts.strictTuples);
-        }
-      }
-    }
-    exports.validateTuple = validateTuple;
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/prefixItems.js
-var require_prefixItems2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/prefixItems.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var items_1 = require_items2();
-    var def = {
-      keyword: "prefixItems",
-      type: "array",
-      schemaType: ["array"],
-      before: "uniqueItems",
-      code: (cxt) => (0, items_1.validateTuple)(cxt, "items")
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/items2020.js
-var require_items20202 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/items2020.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    var code_1 = require_code4();
-    var additionalItems_1 = require_additionalItems2();
-    var error2 = {
-      message: ({ params: { len } }) => (0, codegen_1.str)`must NOT have more than ${len} items`,
-      params: ({ params: { len } }) => (0, codegen_1._)`{limit: ${len}}`
-    };
-    var def = {
-      keyword: "items",
-      type: "array",
-      schemaType: ["object", "boolean"],
-      before: "uniqueItems",
-      error: error2,
-      code(cxt) {
-        const { schema, parentSchema, it } = cxt;
-        const { prefixItems } = parentSchema;
-        it.items = true;
-        if ((0, util_1.alwaysValidSchema)(it, schema))
-          return;
-        if (prefixItems)
-          (0, additionalItems_1.validateAdditionalItems)(cxt, prefixItems);
-        else
-          cxt.ok((0, code_1.validateArray)(cxt));
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/contains.js
-var require_contains2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/contains.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    var error2 = {
-      message: ({ params: { min, max } }) => max === void 0 ? (0, codegen_1.str)`must contain at least ${min} valid item(s)` : (0, codegen_1.str)`must contain at least ${min} and no more than ${max} valid item(s)`,
-      params: ({ params: { min, max } }) => max === void 0 ? (0, codegen_1._)`{minContains: ${min}}` : (0, codegen_1._)`{minContains: ${min}, maxContains: ${max}}`
-    };
-    var def = {
-      keyword: "contains",
-      type: "array",
-      schemaType: ["object", "boolean"],
-      before: "uniqueItems",
-      trackErrors: true,
-      error: error2,
-      code(cxt) {
-        const { gen, schema, parentSchema, data, it } = cxt;
-        let min;
-        let max;
-        const { minContains, maxContains } = parentSchema;
-        if (it.opts.next) {
-          min = minContains === void 0 ? 1 : minContains;
-          max = maxContains;
-        } else {
-          min = 1;
-        }
-        const len = gen.const("len", (0, codegen_1._)`${data}.length`);
-        cxt.setParams({ min, max });
-        if (max === void 0 && min === 0) {
-          (0, util_1.checkStrictMode)(it, `"minContains" == 0 without "maxContains": "contains" keyword ignored`);
-          return;
-        }
-        if (max !== void 0 && min > max) {
-          (0, util_1.checkStrictMode)(it, `"minContains" > "maxContains" is always invalid`);
-          cxt.fail();
-          return;
-        }
-        if ((0, util_1.alwaysValidSchema)(it, schema)) {
-          let cond = (0, codegen_1._)`${len} >= ${min}`;
-          if (max !== void 0)
-            cond = (0, codegen_1._)`${cond} && ${len} <= ${max}`;
-          cxt.pass(cond);
-          return;
-        }
-        it.items = true;
-        const valid = gen.name("valid");
-        if (max === void 0 && min === 1) {
-          validateItems(valid, () => gen.if(valid, () => gen.break()));
-        } else if (min === 0) {
-          gen.let(valid, true);
-          if (max !== void 0)
-            gen.if((0, codegen_1._)`${data}.length > 0`, validateItemsWithCount);
-        } else {
-          gen.let(valid, false);
-          validateItemsWithCount();
-        }
-        cxt.result(valid, () => cxt.reset());
-        function validateItemsWithCount() {
-          const schValid = gen.name("_valid");
-          const count = gen.let("count", 0);
-          validateItems(schValid, () => gen.if(schValid, () => checkLimits(count)));
-        }
-        function validateItems(_valid, block) {
-          gen.forRange("i", 0, len, (i) => {
-            cxt.subschema({
-              keyword: "contains",
-              dataProp: i,
-              dataPropType: util_1.Type.Num,
-              compositeRule: true
-            }, _valid);
-            block();
-          });
-        }
-        function checkLimits(count) {
-          gen.code((0, codegen_1._)`${count}++`);
-          if (max === void 0) {
-            gen.if((0, codegen_1._)`${count} >= ${min}`, () => gen.assign(valid, true).break());
-          } else {
-            gen.if((0, codegen_1._)`${count} > ${max}`, () => gen.assign(valid, false).break());
-            if (min === 1)
-              gen.assign(valid, true);
-            else
-              gen.if((0, codegen_1._)`${count} >= ${min}`, () => gen.assign(valid, true));
-          }
-        }
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/dependencies.js
-var require_dependencies2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/dependencies.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.validateSchemaDeps = exports.validatePropertyDeps = exports.error = void 0;
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    var code_1 = require_code4();
-    exports.error = {
-      message: ({ params: { property, depsCount, deps } }) => {
-        const property_ies = depsCount === 1 ? "property" : "properties";
-        return (0, codegen_1.str)`must have ${property_ies} ${deps} when property ${property} is present`;
-      },
-      params: ({ params: { property, depsCount, deps, missingProperty } }) => (0, codegen_1._)`{property: ${property},
-    missingProperty: ${missingProperty},
-    depsCount: ${depsCount},
-    deps: ${deps}}`
-      // TODO change to reference
-    };
-    var def = {
-      keyword: "dependencies",
-      type: "object",
-      schemaType: "object",
-      error: exports.error,
-      code(cxt) {
-        const [propDeps, schDeps] = splitDependencies(cxt);
-        validatePropertyDeps(cxt, propDeps);
-        validateSchemaDeps(cxt, schDeps);
-      }
-    };
-    function splitDependencies({ schema }) {
-      const propertyDeps = {};
-      const schemaDeps = {};
-      for (const key in schema) {
-        if (key === "__proto__")
-          continue;
-        const deps = Array.isArray(schema[key]) ? propertyDeps : schemaDeps;
-        deps[key] = schema[key];
-      }
-      return [propertyDeps, schemaDeps];
-    }
-    function validatePropertyDeps(cxt, propertyDeps = cxt.schema) {
-      const { gen, data, it } = cxt;
-      if (Object.keys(propertyDeps).length === 0)
-        return;
-      const missing = gen.let("missing");
-      for (const prop in propertyDeps) {
-        const deps = propertyDeps[prop];
-        if (deps.length === 0)
-          continue;
-        const hasProperty = (0, code_1.propertyInData)(gen, data, prop, it.opts.ownProperties);
-        cxt.setParams({
-          property: prop,
-          depsCount: deps.length,
-          deps: deps.join(", ")
-        });
-        if (it.allErrors) {
-          gen.if(hasProperty, () => {
-            for (const depProp of deps) {
-              (0, code_1.checkReportMissingProp)(cxt, depProp);
-            }
-          });
-        } else {
-          gen.if((0, codegen_1._)`${hasProperty} && (${(0, code_1.checkMissingProp)(cxt, deps, missing)})`);
-          (0, code_1.reportMissingProp)(cxt, missing);
-          gen.else();
-        }
-      }
-    }
-    exports.validatePropertyDeps = validatePropertyDeps;
-    function validateSchemaDeps(cxt, schemaDeps = cxt.schema) {
-      const { gen, data, keyword, it } = cxt;
-      const valid = gen.name("valid");
-      for (const prop in schemaDeps) {
-        if ((0, util_1.alwaysValidSchema)(it, schemaDeps[prop]))
-          continue;
-        gen.if(
-          (0, code_1.propertyInData)(gen, data, prop, it.opts.ownProperties),
-          () => {
-            const schCxt = cxt.subschema({ keyword, schemaProp: prop }, valid);
-            cxt.mergeValidEvaluated(schCxt, valid);
-          },
-          () => gen.var(valid, true)
-          // TODO var
-        );
-        cxt.ok(valid);
-      }
-    }
-    exports.validateSchemaDeps = validateSchemaDeps;
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/propertyNames.js
-var require_propertyNames2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/propertyNames.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    var error2 = {
-      message: "property name must be valid",
-      params: ({ params }) => (0, codegen_1._)`{propertyName: ${params.propertyName}}`
-    };
-    var def = {
-      keyword: "propertyNames",
-      type: "object",
-      schemaType: ["object", "boolean"],
-      error: error2,
-      code(cxt) {
-        const { gen, schema, data, it } = cxt;
-        if ((0, util_1.alwaysValidSchema)(it, schema))
-          return;
-        const valid = gen.name("valid");
-        gen.forIn("key", data, (key) => {
-          cxt.setParams({ propertyName: key });
-          cxt.subschema({
-            keyword: "propertyNames",
-            data: key,
-            dataTypes: ["string"],
-            propertyName: key,
-            compositeRule: true
-          }, valid);
-          gen.if((0, codegen_1.not)(valid), () => {
-            cxt.error(true);
-            if (!it.allErrors)
-              gen.break();
-          });
-        });
-        cxt.ok(valid);
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js
-var require_additionalProperties2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var code_1 = require_code4();
-    var codegen_1 = require_codegen2();
-    var names_1 = require_names2();
-    var util_1 = require_util2();
-    var error2 = {
-      message: "must NOT have additional properties",
-      params: ({ params }) => (0, codegen_1._)`{additionalProperty: ${params.additionalProperty}}`
-    };
-    var def = {
-      keyword: "additionalProperties",
-      type: ["object"],
-      schemaType: ["boolean", "object"],
-      allowUndefined: true,
-      trackErrors: true,
-      error: error2,
-      code(cxt) {
-        const { gen, schema, parentSchema, data, errsCount, it } = cxt;
-        if (!errsCount)
-          throw new Error("ajv implementation error");
-        const { allErrors, opts } = it;
-        it.props = true;
-        if (opts.removeAdditional !== "all" && (0, util_1.alwaysValidSchema)(it, schema))
-          return;
-        const props = (0, code_1.allSchemaProperties)(parentSchema.properties);
-        const patProps = (0, code_1.allSchemaProperties)(parentSchema.patternProperties);
-        checkAdditionalProperties();
-        cxt.ok((0, codegen_1._)`${errsCount} === ${names_1.default.errors}`);
-        function checkAdditionalProperties() {
-          gen.forIn("key", data, (key) => {
-            if (!props.length && !patProps.length)
-              additionalPropertyCode(key);
-            else
-              gen.if(isAdditional(key), () => additionalPropertyCode(key));
-          });
-        }
-        function isAdditional(key) {
-          let definedProp;
-          if (props.length > 8) {
-            const propsSchema = (0, util_1.schemaRefOrVal)(it, parentSchema.properties, "properties");
-            definedProp = (0, code_1.isOwnProperty)(gen, propsSchema, key);
-          } else if (props.length) {
-            definedProp = (0, codegen_1.or)(...props.map((p) => (0, codegen_1._)`${key} === ${p}`));
-          } else {
-            definedProp = codegen_1.nil;
-          }
-          if (patProps.length) {
-            definedProp = (0, codegen_1.or)(definedProp, ...patProps.map((p) => (0, codegen_1._)`${(0, code_1.usePattern)(cxt, p)}.test(${key})`));
-          }
-          return (0, codegen_1.not)(definedProp);
-        }
-        function deleteAdditional(key) {
-          gen.code((0, codegen_1._)`delete ${data}[${key}]`);
-        }
-        function additionalPropertyCode(key) {
-          if (opts.removeAdditional === "all" || opts.removeAdditional && schema === false) {
-            deleteAdditional(key);
-            return;
-          }
-          if (schema === false) {
-            cxt.setParams({ additionalProperty: key });
-            cxt.error();
-            if (!allErrors)
-              gen.break();
-            return;
-          }
-          if (typeof schema == "object" && !(0, util_1.alwaysValidSchema)(it, schema)) {
-            const valid = gen.name("valid");
-            if (opts.removeAdditional === "failing") {
-              applyAdditionalSchema(key, valid, false);
-              gen.if((0, codegen_1.not)(valid), () => {
-                cxt.reset();
-                deleteAdditional(key);
-              });
-            } else {
-              applyAdditionalSchema(key, valid);
-              if (!allErrors)
-                gen.if((0, codegen_1.not)(valid), () => gen.break());
-            }
-          }
-        }
-        function applyAdditionalSchema(key, valid, errors) {
-          const subschema = {
-            keyword: "additionalProperties",
-            dataProp: key,
-            dataPropType: util_1.Type.Str
-          };
-          if (errors === false) {
-            Object.assign(subschema, {
-              compositeRule: true,
-              createErrors: false,
-              allErrors: false
-            });
-          }
-          cxt.subschema(subschema, valid);
-        }
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/properties.js
-var require_properties2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/properties.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var validate_1 = require_validate2();
-    var code_1 = require_code4();
-    var util_1 = require_util2();
-    var additionalProperties_1 = require_additionalProperties2();
-    var def = {
-      keyword: "properties",
-      type: "object",
-      schemaType: "object",
-      code(cxt) {
-        const { gen, schema, parentSchema, data, it } = cxt;
-        if (it.opts.removeAdditional === "all" && parentSchema.additionalProperties === void 0) {
-          additionalProperties_1.default.code(new validate_1.KeywordCxt(it, additionalProperties_1.default, "additionalProperties"));
-        }
-        const allProps = (0, code_1.allSchemaProperties)(schema);
-        for (const prop of allProps) {
-          it.definedProperties.add(prop);
-        }
-        if (it.opts.unevaluated && allProps.length && it.props !== true) {
-          it.props = util_1.mergeEvaluated.props(gen, (0, util_1.toHash)(allProps), it.props);
-        }
-        const properties = allProps.filter((p) => !(0, util_1.alwaysValidSchema)(it, schema[p]));
-        if (properties.length === 0)
-          return;
-        const valid = gen.name("valid");
-        for (const prop of properties) {
-          if (hasDefault(prop)) {
-            applyPropertySchema(prop);
-          } else {
-            gen.if((0, code_1.propertyInData)(gen, data, prop, it.opts.ownProperties));
-            applyPropertySchema(prop);
-            if (!it.allErrors)
-              gen.else().var(valid, true);
-            gen.endIf();
-          }
-          cxt.it.definedProperties.add(prop);
-          cxt.ok(valid);
-        }
-        function hasDefault(prop) {
-          return it.opts.useDefaults && !it.compositeRule && schema[prop].default !== void 0;
-        }
-        function applyPropertySchema(prop) {
-          cxt.subschema({
-            keyword: "properties",
-            schemaProp: prop,
-            dataProp: prop
-          }, valid);
-        }
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/patternProperties.js
-var require_patternProperties2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/patternProperties.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var code_1 = require_code4();
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    var util_2 = require_util2();
-    var def = {
-      keyword: "patternProperties",
-      type: "object",
-      schemaType: "object",
-      code(cxt) {
-        const { gen, schema, data, parentSchema, it } = cxt;
-        const { opts } = it;
-        const patterns = (0, code_1.allSchemaProperties)(schema);
-        const alwaysValidPatterns = patterns.filter((p) => (0, util_1.alwaysValidSchema)(it, schema[p]));
-        if (patterns.length === 0 || alwaysValidPatterns.length === patterns.length && (!it.opts.unevaluated || it.props === true)) {
-          return;
-        }
-        const checkProperties = opts.strictSchema && !opts.allowMatchingProperties && parentSchema.properties;
-        const valid = gen.name("valid");
-        if (it.props !== true && !(it.props instanceof codegen_1.Name)) {
-          it.props = (0, util_2.evaluatedPropsToName)(gen, it.props);
-        }
-        const { props } = it;
-        validatePatternProperties();
-        function validatePatternProperties() {
-          for (const pat of patterns) {
-            if (checkProperties)
-              checkMatchingProperties(pat);
-            if (it.allErrors) {
-              validateProperties(pat);
-            } else {
-              gen.var(valid, true);
-              validateProperties(pat);
-              gen.if(valid);
-            }
-          }
-        }
-        function checkMatchingProperties(pat) {
-          for (const prop in checkProperties) {
-            if (new RegExp(pat).test(prop)) {
-              (0, util_1.checkStrictMode)(it, `property ${prop} matches pattern ${pat} (use allowMatchingProperties)`);
-            }
-          }
-        }
-        function validateProperties(pat) {
-          gen.forIn("key", data, (key) => {
-            gen.if((0, codegen_1._)`${(0, code_1.usePattern)(cxt, pat)}.test(${key})`, () => {
-              const alwaysValid = alwaysValidPatterns.includes(pat);
-              if (!alwaysValid) {
-                cxt.subschema({
-                  keyword: "patternProperties",
-                  schemaProp: pat,
-                  dataProp: key,
-                  dataPropType: util_2.Type.Str
-                }, valid);
-              }
-              if (it.opts.unevaluated && props !== true) {
-                gen.assign((0, codegen_1._)`${props}[${key}]`, true);
-              } else if (!alwaysValid && !it.allErrors) {
-                gen.if((0, codegen_1.not)(valid), () => gen.break());
-              }
-            });
-          });
-        }
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/not.js
-var require_not2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/not.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var util_1 = require_util2();
-    var def = {
-      keyword: "not",
-      schemaType: ["object", "boolean"],
-      trackErrors: true,
-      code(cxt) {
-        const { gen, schema, it } = cxt;
-        if ((0, util_1.alwaysValidSchema)(it, schema)) {
-          cxt.fail();
-          return;
-        }
-        const valid = gen.name("valid");
-        cxt.subschema({
-          keyword: "not",
-          compositeRule: true,
-          createErrors: false,
-          allErrors: false
-        }, valid);
-        cxt.failResult(valid, () => cxt.reset(), () => cxt.error());
-      },
-      error: { message: "must NOT be valid" }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/anyOf.js
-var require_anyOf2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/anyOf.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var code_1 = require_code4();
-    var def = {
-      keyword: "anyOf",
-      schemaType: "array",
-      trackErrors: true,
-      code: code_1.validateUnion,
-      error: { message: "must match a schema in anyOf" }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/oneOf.js
-var require_oneOf2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/oneOf.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    var error2 = {
-      message: "must match exactly one schema in oneOf",
-      params: ({ params }) => (0, codegen_1._)`{passingSchemas: ${params.passing}}`
-    };
-    var def = {
-      keyword: "oneOf",
-      schemaType: "array",
-      trackErrors: true,
-      error: error2,
-      code(cxt) {
-        const { gen, schema, parentSchema, it } = cxt;
-        if (!Array.isArray(schema))
-          throw new Error("ajv implementation error");
-        if (it.opts.discriminator && parentSchema.discriminator)
-          return;
-        const schArr = schema;
-        const valid = gen.let("valid", false);
-        const passing = gen.let("passing", null);
-        const schValid = gen.name("_valid");
-        cxt.setParams({ passing });
-        gen.block(validateOneOf);
-        cxt.result(valid, () => cxt.reset(), () => cxt.error(true));
-        function validateOneOf() {
-          schArr.forEach((sch, i) => {
-            let schCxt;
-            if ((0, util_1.alwaysValidSchema)(it, sch)) {
-              gen.var(schValid, true);
-            } else {
-              schCxt = cxt.subschema({
-                keyword: "oneOf",
-                schemaProp: i,
-                compositeRule: true
-              }, schValid);
-            }
-            if (i > 0) {
-              gen.if((0, codegen_1._)`${schValid} && ${valid}`).assign(valid, false).assign(passing, (0, codegen_1._)`[${passing}, ${i}]`).else();
-            }
-            gen.if(schValid, () => {
-              gen.assign(valid, true);
-              gen.assign(passing, i);
-              if (schCxt)
-                cxt.mergeEvaluated(schCxt, codegen_1.Name);
-            });
-          });
-        }
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/allOf.js
-var require_allOf2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/allOf.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var util_1 = require_util2();
-    var def = {
-      keyword: "allOf",
-      schemaType: "array",
-      code(cxt) {
-        const { gen, schema, it } = cxt;
-        if (!Array.isArray(schema))
-          throw new Error("ajv implementation error");
-        const valid = gen.name("valid");
-        schema.forEach((sch, i) => {
-          if ((0, util_1.alwaysValidSchema)(it, sch))
-            return;
-          const schCxt = cxt.subschema({ keyword: "allOf", schemaProp: i }, valid);
-          cxt.ok(valid);
-          cxt.mergeEvaluated(schCxt);
-        });
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/if.js
-var require_if2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/if.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var codegen_1 = require_codegen2();
-    var util_1 = require_util2();
-    var error2 = {
-      message: ({ params }) => (0, codegen_1.str)`must match "${params.ifClause}" schema`,
-      params: ({ params }) => (0, codegen_1._)`{failingKeyword: ${params.ifClause}}`
-    };
-    var def = {
-      keyword: "if",
-      schemaType: ["object", "boolean"],
-      trackErrors: true,
-      error: error2,
-      code(cxt) {
-        const { gen, parentSchema, it } = cxt;
-        if (parentSchema.then === void 0 && parentSchema.else === void 0) {
-          (0, util_1.checkStrictMode)(it, '"if" without "then" and "else" is ignored');
-        }
-        const hasThen = hasSchema(it, "then");
-        const hasElse = hasSchema(it, "else");
-        if (!hasThen && !hasElse)
-          return;
-        const valid = gen.let("valid", true);
-        const schValid = gen.name("_valid");
-        validateIf();
-        cxt.reset();
-        if (hasThen && hasElse) {
-          const ifClause = gen.let("ifClause");
-          cxt.setParams({ ifClause });
-          gen.if(schValid, validateClause("then", ifClause), validateClause("else", ifClause));
-        } else if (hasThen) {
-          gen.if(schValid, validateClause("then"));
-        } else {
-          gen.if((0, codegen_1.not)(schValid), validateClause("else"));
-        }
-        cxt.pass(valid, () => cxt.error(true));
-        function validateIf() {
-          const schCxt = cxt.subschema({
-            keyword: "if",
-            compositeRule: true,
-            createErrors: false,
-            allErrors: false
-          }, schValid);
-          cxt.mergeEvaluated(schCxt);
-        }
-        function validateClause(keyword, ifClause) {
-          return () => {
-            const schCxt = cxt.subschema({ keyword }, schValid);
-            gen.assign(valid, schValid);
-            cxt.mergeValidEvaluated(schCxt, valid);
-            if (ifClause)
-              gen.assign(ifClause, (0, codegen_1._)`${keyword}`);
-            else
-              cxt.setParams({ ifClause: keyword });
-          };
-        }
-      }
-    };
-    function hasSchema(it, keyword) {
-      const schema = it.schema[keyword];
-      return schema !== void 0 && !(0, util_1.alwaysValidSchema)(it, schema);
-    }
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/thenElse.js
-var require_thenElse2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/thenElse.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var util_1 = require_util2();
-    var def = {
-      keyword: ["then", "else"],
-      schemaType: ["object", "boolean"],
-      code({ keyword, parentSchema, it }) {
-        if (parentSchema.if === void 0)
-          (0, util_1.checkStrictMode)(it, `"${keyword}" without "if" is ignored`);
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/index.js
-var require_applicator2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/index.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var additionalItems_1 = require_additionalItems2();
-    var prefixItems_1 = require_prefixItems2();
-    var items_1 = require_items2();
-    var items2020_1 = require_items20202();
-    var contains_1 = require_contains2();
-    var dependencies_1 = require_dependencies2();
-    var propertyNames_1 = require_propertyNames2();
-    var additionalProperties_1 = require_additionalProperties2();
-    var properties_1 = require_properties2();
-    var patternProperties_1 = require_patternProperties2();
-    var not_1 = require_not2();
-    var anyOf_1 = require_anyOf2();
-    var oneOf_1 = require_oneOf2();
-    var allOf_1 = require_allOf2();
-    var if_1 = require_if2();
-    var thenElse_1 = require_thenElse2();
-    function getApplicator(draft2020 = false) {
-      const applicator = [
-        // any
-        not_1.default,
-        anyOf_1.default,
-        oneOf_1.default,
-        allOf_1.default,
-        if_1.default,
-        thenElse_1.default,
-        // object
-        propertyNames_1.default,
-        additionalProperties_1.default,
-        dependencies_1.default,
-        properties_1.default,
-        patternProperties_1.default
-      ];
-      if (draft2020)
-        applicator.push(prefixItems_1.default, items2020_1.default);
-      else
-        applicator.push(additionalItems_1.default, items_1.default);
-      applicator.push(contains_1.default);
-      return applicator;
-    }
-    exports.default = getApplicator;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/format/format.js
-var require_format3 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/format/format.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var codegen_1 = require_codegen2();
-    var error2 = {
-      message: ({ schemaCode }) => (0, codegen_1.str)`must match format "${schemaCode}"`,
-      params: ({ schemaCode }) => (0, codegen_1._)`{format: ${schemaCode}}`
-    };
-    var def = {
-      keyword: "format",
-      type: ["number", "string"],
-      schemaType: "string",
-      $data: true,
-      error: error2,
-      code(cxt, ruleType) {
-        const { gen, data, $data, schema, schemaCode, it } = cxt;
-        const { opts, errSchemaPath, schemaEnv, self } = it;
-        if (!opts.validateFormats)
-          return;
-        if ($data)
-          validate$DataFormat();
-        else
-          validateFormat();
-        function validate$DataFormat() {
-          const fmts = gen.scopeValue("formats", {
-            ref: self.formats,
-            code: opts.code.formats
-          });
-          const fDef = gen.const("fDef", (0, codegen_1._)`${fmts}[${schemaCode}]`);
-          const fType = gen.let("fType");
-          const format = gen.let("format");
-          gen.if((0, codegen_1._)`typeof ${fDef} == "object" && !(${fDef} instanceof RegExp)`, () => gen.assign(fType, (0, codegen_1._)`${fDef}.type || "string"`).assign(format, (0, codegen_1._)`${fDef}.validate`), () => gen.assign(fType, (0, codegen_1._)`"string"`).assign(format, fDef));
-          cxt.fail$data((0, codegen_1.or)(unknownFmt(), invalidFmt()));
-          function unknownFmt() {
-            if (opts.strictSchema === false)
-              return codegen_1.nil;
-            return (0, codegen_1._)`${schemaCode} && !${format}`;
-          }
-          function invalidFmt() {
-            const callFormat = schemaEnv.$async ? (0, codegen_1._)`(${fDef}.async ? await ${format}(${data}) : ${format}(${data}))` : (0, codegen_1._)`${format}(${data})`;
-            const validData = (0, codegen_1._)`(typeof ${format} == "function" ? ${callFormat} : ${format}.test(${data}))`;
-            return (0, codegen_1._)`${format} && ${format} !== true && ${fType} === ${ruleType} && !${validData}`;
-          }
-        }
-        function validateFormat() {
-          const formatDef = self.formats[schema];
-          if (!formatDef) {
-            unknownFormat();
-            return;
-          }
-          if (formatDef === true)
-            return;
-          const [fmtType, format, fmtRef] = getFormat(formatDef);
-          if (fmtType === ruleType)
-            cxt.pass(validCondition());
-          function unknownFormat() {
-            if (opts.strictSchema === false) {
-              self.logger.warn(unknownMsg());
-              return;
-            }
-            throw new Error(unknownMsg());
-            function unknownMsg() {
-              return `unknown format "${schema}" ignored in schema at path "${errSchemaPath}"`;
-            }
-          }
-          function getFormat(fmtDef) {
-            const code = fmtDef instanceof RegExp ? (0, codegen_1.regexpCode)(fmtDef) : opts.code.formats ? (0, codegen_1._)`${opts.code.formats}${(0, codegen_1.getProperty)(schema)}` : void 0;
-            const fmt = gen.scopeValue("formats", { key: schema, ref: fmtDef, code });
-            if (typeof fmtDef == "object" && !(fmtDef instanceof RegExp)) {
-              return [fmtDef.type || "string", fmtDef.validate, (0, codegen_1._)`${fmt}.validate`];
-            }
-            return ["string", fmtDef, fmt];
-          }
-          function validCondition() {
-            if (typeof formatDef == "object" && !(formatDef instanceof RegExp) && formatDef.async) {
-              if (!schemaEnv.$async)
-                throw new Error("async format in sync schema");
-              return (0, codegen_1._)`await ${fmtRef}(${data})`;
-            }
-            return typeof format == "function" ? (0, codegen_1._)`${fmtRef}(${data})` : (0, codegen_1._)`${fmtRef}.test(${data})`;
-          }
-        }
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/format/index.js
-var require_format4 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/format/index.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var format_1 = require_format3();
-    var format = [format_1.default];
-    exports.default = format;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/metadata.js
-var require_metadata2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/metadata.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.contentVocabulary = exports.metadataVocabulary = void 0;
-    exports.metadataVocabulary = [
-      "title",
-      "description",
-      "default",
-      "deprecated",
-      "readOnly",
-      "writeOnly",
-      "examples"
-    ];
-    exports.contentVocabulary = [
-      "contentMediaType",
-      "contentEncoding",
-      "contentSchema"
-    ];
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/draft7.js
-var require_draft72 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/draft7.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var core_1 = require_core4();
-    var validation_1 = require_validation2();
-    var applicator_1 = require_applicator2();
-    var format_1 = require_format4();
-    var metadata_1 = require_metadata2();
-    var draft7Vocabularies = [
-      core_1.default,
-      validation_1.default,
-      (0, applicator_1.default)(),
-      format_1.default,
-      metadata_1.metadataVocabulary,
-      metadata_1.contentVocabulary
-    ];
-    exports.default = draft7Vocabularies;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/discriminator/types.js
-var require_types2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/discriminator/types.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.DiscrError = void 0;
-    var DiscrError;
-    (function(DiscrError2) {
-      DiscrError2["Tag"] = "tag";
-      DiscrError2["Mapping"] = "mapping";
-    })(DiscrError || (exports.DiscrError = DiscrError = {}));
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/discriminator/index.js
-var require_discriminator2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/discriminator/index.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var codegen_1 = require_codegen2();
-    var types_1 = require_types2();
-    var compile_1 = require_compile2();
-    var ref_error_1 = require_ref_error2();
-    var util_1 = require_util2();
-    var error2 = {
-      message: ({ params: { discrError, tagName } }) => discrError === types_1.DiscrError.Tag ? `tag "${tagName}" must be string` : `value of tag "${tagName}" must be in oneOf`,
-      params: ({ params: { discrError, tag, tagName } }) => (0, codegen_1._)`{error: ${discrError}, tag: ${tagName}, tagValue: ${tag}}`
-    };
-    var def = {
-      keyword: "discriminator",
-      type: "object",
-      schemaType: "object",
-      error: error2,
-      code(cxt) {
-        const { gen, data, schema, parentSchema, it } = cxt;
-        const { oneOf } = parentSchema;
-        if (!it.opts.discriminator) {
-          throw new Error("discriminator: requires discriminator option");
-        }
-        const tagName = schema.propertyName;
-        if (typeof tagName != "string")
-          throw new Error("discriminator: requires propertyName");
-        if (schema.mapping)
-          throw new Error("discriminator: mapping is not supported");
-        if (!oneOf)
-          throw new Error("discriminator: requires oneOf keyword");
-        const valid = gen.let("valid", false);
-        const tag = gen.const("tag", (0, codegen_1._)`${data}${(0, codegen_1.getProperty)(tagName)}`);
-        gen.if((0, codegen_1._)`typeof ${tag} == "string"`, () => validateMapping(), () => cxt.error(false, { discrError: types_1.DiscrError.Tag, tag, tagName }));
-        cxt.ok(valid);
-        function validateMapping() {
-          const mapping = getMapping();
-          gen.if(false);
-          for (const tagValue in mapping) {
-            gen.elseIf((0, codegen_1._)`${tag} === ${tagValue}`);
-            gen.assign(valid, applyTagSchema(mapping[tagValue]));
-          }
-          gen.else();
-          cxt.error(false, { discrError: types_1.DiscrError.Mapping, tag, tagName });
-          gen.endIf();
-        }
-        function applyTagSchema(schemaProp) {
-          const _valid = gen.name("valid");
-          const schCxt = cxt.subschema({ keyword: "oneOf", schemaProp }, _valid);
-          cxt.mergeEvaluated(schCxt, codegen_1.Name);
-          return _valid;
-        }
-        function getMapping() {
-          var _a3;
-          const oneOfMapping = {};
-          const topRequired = hasRequired(parentSchema);
-          let tagRequired = true;
-          for (let i = 0; i < oneOf.length; i++) {
-            let sch = oneOf[i];
-            if ((sch === null || sch === void 0 ? void 0 : sch.$ref) && !(0, util_1.schemaHasRulesButRef)(sch, it.self.RULES)) {
-              const ref = sch.$ref;
-              sch = compile_1.resolveRef.call(it.self, it.schemaEnv.root, it.baseId, ref);
-              if (sch instanceof compile_1.SchemaEnv)
-                sch = sch.schema;
-              if (sch === void 0)
-                throw new ref_error_1.default(it.opts.uriResolver, it.baseId, ref);
-            }
-            const propSch = (_a3 = sch === null || sch === void 0 ? void 0 : sch.properties) === null || _a3 === void 0 ? void 0 : _a3[tagName];
-            if (typeof propSch != "object") {
-              throw new Error(`discriminator: oneOf subschemas (or referenced schemas) must have "properties/${tagName}"`);
-            }
-            tagRequired = tagRequired && (topRequired || hasRequired(sch));
-            addMappings(propSch, i);
-          }
-          if (!tagRequired)
-            throw new Error(`discriminator: "${tagName}" must be required`);
-          return oneOfMapping;
-          function hasRequired({ required: required2 }) {
-            return Array.isArray(required2) && required2.includes(tagName);
-          }
-          function addMappings(sch, i) {
-            if (sch.const) {
-              addMapping(sch.const, i);
-            } else if (sch.enum) {
-              for (const tagValue of sch.enum) {
-                addMapping(tagValue, i);
-              }
-            } else {
-              throw new Error(`discriminator: "properties/${tagName}" must have "const" or "enum"`);
-            }
-          }
-          function addMapping(tagValue, i) {
-            if (typeof tagValue != "string" || tagValue in oneOfMapping) {
-              throw new Error(`discriminator: "${tagName}" values must be unique strings`);
-            }
-            oneOfMapping[tagValue] = i;
-          }
-        }
-      }
-    };
-    exports.default = def;
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/refs/json-schema-draft-07.json
-var require_json_schema_draft_072 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/refs/json-schema-draft-07.json"(exports, module) {
-    module.exports = {
-      $schema: "http://json-schema.org/draft-07/schema#",
-      $id: "http://json-schema.org/draft-07/schema#",
-      title: "Core schema meta-schema",
-      definitions: {
-        schemaArray: {
-          type: "array",
-          minItems: 1,
-          items: { $ref: "#" }
-        },
-        nonNegativeInteger: {
-          type: "integer",
-          minimum: 0
-        },
-        nonNegativeIntegerDefault0: {
-          allOf: [{ $ref: "#/definitions/nonNegativeInteger" }, { default: 0 }]
-        },
-        simpleTypes: {
-          enum: ["array", "boolean", "integer", "null", "number", "object", "string"]
-        },
-        stringArray: {
-          type: "array",
-          items: { type: "string" },
-          uniqueItems: true,
-          default: []
-        }
-      },
-      type: ["object", "boolean"],
-      properties: {
-        $id: {
-          type: "string",
-          format: "uri-reference"
-        },
-        $schema: {
-          type: "string",
-          format: "uri"
-        },
-        $ref: {
-          type: "string",
-          format: "uri-reference"
-        },
-        $comment: {
-          type: "string"
-        },
-        title: {
-          type: "string"
-        },
-        description: {
-          type: "string"
-        },
-        default: true,
-        readOnly: {
-          type: "boolean",
-          default: false
-        },
-        examples: {
-          type: "array",
-          items: true
-        },
-        multipleOf: {
-          type: "number",
-          exclusiveMinimum: 0
-        },
-        maximum: {
-          type: "number"
-        },
-        exclusiveMaximum: {
-          type: "number"
-        },
-        minimum: {
-          type: "number"
-        },
-        exclusiveMinimum: {
-          type: "number"
-        },
-        maxLength: { $ref: "#/definitions/nonNegativeInteger" },
-        minLength: { $ref: "#/definitions/nonNegativeIntegerDefault0" },
-        pattern: {
-          type: "string",
-          format: "regex"
-        },
-        additionalItems: { $ref: "#" },
-        items: {
-          anyOf: [{ $ref: "#" }, { $ref: "#/definitions/schemaArray" }],
-          default: true
-        },
-        maxItems: { $ref: "#/definitions/nonNegativeInteger" },
-        minItems: { $ref: "#/definitions/nonNegativeIntegerDefault0" },
-        uniqueItems: {
-          type: "boolean",
-          default: false
-        },
-        contains: { $ref: "#" },
-        maxProperties: { $ref: "#/definitions/nonNegativeInteger" },
-        minProperties: { $ref: "#/definitions/nonNegativeIntegerDefault0" },
-        required: { $ref: "#/definitions/stringArray" },
-        additionalProperties: { $ref: "#" },
-        definitions: {
-          type: "object",
-          additionalProperties: { $ref: "#" },
-          default: {}
-        },
-        properties: {
-          type: "object",
-          additionalProperties: { $ref: "#" },
-          default: {}
-        },
-        patternProperties: {
-          type: "object",
-          additionalProperties: { $ref: "#" },
-          propertyNames: { format: "regex" },
-          default: {}
-        },
-        dependencies: {
-          type: "object",
-          additionalProperties: {
-            anyOf: [{ $ref: "#" }, { $ref: "#/definitions/stringArray" }]
-          }
-        },
-        propertyNames: { $ref: "#" },
-        const: true,
-        enum: {
-          type: "array",
-          items: true,
-          minItems: 1,
-          uniqueItems: true
-        },
-        type: {
-          anyOf: [
-            { $ref: "#/definitions/simpleTypes" },
-            {
-              type: "array",
-              items: { $ref: "#/definitions/simpleTypes" },
-              minItems: 1,
-              uniqueItems: true
-            }
-          ]
-        },
-        format: { type: "string" },
-        contentMediaType: { type: "string" },
-        contentEncoding: { type: "string" },
-        if: { $ref: "#" },
-        then: { $ref: "#" },
-        else: { $ref: "#" },
-        allOf: { $ref: "#/definitions/schemaArray" },
-        anyOf: { $ref: "#/definitions/schemaArray" },
-        oneOf: { $ref: "#/definitions/schemaArray" },
-        not: { $ref: "#" }
-      },
-      default: true
-    };
-  }
-});
-
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/ajv.js
-var require_ajv2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/ajv.js"(exports, module) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.MissingRefError = exports.ValidationError = exports.CodeGen = exports.Name = exports.nil = exports.stringify = exports.str = exports._ = exports.KeywordCxt = exports.Ajv = void 0;
-    var core_1 = require_core3();
-    var draft7_1 = require_draft72();
-    var discriminator_1 = require_discriminator2();
-    var draft7MetaSchema = require_json_schema_draft_072();
-    var META_SUPPORT_DATA = ["/properties"];
-    var META_SCHEMA_ID = "http://json-schema.org/draft-07/schema";
-    var Ajv2 = class extends core_1.default {
-      _addVocabularies() {
-        super._addVocabularies();
-        draft7_1.default.forEach((v) => this.addVocabulary(v));
-        if (this.opts.discriminator)
-          this.addKeyword(discriminator_1.default);
-      }
-      _addDefaultMetaSchema() {
-        super._addDefaultMetaSchema();
-        if (!this.opts.meta)
-          return;
-        const metaSchema = this.opts.$data ? this.$dataMetaSchema(draft7MetaSchema, META_SUPPORT_DATA) : draft7MetaSchema;
-        this.addMetaSchema(metaSchema, META_SCHEMA_ID, false);
-        this.refs["http://json-schema.org/schema"] = META_SCHEMA_ID;
-      }
-      defaultMeta() {
-        return this.opts.defaultMeta = super.defaultMeta() || (this.getSchema(META_SCHEMA_ID) ? META_SCHEMA_ID : void 0);
-      }
-    };
-    exports.Ajv = Ajv2;
-    module.exports = exports = Ajv2;
-    module.exports.Ajv = Ajv2;
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.default = Ajv2;
-    var validate_1 = require_validate2();
-    Object.defineProperty(exports, "KeywordCxt", { enumerable: true, get: function() {
-      return validate_1.KeywordCxt;
-    } });
-    var codegen_1 = require_codegen2();
-    Object.defineProperty(exports, "_", { enumerable: true, get: function() {
-      return codegen_1._;
-    } });
-    Object.defineProperty(exports, "str", { enumerable: true, get: function() {
-      return codegen_1.str;
-    } });
-    Object.defineProperty(exports, "stringify", { enumerable: true, get: function() {
-      return codegen_1.stringify;
-    } });
-    Object.defineProperty(exports, "nil", { enumerable: true, get: function() {
-      return codegen_1.nil;
-    } });
-    Object.defineProperty(exports, "Name", { enumerable: true, get: function() {
-      return codegen_1.Name;
-    } });
-    Object.defineProperty(exports, "CodeGen", { enumerable: true, get: function() {
-      return codegen_1.CodeGen;
-    } });
-    var validation_error_1 = require_validation_error2();
-    Object.defineProperty(exports, "ValidationError", { enumerable: true, get: function() {
-      return validation_error_1.default;
-    } });
-    var ref_error_1 = require_ref_error2();
-    Object.defineProperty(exports, "MissingRefError", { enumerable: true, get: function() {
-      return ref_error_1.default;
-    } });
-  }
-});
-
 // ../../node_modules/ajv-formats/dist/limit.js
 var require_limit = __commonJS({
   "../../node_modules/ajv-formats/dist/limit.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.formatLimitDefinition = void 0;
-    var ajv_1 = require_ajv2();
-    var codegen_1 = require_codegen2();
+    var ajv_1 = require_ajv();
+    var codegen_1 = require_codegen();
     var ops = codegen_1.operators;
     var KWDs = {
       formatMaximum: { okStr: "<=", ok: ops.LTE, fail: ops.GT },
@@ -41547,7 +38413,7 @@ var require_dist = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     var formats_1 = require_formats();
     var limit_1 = require_limit();
-    var codegen_1 = require_codegen2();
+    var codegen_1 = require_codegen();
     var fullName = new codegen_1.Name("fullFormats");
     var fastName = new codegen_1.Name("fastFormats");
     var formatsPlugin = (ajv, opts = { keywords: true }) => {
@@ -42407,12 +39273,12 @@ var init_stdio2 = __esm({
         this.onclose?.();
       }
       send(message) {
-        return new Promise((resolve2) => {
+        return new Promise((resolve3) => {
           const json = serializeMessage(message);
           if (this._stdout.write(json)) {
-            resolve2();
+            resolve3();
           } else {
-            this._stdout.once("drain", resolve2);
+            this._stdout.once("drain", resolve3);
           }
         });
       }
@@ -42436,9 +39302,18 @@ function clampLimit(limit) {
   if (!Number.isFinite(n) || n <= 0) return 10;
   return Math.min(Math.floor(n), 50);
 }
-function jobsResult(entry, limit) {
+function orderCards(cards, { now = Date.now(), history = null } = {}) {
+  const list = Array.isArray(cards) ? cards : [];
+  if (!history) return rotate(list, now, MCP_ROTATE_MS);
+  const { eligible, suppressed } = partitionFreshMatches(list, history);
+  return [...rotate(eligible, now, MCP_ROTATE_MS), ...rotate(suppressed, now, MCP_ROTATE_MS)];
+}
+function jobsResult(entry, limit, order = {}) {
   if (!entry) return notOnboarded();
-  const cards = (Array.isArray(entry.topMatches) ? entry.topMatches : []).filter(isRole).sort(byScoreDesc).slice(0, clampLimit(limit)).map((c) => ({
+  const cards = orderCards(
+    (Array.isArray(entry.topMatches) ? entry.topMatches : []).filter(isRole),
+    order
+  ).slice(0, clampLimit(limit)).map((c) => ({
     id: c.id,
     title: c.title,
     company: c.company,
@@ -42448,9 +39323,14 @@ function jobsResult(entry, limit) {
   }));
   return { status: "ok", count: cards.length, matches: cards };
 }
-function bountiesResult(entry, limit) {
+function bountiesResult(entry, limit, order = {}) {
   if (!entry) return notOnboarded();
-  const cards = (Array.isArray(entry.topMatches) ? entry.topMatches : []).filter((c) => c && c.source === "bounty").sort(byScoreDesc).slice(0, clampLimit(limit)).map((c) => ({
+  const cards = orderCards(
+    (Array.isArray(entry.topMatches) ? entry.topMatches : []).filter(
+      (c) => c && c.source === "bounty"
+    ),
+    order
+  ).slice(0, clampLimit(limit)).map((c) => ({
     id: c.id,
     title: c.title,
     repo: c.repo,
@@ -42460,10 +39340,15 @@ function bountiesResult(entry, limit) {
   }));
   return { status: "ok", count: cards.length, matches: cards };
 }
-function contributeResult(entry, limit, contributeEnabled) {
+function contributeResult(entry, limit, contributeEnabled, order = {}) {
   if (!contributeEnabled) return optInRequired();
   if (!entry) return notOnboarded();
-  const cards = (Array.isArray(entry.topMatches) ? entry.topMatches : []).filter((c) => c && c.source === "contribute").sort(byScoreDesc).slice(0, clampLimit(limit)).map((c) => ({
+  const cards = orderCards(
+    (Array.isArray(entry.topMatches) ? entry.topMatches : []).filter(
+      (c) => c && c.source === "contribute"
+    ),
+    order
+  ).slice(0, clampLimit(limit)).map((c) => ({
     id: c.id,
     title: c.title,
     repo: c.repo,
@@ -42485,15 +39370,15 @@ function inboxResult(entry) {
     lastRefresh: typeof entry.ts === "number" ? new Date(entry.ts).toISOString() : null
   };
 }
-function buildToolResult(name, args5, entry, contributeEnabled) {
+function buildToolResult(name, args5, entry, contributeEnabled, order = {}) {
   const limit = args5?.limit;
   switch (name) {
     case "jobs":
-      return jobsResult(entry, limit);
+      return jobsResult(entry, limit, order);
     case "bounties":
-      return bountiesResult(entry, limit);
+      return bountiesResult(entry, limit, order);
     case "contribute":
-      return contributeResult(entry, limit, contributeEnabled);
+      return contributeResult(entry, limit, contributeEnabled, order);
     case "inbox":
       return inboxResult(entry);
     default:
@@ -42506,13 +39391,13 @@ async function run15() {
   const { ListToolsRequestSchema: ListToolsRequestSchema2, CallToolRequestSchema: CallToolRequestSchema2 } = await Promise.resolve().then(() => (init_types3(), types_exports));
   let version2 = "0.0.0";
   try {
-    const { readFileSync: readFileSync33, existsSync: existsSync25 } = await import("fs");
-    const { join: join38 } = await import("path");
+    const { readFileSync: readFileSync34, existsSync: existsSync25 } = await import("fs");
+    const { join: join39 } = await import("path");
     const { fileURLToPath: fileURLToPath12 } = await import("url");
     const here = fileURLToPath12(new URL(".", import.meta.url));
-    for (const p of [join38(here, "..", "..", "package.json"), join38(here, "..", "package.json")]) {
+    for (const p of [join39(here, "..", "..", "package.json"), join39(here, "..", "package.json")]) {
       if (existsSync25(p)) {
-        const pkg = JSON.parse(readFileSync33(p, "utf8"));
+        const pkg = JSON.parse(readFileSync34(p, "utf8"));
         if (pkg.version) {
           version2 = pkg.version;
           break;
@@ -42521,10 +39406,7 @@ async function run15() {
     }
   } catch {
   }
-  const server = new Server2(
-    { name: "terminalhire", version: version2 },
-    { capabilities: { tools: {} } }
-  );
+  const server = new Server2({ name: "terminalhire", version: version2 }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema2, async () => ({ tools: TOOL_DEFS }));
   server.setRequestHandler(CallToolRequestSchema2, async (req) => {
     const name = req.params?.name;
@@ -42539,17 +39421,25 @@ async function run15() {
         contributeEnabled = false;
       }
     }
-    const result = buildToolResult(name, args5, entry, contributeEnabled);
+    let history = null;
+    try {
+      history = loadSeenHistory();
+    } catch {
+    }
+    const result = buildToolResult(name, args5, entry, contributeEnabled, { history });
     return { content: [{ type: "text", text: JSON.stringify(result) }] };
   });
   const transport = new StdioServerTransport2();
   await server.connect(transport);
 }
-var TOOL_NAMES, notOnboarded, optInRequired, isRole, byScoreDesc, LIMIT_SCHEMA, EMPTY_SCHEMA, TOOL_DEFS;
+var TOOL_NAMES, notOnboarded, optInRequired, isRole, MCP_ROTATE_MS, LIMIT_SCHEMA, EMPTY_SCHEMA, TOOL_DEFS;
 var init_jpi_mcp = __esm({
   "bin/jpi-mcp.js"() {
     "use strict";
     init_cache_store();
+    init_match_slots();
+    init_spinner_select();
+    init_spinner_seen();
     TOOL_NAMES = ["jobs", "bounties", "contribute", "inbox"];
     notOnboarded = () => ({
       status: "not_onboarded",
@@ -42560,7 +39450,7 @@ var init_jpi_mcp = __esm({
       hint: "Contribution opportunities are on by default; this developer explicitly opted out with contributeEnabled: false in ~/.terminalhire/config.json (or the TERMINALHIRE_DIR override). Remove that key or set it to true to re-enable \u2014 no command needed."
     });
     isRole = (c) => c && c.source !== "bounty" && c.source !== "contribute";
-    byScoreDesc = (a, b) => (b.score ?? 0) - (a.score ?? 0);
+    MCP_ROTATE_MS = 5 * 60 * 1e3;
     LIMIT_SCHEMA = {
       type: "object",
       properties: {
@@ -42725,13 +39615,13 @@ async function run16() {
   const { ListToolsRequestSchema: ListToolsRequestSchema2, CallToolRequestSchema: CallToolRequestSchema2 } = await Promise.resolve().then(() => (init_types3(), types_exports));
   let version2 = "0.0.0";
   try {
-    const { readFileSync: readFileSync33, existsSync: existsSync25 } = await import("fs");
-    const { join: join38 } = await import("path");
+    const { readFileSync: readFileSync34, existsSync: existsSync25 } = await import("fs");
+    const { join: join39 } = await import("path");
     const { fileURLToPath: fileURLToPath12 } = await import("url");
     const here = fileURLToPath12(new URL(".", import.meta.url));
-    for (const p of [join38(here, "..", "..", "package.json"), join38(here, "..", "package.json")]) {
+    for (const p of [join39(here, "..", "..", "package.json"), join39(here, "..", "package.json")]) {
       if (existsSync25(p)) {
-        const pkg = JSON.parse(readFileSync33(p, "utf8"));
+        const pkg = JSON.parse(readFileSync34(p, "utf8"));
         if (pkg.version) {
           version2 = pkg.version;
           break;
@@ -42845,7 +39735,7 @@ __export(link_exports, {
   runLinkLogout: () => runLinkLogout
 });
 import { createServer } from "http";
-import { randomBytes as randomBytes6 } from "crypto";
+import { randomBytes as randomBytes7 } from "crypto";
 function resolveLoopbackRequest(rawUrl, expectedNonce) {
   let u;
   try {
@@ -42910,7 +39800,7 @@ function defaultLinkDeps() {
       void Promise.resolve().then(() => (init_open_url(), open_url_exports)).then((m) => m.openInBrowser(url)).catch(() => {
       });
     },
-    generateNonce: () => randomBytes6(16).toString("hex"),
+    generateNonce: () => randomBytes7(16).toString("hex"),
     persistToken: (token) => writeWebSessionFile(token),
     markNudgeDisclosed: () => writeConfig({ inboundNudgeDisclosed: true }),
     // No-op by default: the index-cache is a bin-layer concern (statusline/spinner
@@ -43125,10 +40015,10 @@ __export(jpi_profile_exports, {
 import { createInterface as createInterface9 } from "readline";
 function prompt4(question) {
   const rl = createInterface9({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve2) => {
+  return new Promise((resolve3) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve2(answer.trim());
+      resolve3(answer.trim());
     });
   });
 }
@@ -43205,9 +40095,9 @@ var signal_exports = {};
 __export(signal_exports, {
   extractFingerprint: () => extractFingerprint
 });
-import { readFileSync as readFileSync25, readdirSync as readdirSync2 } from "fs";
+import { readFileSync as readFileSync28, readdirSync as readdirSync2 } from "fs";
 import { execFileSync } from "child_process";
-import { join as join27 } from "path";
+import { join as join31 } from "path";
 function safeGit(args5, cwd) {
   try {
     return execFileSync("git", ["-C", cwd, ...args5], {
@@ -43235,20 +40125,20 @@ function isEmployerContext(cwd) {
 }
 function readJsonSafe(path2) {
   try {
-    return JSON.parse(readFileSync25(path2, "utf8"));
+    return JSON.parse(readFileSync28(path2, "utf8"));
   } catch {
     return null;
   }
 }
 function readFileSafe(path2) {
   try {
-    return readFileSync25(path2, "utf8");
+    return readFileSync28(path2, "utf8");
   } catch {
     return "";
   }
 }
 function tokensFromPackageJson(cwd) {
-  const pkg = readJsonSafe(join27(cwd, "package.json"));
+  const pkg = readJsonSafe(join31(cwd, "package.json"));
   if (!pkg || typeof pkg !== "object") return [];
   const p = pkg;
   const deps = {
@@ -43262,9 +40152,9 @@ function workspaceMemberDirs(cwd) {
   const dirs = [cwd];
   for (const group of ["apps", "packages"]) {
     try {
-      const groupDir = join27(cwd, group);
+      const groupDir = join31(cwd, group);
       for (const e of readdirSync2(groupDir, { withFileTypes: true })) {
-        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join27(groupDir, e.name));
+        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join31(groupDir, e.name));
       }
     } catch {
     }
@@ -43272,18 +40162,18 @@ function workspaceMemberDirs(cwd) {
   return dirs;
 }
 function tokensFromRequirementsTxt(cwd) {
-  const content = readFileSafe(join27(cwd, "requirements.txt"));
+  const content = readFileSafe(join31(cwd, "requirements.txt"));
   if (!content) return [];
   return content.split("\n").map((l) => l.trim().split(/[>=<!\[;]/)[0].trim().toLowerCase()).filter(Boolean);
 }
 function tokensFromGoMod(cwd) {
-  const content = readFileSafe(join27(cwd, "go.mod"));
+  const content = readFileSafe(join31(cwd, "go.mod"));
   if (!content) return [];
   const requires = Array.from(content.matchAll(/^\s+([^\s]+)\s+v/gm)).map((m) => m[1].split("/").pop() ?? "").filter(Boolean);
   return ["go", ...requires];
 }
 function tokensFromCargoToml(cwd) {
-  const content = readFileSafe(join27(cwd, "Cargo.toml"));
+  const content = readFileSafe(join31(cwd, "Cargo.toml"));
   if (!content) return [];
   const deps = [];
   let inDeps = false;
@@ -43304,7 +40194,7 @@ function tokensFromFileExtensions(cwd) {
   const tokens = [];
   const scanDirs = [cwd];
   try {
-    const srcDir = join27(cwd, "src");
+    const srcDir = join31(cwd, "src");
     readdirSync2(srcDir);
     scanDirs.push(srcDir);
   } catch {
@@ -43504,8 +40394,8 @@ var jpi_config_exports = {};
 __export(jpi_config_exports, {
   run: () => run22
 });
-import { join as join28 } from "path";
-import { homedir as homedir25 } from "os";
+import { join as join32 } from "path";
+import { homedir as homedir28 } from "os";
 function parseNudgeMode2(raw) {
   if (raw === "session" || raw === "always") return raw;
   const m = /^every:(\d+)$/.exec(raw);
@@ -43618,628 +40508,13 @@ async function run22() {
   console.error("       terminalhire config --show");
   process.exit(1);
 }
-var TERMINALHIRE_DIR19, CONFIG_FILE2;
+var TERMINALHIRE_DIR20, CONFIG_FILE2;
 var init_jpi_config = __esm({
   "bin/jpi-config.js"() {
     "use strict";
     init_config();
-    TERMINALHIRE_DIR19 = process.env.TERMINALHIRE_DIR || join28(homedir25(), ".terminalhire");
-    CONFIG_FILE2 = join28(TERMINALHIRE_DIR19, "config.json");
-  }
-});
-
-// bin/spinner-io.js
-import {
-  readFileSync as readFileSync26,
-  writeFileSync as writeFileSync18,
-  existsSync as existsSync18,
-  mkdirSync as mkdirSync18,
-  renameSync as renameSync8
-} from "fs";
-import { join as join29, dirname as dirname4 } from "path";
-import { homedir as homedir26 } from "os";
-function thDir() {
-  return process.env["TERMINALHIRE_DIR"] || join29(homedir26(), ".terminalhire");
-}
-function claudeSettingsPath() {
-  return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join29(homedir26(), ".claude", "settings.json");
-}
-function spinnerStateFilePath() {
-  return join29(thDir(), "spinner-state.json");
-}
-function readJson(path2, fallback) {
-  try {
-    return existsSync18(path2) ? JSON.parse(readFileSync26(path2, "utf8")) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-function atomicWriteJson2(path2, obj) {
-  mkdirSync18(dirname4(path2), { recursive: true });
-  const tmp = `${path2}.tmp-${process.pid}`;
-  writeFileSync18(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
-  renameSync8(tmp, path2);
-}
-function readState() {
-  const SPINNER_STATE_FILE = spinnerStateFilePath();
-  return readJson(SPINNER_STATE_FILE, { verbs: [], mode: "replace" });
-}
-function applySpinnerVerbs(ourVerbs, mode = "replace") {
-  const CLAUDE_SETTINGS = claudeSettingsPath();
-  const SPINNER_STATE_FILE = spinnerStateFilePath();
-  const verbs = (Array.isArray(ourVerbs) ? ourVerbs : []).filter(Boolean);
-  if (verbs.length === 0) return clearSpinnerVerbs();
-  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
-  const existing = settings.spinnerVerbs && typeof settings.spinnerVerbs === "object" ? settings.spinnerVerbs : null;
-  const prevOurs = new Set(readState().verbs || []);
-  const userVerbs = existing && Array.isArray(existing.verbs) ? existing.verbs.filter((v) => !prevOurs.has(v)) : [];
-  const newVerbs = [...verbs, ...userVerbs];
-  settings.spinnerVerbs = { mode: mode === "append" ? "append" : "replace", verbs: newVerbs };
-  atomicWriteJson2(CLAUDE_SETTINGS, settings);
-  const st = readState();
-  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
-  return { applied: verbs.length, total: newVerbs.length };
-}
-function clearSpinnerVerbs() {
-  const CLAUDE_SETTINGS = claudeSettingsPath();
-  const SPINNER_STATE_FILE = spinnerStateFilePath();
-  const settings = readJson(CLAUDE_SETTINGS, null);
-  const prevOurs = new Set(readState().verbs || []);
-  let keptUserVerbs = 0;
-  if (settings && settings.spinnerVerbs && Array.isArray(settings.spinnerVerbs.verbs)) {
-    const userVerbs = settings.spinnerVerbs.verbs.filter((v) => !prevOurs.has(v));
-    keptUserVerbs = userVerbs.length;
-    if (userVerbs.length > 0) {
-      settings.spinnerVerbs = {
-        mode: settings.spinnerVerbs.mode === "append" ? "append" : "replace",
-        verbs: userVerbs
-      };
-    } else {
-      delete settings.spinnerVerbs;
-    }
-    atomicWriteJson2(CLAUDE_SETTINGS, settings);
-  }
-  try {
-    const st = readState();
-    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
-  } catch {
-  }
-  return { cleared: true, keptUserVerbs };
-}
-function applySpinnerTips(ourTips) {
-  const CLAUDE_SETTINGS = claudeSettingsPath();
-  const SPINNER_STATE_FILE = spinnerStateFilePath();
-  const tips = (Array.isArray(ourTips) ? ourTips : []).filter(Boolean);
-  if (tips.length === 0) return clearSpinnerTips();
-  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
-  const existing = settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips) ? settings.spinnerTipsOverride.tips : [];
-  const prevOurs = new Set(readState().tips || []);
-  const userTips = existing.filter((t) => !prevOurs.has(t));
-  settings.spinnerTipsEnabled = true;
-  settings.spinnerTipsOverride = { excludeDefault: true, tips: [...tips, ...userTips] };
-  atomicWriteJson2(CLAUDE_SETTINGS, settings);
-  const st = readState();
-  atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
-  return { applied: tips.length };
-}
-function clearSpinnerTips() {
-  const CLAUDE_SETTINGS = claudeSettingsPath();
-  const SPINNER_STATE_FILE = spinnerStateFilePath();
-  const settings = readJson(CLAUDE_SETTINGS, null);
-  const prevOurs = new Set(readState().tips || []);
-  if (settings && settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips)) {
-    const userTips = settings.spinnerTipsOverride.tips.filter((t) => !prevOurs.has(t));
-    if (userTips.length > 0) {
-      settings.spinnerTipsOverride = {
-        excludeDefault: settings.spinnerTipsOverride.excludeDefault === true,
-        tips: userTips
-      };
-    } else {
-      delete settings.spinnerTipsOverride;
-      delete settings.spinnerTipsEnabled;
-    }
-    atomicWriteJson2(CLAUDE_SETTINGS, settings);
-  }
-  try {
-    const st = readState();
-    atomicWriteJson2(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
-  } catch {
-  }
-  return { cleared: true };
-}
-var init_spinner_io = __esm({
-  "bin/spinner-io.js"() {
-    "use strict";
-  }
-});
-
-// bin/spinner-config.js
-import { join as join30 } from "path";
-function configFilePath() {
-  return join30(thDir(), "config.json");
-}
-function readSpinnerConfig() {
-  const CONFIG_FILE4 = configFilePath();
-  const cfg = readJson(CONFIG_FILE4, {});
-  const spinner = cfg && typeof cfg.spinner === "object" ? cfg.spinner : {};
-  const merged = { ...SPINNER_DEFAULTS, ...spinner };
-  if (merged.mode !== "append" && merged.mode !== "replace") merged.mode = SPINNER_DEFAULTS.mode;
-  merged.max = Math.max(1, Math.min(12, Number(merged.max) || SPINNER_DEFAULTS.max));
-  merged.enabled = merged.enabled === true;
-  if (!["always", "sometimes", "rare"].includes(merged.frequency)) {
-    merged.frequency = SPINNER_DEFAULTS.frequency;
-  }
-  return merged;
-}
-var SPINNER_DEFAULTS;
-var init_spinner_config = __esm({
-  "bin/spinner-config.js"() {
-    "use strict";
-    init_spinner_io();
-    SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
-  }
-});
-
-// bin/spinner-seen.js
-var spinner_seen_exports = {};
-__export(spinner_seen_exports, {
-  SEEN_MAX_ENTRIES: () => SEEN_MAX_ENTRIES,
-  SEEN_TTL_MS: () => SEEN_TTL_MS,
-  SEEN_WINDOW_SURFACES: () => SEEN_WINDOW_SURFACES,
-  isSuppressed: () => isSuppressed,
-  loadSeenHistory: () => loadSeenHistory,
-  recordSurface: () => recordSurface,
-  seenFilePath: () => seenFilePath
-});
-import {
-  readFileSync as readFileSync27,
-  writeFileSync as writeFileSync19,
-  renameSync as renameSync9,
-  mkdirSync as mkdirSync19
-} from "fs";
-import { join as join31, dirname as dirname5 } from "path";
-import { homedir as homedir27 } from "os";
-function seenFilePath() {
-  const dir = process.env["TERMINALHIRE_DIR"] || join31(homedir27(), ".terminalhire");
-  return join31(dir, "seen-history.json");
-}
-function atomicWriteJson3(path2, obj) {
-  mkdirSync19(dirname5(path2), { recursive: true });
-  const tmp = `${path2}.tmp-${process.pid}`;
-  writeFileSync19(tmp, JSON.stringify(obj) + "\n", { encoding: "utf8", mode: 384 });
-  renameSync9(tmp, path2);
-}
-function emptyHistory() {
-  return { surface: 0, entries: {} };
-}
-function isFiniteNonNegative(n) {
-  return typeof n === "number" && Number.isFinite(n) && n >= 0;
-}
-function pruneEntries(entries, now) {
-  const out = {};
-  for (const [id, e] of Object.entries(entries)) {
-    if (!e || !isFiniteNonNegative(e.lastSurface) || !isFiniteNonNegative(e.lastSeenAt)) continue;
-    if (now - e.lastSeenAt > SEEN_TTL_MS) continue;
-    out[id] = { lastSurface: e.lastSurface, lastSeenAt: e.lastSeenAt };
-  }
-  return out;
-}
-function capEntries(entries) {
-  const ids = Object.keys(entries);
-  if (ids.length <= SEEN_MAX_ENTRIES) return entries;
-  ids.sort((a, b) => entries[b].lastSurface - entries[a].lastSurface || entries[b].lastSeenAt - entries[a].lastSeenAt);
-  const out = {};
-  for (const id of ids.slice(0, SEEN_MAX_ENTRIES)) out[id] = entries[id];
-  return out;
-}
-function loadSeenHistory(now = Date.now()) {
-  let raw;
-  try {
-    raw = JSON.parse(readFileSync27(seenFilePath(), "utf8"));
-  } catch {
-    return emptyHistory();
-  }
-  if (!raw || typeof raw !== "object") return emptyHistory();
-  const surface = isFiniteNonNegative(raw.surface) ? Math.floor(raw.surface) : 0;
-  const entries = raw.entries && typeof raw.entries === "object" && !Array.isArray(raw.entries) ? pruneEntries(raw.entries, now) : {};
-  return { surface, entries };
-}
-function isSuppressed(id, history) {
-  const e = history.entries[id];
-  if (!e) return false;
-  return history.surface - e.lastSurface < SEEN_WINDOW_SURFACES;
-}
-function recordSurface(ids, now = Date.now()) {
-  const history = loadSeenHistory(now);
-  const surface = history.surface + 1;
-  const entries = { ...history.entries };
-  for (const id of ids) {
-    if (typeof id !== "string" || id.length === 0) continue;
-    entries[id] = { lastSurface: surface, lastSeenAt: now };
-  }
-  const next = { surface, entries: capEntries(pruneEntries(entries, now)) };
-  try {
-    atomicWriteJson3(seenFilePath(), next);
-  } catch {
-  }
-  return next;
-}
-var SEEN_WINDOW_SURFACES, SEEN_TTL_MS, SEEN_MAX_ENTRIES;
-var init_spinner_seen = __esm({
-  "bin/spinner-seen.js"() {
-    "use strict";
-    SEEN_WINDOW_SURFACES = 10;
-    SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
-    SEEN_MAX_ENTRIES = 500;
-  }
-});
-
-// bin/spinner-select.js
-function filterFreshMatches(matches, history) {
-  const { eligible, suppressed } = partitionFreshMatches(matches, history);
-  return suppressed.length === 0 ? matches : [...eligible, ...suppressed];
-}
-function partitionFreshMatches(matches, history) {
-  const list = Array.isArray(matches) ? matches : [];
-  if (!history || !history.entries || Object.keys(history.entries).length === 0) {
-    return { eligible: list, suppressed: [] };
-  }
-  const eligible = [];
-  const suppressed = [];
-  for (const m of list) {
-    if (m && m.id != null && isSuppressed(String(m.id), history)) suppressed.push(m);
-    else eligible.push(m);
-  }
-  const stamp = (m) => history.entries[String(m.id)].lastSurface;
-  suppressed.sort((a, b) => stamp(a) - stamp(b));
-  return { eligible, suppressed };
-}
-function widenFreshCandidates(matches, history, need, widen) {
-  const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
-  if (!(need > 0)) return [];
-  if (!widen || !Array.isArray(widen.reserve) || typeof widen.getAdjacent !== "function") return [];
-  const suppressed = (m) => !!history && !!history.entries && m.id != null && isSuppressed(String(m.id), history);
-  const counts = /* @__PURE__ */ new Map();
-  for (const m of list) {
-    for (const t of Array.isArray(m.matchedTags) ? m.matchedTags : []) {
-      const tag = String(t).toLowerCase();
-      counts.set(tag, (counts.get(tag) || 0) + 1);
-    }
-  }
-  const maxCount = Math.max(0, ...counts.values());
-  if (maxCount === 0) return [];
-  const dominant = [...counts.entries()].filter(([, c]) => c === maxCount).map(([t]) => t);
-  const inPool = new Set(list.map((m) => String(m.id)));
-  const fresh = (m) => m && m.id != null && !inPool.has(String(m.id)) && !suppressed(m);
-  const tagged = (m, adj) => (Array.isArray(m.matchedTags) ? m.matchedTags : []).some((t) => adj.has(String(t).toLowerCase()));
-  const ringCandidates = (hops) => {
-    const adj = new Set(dominant.flatMap((d) => widen.getAdjacent(d, hops)));
-    if (adj.size === 0) return [];
-    return widen.reserve.filter((m) => fresh(m) && tagged(m, adj));
-  };
-  let widened = ringCandidates(1);
-  if (widened.length === 0) widened = ringCandidates(2);
-  if (widened.length === 0) {
-    widened = widen.reserve.filter(
-      (m) => fresh(m) && (m.source === "bounty" || m.source === "contribute")
-    );
-  }
-  return widened.slice(0, need);
-}
-var init_spinner_select = __esm({
-  "bin/spinner-select.js"() {
-    "use strict";
-    init_spinner_seen();
-  }
-});
-
-// bin/spinner-verbs.js
-function titleCase(s) {
-  return String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-function ctaVerb() {
-  return "\u2605 jobs that fit you \xB7 run: terminalhire jobs";
-}
-function rankBySessionTags(topMatches, sessionTags) {
-  const tags = Array.isArray(sessionTags) ? sessionTags.filter(Boolean) : [];
-  if (tags.length === 0 || !Array.isArray(topMatches)) return topMatches;
-  const normalized = tags.map((t) => String(t).toLowerCase().trim());
-  return topMatches.map((m, originalIndex) => {
-    const haystack = `${String(m.title || "").toLowerCase()} ${String(m.company || "").toLowerCase()}`;
-    const hits = normalized.reduce((n, tag) => n + (haystack.includes(tag) ? 1 : 0), 0);
-    return { m, hits, originalIndex };
-  }).sort((a, b) => b.hits - a.hits || a.originalIndex - b.originalIndex).map(({ m }) => m);
-}
-function verbCountForFrequency(frequency, max) {
-  switch (frequency) {
-    case "always":
-      return max;
-    case "rare":
-      return 1;
-    case "sometimes":
-    default:
-      return 2;
-  }
-}
-function buildContextVerbs(topMatches, sessionTags) {
-  const sess = (Array.isArray(sessionTags) ? sessionTags : []).map((t) => String(t).toLowerCase().trim()).filter(Boolean);
-  const roleTags = /* @__PURE__ */ new Set();
-  for (const m of Array.isArray(topMatches) ? topMatches : []) {
-    const mt = m && Array.isArray(m.matchedTags) ? m.matchedTags : [];
-    for (const t of mt) roleTags.add(String(t).toLowerCase().trim());
-  }
-  const overlap = [];
-  for (const t of sess) {
-    if (roleTags.has(t) && !overlap.includes(t)) overlap.push(t);
-  }
-  let headers;
-  if (overlap.length >= 2) {
-    const a = titleCase(overlap[0]);
-    const b = titleCase(overlap[1]);
-    headers = [`\u2726 Fits your ${a} + ${b} work`, `\u2726 A match for what you're building \u2014 link below`];
-  } else if (overlap.length === 1) {
-    const a = titleCase(overlap[0]);
-    headers = [`\u2726 Work in your ${a} stack \u2014 link below`, `\u2726 Your ${a} work \u2014 link in the tip below`];
-  } else {
-    headers = [`\u2726 Work that fits your stack`, `\u2726 A match for you \u2014 link in the tip below`];
-  }
-  return headers;
-}
-function buildPeerLine(topPeers) {
-  const n = (Array.isArray(topPeers) ? topPeers : []).filter(Boolean).length;
-  if (n < 1) return null;
-  return n === 1 ? `\u25C6 1 builder matches what you're building \xB7 terminalhire devs` : `\u25C6 ${n} builders match what you're building \xB7 terminalhire devs`;
-}
-function buildIncomingIntroLine(incomingPending) {
-  const n = incomingPending && typeof incomingPending.count === "number" ? incomingPending.count : 0;
-  if (n < 1) return null;
-  return n === 1 ? `\u2198 someone wants to connect \xB7 terminalhire intro --list` : `\u2198 ${n} people want to connect \xB7 terminalhire intro --list`;
-}
-function buildSessionStaleLine(sessionStale) {
-  return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
-}
-function buildUnpushedClaimsLine(unpushedClaims) {
-  return unpushedClaims === true ? "\u26A0 new claims not yet on your dashboard \u2014 run: terminalhire claim --push --keep-updated" : null;
-}
-function buildSpinnerPool(topMatches, max = 6, opts = {}) {
-  const {
-    sessionTags,
-    frequency = "always",
-    topPeers,
-    incomingPending,
-    sessionStale,
-    unpushedClaims,
-    seenHistory
-  } = opts;
-  const staleLine = buildSessionStaleLine(sessionStale);
-  const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
-  const introLine = buildIncomingIntroLine(incomingPending);
-  const unpushedLine = buildUnpushedClaimsLine(unpushedClaims);
-  const ranked = filterFreshMatches(rankBySessionTags(topMatches, sessionTags), seenHistory);
-  if (!Array.isArray(ranked) || ranked.length === 0) {
-    if (introLine) return withStale([introLine]);
-    if (unpushedLine) return withStale([unpushedLine]);
-    const peerLine = buildPeerLine(topPeers);
-    return withStale(peerLine ? [peerLine] : []);
-  }
-  const headers = buildContextVerbs(ranked, sessionTags);
-  const ceiling = Math.min(headers.length, Math.max(1, Number(max) || 6));
-  const cap = Math.max(1, verbCountForFrequency(frequency, ceiling));
-  const pool = [...headers.slice(0, cap), ctaVerb()];
-  if (introLine) pool.push(introLine);
-  if (unpushedLine) pool.push(unpushedLine);
-  return withStale(pool);
-}
-var init_spinner_verbs = __esm({
-  "bin/spinner-verbs.js"() {
-    "use strict";
-    init_spinner_select();
-  }
-});
-
-// bin/spinner-render.js
-function interleaveBySource(topMatches) {
-  if (!Array.isArray(topMatches) || topMatches.length === 0) return topMatches;
-  const buckets = /* @__PURE__ */ new Map();
-  const order = [];
-  for (const m of topMatches) {
-    const id = m && m.id ? String(m.id) : "";
-    const idx = id.indexOf(":");
-    const source = idx > 0 ? id.slice(0, idx) : "_";
-    if (!buckets.has(source)) {
-      buckets.set(source, []);
-      order.push(source);
-    }
-    buckets.get(source).push(m);
-  }
-  const out = [];
-  let remaining = topMatches.length;
-  while (remaining > 0) {
-    for (const source of order) {
-      const b = buckets.get(source);
-      if (b && b.length) {
-        out.push(b.shift());
-        remaining--;
-      }
-    }
-  }
-  return out;
-}
-function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
-  const base = String(baseUrl || "https://terminalhire.com").replace(/\/+$/, "");
-  const out = [];
-  const surfacedIds = [];
-  const seenRole = /* @__PURE__ */ new Set();
-  const perCompany = /* @__PURE__ */ new Map();
-  const COMPANY_CAP = 2;
-  const { eligible, suppressed } = partitionFreshMatches(
-    Array.isArray(topMatches) ? topMatches : [],
-    opts.seenHistory
-  );
-  const orderForEmit = (list) => {
-    const bountyQ = list.filter((m) => m && m.source === "bounty");
-    const contributeQ = list.filter((m) => m && m.source === "contribute");
-    const roleQ = interleaveBySource(
-      list.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
-    );
-    const ordered = [];
-    let bi = 0;
-    let ri = 0;
-    let ci = 0;
-    while (bi < bountyQ.length || ri < roleQ.length || ci < contributeQ.length) {
-      if (ri < roleQ.length) ordered.push(roleQ[ri++]);
-      if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
-      if (ci < contributeQ.length) ordered.push(contributeQ[ci++]);
-    }
-    return ordered;
-  };
-  const emit = (list) => {
-    for (const m of orderForEmit(list)) {
-      if (out.length >= max) return;
-      if (!m || !m.title || !m.company || !m.id) continue;
-      const idx = String(m.id).indexOf(":");
-      if (idx <= 0) continue;
-      const source = String(m.id).slice(0, idx);
-      const ext = String(m.id).slice(idx + 1);
-      if (!source || !ext) continue;
-      const companyRaw = String(m.company).trim().replace(/\s+/g, " ");
-      const titleRaw = String(m.title).trim().replace(/\s+/g, " ");
-      const roleKey = `${titleRaw.toLowerCase()}@${companyRaw.toLowerCase()}`;
-      const coKey = companyRaw.toLowerCase();
-      if (seenRole.has(roleKey)) continue;
-      if ((perCompany.get(coKey) || 0) >= COMPANY_CAP) continue;
-      seenRole.add(roleKey);
-      perCompany.set(coKey, (perCompany.get(coKey) || 0) + 1);
-      let title = titleRaw;
-      if (title.length > 34) title = title.slice(0, 33).trimEnd() + "\u2026";
-      const company = titleCase(companyRaw);
-      const pct2 = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
-      const token = jobShortToken(String(m.id));
-      const url = `${base}/j/${token}`;
-      if (source === "bounty") {
-        const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
-        const repo = m.repo || companyRaw;
-        out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct2}% \u2014 ${url}`);
-      } else if (source === "contribute") {
-        const repoFull = m.repo || companyRaw;
-        const slashIdx = repoFull.indexOf("/");
-        const repoName = slashIdx >= 0 ? repoFull.slice(slashIdx + 1) : repoFull;
-        const num = m.issueNumber != null ? ` #${m.issueNumber}` : "";
-        const shortUrl = `${base}/c/${contributeShortToken(String(m.id))}`;
-        const fit = m.interest ? m.interest : `${pct2}%`;
-        out.push(`\u2197 contribute \xB7 ${repoName}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${fit} \u2014 ${shortUrl}`);
-      } else {
-        const fit = m.interest ? m.interest : `${pct2}%`;
-        out.push(`\u2197 ${title} @ ${company} \xB7 ${fit} \u2014 ${url}`);
-      }
-      surfacedIds.push(String(m.id));
-    }
-  };
-  emit(eligible);
-  if (out.length < max && opts.widen) {
-    const widened = widenFreshCandidates(
-      Array.isArray(topMatches) ? topMatches : [],
-      opts.seenHistory,
-      max - out.length,
-      opts.widen
-    );
-    if (widened.length > 0) emit(widened);
-  }
-  if (out.length < max) emit(suppressed);
-  return { tips: out, surfacedIds };
-}
-function buildTips(topMatches, baseUrl, max = 8, opts = {}) {
-  return buildTipsDetailed(topMatches, baseUrl, max, opts).tips;
-}
-function renderRefreshSurface(topMatches, sc, opts = {}) {
-  if (!sc || sc.enabled !== true) {
-    clearSpinnerVerbs();
-    clearSpinnerTips();
-    return { verbs: [], tips: [], surfacedIds: [] };
-  }
-  const seenHistory = opts.seenHistory || loadSeenHistory();
-  const ranked = rankBySessionTags(topMatches, opts.sessionTags);
-  const verbs = buildSpinnerPool(ranked, sc.max, {
-    sessionTags: opts.sessionTags,
-    frequency: sc.frequency,
-    topPeers: opts.topPeers,
-    incomingPending: opts.incomingPending,
-    sessionStale: opts.sessionStale,
-    unpushedClaims: opts.unpushedClaims,
-    seenHistory
-  });
-  if (verbs.length > 0) applySpinnerVerbs(verbs, sc.mode);
-  else clearSpinnerVerbs();
-  const { tips, surfacedIds } = buildTipsDetailed(ranked, opts.baseUrl, 8, {
-    seenHistory,
-    widen: opts.widen,
-    clickCatcher: opts.clickCatcher
-  });
-  if (tips.length > 0) applySpinnerTips(tips);
-  else clearSpinnerTips();
-  if (verbs.length > 0 || tips.length > 0) recordSurface(surfacedIds);
-  return { verbs, tips, surfacedIds };
-}
-var init_spinner_render = __esm({
-  "bin/spinner-render.js"() {
-    "use strict";
-    init_spinner_select();
-    init_spinner_verbs();
-    init_spinner_seen();
-    init_spinner_io();
-    init_src();
-  }
-});
-
-// bin/spinner.js
-var spinner_exports = {};
-__export(spinner_exports, {
-  SPINNER_DEFAULTS: () => SPINNER_DEFAULTS,
-  applySpinnerTips: () => applySpinnerTips,
-  applySpinnerVerbs: () => applySpinnerVerbs,
-  buildContextVerbs: () => buildContextVerbs,
-  buildIncomingIntroLine: () => buildIncomingIntroLine,
-  buildPeerLine: () => buildPeerLine,
-  buildSessionStaleLine: () => buildSessionStaleLine,
-  buildSpinnerPool: () => buildSpinnerPool,
-  buildTips: () => buildTips,
-  buildTipsDetailed: () => buildTipsDetailed,
-  buildUnpushedClaimsLine: () => buildUnpushedClaimsLine,
-  clearSpinnerTips: () => clearSpinnerTips,
-  clearSpinnerVerbs: () => clearSpinnerVerbs,
-  ctaVerb: () => ctaVerb,
-  filterFreshMatches: () => filterFreshMatches,
-  interleaveBySource: () => interleaveBySource,
-  partitionFreshMatches: () => partitionFreshMatches,
-  rankBySessionTags: () => rankBySessionTags,
-  readSpinnerConfig: () => readSpinnerConfig,
-  renderRefreshSurface: () => renderRefreshSurface,
-  widenFreshCandidates: () => widenFreshCandidates
-});
-var init_spinner = __esm({
-  "bin/spinner.js"() {
-    "use strict";
-    init_spinner_config();
-    init_spinner_config();
-    init_spinner_verbs();
-    init_spinner_verbs();
-    init_spinner_verbs();
-    init_spinner_verbs();
-    init_spinner_verbs();
-    init_spinner_verbs();
-    init_spinner_verbs();
-    init_spinner_verbs();
-    init_spinner_select();
-    init_spinner_select();
-    init_spinner_select();
-    init_spinner_io();
-    init_spinner_io();
-    init_spinner_io();
-    init_spinner_io();
-    init_spinner_render();
-    init_spinner_render();
-    init_spinner_render();
-    init_spinner_render();
+    TERMINALHIRE_DIR20 = process.env.TERMINALHIRE_DIR || join32(homedir28(), ".terminalhire");
+    CONFIG_FILE2 = join32(TERMINALHIRE_DIR20, "config.json");
   }
 });
 
@@ -44248,27 +40523,21 @@ var jpi_spinner_exports = {};
 __export(jpi_spinner_exports, {
   run: () => run23
 });
-import {
-  readFileSync as readFileSync28,
-  writeFileSync as writeFileSync20,
-  copyFileSync as copyFileSync3,
-  existsSync as existsSync19,
-  mkdirSync as mkdirSync20
-} from "fs";
-import { join as join32 } from "path";
-import { homedir as homedir28 } from "os";
+import { readFileSync as readFileSync29, writeFileSync as writeFileSync22, copyFileSync as copyFileSync3, existsSync as existsSync19 } from "fs";
+import { join as join33 } from "path";
+import { homedir as homedir29 } from "os";
 import { createInterface as createInterface10 } from "readline";
 function readConfig2() {
   try {
-    return existsSync19(CONFIG_FILE3) ? JSON.parse(readFileSync28(CONFIG_FILE3, "utf8")) : {};
+    return existsSync19(CONFIG_FILE3) ? JSON.parse(readFileSync29(CONFIG_FILE3, "utf8")) : {};
   } catch {
     return {};
   }
 }
 function writeConfig2(patch) {
-  mkdirSync20(TH_DIR, { recursive: true });
+  ensureStateDir(TH_DIR);
   const merged = { ...readConfig2(), ...patch };
-  writeFileSync20(CONFIG_FILE3, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  writeFileSync22(CONFIG_FILE3, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function backupSettings() {
   if (!existsSync19(SETTINGS_PATH)) return null;
@@ -44288,7 +40557,7 @@ function ask(question) {
 }
 function readTopMatches() {
   try {
-    const c = JSON.parse(readFileSync28(CACHE_FILE, "utf8"));
+    const c = JSON.parse(readFileSync29(CACHE_FILE, "utf8"));
     return Array.isArray(c.topMatches) ? c.topMatches : [];
   } catch {
     return [];
@@ -44307,18 +40576,36 @@ async function run23() {
     console.log("terminalhire spinner \u2014 job matches in the Claude Code spinner line");
     console.log("");
     console.log(`  enabled:   ${sc.enabled}`);
-    console.log(`  mode:      ${sc.mode}   (replace = only job matches; append = mixed with Claude defaults)`);
+    console.log(
+      `  mode:      ${sc.mode}   (replace = only job matches; append = mixed with Claude defaults)`
+    );
     console.log(`  max:       ${sc.max}    (max job verbs that rotate)`);
-    console.log(`  frequency: ${sc.frequency}   (always = up to max; sometimes = up to 2; rare = 1 per cycle)`);
+    console.log(
+      `  frequency: ${sc.frequency}   (always = up to max; sometimes = up to 2; rare = 1 per cycle)`
+    );
     console.log("");
-    console.log("  terminalhire spinner --on                      enable (asks consent, backs up settings.json)");
-    console.log("  terminalhire spinner --off                     disable + restore your original spinner");
-    console.log("  terminalhire spinner --mode append             mix job verbs with Claude's defaults");
+    console.log(
+      "  terminalhire spinner --on                      enable (asks consent, backs up settings.json)"
+    );
+    console.log(
+      "  terminalhire spinner --off                     disable + restore your original spinner"
+    );
+    console.log(
+      "  terminalhire spinner --mode append             mix job verbs with Claude's defaults"
+    );
     console.log("  terminalhire spinner --mode replace            show only job matches");
-    console.log("  terminalhire spinner --max N                   cap how many job verbs rotate (1\u201312)");
-    console.log("  terminalhire spinner --frequency always        surface up to max role verbs every cycle");
-    console.log("  terminalhire spinner --frequency sometimes     surface up to 2 role verbs (default)");
-    console.log("  terminalhire spinner --frequency rare          surface 1 role verb per cycle (quietest)");
+    console.log(
+      "  terminalhire spinner --max N                   cap how many job verbs rotate (1\u201312)"
+    );
+    console.log(
+      "  terminalhire spinner --frequency always        surface up to max role verbs every cycle"
+    );
+    console.log(
+      "  terminalhire spinner --frequency sometimes     surface up to 2 role verbs (default)"
+    );
+    console.log(
+      "  terminalhire spinner --frequency rare          surface 1 role verb per cycle (quietest)"
+    );
     console.log("");
     return;
   }
@@ -44366,7 +40653,9 @@ async function run23() {
       next.frequency = freq;
     }
     writeConfig2({ spinner: next });
-    console.log(`  spinner config updated: mode=${next.mode} max=${next.max} frequency=${next.frequency} enabled=${next.enabled}`);
+    console.log(
+      `  spinner config updated: mode=${next.mode} max=${next.max} frequency=${next.frequency} enabled=${next.enabled}`
+    );
     if (next.enabled) {
       const verbs = buildSpinnerPool(readTopMatches(), next.max, { frequency: next.frequency });
       if (verbs.length) applySpinnerVerbs(verbs, next.mode);
@@ -44393,7 +40682,9 @@ async function run23() {
     console.log("  \u2022 The tip line below shows a \u2318-clickable terminalhire.com/j/\u2026 link to open");
     console.log("    the listing (clicks logged anonymously, no profile data).");
     console.log(`  \u2022 mode=${mode}  (replace = only job matches; append = mixed with defaults)`);
-    console.log(`  \u2022 frequency=${frequency}  (always = every cycle; sometimes = up to 2 verbs; rare = 1 verb)`);
+    console.log(
+      `  \u2022 frequency=${frequency}  (always = every cycle; sometimes = up to 2 verbs; rare = 1 verb)`
+    );
     console.log("  \u2022 Matches refresh in the background.");
     console.log("    ZERO egress \u2014 your profile never leaves the machine; only public job");
     console.log("    text appears on YOUR screen.");
@@ -44416,14 +40707,18 @@ async function run23() {
     if (backup) console.log(`  Backed up settings to: ${backup}`);
     console.log(`  Enabled. ${verbs.length} job verb(s) live now; refreshes in the background.`);
     if (verbs.length === 0) {
-      console.log("  (No matches cached yet \u2014 run `terminalhire refresh` or wait for the monitor.)");
+      console.log(
+        "  (No matches cached yet \u2014 run `terminalhire refresh` or wait for the monitor.)"
+      );
     }
     console.log("  Claude Code picks up settings.json changes automatically.");
     console.log("  Turn off any time: terminalhire spinner --off");
     console.log("");
     return;
   }
-  console.error("Usage: terminalhire spinner --on | --off | --show | --mode <append|replace> | --max N | --frequency <always|sometimes|rare>");
+  console.error(
+    "Usage: terminalhire spinner --on | --off | --show | --mode <append|replace> | --max N | --frequency <always|sometimes|rare>"
+  );
   process.exit(1);
 }
 var TH_DIR, CONFIG_FILE3, SETTINGS_PATH, CACHE_FILE;
@@ -44431,10 +40726,11 @@ var init_jpi_spinner = __esm({
   "bin/jpi-spinner.js"() {
     "use strict";
     init_spinner();
-    TH_DIR = process.env["TERMINALHIRE_DIR"] || join32(homedir28(), ".terminalhire");
-    CONFIG_FILE3 = join32(TH_DIR, "config.json");
-    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join32(homedir28(), ".claude", "settings.json");
-    CACHE_FILE = join32(TH_DIR, "index-cache.json");
+    init_state_dir();
+    TH_DIR = process.env["TERMINALHIRE_DIR"] || join33(homedir29(), ".terminalhire");
+    CONFIG_FILE3 = join33(TH_DIR, "config.json");
+    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join33(homedir29(), ".claude", "settings.json");
+    CACHE_FILE = join33(TH_DIR, "index-cache.json");
   }
 });
 
@@ -44443,9 +40739,9 @@ var jpi_sync_exports = {};
 __export(jpi_sync_exports, {
   run: () => run24
 });
-import { readFileSync as readFileSync29, writeFileSync as writeFileSync21, mkdirSync as mkdirSync21, existsSync as existsSync20, rmSync as rmSync9 } from "fs";
-import { join as join33 } from "path";
-import { homedir as homedir29, hostname as osHostname2 } from "os";
+import { readFileSync as readFileSync30, writeFileSync as writeFileSync23, existsSync as existsSync20, rmSync as rmSync9 } from "fs";
+import { join as join34 } from "path";
+import { homedir as homedir30, hostname as osHostname2 } from "os";
 import { createInterface as createInterface11 } from "readline";
 function ask2(question) {
   const rl = createInterface11({ input: process.stdin, output: process.stdout });
@@ -44458,14 +40754,14 @@ function ask2(question) {
 }
 function readMarker() {
   try {
-    return existsSync20(TIER1_MARKER) ? JSON.parse(readFileSync29(TIER1_MARKER, "utf8")) : null;
+    return existsSync20(TIER1_MARKER) ? JSON.parse(readFileSync30(TIER1_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
 }
 function writeMarker(marker) {
-  mkdirSync21(TH_DIR2, { recursive: true });
-  writeFileSync21(TIER1_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  ensureStateDir(TH_DIR2);
+  writeFileSync23(TIER1_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearMarker() {
   try {
@@ -44530,13 +40826,13 @@ async function runPush() {
   }
   const fields = buildConsentFields(profile);
   renderPreview(fields);
-  await new Promise((resolve2) => {
+  await new Promise((resolve3) => {
     const rl = createInterface11({ input: process.stdin, output: process.stdout });
     rl.question(
       "  Press Enter to open your browser to authorize + consent (or Ctrl-C to cancel)... ",
       () => {
         rl.close();
-        resolve2();
+        resolve3();
       }
     );
   });
@@ -44556,8 +40852,10 @@ async function runPush() {
         detail = (await r.json())?.message || "";
       } catch {
       }
-      console.error(`
-  Could not start sync: /api/profile-sync/begin returned ${r.status}. ${detail}`);
+      console.error(
+        `
+  Could not start sync: /api/profile-sync/begin returned ${r.status}. ${detail}`
+      );
       if (r.status === 503) console.error("  (Tier-1 sync is not enabled on the server yet.)");
       process.exit(1);
     }
@@ -44672,7 +40970,9 @@ async function runPush() {
   } catch {
   }
   writeMarker({ consentedAt, login: profile.github.login, deleteToken });
-  console.log("\n  Profile synced. A local consent marker was written to ~/.terminalhire/tier1.json");
+  console.log(
+    "\n  Profile synced. A local consent marker was written to ~/.terminalhire/tier1.json"
+  );
   console.log("  Delete your synced profile any time: terminalhire sync --delete\n");
 }
 function runStatus() {
@@ -44709,7 +41009,9 @@ async function runDelete() {
     login = profile.github && profile.github.login ? profile.github.login : null;
   }
   if (!login) {
-    console.log("\n  No github login to delete (no marker, no GitHub profile). Clearing local marker.\n");
+    console.log(
+      "\n  No github login to delete (no marker, no GitHub profile). Clearing local marker.\n"
+    );
     clearMarker();
     process.exit(0);
   }
@@ -44771,7 +41073,9 @@ async function run24() {
   console.log("");
   console.log("  terminalhire sync \u2014 opt-in Tier-1 profile sync (one-time snapshot)");
   console.log("");
-  console.log('  terminalhire sync --push     Send your profile (shows a consent card, requires typed "yes")');
+  console.log(
+    '  terminalhire sync --push     Send your profile (shows a consent card, requires typed "yes")'
+  );
   console.log("  terminalhire sync --status   Show whether you have consented (local read only)");
   console.log("  terminalhire sync --delete   Hard-delete your synced profile (revocation)");
   console.log("");
@@ -44784,8 +41088,9 @@ var init_jpi_sync = __esm({
   "bin/jpi-sync.js"() {
     "use strict";
     init_open_url();
-    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join33(homedir29(), ".terminalhire");
-    TIER1_MARKER = join33(TH_DIR2, "tier1.json");
+    init_state_dir();
+    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join34(homedir30(), ".terminalhire");
+    TIER1_MARKER = join34(TH_DIR2, "tier1.json");
     API_URL7 = process.env["TERMINALHIRE_API_URL"] || process.env["JPI_API_URL"] || "https://terminalhire.com";
     SYNC_BASE = "https://terminalhire.com";
     POLL_INTERVAL_MS = 2e3;
@@ -44800,30 +41105,30 @@ __export(jpi_init_exports, {
   run: () => run25
 });
 import { existsSync as existsSync21 } from "fs";
-import { join as join34, resolve } from "path";
+import { join as join35, resolve as resolve2 } from "path";
 import { fileURLToPath as fileURLToPath7, pathToFileURL } from "url";
 import { createInterface as createInterface12 } from "readline";
 import { spawnSync as spawnSync3 } from "child_process";
 function resolveScript(name) {
-  const distPath = resolve(join34(__dirname4, "..", "..", "dist", "bin", `${name}.js`));
-  const legacyPath = resolve(join34(__dirname4, `${name}.js`));
+  const distPath = resolve2(join35(__dirname4, "..", "..", "dist", "bin", `${name}.js`));
+  const legacyPath = resolve2(join35(__dirname4, `${name}.js`));
   return existsSync21(distPath) ? distPath : legacyPath;
 }
 function resolveSrc(name) {
-  const distPath = resolve(join34(__dirname4, "..", "..", "dist", "src", `${name}.js`));
-  const legacyPath = resolve(join34(__dirname4, "..", "src", `${name}.js`));
+  const distPath = resolve2(join35(__dirname4, "..", "..", "dist", "src", `${name}.js`));
+  const legacyPath = resolve2(join35(__dirname4, "..", "src", `${name}.js`));
   return existsSync21(distPath) ? distPath : legacyPath;
 }
 function resolveInstallJs() {
-  const fromDist = resolve(join34(__dirname4, "..", "..", "install.js"));
-  const fromBin = resolve(join34(__dirname4, "..", "install.js"));
+  const fromDist = resolve2(join35(__dirname4, "..", "..", "install.js"));
+  const fromBin = resolve2(join35(__dirname4, "..", "install.js"));
   if (existsSync21(fromDist)) return fromDist;
   if (existsSync21(fromBin)) return fromBin;
   return fromBin;
 }
 function resolveStatuslineInstallJs() {
-  const fromDist = resolve(join34(__dirname4, "..", "..", "statusline-install.js"));
-  const fromBin = resolve(join34(__dirname4, "..", "statusline-install.js"));
+  const fromDist = resolve2(join35(__dirname4, "..", "..", "statusline-install.js"));
+  const fromBin = resolve2(join35(__dirname4, "..", "statusline-install.js"));
   if (existsSync21(fromDist)) return fromDist;
   if (existsSync21(fromBin)) return fromBin;
   return fromBin;
@@ -44833,14 +41138,14 @@ function tokenizeInterest(raw) {
 }
 async function run25() {
   const rl = createInterface12({ input: process.stdin, output: process.stdout });
-  const ask3 = (question) => new Promise((resolve2) => {
+  const ask3 = (question) => new Promise((resolve3) => {
     let answered = false;
     rl.question(question, (answer) => {
       answered = true;
-      resolve2((answer || "").trim().toLowerCase());
+      resolve3((answer || "").trim().toLowerCase());
     });
     rl.once("close", () => {
-      if (!answered) resolve2(null);
+      if (!answered) resolve3(null);
     });
   });
   console.log("");
@@ -45206,13 +41511,13 @@ async function run26() {
         const statusMap = readStatusMap2();
         results = suppressEngaged(results, statusMap);
         matchCount = results.length;
-        if (MMR_RERANK_ENABLED) {
+        if (MMR_RERANK_ENABLED2) {
           const isRoleResult = (r) => r.job.source !== "bounty" && r.job.source !== "contribute";
           const roleResults = results.filter(isRoleResult);
           const otherResults = results.filter((r) => !isRoleResult(r));
           const diversifiedRoles = mmrRerank2(roleResults, {
-            lambda: MMR_LAMBDA,
-            k: MMR_K
+            lambda: MMR_LAMBDA2,
+            k: MMR_K2
           });
           results = [...diversifiedRoles, ...otherResults];
         }
@@ -45438,7 +41743,7 @@ async function run26() {
     process.exit(1);
   }
 }
-var GH_SESSION_COOKIE8, __dirname5, API_URL8, CWD_SOFTTAGS_ENABLED, CWD_SOFTTAG_WEIGHT, DECLARED_SOFTTAG_WEIGHT, MMR_RERANK_ENABLED, MMR_LAMBDA, MMR_K;
+var GH_SESSION_COOKIE8, __dirname5, API_URL8, CWD_SOFTTAGS_ENABLED, CWD_SOFTTAG_WEIGHT, DECLARED_SOFTTAG_WEIGHT, MMR_RERANK_ENABLED2, MMR_LAMBDA2, MMR_K2;
 var init_jpi_refresh = __esm({
   "bin/jpi-refresh.js"() {
     "use strict";
@@ -45455,9 +41760,9 @@ var init_jpi_refresh = __esm({
     CWD_SOFTTAGS_ENABLED = process.env["TH_CWD_SOFTTAGS"] !== "0";
     CWD_SOFTTAG_WEIGHT = 0.4;
     DECLARED_SOFTTAG_WEIGHT = 0.6;
-    MMR_RERANK_ENABLED = process.env["TH_MMR_RERANK"] !== "0";
-    MMR_LAMBDA = 0.8;
-    MMR_K = 8;
+    MMR_RERANK_ENABLED2 = process.env["TH_MMR_RERANK"] !== "0";
+    MMR_LAMBDA2 = 0.8;
+    MMR_K2 = 8;
   }
 });
 
@@ -45466,14 +41771,14 @@ var jpi_save_exports = {};
 __export(jpi_save_exports, {
   run: () => run27
 });
-import { readFileSync as readFileSync30, existsSync as existsSync22 } from "fs";
-import { join as join35 } from "path";
-import { homedir as homedir30 } from "os";
+import { readFileSync as readFileSync31, existsSync as existsSync22 } from "fs";
+import { join as join36 } from "path";
+import { homedir as homedir31 } from "os";
 import { fileURLToPath as fileURLToPath9 } from "url";
 function findJobInCache(jobId) {
   try {
     if (!existsSync22(INDEX_CACHE_FILE7)) return null;
-    const raw = readFileSync30(INDEX_CACHE_FILE7, "utf8");
+    const raw = readFileSync31(INDEX_CACHE_FILE7, "utf8");
     const entry = JSON.parse(raw);
     const jobs = entry?.index?.jobs ?? [];
     return jobs.find((j) => j.id === jobId) ?? null;
@@ -45561,13 +41866,13 @@ async function run27() {
     process.exit(1);
   }
 }
-var __dirname6, TERMINALHIRE_DIR20, INDEX_CACHE_FILE7;
+var __dirname6, TERMINALHIRE_DIR21, INDEX_CACHE_FILE7;
 var init_jpi_save = __esm({
   "bin/jpi-save.js"() {
     "use strict";
     __dirname6 = fileURLToPath9(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR20 = process.env.TERMINALHIRE_DIR || join35(homedir30(), ".terminalhire");
-    INDEX_CACHE_FILE7 = join35(TERMINALHIRE_DIR20, "index-cache.json");
+    TERMINALHIRE_DIR21 = process.env.TERMINALHIRE_DIR || join36(homedir31(), ".terminalhire");
+    INDEX_CACHE_FILE7 = join36(TERMINALHIRE_DIR21, "index-cache.json");
   }
 });
 
@@ -45579,12 +41884,12 @@ __export(jpi_beta_exports, {
 import { createInterface as createInterface13 } from "readline";
 async function run28() {
   const rl = createInterface13({ input: process.stdin, output: process.stdout });
-  const ask3 = (question) => new Promise((resolve2) => {
-    const onClose = () => resolve2(null);
+  const ask3 = (question) => new Promise((resolve3) => {
+    const onClose = () => resolve3(null);
     rl.once("close", onClose);
     rl.question(question, (answer) => {
       rl.removeListener("close", onClose);
-      resolve2((answer || "").trim());
+      resolve3((answer || "").trim());
     });
   });
   const alreadyActed = readConfig().betaOptIn === true;
@@ -45617,8 +41922,8 @@ async function run28() {
     console.log("      rough edges you find.");
     console.log("    \u2022 A spot on the founding-contributors wall.");
     console.log("");
-    const join38 = await ask3('  Type "yes" to join the beta as a Founding Contributor (anything else cancels): ');
-    if ((join38 || "").toLowerCase() !== "yes") {
+    const join39 = await ask3('  Type "yes" to join the beta as a Founding Contributor (anything else cancels): ');
+    if ((join39 || "").toLowerCase() !== "yes") {
       console.log("\n  No problem \u2014 nothing was sent. Run `terminalhire beta` any time.\n");
       rl.close();
       return;
@@ -45701,14 +42006,14 @@ __export(jpi_feedback_exports, {
   run: () => run29
 });
 import { createInterface as createInterface14 } from "readline";
-import { readFileSync as readFileSync31, existsSync as existsSync23 } from "fs";
-import { join as join36 } from "path";
+import { readFileSync as readFileSync32, existsSync as existsSync23 } from "fs";
+import { join as join37 } from "path";
 import { fileURLToPath as fileURLToPath10 } from "url";
 function readLocalVersion3() {
   try {
-    for (const p of [join36(__dirname7, "..", "..", "package.json"), join36(__dirname7, "..", "package.json")]) {
+    for (const p of [join37(__dirname7, "..", "..", "package.json"), join37(__dirname7, "..", "package.json")]) {
       if (existsSync23(p)) {
-        const pkg = JSON.parse(readFileSync31(p, "utf8"));
+        const pkg = JSON.parse(readFileSync32(p, "utf8"));
         if (pkg.version) return pkg.version;
       }
     }
@@ -45718,12 +42023,12 @@ function readLocalVersion3() {
 }
 async function run29() {
   const rl = createInterface14({ input: process.stdin, output: process.stdout });
-  const ask3 = (question) => new Promise((resolve2) => {
-    const onClose = () => resolve2(null);
+  const ask3 = (question) => new Promise((resolve3) => {
+    const onClose = () => resolve3(null);
     rl.once("close", onClose);
     rl.question(question, (answer) => {
       rl.removeListener("close", onClose);
-      resolve2((answer || "").trim());
+      resolve3((answer || "").trim());
     });
   });
   const lastFull = readConfig().lastFullFeedbackAt;
@@ -45843,18 +42148,18 @@ var init_jpi_feedback = __esm({
 
 // bin/jpi-dispatch.js
 import { fileURLToPath as fileURLToPath11 } from "url";
-import { join as join37 } from "path";
-import { existsSync as existsSync24, readFileSync as readFileSync32 } from "fs";
+import { join as join38 } from "path";
+import { existsSync as existsSync24, readFileSync as readFileSync33 } from "fs";
 var __dirname8 = fileURLToPath11(new URL(".", import.meta.url));
 function readPackageVersion() {
   try {
     const candidates = [
-      join37(__dirname8, "..", "..", "package.json"),
-      join37(__dirname8, "..", "package.json")
+      join38(__dirname8, "..", "..", "package.json"),
+      join38(__dirname8, "..", "package.json")
     ];
     for (const p of candidates) {
       if (existsSync24(p)) {
-        const pkg = JSON.parse(readFileSync32(p, "utf8"));
+        const pkg = JSON.parse(readFileSync33(p, "utf8"));
         if (pkg.version) return pkg.version;
       }
     }
@@ -45866,7 +42171,7 @@ var SUBCOMMANDS = ["jobs", "devs", "project", "bounties", "contribute", "claim",
 var firstArg = process.argv[2];
 if (!firstArg && !process.stdin.isTTY) {
   const { default: childProcess } = await import("child_process");
-  const nudgeScript = join37(__dirname8, "jpi.js");
+  const nudgeScript = join38(__dirname8, "jpi.js");
   const child = childProcess.spawnSync(process.execPath, [nudgeScript], {
     stdio: ["inherit", "inherit", "inherit"]
   });
@@ -46225,8 +42530,8 @@ if (firstArg === "statusline") {
     console.error("Usage: terminalhire statusline --on | --off");
     process.exit(1);
   }
-  const fromDist = join37(__dirname8, "..", "..", "statusline-install.js");
-  const fromBin = join37(__dirname8, "..", "statusline-install.js");
+  const fromDist = join38(__dirname8, "..", "..", "statusline-install.js");
+  const fromBin = join38(__dirname8, "..", "statusline-install.js");
   const installer = existsSync24(fromDist) ? fromDist : fromBin;
   const { spawnSync: spawnSync4 } = await import("child_process");
   const child = spawnSync4(

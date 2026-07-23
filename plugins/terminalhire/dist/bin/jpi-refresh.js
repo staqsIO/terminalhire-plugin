@@ -9,6 +9,60 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// src/state-dir.ts
+import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
+function warnStateDirOnce(dir, message) {
+  if (warnedDirs.has(dir)) return;
+  warnedDirs.add(dir);
+  try {
+    process.stderr.write(message);
+  } catch {
+  }
+}
+function ensureStateDir(dir) {
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let fd;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | noFollow);
+  } catch (err) {
+    if (err?.code === "ELOOP") {
+      warnStateDirOnce(
+        dir,
+        `terminalhire: ${dir} is a symlink \u2014 leaving its permissions alone; the 0700 guarantee on the state directory is NOT enforced.
+`
+      );
+      return STATE_DIR_SYMLINK;
+    }
+    return STATE_DIR_UNVERIFIED;
+  }
+  try {
+    const currentMode = fstatSync(fd).mode & 511;
+    if ((currentMode & ~STATE_DIR_MODE) !== 0) {
+      fchmodSync(fd, currentMode & STATE_DIR_MODE);
+    }
+    return STATE_DIR_OK;
+  } catch {
+    return STATE_DIR_UNVERIFIED;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+    }
+  }
+}
+var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs;
+var init_state_dir = __esm({
+  "src/state-dir.ts"() {
+    "use strict";
+    STATE_DIR_MODE = 448;
+    STATE_DIR_OK = "ok";
+    STATE_DIR_SYMLINK = "symlink";
+    STATE_DIR_UNVERIFIED = "unverified";
+    warnedDirs = /* @__PURE__ */ new Set();
+  }
+});
+
 // src/config.ts
 var config_exports = {};
 __export(config_exports, {
@@ -23,7 +77,7 @@ __export(config_exports, {
   readConfig: () => readConfig,
   writeConfig: () => writeConfig
 });
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync } from "fs";
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, existsSync } from "fs";
 import { join as join3 } from "path";
 import { homedir as homedir3 } from "os";
 function readConfig() {
@@ -37,7 +91,7 @@ function readConfig() {
   }
 }
 function writeConfig(config) {
-  mkdirSync3(TERMINALHIRE_DIR3, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR3);
   const current = readConfig();
   const merged = { ...current, ...config };
   if ("contributePrompted" in merged) {
@@ -96,6 +150,7 @@ var TERMINALHIRE_DIR3, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
+    init_state_dir();
     TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join3(homedir3(), ".terminalhire");
     CONFIG_FILE = join3(TERMINALHIRE_DIR3, "config.json");
     DEFAULT_CONFIG = {
@@ -1162,8 +1217,8 @@ function makeGitHubGovernor(fetchImpl, cfg) {
     try {
       const res = bound == null ? await fetchP : await Promise.race([
         fetchP,
-        new Promise((resolve) => {
-          timer = setTimeout(() => resolve(null), bound);
+        new Promise((resolve2) => {
+          timer = setTimeout(() => resolve2(null), bound);
         })
       ]);
       if (!res || !res.ok) return null;
@@ -1865,6 +1920,27 @@ function makeScoringGovernor(governor) {
     makeDefaultGovernorConfig({ paceEnabled: false })
   );
 }
+function reviewerPseudonym(repoFullName, reviewerId) {
+  const s = `${repoFullName}:${reviewerId}`;
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return `R${h.toString(16).padStart(8, "0")}`;
+}
+async function fetchPublicOrgsOrNull(login, token, sig) {
+  try {
+    const orgs = await ghFetch(
+      `/users/${encodeURIComponent(login)}/orgs?per_page=100`,
+      token,
+      sig
+    );
+    return new Set(orgs.map((o) => o.login.toLowerCase()));
+  } catch {
+    return null;
+  }
+}
 async function fetchPRScoringFacts(prUrl, token, signal, governor) {
   const ref = parseGitHubRef(prUrl);
   if (!ref || ref.kind !== "pull") return null;
@@ -1888,6 +1964,7 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
   const contributors = gov.tripped() || gov.budgetExhausted() ? null : await repoContributorCount(owner, repo, token, sig);
   const { closesIssues, linkageSource } = await resolveClosingIssues(owner, repo, number, pr.body ?? "", token, sig, gov);
   let reviewerAssociations;
+  let reviewSources;
   if (!gov.tripped() && !gov.budgetExhausted()) {
     try {
       const reviews = await ghFetch(
@@ -1896,8 +1973,78 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
         sig
       );
       reviewerAssociations = reviews.map((r) => r.author_association);
+      reviewSources = reviews.map((r) => ({
+        association: r.author_association,
+        isBot: isLifecycleBot(r.user ?? null),
+        isSelf: r.user?.id != null && pr.user?.id != null && r.user.id === pr.user.id,
+        ...r.user?.id != null ? { pseudonym: reviewerPseudonym(`${owner}/${repo}`, r.user.id) } : {},
+        ...r.state ? { state: r.state } : {},
+        submittedAt: r.submitted_at ?? null
+      }));
+      const authorLogin = pr.user?.login;
+      if (authorLogin && !gov.tripped() && !gov.budgetExhausted()) {
+        const authorOrgs = await fetchPublicOrgsOrNull(authorLogin, token, sig);
+        if (authorOrgs != null) {
+          const humanReviewers = /* @__PURE__ */ new Map();
+          for (const r of reviews) {
+            if (r.user?.id == null || r.user.login == null) continue;
+            if (isLifecycleBot(r.user) || pr.user?.id != null && r.user.id === pr.user.id) continue;
+            const p = reviewerPseudonym(`${owner}/${repo}`, r.user.id);
+            if (!humanReviewers.has(p) && humanReviewers.size < AFFILIATION_REVIEWER_CAP) {
+              humanReviewers.set(p, r.user.login);
+            }
+          }
+          const shared = /* @__PURE__ */ new Map();
+          for (const [p, login] of humanReviewers) {
+            if (gov.tripped() || gov.budgetExhausted()) break;
+            const reviewerOrgs = await fetchPublicOrgsOrNull(login, token, sig);
+            if (reviewerOrgs == null) continue;
+            shared.set(p, [...reviewerOrgs].some((o) => authorOrgs.has(o)));
+          }
+          for (const src of reviewSources) {
+            if (src.pseudonym && shared.has(src.pseudonym)) {
+              src.sharedOrgWithAuthor = shared.get(src.pseudonym);
+            }
+          }
+        }
+      }
     } catch {
       reviewerAssociations = void 0;
+      reviewSources = void 0;
+    }
+  }
+  let commits;
+  if (!gov.tripped() && !gov.budgetExhausted()) {
+    try {
+      const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${number}/commits?per_page=100`;
+      const res = await gov.get(url, { headers: ghHeaders(token), signal: sig });
+      if (res && res.ok) {
+        const rawCommits = await res.json();
+        commits = !Array.isArray(rawCommits) || rawCommits.length === 100 ? void 0 : rawCommits.map((c) => ({
+          sha: c.sha,
+          committedAt: c.commit?.committer?.date ?? c.commit?.author?.date ?? null
+        }));
+      }
+    } catch {
+      commits = void 0;
+    }
+  }
+  let reviewThreadStats;
+  if (token && !gov.tripped() && !gov.budgetExhausted()) {
+    try {
+      const q = `query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){reviewThreads(first:100){totalCount nodes{isResolved}}}}rateLimit{cost remaining}}`;
+      const r = await ghGraphQL(q, { o: owner, n: repo, p: number }, token, sig, gov);
+      const threads = r?.data?.repository?.pullRequest?.reviewThreads;
+      if (threads && typeof threads.totalCount === "number" && threads.totalCount <= 100 && Array.isArray(threads.nodes)) {
+        const resolved = threads.nodes.filter((t) => t.isResolved).length;
+        reviewThreadStats = {
+          total: threads.totalCount,
+          resolved,
+          unresolved: threads.totalCount - resolved
+        };
+      }
+    } catch {
+      reviewThreadStats = void 0;
     }
   }
   return {
@@ -1916,12 +2063,25 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
     repoContributors: contributors ?? null,
     repoArchived: !!repoMeta?.archived,
     repoFork: !!repoMeta?.fork,
-    repoPrivate: !!repoMeta?.private,
+    // TERM-46: preserve UNKNOWN when the repo-meta read failed/was skipped — do NOT
+    // coerce a missing read to `false` (public), which would fail OPEN in the
+    // provenance gate. A successful read reports the real flag (GitHub always sends it).
+    repoPrivate: repoMeta ? repoMeta.private ?? false : null,
     additions: pr.additions ?? null,
     deletions: pr.deletions ?? null,
     changedFiles: pr.changed_files ?? null,
     repoForks: repoMeta?.forks_count ?? null,
     reviewerAssociations,
+    reviewSources,
+    // TERM-46 provenance RAW inputs. `created_at` rides the existing repo read;
+    // repoOrgVerified / repoDependents are deferred (extra API) → left undefined.
+    repoCreatedAt: repoMeta?.created_at ?? null,
+    // TERM-50: PR creation rides the existing detail read; null = unknown (older
+    // callers / list shapes) → time-to-merge honestly absent, never fabricated.
+    prCreatedAt: pr.created_at ?? null,
+    // §7 PR-A: commit + review-thread enrichment (undefined when degraded/truncated).
+    commits,
+    reviewThreadStats,
     fetchedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
@@ -2070,7 +2230,7 @@ async function fetchPRLifecycle(prUrl, token, signal, governor) {
     complete
   };
 }
-var TRACTION_TOP_N, MAINTAINER_ENRICH_MAX, CANDIDATE_PR_PAGE, MAX_ENRICH_PRS, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE, RECEPTIVITY_RECENCY_DAYS, RECEPTIVITY_RECENCY_FLOOR, GITHUB_GRAPHQL_URL, LIFECYCLE_BOT_LOGINS;
+var TRACTION_TOP_N, MAINTAINER_ENRICH_MAX, CANDIDATE_PR_PAGE, MAX_ENRICH_PRS, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE, RECEPTIVITY_RECENCY_DAYS, RECEPTIVITY_RECENCY_FLOOR, GITHUB_GRAPHQL_URL, AFFILIATION_REVIEWER_CAP, LIFECYCLE_BOT_LOGINS;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
@@ -2091,6 +2251,7 @@ var init_github = __esm({
     RECEPTIVITY_RECENCY_DAYS = 180;
     RECEPTIVITY_RECENCY_FLOOR = 0.1;
     GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
+    AFFILIATION_REVIEWER_CAP = 5;
     LIFECYCLE_BOT_LOGINS = /* @__PURE__ */ new Set([
       "mergify",
       "mergify[bot]",
@@ -3510,6 +3671,596 @@ var init_directory = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/contributions.ts
+function readSearchMaxPages() {
+  const raw = process.env["CONTRIB_SEARCH_MAX_PAGES"];
+  if (raw == null) return DEFAULT_SEARCH_MAX_PAGES;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_SEARCH_MAX_PAGES;
+  return Math.min(Math.max(n, MIN_SEARCH_MAX_PAGES), MAX_SEARCH_MAX_PAGES);
+}
+function readMaxContribItems() {
+  const raw = process.env["CONTRIB_MAX_ITEMS"];
+  if (raw == null) return DEFAULT_MAX_CONTRIB_ITEMS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_MAX_CONTRIB_ITEMS;
+  return Math.min(Math.max(n, MIN_MAX_CONTRIB_ITEMS), MAX_MAX_CONTRIB_ITEMS);
+}
+function readMaxContribIssuesScanned() {
+  const raw = process.env["CONTRIB_MAX_ISSUES_SCANNED"];
+  if (raw == null) return DEFAULT_MAX_CONTRIB_ISSUES_SCANNED;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n)) return DEFAULT_MAX_CONTRIB_ISSUES_SCANNED;
+  return Math.min(
+    Math.max(n, MIN_MAX_CONTRIB_ISSUES_SCANNED),
+    MAX_MAX_CONTRIB_ISSUES_SCANNED
+  );
+}
+function authHeaders2(token) {
+  const bearer = token ?? process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
+  const h = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "terminalhire",
+    "X-GitHub-Api-Version": "2022-11-28"
+  };
+  if (bearer) h["Authorization"] = `Bearer ${bearer}`;
+  return h;
+}
+function tokenize4(text) {
+  return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
+}
+function labelNames2(labels) {
+  return (labels ?? []).map((l) => typeof l === "string" ? l : l.name ?? "").filter(Boolean);
+}
+function repoFullNameFromApiUrl2(url) {
+  const m = url.match(/\/repos\/([^/]+)\/([^/]+)\/?$/);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+function makeClient(fetchImpl, cfg, token) {
+  const gov = makeGitHubGovernor(fetchImpl, cfg);
+  const effectiveToken = token ?? process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
+  const headers = authHeaders2(effectiveToken);
+  async function raw(path) {
+    return gov.get(`${GITHUB_API2}${path}`, { headers });
+  }
+  async function json(path) {
+    const res = await raw(path);
+    if (!res) return null;
+    if (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0") return null;
+    if (!res.ok) return null;
+    try {
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+  async function probe(path) {
+    return gov.probe(`${GITHUB_API2}${path}`, { headers });
+  }
+  let supplyFailures = 0;
+  const noteSupplyFailure = () => {
+    supplyFailures += 1;
+  };
+  return {
+    raw,
+    json,
+    probe,
+    governor: gov,
+    token: effectiveToken,
+    setSecondaryHint: gov.setSecondaryHint,
+    noteSupplyFailure,
+    // Merge the client-level supply-failure count into the governor stats so callers
+    // read ONE stats object (the cron's metrics line + the B2 degraded check).
+    getStats: () => ({ ...gov.getStats(), supplyFailures })
+  };
+}
+async function contributorCount(client, fullName) {
+  const res = await client.raw(`/repos/${fullName}/contributors?per_page=1&anon=false`);
+  if (!res || !res.ok) return void 0;
+  const link = res.headers.get("link");
+  const m = link?.match(/[?&]page=(\d+)>;\s*rel="last"/);
+  if (m) return Number(m[1]);
+  try {
+    const body = await res.json();
+    return Array.isArray(body) ? body.length : 0;
+  } catch {
+    return void 0;
+  }
+}
+async function openPRIssueRefs(client, fullName) {
+  const token = client.token;
+  const [owner, name] = fullName.split("/");
+  if (token && owner && name) {
+    const res = await openPRClosingRefs(owner, name, token, void 0, client.governor);
+    if (res === null) return null;
+    if (res.capHit) {
+      console.warn(
+        `[contribute] open-PR closing-ref scan capped at 100/${res.totalCount} open PRs for ${fullName} (closing refs beyond the first 100 open PRs not scanned)`
+      );
+    }
+    return res.refs;
+  }
+  const prs = await client.json(
+    `/repos/${fullName}/pulls?state=open&per_page=100`
+  );
+  if (!Array.isArray(prs)) return null;
+  const refs = /* @__PURE__ */ new Set();
+  for (const pr of prs) {
+    const text = `${pr.title ?? ""}
+${pr.body ?? ""}`;
+    for (const m of text.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi)) {
+      refs.add(Number(m[1]));
+    }
+  }
+  return refs;
+}
+async function fetchRateLimit(client) {
+  const r = await client.probe("/rate_limit");
+  return r?.resources ?? null;
+}
+async function searchContribIssues(client, queries) {
+  const byUrl = /* @__PURE__ */ new Map();
+  const maxPages = readSearchMaxPages();
+  for (const q of queries) {
+    for (let page = 1; page <= maxPages; page++) {
+      const res = await client.json(
+        `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE2}&page=${page}`
+      );
+      const items = res?.items;
+      if (items == null) {
+        const st = client.getStats();
+        if (!st.budgetAborted && !st.secondaryAborted) client.noteSupplyFailure();
+        break;
+      }
+      for (const it of items) {
+        if (it.pull_request) continue;
+        if (!byUrl.has(it.html_url)) byUrl.set(it.html_url, it);
+      }
+      if (items.length < SEARCH_PER_PAGE2) break;
+      const stats = client.getStats();
+      if (stats.budgetAborted || stats.secondaryAborted) break;
+    }
+  }
+  return [...byUrl.values()].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+}
+function buildContributionJob(a) {
+  return {
+    id: a.id,
+    source: "contribute",
+    title: a.title,
+    company: a.repo.owner.login,
+    url: a.issue.html_url,
+    remote: true,
+    location: "Remote",
+    tags: a.tags,
+    roleType: "freelance",
+    postedAt: a.issue.created_at,
+    applyMode: "direct",
+    contribution: {
+      repoFullName: a.fullName,
+      repoStars: a.repo.stargazers_count,
+      repoContributors: a.contributors,
+      issueNumber: a.issue.number,
+      labels: a.labels,
+      issueUrl: a.issue.html_url,
+      issueBody: a.body.slice(0, 1e3) || void 0,
+      // Provably 0 open PRs ONLY when the open-PR check actually ran and returned a
+      // verified-empty/non-matching set; a failed check leaves it undefined (never a
+      // fabricated 0), so the claim path falls through to a live re-count.
+      openPRsAtDiscovery: a.openPRsAtDiscovery,
+      repoDescription: a.repo.description || null,
+      // TERM-27: persist the repo's primary language so project curation can
+      // exclude the repo's OWN language id (folded into every issue's tags) from
+      // the distinct-skill signal. Same `repo` used by the tokenize() tag build.
+      language: a.repo.language ?? null,
+      // TERM-35: stamp the search item's comment count (already in the response —
+      // zero extra egress). A NEUTRAL volume signal only: set solely when the
+      // search item carries a finite count >= 0; a failed/absent value leaves it
+      // undefined (never a fabricated 0), so a render's chip falls through cleanly.
+      commentsAtDiscovery: typeof a.issue.comments === "number" && Number.isFinite(a.issue.comments) && a.issue.comments >= 0 ? a.issue.comments : void 0
+    },
+    // Provenance: repo-first discovered items only (label-first omits the field).
+    ...a.discovered ? { discovered: true } : {},
+    raw: a.issue
+  };
+}
+async function aggregateContributions(opts = {}) {
+  const paceEnabled = opts.paceEnabled ?? !opts.fetchImpl;
+  const client = makeClient(opts.fetchImpl ?? fetchWithTimeout, {
+    paceEnabled,
+    gapMs: readReqGapMs(),
+    // Request-path callers (plan B2) can LOWER the budget but never raise it past the
+    // vetted default — take the min so a per-user pass caps its own wall-clock.
+    budgetMs: Math.min(opts.budgetMs ?? Infinity, readBuildBudgetMs()),
+    sleep: opts.sleepImpl ?? realSleep,
+    now: opts.nowImpl ?? Date.now,
+    // Bound the unguarded probe on the REAL network only; injected-fetch tests get
+    // null so the probe stays deterministic (and its shared spy sleeper untouched).
+    probeTimeoutMs: opts.fetchImpl ? null : PROBE_TIMEOUT_MS
+  }, opts.token);
+  const queries = opts.queries ?? CONTRIB_SEARCH_QUERIES;
+  const maxContribItems = readMaxContribItems();
+  const startRl = await fetchRateLimit(client);
+  const coreHealthyAtStart = (startRl?.core?.remaining ?? 0) >= 500;
+  client.setSecondaryHint(coreHealthyAtStart);
+  const issues = (await searchContribIssues(client, queries)).slice(
+    0,
+    readMaxContribIssuesScanned()
+  );
+  const repoCache = /* @__PURE__ */ new Map();
+  const contribCache = /* @__PURE__ */ new Map();
+  const prRefsCache = /* @__PURE__ */ new Map();
+  const xbuild = opts.repoMetaCache;
+  const servedFromXbuild = /* @__PURE__ */ new Set();
+  const persistedXbuild = /* @__PURE__ */ new Set();
+  const xbuildTried = /* @__PURE__ */ new Set();
+  async function primeFromXbuild(key, fullName) {
+    if (!xbuild || xbuildTried.has(key)) return;
+    xbuildTried.add(key);
+    if (repoCache.has(key) && contribCache.has(key)) return;
+    let cached = null;
+    try {
+      cached = await xbuild.get(key);
+    } catch {
+      return;
+    }
+    if (!cached) return;
+    if (!repoCache.has(key)) {
+      const owner = fullName.split("/")[0] ?? "";
+      repoCache.set(key, {
+        full_name: fullName,
+        stargazers_count: cached.stars,
+        archived: cached.archived,
+        disabled: cached.disabled,
+        fork: cached.fork,
+        language: cached.language,
+        description: cached.description,
+        owner: { login: owner }
+      });
+    }
+    if (!contribCache.has(key)) {
+      contribCache.set(key, cached.contributors);
+      servedFromXbuild.add(key);
+    }
+  }
+  async function persistRepoMeta(fullName, repo, contributors) {
+    if (!xbuild) return;
+    const key = repoKey(fullName);
+    if (servedFromXbuild.has(key) || persistedXbuild.has(key)) return;
+    if (contributors === void 0) return;
+    persistedXbuild.add(key);
+    try {
+      await xbuild.set(key, {
+        stars: repo.stargazers_count,
+        contributors,
+        language: repo.language,
+        archived: repo.archived,
+        fork: repo.fork,
+        disabled: repo.disabled,
+        description: repo.description || null
+      });
+    } catch {
+    }
+  }
+  async function repoMeta(fullName) {
+    const key = repoKey(fullName);
+    const hit = repoCache.get(key);
+    if (hit !== void 0) return hit;
+    await primeFromXbuild(key, fullName);
+    const primed = repoCache.get(key);
+    if (primed !== void 0) return primed;
+    const r = await client.json(`/repos/${fullName}`) ?? null;
+    repoCache.set(key, r);
+    return r;
+  }
+  async function repoContribCount(fullName) {
+    const key = repoKey(fullName);
+    if (contribCache.has(key)) return contribCache.get(key);
+    await primeFromXbuild(key, fullName);
+    if (contribCache.has(key)) return contribCache.get(key);
+    const n = await contributorCount(client, fullName);
+    contribCache.set(key, n);
+    return n;
+  }
+  async function repoPRRefs(fullName) {
+    const key = repoKey(fullName);
+    if (prRefsCache.has(key)) return prRefsCache.get(key) ?? null;
+    const refs = await openPRIssueRefs(client, fullName);
+    prRefsCache.set(key, refs);
+    return refs;
+  }
+  const jobs = [];
+  const seen = /* @__PURE__ */ new Set();
+  const perRepo = /* @__PURE__ */ new Map();
+  let metaNull = 0;
+  let contribUndefined = 0;
+  let prRefsNull = 0;
+  for (const issue of issues) {
+    if (jobs.length >= maxContribItems) break;
+    const fullName = repoFullNameFromApiUrl2(issue.repository_url);
+    if (!fullName) continue;
+    const id = `contribute:${repoKey(fullName)}#${issue.number}`;
+    if (seen.has(id)) continue;
+    if (isExcludedRepo(fullName)) continue;
+    if (isAssigned(issue)) continue;
+    if ((perRepo.get(repoKey(fullName)) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) continue;
+    const title = decodeEntities(issue.title).trim();
+    const body = issue.body ? decodeEntities(issue.body) : "";
+    const labels = labelNames2(issue.labels);
+    if (looksLikeContentTask({ title, body, labels })) continue;
+    const repo = await repoMeta(fullName);
+    if (!repo) {
+      metaNull++;
+      continue;
+    }
+    const contributors = await repoContribCount(fullName);
+    if (contributors === void 0) contribUndefined++;
+    await persistRepoMeta(fullName, repo, contributors);
+    if (!passesContributionGate({
+      fullName,
+      stars: repo.stargazers_count,
+      contributors,
+      title,
+      archived: repo.archived,
+      fork: repo.fork
+    })) {
+      continue;
+    }
+    if (repo.disabled) continue;
+    const prRefs = await repoPRRefs(fullName);
+    if (prRefs === null) prRefsNull++;
+    const openPRsAtDiscovery = prRefs ? prRefs.has(issue.number) ? 1 : 0 : void 0;
+    const tags = normalize(
+      tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
+    );
+    seen.add(id);
+    perRepo.set(repoKey(fullName), (perRepo.get(repoKey(fullName)) ?? 0) + 1);
+    jobs.push(
+      buildContributionJob({
+        id,
+        fullName,
+        repo,
+        issue,
+        title,
+        body,
+        labels,
+        tags,
+        contributors,
+        // gate guarantees a number here
+        openPRsAtDiscovery
+      })
+    );
+  }
+  const doDiscovery = opts.discoverRepos ?? (opts.trendingSlugs != null || opts.vocabTerms != null || opts.seedSlugs != null);
+  let discoveredEmitted = 0;
+  let discoveryBudgetStopped = false;
+  if (doDiscovery && jobs.length < maxContribItems) {
+    const maxRepos = Math.min(
+      Math.max(0, opts.maxDiscoveredRepos ?? MAX_DISCOVERED_REPOS),
+      MAX_DISCOVERED_REPOS
+    );
+    const vocabTerms = (opts.vocabTerms ?? DISCOVERY_VOCAB_TERMS).slice(
+      0,
+      DISCOVERY_VOCAB_TERMS.length
+    );
+    const vocabCandidates = [];
+    for (const term of vocabTerms) {
+      if (client.getStats().budgetAborted || client.getStats().secondaryAborted) {
+        discoveryBudgetStopped = true;
+        break;
+      }
+      const res = await client.json(
+        `/search/repositories?q=${encodeURIComponent(term)}&sort=updated&order=desc&per_page=${DISCOVERY_REPOS_PER_TERM}`
+      );
+      for (const r of res?.items ?? []) {
+        if (!r?.full_name) continue;
+        if (!repoCache.has(repoKey(r.full_name))) {
+          repoCache.set(repoKey(r.full_name), {
+            full_name: r.full_name,
+            stargazers_count: r.stargazers_count,
+            archived: r.archived,
+            disabled: r.disabled ?? false,
+            fork: r.fork,
+            language: r.language,
+            description: r.description || null,
+            owner: r.owner
+          });
+        }
+        vocabCandidates.push({ fullName: r.full_name, stars: r.stargazers_count ?? 0 });
+      }
+    }
+    vocabCandidates.sort((a, b) => b.stars - a.stars);
+    const candidates = [];
+    const candSeen = /* @__PURE__ */ new Set();
+    for (const slug of opts.seedSlugs ?? []) {
+      const s = slug?.toLowerCase();
+      if (s && !candSeen.has(repoKey(s))) {
+        candSeen.add(repoKey(s));
+        candidates.push(s);
+      }
+    }
+    for (const slug of opts.trendingSlugs ?? []) {
+      const s = slug?.toLowerCase();
+      if (s && !candSeen.has(repoKey(s))) {
+        candSeen.add(repoKey(s));
+        candidates.push(s);
+      }
+    }
+    for (const { fullName } of vocabCandidates) {
+      if (!candSeen.has(repoKey(fullName))) {
+        candSeen.add(repoKey(fullName));
+        candidates.push(fullName);
+      }
+    }
+    const scanned = candidates.slice(0, maxRepos);
+    for (const fullName of scanned) {
+      if (jobs.length >= maxContribItems) break;
+      if (client.getStats().budgetAborted || client.getStats().secondaryAborted) {
+        discoveryBudgetStopped = true;
+        break;
+      }
+      if (isExcludedRepo(fullName)) continue;
+      const repo = await repoMeta(fullName);
+      if (!repo) {
+        metaNull++;
+        continue;
+      }
+      if (repo.disabled) continue;
+      const contributors = await repoContribCount(fullName);
+      if (contributors === void 0) contribUndefined++;
+      await persistRepoMeta(fullName, repo, contributors);
+      if (repo.archived || repo.fork || repo.stargazers_count < MIN_STARS || contributors === void 0 || contributors < MIN_CONTRIBUTORS) {
+        continue;
+      }
+      const q = `repo:${fullName} is:issue is:open label:${DISCOVERY_ISSUE_LABELS}`;
+      const searchRes = await client.json(
+        `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE2}`
+      );
+      const repoIssues = (searchRes?.items ?? []).filter((it) => !it.pull_request);
+      let perRepoDiscovered = 0;
+      for (const issue of repoIssues) {
+        if (jobs.length >= maxContribItems) break;
+        if (perRepoDiscovered >= MAX_ISSUES_PER_DISCOVERED_REPO) break;
+        if ((perRepo.get(repoKey(fullName)) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) break;
+        const id = `contribute:${repoKey(fullName)}#${issue.number}`;
+        if (seen.has(id)) continue;
+        if (isAssigned(issue)) continue;
+        const title = decodeEntities(issue.title).trim();
+        if (!passesContributionGate({
+          fullName,
+          stars: repo.stargazers_count,
+          contributors,
+          title,
+          archived: repo.archived,
+          fork: repo.fork
+        })) {
+          continue;
+        }
+        const body = issue.body ? decodeEntities(issue.body) : "";
+        const labels = labelNames2(issue.labels);
+        if (looksLikeContentTask({ title, body, labels })) continue;
+        const prRefs = await repoPRRefs(fullName);
+        if (prRefs === null) prRefsNull++;
+        const openPRsAtDiscovery = prRefs ? prRefs.has(issue.number) ? 1 : 0 : void 0;
+        const tags = normalize(
+          tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
+        );
+        seen.add(id);
+        perRepo.set(repoKey(fullName), (perRepo.get(repoKey(fullName)) ?? 0) + 1);
+        perRepoDiscovered++;
+        discoveredEmitted++;
+        jobs.push(
+          buildContributionJob({
+            id,
+            fullName,
+            repo,
+            issue,
+            title,
+            body,
+            labels,
+            tags,
+            contributors,
+            openPRsAtDiscovery,
+            discovered: true
+          })
+        );
+      }
+    }
+  }
+  if (!opts.fetchImpl) {
+    const rl = await fetchRateLimit(client);
+    const core = rl?.core ? `${rl.core.remaining}/${rl.core.limit}` : "n/a";
+    const search = rl?.search ? `${rl.search.remaining}/${rl.search.limit}` : "n/a";
+    const noToken = !client.token;
+    const { pacedMs, secondaryAborted, budgetAborted, elapsedMs, gqlCost, gqlRemaining } = client.getStats();
+    console.info(
+      `[contribute] build metrics \u2014 scanned=${issues.length} reposDistinct=${repoCache.size} emitted=${jobs.length} discovered=${discoveredEmitted} metaNull=${metaNull} contribUndefined=${contribUndefined} prRefsNull=${prRefsNull} paced=${pacedMs} secondaryAborted=${secondaryAborted} budgetAborted=${budgetAborted} core=${core} search=${search} gqlCost=${gqlCost} gqlRemaining=${gqlRemaining ?? "n/a"} elapsed=${elapsedMs}` + (noToken ? " (NO TOKEN \u2192 60/hr)" : "")
+    );
+    if (discoveryBudgetStopped) {
+      console.warn(
+        `[contribute] repo-first discovery stopped early \u2014 build budget exhausted (emitted ${discoveredEmitted} discovered before the cap)`
+      );
+    }
+  }
+  if (opts.onStats) {
+    const { budgetAborted, secondaryAborted, supplyFailures } = client.getStats();
+    opts.onStats({
+      // A PARTIAL crawl from ANY cause: the governor's budget/secondary abort, an early
+      // discovery stop, OR an ordinary /search page failure (supplyFailures) that
+      // truncated the primary supply. Any of these ⇒ the pool is incomplete.
+      degraded: Boolean(budgetAborted || secondaryAborted || discoveryBudgetStopped || supplyFailures > 0),
+      emitted: jobs.length,
+      scanned: issues.length
+    });
+  }
+  return jobs;
+}
+var GITHUB_API2, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, DEFAULT_SEARCH_MAX_PAGES, MIN_SEARCH_MAX_PAGES, MAX_SEARCH_MAX_PAGES, DEFAULT_MAX_CONTRIB_ITEMS, MIN_MAX_CONTRIB_ITEMS, MAX_MAX_CONTRIB_ITEMS, DEFAULT_MAX_CONTRIB_ISSUES_SCANNED, MIN_MAX_CONTRIB_ISSUES_SCANNED, MAX_MAX_CONTRIB_ISSUES_SCANNED, MAX_DISCOVERED_REPOS, MAX_ISSUES_PER_DISCOVERED_REPO, DISCOVERY_REPOS_PER_TERM, DISCOVERY_VOCAB_TERMS, DISCOVERY_ISSUE_LABELS, repoKey;
+var init_contributions = __esm({
+  "../../packages/core/src/feeds/contributions.ts"() {
+    "use strict";
+    init_vocabulary();
+    init_entities();
+    init_bounty_gate();
+    init_contribution_gate();
+    init_contribution_classify();
+    init_github_bounties();
+    init_github();
+    init_http();
+    init_gh_governor();
+    GITHUB_API2 = "https://api.github.com";
+    CONTRIB_LABEL_QUERIES = [
+      'label:"good first issue" type:issue state:open',
+      'label:"good-first-issue" type:issue state:open',
+      'label:"help wanted" type:issue state:open',
+      'label:"help-wanted" type:issue state:open',
+      'label:"up-for-grabs" type:issue state:open',
+      // supply-expansion D: two more first-contribution label families widen the
+      // global newest-first slice WITHOUT relaxing the credential gate.
+      'label:"beginner-friendly" type:issue state:open',
+      'label:"first-timers-only" type:issue state:open'
+    ];
+    CONTRIB_LANGUAGE_QUERIES = [
+      ...["rust", "go", "python", "c++", "ruby"].map(
+        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+      ),
+      ...["rust", "go"].map(
+        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+      ),
+      // supply-expansion D: cover the high-volume web/enterprise ecosystems the
+      // original set omitted. TS/JS were previously left out of "good first issue"
+      // (the global slice over-represented them) but a LANGUAGE-scoped page surfaces
+      // DIFFERENT repos than the global newest-first slice, so re-including them widens
+      // distinct-repo coverage rather than duplicating it.
+      ...["typescript", "javascript", "java", "python"].map(
+        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+      ),
+      ...["typescript", "javascript", "c#", "php"].map(
+        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+      )
+    ];
+    CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
+    SEARCH_PER_PAGE2 = 100;
+    DEFAULT_SEARCH_MAX_PAGES = 1;
+    MIN_SEARCH_MAX_PAGES = 1;
+    MAX_SEARCH_MAX_PAGES = 5;
+    DEFAULT_MAX_CONTRIB_ITEMS = 400;
+    MIN_MAX_CONTRIB_ITEMS = 50;
+    MAX_MAX_CONTRIB_ITEMS = 1e3;
+    DEFAULT_MAX_CONTRIB_ISSUES_SCANNED = 1500;
+    MIN_MAX_CONTRIB_ISSUES_SCANNED = 100;
+    MAX_MAX_CONTRIB_ISSUES_SCANNED = 5e3;
+    MAX_DISCOVERED_REPOS = 15;
+    MAX_ISSUES_PER_DISCOVERED_REPO = 3;
+    DISCOVERY_REPOS_PER_TERM = 20;
+    DISCOVERY_VOCAB_TERMS = ["rust", "go", "python", "typescript"];
+    DISCOVERY_ISSUE_LABELS = '"good first issue","help wanted","good-first-issue","help-wanted"';
+    repoKey = (name) => name.toLowerCase();
+  }
+});
+
 // ../../packages/core/src/winnability.ts
 function clamp01(n) {
   if (!Number.isFinite(n)) return 0;
@@ -3918,6 +4669,7 @@ var init_feeds = __esm({
     init_bounty_gate();
     init_contribution_gate();
     init_contribution_classify();
+    init_contributions();
     init_projectCuration();
     FEEDS = [greenhouse, ashby, lever, workable, himalayas, wwr, hn];
     GREENHOUSE_SLUGS_BY_TIER = {
@@ -4032,555 +4784,6 @@ var init_feeds = __esm({
       ashby: new Set(ASHBY_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase())),
       lever: new Set(LEVER_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase()))
     };
-  }
-});
-
-// ../../packages/core/src/feeds/contributions.ts
-function readSearchMaxPages() {
-  const raw = process.env["CONTRIB_SEARCH_MAX_PAGES"];
-  if (raw == null) return DEFAULT_SEARCH_MAX_PAGES;
-  const n = Number.parseInt(raw, 10);
-  if (Number.isNaN(n)) return DEFAULT_SEARCH_MAX_PAGES;
-  return Math.min(Math.max(n, MIN_SEARCH_MAX_PAGES), MAX_SEARCH_MAX_PAGES);
-}
-function readMaxContribItems() {
-  const raw = process.env["CONTRIB_MAX_ITEMS"];
-  if (raw == null) return DEFAULT_MAX_CONTRIB_ITEMS;
-  const n = Number.parseInt(raw, 10);
-  if (Number.isNaN(n)) return DEFAULT_MAX_CONTRIB_ITEMS;
-  return Math.min(Math.max(n, MIN_MAX_CONTRIB_ITEMS), MAX_MAX_CONTRIB_ITEMS);
-}
-function readMaxContribIssuesScanned() {
-  const raw = process.env["CONTRIB_MAX_ISSUES_SCANNED"];
-  if (raw == null) return DEFAULT_MAX_CONTRIB_ISSUES_SCANNED;
-  const n = Number.parseInt(raw, 10);
-  if (Number.isNaN(n)) return DEFAULT_MAX_CONTRIB_ISSUES_SCANNED;
-  return Math.min(
-    Math.max(n, MIN_MAX_CONTRIB_ISSUES_SCANNED),
-    MAX_MAX_CONTRIB_ISSUES_SCANNED
-  );
-}
-function authHeaders2() {
-  const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
-  const h = {
-    Accept: "application/vnd.github+json",
-    "User-Agent": "terminalhire",
-    "X-GitHub-Api-Version": "2022-11-28"
-  };
-  if (token) h["Authorization"] = `Bearer ${token}`;
-  return h;
-}
-function tokenize4(text) {
-  return text.toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
-}
-function labelNames2(labels) {
-  return (labels ?? []).map((l) => typeof l === "string" ? l : l.name ?? "").filter(Boolean);
-}
-function repoFullNameFromApiUrl2(url) {
-  const m = url.match(/\/repos\/([^/]+)\/([^/]+)\/?$/);
-  return m ? `${m[1]}/${m[2]}` : null;
-}
-function makeClient(fetchImpl, cfg) {
-  const gov = makeGitHubGovernor(fetchImpl, cfg);
-  async function raw(path) {
-    return gov.get(`${GITHUB_API2}${path}`, { headers: authHeaders2() });
-  }
-  async function json(path) {
-    const res = await raw(path);
-    if (!res) return null;
-    if (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0") return null;
-    if (!res.ok) return null;
-    try {
-      return await res.json();
-    } catch {
-      return null;
-    }
-  }
-  async function probe(path) {
-    return gov.probe(`${GITHUB_API2}${path}`, { headers: authHeaders2() });
-  }
-  return { raw, json, probe, governor: gov, setSecondaryHint: gov.setSecondaryHint, getStats: gov.getStats };
-}
-async function contributorCount(client, fullName) {
-  const res = await client.raw(`/repos/${fullName}/contributors?per_page=1&anon=false`);
-  if (!res || !res.ok) return void 0;
-  const link = res.headers.get("link");
-  const m = link?.match(/[?&]page=(\d+)>;\s*rel="last"/);
-  if (m) return Number(m[1]);
-  try {
-    const body = await res.json();
-    return Array.isArray(body) ? body.length : 0;
-  } catch {
-    return void 0;
-  }
-}
-async function openPRIssueRefs(client, fullName) {
-  const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
-  const [owner, name] = fullName.split("/");
-  if (token && owner && name) {
-    const res = await openPRClosingRefs(owner, name, token, void 0, client.governor);
-    if (res === null) return null;
-    if (res.capHit) {
-      console.warn(
-        `[contribute] open-PR closing-ref scan capped at 100/${res.totalCount} open PRs for ${fullName} (closing refs beyond the first 100 open PRs not scanned)`
-      );
-    }
-    return res.refs;
-  }
-  const prs = await client.json(
-    `/repos/${fullName}/pulls?state=open&per_page=100`
-  );
-  if (!Array.isArray(prs)) return null;
-  const refs = /* @__PURE__ */ new Set();
-  for (const pr of prs) {
-    const text = `${pr.title ?? ""}
-${pr.body ?? ""}`;
-    for (const m of text.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi)) {
-      refs.add(Number(m[1]));
-    }
-  }
-  return refs;
-}
-async function fetchRateLimit(client) {
-  const r = await client.probe("/rate_limit");
-  return r?.resources ?? null;
-}
-async function searchContribIssues(client, queries) {
-  const byUrl = /* @__PURE__ */ new Map();
-  const maxPages = readSearchMaxPages();
-  for (const q of queries) {
-    for (let page = 1; page <= maxPages; page++) {
-      const res = await client.json(
-        `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE2}&page=${page}`
-      );
-      const items = res?.items;
-      if (items == null) break;
-      for (const it of items) {
-        if (it.pull_request) continue;
-        if (!byUrl.has(it.html_url)) byUrl.set(it.html_url, it);
-      }
-      if (items.length < SEARCH_PER_PAGE2) break;
-      const stats = client.getStats();
-      if (stats.budgetAborted || stats.secondaryAborted) break;
-    }
-  }
-  return [...byUrl.values()].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  );
-}
-function buildContributionJob(a) {
-  return {
-    id: a.id,
-    source: "contribute",
-    title: a.title,
-    company: a.repo.owner.login,
-    url: a.issue.html_url,
-    remote: true,
-    location: "Remote",
-    tags: a.tags,
-    roleType: "freelance",
-    postedAt: a.issue.created_at,
-    applyMode: "direct",
-    contribution: {
-      repoFullName: a.fullName,
-      repoStars: a.repo.stargazers_count,
-      repoContributors: a.contributors,
-      issueNumber: a.issue.number,
-      labels: a.labels,
-      issueUrl: a.issue.html_url,
-      issueBody: a.body.slice(0, 1e3) || void 0,
-      // Provably 0 open PRs ONLY when the open-PR check actually ran and returned a
-      // verified-empty/non-matching set; a failed check leaves it undefined (never a
-      // fabricated 0), so the claim path falls through to a live re-count.
-      openPRsAtDiscovery: a.openPRsAtDiscovery,
-      repoDescription: a.repo.description || null,
-      // TERM-27: persist the repo's primary language so project curation can
-      // exclude the repo's OWN language id (folded into every issue's tags) from
-      // the distinct-skill signal. Same `repo` used by the tokenize() tag build.
-      language: a.repo.language ?? null,
-      // TERM-35: stamp the search item's comment count (already in the response —
-      // zero extra egress). A NEUTRAL volume signal only: set solely when the
-      // search item carries a finite count >= 0; a failed/absent value leaves it
-      // undefined (never a fabricated 0), so a render's chip falls through cleanly.
-      commentsAtDiscovery: typeof a.issue.comments === "number" && Number.isFinite(a.issue.comments) && a.issue.comments >= 0 ? a.issue.comments : void 0
-    },
-    // Provenance: repo-first discovered items only (label-first omits the field).
-    ...a.discovered ? { discovered: true } : {},
-    raw: a.issue
-  };
-}
-async function aggregateContributions(opts = {}) {
-  const paceEnabled = opts.paceEnabled ?? !opts.fetchImpl;
-  const client = makeClient(opts.fetchImpl ?? fetchWithTimeout, {
-    paceEnabled,
-    gapMs: readReqGapMs(),
-    budgetMs: readBuildBudgetMs(),
-    sleep: opts.sleepImpl ?? realSleep,
-    now: opts.nowImpl ?? Date.now,
-    // Bound the unguarded probe on the REAL network only; injected-fetch tests get
-    // null so the probe stays deterministic (and its shared spy sleeper untouched).
-    probeTimeoutMs: opts.fetchImpl ? null : PROBE_TIMEOUT_MS
-  });
-  const queries = opts.queries ?? CONTRIB_SEARCH_QUERIES;
-  const maxContribItems = readMaxContribItems();
-  const startRl = await fetchRateLimit(client);
-  const coreHealthyAtStart = (startRl?.core?.remaining ?? 0) >= 500;
-  client.setSecondaryHint(coreHealthyAtStart);
-  const issues = (await searchContribIssues(client, queries)).slice(
-    0,
-    readMaxContribIssuesScanned()
-  );
-  const repoCache = /* @__PURE__ */ new Map();
-  const contribCache = /* @__PURE__ */ new Map();
-  const prRefsCache = /* @__PURE__ */ new Map();
-  const xbuild = opts.repoMetaCache;
-  const servedFromXbuild = /* @__PURE__ */ new Set();
-  const persistedXbuild = /* @__PURE__ */ new Set();
-  const xbuildTried = /* @__PURE__ */ new Set();
-  async function primeFromXbuild(key, fullName) {
-    if (!xbuild || xbuildTried.has(key)) return;
-    xbuildTried.add(key);
-    if (repoCache.has(key) && contribCache.has(key)) return;
-    let cached = null;
-    try {
-      cached = await xbuild.get(key);
-    } catch {
-      return;
-    }
-    if (!cached) return;
-    if (!repoCache.has(key)) {
-      const owner = fullName.split("/")[0] ?? "";
-      repoCache.set(key, {
-        full_name: fullName,
-        stargazers_count: cached.stars,
-        archived: cached.archived,
-        disabled: cached.disabled,
-        fork: cached.fork,
-        language: cached.language,
-        description: cached.description,
-        owner: { login: owner }
-      });
-    }
-    if (!contribCache.has(key)) {
-      contribCache.set(key, cached.contributors);
-      servedFromXbuild.add(key);
-    }
-  }
-  async function persistRepoMeta(fullName, repo, contributors) {
-    if (!xbuild) return;
-    const key = repoKey(fullName);
-    if (servedFromXbuild.has(key) || persistedXbuild.has(key)) return;
-    if (contributors === void 0) return;
-    persistedXbuild.add(key);
-    try {
-      await xbuild.set(key, {
-        stars: repo.stargazers_count,
-        contributors,
-        language: repo.language,
-        archived: repo.archived,
-        fork: repo.fork,
-        disabled: repo.disabled,
-        description: repo.description || null
-      });
-    } catch {
-    }
-  }
-  async function repoMeta(fullName) {
-    const key = repoKey(fullName);
-    const hit = repoCache.get(key);
-    if (hit !== void 0) return hit;
-    await primeFromXbuild(key, fullName);
-    const primed = repoCache.get(key);
-    if (primed !== void 0) return primed;
-    const r = await client.json(`/repos/${fullName}`) ?? null;
-    repoCache.set(key, r);
-    return r;
-  }
-  async function repoContribCount(fullName) {
-    const key = repoKey(fullName);
-    if (contribCache.has(key)) return contribCache.get(key);
-    await primeFromXbuild(key, fullName);
-    if (contribCache.has(key)) return contribCache.get(key);
-    const n = await contributorCount(client, fullName);
-    contribCache.set(key, n);
-    return n;
-  }
-  async function repoPRRefs(fullName) {
-    const key = repoKey(fullName);
-    if (prRefsCache.has(key)) return prRefsCache.get(key) ?? null;
-    const refs = await openPRIssueRefs(client, fullName);
-    prRefsCache.set(key, refs);
-    return refs;
-  }
-  const jobs = [];
-  const seen = /* @__PURE__ */ new Set();
-  const perRepo = /* @__PURE__ */ new Map();
-  let metaNull = 0;
-  let contribUndefined = 0;
-  let prRefsNull = 0;
-  for (const issue of issues) {
-    if (jobs.length >= maxContribItems) break;
-    const fullName = repoFullNameFromApiUrl2(issue.repository_url);
-    if (!fullName) continue;
-    const id = `contribute:${repoKey(fullName)}#${issue.number}`;
-    if (seen.has(id)) continue;
-    if (isExcludedRepo(fullName)) continue;
-    if (isAssigned(issue)) continue;
-    if ((perRepo.get(repoKey(fullName)) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) continue;
-    const title = decodeEntities(issue.title).trim();
-    const body = issue.body ? decodeEntities(issue.body) : "";
-    const labels = labelNames2(issue.labels);
-    if (looksLikeContentTask({ title, body, labels })) continue;
-    const repo = await repoMeta(fullName);
-    if (!repo) {
-      metaNull++;
-      continue;
-    }
-    const contributors = await repoContribCount(fullName);
-    if (contributors === void 0) contribUndefined++;
-    await persistRepoMeta(fullName, repo, contributors);
-    if (!passesContributionGate({
-      fullName,
-      stars: repo.stargazers_count,
-      contributors,
-      title,
-      archived: repo.archived,
-      fork: repo.fork
-    })) {
-      continue;
-    }
-    if (repo.disabled) continue;
-    const prRefs = await repoPRRefs(fullName);
-    if (prRefs === null) prRefsNull++;
-    const openPRsAtDiscovery = prRefs ? prRefs.has(issue.number) ? 1 : 0 : void 0;
-    const tags = normalize(
-      tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
-    );
-    seen.add(id);
-    perRepo.set(repoKey(fullName), (perRepo.get(repoKey(fullName)) ?? 0) + 1);
-    jobs.push(
-      buildContributionJob({
-        id,
-        fullName,
-        repo,
-        issue,
-        title,
-        body,
-        labels,
-        tags,
-        contributors,
-        // gate guarantees a number here
-        openPRsAtDiscovery
-      })
-    );
-  }
-  const doDiscovery = opts.discoverRepos ?? (opts.trendingSlugs != null || opts.vocabTerms != null);
-  let discoveredEmitted = 0;
-  let discoveryBudgetStopped = false;
-  if (doDiscovery && jobs.length < maxContribItems) {
-    const maxRepos = Math.min(
-      Math.max(0, opts.maxDiscoveredRepos ?? MAX_DISCOVERED_REPOS),
-      MAX_DISCOVERED_REPOS
-    );
-    const vocabTerms = (opts.vocabTerms ?? DISCOVERY_VOCAB_TERMS).slice(
-      0,
-      DISCOVERY_VOCAB_TERMS.length
-    );
-    const vocabCandidates = [];
-    for (const term of vocabTerms) {
-      if (client.getStats().budgetAborted || client.getStats().secondaryAborted) {
-        discoveryBudgetStopped = true;
-        break;
-      }
-      const res = await client.json(
-        `/search/repositories?q=${encodeURIComponent(term)}&sort=updated&order=desc&per_page=${DISCOVERY_REPOS_PER_TERM}`
-      );
-      for (const r of res?.items ?? []) {
-        if (!r?.full_name) continue;
-        if (!repoCache.has(repoKey(r.full_name))) {
-          repoCache.set(repoKey(r.full_name), {
-            full_name: r.full_name,
-            stargazers_count: r.stargazers_count,
-            archived: r.archived,
-            disabled: r.disabled ?? false,
-            fork: r.fork,
-            language: r.language,
-            description: r.description || null,
-            owner: r.owner
-          });
-        }
-        vocabCandidates.push({ fullName: r.full_name, stars: r.stargazers_count ?? 0 });
-      }
-    }
-    vocabCandidates.sort((a, b) => b.stars - a.stars);
-    const candidates = [];
-    const candSeen = /* @__PURE__ */ new Set();
-    for (const slug of opts.trendingSlugs ?? []) {
-      const s = slug?.toLowerCase();
-      if (s && !candSeen.has(repoKey(s))) {
-        candSeen.add(repoKey(s));
-        candidates.push(s);
-      }
-    }
-    for (const { fullName } of vocabCandidates) {
-      if (!candSeen.has(repoKey(fullName))) {
-        candSeen.add(repoKey(fullName));
-        candidates.push(fullName);
-      }
-    }
-    const scanned = candidates.slice(0, maxRepos);
-    for (const fullName of scanned) {
-      if (jobs.length >= maxContribItems) break;
-      if (client.getStats().budgetAborted || client.getStats().secondaryAborted) {
-        discoveryBudgetStopped = true;
-        break;
-      }
-      if (isExcludedRepo(fullName)) continue;
-      const repo = await repoMeta(fullName);
-      if (!repo) {
-        metaNull++;
-        continue;
-      }
-      if (repo.disabled) continue;
-      const contributors = await repoContribCount(fullName);
-      if (contributors === void 0) contribUndefined++;
-      await persistRepoMeta(fullName, repo, contributors);
-      if (repo.archived || repo.fork || repo.stargazers_count < MIN_STARS || contributors === void 0 || contributors < MIN_CONTRIBUTORS) {
-        continue;
-      }
-      const q = `repo:${fullName} is:issue is:open label:${DISCOVERY_ISSUE_LABELS}`;
-      const searchRes = await client.json(
-        `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE2}`
-      );
-      const repoIssues = (searchRes?.items ?? []).filter((it) => !it.pull_request);
-      let perRepoDiscovered = 0;
-      for (const issue of repoIssues) {
-        if (jobs.length >= maxContribItems) break;
-        if (perRepoDiscovered >= MAX_ISSUES_PER_DISCOVERED_REPO) break;
-        if ((perRepo.get(repoKey(fullName)) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) break;
-        const id = `contribute:${repoKey(fullName)}#${issue.number}`;
-        if (seen.has(id)) continue;
-        if (isAssigned(issue)) continue;
-        const title = decodeEntities(issue.title).trim();
-        if (!passesContributionGate({
-          fullName,
-          stars: repo.stargazers_count,
-          contributors,
-          title,
-          archived: repo.archived,
-          fork: repo.fork
-        })) {
-          continue;
-        }
-        const body = issue.body ? decodeEntities(issue.body) : "";
-        const labels = labelNames2(issue.labels);
-        if (looksLikeContentTask({ title, body, labels })) continue;
-        const prRefs = await repoPRRefs(fullName);
-        if (prRefs === null) prRefsNull++;
-        const openPRsAtDiscovery = prRefs ? prRefs.has(issue.number) ? 1 : 0 : void 0;
-        const tags = normalize(
-          tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
-        );
-        seen.add(id);
-        perRepo.set(repoKey(fullName), (perRepo.get(repoKey(fullName)) ?? 0) + 1);
-        perRepoDiscovered++;
-        discoveredEmitted++;
-        jobs.push(
-          buildContributionJob({
-            id,
-            fullName,
-            repo,
-            issue,
-            title,
-            body,
-            labels,
-            tags,
-            contributors,
-            openPRsAtDiscovery,
-            discovered: true
-          })
-        );
-      }
-    }
-  }
-  if (!opts.fetchImpl) {
-    const rl = await fetchRateLimit(client);
-    const core = rl?.core ? `${rl.core.remaining}/${rl.core.limit}` : "n/a";
-    const search = rl?.search ? `${rl.search.remaining}/${rl.search.limit}` : "n/a";
-    const noToken = !(process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"]);
-    const { pacedMs, secondaryAborted, budgetAborted, elapsedMs, gqlCost, gqlRemaining } = client.getStats();
-    console.info(
-      `[contribute] build metrics \u2014 scanned=${issues.length} reposDistinct=${repoCache.size} emitted=${jobs.length} discovered=${discoveredEmitted} metaNull=${metaNull} contribUndefined=${contribUndefined} prRefsNull=${prRefsNull} paced=${pacedMs} secondaryAborted=${secondaryAborted} budgetAborted=${budgetAborted} core=${core} search=${search} gqlCost=${gqlCost} gqlRemaining=${gqlRemaining ?? "n/a"} elapsed=${elapsedMs}` + (noToken ? " (NO TOKEN \u2192 60/hr)" : "")
-    );
-    if (discoveryBudgetStopped) {
-      console.warn(
-        `[contribute] repo-first discovery stopped early \u2014 build budget exhausted (emitted ${discoveredEmitted} discovered before the cap)`
-      );
-    }
-  }
-  return jobs;
-}
-var GITHUB_API2, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, DEFAULT_SEARCH_MAX_PAGES, MIN_SEARCH_MAX_PAGES, MAX_SEARCH_MAX_PAGES, DEFAULT_MAX_CONTRIB_ITEMS, MIN_MAX_CONTRIB_ITEMS, MAX_MAX_CONTRIB_ITEMS, DEFAULT_MAX_CONTRIB_ISSUES_SCANNED, MIN_MAX_CONTRIB_ISSUES_SCANNED, MAX_MAX_CONTRIB_ISSUES_SCANNED, MAX_DISCOVERED_REPOS, MAX_ISSUES_PER_DISCOVERED_REPO, DISCOVERY_REPOS_PER_TERM, DISCOVERY_VOCAB_TERMS, DISCOVERY_ISSUE_LABELS, repoKey;
-var init_contributions = __esm({
-  "../../packages/core/src/feeds/contributions.ts"() {
-    "use strict";
-    init_vocabulary();
-    init_entities();
-    init_bounty_gate();
-    init_contribution_gate();
-    init_contribution_classify();
-    init_github_bounties();
-    init_github();
-    init_http();
-    init_gh_governor();
-    GITHUB_API2 = "https://api.github.com";
-    CONTRIB_LABEL_QUERIES = [
-      'label:"good first issue" type:issue state:open',
-      'label:"good-first-issue" type:issue state:open',
-      'label:"help wanted" type:issue state:open',
-      'label:"help-wanted" type:issue state:open',
-      'label:"up-for-grabs" type:issue state:open',
-      // supply-expansion D: two more first-contribution label families widen the
-      // global newest-first slice WITHOUT relaxing the credential gate.
-      'label:"beginner-friendly" type:issue state:open',
-      'label:"first-timers-only" type:issue state:open'
-    ];
-    CONTRIB_LANGUAGE_QUERIES = [
-      ...["rust", "go", "python", "c++", "ruby"].map(
-        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
-      ),
-      ...["rust", "go"].map(
-        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
-      ),
-      // supply-expansion D: cover the high-volume web/enterprise ecosystems the
-      // original set omitted. TS/JS were previously left out of "good first issue"
-      // (the global slice over-represented them) but a LANGUAGE-scoped page surfaces
-      // DIFFERENT repos than the global newest-first slice, so re-including them widens
-      // distinct-repo coverage rather than duplicating it.
-      ...["typescript", "javascript", "java", "python"].map(
-        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
-      ),
-      ...["typescript", "javascript", "c#", "php"].map(
-        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
-      )
-    ];
-    CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
-    SEARCH_PER_PAGE2 = 100;
-    DEFAULT_SEARCH_MAX_PAGES = 1;
-    MIN_SEARCH_MAX_PAGES = 1;
-    MAX_SEARCH_MAX_PAGES = 5;
-    DEFAULT_MAX_CONTRIB_ITEMS = 400;
-    MIN_MAX_CONTRIB_ITEMS = 50;
-    MAX_MAX_CONTRIB_ITEMS = 1e3;
-    DEFAULT_MAX_CONTRIB_ISSUES_SCANNED = 1500;
-    MIN_MAX_CONTRIB_ISSUES_SCANNED = 100;
-    MAX_MAX_CONTRIB_ISSUES_SCANNED = 5e3;
-    MAX_DISCOVERED_REPOS = 15;
-    MAX_ISSUES_PER_DISCOVERED_REPO = 3;
-    DISCOVERY_REPOS_PER_TERM = 20;
-    DISCOVERY_VOCAB_TERMS = ["rust", "go", "python", "typescript"];
-    DISCOVERY_ISSUE_LABELS = '"good first issue","help wanted","good-first-issue","help-wanted"';
-    repoKey = (name) => name.toLowerCase();
   }
 });
 
@@ -4816,8 +5019,8 @@ async function getWithTimeout(governor, url, token, timeoutMs) {
   try {
     const res = await Promise.race([
       getP,
-      new Promise((resolve) => {
-        timer = setTimeout(() => resolve(null), timeoutMs);
+      new Promise((resolve2) => {
+        timer = setTimeout(() => resolve2(null), timeoutMs);
       })
     ]);
     if (res === null) controller.abort();
@@ -8407,6 +8610,936 @@ var init_legible_trajectory = __esm({
   }
 });
 
+// ../../packages/core/src/credential/sources.ts
+function classifyOne(src) {
+  if (src.isSelf) return "C";
+  if (src.isBot) return "B";
+  if (src.association !== void 0 && HUMAN_SET.has(src.association.toUpperCase())) return "A";
+  return "B";
+}
+function classifyReviewSources(input) {
+  if (input.reviewSources === void 0) return void 0;
+  return input.reviewSources.map((src) => {
+    const cls = classifyOne(src);
+    return { class: cls, association: src.association, label: CLASS_LABEL[cls] };
+  });
+}
+var SOURCE_CLASS, HUMAN_SET, CLASS_LABEL;
+var init_sources = __esm({
+  "../../packages/core/src/credential/sources.ts"() {
+    "use strict";
+    SOURCE_CLASS = {
+      /** `author_association` values that make a (non-bot, non-self) reviewer a
+       *  class-A independent human. Independence itself (is this maintainer affiliated
+       *  with the contributor?) is refined by the repo-provenance/independence layer
+       *  (TERM-46); this establishes the HUMAN class. */
+      HUMAN_ASSOCIATIONS: ["OWNER", "MEMBER", "COLLABORATOR"]
+    };
+    HUMAN_SET = new Set(
+      SOURCE_CLASS.HUMAN_ASSOCIATIONS.map((a) => a.toUpperCase())
+    );
+    CLASS_LABEL = {
+      A: "independent-human",
+      B: "automation",
+      C: "self-review"
+    };
+  }
+});
+
+// ../../packages/core/src/credential/independence.ts
+function repoOwner(repo) {
+  const owner = repo.split("/")[0];
+  return owner ? owner.toLowerCase() : null;
+}
+function computeRepoProvenance(facts) {
+  const reasons = [];
+  const owner = repoOwner(facts.repo);
+  const selfOwned = owner != null && facts.authorLogin != null && owner === facts.authorLogin.toLowerCase();
+  let ageDays2 = null;
+  if (facts.repoCreatedAt) {
+    const created = Date.parse(facts.repoCreatedAt);
+    const seen = Date.parse(facts.fetchedAt);
+    if (!Number.isNaN(created) && !Number.isNaN(seen)) ageDays2 = (seen - created) / MS_PER_DAY;
+  }
+  const dayOld = ageDays2 != null && ageDays2 < PROVENANCE.MIN_AGE_DAYS;
+  if (dayOld) reasons.push(`repo is ${Math.max(0, Math.floor(ageDays2))}d old (< ${PROVENANCE.MIN_AGE_DAYS}d)`);
+  if (selfOwned) reasons.push("repo is owned by the contributor (self-owned)");
+  if (facts.repoPrivate === true) reasons.push("repo is private (not a public OSS signal)");
+  if (selfOwned || dayOld || facts.repoPrivate === true) {
+    return { tier: "flagged", reasons };
+  }
+  if (facts.repoFork) reasons.push("repo is a fork");
+  const stars = facts.repoStars ?? 0;
+  const contributors = facts.repoContributors ?? 0;
+  const strongStars = facts.repoStars != null && stars >= PROVENANCE.STAR_FLOOR;
+  const strongContribs = facts.repoContributors != null && contributors >= PROVENANCE.CONTRIB_FLOOR;
+  const knownPublic = facts.repoPrivate === false;
+  const ageEstablished = ageDays2 != null && ageDays2 >= PROVENANCE.MIN_AGE_DAYS;
+  if (strongStars && strongContribs && knownPublic && ageEstablished) {
+    reasons.push(`${stars}\u2605, ${contributors}+ contributors, public, ${Math.floor(ageDays2)}d old`);
+    return { tier: "established", reasons };
+  }
+  reasons.push("external signals unknown or below floor");
+  return { tier: "weak", reasons };
+}
+function computeEventIndependence(facts) {
+  if (!facts.merged) return void 0;
+  if (facts.mergedById == null || facts.authorId == null) {
+    return {
+      merger: {
+        party: "merger",
+        independence: "unverified",
+        reasons: ["merger or author identity unresolved"]
+      }
+    };
+  }
+  if (facts.mergedById === facts.authorId) {
+    return {
+      merger: {
+        party: "merger",
+        independence: "affiliated",
+        reasons: ["self-merged (merger id === author id)"]
+      }
+    };
+  }
+  return {
+    merger: {
+      party: "merger",
+      independence: "independent",
+      reasons: ["distinct merger id (identity check only; deeper affiliation not yet verified)"]
+    }
+  };
+}
+function eventCountsAtFullWeight(event, provenance) {
+  return event.independence === "independent" && provenance.tier === "established";
+}
+function computeReviewerIndependence(signals) {
+  if (signals.isSelf) {
+    return { party: "reviewer", independence: "affiliated", reasons: ["self-review (reviewer is the contributor)"] };
+  }
+  if (signals.isBot) {
+    return { party: "reviewer", independence: "unverified", reasons: ["automated reviewer \u2014 not an independent human party"] };
+  }
+  if (signals.sharedOrgWithAuthor === true) {
+    return { party: "reviewer", independence: "affiliated", reasons: ["shares a public org with the author"] };
+  }
+  if (signals.sharedOrgWithAuthor === false) {
+    return {
+      party: "reviewer",
+      independence: "independent",
+      reasons: ["no shared public org with the author (public-org check only; external-history check deferred)"]
+    };
+  }
+  return { party: "reviewer", independence: "unverified", reasons: ["affiliation signal absent (read failed/skipped)"] };
+}
+var PROVENANCE, MS_PER_DAY;
+var init_independence = __esm({
+  "../../packages/core/src/credential/independence.ts"() {
+    "use strict";
+    PROVENANCE = {
+      /** A repo younger than this (days) is "day-old" → flagged (can't have earned
+       *  external trust yet). */
+      MIN_AGE_DAYS: 30,
+      /** Stars floor for an `established` external signal. */
+      STAR_FLOOR: 50,
+      /** Distinct-contributor floor for an `established` external signal (matches the
+       *  ≥5 external-contributor maintainer gate, plan 062). */
+      CONTRIB_FLOOR: 5
+    };
+    MS_PER_DAY = 864e5;
+  }
+});
+
+// ../../packages/core/src/credential/redaction.ts
+function redactThirdParty(party, consent) {
+  const c = consent ?? DENY_CONSENT;
+  const showIdentity = c.identityOptIn === true && c.erased === false;
+  return {
+    label: showIdentity ? party.login : ANON_MAINTAINER_LABEL,
+    identity: showIdentity ? party.login : null
+  };
+}
+function renderMaintainerQuote(quote, consent) {
+  const c = consent ?? DENY_CONSENT;
+  if (quote && c.quoteOptIn === true && c.erased === false) {
+    return { text: quote, kind: "verbatim" };
+  }
+  return { text: "", kind: "omitted" };
+}
+var ANON_MAINTAINER_LABEL, DENY_CONSENT;
+var init_redaction = __esm({
+  "../../packages/core/src/credential/redaction.ts"() {
+    "use strict";
+    ANON_MAINTAINER_LABEL = "a repo maintainer";
+    DENY_CONSENT = {
+      identityOptIn: false,
+      quoteOptIn: false,
+      erased: false
+    };
+  }
+});
+
+// ../../packages/core/src/credential/decisions.ts
+function classifyDecisionEvidence(facts) {
+  const d = facts.defense;
+  const defenseQualifies = d != null && d.substantiveCorrectness === true && d.maintainerVerified === true && d.reviewerIndependence === "independent" && facts.provenance.tier === "established";
+  if (defenseQualifies) return "defended_finding";
+  const frictionless = facts.defense == null && facts.humanChangeRequests === 0 && facts.merger?.independence === "independent" && facts.provenance.tier === "established";
+  if (frictionless) return "frictionless_merge";
+  const engaged = facts.humanChangeRequests != null && facts.humanChangeRequests > 0 || d != null;
+  return engaged ? "responsive" : "none";
+}
+var DECISION_LABEL;
+var init_decisions = __esm({
+  "../../packages/core/src/credential/decisions.ts"() {
+    "use strict";
+    DECISION_LABEL = {
+      frictionless_merge: "clean execution \u2014 merged with zero human change-requests",
+      defended_finding: "defended finding \u2014 verified by the maintainer",
+      responsive: "responsive to review",
+      none: "no decision evidence"
+    };
+  }
+});
+
+// ../../packages/core/src/credential/metrics-hygiene.ts
+function knownCount(v) {
+  return v != null && Number.isFinite(v) && v >= 0;
+}
+function hoursBetween(startIso, endIso) {
+  if (!startIso || !endIso) return null;
+  const start = Date.parse(startIso);
+  const end = Date.parse(endIso);
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return null;
+  return (end - start) / MS_PER_HOUR;
+}
+function deriveHygienicMetrics(facts) {
+  const reasons = [];
+  const sized = knownCount(facts.additions) && knownCount(facts.deletions);
+  const totalLines = sized ? facts.additions + facts.deletions : null;
+  let sizeClass;
+  if (totalLines != null) {
+    sizeClass = totalLines >= METRICS.LARGE_DIFF_LINES ? "large" : totalLines < METRICS.SMALL_DIFF_LINES ? "small" : "medium";
+  }
+  const deletionHeavy = sized ? facts.deletions >= METRICS.DELETION_HEAVY_FLOOR && facts.deletions > facts.additions * 2 : void 0;
+  const hours = hoursBetween(facts.prCreatedAt, facts.mergedAt);
+  const median = facts.repoMedianHoursToMerge != null && Number.isFinite(facts.repoMedianHoursToMerge) ? facts.repoMedianHoursToMerge : null;
+  let timeToMerge;
+  if (hours != null && median != null && median > 0) {
+    timeToMerge = { hours, repoMedianHours: median, ratio: hours / median };
+  }
+  const fastAbsolute = hours != null && hours <= METRICS.FAST_MERGE_HOURS;
+  const fastVsBaseline = timeToMerge != null && timeToMerge.ratio <= METRICS.FAST_VS_MEDIAN_RATIO;
+  const riskySurface = sizeClass === "large" || facts.securitySensitive === true;
+  const rubberStampRisk = (fastAbsolute || fastVsBaseline) && riskySurface;
+  if (rubberStampRisk) {
+    if (fastAbsolute) reasons.push(`merged in ${hours.toFixed(2)}h (\u2264 ${METRICS.FAST_MERGE_HOURS}h)`);
+    if (fastVsBaseline) reasons.push(`merged at ${timeToMerge.ratio.toFixed(2)}\xD7 the repo median`);
+    if (sizeClass === "large") reasons.push("large diff");
+    if (facts.securitySensitive === true) reasons.push("security-sensitive paths");
+  }
+  return {
+    ...timeToMerge ? { timeToMerge } : {},
+    ...sizeClass ? { sizeClass } : {},
+    ...deletionHeavy !== void 0 ? { deletionHeavy } : {},
+    rubberStampRisk,
+    rubberStampReasons: reasons
+  };
+}
+var METRICS, MS_PER_HOUR;
+var init_metrics_hygiene = __esm({
+  "../../packages/core/src/credential/metrics-hygiene.ts"() {
+    "use strict";
+    METRICS = {
+      /** Total changed lines at/above which a diff is `large`. */
+      LARGE_DIFF_LINES: 400,
+      /** Total changed lines below which a diff is `small`. */
+      SMALL_DIFF_LINES: 50,
+      /** A merge at/under this many hours is "fast" in absolute terms. */
+      FAST_MERGE_HOURS: 1,
+      /** A merge at/under this fraction of the repo median is "fast" vs baseline. */
+      FAST_VS_MEDIAN_RATIO: 0.1,
+      /** Deletions must be at least this many lines AND exceed additions×2 to count as
+       *  deletion-heavy (avoids flagging trivial cleanups). */
+      DELETION_HEAVY_FLOOR: 50
+    };
+    MS_PER_HOUR = 36e5;
+  }
+});
+
+// ../../packages/core/src/credential/dossier.ts
+function toMs(iso) {
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? null : t;
+}
+function buildTimeline(facts, sourceClasses) {
+  const { prCreatedAt, commits } = facts;
+  const sources = facts.reviewSources;
+  if (prCreatedAt == null) return {};
+  if (commits == null) return {};
+  if (sources == null || sourceClasses == null) return {};
+  if (!sources.every((s) => s.submittedAt != null)) return {};
+  if (!commits.every((c) => c.committedAt != null)) return {};
+  const events = [];
+  const openedMs = toMs(prCreatedAt);
+  if (openedMs == null) return {};
+  events.push({ at: openedMs, rank: TIMELINE_TIE_RANK.opened, isReview: false, isSelf: false, node: { kind: "opened", at: prCreatedAt } });
+  for (const c of commits) {
+    const cm = toMs(c.committedAt);
+    if (cm == null) return {};
+    events.push({ at: cm, rank: TIMELINE_TIE_RANK.commit, isReview: false, isSelf: false, node: { kind: "commit", at: c.committedAt, shortSha: c.sha.slice(0, 8) } });
+  }
+  for (let i = 0; i < sources.length; i++) {
+    const s = sources[i];
+    const rm = toMs(s.submittedAt);
+    if (rm == null) return {};
+    events.push({
+      at: rm,
+      rank: TIMELINE_TIE_RANK.review,
+      isReview: true,
+      isSelf: s.isSelf === true,
+      node: {
+        kind: "review",
+        at: s.submittedAt,
+        class: sourceClasses[i]?.class ?? "B",
+        ...s.pseudonym ? { pseudonym: s.pseudonym } : {},
+        ...s.state ? { state: s.state } : {}
+      }
+    });
+  }
+  if (facts.merged && facts.mergedAt) {
+    const mm = toMs(facts.mergedAt);
+    if (mm != null) events.push({ at: mm, rank: TIMELINE_TIE_RANK.merged, isReview: false, isSelf: false, node: { kind: "merged", at: facts.mergedAt } });
+  }
+  events.sort((a, b) => a.at - b.at || a.rank - b.rank);
+  let reviewRounds = 0;
+  let runHasNonSelf = false;
+  for (const e of events) {
+    if (e.node.kind === "commit") {
+      if (runHasNonSelf) reviewRounds++;
+      runHasNonSelf = false;
+    } else if (e.isReview && !e.isSelf) {
+      runHasNonSelf = true;
+    }
+  }
+  if (runHasNonSelf) reviewRounds++;
+  return { timeline: events.map((e) => e.node), reviewRounds };
+}
+function buildDossierEnvelope(facts, defense) {
+  const provenance = computeRepoProvenance(facts);
+  const event = computeEventIndependence(facts);
+  const merger = event?.merger;
+  const sourceClasses = classifyReviewSources({ reviewSources: facts.reviewSources });
+  let humanChangeRequests;
+  const sources = facts.reviewSources;
+  if (sources != null && sources.every((s) => s.state != null)) {
+    humanChangeRequests = sources.filter(
+      (s) => !s.isBot && !s.isSelf && s.state === "CHANGES_REQUESTED"
+    ).length;
+  }
+  const reviewThread = sources != null && sourceClasses != null ? sources.map((s, i) => ({
+    ...s.pseudonym ? { pseudonym: s.pseudonym } : {},
+    class: sourceClasses[i]?.class ?? "B",
+    ...s.state ? { state: s.state } : {},
+    submittedAt: s.submittedAt ?? null,
+    independence: computeReviewerIndependence(s).independence
+  })) : void 0;
+  const decisionEvidence = classifyDecisionEvidence({
+    humanChangeRequests,
+    merger,
+    provenance,
+    defense
+  });
+  const hygienicMetrics = deriveHygienicMetrics({
+    prCreatedAt: facts.prCreatedAt,
+    mergedAt: facts.mergedAt,
+    additions: facts.additions,
+    deletions: facts.deletions
+    // Repo-median baseline is deferred (governor-budget review, plan risk #5) —
+    // absent baseline ⇒ time-to-merge honestly omitted by the deriver.
+  });
+  const prStats = knownCount(facts.additions) && knownCount(facts.deletions) && knownCount(facts.changedFiles) ? { additions: facts.additions, deletions: facts.deletions, changedFiles: facts.changedFiles } : void 0;
+  const linkage = facts.closesIssues.length > 0 && facts.linkageSource !== "none" ? { closesIssues: [...facts.closesIssues], linkageSource: facts.linkageSource } : void 0;
+  const { timeline, reviewRounds } = buildTimeline(facts, sourceClasses);
+  const threadStats = facts.reviewThreadStats ? {
+    total: facts.reviewThreadStats.total,
+    resolved: facts.reviewThreadStats.resolved,
+    unresolved: facts.reviewThreadStats.unresolved
+  } : void 0;
+  return {
+    v: "dossier/1",
+    provenance,
+    ...merger ? { merger } : {},
+    fullWeight: merger != null && eventCountsAtFullWeight(merger, provenance),
+    ...sourceClasses ? { sourceClasses } : {},
+    ...reviewThread ? { reviewThread } : {},
+    ...humanChangeRequests !== void 0 ? { humanChangeRequests } : {},
+    decisionEvidence,
+    hygienicMetrics,
+    ...prStats ? { prStats } : {},
+    ...linkage ? linkage : {},
+    ...timeline ? { timeline } : {},
+    ...reviewRounds !== void 0 ? { reviewRounds } : {},
+    ...threadStats ? { threadStats } : {}
+  };
+}
+var TIMELINE_TIE_RANK;
+var init_dossier = __esm({
+  "../../packages/core/src/credential/dossier.ts"() {
+    "use strict";
+    init_sources();
+    init_independence();
+    init_decisions();
+    init_metrics_hygiene();
+    TIMELINE_TIE_RANK = { opened: 0, commit: 1, review: 2, merged: 3 };
+  }
+});
+
+// ../../packages/core/src/credential/synthesis.ts
+function parsePath(path) {
+  if (path.length === 0) return null;
+  const segments = [];
+  for (const part of path.split(".")) {
+    const m = part.match(/^([^[\]]*)((?:\[\d+\])*)$/);
+    if (!m) return null;
+    const base = m[1];
+    if (base.length > 0) {
+      if (FORBIDDEN_SEGMENTS.has(base)) return null;
+      segments.push(base);
+    } else if (m[2].length === 0) {
+      return null;
+    }
+    const idx = m[2];
+    if (idx) {
+      for (const g of idx.matchAll(/\[(\d+)\]/g)) segments.push(g[1]);
+    }
+  }
+  return segments.length > 0 ? segments : null;
+}
+function resolveCitation(source, cite) {
+  if (typeof cite !== "string" || !cite.startsWith(CITE_PREFIX)) {
+    return { cite: String(cite), path: "", resolved: false };
+  }
+  const path = cite.slice(CITE_PREFIX.length);
+  const segments = parsePath(path);
+  if (!segments) return { cite, path, resolved: false };
+  let cur = source;
+  for (const seg of segments) {
+    if (cur == null || typeof cur !== "object") return { cite, path, resolved: false };
+    if (Array.isArray(cur)) {
+      const i = Number(seg);
+      if (!Number.isInteger(i) || i < 0 || i >= cur.length) return { cite, path, resolved: false };
+      cur = cur[i];
+    } else {
+      if (!Object.prototype.hasOwnProperty.call(cur, seg)) return { cite, path, resolved: false };
+      cur = cur[seg];
+    }
+  }
+  if (cur === void 0) return { cite, path, resolved: false };
+  return { cite, path, resolved: true, value: cur };
+}
+function resolveCitations(source, cites) {
+  return cites.map((c) => resolveCitation(source, c));
+}
+function citeSourceClass(source, cite) {
+  if (typeof cite !== "string") return null;
+  const m = cite.match(/^env:(sourceClasses|reviewThread)\[(\d+)\]/);
+  if (!m) return null;
+  const r = resolveCitation(source, `${CITE_PREFIX}${m[1]}[${m[2]}].class`);
+  const v = r.resolved ? r.value : void 0;
+  return v === "A" || v === "B" || v === "C" ? v : null;
+}
+function citesConverge(source, cites) {
+  if (!Array.isArray(cites)) return false;
+  const classes = /* @__PURE__ */ new Set();
+  for (const c of cites) {
+    const cls = citeSourceClass(source, c);
+    if (cls) classes.add(cls);
+  }
+  return classes.size >= 2;
+}
+function claimFullyResolves(source, claim) {
+  if (claim.cites.length === 0) return false;
+  return claim.cites.every((c) => resolveCitation(source, c).resolved);
+}
+function citablePaths(source, prefix = "", depth = 0) {
+  if (depth > 6 || source == null || typeof source !== "object") return [];
+  const out = [];
+  const push = (p, v) => {
+    out.push(`${CITE_PREFIX}${p}`);
+    if (v != null && typeof v === "object") out.push(...citablePaths(v, p, depth + 1));
+  };
+  if (Array.isArray(source)) {
+    source.forEach((v, i) => push(prefix ? `${prefix}[${i}]` : `[${i}]`, v));
+  } else {
+    for (const [k, v] of Object.entries(source)) {
+      if (v === void 0) continue;
+      push(prefix ? `${prefix}.${k}` : k, v);
+    }
+  }
+  return out;
+}
+function projectForSynthesis(env) {
+  if (env == null || typeof env !== "object") return null;
+  const tier = enumOf(env.provenance?.tier, TIER_SET);
+  const decisionEvidence = enumOf(env.decisionEvidence, DECISION_SET);
+  const rubberStampRisk = typeof env.hygienicMetrics?.rubberStampRisk === "boolean" ? env.hygienicMetrics.rubberStampRisk : void 0;
+  if (tier === void 0 || typeof env.fullWeight !== "boolean" || decisionEvidence === void 0 || rubberStampRisk === void 0) {
+    return null;
+  }
+  const src = {
+    provenance: { tier },
+    fullWeight: env.fullWeight,
+    decisionEvidence,
+    hygienicMetrics: { rubberStampRisk }
+  };
+  const hm = env.hygienicMetrics;
+  const sizeClass = enumOf(hm.sizeClass, SIZE_CLASS_SET);
+  if (sizeClass !== void 0) src.hygienicMetrics.sizeClass = sizeClass;
+  if (typeof hm.deletionHeavy === "boolean") src.hygienicMetrics.deletionHeavy = hm.deletionHeavy;
+  if (hm.timeToMerge) {
+    const hours = boundedNum(hm.timeToMerge.hours);
+    const repoMedianHours = boundedNum(hm.timeToMerge.repoMedianHours);
+    const ratio = boundedNum(hm.timeToMerge.ratio);
+    if (hours !== void 0 && repoMedianHours !== void 0 && ratio !== void 0) {
+      src.hygienicMetrics.timeToMerge = { hours, repoMedianHours, ratio };
+    }
+  }
+  if (env.merger) {
+    const party = enumOf(env.merger.party, PARTY_SET);
+    const independence = enumOf(env.merger.independence, INDEPENDENCE_SET);
+    if (party !== void 0 && independence !== void 0) src.merger = { party, independence };
+  }
+  if (Array.isArray(env.sourceClasses)) {
+    const out = [];
+    for (const s of env.sourceClasses) {
+      const cls = enumOf(s?.class, /* @__PURE__ */ new Set(["A", "B", "C"]));
+      const label = enumOf(s?.label, LABEL_SET);
+      if (cls === void 0 || label === void 0) continue;
+      const entry = { class: cls, label };
+      const association = enumOf(s.association, ASSOCIATION_SET);
+      if (association !== void 0) entry.association = association;
+      out.push(entry);
+    }
+    if (out.length > 0) src.sourceClasses = out;
+  }
+  if (Array.isArray(env.reviewThread)) {
+    const out = [];
+    for (const t of env.reviewThread) {
+      const cls = enumOf(t?.class, /* @__PURE__ */ new Set(["A", "B", "C"]));
+      const independence = enumOf(t?.independence, INDEPENDENCE_SET);
+      if (cls === void 0 || independence === void 0) continue;
+      const entry = { class: cls, independence };
+      const pseudonym = validPseudonym(t.pseudonym);
+      if (pseudonym !== void 0) entry.pseudonym = pseudonym;
+      const state = enumOf(t.state, REVIEW_STATE_SET);
+      if (state !== void 0) entry.state = state;
+      const submittedAt = validTs(t.submittedAt);
+      if (submittedAt !== void 0) entry.submittedAt = submittedAt;
+      out.push(entry);
+    }
+    if (out.length > 0) src.reviewThread = out;
+  }
+  const hcr = boundedCount(env.humanChangeRequests);
+  if (hcr !== void 0) src.humanChangeRequests = hcr;
+  if (env.prStats) {
+    const additions = boundedCount(env.prStats.additions);
+    const deletions = boundedCount(env.prStats.deletions);
+    const changedFiles = boundedCount(env.prStats.changedFiles);
+    if (additions !== void 0 && deletions !== void 0 && changedFiles !== void 0) {
+      src.prStats = { additions, deletions, changedFiles };
+    }
+  }
+  if (Array.isArray(env.closesIssues)) {
+    const nums = env.closesIssues.filter((n) => boundedCount(n) !== void 0);
+    const linkageSource = enumOf(env.linkageSource, LINKAGE_SET);
+    if (nums.length > 0 && nums.length === env.closesIssues.length && linkageSource !== void 0) {
+      src.closesIssues = nums;
+      src.linkageSource = linkageSource;
+    }
+  }
+  if (Array.isArray(env.timeline)) {
+    const out = [];
+    let ok = true;
+    for (const node of env.timeline) {
+      const kind = enumOf(node?.kind, /* @__PURE__ */ new Set(["opened", "commit", "review", "merged"]));
+      const at = validTs(node?.at);
+      if (kind === void 0 || at === void 0) {
+        ok = false;
+        break;
+      }
+      const n = { kind, at };
+      if (kind === "commit") {
+        const shortSha = typeof node.shortSha === "string" && SHORT_SHA_RE.test(node.shortSha) ? node.shortSha : void 0;
+        if (shortSha === void 0) {
+          ok = false;
+          break;
+        }
+        n.shortSha = shortSha;
+      } else if (kind === "review") {
+        const cls = enumOf(node.class, /* @__PURE__ */ new Set(["A", "B", "C"]));
+        if (cls === void 0) {
+          ok = false;
+          break;
+        }
+        n.class = cls;
+        const pseudonym = validPseudonym(node.pseudonym);
+        if (pseudonym !== void 0) n.pseudonym = pseudonym;
+        const state = enumOf(node.state, REVIEW_STATE_SET);
+        if (state !== void 0) n.state = state;
+      }
+      out.push(n);
+    }
+    if (ok && out.length > 0) src.timeline = out;
+  }
+  const reviewRounds = boundedCount(env.reviewRounds);
+  if (reviewRounds !== void 0) src.reviewRounds = reviewRounds;
+  if (env.threadStats) {
+    const total = boundedCount(env.threadStats.total);
+    const resolved = boundedCount(env.threadStats.resolved);
+    const unresolved = boundedCount(env.threadStats.unresolved);
+    if (total !== void 0 && resolved !== void 0 && unresolved !== void 0) {
+      src.threadStats = { total, resolved, unresolved };
+    }
+  }
+  return src;
+}
+function buildRollupSource(baseRepo, inputs) {
+  let fullWeightCount = 0;
+  let totalAdditions = 0;
+  let totalDeletions = 0;
+  let totalChangedFiles = 0;
+  let reviewRoundsTotal = 0;
+  let independentReviewCount = 0;
+  let defendedFindingCount = 0;
+  let issueLinkedCount = 0;
+  let bestTier = "weak";
+  const tierRank = {
+    flagged: 0,
+    weak: 1,
+    established: 2
+  };
+  const gradeMap = /* @__PURE__ */ new Map();
+  for (const it of inputs) {
+    const env = it.env;
+    if (env.fullWeight) fullWeightCount += 1;
+    const tier = env.provenance?.tier;
+    if ((tier === "established" || tier === "weak" || tier === "flagged") && tierRank[tier] > tierRank[bestTier]) {
+      bestTier = tier;
+    }
+    if (env.prStats) {
+      totalAdditions += env.prStats.additions;
+      totalDeletions += env.prStats.deletions;
+      totalChangedFiles += env.prStats.changedFiles;
+    }
+    if (typeof env.reviewRounds === "number") reviewRoundsTotal += env.reviewRounds;
+    if (env.merger?.independence === "independent") independentReviewCount += 1;
+    if (env.decisionEvidence === "defended_finding") defendedFindingCount += 1;
+    if (env.closesIssues && env.closesIssues.length > 0) issueLinkedCount += 1;
+    const gradeRank = {
+      "no-signal": 0,
+      process: 1,
+      medium: 2,
+      high: 3
+    };
+    for (const c of it.sections?.competencies ?? []) {
+      const prev = gradeMap.get(c.name);
+      if (!prev || gradeRank[c.grade] > gradeRank[prev.grade]) {
+        gradeMap.set(c.name, { name: c.name, grade: c.grade });
+      }
+    }
+  }
+  return {
+    baseRepo,
+    prCount: inputs.length,
+    fullWeightCount,
+    repoTier: bestTier,
+    totalAdditions,
+    totalDeletions,
+    totalChangedFiles,
+    reviewRoundsTotal,
+    independentReviewCount,
+    defendedFindingCount,
+    issueLinkedCount,
+    competencyGrades: COMPETENCY_NAMES.map((n) => gradeMap.get(n)).filter(
+      (g) => g !== void 0
+    )
+  };
+}
+function buildPass1System(kind) {
+  const hygiene = HYGIENE_PRINCIPLES_S6.map((p, i) => `${i + 1}. ${p}`).join("\n");
+  const taxonomy = kind === "pr" ? `
+
+COMPETENCY TAXONOMY (use these names ONLY, never free text): ${COMPETENCY_NAMES.join(", ")}.
+Grades: ${COMPETENCY_GRADES.join(", ")}. Grade "process" = procedural/engagement-level signal (e.g. a review round occurred), NOT strong competence; "no-signal" = the facts carry nothing for it (omit rather than pad).` : '\n\nEmit EXACTLY one claim of kind="bullet": a single, plain, non-inflated r\xE9sum\xE9 bullet for this repository rollup. No superlatives, no unverifiable scope.';
+  const framing = kind === "pr" ? 'Produce: one kind="thesis" claim (what the contribution was), one kind="decision" claim (how it was reviewed/decided), and zero or more kind="competency" claims.' : "Produce the single r\xE9sum\xE9 bullet described below.";
+  return `${CITATION_CONTRACT}
+
+METRICS-HYGIENE PRINCIPLES (obey all \u2014 the render enforces the same rails):
+${hygiene}${taxonomy}
+
+${framing}`;
+}
+function buildPass1User(source, kind) {
+  const allowed = citablePaths(source);
+  return [
+    `KIND: ${kind}`,
+    "SOURCE (the only facts you may use):",
+    JSON.stringify(source),
+    "",
+    "ALLOWED CITES (cite ONLY from this list):",
+    allowed.join("\n")
+  ].join("\n");
+}
+function buildPass2System() {
+  return VERIFY_CONTRACT;
+}
+function buildPass2User(claims, source) {
+  const blocks = claims.map((cl) => {
+    const resolved = resolveCitations(source, cl.cites).map((r) => `  ${r.cite} = ${r.resolved ? JSON.stringify(r.value) : "<UNRESOLVED>"}`).join("\n");
+    const comp = cl.competency ? ` [competency ${cl.competency.name}=${cl.competency.grade}]` : "";
+    return `CLAIM ${cl.id} (${cl.kind})${comp}:
+  text: ${JSON.stringify(cl.text)}
+  evidence:
+${resolved}`;
+  });
+  return `Verify each claim against ITS evidence excerpts only.
+
+${blocks.join("\n\n")}`;
+}
+function extractJson(text) {
+  if (typeof text !== "string") return null;
+  const start = text.indexOf("{");
+  if (start < 0) return null;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          return JSON.parse(text.slice(start, i + 1));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+function parsePass1(raw) {
+  const obj = typeof raw === "string" ? extractJson(raw) : raw;
+  if (obj == null || typeof obj !== "object" || !Array.isArray(obj.claims)) {
+    return { claims: [] };
+  }
+  const claims = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const c of obj.claims) {
+    if (c == null || typeof c !== "object") continue;
+    const o = c;
+    const kind = o.kind;
+    if (kind !== "thesis" && kind !== "decision" && kind !== "competency" && kind !== "bullet") continue;
+    const text = typeof o.text === "string" ? o.text.trim() : "";
+    if (text.length === 0) continue;
+    const cites = Array.isArray(o.cites) ? o.cites.filter((x) => typeof x === "string") : [];
+    let id = typeof o.id === "string" && o.id.length > 0 ? o.id : `c${claims.length + 1}`;
+    while (seen.has(id)) id = `${id}_`;
+    seen.add(id);
+    const claim = { id, kind, text, cites };
+    if (kind === "competency") {
+      const comp = o.competency;
+      if (!comp || !isCompetencyName(comp.name) || !isCompetencyGrade(comp.grade)) continue;
+      claim.competency = { name: comp.name, grade: comp.grade };
+    }
+    claims.push(claim);
+  }
+  return { claims };
+}
+function parseVerdict(raw) {
+  const obj = typeof raw === "string" ? extractJson(raw) : raw;
+  const supported = obj != null && typeof obj === "object" && Array.isArray(obj.supported) ? obj.supported.filter((x) => typeof x === "string") : [];
+  return { supported };
+}
+function applyVerdict(claims, verdict) {
+  const ok = new Set(verdict.supported);
+  const kept = claims.filter((c) => ok.has(c.id));
+  return { kept, dropped: claims.length - kept.length };
+}
+function dropUnresolvableCites(source, claims) {
+  const kept = claims.filter((c) => claimFullyResolves(source, c));
+  return { kept, dropped: claims.length - kept.length };
+}
+function words(text) {
+  return text.toLowerCase().match(/[a-z0-9_]+/g) ?? [];
+}
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function textContainsLogin(text, login) {
+  if (typeof text !== "string" || typeof login !== "string") return false;
+  const f = login.trim();
+  if (f.length === 0) return false;
+  return new RegExp(`(^|[^a-z0-9-])${escapeRegex(f)}([^a-z0-9-]|$)`, "i").test(text);
+}
+function dropIdentityTokens(forbidden, claims) {
+  const logins = forbidden.filter((f) => typeof f === "string" && f.trim().length > 0).map((f) => f.trim());
+  if (logins.length === 0) return { kept: claims, dropped: 0 };
+  const patterns = logins.map((f) => new RegExp(`(^|[^a-z0-9-])${escapeRegex(f)}([^a-z0-9-]|$)`, "i"));
+  const kept = claims.filter((c) => !patterns.some((re) => re.test(c.text)));
+  return { kept, dropped: claims.length - kept.length };
+}
+function dropNgramOverlap(promptSources, claims, maxRun = 10) {
+  const windowLen = maxRun + 1;
+  const sourceGrams = /* @__PURE__ */ new Set();
+  for (const src of promptSources) {
+    const toks = words(src);
+    for (let i = 0; i + windowLen <= toks.length; i++) {
+      sourceGrams.add(toks.slice(i, i + windowLen).join(" "));
+    }
+  }
+  if (sourceGrams.size === 0) return { kept: claims, dropped: 0 };
+  const overlaps = (text) => {
+    const toks = words(text);
+    for (let i = 0; i + windowLen <= toks.length; i++) {
+      if (sourceGrams.has(toks.slice(i, i + windowLen).join(" "))) return true;
+    }
+    return false;
+  };
+  const kept = claims.filter((c) => !overlaps(c.text));
+  return { kept, dropped: claims.length - kept.length };
+}
+function assembleSections(kept) {
+  const thesis = kept.find((c) => c.kind === "thesis");
+  const decision = kept.find((c) => c.kind === "decision");
+  const gradeRank = {
+    "no-signal": 0,
+    process: 1,
+    medium: 2,
+    high: 3
+  };
+  const byName = /* @__PURE__ */ new Map();
+  for (const c of kept) {
+    if (c.kind !== "competency" || !c.competency) continue;
+    const entry = { name: c.competency.name, grade: c.competency.grade, cites: c.cites, text: c.text };
+    const prev = byName.get(entry.name);
+    if (!prev || gradeRank[entry.grade] > gradeRank[prev.grade]) byName.set(entry.name, entry);
+  }
+  const competencies = COMPETENCY_NAMES.map((n) => byName.get(n)).filter(
+    (c) => c !== void 0
+  );
+  return {
+    thesisContribution: thesis?.text ?? "",
+    decisionNarrative: decision?.text ?? "",
+    competencies
+  };
+}
+function assembleRollup(kept) {
+  const bullet = kept.find((c) => c.kind === "bullet");
+  return { resumeBullet: bullet?.text ?? "" };
+}
+var SYNTHESIS_MODEL, SYNTHESIS_VERSION, ROLLUP_VERSION, CITE_PREFIX, COMPETENCY_NAMES, COMPETENCY_NAME_SET, isCompetencyName, COMPETENCY_GRADES, COMPETENCY_GRADE_SET, isCompetencyGrade, FORBIDDEN_SEGMENTS, TIER_SET, DECISION_SET, INDEPENDENCE_SET, PARTY_SET, LABEL_SET, ASSOCIATION_SET, REVIEW_STATE_SET, SIZE_CLASS_SET, LINKAGE_SET, SYN_PSEUDONYM_RE, SHORT_SHA_RE, ISO_TS_RE, enumOf, boundedCount, boundedNum, validTs, validPseudonym, HYGIENE_PRINCIPLES_S6, CITATION_CONTRACT, VERIFY_CONTRACT;
+var init_synthesis = __esm({
+  "../../packages/core/src/credential/synthesis.ts"() {
+    "use strict";
+    SYNTHESIS_MODEL = "claude-sonnet-5";
+    SYNTHESIS_VERSION = "synthesis/1";
+    ROLLUP_VERSION = "rollup/1";
+    CITE_PREFIX = "env:";
+    COMPETENCY_NAMES = [
+      "code-authorship",
+      "iterative-refinement",
+      "independent-review",
+      "defect-resolution",
+      "repository-standing",
+      "issue-linkage"
+    ];
+    COMPETENCY_NAME_SET = new Set(COMPETENCY_NAMES);
+    isCompetencyName = (v) => typeof v === "string" && COMPETENCY_NAME_SET.has(v);
+    COMPETENCY_GRADES = [
+      "high",
+      "medium",
+      "process",
+      "no-signal"
+    ];
+    COMPETENCY_GRADE_SET = new Set(COMPETENCY_GRADES);
+    isCompetencyGrade = (v) => typeof v === "string" && COMPETENCY_GRADE_SET.has(v);
+    FORBIDDEN_SEGMENTS = /* @__PURE__ */ new Set(["__proto__", "prototype", "constructor"]);
+    TIER_SET = /* @__PURE__ */ new Set(["established", "weak", "flagged"]);
+    DECISION_SET = /* @__PURE__ */ new Set(["frictionless_merge", "defended_finding", "responsive", "none"]);
+    INDEPENDENCE_SET = /* @__PURE__ */ new Set(["independent", "affiliated", "unverified"]);
+    PARTY_SET = /* @__PURE__ */ new Set(["merger", "reviewer"]);
+    LABEL_SET = /* @__PURE__ */ new Set(["independent-human", "automation", "self-review"]);
+    ASSOCIATION_SET = /* @__PURE__ */ new Set([
+      "COLLABORATOR",
+      "CONTRIBUTOR",
+      "FIRST_TIMER",
+      "FIRST_TIME_CONTRIBUTOR",
+      "MANNEQUIN",
+      "MEMBER",
+      "NONE",
+      "OWNER"
+    ]);
+    REVIEW_STATE_SET = /* @__PURE__ */ new Set(["APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED", "PENDING"]);
+    SIZE_CLASS_SET = /* @__PURE__ */ new Set(["small", "medium", "large"]);
+    LINKAGE_SET = /* @__PURE__ */ new Set(["graphql", "body-keyword"]);
+    SYN_PSEUDONYM_RE = /^R[0-9a-f]{8}$/;
+    SHORT_SHA_RE = /^[0-9a-f]{4,40}$/i;
+    ISO_TS_RE = /^\d{4}-\d{2}-\d{2}T[0-9:.]+(?:Z|[+-]\d{2}:?\d{2})?$/;
+    enumOf = (v, set) => typeof v === "string" && set.has(v) ? v : void 0;
+    boundedCount = (v) => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 1e9 ? v : void 0;
+    boundedNum = (v) => typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= 1e9 ? v : void 0;
+    validTs = (v) => typeof v === "string" && v.length <= 40 && ISO_TS_RE.test(v) && !Number.isNaN(Date.parse(v)) ? v : void 0;
+    validPseudonym = (v) => typeof v === "string" && SYN_PSEUDONYM_RE.test(v) ? v : void 0;
+    HYGIENE_PRINCIPLES_S6 = [
+      "Time-to-merge demoted from headline. If shown, contextualized against the repo\u2019s historical average for similar-size PRs; an abnormally fast merge of a large/security diff is flagged as a risk (possible rubber-stamp), not an achievement.",
+      "Value over volume \u2014 no raw +LOC celebration; normalize by impact; treat large deletions/refactors as potentially high-value.",
+      'Explicit scope statement on every dossier: "Reflects merged public-repo code contributions. Does not capture private, non-code, or correct-but-overruled work." Names the survivorship limit up front.',
+      "reviewRounds + threadStats are ENGAGEMENT metrics, never validation. A review round and a thread-resolution tally describe how much back-and-forth a PR drew \u2014 not whether the work was vetted. They render with honest absence and the render never fuses human + automation into one review count."
+    ];
+    CITATION_CONTRACT = [
+      "You write ONE developer-contribution dossier section from STRUCTURED FACTS ONLY.",
+      "You are given a JSON `source` object of identity-free facts (pseudonym labels, enums,",
+      "counts, timestamps). You have NO other information. You must NOT invent, infer beyond,",
+      "or embellish these facts, and you must NOT name any person, account, email, or handle.",
+      "",
+      "Every claim you emit MUST carry one or more citations. A citation is the exact string",
+      "`env:<path>` pointing at the source value that proves the claim (e.g. `env:threadStats.resolved`,",
+      "`env:provenance.tier`, `env:reviewRounds`). Cite ONLY paths present in the provided",
+      "ALLOWED CITES list. A claim you cannot ground in a real path \u2014 DO NOT emit it. Prefer",
+      "fewer, fully-grounded claims over broad ones. If the facts support nothing, emit no claims.",
+      "",
+      'Return STRICT JSON: {"claims":[{"id":"c1","kind":"thesis|decision|competency|bullet",',
+      '"text":"...","cites":["env:..."],"competency":{"name":"<taxonomy>","grade":"high|medium|process|no-signal"}}]}',
+      'The `competency` field is present ONLY on kind="competency" claims. `id` is unique per claim.'
+    ].join("\n");
+    VERIFY_CONTRACT = [
+      "You are an ADVERSARIAL verifier. Your job is to DISPROVE claims, not to help.",
+      "For each claim you are given the claim text and the RESOLVED source excerpts its",
+      "citations point at (the actual values). Keep a claim ONLY if the excerpts",
+      "UNEQUIVOCALLY support every assertion in its text \u2014 the excerpts alone, with no",
+      "outside knowledge, no inference, no benefit of the doubt. If a claim overstates,",
+      "generalizes beyond the excerpt, names anyone, or is not fully entailed by the",
+      "excerpts: REJECT it. When in doubt, REJECT (default-to-fail).",
+      "",
+      "OUTPUT FORMAT \u2014 obey exactly: respond with ONLY the JSON object and NOTHING ELSE.",
+      "No preamble, no per-claim commentary, no reasoning prose, no markdown fence, no text",
+      "before or after. Decide internally; emit only the verdict:",
+      '{"supported":["c1","c3"]} \u2014 the ids of the claims that survive (omit all others; use',
+      '{"supported":[]} if none do). Any surviving id MUST be one you were given.'
+    ].join("\n");
+  }
+});
+
 // ../../packages/core/src/short-token.ts
 import { createHash as createHash2 } from "crypto";
 function opportunityShortToken(id) {
@@ -8448,23 +9581,30 @@ var init_short_token = __esm({
 var src_exports = {};
 __export(src_exports, {
   AI_BAN_DENYLIST: () => AI_BAN_DENYLIST,
+  ANON_MAINTAINER_LABEL: () => ANON_MAINTAINER_LABEL,
   ASHBY_SLUGS_BY_TIER: () => ASHBY_SLUGS_BY_TIER,
   CAP_LABELS: () => CAP_LABELS,
+  CITE_PREFIX: () => CITE_PREFIX,
+  COMPETENCY_GRADES: () => COMPETENCY_GRADES,
+  COMPETENCY_NAMES: () => COMPETENCY_NAMES,
   CREDENTIAL_WEIGHTS: () => CREDENTIAL_WEIGHTS,
   CURATION_NORM: () => CURATION_NORM,
   CURATION_WEIGHTS: () => CURATION_WEIGHTS,
   DECAY_FLOOR: () => DECAY_FLOOR,
+  DECISION_LABEL: () => DECISION_LABEL,
   DEFAULT_ASHBY_SLUGS: () => DEFAULT_ASHBY_SLUGS,
   DEFAULT_BOUNTY_REPOS: () => DEFAULT_BOUNTY_REPOS,
   DEFAULT_GREENHOUSE_SLUGS: () => DEFAULT_GREENHOUSE_SLUGS,
   DEFAULT_ISSUE_STATUS_TIMEOUT_MS: () => DEFAULT_ISSUE_STATUS_TIMEOUT_MS,
   DEFAULT_LEVER_SLUGS: () => DEFAULT_LEVER_SLUGS,
   DEFAULT_WORKABLE_SLUGS: () => DEFAULT_WORKABLE_SLUGS,
+  DENY_CONSENT: () => DENY_CONSENT,
   DISPLAY_DELTA_FLOOR: () => DISPLAY_DELTA_FLOOR,
   EXAMPLE_BUYER: () => EXAMPLE_BUYER,
   FEEDS: () => FEEDS,
   GRAPH: () => GRAPH,
   GREENHOUSE_SLUGS_BY_TIER: () => GREENHOUSE_SLUGS_BY_TIER,
+  HYGIENE_PRINCIPLES_S6: () => HYGIENE_PRINCIPLES_S6,
   IDF_BACKGROUND: () => IDF_BACKGROUND,
   INTEREST_CAP: () => INTEREST_CAP,
   INTRO_ACCEPTED_TTL_MS: () => INTRO_ACCEPTED_TTL_MS,
@@ -8475,15 +9615,21 @@ __export(src_exports, {
   MAX_JOBS_PER_COMPANY: () => MAX_JOBS_PER_COMPANY,
   MENTION_DELTA: () => MENTION_DELTA,
   MERGE_PROBABILITY: () => MERGE_PROBABILITY,
+  METRICS: () => METRICS,
   MIN_CONTRIBUTORS: () => MIN_CONTRIBUTORS,
   MIN_STARS: () => MIN_STARS,
   PROBE_TIMEOUT_MS: () => PROBE_TIMEOUT_MS,
+  PROVENANCE: () => PROVENANCE,
   RIGOR: () => RIGOR,
+  ROLLUP_VERSION: () => ROLLUP_VERSION,
   SKILL_DENSITY_SATURATION: () => SKILL_DENSITY_SATURATION,
   SKILL_FLOOR_ENABLED: () => SKILL_FLOOR_ENABLED,
   SKILL_FLOOR_MIN: () => SKILL_FLOOR_MIN,
+  SOURCE_CLASS: () => SOURCE_CLASS,
   STRONG_MATCH_THRESHOLD: () => STRONG_MATCH_THRESHOLD,
   SYNONYMS: () => SYNONYMS,
+  SYNTHESIS_MODEL: () => SYNTHESIS_MODEL,
+  SYNTHESIS_VERSION: () => SYNTHESIS_VERSION,
   TRIVIAL_PR_TITLE: () => TRIVIAL_PR_TITLE,
   VOCABULARY: () => VOCABULARY,
   VOCAB_NODES: () => VOCAB_NODES,
@@ -8493,17 +9639,33 @@ __export(src_exports, {
   acceptanceCountForDomains: () => acceptanceCountForDomains,
   aggregate: () => aggregate,
   aggregateBounties: () => aggregateBounties,
+  aggregateContributions: () => aggregateContributions,
+  applyVerdict: () => applyVerdict,
   ashby: () => ashby,
+  assembleRollup: () => assembleRollup,
+  assembleSections: () => assembleSections,
   authorizeIntroDecision: () => authorizeIntroDecision,
   authorizeIntroDeletion: () => authorizeIntroDeletion,
   bestAcceptanceDomain: () => bestAcceptanceDomain,
   buildDirectoryIndex: () => buildDirectoryIndex,
+  buildDossierEnvelope: () => buildDossierEnvelope,
   buildGraph: () => buildGraph,
   buildIndex: () => buildIndex,
   buildIntroListItem: () => buildIntroListItem,
   buildIntroPayload: () => buildIntroPayload,
+  buildPass1System: () => buildPass1System,
+  buildPass1User: () => buildPass1User,
+  buildPass2System: () => buildPass2System,
+  buildPass2User: () => buildPass2User,
   buildReason: () => buildReason,
+  buildRollupSource: () => buildRollupSource,
   capJobsPerCompany: () => capJobsPerCompany,
+  citablePaths: () => citablePaths,
+  citeSourceClass: () => citeSourceClass,
+  citesConverge: () => citesConverge,
+  claimFullyResolves: () => claimFullyResolves,
+  classifyDecisionEvidence: () => classifyDecisionEvidence,
+  classifyReviewSources: () => classifyReviewSources,
   classifyToken: () => classifyToken,
   classifyTokens: () => classifyTokens,
   companyTierForJob: () => companyTierForJob,
@@ -8511,6 +9673,9 @@ __export(src_exports, {
   composeIntroEmail: () => composeIntroEmail,
   computeAcceptanceCredential: () => computeAcceptanceCredential,
   computeAcceptanceCredentialPublic: () => computeAcceptanceCredentialPublic,
+  computeEventIndependence: () => computeEventIndependence,
+  computeRepoProvenance: () => computeRepoProvenance,
+  computeReviewerIndependence: () => computeReviewerIndependence,
   computeWinnability: () => computeWinnability,
   contributeShortToken: () => contributeShortToken,
   coreTagsFromTitle: () => coreTagsFromTitle,
@@ -8518,14 +9683,20 @@ __export(src_exports, {
   curateProjects: () => curateProjects,
   decorate: () => decorate,
   decryptMessage: () => decryptMessage,
+  deriveHygienicMetrics: () => deriveHygienicMetrics,
   deriveLegibleProfile: () => deriveLegibleProfile,
   deriveResumeTrend: () => deriveResumeTrend,
   deriveRigorTiers: () => deriveRigorTiers,
   deriveSharedKey: () => deriveSharedKey,
   deriveTrajectoryNarrative: () => deriveTrajectoryNarrative,
   displayableDrift: () => displayableDrift,
+  dropIdentityTokens: () => dropIdentityTokens,
+  dropNgramOverlap: () => dropNgramOverlap,
+  dropUnresolvableCites: () => dropUnresolvableCites,
   encryptMessage: () => encryptMessage,
+  eventCountsAtFullWeight: () => eventCountsAtFullWeight,
   expandWeighted: () => expandWeighted,
+  extractJson: () => extractJson,
   extractSkillTags: () => extractSkillTags,
   fetchGitHubProfile: () => fetchGitHubProfile,
   fetchIssueStatus: () => fetchIssueStatus,
@@ -8551,6 +9722,8 @@ __export(src_exports, {
   introRetentionAction: () => introRetentionAction,
   isAiBanRepo: () => isAiBanRepo,
   isBounty: () => isBounty,
+  isCompetencyGrade: () => isCompetencyGrade,
+  isCompetencyName: () => isCompetencyName,
   isContribution: () => isContribution,
   isExcludedRepo: () => isExcludedRepo,
   isOverIntroLimit: () => isOverIntroLimit,
@@ -8559,6 +9732,7 @@ __export(src_exports, {
   issueCrossRefPRAttempts: () => issueCrossRefPRAttempts,
   jobShortToken: () => jobShortToken,
   joinLabels: () => joinLabels,
+  knownCount: () => knownCount,
   labelFor: () => labelFor,
   lever: () => lever,
   loadPartnerRoles: () => loadPartnerRoles,
@@ -8576,16 +9750,23 @@ __export(src_exports, {
   opportunityShortToken: () => opportunityShortToken,
   pageMatches: () => pageMatches,
   parseGitHubRef: () => parseGitHubRef,
+  parsePass1: () => parsePass1,
+  parseVerdict: () => parseVerdict,
   passesContributionGate: () => passesContributionGate,
   passesMaturityGate: () => passesMaturityGate,
   personCardToJob: () => personCardToJob,
   projectCardToJob: () => projectCardToJob,
+  projectForSynthesis: () => projectForSynthesis,
   readBuildBudgetMs: () => readBuildBudgetMs,
   readReqGapMs: () => readReqGapMs,
   realSleep: () => realSleep,
   recordClick: () => recordClick,
+  redactThirdParty: () => redactThirdParty,
   rejectExtraIntroFields: () => rejectExtraIntroFields,
   relevanceScore: () => relevanceScore,
+  renderMaintainerQuote: () => renderMaintainerQuote,
+  resolveCitation: () => resolveCitation,
+  resolveCitations: () => resolveCitations,
   resolveJobToken: () => resolveJobToken,
   revealIntroContacts: () => revealIntroContacts,
   rosterActiveFromContribution: () => rosterActiveFromContribution,
@@ -8594,6 +9775,7 @@ __export(src_exports, {
   setStatus: () => setStatus,
   signalLabel: () => signalLabel,
   tagDissimilarity: () => tagDissimilarity,
+  textContainsLogin: () => textContainsLogin,
   tokenize: () => tokenize,
   validateGraph: () => validateGraph,
   validateIntroPayload: () => validateIntroPayload,
@@ -8624,24 +9806,20 @@ var init_src = __esm({
     init_legible();
     init_legible_trajectory();
     init_rigor();
+    init_sources();
+    init_independence();
+    init_redaction();
+    init_decisions();
+    init_metrics_hygiene();
+    init_dossier();
+    init_synthesis();
     init_short_token();
   }
 });
 
 // src/crypto-store.ts
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes as randomBytes3
-} from "crypto";
-import {
-  readFileSync as readFileSync6,
-  writeFileSync as writeFileSync5,
-  mkdirSync as mkdirSync5,
-  existsSync as existsSync3,
-  renameSync as renameSync3,
-  rmSync as rmSync2
-} from "fs";
+import { createCipheriv, createDecipheriv, randomBytes as randomBytes3 } from "crypto";
+import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, existsSync as existsSync3, renameSync as renameSync3, rmSync as rmSync2 } from "fs";
 import { join as join6, dirname, basename } from "path";
 import { homedir as homedir5 } from "os";
 import { createRequire } from "module";
@@ -8657,11 +9835,7 @@ function encrypt(plaintext, key) {
   };
 }
 function decrypt(blob, key) {
-  const decipher = createDecipheriv(
-    ALGO,
-    key,
-    Buffer.from(blob.iv, "hex")
-  );
+  const decipher = createDecipheriv(ALGO, key, Buffer.from(blob.iv, "hex"));
   decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
   const plain = Buffer.concat([
     decipher.update(Buffer.from(blob.ciphertext, "hex")),
@@ -8688,7 +9862,7 @@ async function tryLoadFromKeytar() {
   }
 }
 function loadOrCreateFileKey() {
-  mkdirSync5(TERMINALHIRE_DIR4, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR4);
   if (existsSync3(KEY_FILE)) {
     return Buffer.from(readFileSync6(KEY_FILE, "utf8").trim(), "hex");
   }
@@ -8702,8 +9876,11 @@ function warnStderr(message) {
 }
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname(filePath);
-  mkdirSync5(dir, { recursive: true, mode: 448 });
-  const tmp = join6(dir, `.${basename(filePath)}.tmp-${process.pid}-${randomBytes3(6).toString("hex")}`);
+  ensureStateDir(dir);
+  const tmp = join6(
+    dir,
+    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes3(6).toString("hex")}`
+  );
   writeFileSync5(tmp, content, { encoding: "utf8", mode: 384 });
   renameSync3(tmp, filePath);
 }
@@ -8730,7 +9907,9 @@ async function resolveKey(filePath, opts) {
   if (opts.keyPolicy === "keychain-required") {
     const key = await tryLoadFromKeytar();
     if (!key) {
-      warnStderr(`crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`);
+      warnStderr(
+        `crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`
+      );
       return null;
     }
     return key;
@@ -8765,6 +9944,7 @@ var TERMINALHIRE_DIR4, KEY_FILE, KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, KEY_BYTES
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
+    init_state_dir();
     TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join6(homedir5(), ".terminalhire");
     KEY_FILE = join6(TERMINALHIRE_DIR4, "key");
     KEYTAR_SERVICE = "terminalhire";
@@ -8956,11 +10136,10 @@ import {
   readFileSync as readFileSync7,
   writeFileSync as writeFileSync6,
   renameSync as renameSync4,
-  mkdirSync as mkdirSync6,
   existsSync as existsSync4,
   copyFileSync,
-  openSync,
-  closeSync,
+  openSync as openSync2,
+  closeSync as closeSync2,
   unlinkSync
 } from "fs";
 import { join as join8, dirname as dirname2 } from "path";
@@ -8969,7 +10148,7 @@ function statusFilePath() {
   return STATUS_FILE;
 }
 function atomicWriteJson(path, obj) {
-  mkdirSync6(dirname2(path), { recursive: true });
+  ensureStateDir(dirname2(path));
   const tmp = `${path}.tmp-${process.pid}`;
   writeFileSync6(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
   renameSync4(tmp, path);
@@ -8988,8 +10167,8 @@ function withLock(fn) {
   for (; ; ) {
     let fd;
     try {
-      mkdirSync6(dirname2(LOCK_FILE), { recursive: true });
-      fd = openSync(LOCK_FILE, "wx");
+      ensureStateDir(dirname2(LOCK_FILE));
+      fd = openSync2(LOCK_FILE, "wx");
     } catch (err) {
       if (err && err.code === "EEXIST") {
         if (Date.now() > deadline) {
@@ -9008,7 +10187,7 @@ function withLock(fn) {
       return fn();
     } finally {
       try {
-        closeSync(fd);
+        closeSync2(fd);
       } catch {
       }
       try {
@@ -9041,7 +10220,10 @@ function readStatusMap() {
 function markStatus(id, status) {
   return withLock(() => {
     const current = readStatusMap();
-    const next = status === "claimed" ? { ...current, [id]: { ...current[id], status: "claimed", markedAt: (/* @__PURE__ */ new Date()).toISOString() } } : setStatus(current, id, status);
+    const next = status === "claimed" ? {
+      ...current,
+      [id]: { ...current[id], status: "claimed", markedAt: (/* @__PURE__ */ new Date()).toISOString() }
+    } : setStatus(current, id, status);
     atomicWriteJson(STATUS_FILE, next);
     return next[id];
   });
@@ -9059,6 +10241,7 @@ var init_job_status_store = __esm({
   "bin/job-status-store.js"() {
     "use strict";
     init_src();
+    init_state_dir();
     TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join8(homedir7(), ".terminalhire");
     STATUS_FILE = join8(TERMINALHIRE_DIR6, "job-status.json");
     LOCK_FILE = `${STATUS_FILE}.lock`;
@@ -9332,6 +10515,7 @@ var init_signal = __esm({
 var spinner_seen_exports = {};
 __export(spinner_seen_exports, {
   SEEN_MAX_ENTRIES: () => SEEN_MAX_ENTRIES,
+  SEEN_MAX_WIDTHS: () => SEEN_MAX_WIDTHS,
   SEEN_TTL_MS: () => SEEN_TTL_MS,
   SEEN_WINDOW_SURFACES: () => SEEN_WINDOW_SURFACES,
   isSuppressed: () => isSuppressed,
@@ -9339,12 +10523,7 @@ __export(spinner_seen_exports, {
   recordSurface: () => recordSurface,
   seenFilePath: () => seenFilePath
 });
-import {
-  readFileSync as readFileSync9,
-  writeFileSync as writeFileSync7,
-  renameSync as renameSync5,
-  mkdirSync as mkdirSync7
-} from "fs";
+import { readFileSync as readFileSync9, writeFileSync as writeFileSync7, renameSync as renameSync5 } from "fs";
 import { join as join10, dirname as dirname3 } from "path";
 import { homedir as homedir8 } from "os";
 function seenFilePath() {
@@ -9352,13 +10531,21 @@ function seenFilePath() {
   return join10(dir, "seen-history.json");
 }
 function atomicWriteJson2(path, obj) {
-  mkdirSync7(dirname3(path), { recursive: true });
+  ensureStateDir(dirname3(path));
   const tmp = `${path}.tmp-${process.pid}`;
   writeFileSync7(tmp, JSON.stringify(obj) + "\n", { encoding: "utf8", mode: 384 });
   renameSync5(tmp, path);
 }
 function emptyHistory() {
-  return { surface: 0, entries: {} };
+  return { surface: 0, entries: {}, widths: {} };
+}
+function capWidths(widths) {
+  const keys = Object.keys(widths);
+  if (keys.length <= SEEN_MAX_WIDTHS) return widths;
+  keys.sort((a, b) => Number(b) - Number(a));
+  const out = {};
+  for (const k of keys.slice(0, SEEN_MAX_WIDTHS)) out[k] = widths[k];
+  return out;
 }
 function isFiniteNonNegative(n) {
   return typeof n === "number" && Number.isFinite(n) && n >= 0;
@@ -9375,7 +10562,9 @@ function pruneEntries(entries, now) {
 function capEntries(entries) {
   const ids = Object.keys(entries);
   if (ids.length <= SEEN_MAX_ENTRIES) return entries;
-  ids.sort((a, b) => entries[b].lastSurface - entries[a].lastSurface || entries[b].lastSeenAt - entries[a].lastSeenAt);
+  ids.sort(
+    (a, b) => entries[b].lastSurface - entries[a].lastSurface || entries[b].lastSeenAt - entries[a].lastSeenAt
+  );
   const out = {};
   for (const id of ids.slice(0, SEEN_MAX_ENTRIES)) out[id] = entries[id];
   return out;
@@ -9390,7 +10579,14 @@ function loadSeenHistory(now = Date.now()) {
   if (!raw || typeof raw !== "object") return emptyHistory();
   const surface = isFiniteNonNegative(raw.surface) ? Math.floor(raw.surface) : 0;
   const entries = raw.entries && typeof raw.entries === "object" && !Array.isArray(raw.entries) ? pruneEntries(raw.entries, now) : {};
-  return { surface, entries };
+  const widths = raw.widths && typeof raw.widths === "object" && !Array.isArray(raw.widths) ? capWidths(
+    Object.fromEntries(
+      Object.entries(raw.widths).filter(
+        ([s, n]) => isFiniteNonNegative(Number(s)) && isFiniteNonNegative(n)
+      )
+    )
+  ) : {};
+  return { surface, entries, widths };
 }
 function isSuppressed(id, history) {
   const e = history.entries[id];
@@ -9405,35 +10601,36 @@ function recordSurface(ids, now = Date.now()) {
     if (typeof id !== "string" || id.length === 0) continue;
     entries[id] = { lastSurface: surface, lastSeenAt: now };
   }
-  const next = { surface, entries: capEntries(pruneEntries(entries, now)) };
+  const stamped = new Set(
+    (Array.isArray(ids) ? ids : []).filter((id) => typeof id === "string" && id.length > 0)
+  );
+  const widths = capWidths({ ...history.widths, [surface]: stamped.size });
+  const next = { surface, entries: capEntries(pruneEntries(entries, now)), widths };
   try {
     atomicWriteJson2(seenFilePath(), next);
   } catch {
   }
   return next;
 }
-var SEEN_WINDOW_SURFACES, SEEN_TTL_MS, SEEN_MAX_ENTRIES;
+var SEEN_WINDOW_SURFACES, SEEN_TTL_MS, SEEN_MAX_ENTRIES, SEEN_MAX_WIDTHS;
 var init_spinner_seen = __esm({
   "bin/spinner-seen.js"() {
     "use strict";
+    init_state_dir();
     SEEN_WINDOW_SURFACES = 10;
     SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
     SEEN_MAX_ENTRIES = 500;
+    SEEN_MAX_WIDTHS = 200;
   }
 });
 
 // bin/spinner-io.js
-import {
-  readFileSync as readFileSync10,
-  writeFileSync as writeFileSync8,
-  existsSync as existsSync5,
-  mkdirSync as mkdirSync8,
-  renameSync as renameSync6
-} from "fs";
-import { join as join11, dirname as dirname4 } from "path";
+import { readFileSync as readFileSync10, writeFileSync as writeFileSync8, existsSync as existsSync5, mkdirSync as mkdirSync2, renameSync as renameSync6 } from "fs";
+import { join as join11, dirname as dirname4, resolve } from "path";
 import { homedir as homedir9 } from "os";
 function thDir() {
-  return process.env["TERMINALHIRE_DIR"] || join11(homedir9(), ".terminalhire");
+  const raw = process.env["TERMINALHIRE_DIR"] || join11(homedir9(), ".terminalhire");
+  return resolve(raw);
 }
 function claudeSettingsPath() {
   return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join11(homedir9(), ".claude", "settings.json");
@@ -9449,7 +10646,11 @@ function readJson(path, fallback) {
   }
 }
 function atomicWriteJson3(path, obj) {
-  mkdirSync8(dirname4(path), { recursive: true });
+  if (dirname4(path) === thDir()) {
+    ensureStateDir(thDir());
+  } else {
+    mkdirSync2(dirname4(path), { recursive: true });
+  }
   const tmp = `${path}.tmp-${process.pid}`;
   writeFileSync8(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
   renameSync6(tmp, path);
@@ -9495,7 +10696,12 @@ function clearSpinnerVerbs() {
   }
   try {
     const st = readState();
-    atomicWriteJson3(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
+    atomicWriteJson3(SPINNER_STATE_FILE, {
+      ...st,
+      verbs: [],
+      mode: st.mode || "replace",
+      ts: Date.now()
+    });
   } catch {
   }
   return { cleared: true, keptUserVerbs };
@@ -9544,6 +10750,7 @@ function clearSpinnerTips() {
 var init_spinner_io = __esm({
   "bin/spinner-io.js"() {
     "use strict";
+    init_state_dir();
   }
 });
 
@@ -9575,11 +10782,11 @@ var init_spinner_config = __esm({
 });
 
 // bin/spinner-select.js
-function filterFreshMatches(matches, history) {
-  const { eligible, suppressed } = partitionFreshMatches(matches, history);
+function filterFreshMatches(matches, history, getId = defaultGetId) {
+  const { eligible, suppressed } = partitionFreshMatches(matches, history, getId);
   return suppressed.length === 0 ? matches : [...eligible, ...suppressed];
 }
-function partitionFreshMatches(matches, history) {
+function partitionFreshMatches(matches, history, getId = defaultGetId) {
   const list = Array.isArray(matches) ? matches : [];
   if (!history || !history.entries || Object.keys(history.entries).length === 0) {
     return { eligible: list, suppressed: [] };
@@ -9587,10 +10794,11 @@ function partitionFreshMatches(matches, history) {
   const eligible = [];
   const suppressed = [];
   for (const m of list) {
-    if (m && m.id != null && isSuppressed(String(m.id), history)) suppressed.push(m);
+    const id = getId(m);
+    if (m && id != null && isSuppressed(String(id), history)) suppressed.push(m);
     else eligible.push(m);
   }
-  const stamp = (m) => history.entries[String(m.id)].lastSurface;
+  const stamp = (m) => history.entries[String(getId(m))].lastSurface;
   suppressed.sort((a, b) => stamp(a) - stamp(b));
   return { eligible, suppressed };
 }
@@ -9611,7 +10819,9 @@ function widenFreshCandidates(matches, history, need, widen) {
   const dominant = [...counts.entries()].filter(([, c]) => c === maxCount).map(([t]) => t);
   const inPool = new Set(list.map((m) => String(m.id)));
   const fresh = (m) => m && m.id != null && !inPool.has(String(m.id)) && !suppressed(m);
-  const tagged = (m, adj) => (Array.isArray(m.matchedTags) ? m.matchedTags : []).some((t) => adj.has(String(t).toLowerCase()));
+  const tagged = (m, adj) => (Array.isArray(m.matchedTags) ? m.matchedTags : []).some(
+    (t) => adj.has(String(t).toLowerCase())
+  );
   const ringCandidates = (hops) => {
     const adj = new Set(dominant.flatMap((d) => widen.getAdjacent(d, hops)));
     if (adj.size === 0) return [];
@@ -9626,10 +10836,12 @@ function widenFreshCandidates(matches, history, need, widen) {
   }
   return widened.slice(0, need);
 }
+var defaultGetId;
 var init_spinner_select = __esm({
   "bin/spinner-select.js"() {
     "use strict";
     init_spinner_seen();
+    defaultGetId = (m) => m?.id;
   }
 });
 
@@ -9944,23 +11156,12 @@ var init_spinner = __esm({
 });
 
 // src/github-auth.ts
-import {
-  createCipheriv as createCipheriv2,
-  createDecipheriv as createDecipheriv2,
-  randomBytes as randomBytes4
-} from "crypto";
-import {
-  readFileSync as readFileSync11,
-  writeFileSync as writeFileSync9,
-  mkdirSync as mkdirSync9,
-  existsSync as existsSync6,
-  rmSync as rmSync3,
-  renameSync as renameSync7
-} from "fs";
+import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes4 } from "crypto";
+import { readFileSync as readFileSync11, writeFileSync as writeFileSync9, existsSync as existsSync6, rmSync as rmSync3, renameSync as renameSync7 } from "fs";
 import { join as join13 } from "path";
 import { homedir as homedir10 } from "os";
 async function loadKey() {
-  mkdirSync9(TERMINALHIRE_DIR7, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR7);
   if (existsSync6(KEY_FILE2)) {
     return Buffer.from(readFileSync11(KEY_FILE2, "utf8").trim(), "hex");
   }
@@ -9988,6 +11189,7 @@ var TERMINALHIRE_DIR7, TOKEN_FILE, KEY_FILE2, ALGO2, KEY_BYTES2, IV_BYTES2;
 var init_github_auth = __esm({
   "src/github-auth.ts"() {
     "use strict";
+    init_state_dir();
     TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join13(homedir10(), ".terminalhire");
     TOKEN_FILE = join13(TERMINALHIRE_DIR7, "github-token.enc");
     KEY_FILE2 = join13(TERMINALHIRE_DIR7, "key");
@@ -10011,7 +11213,15 @@ __export(claims_exports, {
   toPushedClaim: () => toPushedClaim,
   updateClaim: () => updateClaim
 });
-import { readFileSync as readFileSync12, writeFileSync as writeFileSync10, mkdirSync as mkdirSync10, renameSync as renameSync8, existsSync as existsSync7, rmSync as rmSync4, statSync } from "fs";
+import {
+  readFileSync as readFileSync12,
+  writeFileSync as writeFileSync10,
+  mkdirSync as mkdirSync3,
+  renameSync as renameSync8,
+  existsSync as existsSync7,
+  rmSync as rmSync4,
+  statSync
+} from "fs";
 import { randomBytes as randomBytes5 } from "crypto";
 import { join as join14 } from "path";
 import { homedir as homedir11 } from "os";
@@ -10019,11 +11229,11 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 function withClaimsLock(fn) {
-  mkdirSync10(TERMINALHIRE_DIR8, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR8);
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   for (; ; ) {
     try {
-      mkdirSync10(LOCK_DIR, { mode: 448 });
+      mkdirSync3(LOCK_DIR, { mode: 448 });
       break;
     } catch {
       try {
@@ -10078,11 +11288,15 @@ function readClaims() {
   }
 }
 function writeClaims(claims) {
-  mkdirSync10(TERMINALHIRE_DIR8, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR8);
   const tmp = `${CLAIMS_FILE}.${process.pid}.${randomBytes5(6).toString("hex")}.tmp`;
   const payload = { claims };
   try {
-    writeFileSync10(tmp, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 384, flag: "wx" });
+    writeFileSync10(tmp, JSON.stringify(payload, null, 2), {
+      encoding: "utf8",
+      mode: 384,
+      flag: "wx"
+    });
     renameSync8(tmp, CLAIMS_FILE);
   } catch (err) {
     try {
@@ -10156,6 +11370,7 @@ var TERMINALHIRE_DIR8, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
+    init_state_dir();
     TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join14(homedir11(), ".terminalhire");
     CLAIMS_FILE = join14(TERMINALHIRE_DIR8, "claims.json");
     LOCK_DIR = `${CLAIMS_FILE}.lock`;
@@ -10173,8 +11388,22 @@ var init_claims = __esm({
     ];
     TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
     POLL_TRANSITIONS = {
-      merged: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready", "submitted", "abandoned"]),
-      abandoned: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready", "submitted", "merged"]),
+      merged: /* @__PURE__ */ new Set([
+        "claimed",
+        "working",
+        "in-review",
+        "ready",
+        "submitted",
+        "abandoned"
+      ]),
+      abandoned: /* @__PURE__ */ new Set([
+        "claimed",
+        "working",
+        "in-review",
+        "ready",
+        "submitted",
+        "merged"
+      ]),
       submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
     };
   }
@@ -10201,11 +11430,11 @@ __export(claim_push_bg_exports, {
   writePushTokenEnc: () => writePushTokenEnc
 });
 import { createHash as createHash3 } from "crypto";
-import { readFileSync as readFileSync13, writeFileSync as writeFileSync11, mkdirSync as mkdirSync11, existsSync as existsSync8, rmSync as rmSync5 } from "fs";
+import { readFileSync as readFileSync13, writeFileSync as writeFileSync11, existsSync as existsSync8, rmSync as rmSync5 } from "fs";
 import { join as join15 } from "path";
 import { homedir as homedir12 } from "os";
 async function writePushTokenEnc(rawToken) {
-  mkdirSync11(TERMINALHIRE_DIR9, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR9);
   const key = await loadKey();
   const blob = encrypt2(rawToken, key);
   writeFileSync11(CLAIM_PUSH_TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
@@ -10234,7 +11463,7 @@ function readAutoMarker() {
   }
 }
 function writeAutoMarker(marker) {
-  mkdirSync11(TERMINALHIRE_DIR9, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR9);
   writeFileSync11(CLAIM_PUSH_AUTO_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearAutoMarker() {
@@ -10350,6 +11579,7 @@ var init_claim_push_bg = __esm({
   "bin/claim-push-bg.js"() {
     "use strict";
     init_github_auth();
+    init_state_dir();
     TERMINALHIRE_DIR9 = process.env.TERMINALHIRE_DIR || join15(homedir12(), ".terminalhire");
     CLAIM_PUSH_AUTO_MARKER = join15(TERMINALHIRE_DIR9, "claim-push-auto.json");
     CLAIM_PUSH_TOKEN_FILE = join15(TERMINALHIRE_DIR9, "claim-push-token.enc");
@@ -10373,7 +11603,7 @@ __export(version_nudge_exports, {
   recordNag: () => recordNag,
   shouldNag: () => shouldNag
 });
-import { readFileSync as readFileSync14, writeFileSync as writeFileSync12, mkdirSync as mkdirSync12, existsSync as existsSync9 } from "fs";
+import { readFileSync as readFileSync14, writeFileSync as writeFileSync12, existsSync as existsSync9 } from "fs";
 import { join as join16 } from "path";
 import { homedir as homedir13 } from "os";
 import { fileURLToPath as fileURLToPath2 } from "url";
@@ -10448,12 +11678,16 @@ function shouldNag(now = Date.now()) {
 }
 function recordNag(now = Date.now()) {
   try {
-    mkdirSync12(stateDir(), { recursive: true });
+    ensureStateDir(stateDir());
     writeFileSync12(nudgeStateFile(), JSON.stringify({ lastNaggedAt: now }) + "\n", "utf8");
   } catch {
   }
 }
-function emitInteractiveNudge({ now = Date.now(), stream = process.stderr, localVersion } = {}) {
+function emitInteractiveNudge({
+  now = Date.now(),
+  stream = process.stderr,
+  localVersion
+} = {}) {
   try {
     const nudge = cachedStaleNudge(localVersion);
     if (!nudge) return false;
@@ -10470,6 +11704,7 @@ var __dirname, NAG_INTERVAL_MS;
 var init_version_nudge = __esm({
   "bin/version-nudge.js"() {
     "use strict";
+    init_state_dir();
     __dirname = fileURLToPath2(new URL(".", import.meta.url));
     NAG_INTERVAL_MS = 24 * 60 * 60 * 1e3;
   }
@@ -10495,7 +11730,8 @@ var init_beta_nudge = __esm({
 import { fileURLToPath as fileURLToPath3 } from "url";
 
 // bin/directory.js
-import { readFileSync, writeFileSync, mkdirSync, renameSync } from "fs";
+init_state_dir();
+import { readFileSync, writeFileSync, renameSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
@@ -10515,7 +11751,7 @@ function readDirectoryCache() {
   }
 }
 function writeDirectoryCache(index) {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR);
   writeFileSync(DIRECTORY_CACHE_FILE, JSON.stringify({ ts: Date.now(), index }), "utf8");
 }
 function readProject() {
@@ -10575,7 +11811,8 @@ function excludeOwnCard(results, ownLogin) {
 }
 
 // bin/cache-store.js
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, renameSync as renameSync2 } from "fs";
+init_state_dir();
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, renameSync as renameSync2 } from "fs";
 import { join as join2 } from "path";
 import { homedir as homedir2 } from "os";
 var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
@@ -10590,7 +11827,7 @@ function readCacheEntry() {
   }
 }
 function updateIndexCache(patch) {
-  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR2);
   const existing = readCacheEntry() ?? {};
   const entry = {
     ...existing,
@@ -10744,14 +11981,8 @@ function suppressEngaged(results, statusMap) {
 init_config();
 
 // src/web-session.ts
-import {
-  chmodSync,
-  existsSync as existsSync2,
-  mkdirSync as mkdirSync4,
-  readFileSync as readFileSync4,
-  rmSync,
-  writeFileSync as writeFileSync4
-} from "fs";
+init_state_dir();
+import { chmodSync, existsSync as existsSync2, readFileSync as readFileSync4, rmSync, writeFileSync as writeFileSync4 } from "fs";
 import { homedir as homedir4 } from "os";
 import { join as join4 } from "path";
 function terminalhireDir() {

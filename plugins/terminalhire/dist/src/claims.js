@@ -1,8 +1,66 @@
 // src/claims.ts
-import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync, rmSync, statSync } from "fs";
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync as mkdirSync2,
+  renameSync,
+  existsSync,
+  rmSync,
+  statSync
+} from "fs";
 import { randomBytes } from "crypto";
 import { join } from "path";
 import { homedir } from "os";
+
+// src/state-dir.ts
+import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
+var STATE_DIR_MODE = 448;
+var STATE_DIR_OK = "ok";
+var STATE_DIR_SYMLINK = "symlink";
+var STATE_DIR_UNVERIFIED = "unverified";
+var warnedDirs = /* @__PURE__ */ new Set();
+function warnStateDirOnce(dir, message) {
+  if (warnedDirs.has(dir)) return;
+  warnedDirs.add(dir);
+  try {
+    process.stderr.write(message);
+  } catch {
+  }
+}
+function ensureStateDir(dir) {
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let fd;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | noFollow);
+  } catch (err) {
+    if (err?.code === "ELOOP") {
+      warnStateDirOnce(
+        dir,
+        `terminalhire: ${dir} is a symlink \u2014 leaving its permissions alone; the 0700 guarantee on the state directory is NOT enforced.
+`
+      );
+      return STATE_DIR_SYMLINK;
+    }
+    return STATE_DIR_UNVERIFIED;
+  }
+  try {
+    const currentMode = fstatSync(fd).mode & 511;
+    if ((currentMode & ~STATE_DIR_MODE) !== 0) {
+      fchmodSync(fd, currentMode & STATE_DIR_MODE);
+    }
+    return STATE_DIR_OK;
+  } catch {
+    return STATE_DIR_UNVERIFIED;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+    }
+  }
+}
+
+// src/claims.ts
 var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
 var CLAIMS_FILE = join(TERMINALHIRE_DIR, "claims.json");
 var LOCK_DIR = `${CLAIMS_FILE}.lock`;
@@ -13,11 +71,11 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 function withClaimsLock(fn) {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR);
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   for (; ; ) {
     try {
-      mkdirSync(LOCK_DIR, { mode: 448 });
+      mkdirSync2(LOCK_DIR, { mode: 448 });
       break;
     } catch {
       try {
@@ -63,8 +121,22 @@ function toPushedClaim(claim) {
 }
 var TERMINAL_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
 var POLL_TRANSITIONS = {
-  merged: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready", "submitted", "abandoned"]),
-  abandoned: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready", "submitted", "merged"]),
+  merged: /* @__PURE__ */ new Set([
+    "claimed",
+    "working",
+    "in-review",
+    "ready",
+    "submitted",
+    "abandoned"
+  ]),
+  abandoned: /* @__PURE__ */ new Set([
+    "claimed",
+    "working",
+    "in-review",
+    "ready",
+    "submitted",
+    "merged"
+  ]),
   submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
 };
 function nextPolledState(from, observed) {
@@ -87,11 +159,15 @@ function readClaims() {
   }
 }
 function writeClaims(claims) {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR);
   const tmp = `${CLAIMS_FILE}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
   const payload = { claims };
   try {
-    writeFileSync(tmp, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 384, flag: "wx" });
+    writeFileSync(tmp, JSON.stringify(payload, null, 2), {
+      encoding: "utf8",
+      mode: 384,
+      flag: "wx"
+    });
     renameSync(tmp, CLAIMS_FILE);
   } catch (err) {
     try {

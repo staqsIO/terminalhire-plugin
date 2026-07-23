@@ -27,7 +27,17 @@
  */
 
 import {
-  readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync, rmSync,
+  readFileSync,
+  writeFileSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  rmSync,
+  openSync,
+  fstatSync,
+  fchmodSync,
+  closeSync,
+  constants,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
@@ -48,6 +58,103 @@ const LAUNCHER_COMMAND = `node ${STABLE_LAUNCHER}`;
 
 const UNINSTALL = process.argv.includes('--uninstall');
 
+// TERM-39 blocker 1: create + heal the state dir so it carries no group or other
+// permission bits, rather than the umask default (typically 0755). "Never looser
+// than 0700" — the heal MASKS, so a 0555 dir ends at 0500, not 0700. This installer SHIPS STANDALONE (package.json
+// `files`) and runs before any build guarantee — a fresh dev clone may not have
+// `dist/` yet, and the plugin-dist copy sits at a different relative depth than
+// the npm-published layout — so it cannot reliably dynamically import the
+// compiled ensureStateDir() the rest of the CLI shares (apps/cli/src/state-dir.ts).
+// Inlined instead, so it never depends on a build having happened. Keep this
+// byte-identical in behavior to state-dir.ts's ensureStateDir() (and to
+// install.js's copy of the same) — if you change one, change all three.
+/**
+ * One warning per exact `dir` STRING, per loaded copy of this helper — anomalous,
+ * but not worth a spew. Two things this deliberately does NOT promise:
+ *
+ *   - NOT once per directory. The key is the argument as passed, not a resolved
+ *     path, so `~/.th/link` and `~/.th/./link` are two keys for one directory and
+ *     warn twice. Callers derive the path at CALL time (`TERMINALHIRE_DIR` or
+ *     `homedir()`), which is deterministic within a process but is neither a
+ *     constant nor enforced; resolving would cost a syscall on every call to
+ *     dedupe a message that is already anomalous.
+ *   - NOT once per process. Each of the four copies owns its own `warnedDirs`,
+ *     and `bin/jpi-init.js` imports two of them in the same process.
+ */
+const warnedDirs = new Set();
+function warnStateDirOnce(dir, message) {
+  if (warnedDirs.has(dir)) return;
+  warnedDirs.add(dir);
+  try {
+    process.stderr.write(message);
+  } catch {
+    /* a closed stderr must never break a directory create */
+  }
+}
+
+function ensureStateDir(dir) {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+
+  // ONE atomic open decides both "is this a symlink?" and "what do we chmod?".
+  // The previous shape — lstatSync(dir).isSymbolicLink() and then openSync(dir)
+  // — was two separate path resolutions with a race between them: swap the path
+  // for a symlink in that window and the plain open FOLLOWS it, so the fd (and
+  // the fchmod below) lands on the attacker's target. O_NOFOLLOW fails with
+  // ELOOP when the final component is a symlink, which removes the window
+  // instead of narrowing it. O_NOFOLLOW is absent on Windows, where it degrades
+  // to a plain open — moot there, since opening a directory fails anyway and
+  // the whole path returns 'unverified'.
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let fd;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | noFollow);
+  } catch (err) {
+    if (err?.code === 'ELOOP') {
+      // We refuse to chmod a directory we do not own. Note what this does and
+      // does NOT buy: anyone who can plant this symlink can already read what
+      // we write through it, so refusing protects the unrelated target, not the
+      // token. Report it rather than continuing silently — but note that no
+      // production caller acts on this status today; it is a report, not a gate.
+      warnStateDirOnce(
+        dir,
+        `terminalhire: ${dir} is a symlink — leaving its permissions alone; ` +
+          `the 0700 guarantee on the state directory is NOT enforced.\n`,
+      );
+      return 'symlink';
+    }
+    // Could not inspect (Windows: opening a directory fails). Not an error, but
+    // explicitly NOT a guarantee either.
+    return 'unverified';
+  }
+
+  try {
+    const currentMode = fstatSync(fd).mode & 0o777;
+    // "Looser than 0700" = any permission bit set outside owner rwx (group/other
+    // read/write/execute, e.g. the default 0755). A stricter-or-equal mode is left
+    // alone — this only ever tightens.
+    if ((currentMode & ~0o700) !== 0) {
+      // Mask, never assign. `currentMode & 0o700` can only REMOVE bits
+      // the directory already had — e.g. 0555 (no owner-write) heals to 0500, not
+      // 0700, and 0755 heals to 0700 (its owner bits were already full rwx).
+      // Assigning 0o700 unconditionally would ADD an owner-write bit
+      // that was never there for a mode like 0555/0505 — not a "tighten."
+      fchmodSync(fd, currentMode & 0o700);
+    }
+    return 'ok';
+  } catch {
+    // The heal stays best-effort: a platform where fstat/fchmod are a no-op or
+    // throw must never crash an otherwise-successful create. But it is now
+    // REPORTED rather than swallowed.
+    return 'unverified';
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // Prompt helper. When jpi-init runs this installer IN-PROCESS it injects a single
@@ -60,11 +167,17 @@ const UNINSTALL = process.argv.includes('--uninstall');
 function makeAsker(injected) {
   if (injected) return { ask: injected, close() {} };
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const ask = (question) => new Promise(res => {
-    let answered = false;
-    rl.question(question, answer => { answered = true; res((answer || '').trim().toLowerCase()); });
-    rl.once('close', () => { if (!answered) res(null); });
-  });
+  const ask = (question) =>
+    new Promise((res) => {
+      let answered = false;
+      rl.question(question, (answer) => {
+        answered = true;
+        res((answer || '').trim().toLowerCase());
+      });
+      rl.once('close', () => {
+        if (!answered) res(null);
+      });
+    });
   return { ask, close: () => rl.close() };
 }
 
@@ -80,7 +193,9 @@ function backupSettings() {
 function readSettings() {
   try {
     if (existsSync(SETTINGS_PATH)) return JSON.parse(readFileSync(SETTINGS_PATH, 'utf8'));
-  } catch { /* fall through to empty */ }
+  } catch {
+    /* fall through to empty */
+  }
   return {};
 }
 
@@ -110,7 +225,7 @@ function classifyExisting(statusLine) {
   if (cmd.includes('statusline-launch.js')) return 'ours';
   if (
     cmd.includes('statusline-wrapper.sh') ||
-    existsSync(LEGACY_WRAPPER) && cmd.includes('.terminalhire') ||
+    (existsSync(LEGACY_WRAPPER) && cmd.includes('.terminalhire')) ||
     cmd.includes('jpi-dispatch') ||
     /terminalhire|\bjpi\b|jpi-/.test(cmd)
   ) {
@@ -154,11 +269,15 @@ async function install({ ask: injectedAsk } = {}) {
   console.log('  • node statusline-install.js --uninstall   (restores your prior statusLine)');
   console.log('');
 
-  const answer = await ask('Enable the connection-notification statusLine? Type "yes" to continue: ');
+  const answer = await ask(
+    'Enable the connection-notification statusLine? Type "yes" to continue: ',
+  );
   if (answer === null && !process.stdin.isTTY) {
     // Non-interactive stdin with no input — do NOT silently proceed to a prompt that
     // resolves empty and fail-closes. Say so plainly and skip (explicit, not a fake abort).
-    console.log('\n  stdin is not interactive — run `terminalhire statusline --on` in a real terminal to enable.');
+    console.log(
+      '\n  stdin is not interactive — run `terminalhire statusline --on` in a real terminal to enable.',
+    );
     asker.close();
     return 0;
   }
@@ -195,7 +314,7 @@ async function install({ ask: injectedAsk } = {}) {
 
   // Only NOW (post-consent) do we touch the filesystem — V-4.
   console.log('');
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR);
 
   // Copy the launcher to its stable, version-agnostic home.
   copyFileSync(src, STABLE_LAUNCHER);
@@ -203,7 +322,11 @@ async function install({ ask: injectedAsk } = {}) {
   // Chain-wrap a genuinely FOREIGN statusLine: save it verbatim so the launcher runs it
   // first and uninstall can restore it byte-for-byte (V-5/V-8).
   if (kind === 'foreign') {
-    writeFileSync(FOREIGN_SIDECAR, JSON.stringify({ statusLine: existing }, null, 2) + '\n', 'utf8');
+    writeFileSync(
+      FOREIGN_SIDECAR,
+      JSON.stringify({ statusLine: existing }, null, 2) + '\n',
+      'utf8',
+    );
     console.log('  Preserved your existing statusLine — it will render alongside ours.');
   } else if (kind === 'ours' && existsSync(FOREIGN_SIDECAR)) {
     // Idempotent re-run: keep any previously-saved foreign statusLine sidecar.
@@ -246,9 +369,10 @@ async function uninstall({ ask: injectedAsk } = {}) {
 
   console.log('');
   const settings = readSettings();
-  const isOurs = settings.statusLine
-    && typeof settings.statusLine.command === 'string'
-    && settings.statusLine.command.includes('statusline-launch.js');
+  const isOurs =
+    settings.statusLine &&
+    typeof settings.statusLine.command === 'string' &&
+    settings.statusLine.command.includes('statusline-launch.js');
 
   // Only mutate settings if the current statusLine is ours (never clobber a foreign one
   // the user re-added after install).
@@ -257,7 +381,8 @@ async function uninstall({ ask: injectedAsk } = {}) {
     if (existsSync(FOREIGN_SIDECAR)) {
       try {
         const saved = JSON.parse(readFileSync(FOREIGN_SIDECAR, 'utf8'));
-        if (saved && saved.statusLine) settings.statusLine = saved.statusLine; // byte-for-byte (V-5)
+        if (saved && saved.statusLine)
+          settings.statusLine = saved.statusLine; // byte-for-byte (V-5)
         else delete settings.statusLine;
       } catch {
         delete settings.statusLine;
@@ -274,8 +399,16 @@ async function uninstall({ ask: injectedAsk } = {}) {
   }
 
   // Clean up our stable artifacts (the pointer is re-written harmlessly by the hook).
-  try { if (existsSync(FOREIGN_SIDECAR)) rmSync(FOREIGN_SIDECAR); } catch { /* best-effort */ }
-  try { if (existsSync(STABLE_LAUNCHER)) rmSync(STABLE_LAUNCHER); } catch { /* best-effort */ }
+  try {
+    if (existsSync(FOREIGN_SIDECAR)) rmSync(FOREIGN_SIDECAR);
+  } catch {
+    /* best-effort */
+  }
+  try {
+    if (existsSync(STABLE_LAUNCHER)) rmSync(STABLE_LAUNCHER);
+  } catch {
+    /* best-effort */
+  }
 
   console.log('');
   console.log('Done. Restart Claude Code to apply.');
@@ -290,8 +423,8 @@ const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv
 if (isMain) {
   const run = UNINSTALL ? uninstall : install;
   run()
-    .then(code => process.exit(typeof code === 'number' ? code : 0))
-    .catch(err => {
+    .then((code) => process.exit(typeof code === 'number' ? code : 0))
+    .catch((err) => {
       console.error(`${UNINSTALL ? 'Uninstall' : 'Install'} error:`, err.message);
       process.exit(1);
     });

@@ -678,6 +678,54 @@ var init_directory = __esm({
   }
 });
 
+// ../../packages/core/src/feeds/contributions.ts
+var CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES;
+var init_contributions = __esm({
+  "../../packages/core/src/feeds/contributions.ts"() {
+    "use strict";
+    init_vocabulary();
+    init_entities();
+    init_bounty_gate();
+    init_contribution_gate();
+    init_contribution_classify();
+    init_github_bounties();
+    init_github();
+    init_http();
+    init_gh_governor();
+    CONTRIB_LABEL_QUERIES = [
+      'label:"good first issue" type:issue state:open',
+      'label:"good-first-issue" type:issue state:open',
+      'label:"help wanted" type:issue state:open',
+      'label:"help-wanted" type:issue state:open',
+      'label:"up-for-grabs" type:issue state:open',
+      // supply-expansion D: two more first-contribution label families widen the
+      // global newest-first slice WITHOUT relaxing the credential gate.
+      'label:"beginner-friendly" type:issue state:open',
+      'label:"first-timers-only" type:issue state:open'
+    ];
+    CONTRIB_LANGUAGE_QUERIES = [
+      ...["rust", "go", "python", "c++", "ruby"].map(
+        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+      ),
+      ...["rust", "go"].map(
+        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+      ),
+      // supply-expansion D: cover the high-volume web/enterprise ecosystems the
+      // original set omitted. TS/JS were previously left out of "good first issue"
+      // (the global slice over-represented them) but a LANGUAGE-scoped page surfaces
+      // DIFFERENT repos than the global newest-first slice, so re-including them widens
+      // distinct-repo coverage rather than duplicating it.
+      ...["typescript", "javascript", "java", "python"].map(
+        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+      ),
+      ...["typescript", "javascript", "c#", "php"].map(
+        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+      )
+    ];
+    CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
+  }
+});
+
 // ../../packages/core/src/winnability.ts
 var WINNABILITY_NORM;
 var init_winnability = __esm({
@@ -753,6 +801,7 @@ var init_feeds = __esm({
     init_bounty_gate();
     init_contribution_gate();
     init_contribution_classify();
+    init_contributions();
     init_projectCuration();
     GREENHOUSE_SLUGS_BY_TIER = {
       bigco: [
@@ -864,54 +913,6 @@ var init_feeds = __esm({
       ashby: new Set(ASHBY_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase())),
       lever: new Set(LEVER_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase()))
     };
-  }
-});
-
-// ../../packages/core/src/feeds/contributions.ts
-var CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES;
-var init_contributions = __esm({
-  "../../packages/core/src/feeds/contributions.ts"() {
-    "use strict";
-    init_vocabulary();
-    init_entities();
-    init_bounty_gate();
-    init_contribution_gate();
-    init_contribution_classify();
-    init_github_bounties();
-    init_github();
-    init_http();
-    init_gh_governor();
-    CONTRIB_LABEL_QUERIES = [
-      'label:"good first issue" type:issue state:open',
-      'label:"good-first-issue" type:issue state:open',
-      'label:"help wanted" type:issue state:open',
-      'label:"help-wanted" type:issue state:open',
-      'label:"up-for-grabs" type:issue state:open',
-      // supply-expansion D: two more first-contribution label families widen the
-      // global newest-first slice WITHOUT relaxing the credential gate.
-      'label:"beginner-friendly" type:issue state:open',
-      'label:"first-timers-only" type:issue state:open'
-    ];
-    CONTRIB_LANGUAGE_QUERIES = [
-      ...["rust", "go", "python", "c++", "ruby"].map(
-        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
-      ),
-      ...["rust", "go"].map(
-        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
-      ),
-      // supply-expansion D: cover the high-volume web/enterprise ecosystems the
-      // original set omitted. TS/JS were previously left out of "good first issue"
-      // (the global slice over-represented them) but a LANGUAGE-scoped page surfaces
-      // DIFFERENT repos than the global newest-first slice, so re-including them widens
-      // distinct-repo coverage rather than duplicating it.
-      ...["typescript", "javascript", "java", "python"].map(
-        (lang) => `label:"good first issue" language:${lang} type:issue state:open`
-      ),
-      ...["typescript", "javascript", "c#", "php"].map(
-        (lang) => `label:"help wanted" language:${lang} type:issue state:open`
-      )
-    ];
-    CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
   }
 });
 
@@ -4092,6 +4093,118 @@ var init_legible_trajectory = __esm({
   }
 });
 
+// ../../packages/core/src/credential/sources.ts
+var SOURCE_CLASS, HUMAN_SET;
+var init_sources = __esm({
+  "../../packages/core/src/credential/sources.ts"() {
+    "use strict";
+    SOURCE_CLASS = {
+      /** `author_association` values that make a (non-bot, non-self) reviewer a
+       *  class-A independent human. Independence itself (is this maintainer affiliated
+       *  with the contributor?) is refined by the repo-provenance/independence layer
+       *  (TERM-46); this establishes the HUMAN class. */
+      HUMAN_ASSOCIATIONS: ["OWNER", "MEMBER", "COLLABORATOR"]
+    };
+    HUMAN_SET = new Set(
+      SOURCE_CLASS.HUMAN_ASSOCIATIONS.map((a) => a.toUpperCase())
+    );
+  }
+});
+
+// ../../packages/core/src/credential/independence.ts
+var init_independence = __esm({
+  "../../packages/core/src/credential/independence.ts"() {
+    "use strict";
+  }
+});
+
+// ../../packages/core/src/credential/redaction.ts
+var init_redaction = __esm({
+  "../../packages/core/src/credential/redaction.ts"() {
+    "use strict";
+  }
+});
+
+// ../../packages/core/src/credential/decisions.ts
+var init_decisions = __esm({
+  "../../packages/core/src/credential/decisions.ts"() {
+    "use strict";
+  }
+});
+
+// ../../packages/core/src/credential/metrics-hygiene.ts
+var init_metrics_hygiene = __esm({
+  "../../packages/core/src/credential/metrics-hygiene.ts"() {
+    "use strict";
+  }
+});
+
+// ../../packages/core/src/credential/dossier.ts
+var init_dossier = __esm({
+  "../../packages/core/src/credential/dossier.ts"() {
+    "use strict";
+    init_sources();
+    init_independence();
+    init_decisions();
+    init_metrics_hygiene();
+  }
+});
+
+// ../../packages/core/src/credential/synthesis.ts
+var COMPETENCY_NAMES, COMPETENCY_NAME_SET, COMPETENCY_GRADES, COMPETENCY_GRADE_SET, CITATION_CONTRACT, VERIFY_CONTRACT;
+var init_synthesis = __esm({
+  "../../packages/core/src/credential/synthesis.ts"() {
+    "use strict";
+    COMPETENCY_NAMES = [
+      "code-authorship",
+      "iterative-refinement",
+      "independent-review",
+      "defect-resolution",
+      "repository-standing",
+      "issue-linkage"
+    ];
+    COMPETENCY_NAME_SET = new Set(COMPETENCY_NAMES);
+    COMPETENCY_GRADES = [
+      "high",
+      "medium",
+      "process",
+      "no-signal"
+    ];
+    COMPETENCY_GRADE_SET = new Set(COMPETENCY_GRADES);
+    CITATION_CONTRACT = [
+      "You write ONE developer-contribution dossier section from STRUCTURED FACTS ONLY.",
+      "You are given a JSON `source` object of identity-free facts (pseudonym labels, enums,",
+      "counts, timestamps). You have NO other information. You must NOT invent, infer beyond,",
+      "or embellish these facts, and you must NOT name any person, account, email, or handle.",
+      "",
+      "Every claim you emit MUST carry one or more citations. A citation is the exact string",
+      "`env:<path>` pointing at the source value that proves the claim (e.g. `env:threadStats.resolved`,",
+      "`env:provenance.tier`, `env:reviewRounds`). Cite ONLY paths present in the provided",
+      "ALLOWED CITES list. A claim you cannot ground in a real path \u2014 DO NOT emit it. Prefer",
+      "fewer, fully-grounded claims over broad ones. If the facts support nothing, emit no claims.",
+      "",
+      'Return STRICT JSON: {"claims":[{"id":"c1","kind":"thesis|decision|competency|bullet",',
+      '"text":"...","cites":["env:..."],"competency":{"name":"<taxonomy>","grade":"high|medium|process|no-signal"}}]}',
+      'The `competency` field is present ONLY on kind="competency" claims. `id` is unique per claim.'
+    ].join("\n");
+    VERIFY_CONTRACT = [
+      "You are an ADVERSARIAL verifier. Your job is to DISPROVE claims, not to help.",
+      "For each claim you are given the claim text and the RESOLVED source excerpts its",
+      "citations point at (the actual values). Keep a claim ONLY if the excerpts",
+      "UNEQUIVOCALLY support every assertion in its text \u2014 the excerpts alone, with no",
+      "outside knowledge, no inference, no benefit of the doubt. If a claim overstates,",
+      "generalizes beyond the excerpt, names anyone, or is not fully entailed by the",
+      "excerpts: REJECT it. When in doubt, REJECT (default-to-fail).",
+      "",
+      "OUTPUT FORMAT \u2014 obey exactly: respond with ONLY the JSON object and NOTHING ELSE.",
+      "No preamble, no per-claim commentary, no reasoning prose, no markdown fence, no text",
+      "before or after. Decide internally; emit only the verdict:",
+      '{"supported":["c1","c3"]} \u2014 the ids of the claims that survive (omit all others; use',
+      '{"supported":[]} if none do). Any surviving id MUST be one you were given.'
+    ].join("\n");
+  }
+});
+
 // ../../packages/core/src/short-token.ts
 import { createHash as createHash2 } from "crypto";
 var init_short_token = __esm({
@@ -4123,28 +4236,78 @@ var init_src = __esm({
     init_legible();
     init_legible_trajectory();
     init_rigor();
+    init_sources();
+    init_independence();
+    init_redaction();
+    init_decisions();
+    init_metrics_hygiene();
+    init_dossier();
+    init_synthesis();
     init_short_token();
   }
 });
 
+// src/state-dir.ts
+import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
+function warnStateDirOnce(dir, message) {
+  if (warnedDirs.has(dir)) return;
+  warnedDirs.add(dir);
+  try {
+    process.stderr.write(message);
+  } catch {
+  }
+}
+function ensureStateDir(dir) {
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let fd;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | noFollow);
+  } catch (err) {
+    if (err?.code === "ELOOP") {
+      warnStateDirOnce(
+        dir,
+        `terminalhire: ${dir} is a symlink \u2014 leaving its permissions alone; the 0700 guarantee on the state directory is NOT enforced.
+`
+      );
+      return STATE_DIR_SYMLINK;
+    }
+    return STATE_DIR_UNVERIFIED;
+  }
+  try {
+    const currentMode = fstatSync(fd).mode & 511;
+    if ((currentMode & ~STATE_DIR_MODE) !== 0) {
+      fchmodSync(fd, currentMode & STATE_DIR_MODE);
+    }
+    return STATE_DIR_OK;
+  } catch {
+    return STATE_DIR_UNVERIFIED;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+    }
+  }
+}
+var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs;
+var init_state_dir = __esm({
+  "src/state-dir.ts"() {
+    "use strict";
+    STATE_DIR_MODE = 448;
+    STATE_DIR_OK = "ok";
+    STATE_DIR_SYMLINK = "symlink";
+    STATE_DIR_UNVERIFIED = "unverified";
+    warnedDirs = /* @__PURE__ */ new Set();
+  }
+});
+
 // src/github-auth.ts
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes as randomBytes3
-} from "crypto";
-import {
-  readFileSync as readFileSync2,
-  writeFileSync,
-  mkdirSync,
-  existsSync,
-  rmSync,
-  renameSync
-} from "fs";
+import { createCipheriv, createDecipheriv, randomBytes as randomBytes3 } from "crypto";
+import { readFileSync as readFileSync2, writeFileSync, existsSync, rmSync, renameSync } from "fs";
 import { join as join2 } from "path";
 import { homedir } from "os";
 async function loadKey() {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR);
   if (existsSync(KEY_FILE)) {
     return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");
   }
@@ -4172,6 +4335,7 @@ var TERMINALHIRE_DIR, TOKEN_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES;
 var init_github_auth = __esm({
   "src/github-auth.ts"() {
     "use strict";
+    init_state_dir();
     TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
     TOKEN_FILE = join2(TERMINALHIRE_DIR, "github-token.enc");
     KEY_FILE = join2(TERMINALHIRE_DIR, "key");
@@ -4182,7 +4346,7 @@ var init_github_auth = __esm({
 });
 
 // src/chat-keystore.ts
-import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync3, writeFileSync as writeFileSync2, rmSync as rmSync2 } from "fs";
+import { existsSync as existsSync2, readFileSync as readFileSync3, writeFileSync as writeFileSync2, rmSync as rmSync2 } from "fs";
 import { homedir as homedir2 } from "os";
 import { join as join3 } from "path";
 async function loadOrCreateIdentity() {
@@ -4192,7 +4356,7 @@ async function loadOrCreateIdentity() {
     return JSON.parse(decrypt(blob2, key));
   }
   const keypair = generateIdentityKeypair();
-  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR2);
   const blob = encrypt(JSON.stringify(keypair), key);
   writeFileSync2(IDENTITY_FILE, JSON.stringify(blob, null, 2), { mode: 384, encoding: "utf8" });
   return keypair;
@@ -4203,20 +4367,14 @@ var init_chat_keystore = __esm({
     "use strict";
     init_src();
     init_github_auth();
+    init_state_dir();
     TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
     IDENTITY_FILE = join3(TERMINALHIRE_DIR2, "chat-identity.enc");
   }
 });
 
 // src/web-session.ts
-import {
-  chmodSync,
-  existsSync as existsSync3,
-  mkdirSync as mkdirSync3,
-  readFileSync as readFileSync4,
-  rmSync as rmSync3,
-  writeFileSync as writeFileSync3
-} from "fs";
+import { chmodSync, existsSync as existsSync3, readFileSync as readFileSync4, rmSync as rmSync3, writeFileSync as writeFileSync3 } from "fs";
 import { homedir as homedir3 } from "os";
 import { join as join4 } from "path";
 function terminalhireDir() {
@@ -4244,11 +4402,12 @@ function readWebSessionCookie() {
 var init_web_session = __esm({
   "src/web-session.ts"() {
     "use strict";
+    init_state_dir();
   }
 });
 
 // src/chat-client.ts
-import { existsSync as existsSync4, mkdirSync as mkdirSync4, readFileSync as readFileSync5, writeFileSync as writeFileSync4 } from "fs";
+import { existsSync as existsSync4, readFileSync as readFileSync5, writeFileSync as writeFileSync4 } from "fs";
 import { homedir as homedir4 } from "os";
 import { join as join5 } from "path";
 function defaultReadPeerPins() {
@@ -4266,7 +4425,7 @@ function defaultReadPeerPins() {
   }
 }
 function defaultWritePeerPins(pins) {
-  mkdirSync4(TERMINALHIRE_DIR3, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR3);
   writeFileSync4(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
 }
 function defaultChatClientDeps() {
@@ -4337,7 +4496,11 @@ function createChatClient(overrides) {
   async function sendMessage(introId, peerLogin, plaintext) {
     const peerPublicKey = await fetchPeerKey(peerLogin);
     const identity = await deps.loadIdentity();
-    const encrypted = encryptMessage(plaintext, identity.privateKey, peerPublicKey);
+    const encrypted = encryptMessage(
+      plaintext,
+      identity.privateKey,
+      peerPublicKey
+    );
     const res = await authedFetch("/api/chat/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -4368,7 +4531,11 @@ function createChatClient(overrides) {
     return messages.map((m) => ({
       id: m.id,
       senderLogin: m.senderLogin,
-      plaintext: decryptMessage({ ciphertext: m.ciphertext, nonce: m.nonce }, identity.privateKey, peerPublicKey),
+      plaintext: decryptMessage(
+        { ciphertext: m.ciphertext, nonce: m.nonce },
+        identity.privateKey,
+        peerPublicKey
+      ),
       createdAt: m.createdAt
     }));
   }
@@ -4443,6 +4610,7 @@ var init_chat_client = __esm({
     init_src();
     init_chat_keystore();
     init_web_session();
+    init_state_dir();
     CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE = "__jpi_gh_session";
     TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
@@ -4469,7 +4637,9 @@ var init_chat_client = __esm({
       pinnedKey;
       servedKey;
       constructor(peerLogin, pinnedKey, servedKey) {
-        super(`\u26A0 safety number changed for @${peerLogin} \u2014 the key on file does not match the server. Verify before continuing.`);
+        super(
+          `\u26A0 safety number changed for @${peerLogin} \u2014 the key on file does not match the server. Verify before continuing.`
+        );
         this.name = "SafetyNumberChangedError";
         this.peerLogin = peerLogin;
         this.pinnedKey = pinnedKey;
@@ -4488,7 +4658,7 @@ var init_chat_client = __esm({
 });
 
 // src/config.ts
-import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, mkdirSync as mkdirSync5, existsSync as existsSync5 } from "fs";
+import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, existsSync as existsSync5 } from "fs";
 import { join as join6 } from "path";
 import { homedir as homedir5 } from "os";
 function readConfig() {
@@ -4502,7 +4672,7 @@ function readConfig() {
   }
 }
 function writeConfig(config) {
-  mkdirSync5(TERMINALHIRE_DIR4, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR4);
   const current = readConfig();
   const merged = { ...current, ...config };
   if ("contributePrompted" in merged) {
@@ -4517,6 +4687,7 @@ var TERMINALHIRE_DIR4, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
+    init_state_dir();
     TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join6(homedir5(), ".terminalhire");
     CONFIG_FILE = join6(TERMINALHIRE_DIR4, "config.json");
     DEFAULT_CONFIG = {
@@ -4609,7 +4780,7 @@ __export(jpi_chat_read_exports, {
   syncUnreadBadge: () => syncUnreadBadge,
   writeReadCursor: () => writeReadCursor
 });
-import { existsSync as existsSync6, mkdirSync as mkdirSync6, readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "fs";
+import { existsSync as existsSync6, readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "fs";
 import { homedir as homedir6 } from "os";
 import { join as join7 } from "path";
 async function syncUnreadBadge(deps = {}) {
@@ -4657,7 +4828,7 @@ function writeReadCursor(login, iso, deps = {}) {
   const prev = cursors[login];
   if (prev && iso <= prev) return;
   cursors[login] = iso;
-  mkdirSync6(TERMINALHIRE_DIR5, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR5);
   writeFileSync6(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
 }
 async function postReadCursor(peerLogin, lastReadAt, deps = {}) {
@@ -4691,7 +4862,20 @@ function formatStamp(iso, now = /* @__PURE__ */ new Date()) {
   if (Number.isNaN(d.getTime())) return "";
   const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
   if (sameDay) return formatClock(iso);
-  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const MONTHS = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec"
+  ];
   return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
 function truncate2(s, n) {
@@ -4707,7 +4891,9 @@ function renderInbox(items, invites = []) {
     for (const iv of invites) {
       const login = sanitizeLine(iv.login);
       const handle = `@${login}`;
-      lines.push(`  \u2198 ${handle.padEnd(18)} wants to connect \xB7 terminalhire intro --accept ${handle}`);
+      lines.push(
+        `  \u2198 ${handle.padEnd(18)} wants to connect \xB7 terminalhire intro --accept ${handle}`
+      );
     }
     lines.push("  " + "\u2500".repeat(64));
   }
@@ -4726,7 +4912,9 @@ function renderInbox(items, invites = []) {
     }
   }
   lines.push("  " + "\u2500".repeat(64));
-  lines.push('  read: terminalhire chat <login> --read   \xB7   reply: terminalhire chat <login> --send "\u2026"');
+  lines.push(
+    '  read: terminalhire chat <login> --read   \xB7   reply: terminalhire chat <login> --send "\u2026"'
+  );
   return lines.join("\n") + "\n";
 }
 function renderThread(state) {
@@ -4734,16 +4922,16 @@ function renderThread(state) {
   const safePeer = sanitizeLine(peerLogin);
   const status = formatPresence(presence);
   const lines = [];
-  lines.push(
-    `  @${safePeer}  ${status}` + (safety ? `  \xB7 safety# ${sanitizeLine(safety)}` : "")
-  );
+  lines.push(`  @${safePeer}  ${status}` + (safety ? `  \xB7 safety# ${sanitizeLine(safety)}` : ""));
   lines.push("  " + "\u2500".repeat(64));
   if (!messages || messages.length === 0) {
     lines.push(`  (no messages yet \u2014 say hi: terminalhire chat ${safePeer} --send "\u2026")`);
   } else {
     for (const m of messages) {
       const who = m.senderLogin === peerLogin ? `@${safePeer}` : "you";
-      lines.push(`  ${formatClock(m.createdAt).padStart(6)}  ${who.padEnd(16)} ${sanitizeLine(m.plaintext)}`);
+      lines.push(
+        `  ${formatClock(m.createdAt).padStart(6)}  ${who.padEnd(16)} ${sanitizeLine(m.plaintext)}`
+      );
     }
   }
   lines.push("  " + "\u2500".repeat(64));
@@ -4778,10 +4966,12 @@ function writeProblem(output, result, target) {
       );
       return "not-connected";
     default:
-      output.write(`
+      output.write(
+        `
   Could not reach your connections: ${sanitizeLine(result.message ?? "unknown error")}
 
-`);
+`
+      );
       return "error";
   }
 }
@@ -4887,10 +5077,12 @@ async function runReadThread(opts = {}) {
   try {
     messages = await client.pollMessages(introId, peerLogin);
   } catch (err) {
-    output.write(`
+    output.write(
+      `
   Could not read the thread: ${sanitizeLine(err instanceof Error ? err.message : String(err))}
 
-`);
+`
+    );
     return { ok: false, reason: "error" };
   }
   const total = messages.length;
@@ -4903,7 +5095,15 @@ async function runReadThread(opts = {}) {
       safety = "";
     }
   }
-  output.write(renderThread({ peerLogin, presence: REACHABLE_DISPLAY, safety, messages: shownMessages, total }));
+  output.write(
+    renderThread({
+      peerLogin,
+      presence: REACHABLE_DISPLAY,
+      safety,
+      messages: shownMessages,
+      total
+    })
+  );
   if (total > 0) {
     const newest = messages[total - 1];
     if (newest && newest.createdAt) {
@@ -4948,10 +5148,12 @@ async function runSend(opts = {}) {
     if (typeof client.ensureKeyPublished === "function") await client.ensureKeyPublished();
     await client.sendMessage(introId, peerLogin, body);
   } catch (err) {
-    output.write(`
+    output.write(
+      `
   Could not send to @${sanitizeLine(peerLogin)}: ${sanitizeLine(err instanceof Error ? err.message : String(err))}
 
-`);
+`
+    );
     return { ok: false, reason: "error" };
   }
   const nowIso = (/* @__PURE__ */ new Date()).toISOString();
@@ -4982,6 +5184,7 @@ var init_jpi_chat_read = __esm({
     "use strict";
     init_chat_client();
     init_web_session();
+    init_state_dir();
     init_jpi_chat();
     CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE2 = "__jpi_gh_session";
@@ -4993,19 +5196,8 @@ var init_jpi_chat_read = __esm({
 });
 
 // src/crypto-store.ts
-import {
-  createCipheriv as createCipheriv2,
-  createDecipheriv as createDecipheriv2,
-  randomBytes as randomBytes4
-} from "crypto";
-import {
-  readFileSync as readFileSync8,
-  writeFileSync as writeFileSync7,
-  mkdirSync as mkdirSync7,
-  existsSync as existsSync7,
-  renameSync as renameSync2,
-  rmSync as rmSync4
-} from "fs";
+import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes4 } from "crypto";
+import { readFileSync as readFileSync8, writeFileSync as writeFileSync7, existsSync as existsSync7, renameSync as renameSync2, rmSync as rmSync4 } from "fs";
 import { join as join8, dirname, basename } from "path";
 import { homedir as homedir7 } from "os";
 import { createRequire } from "module";
@@ -5021,11 +5213,7 @@ function encrypt2(plaintext, key) {
   };
 }
 function decrypt2(blob, key) {
-  const decipher = createDecipheriv2(
-    ALGO2,
-    key,
-    Buffer.from(blob.iv, "hex")
-  );
+  const decipher = createDecipheriv2(ALGO2, key, Buffer.from(blob.iv, "hex"));
   decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
   const plain = Buffer.concat([
     decipher.update(Buffer.from(blob.ciphertext, "hex")),
@@ -5052,7 +5240,7 @@ async function tryLoadFromKeytar() {
   }
 }
 function loadOrCreateFileKey() {
-  mkdirSync7(TERMINALHIRE_DIR6, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR6);
   if (existsSync7(KEY_FILE2)) {
     return Buffer.from(readFileSync8(KEY_FILE2, "utf8").trim(), "hex");
   }
@@ -5066,8 +5254,11 @@ function warnStderr(message) {
 }
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname(filePath);
-  mkdirSync7(dir, { recursive: true, mode: 448 });
-  const tmp = join8(dir, `.${basename(filePath)}.tmp-${process.pid}-${randomBytes4(6).toString("hex")}`);
+  ensureStateDir(dir);
+  const tmp = join8(
+    dir,
+    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes4(6).toString("hex")}`
+  );
   writeFileSync7(tmp, content, { encoding: "utf8", mode: 384 });
   renameSync2(tmp, filePath);
 }
@@ -5094,7 +5285,9 @@ async function resolveKey(filePath, opts) {
   if (opts.keyPolicy === "keychain-required") {
     const key = await tryLoadFromKeytar();
     if (!key) {
-      warnStderr(`crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`);
+      warnStderr(
+        `crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`
+      );
       return null;
     }
     return key;
@@ -5129,6 +5322,7 @@ var TERMINALHIRE_DIR6, KEY_FILE2, KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO2, KEY_BYT
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
+    init_state_dir();
     TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join8(homedir7(), ".terminalhire");
     KEY_FILE2 = join8(TERMINALHIRE_DIR6, "key");
     KEYTAR_SERVICE = "terminalhire";

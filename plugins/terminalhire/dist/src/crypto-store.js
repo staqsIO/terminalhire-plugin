@@ -1,20 +1,59 @@
 // src/crypto-store.ts
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes
-} from "crypto";
-import {
-  readFileSync,
-  writeFileSync,
-  mkdirSync,
-  existsSync,
-  renameSync,
-  rmSync
-} from "fs";
+import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
+import { readFileSync, writeFileSync, existsSync, renameSync, rmSync } from "fs";
 import { join, dirname, basename } from "path";
 import { homedir } from "os";
 import { createRequire } from "module";
+
+// src/state-dir.ts
+import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
+var STATE_DIR_MODE = 448;
+var STATE_DIR_OK = "ok";
+var STATE_DIR_SYMLINK = "symlink";
+var STATE_DIR_UNVERIFIED = "unverified";
+var warnedDirs = /* @__PURE__ */ new Set();
+function warnStateDirOnce(dir, message) {
+  if (warnedDirs.has(dir)) return;
+  warnedDirs.add(dir);
+  try {
+    process.stderr.write(message);
+  } catch {
+  }
+}
+function ensureStateDir(dir) {
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let fd;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | noFollow);
+  } catch (err) {
+    if (err?.code === "ELOOP") {
+      warnStateDirOnce(
+        dir,
+        `terminalhire: ${dir} is a symlink \u2014 leaving its permissions alone; the 0700 guarantee on the state directory is NOT enforced.
+`
+      );
+      return STATE_DIR_SYMLINK;
+    }
+    return STATE_DIR_UNVERIFIED;
+  }
+  try {
+    const currentMode = fstatSync(fd).mode & 511;
+    if ((currentMode & ~STATE_DIR_MODE) !== 0) {
+      fchmodSync(fd, currentMode & STATE_DIR_MODE);
+    }
+    return STATE_DIR_OK;
+  } catch {
+    return STATE_DIR_UNVERIFIED;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+    }
+  }
+}
+
+// src/crypto-store.ts
 var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
 var KEY_FILE = join(TERMINALHIRE_DIR, "key");
 var KEYTAR_SERVICE = "terminalhire";
@@ -34,11 +73,7 @@ function encrypt(plaintext, key) {
   };
 }
 function decrypt(blob, key) {
-  const decipher = createDecipheriv(
-    ALGO,
-    key,
-    Buffer.from(blob.iv, "hex")
-  );
+  const decipher = createDecipheriv(ALGO, key, Buffer.from(blob.iv, "hex"));
   decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
   const plain = Buffer.concat([
     decipher.update(Buffer.from(blob.ciphertext, "hex")),
@@ -69,7 +104,7 @@ async function tryLoadFromKeytar() {
   }
 }
 function loadOrCreateFileKey() {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR);
   if (existsSync(KEY_FILE)) {
     return Buffer.from(readFileSync(KEY_FILE, "utf8").trim(), "hex");
   }
@@ -83,8 +118,11 @@ function warnStderr(message) {
 }
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname(filePath);
-  mkdirSync(dir, { recursive: true, mode: 448 });
-  const tmp = join(dir, `.${basename(filePath)}.tmp-${process.pid}-${randomBytes(6).toString("hex")}`);
+  ensureStateDir(dir);
+  const tmp = join(
+    dir,
+    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes(6).toString("hex")}`
+  );
   writeFileSync(tmp, content, { encoding: "utf8", mode: 384 });
   renameSync(tmp, filePath);
 }
@@ -112,7 +150,9 @@ async function resolveKey(filePath, opts) {
   if (opts.keyPolicy === "keychain-required") {
     const key = await tryLoadFromKeytar();
     if (!key) {
-      warnStderr(`crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`);
+      warnStderr(
+        `crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`
+      );
       return null;
     }
     return key;

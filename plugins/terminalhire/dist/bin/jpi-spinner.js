@@ -1,13 +1,7 @@
 #!/usr/bin/env node
 
 // bin/jpi-spinner.js
-import {
-  readFileSync as readFileSync4,
-  writeFileSync as writeFileSync3,
-  copyFileSync,
-  existsSync as existsSync2,
-  mkdirSync as mkdirSync3
-} from "fs";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, copyFileSync, existsSync as existsSync2 } from "fs";
 import { join as join5 } from "path";
 import { homedir as homedir3 } from "os";
 import { createInterface } from "readline";
@@ -16,17 +10,62 @@ import { createInterface } from "readline";
 import { join as join2 } from "path";
 
 // bin/spinner-io.js
-import {
-  readFileSync,
-  writeFileSync,
-  existsSync,
-  mkdirSync,
-  renameSync
-} from "fs";
-import { join, dirname } from "path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync as mkdirSync2, renameSync } from "fs";
+import { join, dirname, resolve } from "path";
 import { homedir } from "os";
+
+// src/state-dir.ts
+import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
+var STATE_DIR_MODE = 448;
+var STATE_DIR_OK = "ok";
+var STATE_DIR_SYMLINK = "symlink";
+var STATE_DIR_UNVERIFIED = "unverified";
+var warnedDirs = /* @__PURE__ */ new Set();
+function warnStateDirOnce(dir, message) {
+  if (warnedDirs.has(dir)) return;
+  warnedDirs.add(dir);
+  try {
+    process.stderr.write(message);
+  } catch {
+  }
+}
+function ensureStateDir(dir) {
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let fd;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | noFollow);
+  } catch (err) {
+    if (err?.code === "ELOOP") {
+      warnStateDirOnce(
+        dir,
+        `terminalhire: ${dir} is a symlink \u2014 leaving its permissions alone; the 0700 guarantee on the state directory is NOT enforced.
+`
+      );
+      return STATE_DIR_SYMLINK;
+    }
+    return STATE_DIR_UNVERIFIED;
+  }
+  try {
+    const currentMode = fstatSync(fd).mode & 511;
+    if ((currentMode & ~STATE_DIR_MODE) !== 0) {
+      fchmodSync(fd, currentMode & STATE_DIR_MODE);
+    }
+    return STATE_DIR_OK;
+  } catch {
+    return STATE_DIR_UNVERIFIED;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+    }
+  }
+}
+
+// bin/spinner-io.js
 function thDir() {
-  return process.env["TERMINALHIRE_DIR"] || join(homedir(), ".terminalhire");
+  const raw = process.env["TERMINALHIRE_DIR"] || join(homedir(), ".terminalhire");
+  return resolve(raw);
 }
 function claudeSettingsPath() {
   return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join(homedir(), ".claude", "settings.json");
@@ -42,7 +81,11 @@ function readJson(path, fallback) {
   }
 }
 function atomicWriteJson(path, obj) {
-  mkdirSync(dirname(path), { recursive: true });
+  if (dirname(path) === thDir()) {
+    ensureStateDir(thDir());
+  } else {
+    mkdirSync2(dirname(path), { recursive: true });
+  }
   const tmp = `${path}.tmp-${process.pid}`;
   writeFileSync(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
   renameSync(tmp, path);
@@ -88,7 +131,12 @@ function clearSpinnerVerbs() {
   }
   try {
     const st = readState();
-    atomicWriteJson(SPINNER_STATE_FILE, { ...st, verbs: [], mode: st.mode || "replace", ts: Date.now() });
+    atomicWriteJson(SPINNER_STATE_FILE, {
+      ...st,
+      verbs: [],
+      mode: st.mode || "replace",
+      ts: Date.now()
+    });
   } catch {
   }
   return { cleared: true, keptUserVerbs };
@@ -139,12 +187,7 @@ function readSpinnerConfig() {
 }
 
 // bin/spinner-seen.js
-import {
-  readFileSync as readFileSync2,
-  writeFileSync as writeFileSync2,
-  renameSync as renameSync2,
-  mkdirSync as mkdirSync2
-} from "fs";
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, renameSync as renameSync2 } from "fs";
 import { join as join3, dirname as dirname2 } from "path";
 import { homedir as homedir2 } from "os";
 var SEEN_WINDOW_SURFACES = 10;
@@ -156,11 +199,12 @@ function isSuppressed(id, history) {
 }
 
 // bin/spinner-select.js
-function filterFreshMatches(matches, history) {
-  const { eligible, suppressed } = partitionFreshMatches(matches, history);
+var defaultGetId = (m) => m?.id;
+function filterFreshMatches(matches, history, getId = defaultGetId) {
+  const { eligible, suppressed } = partitionFreshMatches(matches, history, getId);
   return suppressed.length === 0 ? matches : [...eligible, ...suppressed];
 }
-function partitionFreshMatches(matches, history) {
+function partitionFreshMatches(matches, history, getId = defaultGetId) {
   const list = Array.isArray(matches) ? matches : [];
   if (!history || !history.entries || Object.keys(history.entries).length === 0) {
     return { eligible: list, suppressed: [] };
@@ -168,10 +212,11 @@ function partitionFreshMatches(matches, history) {
   const eligible = [];
   const suppressed = [];
   for (const m of list) {
-    if (m && m.id != null && isSuppressed(String(m.id), history)) suppressed.push(m);
+    const id = getId(m);
+    if (m && id != null && isSuppressed(String(id), history)) suppressed.push(m);
     else eligible.push(m);
   }
-  const stamp = (m) => history.entries[String(m.id)].lastSurface;
+  const stamp = (m) => history.entries[String(getId(m))].lastSurface;
   suppressed.sort((a, b) => stamp(a) - stamp(b));
   return { eligible, suppressed };
 }
@@ -674,6 +719,39 @@ var MAINTAINER_SET = new Set(
 // ../../packages/core/src/github.ts
 var RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
 
+// ../../packages/core/src/feeds/contributions.ts
+var CONTRIB_LABEL_QUERIES = [
+  'label:"good first issue" type:issue state:open',
+  'label:"good-first-issue" type:issue state:open',
+  'label:"help wanted" type:issue state:open',
+  'label:"help-wanted" type:issue state:open',
+  'label:"up-for-grabs" type:issue state:open',
+  // supply-expansion D: two more first-contribution label families widen the
+  // global newest-first slice WITHOUT relaxing the credential gate.
+  'label:"beginner-friendly" type:issue state:open',
+  'label:"first-timers-only" type:issue state:open'
+];
+var CONTRIB_LANGUAGE_QUERIES = [
+  ...["rust", "go", "python", "c++", "ruby"].map(
+    (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+  ),
+  ...["rust", "go"].map(
+    (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+  ),
+  // supply-expansion D: cover the high-volume web/enterprise ecosystems the
+  // original set omitted. TS/JS were previously left out of "good first issue"
+  // (the global slice over-represented them) but a LANGUAGE-scoped page surfaces
+  // DIFFERENT repos than the global newest-first slice, so re-including them widens
+  // distinct-repo coverage rather than duplicating it.
+  ...["typescript", "javascript", "java", "python"].map(
+    (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+  ),
+  ...["typescript", "javascript", "c#", "php"].map(
+    (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+  )
+];
+var CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
+
 // ../../packages/core/src/winnability.ts
 var WINNABILITY_NORM = {
   /** ~500 new stars in a build interval is treated as "maxed" momentum. */
@@ -828,39 +906,6 @@ var BIGCO_SLUGS_BY_SOURCE = {
   lever: new Set(LEVER_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase()))
 };
 
-// ../../packages/core/src/feeds/contributions.ts
-var CONTRIB_LABEL_QUERIES = [
-  'label:"good first issue" type:issue state:open',
-  'label:"good-first-issue" type:issue state:open',
-  'label:"help wanted" type:issue state:open',
-  'label:"help-wanted" type:issue state:open',
-  'label:"up-for-grabs" type:issue state:open',
-  // supply-expansion D: two more first-contribution label families widen the
-  // global newest-first slice WITHOUT relaxing the credential gate.
-  'label:"beginner-friendly" type:issue state:open',
-  'label:"first-timers-only" type:issue state:open'
-];
-var CONTRIB_LANGUAGE_QUERIES = [
-  ...["rust", "go", "python", "c++", "ruby"].map(
-    (lang) => `label:"help wanted" language:${lang} type:issue state:open`
-  ),
-  ...["rust", "go"].map(
-    (lang) => `label:"good first issue" language:${lang} type:issue state:open`
-  ),
-  // supply-expansion D: cover the high-volume web/enterprise ecosystems the
-  // original set omitted. TS/JS were previously left out of "good first issue"
-  // (the global slice over-represented them) but a LANGUAGE-scoped page surfaces
-  // DIFFERENT repos than the global newest-first slice, so re-including them widens
-  // distinct-repo coverage rather than duplicating it.
-  ...["typescript", "javascript", "java", "python"].map(
-    (lang) => `label:"good first issue" language:${lang} type:issue state:open`
-  ),
-  ...["typescript", "javascript", "c#", "php"].map(
-    (lang) => `label:"help wanted" language:${lang} type:issue state:open`
-  )
-];
-var CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
-
 // ../../packages/core/src/partners.ts
 import { readFileSync as readFileSync3 } from "fs";
 import { join as join4 } from "path";
@@ -890,6 +935,67 @@ var INTRO_ACCEPTED_TTL_MS = 365 * 24 * 60 * 60 * 1e3;
 import { hkdfSync, createHash, randomBytes } from "crypto";
 var KDF_INFO = Buffer.from("terminalhire-chat-v1");
 
+// ../../packages/core/src/credential/sources.ts
+var SOURCE_CLASS = {
+  /** `author_association` values that make a (non-bot, non-self) reviewer a
+   *  class-A independent human. Independence itself (is this maintainer affiliated
+   *  with the contributor?) is refined by the repo-provenance/independence layer
+   *  (TERM-46); this establishes the HUMAN class. */
+  HUMAN_ASSOCIATIONS: ["OWNER", "MEMBER", "COLLABORATOR"]
+};
+var HUMAN_SET = new Set(
+  SOURCE_CLASS.HUMAN_ASSOCIATIONS.map((a) => a.toUpperCase())
+);
+
+// ../../packages/core/src/credential/synthesis.ts
+var COMPETENCY_NAMES = [
+  "code-authorship",
+  "iterative-refinement",
+  "independent-review",
+  "defect-resolution",
+  "repository-standing",
+  "issue-linkage"
+];
+var COMPETENCY_NAME_SET = new Set(COMPETENCY_NAMES);
+var COMPETENCY_GRADES = [
+  "high",
+  "medium",
+  "process",
+  "no-signal"
+];
+var COMPETENCY_GRADE_SET = new Set(COMPETENCY_GRADES);
+var CITATION_CONTRACT = [
+  "You write ONE developer-contribution dossier section from STRUCTURED FACTS ONLY.",
+  "You are given a JSON `source` object of identity-free facts (pseudonym labels, enums,",
+  "counts, timestamps). You have NO other information. You must NOT invent, infer beyond,",
+  "or embellish these facts, and you must NOT name any person, account, email, or handle.",
+  "",
+  "Every claim you emit MUST carry one or more citations. A citation is the exact string",
+  "`env:<path>` pointing at the source value that proves the claim (e.g. `env:threadStats.resolved`,",
+  "`env:provenance.tier`, `env:reviewRounds`). Cite ONLY paths present in the provided",
+  "ALLOWED CITES list. A claim you cannot ground in a real path \u2014 DO NOT emit it. Prefer",
+  "fewer, fully-grounded claims over broad ones. If the facts support nothing, emit no claims.",
+  "",
+  'Return STRICT JSON: {"claims":[{"id":"c1","kind":"thesis|decision|competency|bullet",',
+  '"text":"...","cites":["env:..."],"competency":{"name":"<taxonomy>","grade":"high|medium|process|no-signal"}}]}',
+  'The `competency` field is present ONLY on kind="competency" claims. `id` is unique per claim.'
+].join("\n");
+var VERIFY_CONTRACT = [
+  "You are an ADVERSARIAL verifier. Your job is to DISPROVE claims, not to help.",
+  "For each claim you are given the claim text and the RESOLVED source excerpts its",
+  "citations point at (the actual values). Keep a claim ONLY if the excerpts",
+  "UNEQUIVOCALLY support every assertion in its text \u2014 the excerpts alone, with no",
+  "outside knowledge, no inference, no benefit of the doubt. If a claim overstates,",
+  "generalizes beyond the excerpt, names anyone, or is not fully entailed by the",
+  "excerpts: REJECT it. When in doubt, REJECT (default-to-fail).",
+  "",
+  "OUTPUT FORMAT \u2014 obey exactly: respond with ONLY the JSON object and NOTHING ELSE.",
+  "No preamble, no per-claim commentary, no reasoning prose, no markdown fence, no text",
+  "before or after. Decide internally; emit only the verdict:",
+  '{"supported":["c1","c3"]} \u2014 the ids of the claims that survive (omit all others; use',
+  '{"supported":[]} if none do). Any surviving id MUST be one you were given.'
+].join("\n");
+
 // ../../packages/core/src/short-token.ts
 import { createHash as createHash2 } from "crypto";
 
@@ -906,7 +1012,7 @@ function readConfig() {
   }
 }
 function writeConfig(patch) {
-  mkdirSync3(TH_DIR, { recursive: true });
+  ensureStateDir(TH_DIR);
   const merged = { ...readConfig(), ...patch };
   writeFileSync3(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
@@ -947,18 +1053,36 @@ async function run() {
     console.log("terminalhire spinner \u2014 job matches in the Claude Code spinner line");
     console.log("");
     console.log(`  enabled:   ${sc.enabled}`);
-    console.log(`  mode:      ${sc.mode}   (replace = only job matches; append = mixed with Claude defaults)`);
+    console.log(
+      `  mode:      ${sc.mode}   (replace = only job matches; append = mixed with Claude defaults)`
+    );
     console.log(`  max:       ${sc.max}    (max job verbs that rotate)`);
-    console.log(`  frequency: ${sc.frequency}   (always = up to max; sometimes = up to 2; rare = 1 per cycle)`);
+    console.log(
+      `  frequency: ${sc.frequency}   (always = up to max; sometimes = up to 2; rare = 1 per cycle)`
+    );
     console.log("");
-    console.log("  terminalhire spinner --on                      enable (asks consent, backs up settings.json)");
-    console.log("  terminalhire spinner --off                     disable + restore your original spinner");
-    console.log("  terminalhire spinner --mode append             mix job verbs with Claude's defaults");
+    console.log(
+      "  terminalhire spinner --on                      enable (asks consent, backs up settings.json)"
+    );
+    console.log(
+      "  terminalhire spinner --off                     disable + restore your original spinner"
+    );
+    console.log(
+      "  terminalhire spinner --mode append             mix job verbs with Claude's defaults"
+    );
     console.log("  terminalhire spinner --mode replace            show only job matches");
-    console.log("  terminalhire spinner --max N                   cap how many job verbs rotate (1\u201312)");
-    console.log("  terminalhire spinner --frequency always        surface up to max role verbs every cycle");
-    console.log("  terminalhire spinner --frequency sometimes     surface up to 2 role verbs (default)");
-    console.log("  terminalhire spinner --frequency rare          surface 1 role verb per cycle (quietest)");
+    console.log(
+      "  terminalhire spinner --max N                   cap how many job verbs rotate (1\u201312)"
+    );
+    console.log(
+      "  terminalhire spinner --frequency always        surface up to max role verbs every cycle"
+    );
+    console.log(
+      "  terminalhire spinner --frequency sometimes     surface up to 2 role verbs (default)"
+    );
+    console.log(
+      "  terminalhire spinner --frequency rare          surface 1 role verb per cycle (quietest)"
+    );
     console.log("");
     return;
   }
@@ -1006,7 +1130,9 @@ async function run() {
       next.frequency = freq;
     }
     writeConfig({ spinner: next });
-    console.log(`  spinner config updated: mode=${next.mode} max=${next.max} frequency=${next.frequency} enabled=${next.enabled}`);
+    console.log(
+      `  spinner config updated: mode=${next.mode} max=${next.max} frequency=${next.frequency} enabled=${next.enabled}`
+    );
     if (next.enabled) {
       const verbs = buildSpinnerPool(readTopMatches(), next.max, { frequency: next.frequency });
       if (verbs.length) applySpinnerVerbs(verbs, next.mode);
@@ -1033,7 +1159,9 @@ async function run() {
     console.log("  \u2022 The tip line below shows a \u2318-clickable terminalhire.com/j/\u2026 link to open");
     console.log("    the listing (clicks logged anonymously, no profile data).");
     console.log(`  \u2022 mode=${mode}  (replace = only job matches; append = mixed with defaults)`);
-    console.log(`  \u2022 frequency=${frequency}  (always = every cycle; sometimes = up to 2 verbs; rare = 1 verb)`);
+    console.log(
+      `  \u2022 frequency=${frequency}  (always = every cycle; sometimes = up to 2 verbs; rare = 1 verb)`
+    );
     console.log("  \u2022 Matches refresh in the background.");
     console.log("    ZERO egress \u2014 your profile never leaves the machine; only public job");
     console.log("    text appears on YOUR screen.");
@@ -1056,14 +1184,18 @@ async function run() {
     if (backup) console.log(`  Backed up settings to: ${backup}`);
     console.log(`  Enabled. ${verbs.length} job verb(s) live now; refreshes in the background.`);
     if (verbs.length === 0) {
-      console.log("  (No matches cached yet \u2014 run `terminalhire refresh` or wait for the monitor.)");
+      console.log(
+        "  (No matches cached yet \u2014 run `terminalhire refresh` or wait for the monitor.)"
+      );
     }
     console.log("  Claude Code picks up settings.json changes automatically.");
     console.log("  Turn off any time: terminalhire spinner --off");
     console.log("");
     return;
   }
-  console.error("Usage: terminalhire spinner --on | --off | --show | --mode <append|replace> | --max N | --frequency <always|sometimes|rare>");
+  console.error(
+    "Usage: terminalhire spinner --on | --off | --show | --mode <append|replace> | --max N | --frequency <always|sometimes|rare>"
+  );
   process.exit(1);
 }
 export {

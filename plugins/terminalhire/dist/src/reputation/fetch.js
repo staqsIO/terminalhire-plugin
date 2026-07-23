@@ -660,6 +660,28 @@ function makeScoringGovernor(governor) {
     makeDefaultGovernorConfig({ paceEnabled: false })
   );
 }
+function reviewerPseudonym(repoFullName, reviewerId) {
+  const s = `${repoFullName}:${reviewerId}`;
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return `R${h.toString(16).padStart(8, "0")}`;
+}
+async function fetchPublicOrgsOrNull(login, token, sig) {
+  try {
+    const orgs = await ghFetch(
+      `/users/${encodeURIComponent(login)}/orgs?per_page=100`,
+      token,
+      sig
+    );
+    return new Set(orgs.map((o) => o.login.toLowerCase()));
+  } catch {
+    return null;
+  }
+}
+var AFFILIATION_REVIEWER_CAP = 5;
 async function fetchPRScoringFacts(prUrl, token, signal, governor) {
   const ref = parseGitHubRef(prUrl);
   if (!ref || ref.kind !== "pull") return null;
@@ -683,6 +705,7 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
   const contributors = gov.tripped() || gov.budgetExhausted() ? null : await repoContributorCount(owner, repo, token, sig);
   const { closesIssues, linkageSource } = await resolveClosingIssues(owner, repo, number, pr.body ?? "", token, sig, gov);
   let reviewerAssociations;
+  let reviewSources;
   if (!gov.tripped() && !gov.budgetExhausted()) {
     try {
       const reviews = await ghFetch(
@@ -691,8 +714,78 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
         sig
       );
       reviewerAssociations = reviews.map((r) => r.author_association);
+      reviewSources = reviews.map((r) => ({
+        association: r.author_association,
+        isBot: isLifecycleBot(r.user ?? null),
+        isSelf: r.user?.id != null && pr.user?.id != null && r.user.id === pr.user.id,
+        ...r.user?.id != null ? { pseudonym: reviewerPseudonym(`${owner}/${repo}`, r.user.id) } : {},
+        ...r.state ? { state: r.state } : {},
+        submittedAt: r.submitted_at ?? null
+      }));
+      const authorLogin = pr.user?.login;
+      if (authorLogin && !gov.tripped() && !gov.budgetExhausted()) {
+        const authorOrgs = await fetchPublicOrgsOrNull(authorLogin, token, sig);
+        if (authorOrgs != null) {
+          const humanReviewers = /* @__PURE__ */ new Map();
+          for (const r of reviews) {
+            if (r.user?.id == null || r.user.login == null) continue;
+            if (isLifecycleBot(r.user) || pr.user?.id != null && r.user.id === pr.user.id) continue;
+            const p = reviewerPseudonym(`${owner}/${repo}`, r.user.id);
+            if (!humanReviewers.has(p) && humanReviewers.size < AFFILIATION_REVIEWER_CAP) {
+              humanReviewers.set(p, r.user.login);
+            }
+          }
+          const shared = /* @__PURE__ */ new Map();
+          for (const [p, login] of humanReviewers) {
+            if (gov.tripped() || gov.budgetExhausted()) break;
+            const reviewerOrgs = await fetchPublicOrgsOrNull(login, token, sig);
+            if (reviewerOrgs == null) continue;
+            shared.set(p, [...reviewerOrgs].some((o) => authorOrgs.has(o)));
+          }
+          for (const src of reviewSources) {
+            if (src.pseudonym && shared.has(src.pseudonym)) {
+              src.sharedOrgWithAuthor = shared.get(src.pseudonym);
+            }
+          }
+        }
+      }
     } catch {
       reviewerAssociations = void 0;
+      reviewSources = void 0;
+    }
+  }
+  let commits;
+  if (!gov.tripped() && !gov.budgetExhausted()) {
+    try {
+      const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${number}/commits?per_page=100`;
+      const res = await gov.get(url, { headers: ghHeaders(token), signal: sig });
+      if (res && res.ok) {
+        const rawCommits = await res.json();
+        commits = !Array.isArray(rawCommits) || rawCommits.length === 100 ? void 0 : rawCommits.map((c) => ({
+          sha: c.sha,
+          committedAt: c.commit?.committer?.date ?? c.commit?.author?.date ?? null
+        }));
+      }
+    } catch {
+      commits = void 0;
+    }
+  }
+  let reviewThreadStats;
+  if (token && !gov.tripped() && !gov.budgetExhausted()) {
+    try {
+      const q = `query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){reviewThreads(first:100){totalCount nodes{isResolved}}}}rateLimit{cost remaining}}`;
+      const r = await ghGraphQL(q, { o: owner, n: repo, p: number }, token, sig, gov);
+      const threads = r?.data?.repository?.pullRequest?.reviewThreads;
+      if (threads && typeof threads.totalCount === "number" && threads.totalCount <= 100 && Array.isArray(threads.nodes)) {
+        const resolved = threads.nodes.filter((t) => t.isResolved).length;
+        reviewThreadStats = {
+          total: threads.totalCount,
+          resolved,
+          unresolved: threads.totalCount - resolved
+        };
+      }
+    } catch {
+      reviewThreadStats = void 0;
     }
   }
   return {
@@ -711,12 +804,25 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
     repoContributors: contributors ?? null,
     repoArchived: !!repoMeta?.archived,
     repoFork: !!repoMeta?.fork,
-    repoPrivate: !!repoMeta?.private,
+    // TERM-46: preserve UNKNOWN when the repo-meta read failed/was skipped — do NOT
+    // coerce a missing read to `false` (public), which would fail OPEN in the
+    // provenance gate. A successful read reports the real flag (GitHub always sends it).
+    repoPrivate: repoMeta ? repoMeta.private ?? false : null,
     additions: pr.additions ?? null,
     deletions: pr.deletions ?? null,
     changedFiles: pr.changed_files ?? null,
     repoForks: repoMeta?.forks_count ?? null,
     reviewerAssociations,
+    reviewSources,
+    // TERM-46 provenance RAW inputs. `created_at` rides the existing repo read;
+    // repoOrgVerified / repoDependents are deferred (extra API) → left undefined.
+    repoCreatedAt: repoMeta?.created_at ?? null,
+    // TERM-50: PR creation rides the existing detail read; null = unknown (older
+    // callers / list shapes) → time-to-merge honestly absent, never fabricated.
+    prCreatedAt: pr.created_at ?? null,
+    // §7 PR-A: commit + review-thread enrichment (undefined when degraded/truncated).
+    commits,
+    reviewThreadStats,
     fetchedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
@@ -880,6 +986,39 @@ async function fetchPRLifecycle(prUrl, token, signal, governor) {
   };
 }
 
+// ../../packages/core/src/feeds/contributions.ts
+var CONTRIB_LABEL_QUERIES = [
+  'label:"good first issue" type:issue state:open',
+  'label:"good-first-issue" type:issue state:open',
+  'label:"help wanted" type:issue state:open',
+  'label:"help-wanted" type:issue state:open',
+  'label:"up-for-grabs" type:issue state:open',
+  // supply-expansion D: two more first-contribution label families widen the
+  // global newest-first slice WITHOUT relaxing the credential gate.
+  'label:"beginner-friendly" type:issue state:open',
+  'label:"first-timers-only" type:issue state:open'
+];
+var CONTRIB_LANGUAGE_QUERIES = [
+  ...["rust", "go", "python", "c++", "ruby"].map(
+    (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+  ),
+  ...["rust", "go"].map(
+    (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+  ),
+  // supply-expansion D: cover the high-volume web/enterprise ecosystems the
+  // original set omitted. TS/JS were previously left out of "good first issue"
+  // (the global slice over-represented them) but a LANGUAGE-scoped page surfaces
+  // DIFFERENT repos than the global newest-first slice, so re-including them widens
+  // distinct-repo coverage rather than duplicating it.
+  ...["typescript", "javascript", "java", "python"].map(
+    (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+  ),
+  ...["typescript", "javascript", "c#", "php"].map(
+    (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+  )
+];
+var CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
+
 // ../../packages/core/src/winnability.ts
 var WINNABILITY_NORM = {
   /** ~500 new stars in a build interval is treated as "maxed" momentum. */
@@ -1034,39 +1173,6 @@ var BIGCO_SLUGS_BY_SOURCE = {
   lever: new Set(LEVER_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase()))
 };
 
-// ../../packages/core/src/feeds/contributions.ts
-var CONTRIB_LABEL_QUERIES = [
-  'label:"good first issue" type:issue state:open',
-  'label:"good-first-issue" type:issue state:open',
-  'label:"help wanted" type:issue state:open',
-  'label:"help-wanted" type:issue state:open',
-  'label:"up-for-grabs" type:issue state:open',
-  // supply-expansion D: two more first-contribution label families widen the
-  // global newest-first slice WITHOUT relaxing the credential gate.
-  'label:"beginner-friendly" type:issue state:open',
-  'label:"first-timers-only" type:issue state:open'
-];
-var CONTRIB_LANGUAGE_QUERIES = [
-  ...["rust", "go", "python", "c++", "ruby"].map(
-    (lang) => `label:"help wanted" language:${lang} type:issue state:open`
-  ),
-  ...["rust", "go"].map(
-    (lang) => `label:"good first issue" language:${lang} type:issue state:open`
-  ),
-  // supply-expansion D: cover the high-volume web/enterprise ecosystems the
-  // original set omitted. TS/JS were previously left out of "good first issue"
-  // (the global slice over-represented them) but a LANGUAGE-scoped page surfaces
-  // DIFFERENT repos than the global newest-first slice, so re-including them widens
-  // distinct-repo coverage rather than duplicating it.
-  ...["typescript", "javascript", "java", "python"].map(
-    (lang) => `label:"good first issue" language:${lang} type:issue state:open`
-  ),
-  ...["typescript", "javascript", "c#", "php"].map(
-    (lang) => `label:"help wanted" language:${lang} type:issue state:open`
-  )
-];
-var CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
-
 // ../../packages/core/src/partners.ts
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -1095,6 +1201,67 @@ var INTRO_ACCEPTED_TTL_MS = 365 * 24 * 60 * 60 * 1e3;
 // ../../packages/core/src/chatCrypto.ts
 import { hkdfSync, createHash, randomBytes } from "crypto";
 var KDF_INFO = Buffer.from("terminalhire-chat-v1");
+
+// ../../packages/core/src/credential/sources.ts
+var SOURCE_CLASS = {
+  /** `author_association` values that make a (non-bot, non-self) reviewer a
+   *  class-A independent human. Independence itself (is this maintainer affiliated
+   *  with the contributor?) is refined by the repo-provenance/independence layer
+   *  (TERM-46); this establishes the HUMAN class. */
+  HUMAN_ASSOCIATIONS: ["OWNER", "MEMBER", "COLLABORATOR"]
+};
+var HUMAN_SET = new Set(
+  SOURCE_CLASS.HUMAN_ASSOCIATIONS.map((a) => a.toUpperCase())
+);
+
+// ../../packages/core/src/credential/synthesis.ts
+var COMPETENCY_NAMES = [
+  "code-authorship",
+  "iterative-refinement",
+  "independent-review",
+  "defect-resolution",
+  "repository-standing",
+  "issue-linkage"
+];
+var COMPETENCY_NAME_SET = new Set(COMPETENCY_NAMES);
+var COMPETENCY_GRADES = [
+  "high",
+  "medium",
+  "process",
+  "no-signal"
+];
+var COMPETENCY_GRADE_SET = new Set(COMPETENCY_GRADES);
+var CITATION_CONTRACT = [
+  "You write ONE developer-contribution dossier section from STRUCTURED FACTS ONLY.",
+  "You are given a JSON `source` object of identity-free facts (pseudonym labels, enums,",
+  "counts, timestamps). You have NO other information. You must NOT invent, infer beyond,",
+  "or embellish these facts, and you must NOT name any person, account, email, or handle.",
+  "",
+  "Every claim you emit MUST carry one or more citations. A citation is the exact string",
+  "`env:<path>` pointing at the source value that proves the claim (e.g. `env:threadStats.resolved`,",
+  "`env:provenance.tier`, `env:reviewRounds`). Cite ONLY paths present in the provided",
+  "ALLOWED CITES list. A claim you cannot ground in a real path \u2014 DO NOT emit it. Prefer",
+  "fewer, fully-grounded claims over broad ones. If the facts support nothing, emit no claims.",
+  "",
+  'Return STRICT JSON: {"claims":[{"id":"c1","kind":"thesis|decision|competency|bullet",',
+  '"text":"...","cites":["env:..."],"competency":{"name":"<taxonomy>","grade":"high|medium|process|no-signal"}}]}',
+  'The `competency` field is present ONLY on kind="competency" claims. `id` is unique per claim.'
+].join("\n");
+var VERIFY_CONTRACT = [
+  "You are an ADVERSARIAL verifier. Your job is to DISPROVE claims, not to help.",
+  "For each claim you are given the claim text and the RESOLVED source excerpts its",
+  "citations point at (the actual values). Keep a claim ONLY if the excerpts",
+  "UNEQUIVOCALLY support every assertion in its text \u2014 the excerpts alone, with no",
+  "outside knowledge, no inference, no benefit of the doubt. If a claim overstates,",
+  "generalizes beyond the excerpt, names anyone, or is not fully entailed by the",
+  "excerpts: REJECT it. When in doubt, REJECT (default-to-fail).",
+  "",
+  "OUTPUT FORMAT \u2014 obey exactly: respond with ONLY the JSON object and NOTHING ELSE.",
+  "No preamble, no per-claim commentary, no reasoning prose, no markdown fence, no text",
+  "before or after. Decide internally; emit only the verdict:",
+  '{"supported":["c1","c3"]} \u2014 the ids of the claims that survive (omit all others; use',
+  '{"supported":[]} if none do). Any surviving id MUST be one you were given.'
+].join("\n");
 
 // ../../packages/core/src/short-token.ts
 import { createHash as createHash2 } from "crypto";

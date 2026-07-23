@@ -27,10 +27,14 @@
  *   - Never prints file paths, stack traces, or profile data.
  */
 
-import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+// The state dir holds key material, so it must be created at 0700 — a bare
+// mkdirSync here would create it at the 0755 umask default, and whichever
+// module creates it FIRST wins its mode for the directory's lifetime (TERM-39).
+import { ensureStateDir } from './state-dir.js';
 
 const TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), '.terminalhire');
 const NUDGE_FILE = join(TERMINALHIRE_DIR, 'nudged.json');
@@ -50,7 +54,7 @@ function writeEnginePointer() {
     const pluginRoot = dirname(dirname(fileURLToPath(import.meta.url)));
     const engine = join(pluginRoot, 'dist', 'bin', 'jpi-statusline.js');
     if (!existsSync(engine)) return; // nothing to point at yet — leave prior pointer
-    mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+    ensureStateDir(TERMINALHIRE_DIR);
     // Atomic-ish: write a temp file then rename, so a concurrent reader never sees a
     // half-written pointer (heeds the zombie-monitor lesson — no torn shared artifact).
     const tmp = `${ENGINE_POINTER_FILE}.tmp-${process.pid}`;
@@ -82,7 +86,7 @@ function alreadyNudgedThisSlot(prefix) {
     if (typeof v === 'number' && v < cutoff) delete nudged[k];
   }
   try {
-    mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+    ensureStateDir(TERMINALHIRE_DIR);
     writeFileSync(NUDGE_FILE, JSON.stringify(nudged), 'utf8');
   } catch { /* non-fatal */ }
   return false;

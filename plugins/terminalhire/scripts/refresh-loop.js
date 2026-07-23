@@ -38,9 +38,15 @@
 'use strict';
 
 const { spawnSync } = require('node:child_process');
-const { readFileSync, writeFileSync, mkdirSync, unlinkSync } = require('node:fs');
+const { readFileSync, writeFileSync, unlinkSync } = require('node:fs');
 const { join, dirname } = require('node:path');
 const { homedir } = require('node:os');
+// The state dir holds key material, so it must be created at 0700 — a bare
+// mkdirSync here would create it at the 0755 umask default. This monitor is a
+// plausible FIRST creator on a fresh machine (it runs on a loop, before any CLI
+// command), and whichever module creates the dir first wins its mode for the
+// directory's lifetime (TERM-39).
+const { ensureStateDir } = require('./state-dir.js');
 
 const PLUGIN_ROOT = process.argv[2] || join(dirname(__filename), '..');
 const DISPATCH = join(PLUGIN_ROOT, 'dist', 'bin', 'jpi-dispatch.js');
@@ -230,7 +236,10 @@ function beat() {
  */
 function acquireLock() {
   try {
-    mkdirSync(TH_DIR, { recursive: true });
+    // ensureStateDir throws on a CREATE failure exactly as the bare mkdirSync it
+    // replaced did (its permissions heal is best-effort and never throws), so the
+    // fail-OPEN behaviour below is unchanged.
+    ensureStateDir(TH_DIR);
   } catch {
     // Lock dir unusable → fail OPEN (run) rather than block the monitor entirely —
     // a rare double-run is less harmful than no refresh at all.

@@ -1,450 +1,16 @@
-#!/usr/bin/env node
-
-// bin/spinner-config.js
-import { join as join2 } from "path";
-
-// bin/spinner-io.js
-import { readFileSync, writeFileSync, existsSync, mkdirSync as mkdirSync2, renameSync } from "fs";
-import { join, dirname, resolve } from "path";
+// bin/job-status-store.js
+import {
+  readFileSync as readFileSync2,
+  writeFileSync,
+  renameSync,
+  existsSync,
+  copyFileSync,
+  openSync as openSync2,
+  closeSync as closeSync2,
+  unlinkSync
+} from "fs";
+import { join as join2, dirname } from "path";
 import { homedir } from "os";
-
-// src/state-dir.ts
-import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
-var STATE_DIR_MODE = 448;
-var STATE_DIR_OK = "ok";
-var STATE_DIR_SYMLINK = "symlink";
-var STATE_DIR_UNVERIFIED = "unverified";
-var warnedDirs = /* @__PURE__ */ new Set();
-function warnStateDirOnce(dir, message) {
-  if (warnedDirs.has(dir)) return;
-  warnedDirs.add(dir);
-  try {
-    process.stderr.write(message);
-  } catch {
-  }
-}
-function ensureStateDir(dir) {
-  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
-  const noFollow = constants.O_NOFOLLOW ?? 0;
-  let fd;
-  try {
-    fd = openSync(dir, constants.O_RDONLY | noFollow);
-  } catch (err) {
-    if (err?.code === "ELOOP") {
-      warnStateDirOnce(
-        dir,
-        `terminalhire: ${dir} is a symlink \u2014 leaving its permissions alone; the 0700 guarantee on the state directory is NOT enforced.
-`
-      );
-      return STATE_DIR_SYMLINK;
-    }
-    return STATE_DIR_UNVERIFIED;
-  }
-  try {
-    const currentMode = fstatSync(fd).mode & 511;
-    if ((currentMode & ~STATE_DIR_MODE) !== 0) {
-      fchmodSync(fd, currentMode & STATE_DIR_MODE);
-    }
-    return STATE_DIR_OK;
-  } catch {
-    return STATE_DIR_UNVERIFIED;
-  } finally {
-    try {
-      closeSync(fd);
-    } catch {
-    }
-  }
-}
-
-// bin/spinner-io.js
-function thDir() {
-  const raw = process.env["TERMINALHIRE_DIR"] || join(homedir(), ".terminalhire");
-  return resolve(raw);
-}
-function claudeSettingsPath() {
-  return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join(homedir(), ".claude", "settings.json");
-}
-function spinnerStateFilePath() {
-  return join(thDir(), "spinner-state.json");
-}
-function readJson(path, fallback) {
-  try {
-    return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-function atomicWriteJson(path, obj) {
-  if (dirname(path) === thDir()) {
-    ensureStateDir(thDir());
-  } else {
-    mkdirSync2(dirname(path), { recursive: true });
-  }
-  const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
-  renameSync(tmp, path);
-}
-function readState() {
-  const SPINNER_STATE_FILE = spinnerStateFilePath();
-  return readJson(SPINNER_STATE_FILE, { verbs: [], mode: "replace" });
-}
-function applySpinnerVerbs(ourVerbs, mode = "replace") {
-  const CLAUDE_SETTINGS = claudeSettingsPath();
-  const SPINNER_STATE_FILE = spinnerStateFilePath();
-  const verbs = (Array.isArray(ourVerbs) ? ourVerbs : []).filter(Boolean);
-  if (verbs.length === 0) return clearSpinnerVerbs();
-  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
-  const existing = settings.spinnerVerbs && typeof settings.spinnerVerbs === "object" ? settings.spinnerVerbs : null;
-  const prevOurs = new Set(readState().verbs || []);
-  const userVerbs = existing && Array.isArray(existing.verbs) ? existing.verbs.filter((v) => !prevOurs.has(v)) : [];
-  const newVerbs = [...verbs, ...userVerbs];
-  settings.spinnerVerbs = { mode: mode === "append" ? "append" : "replace", verbs: newVerbs };
-  atomicWriteJson(CLAUDE_SETTINGS, settings);
-  const st = readState();
-  atomicWriteJson(SPINNER_STATE_FILE, { ...st, verbs, mode, ts: Date.now() });
-  return { applied: verbs.length, total: newVerbs.length };
-}
-function clearSpinnerVerbs() {
-  const CLAUDE_SETTINGS = claudeSettingsPath();
-  const SPINNER_STATE_FILE = spinnerStateFilePath();
-  const settings = readJson(CLAUDE_SETTINGS, null);
-  const prevOurs = new Set(readState().verbs || []);
-  let keptUserVerbs = 0;
-  if (settings && settings.spinnerVerbs && Array.isArray(settings.spinnerVerbs.verbs)) {
-    const userVerbs = settings.spinnerVerbs.verbs.filter((v) => !prevOurs.has(v));
-    keptUserVerbs = userVerbs.length;
-    if (userVerbs.length > 0) {
-      settings.spinnerVerbs = {
-        mode: settings.spinnerVerbs.mode === "append" ? "append" : "replace",
-        verbs: userVerbs
-      };
-    } else {
-      delete settings.spinnerVerbs;
-    }
-    atomicWriteJson(CLAUDE_SETTINGS, settings);
-  }
-  try {
-    const st = readState();
-    atomicWriteJson(SPINNER_STATE_FILE, {
-      ...st,
-      verbs: [],
-      mode: st.mode || "replace",
-      ts: Date.now()
-    });
-  } catch {
-  }
-  return { cleared: true, keptUserVerbs };
-}
-function applySpinnerTips(ourTips) {
-  const CLAUDE_SETTINGS = claudeSettingsPath();
-  const SPINNER_STATE_FILE = spinnerStateFilePath();
-  const tips = (Array.isArray(ourTips) ? ourTips : []).filter(Boolean);
-  if (tips.length === 0) return clearSpinnerTips();
-  const settings = readJson(CLAUDE_SETTINGS, {}) || {};
-  const existing = settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips) ? settings.spinnerTipsOverride.tips : [];
-  const prevOurs = new Set(readState().tips || []);
-  const userTips = existing.filter((t) => !prevOurs.has(t));
-  settings.spinnerTipsEnabled = true;
-  settings.spinnerTipsOverride = { excludeDefault: true, tips: [...tips, ...userTips] };
-  atomicWriteJson(CLAUDE_SETTINGS, settings);
-  const st = readState();
-  atomicWriteJson(SPINNER_STATE_FILE, { ...st, tips, ts: Date.now() });
-  return { applied: tips.length };
-}
-function clearSpinnerTips() {
-  const CLAUDE_SETTINGS = claudeSettingsPath();
-  const SPINNER_STATE_FILE = spinnerStateFilePath();
-  const settings = readJson(CLAUDE_SETTINGS, null);
-  const prevOurs = new Set(readState().tips || []);
-  if (settings && settings.spinnerTipsOverride && Array.isArray(settings.spinnerTipsOverride.tips)) {
-    const userTips = settings.spinnerTipsOverride.tips.filter((t) => !prevOurs.has(t));
-    if (userTips.length > 0) {
-      settings.spinnerTipsOverride = {
-        excludeDefault: settings.spinnerTipsOverride.excludeDefault === true,
-        tips: userTips
-      };
-    } else {
-      delete settings.spinnerTipsOverride;
-      delete settings.spinnerTipsEnabled;
-    }
-    atomicWriteJson(CLAUDE_SETTINGS, settings);
-  }
-  try {
-    const st = readState();
-    atomicWriteJson(SPINNER_STATE_FILE, { ...st, tips: [], ts: Date.now() });
-  } catch {
-  }
-  return { cleared: true };
-}
-
-// bin/spinner-config.js
-function configFilePath() {
-  return join2(thDir(), "config.json");
-}
-var SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
-function readSpinnerConfig() {
-  const CONFIG_FILE = configFilePath();
-  const cfg = readJson(CONFIG_FILE, {});
-  const spinner = cfg && typeof cfg.spinner === "object" ? cfg.spinner : {};
-  const merged = { ...SPINNER_DEFAULTS, ...spinner };
-  if (merged.mode !== "append" && merged.mode !== "replace") merged.mode = SPINNER_DEFAULTS.mode;
-  merged.max = Math.max(1, Math.min(12, Number(merged.max) || SPINNER_DEFAULTS.max));
-  merged.enabled = merged.enabled === true;
-  if (!["always", "sometimes", "rare"].includes(merged.frequency)) {
-    merged.frequency = SPINNER_DEFAULTS.frequency;
-  }
-  return merged;
-}
-
-// bin/spinner-seen.js
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, renameSync as renameSync2 } from "fs";
-import { join as join3, dirname as dirname2 } from "path";
-import { homedir as homedir2 } from "os";
-var SEEN_WINDOW_SURFACES = 10;
-var SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
-var SEEN_MAX_ENTRIES = 500;
-var SEEN_MAX_WIDTHS = 200;
-function seenFilePath() {
-  const dir = process.env["TERMINALHIRE_DIR"] || join3(homedir2(), ".terminalhire");
-  return join3(dir, "seen-history.json");
-}
-function atomicWriteJson2(path, obj) {
-  ensureStateDir(dirname2(path));
-  const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync2(tmp, JSON.stringify(obj) + "\n", { encoding: "utf8", mode: 384 });
-  renameSync2(tmp, path);
-}
-function emptyHistory() {
-  return { surface: 0, entries: {}, widths: {} };
-}
-function capWidths(widths) {
-  const keys = Object.keys(widths);
-  if (keys.length <= SEEN_MAX_WIDTHS) return widths;
-  keys.sort((a, b) => Number(b) - Number(a));
-  const out = {};
-  for (const k of keys.slice(0, SEEN_MAX_WIDTHS)) out[k] = widths[k];
-  return out;
-}
-function isFiniteNonNegative(n) {
-  return typeof n === "number" && Number.isFinite(n) && n >= 0;
-}
-function pruneEntries(entries, now) {
-  const out = {};
-  for (const [id, e] of Object.entries(entries)) {
-    if (!e || !isFiniteNonNegative(e.lastSurface) || !isFiniteNonNegative(e.lastSeenAt)) continue;
-    if (now - e.lastSeenAt > SEEN_TTL_MS) continue;
-    out[id] = { lastSurface: e.lastSurface, lastSeenAt: e.lastSeenAt };
-  }
-  return out;
-}
-function capEntries(entries) {
-  const ids = Object.keys(entries);
-  if (ids.length <= SEEN_MAX_ENTRIES) return entries;
-  ids.sort(
-    (a, b) => entries[b].lastSurface - entries[a].lastSurface || entries[b].lastSeenAt - entries[a].lastSeenAt
-  );
-  const out = {};
-  for (const id of ids.slice(0, SEEN_MAX_ENTRIES)) out[id] = entries[id];
-  return out;
-}
-function loadSeenHistory(now = Date.now()) {
-  let raw;
-  try {
-    raw = JSON.parse(readFileSync2(seenFilePath(), "utf8"));
-  } catch {
-    return emptyHistory();
-  }
-  if (!raw || typeof raw !== "object") return emptyHistory();
-  const surface = isFiniteNonNegative(raw.surface) ? Math.floor(raw.surface) : 0;
-  const entries = raw.entries && typeof raw.entries === "object" && !Array.isArray(raw.entries) ? pruneEntries(raw.entries, now) : {};
-  const widths = raw.widths && typeof raw.widths === "object" && !Array.isArray(raw.widths) ? capWidths(
-    Object.fromEntries(
-      Object.entries(raw.widths).filter(
-        ([s, n]) => isFiniteNonNegative(Number(s)) && isFiniteNonNegative(n)
-      )
-    )
-  ) : {};
-  return { surface, entries, widths };
-}
-function isSuppressed(id, history) {
-  const e = history.entries[id];
-  if (!e) return false;
-  return history.surface - e.lastSurface < SEEN_WINDOW_SURFACES;
-}
-function recordSurface(ids, now = Date.now()) {
-  const history = loadSeenHistory(now);
-  const surface = history.surface + 1;
-  const entries = { ...history.entries };
-  for (const id of ids) {
-    if (typeof id !== "string" || id.length === 0) continue;
-    entries[id] = { lastSurface: surface, lastSeenAt: now };
-  }
-  const stamped = new Set(
-    (Array.isArray(ids) ? ids : []).filter((id) => typeof id === "string" && id.length > 0)
-  );
-  const widths = capWidths({ ...history.widths, [surface]: stamped.size });
-  const next = { surface, entries: capEntries(pruneEntries(entries, now)), widths };
-  try {
-    atomicWriteJson2(seenFilePath(), next);
-  } catch {
-  }
-  return next;
-}
-
-// bin/spinner-select.js
-var defaultGetId = (m) => m?.id;
-function filterFreshMatches(matches, history, getId = defaultGetId) {
-  const { eligible, suppressed } = partitionFreshMatches(matches, history, getId);
-  return suppressed.length === 0 ? matches : [...eligible, ...suppressed];
-}
-function partitionFreshMatches(matches, history, getId = defaultGetId) {
-  const list = Array.isArray(matches) ? matches : [];
-  if (!history || !history.entries || Object.keys(history.entries).length === 0) {
-    return { eligible: list, suppressed: [] };
-  }
-  const eligible = [];
-  const suppressed = [];
-  for (const m of list) {
-    const id = getId(m);
-    if (m && id != null && isSuppressed(String(id), history)) suppressed.push(m);
-    else eligible.push(m);
-  }
-  const stamp = (m) => history.entries[String(getId(m))].lastSurface;
-  suppressed.sort((a, b) => stamp(a) - stamp(b));
-  return { eligible, suppressed };
-}
-function widenFreshCandidates(matches, history, need, widen) {
-  const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
-  if (!(need > 0)) return [];
-  if (!widen || !Array.isArray(widen.reserve) || typeof widen.getAdjacent !== "function") return [];
-  const suppressed = (m) => !!history && !!history.entries && m.id != null && isSuppressed(String(m.id), history);
-  const counts = /* @__PURE__ */ new Map();
-  for (const m of list) {
-    for (const t of Array.isArray(m.matchedTags) ? m.matchedTags : []) {
-      const tag = String(t).toLowerCase();
-      counts.set(tag, (counts.get(tag) || 0) + 1);
-    }
-  }
-  const maxCount = Math.max(0, ...counts.values());
-  if (maxCount === 0) return [];
-  const dominant = [...counts.entries()].filter(([, c]) => c === maxCount).map(([t]) => t);
-  const inPool = new Set(list.map((m) => String(m.id)));
-  const fresh = (m) => m && m.id != null && !inPool.has(String(m.id)) && !suppressed(m);
-  const tagged = (m, adj) => (Array.isArray(m.matchedTags) ? m.matchedTags : []).some(
-    (t) => adj.has(String(t).toLowerCase())
-  );
-  const ringCandidates = (hops) => {
-    const adj = new Set(dominant.flatMap((d) => widen.getAdjacent(d, hops)));
-    if (adj.size === 0) return [];
-    return widen.reserve.filter((m) => fresh(m) && tagged(m, adj));
-  };
-  let widened = ringCandidates(1);
-  if (widened.length === 0) widened = ringCandidates(2);
-  if (widened.length === 0) {
-    widened = widen.reserve.filter(
-      (m) => fresh(m) && (m.source === "bounty" || m.source === "contribute")
-    );
-  }
-  return widened.slice(0, need);
-}
-
-// bin/spinner-verbs.js
-function titleCase(s) {
-  return String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-function ctaVerb() {
-  return "\u2605 jobs that fit you \xB7 run: terminalhire jobs";
-}
-function rankBySessionTags(topMatches, sessionTags) {
-  const tags = Array.isArray(sessionTags) ? sessionTags.filter(Boolean) : [];
-  if (tags.length === 0 || !Array.isArray(topMatches)) return topMatches;
-  const normalized = tags.map((t) => String(t).toLowerCase().trim());
-  return topMatches.map((m, originalIndex) => {
-    const haystack = `${String(m.title || "").toLowerCase()} ${String(m.company || "").toLowerCase()}`;
-    const hits = normalized.reduce((n, tag) => n + (haystack.includes(tag) ? 1 : 0), 0);
-    return { m, hits, originalIndex };
-  }).sort((a, b) => b.hits - a.hits || a.originalIndex - b.originalIndex).map(({ m }) => m);
-}
-function verbCountForFrequency(frequency, max) {
-  switch (frequency) {
-    case "always":
-      return max;
-    case "rare":
-      return 1;
-    case "sometimes":
-    default:
-      return 2;
-  }
-}
-function buildContextVerbs(topMatches, sessionTags) {
-  const sess = (Array.isArray(sessionTags) ? sessionTags : []).map((t) => String(t).toLowerCase().trim()).filter(Boolean);
-  const roleTags = /* @__PURE__ */ new Set();
-  for (const m of Array.isArray(topMatches) ? topMatches : []) {
-    const mt = m && Array.isArray(m.matchedTags) ? m.matchedTags : [];
-    for (const t of mt) roleTags.add(String(t).toLowerCase().trim());
-  }
-  const overlap = [];
-  for (const t of sess) {
-    if (roleTags.has(t) && !overlap.includes(t)) overlap.push(t);
-  }
-  let headers;
-  if (overlap.length >= 2) {
-    const a = titleCase(overlap[0]);
-    const b = titleCase(overlap[1]);
-    headers = [`\u2726 Fits your ${a} + ${b} work`, `\u2726 A match for what you're building \u2014 link below`];
-  } else if (overlap.length === 1) {
-    const a = titleCase(overlap[0]);
-    headers = [`\u2726 Work in your ${a} stack \u2014 link below`, `\u2726 Your ${a} work \u2014 link in the tip below`];
-  } else {
-    headers = [`\u2726 Work that fits your stack`, `\u2726 A match for you \u2014 link in the tip below`];
-  }
-  return headers;
-}
-function buildPeerLine(topPeers) {
-  const n = (Array.isArray(topPeers) ? topPeers : []).filter(Boolean).length;
-  if (n < 1) return null;
-  return n === 1 ? `\u25C6 1 builder matches what you're building \xB7 terminalhire devs` : `\u25C6 ${n} builders match what you're building \xB7 terminalhire devs`;
-}
-function buildIncomingIntroLine(incomingPending) {
-  const n = incomingPending && typeof incomingPending.count === "number" ? incomingPending.count : 0;
-  if (n < 1) return null;
-  return n === 1 ? `\u2198 someone wants to connect \xB7 terminalhire intro --list` : `\u2198 ${n} people want to connect \xB7 terminalhire intro --list`;
-}
-function buildSessionStaleLine(sessionStale) {
-  return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
-}
-function buildUnpushedClaimsLine(unpushedClaims) {
-  return unpushedClaims === true ? "\u26A0 new claims not yet on your dashboard \u2014 run: terminalhire claim --push --keep-updated" : null;
-}
-function buildSpinnerPool(topMatches, max = 6, opts = {}) {
-  const {
-    sessionTags,
-    frequency = "always",
-    topPeers,
-    incomingPending,
-    sessionStale,
-    unpushedClaims,
-    seenHistory
-  } = opts;
-  const staleLine = buildSessionStaleLine(sessionStale);
-  const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
-  const introLine = buildIncomingIntroLine(incomingPending);
-  const unpushedLine = buildUnpushedClaimsLine(unpushedClaims);
-  const ranked = filterFreshMatches(rankBySessionTags(topMatches, sessionTags), seenHistory);
-  if (!Array.isArray(ranked) || ranked.length === 0) {
-    if (introLine) return withStale([introLine]);
-    if (unpushedLine) return withStale([unpushedLine]);
-    const peerLine = buildPeerLine(topPeers);
-    return withStale(peerLine ? [peerLine] : []);
-  }
-  const headers = buildContextVerbs(ranked, sessionTags);
-  const ceiling = Math.min(headers.length, Math.max(1, Number(max) || 6));
-  const cap = Math.max(1, verbCountForFrequency(frequency, ceiling));
-  const pool = [...headers.slice(0, cap), ctaVerb()];
-  if (introLine) pool.push(introLine);
-  if (unpushedLine) pool.push(unpushedLine);
-  return withStale(pool);
-}
 
 // ../../packages/core/src/vocab/graph.data.ts
 var VOCAB_NODES = [
@@ -1034,8 +600,8 @@ var BIGCO_SLUGS_BY_SOURCE = {
 };
 
 // ../../packages/core/src/partners.ts
-import { readFileSync as readFileSync3 } from "fs";
-import { join as join4 } from "path";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { fileURLToPath } from "url";
 var EXAMPLE_BUYER = {
   id: "northstar",
@@ -1061,6 +627,17 @@ var INTRO_ACCEPTED_TTL_MS = 365 * 24 * 60 * 60 * 1e3;
 // ../../packages/core/src/chatCrypto.ts
 import { hkdfSync, createHash, randomBytes } from "crypto";
 var KDF_INFO = Buffer.from("terminalhire-chat-v1");
+
+// ../../packages/core/src/job-status.ts
+function recordClick(map, id) {
+  const prev = map[id];
+  if (prev?.clicked === true) return map;
+  return { ...map, [id]: { ...prev, clicked: true } };
+}
+function setStatus(map, id, s, markedAt = (/* @__PURE__ */ new Date()).toISOString()) {
+  const prev = map[id];
+  return { ...map, [id]: { ...prev, status: s, markedAt } };
+}
 
 // ../../packages/core/src/credential/sources.ts
 var SOURCE_CLASS = {
@@ -1125,177 +702,155 @@ var VERIFY_CONTRACT = [
 
 // ../../packages/core/src/short-token.ts
 import { createHash as createHash2 } from "crypto";
-function opportunityShortToken(id) {
-  return createHash2("sha256").update(id, "utf8").digest("base64url").slice(0, 8);
+
+// src/state-dir.ts
+import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
+var STATE_DIR_MODE = 448;
+var STATE_DIR_OK = "ok";
+var STATE_DIR_SYMLINK = "symlink";
+var STATE_DIR_UNVERIFIED = "unverified";
+var warnedDirs = /* @__PURE__ */ new Set();
+function warnStateDirOnce(dir, message) {
+  if (warnedDirs.has(dir)) return;
+  warnedDirs.add(dir);
+  try {
+    process.stderr.write(message);
+  } catch {
+  }
 }
-var contributeShortToken = opportunityShortToken;
-function jobShortToken(id) {
-  return createHash2("sha256").update(`job:${id}`, "utf8").digest("base64url").slice(0, 8);
+function ensureStateDir(dir) {
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let fd;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | noFollow);
+  } catch (err) {
+    if (err?.code === "ELOOP") {
+      warnStateDirOnce(
+        dir,
+        `terminalhire: ${dir} is a symlink \u2014 leaving its permissions alone; the 0700 guarantee on the state directory is NOT enforced.
+`
+      );
+      return STATE_DIR_SYMLINK;
+    }
+    return STATE_DIR_UNVERIFIED;
+  }
+  try {
+    const currentMode = fstatSync(fd).mode & 511;
+    if ((currentMode & ~STATE_DIR_MODE) !== 0) {
+      fchmodSync(fd, currentMode & STATE_DIR_MODE);
+    }
+    return STATE_DIR_OK;
+  } catch {
+    return STATE_DIR_UNVERIFIED;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+    }
+  }
 }
 
-// bin/spinner-render.js
-function interleaveBySource(topMatches) {
-  if (!Array.isArray(topMatches) || topMatches.length === 0) return topMatches;
-  const buckets = /* @__PURE__ */ new Map();
-  const order = [];
-  for (const m of topMatches) {
-    const id = m && m.id ? String(m.id) : "";
-    const idx = id.indexOf(":");
-    const source = idx > 0 ? id.slice(0, idx) : "_";
-    if (!buckets.has(source)) {
-      buckets.set(source, []);
-      order.push(source);
+// bin/job-status-store.js
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
+var STATUS_FILE = join2(TERMINALHIRE_DIR, "job-status.json");
+var LOCK_FILE = `${STATUS_FILE}.lock`;
+var BAK_FILE = `${STATUS_FILE}.bak`;
+function statusFilePath() {
+  return STATUS_FILE;
+}
+function atomicWriteJson(path, obj) {
+  ensureStateDir(dirname(path));
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync(tmp, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  renameSync(tmp, path);
+}
+function sleepMs(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
     }
-    buckets.get(source).push(m);
   }
-  const out = [];
-  let remaining = topMatches.length;
-  while (remaining > 0) {
-    for (const source of order) {
-      const b = buckets.get(source);
-      if (b && b.length) {
-        out.push(b.shift());
-        remaining--;
+}
+function withLock(fn) {
+  const deadline = Date.now() + 2e3;
+  for (; ; ) {
+    let fd;
+    try {
+      ensureStateDir(dirname(LOCK_FILE));
+      fd = openSync2(LOCK_FILE, "wx");
+    } catch (err) {
+      if (err && err.code === "EEXIST") {
+        if (Date.now() > deadline) {
+          try {
+            unlinkSync(LOCK_FILE);
+          } catch {
+          }
+          continue;
+        }
+        sleepMs(5);
+        continue;
+      }
+      throw err;
+    }
+    try {
+      return fn();
+    } finally {
+      try {
+        closeSync2(fd);
+      } catch {
+      }
+      try {
+        unlinkSync(LOCK_FILE);
+      } catch {
       }
     }
   }
-  return out;
 }
-function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
-  const base = String(baseUrl || "https://terminalhire.com").replace(/\/+$/, "");
-  const out = [];
-  const surfacedIds = [];
-  const seenRole = /* @__PURE__ */ new Set();
-  const perCompany = /* @__PURE__ */ new Map();
-  const COMPANY_CAP = 2;
-  const { eligible, suppressed } = partitionFreshMatches(
-    Array.isArray(topMatches) ? topMatches : [],
-    opts.seenHistory
-  );
-  const orderForEmit = (list) => {
-    const bountyQ = list.filter((m) => m && m.source === "bounty");
-    const contributeQ = list.filter((m) => m && m.source === "contribute");
-    const roleQ = interleaveBySource(
-      list.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
-    );
-    const ordered = [];
-    let bi = 0;
-    let ri = 0;
-    let ci = 0;
-    while (bi < bountyQ.length || ri < roleQ.length || ci < contributeQ.length) {
-      if (ri < roleQ.length) ordered.push(roleQ[ri++]);
-      if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
-      if (ci < contributeQ.length) ordered.push(contributeQ[ci++]);
-    }
-    return ordered;
-  };
-  const emit = (list) => {
-    for (const m of orderForEmit(list)) {
-      if (out.length >= max) return;
-      if (!m || !m.title || !m.company || !m.id) continue;
-      const idx = String(m.id).indexOf(":");
-      if (idx <= 0) continue;
-      const source = String(m.id).slice(0, idx);
-      const ext = String(m.id).slice(idx + 1);
-      if (!source || !ext) continue;
-      const companyRaw = String(m.company).trim().replace(/\s+/g, " ");
-      const titleRaw = String(m.title).trim().replace(/\s+/g, " ");
-      const roleKey = `${titleRaw.toLowerCase()}@${companyRaw.toLowerCase()}`;
-      const coKey = companyRaw.toLowerCase();
-      if (seenRole.has(roleKey)) continue;
-      if ((perCompany.get(coKey) || 0) >= COMPANY_CAP) continue;
-      seenRole.add(roleKey);
-      perCompany.set(coKey, (perCompany.get(coKey) || 0) + 1);
-      let title = titleRaw;
-      if (title.length > 34) title = title.slice(0, 33).trimEnd() + "\u2026";
-      const company = titleCase(companyRaw);
-      const pct = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
-      const token = jobShortToken(String(m.id));
-      const url = `${base}/j/${token}`;
-      if (source === "bounty") {
-        const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
-        const repo = m.repo || companyRaw;
-        out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct}% \u2014 ${url}`);
-      } else if (source === "contribute") {
-        const repoFull = m.repo || companyRaw;
-        const slashIdx = repoFull.indexOf("/");
-        const repoName = slashIdx >= 0 ? repoFull.slice(slashIdx + 1) : repoFull;
-        const num = m.issueNumber != null ? ` #${m.issueNumber}` : "";
-        const shortUrl = `${base}/c/${contributeShortToken(String(m.id))}`;
-        const fit = m.interest ? m.interest : `${pct}%`;
-        out.push(`\u2197 contribute \xB7 ${repoName}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${fit} \u2014 ${shortUrl}`);
-      } else {
-        const fit = m.interest ? m.interest : `${pct}%`;
-        out.push(`\u2197 ${title} @ ${company} \xB7 ${fit} \u2014 ${url}`);
-      }
-      surfacedIds.push(String(m.id));
-    }
-  };
-  emit(eligible);
-  if (out.length < max && opts.widen) {
-    const widened = widenFreshCandidates(
-      Array.isArray(topMatches) ? topMatches : [],
-      opts.seenHistory,
-      max - out.length,
-      opts.widen
-    );
-    if (widened.length > 0) emit(widened);
+function readStatusMap() {
+  if (!existsSync(STATUS_FILE)) return {};
+  let raw;
+  try {
+    raw = readFileSync2(STATUS_FILE, "utf8");
+  } catch {
+    return {};
   }
-  if (out.length < max) emit(suppressed);
-  return { tips: out, surfacedIds };
-}
-function buildTips(topMatches, baseUrl, max = 8, opts = {}) {
-  return buildTipsDetailed(topMatches, baseUrl, max, opts).tips;
-}
-function renderRefreshSurface(topMatches, sc, opts = {}) {
-  if (!sc || sc.enabled !== true) {
-    clearSpinnerVerbs();
-    clearSpinnerTips();
-    return { verbs: [], tips: [], surfacedIds: [] };
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    throw new Error("status store is not an object");
+  } catch {
+    try {
+      copyFileSync(STATUS_FILE, BAK_FILE);
+    } catch {
+    }
+    return {};
   }
-  const seenHistory = opts.seenHistory || loadSeenHistory();
-  const ranked = rankBySessionTags(topMatches, opts.sessionTags);
-  const verbs = buildSpinnerPool(ranked, sc.max, {
-    sessionTags: opts.sessionTags,
-    frequency: sc.frequency,
-    topPeers: opts.topPeers,
-    incomingPending: opts.incomingPending,
-    sessionStale: opts.sessionStale,
-    unpushedClaims: opts.unpushedClaims,
-    seenHistory
+}
+function markStatus(id, status) {
+  return withLock(() => {
+    const current = readStatusMap();
+    const next = status === "claimed" ? {
+      ...current,
+      [id]: { ...current[id], status: "claimed", markedAt: (/* @__PURE__ */ new Date()).toISOString() }
+    } : setStatus(current, id, status);
+    atomicWriteJson(STATUS_FILE, next);
+    return next[id];
   });
-  if (verbs.length > 0) applySpinnerVerbs(verbs, sc.mode);
-  else clearSpinnerVerbs();
-  const { tips, surfacedIds } = buildTipsDetailed(ranked, opts.baseUrl, 8, {
-    seenHistory,
-    widen: opts.widen,
-    clickCatcher: opts.clickCatcher
+}
+function markClicked(id) {
+  return withLock(() => {
+    const current = readStatusMap();
+    const next = recordClick(current, id);
+    atomicWriteJson(STATUS_FILE, next);
+    return next[id];
   });
-  if (tips.length > 0) applySpinnerTips(tips);
-  else clearSpinnerTips();
-  if (verbs.length > 0 || tips.length > 0) recordSurface(surfacedIds);
-  return { verbs, tips, surfacedIds };
 }
 export {
-  SPINNER_DEFAULTS,
-  applySpinnerTips,
-  applySpinnerVerbs,
-  buildContextVerbs,
-  buildIncomingIntroLine,
-  buildPeerLine,
-  buildSessionStaleLine,
-  buildSpinnerPool,
-  buildTips,
-  buildTipsDetailed,
-  buildUnpushedClaimsLine,
-  clearSpinnerTips,
-  clearSpinnerVerbs,
-  ctaVerb,
-  filterFreshMatches,
-  interleaveBySource,
-  partitionFreshMatches,
-  rankBySessionTags,
-  readSpinnerConfig,
-  renderRefreshSurface,
-  widenFreshCandidates
+  markClicked,
+  markStatus,
+  readStatusMap,
+  statusFilePath
 };

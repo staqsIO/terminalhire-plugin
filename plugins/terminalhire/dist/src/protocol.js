@@ -1,9 +1,59 @@
 // src/protocol.ts
 import { spawn, spawnSync } from "child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, renameSync } from "fs";
+import { existsSync, mkdirSync as mkdirSync2, readFileSync, rmSync, writeFileSync, renameSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { fileURLToPath } from "url";
+
+// src/state-dir.ts
+import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
+var STATE_DIR_MODE = 448;
+var STATE_DIR_OK = "ok";
+var STATE_DIR_SYMLINK = "symlink";
+var STATE_DIR_UNVERIFIED = "unverified";
+var warnedDirs = /* @__PURE__ */ new Set();
+function warnStateDirOnce(dir, message) {
+  if (warnedDirs.has(dir)) return;
+  warnedDirs.add(dir);
+  try {
+    process.stderr.write(message);
+  } catch {
+  }
+}
+function ensureStateDir(dir) {
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let fd;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | noFollow);
+  } catch (err) {
+    if (err?.code === "ELOOP") {
+      warnStateDirOnce(
+        dir,
+        `terminalhire: ${dir} is a symlink \u2014 leaving its permissions alone; the 0700 guarantee on the state directory is NOT enforced.
+`
+      );
+      return STATE_DIR_SYMLINK;
+    }
+    return STATE_DIR_UNVERIFIED;
+  }
+  try {
+    const currentMode = fstatSync(fd).mode & 511;
+    if ((currentMode & ~STATE_DIR_MODE) !== 0) {
+      fchmodSync(fd, currentMode & STATE_DIR_MODE);
+    }
+    return STATE_DIR_OK;
+  } catch {
+    return STATE_DIR_UNVERIFIED;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+    }
+  }
+}
+
+// src/protocol.ts
 var CLAIM_URL_RE = /^(th|terminalhire):\/\/claim\/([A-Za-z0-9_-]{8})\/?$/i;
 function parseClaimUrl(raw) {
   if (typeof raw !== "string") return null;
@@ -25,7 +75,10 @@ function defaultProtocolDeps() {
     spawn: (command, args, options) => spawn(command, args, options),
     existsSync: (path) => existsSync(path),
     mkdirSync: (path) => {
-      mkdirSync(path, { recursive: true });
+      mkdirSync2(path, { recursive: true });
+    },
+    ensureStateDir: (path) => {
+      ensureStateDir(path);
     },
     writeFileSync: (path, contents) => {
       writeFileSync(path, contents, "utf8");
@@ -124,7 +177,7 @@ function darwinAppPaths(deps) {
 }
 function darwinRegister(deps) {
   const dir = stateDir(deps);
-  deps.mkdirSync(dir);
+  deps.ensureStateDir(dir);
   const { appDir, appPath, plistPath } = darwinAppPaths(deps);
   deps.mkdirSync(appDir);
   const scriptPath = join(dir, "handler.applescript");
@@ -134,17 +187,41 @@ function darwinRegister(deps) {
   if (compile.status !== 0) {
     return { ok: false, reason: "osacompile_failed" };
   }
-  const setId = deps.spawnSync(PLISTBUDDY, ["-c", "Set :CFBundleIdentifier com.terminalhire.handler", plistPath]);
+  const setId = deps.spawnSync(PLISTBUDDY, [
+    "-c",
+    "Set :CFBundleIdentifier com.terminalhire.handler",
+    plistPath
+  ]);
   if (setId.status !== 0) {
-    deps.spawnSync(PLISTBUDDY, ["-c", "Add :CFBundleIdentifier string com.terminalhire.handler", plistPath]);
+    deps.spawnSync(PLISTBUDDY, [
+      "-c",
+      "Add :CFBundleIdentifier string com.terminalhire.handler",
+      plistPath
+    ]);
   }
   const urlTypeAdds = [
     deps.spawnSync(PLISTBUDDY, ["-c", "Add :CFBundleURLTypes array", plistPath]),
     deps.spawnSync(PLISTBUDDY, ["-c", "Add :CFBundleURLTypes:0 dict", plistPath]),
-    deps.spawnSync(PLISTBUDDY, ["-c", "Add :CFBundleURLTypes:0:CFBundleURLName string Terminalhire Claim", plistPath]),
-    deps.spawnSync(PLISTBUDDY, ["-c", "Add :CFBundleURLTypes:0:CFBundleURLSchemes array", plistPath]),
-    deps.spawnSync(PLISTBUDDY, ["-c", "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string th", plistPath]),
-    deps.spawnSync(PLISTBUDDY, ["-c", "Add :CFBundleURLTypes:0:CFBundleURLSchemes:1 string terminalhire", plistPath])
+    deps.spawnSync(PLISTBUDDY, [
+      "-c",
+      "Add :CFBundleURLTypes:0:CFBundleURLName string Terminalhire Claim",
+      plistPath
+    ]),
+    deps.spawnSync(PLISTBUDDY, [
+      "-c",
+      "Add :CFBundleURLTypes:0:CFBundleURLSchemes array",
+      plistPath
+    ]),
+    deps.spawnSync(PLISTBUDDY, [
+      "-c",
+      "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string th",
+      plistPath
+    ]),
+    deps.spawnSync(PLISTBUDDY, [
+      "-c",
+      "Add :CFBundleURLTypes:0:CFBundleURLSchemes:1 string terminalhire",
+      plistPath
+    ])
   ];
   if (urlTypeAdds.some((r) => r.status !== 0)) {
     return { ok: false, reason: "plist_url_types_failed" };
@@ -173,7 +250,12 @@ function darwinStatus(deps) {
 }
 function darwinOpenPreviewTerminal(token, deps) {
   const doScript = `do script ${appleScriptStringLiteral(buildPreviewShellCommand(token, deps))}`;
-  const res = deps.spawnSync("osascript", ["-e", 'tell application "Terminal" to activate', "-e", doScript]);
+  const res = deps.spawnSync("osascript", [
+    "-e",
+    'tell application "Terminal" to activate',
+    "-e",
+    doScript
+  ]);
   return res.status === 0;
 }
 var WIN32_SCHEMES = ["th", "terminalhire"];
@@ -185,7 +267,14 @@ function win32Register(deps) {
     const r2 = deps.spawnSync("reg", ["add", key, "/v", "URL Protocol", "/d", "", "/f"]);
     if (r2.status !== 0) return { ok: false, reason: "reg_add_failed" };
     const cmdValue = `"${deps.execPath}" "${deps.dispatchPath}" handle-url "%1"`;
-    const r3 = deps.spawnSync("reg", ["add", `${key}\\shell\\open\\command`, "/ve", "/d", cmdValue, "/f"]);
+    const r3 = deps.spawnSync("reg", [
+      "add",
+      `${key}\\shell\\open\\command`,
+      "/ve",
+      "/d",
+      cmdValue,
+      "/f"
+    ]);
     if (r3.status !== 0) return { ok: false, reason: "reg_add_failed" };
   }
   return { ok: true };
@@ -225,8 +314,16 @@ function linuxRegister(deps) {
   const dir = linuxDesktopDir(deps);
   deps.mkdirSync(dir);
   deps.writeFileSync(linuxDesktopFile(deps), buildDesktopEntry(deps.execPath, deps.dispatchPath));
-  const r1 = deps.spawnSync("xdg-mime", ["default", "terminalhire-handler.desktop", "x-scheme-handler/th"]);
-  const r2 = deps.spawnSync("xdg-mime", ["default", "terminalhire-handler.desktop", "x-scheme-handler/terminalhire"]);
+  const r1 = deps.spawnSync("xdg-mime", [
+    "default",
+    "terminalhire-handler.desktop",
+    "x-scheme-handler/th"
+  ]);
+  const r2 = deps.spawnSync("xdg-mime", [
+    "default",
+    "terminalhire-handler.desktop",
+    "x-scheme-handler/terminalhire"
+  ]);
   deps.spawnSync("update-desktop-database", [dir]);
   if (r1.status !== 0 || r2.status !== 0) return { ok: false, reason: "xdg_mime_failed" };
   return { ok: true };
@@ -263,7 +360,7 @@ function readHandlerTemplateVersion(deps) {
   }
 }
 function writeHandlerTemplateVersion(deps) {
-  deps.mkdirSync(stateDir(deps));
+  deps.ensureStateDir(stateDir(deps));
   deps.writeFileSync(handlerTemplateVersionPath(deps), String(HANDLER_TEMPLATE_VERSION));
 }
 function registerScheme(deps = defaultProtocolDeps()) {
@@ -340,7 +437,7 @@ function readPendingClaims(deps) {
 }
 function appendPendingClaim(deps, entry) {
   try {
-    deps.mkdirSync(stateDir(deps));
+    deps.ensureStateDir(stateDir(deps));
     const existing = readPendingClaims(deps).filter((c) => c.token !== entry.token);
     const next = [...existing, entry].slice(-PENDING_CLAIMS_CAP);
     const finalPath = pendingClaimsPath(deps);
@@ -403,7 +500,14 @@ async function tryHeadlessOpen(token, deps) {
     ]);
   }
   for (const [bin, prefixArgs] of LINUX_TERMINAL_CANDIDATES) {
-    const ok = await trySpawnDetached(deps, bin, [...prefixArgs, deps.execPath, deps.dispatchPath, "claim", "preview", token]);
+    const ok = await trySpawnDetached(deps, bin, [
+      ...prefixArgs,
+      deps.execPath,
+      deps.dispatchPath,
+      "claim",
+      "preview",
+      token
+    ]);
     if (ok) return true;
   }
   return false;
@@ -417,7 +521,9 @@ async function handleUrl(raw, deps = defaultProtocolDeps()) {
   }
   const { token } = parsed;
   if (deps.isTTY()) {
-    const res = deps.spawnSync(deps.execPath, [deps.dispatchPath, "claim", "preview", token], { stdio: "inherit" });
+    const res = deps.spawnSync(deps.execPath, [deps.dispatchPath, "claim", "preview", token], {
+      stdio: "inherit"
+    });
     deps.exit(res.status ?? 1);
     return;
   }

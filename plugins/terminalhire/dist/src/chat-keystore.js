@@ -1,5 +1,5 @@
 // src/chat-keystore.ts
-import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync3, writeFileSync as writeFileSync2, rmSync as rmSync2 } from "fs";
+import { existsSync as existsSync2, readFileSync as readFileSync3, writeFileSync as writeFileSync2, rmSync as rmSync2 } from "fs";
 import { homedir as homedir2 } from "os";
 import { join as join3 } from "path";
 
@@ -403,6 +403,39 @@ var MAINTAINER_SET = new Set(
 // ../../packages/core/src/github.ts
 var RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
 
+// ../../packages/core/src/feeds/contributions.ts
+var CONTRIB_LABEL_QUERIES = [
+  'label:"good first issue" type:issue state:open',
+  'label:"good-first-issue" type:issue state:open',
+  'label:"help wanted" type:issue state:open',
+  'label:"help-wanted" type:issue state:open',
+  'label:"up-for-grabs" type:issue state:open',
+  // supply-expansion D: two more first-contribution label families widen the
+  // global newest-first slice WITHOUT relaxing the credential gate.
+  'label:"beginner-friendly" type:issue state:open',
+  'label:"first-timers-only" type:issue state:open'
+];
+var CONTRIB_LANGUAGE_QUERIES = [
+  ...["rust", "go", "python", "c++", "ruby"].map(
+    (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+  ),
+  ...["rust", "go"].map(
+    (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+  ),
+  // supply-expansion D: cover the high-volume web/enterprise ecosystems the
+  // original set omitted. TS/JS were previously left out of "good first issue"
+  // (the global slice over-represented them) but a LANGUAGE-scoped page surfaces
+  // DIFFERENT repos than the global newest-first slice, so re-including them widens
+  // distinct-repo coverage rather than duplicating it.
+  ...["typescript", "javascript", "java", "python"].map(
+    (lang) => `label:"good first issue" language:${lang} type:issue state:open`
+  ),
+  ...["typescript", "javascript", "c#", "php"].map(
+    (lang) => `label:"help wanted" language:${lang} type:issue state:open`
+  )
+];
+var CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
+
 // ../../packages/core/src/winnability.ts
 var WINNABILITY_NORM = {
   /** ~500 new stars in a build interval is treated as "maxed" momentum. */
@@ -556,39 +589,6 @@ var BIGCO_SLUGS_BY_SOURCE = {
   ashby: new Set(ASHBY_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase())),
   lever: new Set(LEVER_SLUGS_BY_TIER.bigco.map((s) => s.toLowerCase()))
 };
-
-// ../../packages/core/src/feeds/contributions.ts
-var CONTRIB_LABEL_QUERIES = [
-  'label:"good first issue" type:issue state:open',
-  'label:"good-first-issue" type:issue state:open',
-  'label:"help wanted" type:issue state:open',
-  'label:"help-wanted" type:issue state:open',
-  'label:"up-for-grabs" type:issue state:open',
-  // supply-expansion D: two more first-contribution label families widen the
-  // global newest-first slice WITHOUT relaxing the credential gate.
-  'label:"beginner-friendly" type:issue state:open',
-  'label:"first-timers-only" type:issue state:open'
-];
-var CONTRIB_LANGUAGE_QUERIES = [
-  ...["rust", "go", "python", "c++", "ruby"].map(
-    (lang) => `label:"help wanted" language:${lang} type:issue state:open`
-  ),
-  ...["rust", "go"].map(
-    (lang) => `label:"good first issue" language:${lang} type:issue state:open`
-  ),
-  // supply-expansion D: cover the high-volume web/enterprise ecosystems the
-  // original set omitted. TS/JS were previously left out of "good first issue"
-  // (the global slice over-represented them) but a LANGUAGE-scoped page surfaces
-  // DIFFERENT repos than the global newest-first slice, so re-including them widens
-  // distinct-repo coverage rather than duplicating it.
-  ...["typescript", "javascript", "java", "python"].map(
-    (lang) => `label:"good first issue" language:${lang} type:issue state:open`
-  ),
-  ...["typescript", "javascript", "c#", "php"].map(
-    (lang) => `label:"help wanted" language:${lang} type:issue state:open`
-  )
-];
-var CONTRIB_SEARCH_QUERIES = [...CONTRIB_LABEL_QUERIES, ...CONTRIB_LANGUAGE_QUERIES];
 
 // ../../packages/core/src/partners.ts
 import { readFileSync } from "fs";
@@ -2723,25 +2723,125 @@ function generateIdentityKeypair() {
   return { publicKey: bytesToHex2(publicKey), privateKey: bytesToHex2(privateKey) };
 }
 
+// ../../packages/core/src/credential/sources.ts
+var SOURCE_CLASS = {
+  /** `author_association` values that make a (non-bot, non-self) reviewer a
+   *  class-A independent human. Independence itself (is this maintainer affiliated
+   *  with the contributor?) is refined by the repo-provenance/independence layer
+   *  (TERM-46); this establishes the HUMAN class. */
+  HUMAN_ASSOCIATIONS: ["OWNER", "MEMBER", "COLLABORATOR"]
+};
+var HUMAN_SET = new Set(
+  SOURCE_CLASS.HUMAN_ASSOCIATIONS.map((a) => a.toUpperCase())
+);
+
+// ../../packages/core/src/credential/synthesis.ts
+var COMPETENCY_NAMES = [
+  "code-authorship",
+  "iterative-refinement",
+  "independent-review",
+  "defect-resolution",
+  "repository-standing",
+  "issue-linkage"
+];
+var COMPETENCY_NAME_SET = new Set(COMPETENCY_NAMES);
+var COMPETENCY_GRADES = [
+  "high",
+  "medium",
+  "process",
+  "no-signal"
+];
+var COMPETENCY_GRADE_SET = new Set(COMPETENCY_GRADES);
+var CITATION_CONTRACT = [
+  "You write ONE developer-contribution dossier section from STRUCTURED FACTS ONLY.",
+  "You are given a JSON `source` object of identity-free facts (pseudonym labels, enums,",
+  "counts, timestamps). You have NO other information. You must NOT invent, infer beyond,",
+  "or embellish these facts, and you must NOT name any person, account, email, or handle.",
+  "",
+  "Every claim you emit MUST carry one or more citations. A citation is the exact string",
+  "`env:<path>` pointing at the source value that proves the claim (e.g. `env:threadStats.resolved`,",
+  "`env:provenance.tier`, `env:reviewRounds`). Cite ONLY paths present in the provided",
+  "ALLOWED CITES list. A claim you cannot ground in a real path \u2014 DO NOT emit it. Prefer",
+  "fewer, fully-grounded claims over broad ones. If the facts support nothing, emit no claims.",
+  "",
+  'Return STRICT JSON: {"claims":[{"id":"c1","kind":"thesis|decision|competency|bullet",',
+  '"text":"...","cites":["env:..."],"competency":{"name":"<taxonomy>","grade":"high|medium|process|no-signal"}}]}',
+  'The `competency` field is present ONLY on kind="competency" claims. `id` is unique per claim.'
+].join("\n");
+var VERIFY_CONTRACT = [
+  "You are an ADVERSARIAL verifier. Your job is to DISPROVE claims, not to help.",
+  "For each claim you are given the claim text and the RESOLVED source excerpts its",
+  "citations point at (the actual values). Keep a claim ONLY if the excerpts",
+  "UNEQUIVOCALLY support every assertion in its text \u2014 the excerpts alone, with no",
+  "outside knowledge, no inference, no benefit of the doubt. If a claim overstates,",
+  "generalizes beyond the excerpt, names anyone, or is not fully entailed by the",
+  "excerpts: REJECT it. When in doubt, REJECT (default-to-fail).",
+  "",
+  "OUTPUT FORMAT \u2014 obey exactly: respond with ONLY the JSON object and NOTHING ELSE.",
+  "No preamble, no per-claim commentary, no reasoning prose, no markdown fence, no text",
+  "before or after. Decide internally; emit only the verdict:",
+  '{"supported":["c1","c3"]} \u2014 the ids of the claims that survive (omit all others; use',
+  '{"supported":[]} if none do). Any surviving id MUST be one you were given.'
+].join("\n");
+
 // ../../packages/core/src/short-token.ts
 import { createHash as createHash2 } from "crypto";
 
 // src/github-auth.ts
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes as randomBytes3
-} from "crypto";
-import {
-  readFileSync as readFileSync2,
-  writeFileSync,
-  mkdirSync,
-  existsSync,
-  rmSync,
-  renameSync
-} from "fs";
+import { createCipheriv, createDecipheriv, randomBytes as randomBytes3 } from "crypto";
+import { readFileSync as readFileSync2, writeFileSync, existsSync, rmSync, renameSync } from "fs";
 import { join as join2 } from "path";
 import { homedir } from "os";
+
+// src/state-dir.ts
+import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
+var STATE_DIR_MODE = 448;
+var STATE_DIR_OK = "ok";
+var STATE_DIR_SYMLINK = "symlink";
+var STATE_DIR_UNVERIFIED = "unverified";
+var warnedDirs = /* @__PURE__ */ new Set();
+function warnStateDirOnce(dir, message) {
+  if (warnedDirs.has(dir)) return;
+  warnedDirs.add(dir);
+  try {
+    process.stderr.write(message);
+  } catch {
+  }
+}
+function ensureStateDir(dir) {
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let fd;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | noFollow);
+  } catch (err) {
+    if (err?.code === "ELOOP") {
+      warnStateDirOnce(
+        dir,
+        `terminalhire: ${dir} is a symlink \u2014 leaving its permissions alone; the 0700 guarantee on the state directory is NOT enforced.
+`
+      );
+      return STATE_DIR_SYMLINK;
+    }
+    return STATE_DIR_UNVERIFIED;
+  }
+  try {
+    const currentMode = fstatSync(fd).mode & 511;
+    if ((currentMode & ~STATE_DIR_MODE) !== 0) {
+      fchmodSync(fd, currentMode & STATE_DIR_MODE);
+    }
+    return STATE_DIR_OK;
+  } catch {
+    return STATE_DIR_UNVERIFIED;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+    }
+  }
+}
+
+// src/github-auth.ts
 var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
 var TOKEN_FILE = join2(TERMINALHIRE_DIR, "github-token.enc");
 var KEY_FILE = join2(TERMINALHIRE_DIR, "key");
@@ -2749,7 +2849,7 @@ var ALGO = "aes-256-gcm";
 var KEY_BYTES = 32;
 var IV_BYTES = 12;
 async function loadKey() {
-  mkdirSync(TERMINALHIRE_DIR, { recursive: true, mode: 448 });
+  ensureStateDir(TERMINALHIRE_DIR);
   if (existsSync(KEY_FILE)) {
     return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");
   }
@@ -2784,7 +2884,7 @@ async function loadOrCreateIdentity() {
     return JSON.parse(decrypt(blob2, key));
   }
   const keypair = generateIdentityKeypair();
-  mkdirSync2(TERMINALHIRE_DIR2, { recursive: true });
+  ensureStateDir(TERMINALHIRE_DIR2);
   const blob = encrypt(JSON.stringify(keypair), key);
   writeFileSync2(IDENTITY_FILE, JSON.stringify(blob, null, 2), { mode: 384, encoding: "utf8" });
   return keypair;

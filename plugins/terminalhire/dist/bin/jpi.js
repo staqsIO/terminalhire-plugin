@@ -1,13 +1,63 @@
 #!/usr/bin/env node
 
 // bin/jpi.js
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, readSync } from "fs";
 import { isatty } from "tty";
 import net from "net";
 import { join } from "path";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
+
+// src/state-dir.ts
+import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
+var STATE_DIR_MODE = 448;
+var STATE_DIR_OK = "ok";
+var STATE_DIR_SYMLINK = "symlink";
+var STATE_DIR_UNVERIFIED = "unverified";
+var warnedDirs = /* @__PURE__ */ new Set();
+function warnStateDirOnce(dir, message) {
+  if (warnedDirs.has(dir)) return;
+  warnedDirs.add(dir);
+  try {
+    process.stderr.write(message);
+  } catch {
+  }
+}
+function ensureStateDir(dir) {
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let fd;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | noFollow);
+  } catch (err) {
+    if (err?.code === "ELOOP") {
+      warnStateDirOnce(
+        dir,
+        `terminalhire: ${dir} is a symlink \u2014 leaving its permissions alone; the 0700 guarantee on the state directory is NOT enforced.
+`
+      );
+      return STATE_DIR_SYMLINK;
+    }
+    return STATE_DIR_UNVERIFIED;
+  }
+  try {
+    const currentMode = fstatSync(fd).mode & 511;
+    if ((currentMode & ~STATE_DIR_MODE) !== 0) {
+      fchmodSync(fd, currentMode & STATE_DIR_MODE);
+    }
+    return STATE_DIR_OK;
+  } catch {
+    return STATE_DIR_UNVERIFIED;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+    }
+  }
+}
+
+// bin/jpi.js
 var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
 var INDEX_CACHE_FILE = join(TERMINALHIRE_DIR, "index-cache.json");
 var NUDGE_FILE = join(TERMINALHIRE_DIR, "nudged.json");
@@ -105,7 +155,7 @@ function readLearned() {
 }
 function markLearned(sessionId) {
   try {
-    mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+    ensureStateDir(TERMINALHIRE_DIR);
     const learned = readLearned();
     learned[sessionId] = Date.now();
     const cutoff = Date.now() - 864e5;
@@ -129,7 +179,7 @@ function spawnLearnDetached(cwd) {
 }
 function markNudged(sessionId) {
   try {
-    mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+    ensureStateDir(TERMINALHIRE_DIR);
     const nudged = readNudged();
     nudged[sessionId] = Date.now();
     const cutoff = Date.now() - 864e5;
@@ -212,7 +262,7 @@ function parseNudgeMode(raw) {
 }
 function bumpRenderCounter() {
   try {
-    mkdirSync(TERMINALHIRE_DIR, { recursive: true });
+    ensureStateDir(TERMINALHIRE_DIR);
     let counter = 0;
     if (existsSync(NUDGE_COUNTER_FILE)) {
       const raw = JSON.parse(readFileSync(NUDGE_COUNTER_FILE, "utf8"));
@@ -265,7 +315,8 @@ try {
   if (haveRoles) {
     const plural = matchCount === 1 ? "role" : "roles";
     line = `\u2726 ${matchCount} ${plural} match your current work \u2014 run: th jobs`;
-    if (incomingCount > 0) line += `  \xB7  \u2709 ${incomingCount} intro request${incomingCount === 1 ? "" : "s"}`;
+    if (incomingCount > 0)
+      line += `  \xB7  \u2709 ${incomingCount} intro request${incomingCount === 1 ? "" : "s"}`;
     if (unreadChatCount > 0) line += `  \xB7  \u{1F4AC} ${unreadChatCount} unread`;
     if (sessionStale) line += `  \xB7  \u26A0 session expired \u2014 run: th link`;
   } else if (incomingCount > 0) {
