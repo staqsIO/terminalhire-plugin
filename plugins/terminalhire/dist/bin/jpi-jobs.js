@@ -9872,6 +9872,7 @@ __export(spinner_seen_exports, {
   SEEN_MAX_WIDTHS: () => SEEN_MAX_WIDTHS,
   SEEN_TTL_MS: () => SEEN_TTL_MS,
   SEEN_WINDOW_SURFACES: () => SEEN_WINDOW_SURFACES,
+  isAtCapacity: () => isAtCapacity,
   isSuppressed: () => isSuppressed,
   loadSeenHistory: () => loadSeenHistory,
   recordSurface: () => recordSurface,
@@ -9880,6 +9881,9 @@ __export(spinner_seen_exports, {
 import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, renameSync as renameSync4 } from "fs";
 import { join as join6, dirname as dirname3 } from "path";
 import { homedir as homedir4 } from "os";
+function isAtCapacity(history) {
+  return Object.keys(history?.entries ?? {}).length >= SEEN_MAX_ENTRIES;
+}
 function seenFilePath() {
   const dir = process.env["TERMINALHIRE_DIR"] || join6(homedir4(), ".terminalhire");
   return join6(dir, "seen-history.json");
@@ -9973,7 +9977,7 @@ var init_spinner_seen = __esm({
     init_state_dir();
     SEEN_WINDOW_SURFACES = 10;
     SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
-    SEEN_MAX_ENTRIES = 500;
+    SEEN_MAX_ENTRIES = 1500;
     SEEN_MAX_WIDTHS = 200;
   }
 });

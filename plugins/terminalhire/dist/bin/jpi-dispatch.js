@@ -12012,6 +12012,7 @@ __export(spinner_seen_exports, {
   SEEN_MAX_WIDTHS: () => SEEN_MAX_WIDTHS,
   SEEN_TTL_MS: () => SEEN_TTL_MS,
   SEEN_WINDOW_SURFACES: () => SEEN_WINDOW_SURFACES,
+  isAtCapacity: () => isAtCapacity,
   isSuppressed: () => isSuppressed,
   loadSeenHistory: () => loadSeenHistory,
   recordSurface: () => recordSurface,
@@ -12020,6 +12021,9 @@ __export(spinner_seen_exports, {
 import { readFileSync as readFileSync11, writeFileSync as writeFileSync10, renameSync as renameSync7 } from "fs";
 import { join as join13, dirname as dirname4 } from "path";
 import { homedir as homedir11 } from "os";
+function isAtCapacity(history) {
+  return Object.keys(history?.entries ?? {}).length >= SEEN_MAX_ENTRIES;
+}
 function seenFilePath() {
   const dir = process.env["TERMINALHIRE_DIR"] || join13(homedir11(), ".terminalhire");
   return join13(dir, "seen-history.json");
@@ -12113,7 +12117,7 @@ var init_spinner_seen = __esm({
     init_state_dir();
     SEEN_WINDOW_SURFACES = 10;
     SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
-    SEEN_MAX_ENTRIES = 500;
+    SEEN_MAX_ENTRIES = 1500;
     SEEN_MAX_WIDTHS = 200;
   }
 });
@@ -13108,6 +13112,17 @@ function rotate(list, now, windowMs = ROTATE_WINDOW_MS) {
   const idx = Math.floor(now / windowMs) % list.length;
   return [...list.slice(idx), ...list.slice(0, idx)];
 }
+function lastSurfaceFor(result, lastSurfaceOf) {
+  const id = result?.job?.id;
+  if (typeof id !== "string" || id.length === 0) return UNSEEN;
+  const v = lastSurfaceOf(id);
+  return typeof v === "number" && Number.isFinite(v) ? v : UNSEEN;
+}
+function orderByStaleness(list, lastSurfaceOf) {
+  return [...list].map((r, i) => ({ r, i, s: lastSurfaceFor(r, lastSurfaceOf) })).sort(
+    (a, b) => a.s - b.s || (typeof b.r?.score === "number" ? b.r.score : 0) - (typeof a.r?.score === "number" ? a.r.score : 0) || a.i - b.i
+  ).map((e) => e.r);
+}
 function budgetSlots(results, opts = {}) {
   const {
     thinProfile = false,
@@ -13119,7 +13134,8 @@ function budgetSlots(results, opts = {}) {
     interestJobPicks = [],
     interestJobSlots = INTEREST_JOB_SLOTS,
     leadRotate = process.env[LEAD_ROTATE_ENV] !== "0",
-    phaseMs = 0
+    phaseMs = 0,
+    lastSurfaceOf = null
   } = opts;
   const list = Array.isArray(results) ? results : [];
   const rNow = now + (Number.isFinite(phaseMs) ? phaseMs : 0);
@@ -13152,12 +13168,12 @@ function budgetSlots(results, opts = {}) {
     const o = Math.floor(rNow / LEAD_ROTATE_MS) % selectedHead.length;
     stableRoles = [...selectedHead.slice(o), ...selectedHead.slice(0, o)];
   }
-  const rotableRoles = roleMatches.slice(headPoolSize, headPoolSize + ROLE_ROTATE_WINDOW);
-  const rotatedRoles = rotate(rotableRoles, rNow);
+  const tailRoles = roleMatches.slice(headPoolSize);
+  const rotatedRoles = lastSurfaceOf ? orderByStaleness(tailRoles, lastSurfaceOf) : rotate(tailRoles.slice(0, ROLE_ROTATE_WINDOW), rNow);
   const roleTop = [...stableRoles, ...rotatedRoles].slice(0, roleSlots);
   return { roleTop, bountyTop, contributeTop, interestTop, interestJobTop };
 }
-var TOTAL_SLOTS, BOUNTY_SLOTS, BOUNTY_MIN_MATCH, INTEREST_CONTRIBUTE_SLOTS, INTEREST_JOB_SLOTS, INTEREST_SLOT_LABEL, CONTRIBUTE_SLOTS, CONTRIBUTE_SLOTS_THIN, MIX_PRESETS, DEFAULT_MIX, ROLE_STABLE_MAX, ROLE_ROTATE_WINDOW, ROTATE_WINDOW_MS, ROLE_HEAD_POOL, ROLE_HEAD_ROTATE_MS, LEAD_ROTATE_ENV, LEAD_ROTATE_MS, ROTATE_PHASE_ENV;
+var TOTAL_SLOTS, BOUNTY_SLOTS, BOUNTY_MIN_MATCH, INTEREST_CONTRIBUTE_SLOTS, INTEREST_JOB_SLOTS, INTEREST_SLOT_LABEL, CONTRIBUTE_SLOTS, CONTRIBUTE_SLOTS_THIN, MIX_PRESETS, DEFAULT_MIX, ROLE_STABLE_MAX, ROLE_ROTATE_WINDOW, ROTATE_WINDOW_MS, ROLE_HEAD_POOL, ROLE_HEAD_ROTATE_MS, LEAD_ROTATE_ENV, LEAD_ROTATE_MS, ROTATE_PHASE_ENV, UNSEEN;
 var init_match_slots = __esm({
   "bin/match-slots.js"() {
     "use strict";
@@ -13179,6 +13195,7 @@ var init_match_slots = __esm({
     LEAD_ROTATE_ENV = "TH_LEAD_ROTATE";
     LEAD_ROTATE_MS = 25 * 60 * 1e3;
     ROTATE_PHASE_ENV = "TH_ROTATE_PHASE";
+    UNSEEN = -1;
   }
 });
 
@@ -41450,7 +41467,7 @@ async function run26() {
       try {
         const res = await fetch(`${API_URL8}/api/index`, {
           signal: AbortSignal.timeout(15e3),
-          headers: { "Accept": "application/json" }
+          headers: { Accept: "application/json" }
         });
         if (!res.ok) {
           process.stderr.write(`terminalhire refresh: index fetch failed (HTTP ${res.status})
@@ -41475,6 +41492,7 @@ async function run26() {
     let matchCount = 0;
     let topMatches = [];
     let widenReserve = [];
+    let seenHistory;
     let cwdSignalFp;
     try {
       const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
@@ -41535,17 +41553,31 @@ async function run26() {
             statusMap
           );
         }
-        const { roleTop, bountyTop, contributeTop, interestTop, interestJobTop } = budgetSlots(results, {
-          thinProfile,
-          contributeEnabled: isContributeEnabled(),
-          mix: getSurfaceMix(),
-          interestPicks,
-          interestJobPicks,
-          // 078b: de-sync rotation phase across installs (stable per machine,
-          // zero persistence, zero egress). TH_ROTATE_PHASE='0' restores the
-          // shared global wall-clock phase (pre-078b behavior).
-          phaseMs: process.env[ROTATE_PHASE_ENV] !== "0" ? derivePhaseMs(hostname() + osHomedir()) : 0
-        });
+        let lastSurfaceOf = null;
+        try {
+          if (process.env["TH_SEEN_SELECT"] !== "0") {
+            const { loadSeenHistory: loadSeenHistory2 } = await Promise.resolve().then(() => (init_spinner_seen(), spinner_seen_exports));
+            seenHistory = loadSeenHistory2();
+            const entries = seenHistory.entries;
+            lastSurfaceOf = (id) => entries[id]?.lastSurface;
+          }
+        } catch {
+        }
+        const { roleTop, bountyTop, contributeTop, interestTop, interestJobTop } = budgetSlots(
+          results,
+          {
+            thinProfile,
+            contributeEnabled: isContributeEnabled(),
+            mix: getSurfaceMix(),
+            interestPicks,
+            interestJobPicks,
+            lastSurfaceOf,
+            // 078b: de-sync rotation phase across installs (stable per machine,
+            // zero persistence, zero egress). TH_ROTATE_PHASE='0' restores the
+            // shared global wall-clock phase (pre-078b behavior).
+            phaseMs: process.env[ROTATE_PHASE_ENV] !== "0" ? derivePhaseMs(hostname() + osHomedir()) : 0
+          }
+        );
         const toCard = (r) => ({
           id: r.job.id,
           title: r.job.title,
@@ -41562,102 +41594,114 @@ async function run26() {
           // every non-interest card keeps its exact pre-037 key set.
           ...r.interestLabel ? { interest: r.interestLabel } : {}
         });
-        topMatches = [...roleTop, ...bountyTop, ...contributeTop, ...interestTop, ...interestJobTop].map(toCard);
+        topMatches = [
+          ...roleTop,
+          ...bountyTop,
+          ...contributeTop,
+          ...interestTop,
+          ...interestJobTop
+        ].map(toCard);
         const inTop = new Set(topMatches.map((m) => m.id));
         widenReserve = results.filter((r) => !inTop.has(r.job.id)).slice(0, 100).map(toCard);
       }
     } catch {
     }
     let topPeers = [];
-    if (isPeerConnectEnabled()) try {
-      const { match: match2, STRONG_MATCH_THRESHOLD: STRONG_MATCH_THRESHOLD2 } = await Promise.resolve().then(() => (init_src(), src_exports));
-      const { extractFingerprint: extractFingerprint2 } = await Promise.resolve().then(() => (init_signal(), signal_exports));
-      const sig = extractFingerprint2(process.cwd());
-      const project = readProject();
-      const skillTags = [
-        .../* @__PURE__ */ new Set([
-          ...Array.isArray(sig?.skillTags) ? sig.skillTags : [],
-          ...project && Array.isArray(project.skillTags) ? project.skillTags : []
-        ])
-      ];
-      if (skillTags.length > 0) {
-        const fp = { skillTags, prefs: project?.prefs ?? {} };
-        const directory = await fetchDirectory({ quiet: true });
-        const cards = directory?.cards ?? [];
-        if (cards.length > 0) {
-          const strongPeers = match2(fp, cards, cards.length).filter(
-            (r) => r.score >= STRONG_MATCH_THRESHOLD2
-          );
-          let ownLogin;
-          try {
-            const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-            ownLogin = (await readProfile2())?.github?.login;
-          } catch {
+    if (isPeerConnectEnabled())
+      try {
+        const { match: match2, STRONG_MATCH_THRESHOLD: STRONG_MATCH_THRESHOLD2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+        const { extractFingerprint: extractFingerprint2 } = await Promise.resolve().then(() => (init_signal(), signal_exports));
+        const sig = extractFingerprint2(process.cwd());
+        const project = readProject();
+        const skillTags = [
+          .../* @__PURE__ */ new Set([
+            ...Array.isArray(sig?.skillTags) ? sig.skillTags : [],
+            ...project && Array.isArray(project.skillTags) ? project.skillTags : []
+          ])
+        ];
+        if (skillTags.length > 0) {
+          const fp = { skillTags, prefs: project?.prefs ?? {} };
+          const directory = await fetchDirectory({ quiet: true });
+          const cards = directory?.cards ?? [];
+          if (cards.length > 0) {
+            const strongPeers = match2(fp, cards, cards.length).filter(
+              (r) => r.score >= STRONG_MATCH_THRESHOLD2
+            );
+            let ownLogin;
+            try {
+              const { readProfile: readProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+              ownLogin = (await readProfile2())?.github?.login;
+            } catch {
+            }
+            const peerResults = excludeOwnCard(strongPeers, ownLogin);
+            topPeers = peerResults.map((r) => ({
+              login: r.job.company,
+              // public handle (person login / project owner)
+              title: r.job.title,
+              // public card title (name or project title)
+              score: r.score,
+              matchedTags: r.matchedTags,
+              source: r.job.source,
+              // 'person' | 'project'
+              url: r.job.url,
+              // public /r/<login> credential link
+              id: r.job.id
+            }));
+            await reportMatched(peerResults);
           }
-          const peerResults = excludeOwnCard(strongPeers, ownLogin);
-          topPeers = peerResults.map((r) => ({
-            login: r.job.company,
-            // public handle (person login / project owner)
-            title: r.job.title,
-            // public card title (name or project title)
-            score: r.score,
-            matchedTags: r.matchedTags,
-            source: r.job.source,
-            // 'person' | 'project'
-            url: r.job.url,
-            // public /r/<login> credential link
-            id: r.job.id
-          }));
-          await reportMatched(peerResults);
         }
+      } catch {
       }
-    } catch {
-    }
     let incomingPending = { count: 0 };
     let sessionStale = false;
     const sessionExpired = (res) => res.status === 401;
     const sessionCookie = readWebSessionFile();
-    if (sessionCookie && !isInboundNudgeMuted()) try {
-      const res = await fetch(`${API_URL8}/api/intro/list`, {
-        method: "GET",
-        headers: { Cookie: `${GH_SESSION_COOKIE8}=${sessionCookie}` },
-        signal: AbortSignal.timeout(1e4)
-      });
-      if (res.ok) {
-        const body = await res.json();
-        const intros = Array.isArray(body?.intros) ? body.intros : [];
-        const incoming = intros.filter((it) => it && it.role === "incoming" && it.status === "pending");
-        incomingPending = { count: incoming.length };
-      } else if (sessionExpired(res)) {
-        sessionStale = true;
+    if (sessionCookie && !isInboundNudgeMuted())
+      try {
+        const res = await fetch(`${API_URL8}/api/intro/list`, {
+          method: "GET",
+          headers: { Cookie: `${GH_SESSION_COOKIE8}=${sessionCookie}` },
+          signal: AbortSignal.timeout(1e4)
+        });
+        if (res.ok) {
+          const body = await res.json();
+          const intros = Array.isArray(body?.intros) ? body.intros : [];
+          const incoming = intros.filter(
+            (it) => it && it.role === "incoming" && it.status === "pending"
+          );
+          incomingPending = { count: incoming.length };
+        } else if (sessionExpired(res)) {
+          sessionStale = true;
+        }
+      } catch {
       }
-    } catch {
-    }
     let unreadChat = { count: 0 };
-    if (sessionCookie && !isInboundNudgeMuted()) try {
-      const res = await fetch(`${API_URL8}/api/chat/inbox`, {
-        method: "GET",
-        headers: { Cookie: `${GH_SESSION_COOKIE8}=${sessionCookie}` },
-        signal: AbortSignal.timeout(1e4)
-      });
-      if (res.ok) {
-        const body = await res.json();
-        const inbox = Array.isArray(body?.inbox) ? body.inbox : [];
-        const total = inbox.reduce(
-          (sum, it) => sum + (it && typeof it.unreadCount === "number" && it.unreadCount > 0 ? it.unreadCount : 0),
-          0
-        );
-        unreadChat = { count: total };
-      } else if (sessionExpired(res)) {
-        sessionStale = true;
+    if (sessionCookie && !isInboundNudgeMuted())
+      try {
+        const res = await fetch(`${API_URL8}/api/chat/inbox`, {
+          method: "GET",
+          headers: { Cookie: `${GH_SESSION_COOKIE8}=${sessionCookie}` },
+          signal: AbortSignal.timeout(1e4)
+        });
+        if (res.ok) {
+          const body = await res.json();
+          const inbox = Array.isArray(body?.inbox) ? body.inbox : [];
+          const total = inbox.reduce(
+            (sum, it) => sum + (it && typeof it.unreadCount === "number" && it.unreadCount > 0 ? it.unreadCount : 0),
+            0
+          );
+          unreadChat = { count: total };
+        } else if (sessionExpired(res)) {
+          sessionStale = true;
+        }
+      } catch {
       }
-    } catch {
-    }
-    let seenHistory;
     try {
-      const { loadSeenHistory: loadSeenHistory2 } = await Promise.resolve().then(() => (init_spinner_seen(), spinner_seen_exports));
       const { filterFreshMatches: filterFreshMatches2 } = await Promise.resolve().then(() => (init_spinner(), spinner_exports));
-      seenHistory = loadSeenHistory2();
+      if (!seenHistory) {
+        const { loadSeenHistory: loadSeenHistory2 } = await Promise.resolve().then(() => (init_spinner_seen(), spinner_seen_exports));
+        seenHistory = loadSeenHistory2();
+      }
       topMatches = filterFreshMatches2(topMatches, seenHistory);
     } catch {
     }

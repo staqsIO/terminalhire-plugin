@@ -54,7 +54,10 @@ function ensureStateDir(dir) {
 // bin/spinner-seen.js
 var SEEN_WINDOW_SURFACES = 10;
 var SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
-var SEEN_MAX_ENTRIES = 500;
+var SEEN_MAX_ENTRIES = 1500;
+function isAtCapacity(history) {
+  return Object.keys(history?.entries ?? {}).length >= SEEN_MAX_ENTRIES;
+}
 var SEEN_MAX_WIDTHS = 200;
 function seenFilePath() {
   const dir = process.env["TERMINALHIRE_DIR"] || join(homedir(), ".terminalhire");
@@ -147,6 +150,7 @@ export {
   SEEN_MAX_WIDTHS,
   SEEN_TTL_MS,
   SEEN_WINDOW_SURFACES,
+  isAtCapacity,
   isSuppressed,
   loadSeenHistory,
   recordSurface,

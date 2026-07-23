@@ -73,8 +73,11 @@ function readStdinSync() {
     sock.unref();
   } catch {
   }
-  const DEADLINE_MS = 200;
+  const IDLE_MS = 200;
+  const STREAM_IDLE_MS = 500;
+  const MAX_TOTAL_MS = 1500;
   const start = Date.now();
+  let lastProgress = start;
   const idle = new Int32Array(new SharedArrayBuffer(4));
   const chunks = [];
   const buf = Buffer.alloc(1 << 16);
@@ -85,7 +88,9 @@ function readStdinSync() {
         n = readSync(0, buf, 0, buf.length, null);
       } catch (e) {
         if (e && e.code === "EAGAIN") {
-          if (Date.now() - start > DEADLINE_MS) break;
+          const idleBudget = chunks.length > 0 ? STREAM_IDLE_MS : IDLE_MS;
+          if (Date.now() - lastProgress > idleBudget) break;
+          if (Date.now() - start > MAX_TOTAL_MS) break;
           Atomics.wait(idle, 0, 0, 5);
           continue;
         }
@@ -93,7 +98,8 @@ function readStdinSync() {
       }
       if (n === 0) break;
       chunks.push(Buffer.from(buf.subarray(0, n)));
-      if (Date.now() - start > DEADLINE_MS) break;
+      lastProgress = Date.now();
+      if (Date.now() - start > MAX_TOTAL_MS) break;
     }
   } catch {
     return {};
@@ -112,10 +118,12 @@ function readStdinWin32() {
     const chunks = [];
     let settled = false;
     let timer;
+    let hardStop;
     const finish = () => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(hardStop);
       try {
         process.stdin.pause();
       } catch {
@@ -128,9 +136,22 @@ function readStdinWin32() {
         resolve({});
       }
     };
-    timer = setTimeout(finish, 200);
-    if (typeof timer.unref === "function") timer.unref();
-    process.stdin.on("data", (c) => chunks.push(c));
+    const IDLE_MS = 200;
+    const STREAM_IDLE_MS = 500;
+    const MAX_TOTAL_MS = 1500;
+    const started = Date.now();
+    const arm = (ms) => {
+      clearTimeout(timer);
+      timer = setTimeout(finish, ms);
+      if (typeof timer.unref === "function") timer.unref();
+    };
+    arm(IDLE_MS);
+    hardStop = setTimeout(finish, MAX_TOTAL_MS);
+    if (typeof hardStop.unref === "function") hardStop.unref();
+    process.stdin.on("data", (c) => {
+      chunks.push(c);
+      arm(Math.min(STREAM_IDLE_MS, Math.max(0, MAX_TOTAL_MS - (Date.now() - started))));
+    });
     process.stdin.on("end", finish);
     process.stdin.on("error", finish);
   });

@@ -202,7 +202,7 @@ import { join as join3, dirname as dirname2 } from "path";
 import { homedir as homedir2 } from "os";
 var SEEN_WINDOW_SURFACES = 10;
 var SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
-var SEEN_MAX_ENTRIES = 500;
+var SEEN_MAX_ENTRIES = 1500;
 var SEEN_MAX_WIDTHS = 200;
 function seenFilePath() {
   const dir = process.env["TERMINALHIRE_DIR"] || join3(homedir2(), ".terminalhire");
