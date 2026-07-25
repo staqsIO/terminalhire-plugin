@@ -88,14 +88,127 @@ var init_state_dir = __esm({
   }
 });
 
-// src/crypto-store.ts
-import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
-import { readFileSync, writeFileSync, existsSync, renameSync, rmSync } from "fs";
-import { join, dirname, basename } from "path";
+// src/test-race-barrier.ts
+import { closeSync as closeSync2, constants as constants2, existsSync, lstatSync, openSync as openSync2 } from "fs";
+import { join } from "path";
+function syncSleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function waitForTestRaceBarrier(phase) {
+  const root = process.env[ENV_VAR];
+  if (!root) return;
+  const phaseDir = join(root, phase);
+  if (!existsSync(phaseDir)) return;
+  const readyFile = join(phaseDir, `ready-${process.pid}`);
+  const goFile = join(phaseDir, "go");
+  const noFollow = constants2.O_NOFOLLOW ?? 0;
+  if (lstatSync(readyFile, { throwIfNoEntry: false })) {
+    throw new Error(
+      `terminalhire: test race barrier "${phase}" found something already at its ready marker path ${readyFile} (regular file or symlink) \u2014 refusing rather than following or overwriting whatever is already there (this only fires under ${ENV_VAR}, never in production).`
+    );
+  }
+  let readyFd;
+  try {
+    readyFd = openSync2(
+      readyFile,
+      constants2.O_CREAT | constants2.O_EXCL | constants2.O_WRONLY | noFollow
+    );
+  } catch (err) {
+    throw new Error(
+      `terminalhire: test race barrier "${phase}" could not create its ready marker at ${readyFile} (${err instanceof Error ? err.message : String(err)}) \u2014 refusing rather than blocking on or writing through whatever is already there (this only fires under ${ENV_VAR}, never in production).`
+    );
+  }
+  closeSync2(readyFd);
+  const deadline = Date.now() + 3e4;
+  while (!existsSync(goFile)) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `terminalhire: test race barrier "${phase}" timed out waiting for ${goFile} (the test process never released it \u2014 this only fires under ${ENV_VAR}, never in production).`
+      );
+    }
+    syncSleepMs(2);
+  }
+}
+var ENV_VAR;
+var init_test_race_barrier = __esm({
+  "src/test-race-barrier.ts"() {
+    "use strict";
+    ENV_VAR = "TERMINALHIRE_TEST_RACE_BARRIER_DIR";
+  }
+});
+
+// src/shared-key.ts
+import { randomBytes } from "crypto";
+import { readFileSync, writeFileSync, existsSync as existsSync2, linkSync, unlinkSync } from "fs";
+import { join as join2 } from "path";
 import { homedir } from "os";
+function isValidKeyHex(value) {
+  return KEY_HEX_RE.test(value);
+}
+function readKeyFileOrThrow() {
+  const raw = readFileSync(KEY_FILE, "utf8").trim();
+  if (!isValidKeyHex(raw)) {
+    throw new Error(
+      `terminalhire: the shared encryption key at ${KEY_FILE} is not in the expected format (expected exactly ${KEY_BYTES * 2} lowercase-hex characters \u2014 a ${KEY_BYTES}-byte key).
+This key decrypts the GitHub token, local profile, and chat identity stores under ~/.terminalhire \u2014 it should never be hand-edited.
+Recovery: if you intend to reset it, delete the file yourself (this INVALIDATES every encrypted store under ~/.terminalhire, which will need to be re-created/re-authenticated):
+  rm ${KEY_FILE}`
+    );
+  }
+  return Buffer.from(raw, "hex");
+}
+function publishKeyBlob(key) {
+  const tmpFile = `${KEY_FILE}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync(tmpFile, key.toString("hex"), { encoding: "utf8", mode: 384, flag: "wx" });
+    try {
+      linkSync(tmpFile, KEY_FILE);
+      return true;
+    } catch (err) {
+      if (err?.code === "EEXIST") {
+        return false;
+      }
+      throw err;
+    }
+  } finally {
+    try {
+      unlinkSync(tmpFile);
+    } catch {
+    }
+  }
+}
+function loadOrCreateSharedKey() {
+  ensureStateDirForSecret(TERMINALHIRE_DIR);
+  if (existsSync2(KEY_FILE)) {
+    return readKeyFileOrThrow();
+  }
+  waitForTestRaceBarrier("key");
+  const key = randomBytes(KEY_BYTES);
+  if (publishKeyBlob(key)) {
+    return key;
+  }
+  return readKeyFileOrThrow();
+}
+var TERMINALHIRE_DIR, KEY_FILE, KEY_BYTES, KEY_HEX_RE;
+var init_shared_key = __esm({
+  "src/shared-key.ts"() {
+    "use strict";
+    init_state_dir();
+    init_test_race_barrier();
+    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
+    KEY_FILE = join2(TERMINALHIRE_DIR, "key");
+    KEY_BYTES = 32;
+    KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
+  }
+});
+
+// src/crypto-store.ts
+import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync3, renameSync, rmSync } from "fs";
+import { join as join3, dirname, basename } from "path";
 import { createRequire } from "module";
 function encrypt(plaintext, key) {
-  const iv = randomBytes(IV_BYTES);
+  const iv = randomBytes2(IV_BYTES);
   const cipher = createCipheriv(ALGO, key, iv);
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -125,21 +238,12 @@ async function tryLoadFromKeytar() {
     if (stored) {
       return Buffer.from(stored, "hex");
     }
-    const key = randomBytes(KEY_BYTES);
+    const key = randomBytes2(KEY_BYTES);
     await kt.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, key.toString("hex"));
     return key;
   } catch {
     return null;
   }
-}
-function loadOrCreateFileKey() {
-  ensureStateDirForSecret(TERMINALHIRE_DIR);
-  if (existsSync(KEY_FILE)) {
-    return Buffer.from(readFileSync(KEY_FILE, "utf8").trim(), "hex");
-  }
-  const key = randomBytes(KEY_BYTES);
-  writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
-  return key;
 }
 function warnStderr(message) {
   process.stderr.write(`${message}
@@ -148,11 +252,11 @@ function warnStderr(message) {
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname(filePath);
   ensureStateDirForSecret(dir);
-  const tmp = join(
+  const tmp = join3(
     dir,
-    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes(6).toString("hex")}`
+    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes2(6).toString("hex")}`
   );
-  writeFileSync(tmp, content, { encoding: "utf8", mode: 384 });
+  writeFileSync2(tmp, content, { encoding: "utf8", mode: 384, flag: "wx" });
   renameSync(tmp, filePath);
 }
 async function resolveKey(filePath, opts) {
@@ -166,16 +270,16 @@ async function resolveKey(filePath, opts) {
     }
     return key;
   }
-  return loadOrCreateFileKey();
+  return loadOrCreateSharedKey();
 }
 function createEncryptedStore(filePath, opts) {
   dependentStoreFiles.add(filePath);
   async function read() {
     const key = await resolveKey(filePath, opts);
     if (!key) return opts.blank();
-    if (!existsSync(filePath)) return opts.blank();
+    if (!existsSync3(filePath)) return opts.blank();
     try {
-      const raw = readFileSync(filePath, "utf8");
+      const raw = readFileSync2(filePath, "utf8");
       const blob = JSON.parse(raw);
       const plaintext = decrypt(blob, key);
       return JSON.parse(plaintext);
@@ -192,17 +296,15 @@ function createEncryptedStore(filePath, opts) {
   }
   return { read, write };
 }
-var TERMINALHIRE_DIR, KEY_FILE, KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, KEY_BYTES, IV_BYTES, forceKeytarUnavailableForTests, dependentStoreFiles;
+var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, IV_BYTES, forceKeytarUnavailableForTests, dependentStoreFiles;
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
-    KEY_FILE = join(TERMINALHIRE_DIR, "key");
+    init_shared_key();
     KEYTAR_SERVICE = "terminalhire";
     KEYTAR_ACCOUNT = "profile-key";
     ALGO = "aes-256-gcm";
-    KEY_BYTES = 32;
     IV_BYTES = 12;
     forceKeytarUnavailableForTests = false;
     dependentStoreFiles = /* @__PURE__ */ new Set();
@@ -1104,8 +1206,8 @@ var init_feeds = __esm({
 });
 
 // ../../packages/core/src/partners.ts
-import { readFileSync as readFileSync2 } from "fs";
-import { join as join2 } from "path";
+import { readFileSync as readFileSync3 } from "fs";
+import { join as join4 } from "path";
 import { fileURLToPath } from "url";
 var EXAMPLE_BUYER, BUYER_REGISTRY;
 var init_partners = __esm({
@@ -1176,7 +1278,7 @@ var init_directoryThreshold = __esm({
 });
 
 // ../../packages/core/src/chatCrypto.ts
-import { hkdfSync, createHash, randomBytes as randomBytes2 } from "crypto";
+import { hkdfSync, createHash, randomBytes as randomBytes3 } from "crypto";
 var KDF_INFO;
 var init_chatCrypto = __esm({
   "../../packages/core/src/chatCrypto.ts"() {
@@ -1451,7 +1553,7 @@ var init_src = __esm({
 });
 
 // src/profile.ts
-import { join as join3 } from "path";
+import { join as join5 } from "path";
 import { homedir as homedir2 } from "os";
 function blankProfile() {
   return {
@@ -1473,8 +1575,8 @@ var init_profile = __esm({
     "use strict";
     init_src();
     init_crypto_store();
-    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
-    PROFILE_FILE = join3(TERMINALHIRE_DIR2, "profile.enc");
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join5(homedir2(), ".terminalhire");
+    PROFILE_FILE = join5(TERMINALHIRE_DIR2, "profile.enc");
     profileStore = createEncryptedStore(PROFILE_FILE, {
       blank: blankProfile,
       keyPolicy: "keytar-first-file-fallback"
@@ -1499,7 +1601,7 @@ __export(repo_experience_exports, {
   recordPolicySnapshot: () => recordPolicySnapshot,
   writeTombstone: () => writeTombstone
 });
-import { join as join4 } from "path";
+import { join as join6 } from "path";
 import { homedir as homedir3 } from "os";
 function blankFile() {
   return { version: 1, repos: {} };
@@ -1707,8 +1809,8 @@ var init_repo_experience = __esm({
     "use strict";
     init_crypto_store();
     init_profile();
-    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
-    REPO_EXPERIENCE_FILE = join4(TERMINALHIRE_DIR3, "repo-experience.enc");
+    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join6(homedir3(), ".terminalhire");
+    REPO_EXPERIENCE_FILE = join6(TERMINALHIRE_DIR3, "repo-experience.enc");
     MAX_REPOS = 100;
     MAX_CULTURE_SAMPLES = 12;
     MAX_NOTES = 10;
@@ -1738,16 +1840,16 @@ __export(claims_exports, {
   updateClaim: () => updateClaim
 });
 import {
-  readFileSync as readFileSync3,
-  writeFileSync as writeFileSync2,
+  readFileSync as readFileSync4,
+  writeFileSync as writeFileSync3,
   mkdirSync as mkdirSync2,
   renameSync as renameSync2,
-  existsSync as existsSync2,
+  existsSync as existsSync4,
   rmSync as rmSync2,
   statSync
 } from "fs";
-import { randomBytes as randomBytes3 } from "crypto";
-import { join as join5 } from "path";
+import { randomBytes as randomBytes4 } from "crypto";
+import { join as join7 } from "path";
 import { homedir as homedir4 } from "os";
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -1803,8 +1905,8 @@ function normalizeClaim(c) {
 }
 function readClaims() {
   try {
-    if (!existsSync2(CLAIMS_FILE)) return [];
-    const data = JSON.parse(readFileSync3(CLAIMS_FILE, "utf8"));
+    if (!existsSync4(CLAIMS_FILE)) return [];
+    const data = JSON.parse(readFileSync4(CLAIMS_FILE, "utf8"));
     const claims = Array.isArray(data?.claims) ? data.claims : [];
     return claims.map(normalizeClaim);
   } catch {
@@ -1813,10 +1915,10 @@ function readClaims() {
 }
 function writeClaims(claims) {
   ensureStateDir(TERMINALHIRE_DIR4);
-  const tmp = `${CLAIMS_FILE}.${process.pid}.${randomBytes3(6).toString("hex")}.tmp`;
+  const tmp = `${CLAIMS_FILE}.${process.pid}.${randomBytes4(6).toString("hex")}.tmp`;
   const payload = { claims };
   try {
-    writeFileSync2(tmp, JSON.stringify(payload, null, 2), {
+    writeFileSync3(tmp, JSON.stringify(payload, null, 2), {
       encoding: "utf8",
       mode: 384,
       flag: "wx"
@@ -1917,8 +2019,8 @@ var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
-    CLAIMS_FILE = join5(TERMINALHIRE_DIR4, "claims.json");
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join7(homedir4(), ".terminalhire");
+    CLAIMS_FILE = join7(TERMINALHIRE_DIR4, "claims.json");
     LOCK_DIR = `${CLAIMS_FILE}.lock`;
     LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
     LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;

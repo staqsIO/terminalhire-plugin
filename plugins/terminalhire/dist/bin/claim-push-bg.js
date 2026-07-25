@@ -104,22 +104,22 @@ __export(claims_exports, {
   updateClaim: () => updateClaim
 });
 import {
-  readFileSync as readFileSync2,
-  writeFileSync as writeFileSync2,
+  readFileSync as readFileSync3,
+  writeFileSync as writeFileSync3,
   mkdirSync as mkdirSync2,
   renameSync as renameSync2,
-  existsSync as existsSync3,
+  existsSync as existsSync4,
   rmSync as rmSync2,
   statSync
 } from "fs";
-import { randomBytes as randomBytes2 } from "crypto";
-import { join as join3 } from "path";
-import { homedir as homedir2 } from "os";
+import { randomBytes as randomBytes3 } from "crypto";
+import { join as join4 } from "path";
+import { homedir as homedir3 } from "os";
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 function withClaimsLock(fn) {
-  ensureStateDir(TERMINALHIRE_DIR2);
+  ensureStateDir(TERMINALHIRE_DIR3);
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   for (; ; ) {
     try {
@@ -169,8 +169,8 @@ function normalizeClaim(c) {
 }
 function readClaims() {
   try {
-    if (!existsSync3(CLAIMS_FILE)) return [];
-    const data = JSON.parse(readFileSync2(CLAIMS_FILE, "utf8"));
+    if (!existsSync4(CLAIMS_FILE)) return [];
+    const data = JSON.parse(readFileSync3(CLAIMS_FILE, "utf8"));
     const claims = Array.isArray(data?.claims) ? data.claims : [];
     return claims.map(normalizeClaim);
   } catch {
@@ -178,11 +178,11 @@ function readClaims() {
   }
 }
 function writeClaims(claims) {
-  ensureStateDir(TERMINALHIRE_DIR2);
-  const tmp = `${CLAIMS_FILE}.${process.pid}.${randomBytes2(6).toString("hex")}.tmp`;
+  ensureStateDir(TERMINALHIRE_DIR3);
+  const tmp = `${CLAIMS_FILE}.${process.pid}.${randomBytes3(6).toString("hex")}.tmp`;
   const payload = { claims };
   try {
-    writeFileSync2(tmp, JSON.stringify(payload, null, 2), {
+    writeFileSync3(tmp, JSON.stringify(payload, null, 2), {
       encoding: "utf8",
       mode: 384,
       flag: "wx"
@@ -278,13 +278,13 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR2, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS;
+var TERMINALHIRE_DIR3, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
-    CLAIMS_FILE = join3(TERMINALHIRE_DIR2, "claims.json");
+    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
+    CLAIMS_FILE = join4(TERMINALHIRE_DIR3, "claims.json");
     LOCK_DIR = `${CLAIMS_FILE}.lock`;
     LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
     LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
@@ -323,22 +323,21 @@ var init_claims = __esm({
 
 // bin/claim-push-bg.js
 import { createHash } from "crypto";
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, existsSync as existsSync4, rmSync as rmSync3 } from "fs";
-import { join as join4 } from "path";
-import { homedir as homedir3 } from "os";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync4, existsSync as existsSync5, rmSync as rmSync3 } from "fs";
+import { join as join5 } from "path";
+import { homedir as homedir4 } from "os";
 
 // src/github-auth.ts
 init_state_dir();
-import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
-import {
-  readFileSync,
-  writeFileSync,
-  existsSync as existsSync2,
-  rmSync,
-  renameSync,
-  linkSync,
-  unlinkSync
-} from "fs";
+import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync3, rmSync, renameSync } from "fs";
+import { join as join3 } from "path";
+import { homedir as homedir2 } from "os";
+
+// src/shared-key.ts
+init_state_dir();
+import { randomBytes } from "crypto";
+import { readFileSync, writeFileSync, existsSync as existsSync2, linkSync, unlinkSync } from "fs";
 import { join as join2 } from "path";
 import { homedir } from "os";
 
@@ -385,13 +384,10 @@ function waitForTestRaceBarrier(phase) {
   }
 }
 
-// src/github-auth.ts
+// src/shared-key.ts
 var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
-var TOKEN_FILE = join2(TERMINALHIRE_DIR, "github-token.enc");
 var KEY_FILE = join2(TERMINALHIRE_DIR, "key");
-var ALGO = "aes-256-gcm";
 var KEY_BYTES = 32;
-var IV_BYTES = 12;
 var KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
 function isValidKeyHex(value) {
   return KEY_HEX_RE.test(value);
@@ -428,7 +424,7 @@ function publishKeyBlob(key) {
     }
   }
 }
-async function loadKey() {
+function loadOrCreateSharedKey() {
   ensureStateDirForSecret(TERMINALHIRE_DIR);
   if (existsSync2(KEY_FILE)) {
     return readKeyFileOrThrow();
@@ -440,8 +436,17 @@ async function loadKey() {
   }
   return readKeyFileOrThrow();
 }
+
+// src/github-auth.ts
+var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
+var TOKEN_FILE = join3(TERMINALHIRE_DIR2, "github-token.enc");
+var ALGO = "aes-256-gcm";
+var IV_BYTES = 12;
+async function loadKey() {
+  return loadOrCreateSharedKey();
+}
 function encrypt(plaintext, key) {
-  const iv = randomBytes(IV_BYTES);
+  const iv = randomBytes2(IV_BYTES);
   const cipher = createCipheriv(ALGO, key, iv);
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -459,24 +464,24 @@ function decrypt(blob, key) {
 
 // bin/claim-push-bg.js
 init_state_dir();
-var TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
-var CLAIM_PUSH_AUTO_MARKER = join4(TERMINALHIRE_DIR3, "claim-push-auto.json");
-var CLAIM_PUSH_TOKEN_FILE = join4(TERMINALHIRE_DIR3, "claim-push-token.enc");
-var CLAIM_PUSH_MANUAL_MARKER = join4(TERMINALHIRE_DIR3, "claim-push.json");
+var TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
+var CLAIM_PUSH_AUTO_MARKER = join5(TERMINALHIRE_DIR4, "claim-push-auto.json");
+var CLAIM_PUSH_TOKEN_FILE = join5(TERMINALHIRE_DIR4, "claim-push-token.enc");
+var CLAIM_PUSH_MANUAL_MARKER = join5(TERMINALHIRE_DIR4, "claim-push.json");
 var CLAIM_SYNC_BASE = "https://terminalhire.com";
 var AUTO_CONSENT_VERSION = 2;
 var AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
 async function writePushTokenEnc(rawToken) {
-  ensureStateDirForSecret(TERMINALHIRE_DIR3);
+  ensureStateDirForSecret(TERMINALHIRE_DIR4);
   const key = await loadKey();
   const blob = encrypt(rawToken, key);
-  writeFileSync3(CLAIM_PUSH_TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
+  writeFileSync4(CLAIM_PUSH_TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 async function readPushTokenEnc() {
-  if (!existsSync4(CLAIM_PUSH_TOKEN_FILE)) return void 0;
+  if (!existsSync5(CLAIM_PUSH_TOKEN_FILE)) return void 0;
   try {
     const key = await loadKey();
-    const blob = JSON.parse(readFileSync3(CLAIM_PUSH_TOKEN_FILE, "utf8"));
+    const blob = JSON.parse(readFileSync4(CLAIM_PUSH_TOKEN_FILE, "utf8"));
     return decrypt(blob, key);
   } catch {
     return void 0;
@@ -490,14 +495,14 @@ function clearPushTokenEnc() {
 }
 function readAutoMarker() {
   try {
-    return existsSync4(CLAIM_PUSH_AUTO_MARKER) ? JSON.parse(readFileSync3(CLAIM_PUSH_AUTO_MARKER, "utf8")) : null;
+    return existsSync5(CLAIM_PUSH_AUTO_MARKER) ? JSON.parse(readFileSync4(CLAIM_PUSH_AUTO_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
 }
 function writeAutoMarker(marker) {
-  ensureStateDir(TERMINALHIRE_DIR3);
-  writeFileSync3(CLAIM_PUSH_AUTO_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  ensureStateDir(TERMINALHIRE_DIR4);
+  writeFileSync4(CLAIM_PUSH_AUTO_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearAutoMarker() {
   try {
@@ -551,13 +556,13 @@ async function shouldNudgeUnpushed() {
     const currentHash = computeSnapshotHash(pushed);
     let manual = null;
     try {
-      manual = existsSync4(CLAIM_PUSH_MANUAL_MARKER) ? JSON.parse(readFileSync3(CLAIM_PUSH_MANUAL_MARKER, "utf8")) : null;
+      manual = existsSync5(CLAIM_PUSH_MANUAL_MARKER) ? JSON.parse(readFileSync4(CLAIM_PUSH_MANUAL_MARKER, "utf8")) : null;
     } catch {
       manual = null;
     }
     return unpushedNudgeGate({
-      autoMarkerExists: existsSync4(CLAIM_PUSH_AUTO_MARKER),
-      tokenFileExists: existsSync4(CLAIM_PUSH_TOKEN_FILE),
+      autoMarkerExists: existsSync5(CLAIM_PUSH_AUTO_MARKER),
+      tokenFileExists: existsSync5(CLAIM_PUSH_TOKEN_FILE),
       manualMarkerExists: !!manual,
       lastSnapshotHash: manual?.lastSnapshotHash ?? null,
       currentHash,
@@ -569,7 +574,7 @@ async function shouldNudgeUnpushed() {
 }
 async function runBackgroundClaimPush({ now = Date.now() } = {}) {
   try {
-    if (!existsSync4(CLAIM_PUSH_AUTO_MARKER) || !existsSync4(CLAIM_PUSH_TOKEN_FILE)) return;
+    if (!existsSync5(CLAIM_PUSH_AUTO_MARKER) || !existsSync5(CLAIM_PUSH_TOKEN_FILE)) return;
     const marker = readAutoMarker();
     if (!marker || !marker.autoConsentedAt) return;
     const { listClaims: listClaims2, toPushedClaim: toPushedClaim2, PUSHED_CLAIM_FIELDS: PUSHED_CLAIM_FIELDS2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));

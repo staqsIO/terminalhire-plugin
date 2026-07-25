@@ -1,16 +1,8 @@
 // src/github-auth.ts
-import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
-import {
-  readFileSync,
-  writeFileSync,
-  existsSync as existsSync2,
-  rmSync,
-  renameSync,
-  linkSync,
-  unlinkSync
-} from "fs";
-import { join as join2 } from "path";
-import { homedir } from "os";
+import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync3, rmSync, renameSync } from "fs";
+import { join as join3 } from "path";
+import { homedir as homedir2 } from "os";
 
 // src/state-dir.ts
 import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
@@ -85,6 +77,12 @@ function ensureStateDirForSecret(dir) {
   applyStateDirSecretPolicy(dir, ensureStateDir(dir));
 }
 
+// src/shared-key.ts
+import { randomBytes } from "crypto";
+import { readFileSync, writeFileSync, existsSync as existsSync2, linkSync, unlinkSync } from "fs";
+import { join as join2 } from "path";
+import { homedir } from "os";
+
 // src/test-race-barrier.ts
 import { closeSync as closeSync2, constants as constants2, existsSync, lstatSync, openSync as openSync2 } from "fs";
 import { join } from "path";
@@ -128,17 +126,10 @@ function waitForTestRaceBarrier(phase) {
   }
 }
 
-// src/github-auth.ts
+// src/shared-key.ts
 var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
-var TOKEN_FILE = join2(TERMINALHIRE_DIR, "github-token.enc");
 var KEY_FILE = join2(TERMINALHIRE_DIR, "key");
-var ALGO = "aes-256-gcm";
 var KEY_BYTES = 32;
-var IV_BYTES = 12;
-var GITHUB_SCOPE = "read:user";
-var DEVICE_CODE_URL = "https://github.com/login/device/code";
-var ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
-var BAKED_IN_CLIENT_ID = "Ov23lignE2ZSBe0J3a6B";
 var KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
 function isValidKeyHex(value) {
   return KEY_HEX_RE.test(value);
@@ -175,7 +166,7 @@ function publishKeyBlob(key) {
     }
   }
 }
-async function loadKey() {
+function loadOrCreateSharedKey() {
   ensureStateDirForSecret(TERMINALHIRE_DIR);
   if (existsSync2(KEY_FILE)) {
     return readKeyFileOrThrow();
@@ -190,8 +181,21 @@ async function loadKey() {
 function __publishKeyBlobForTests(key) {
   return publishKeyBlob(key);
 }
+
+// src/github-auth.ts
+var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
+var TOKEN_FILE = join3(TERMINALHIRE_DIR2, "github-token.enc");
+var ALGO = "aes-256-gcm";
+var IV_BYTES = 12;
+var GITHUB_SCOPE = "read:user";
+var DEVICE_CODE_URL = "https://github.com/login/device/code";
+var ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
+var BAKED_IN_CLIENT_ID = "Ov23lignE2ZSBe0J3a6B";
+async function loadKey() {
+  return loadOrCreateSharedKey();
+}
 function encrypt(plaintext, key) {
-  const iv = randomBytes(IV_BYTES);
+  const iv = randomBytes2(IV_BYTES);
   const cipher = createCipheriv(ALGO, key, iv);
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -207,10 +211,10 @@ function decrypt(blob, key) {
   return plain.toString("utf8");
 }
 async function readGitHubToken() {
-  if (!existsSync2(TOKEN_FILE)) return void 0;
+  if (!existsSync3(TOKEN_FILE)) return void 0;
   try {
     const key = await loadKey();
-    const raw = readFileSync(TOKEN_FILE, "utf8");
+    const raw = readFileSync2(TOKEN_FILE, "utf8");
     const blob = JSON.parse(raw);
     return decrypt(blob, key);
   } catch {
@@ -218,12 +222,12 @@ async function readGitHubToken() {
   }
 }
 async function writeGitHubToken(token) {
-  ensureStateDirForSecret(TERMINALHIRE_DIR);
+  ensureStateDirForSecret(TERMINALHIRE_DIR2);
   const key = await loadKey();
   const blob = encrypt(token, key);
-  const tmpFile = `${TOKEN_FILE}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+  const tmpFile = `${TOKEN_FILE}.${process.pid}.${randomBytes2(6).toString("hex")}.tmp`;
   try {
-    writeFileSync(tmpFile, JSON.stringify(blob, null, 2), {
+    writeFileSync2(tmpFile, JSON.stringify(blob, null, 2), {
       encoding: "utf8",
       mode: 384,
       flag: "wx"
@@ -244,7 +248,7 @@ async function deleteGitHubToken() {
   }
 }
 async function hasGitHubToken() {
-  return existsSync2(TOKEN_FILE);
+  return existsSync3(TOKEN_FILE);
 }
 var MOCK_TOKEN = "mock-github-token-jpi-dev";
 var MOCK_LOGIN = "janedev";

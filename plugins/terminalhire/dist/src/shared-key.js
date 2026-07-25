@@ -1,8 +1,8 @@
-// src/crypto-store.ts
-import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync3, renameSync, rmSync } from "fs";
-import { join as join3, dirname, basename } from "path";
-import { createRequire } from "module";
+// src/shared-key.ts
+import { randomBytes } from "crypto";
+import { readFileSync, writeFileSync, existsSync as existsSync2, linkSync, unlinkSync } from "fs";
+import { join as join2 } from "path";
+import { homedir } from "os";
 
 // src/state-dir.ts
 import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
@@ -76,12 +76,6 @@ then re-run the command. If the symlink is intentional, point TERMINALHIRE_DIR a
 function ensureStateDirForSecret(dir) {
   applyStateDirSecretPolicy(dir, ensureStateDir(dir));
 }
-
-// src/shared-key.ts
-import { randomBytes } from "crypto";
-import { readFileSync, writeFileSync, existsSync as existsSync2, linkSync, unlinkSync } from "fs";
-import { join as join2 } from "path";
-import { homedir } from "os";
 
 // src/test-race-barrier.ts
 import { closeSync as closeSync2, constants as constants2, existsSync, lstatSync, openSync as openSync2 } from "fs";
@@ -178,129 +172,13 @@ function loadOrCreateSharedKey() {
   }
   return readKeyFileOrThrow();
 }
-
-// src/crypto-store.ts
-var KEYTAR_SERVICE = "terminalhire";
-var KEYTAR_ACCOUNT = "profile-key";
-var ALGO = "aes-256-gcm";
-var IV_BYTES = 12;
-function encrypt(plaintext, key) {
-  const iv = randomBytes2(IV_BYTES);
-  const cipher = createCipheriv(ALGO, key, iv);
-  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return {
-    iv: iv.toString("hex"),
-    tag: tag.toString("hex"),
-    ciphertext: ct.toString("hex")
-  };
-}
-function decrypt(blob, key) {
-  const decipher = createDecipheriv(ALGO, key, Buffer.from(blob.iv, "hex"));
-  decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
-  const plain = Buffer.concat([
-    decipher.update(Buffer.from(blob.ciphertext, "hex")),
-    decipher.final()
-  ]);
-  return plain.toString("utf8");
-}
-var forceKeytarUnavailableForTests = false;
-function __setForceKeytarUnavailableForTests(value) {
-  forceKeytarUnavailableForTests = value;
-}
-function skipKeychain() {
-  return process.env.TERMINALHIRE_NO_KEYCHAIN !== void 0 || process.env.CI !== void 0 || process.env.VITEST !== void 0 || process.env.NODE_ENV === "test";
-}
-async function tryLoadFromKeytar() {
-  if (forceKeytarUnavailableForTests || skipKeychain()) return null;
-  try {
-    const kt = createRequire(import.meta.url)("keytar");
-    const stored = await kt.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
-    if (stored) {
-      return Buffer.from(stored, "hex");
-    }
-    const key = randomBytes2(KEY_BYTES);
-    await kt.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, key.toString("hex"));
-    return key;
-  } catch {
-    return null;
-  }
-}
-function warnStderr(message) {
-  process.stderr.write(`${message}
-`);
-}
-function atomicWriteFileSync(filePath, content) {
-  const dir = dirname(filePath);
-  ensureStateDirForSecret(dir);
-  const tmp = join3(
-    dir,
-    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes2(6).toString("hex")}`
-  );
-  writeFileSync2(tmp, content, { encoding: "utf8", mode: 384, flag: "wx" });
-  renameSync(tmp, filePath);
-}
-var dependentStoreFiles = /* @__PURE__ */ new Set();
-async function deleteKey() {
-  for (const filePath of dependentStoreFiles) {
-    try {
-      rmSync(filePath);
-    } catch {
-    }
-  }
-  if (!forceKeytarUnavailableForTests && !skipKeychain()) {
-    try {
-      const kt = createRequire(import.meta.url)("keytar");
-      await kt.deletePassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
-    } catch {
-    }
-  }
-  try {
-    rmSync(KEY_FILE);
-  } catch {
-  }
-}
-async function resolveKey(filePath, opts) {
-  if (opts.keyPolicy === "keychain-required") {
-    const key = await tryLoadFromKeytar();
-    if (!key) {
-      warnStderr(
-        `crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`
-      );
-      return null;
-    }
-    return key;
-  }
-  return loadOrCreateSharedKey();
-}
-function createEncryptedStore(filePath, opts) {
-  dependentStoreFiles.add(filePath);
-  async function read() {
-    const key = await resolveKey(filePath, opts);
-    if (!key) return opts.blank();
-    if (!existsSync3(filePath)) return opts.blank();
-    try {
-      const raw = readFileSync2(filePath, "utf8");
-      const blob = JSON.parse(raw);
-      const plaintext = decrypt(blob, key);
-      return JSON.parse(plaintext);
-    } catch {
-      warnStderr(`crypto-store: failed to decrypt ${filePath} \u2014 returning blank`);
-      return opts.blank();
-    }
-  }
-  async function write(value) {
-    const key = await resolveKey(filePath, opts);
-    if (!key) return;
-    const blob = encrypt(JSON.stringify(value), key);
-    atomicWriteFileSync(filePath, JSON.stringify(blob, null, 2));
-  }
-  return { read, write };
+function __publishKeyBlobForTests(key) {
+  return publishKeyBlob(key);
 }
 export {
-  __setForceKeytarUnavailableForTests,
-  createEncryptedStore,
-  decrypt,
-  deleteKey,
-  encrypt
+  KEY_BYTES,
+  KEY_FILE,
+  __publishKeyBlobForTests,
+  loadOrCreateSharedKey,
+  readKeyFileOrThrow
 };

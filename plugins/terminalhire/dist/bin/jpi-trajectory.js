@@ -285,7 +285,7 @@ function finalize(build) {
   };
 }
 function reconstruct(files, opts = {}) {
-  const join6 = opts.joinSidechains !== false;
+  const join8 = opts.joinSidechains !== false;
   const mains = [];
   const sidechains = [];
   for (const file of files) {
@@ -310,7 +310,7 @@ function reconstruct(files, opts = {}) {
   }
   const orphanedSidechainPaths = [];
   const joinedPaths = /* @__PURE__ */ new Set();
-  if (join6) {
+  if (join8) {
     const sidechainsBySession = /* @__PURE__ */ new Map();
     for (const sc of sidechains) {
       const acc = sidechainsBySession.get(sc.sessionId) ?? [];
@@ -2215,14 +2215,127 @@ var init_web_session = __esm({
   }
 });
 
-// src/crypto-store.ts
-import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, existsSync as existsSync2, renameSync, rmSync as rmSync2 } from "fs";
-import { join as join3, dirname, basename } from "path";
+// src/test-race-barrier.ts
+import { closeSync as closeSync2, constants as constants2, existsSync as existsSync2, lstatSync, openSync as openSync2 } from "fs";
+import { join as join3 } from "path";
+function syncSleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function waitForTestRaceBarrier(phase) {
+  const root = process.env[ENV_VAR];
+  if (!root) return;
+  const phaseDir = join3(root, phase);
+  if (!existsSync2(phaseDir)) return;
+  const readyFile = join3(phaseDir, `ready-${process.pid}`);
+  const goFile = join3(phaseDir, "go");
+  const noFollow = constants2.O_NOFOLLOW ?? 0;
+  if (lstatSync(readyFile, { throwIfNoEntry: false })) {
+    throw new Error(
+      `terminalhire: test race barrier "${phase}" found something already at its ready marker path ${readyFile} (regular file or symlink) \u2014 refusing rather than following or overwriting whatever is already there (this only fires under ${ENV_VAR}, never in production).`
+    );
+  }
+  let readyFd;
+  try {
+    readyFd = openSync2(
+      readyFile,
+      constants2.O_CREAT | constants2.O_EXCL | constants2.O_WRONLY | noFollow
+    );
+  } catch (err) {
+    throw new Error(
+      `terminalhire: test race barrier "${phase}" could not create its ready marker at ${readyFile} (${err instanceof Error ? err.message : String(err)}) \u2014 refusing rather than blocking on or writing through whatever is already there (this only fires under ${ENV_VAR}, never in production).`
+    );
+  }
+  closeSync2(readyFd);
+  const deadline = Date.now() + 3e4;
+  while (!existsSync2(goFile)) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `terminalhire: test race barrier "${phase}" timed out waiting for ${goFile} (the test process never released it \u2014 this only fires under ${ENV_VAR}, never in production).`
+      );
+    }
+    syncSleepMs(2);
+  }
+}
+var ENV_VAR;
+var init_test_race_barrier = __esm({
+  "src/test-race-barrier.ts"() {
+    "use strict";
+    ENV_VAR = "TERMINALHIRE_TEST_RACE_BARRIER_DIR";
+  }
+});
+
+// src/shared-key.ts
+import { randomBytes as randomBytes2 } from "crypto";
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, existsSync as existsSync3, linkSync, unlinkSync } from "fs";
+import { join as join4 } from "path";
 import { homedir as homedir2 } from "os";
+function isValidKeyHex(value) {
+  return KEY_HEX_RE.test(value);
+}
+function readKeyFileOrThrow() {
+  const raw = readFileSync3(KEY_FILE, "utf8").trim();
+  if (!isValidKeyHex(raw)) {
+    throw new Error(
+      `terminalhire: the shared encryption key at ${KEY_FILE} is not in the expected format (expected exactly ${KEY_BYTES * 2} lowercase-hex characters \u2014 a ${KEY_BYTES}-byte key).
+This key decrypts the GitHub token, local profile, and chat identity stores under ~/.terminalhire \u2014 it should never be hand-edited.
+Recovery: if you intend to reset it, delete the file yourself (this INVALIDATES every encrypted store under ~/.terminalhire, which will need to be re-created/re-authenticated):
+  rm ${KEY_FILE}`
+    );
+  }
+  return Buffer.from(raw, "hex");
+}
+function publishKeyBlob(key) {
+  const tmpFile = `${KEY_FILE}.${process.pid}.${randomBytes2(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync2(tmpFile, key.toString("hex"), { encoding: "utf8", mode: 384, flag: "wx" });
+    try {
+      linkSync(tmpFile, KEY_FILE);
+      return true;
+    } catch (err) {
+      if (err?.code === "EEXIST") {
+        return false;
+      }
+      throw err;
+    }
+  } finally {
+    try {
+      unlinkSync(tmpFile);
+    } catch {
+    }
+  }
+}
+function loadOrCreateSharedKey() {
+  ensureStateDirForSecret(TERMINALHIRE_DIR);
+  if (existsSync3(KEY_FILE)) {
+    return readKeyFileOrThrow();
+  }
+  waitForTestRaceBarrier("key");
+  const key = randomBytes2(KEY_BYTES);
+  if (publishKeyBlob(key)) {
+    return key;
+  }
+  return readKeyFileOrThrow();
+}
+var TERMINALHIRE_DIR, KEY_FILE, KEY_BYTES, KEY_HEX_RE;
+var init_shared_key = __esm({
+  "src/shared-key.ts"() {
+    "use strict";
+    init_state_dir();
+    init_test_race_barrier();
+    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join4(homedir2(), ".terminalhire");
+    KEY_FILE = join4(TERMINALHIRE_DIR, "key");
+    KEY_BYTES = 32;
+    KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
+  }
+});
+
+// src/crypto-store.ts
+import { createCipheriv, createDecipheriv, randomBytes as randomBytes3 } from "crypto";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, existsSync as existsSync4, renameSync, rmSync as rmSync2 } from "fs";
+import { join as join5, dirname, basename } from "path";
 import { createRequire } from "module";
 function encrypt(plaintext, key) {
-  const iv = randomBytes2(IV_BYTES);
+  const iv = randomBytes3(IV_BYTES);
   const cipher = createCipheriv(ALGO, key, iv);
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -2252,21 +2365,12 @@ async function tryLoadFromKeytar() {
     if (stored) {
       return Buffer.from(stored, "hex");
     }
-    const key = randomBytes2(KEY_BYTES);
+    const key = randomBytes3(KEY_BYTES);
     await kt.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, key.toString("hex"));
     return key;
   } catch {
     return null;
   }
-}
-function loadOrCreateFileKey() {
-  ensureStateDirForSecret(TERMINALHIRE_DIR);
-  if (existsSync2(KEY_FILE)) {
-    return Buffer.from(readFileSync3(KEY_FILE, "utf8").trim(), "hex");
-  }
-  const key = randomBytes2(KEY_BYTES);
-  writeFileSync2(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
-  return key;
 }
 function warnStderr(message) {
   process.stderr.write(`${message}
@@ -2275,11 +2379,11 @@ function warnStderr(message) {
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname(filePath);
   ensureStateDirForSecret(dir);
-  const tmp = join3(
+  const tmp = join5(
     dir,
-    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes2(6).toString("hex")}`
+    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes3(6).toString("hex")}`
   );
-  writeFileSync2(tmp, content, { encoding: "utf8", mode: 384 });
+  writeFileSync3(tmp, content, { encoding: "utf8", mode: 384, flag: "wx" });
   renameSync(tmp, filePath);
 }
 async function deleteKey() {
@@ -2312,16 +2416,16 @@ async function resolveKey(filePath, opts) {
     }
     return key;
   }
-  return loadOrCreateFileKey();
+  return loadOrCreateSharedKey();
 }
 function createEncryptedStore(filePath, opts) {
   dependentStoreFiles.add(filePath);
   async function read() {
     const key = await resolveKey(filePath, opts);
     if (!key) return opts.blank();
-    if (!existsSync2(filePath)) return opts.blank();
+    if (!existsSync4(filePath)) return opts.blank();
     try {
-      const raw = readFileSync3(filePath, "utf8");
+      const raw = readFileSync4(filePath, "utf8");
       const blob = JSON.parse(raw);
       const plaintext = decrypt(blob, key);
       return JSON.parse(plaintext);
@@ -2338,17 +2442,15 @@ function createEncryptedStore(filePath, opts) {
   }
   return { read, write };
 }
-var TERMINALHIRE_DIR, KEY_FILE, KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, KEY_BYTES, IV_BYTES, forceKeytarUnavailableForTests, dependentStoreFiles;
+var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, IV_BYTES, forceKeytarUnavailableForTests, dependentStoreFiles;
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
-    KEY_FILE = join3(TERMINALHIRE_DIR, "key");
+    init_shared_key();
     KEYTAR_SERVICE = "terminalhire";
     KEYTAR_ACCOUNT = "profile-key";
     ALGO = "aes-256-gcm";
-    KEY_BYTES = 32;
     IV_BYTES = 12;
     forceKeytarUnavailableForTests = false;
     dependentStoreFiles = /* @__PURE__ */ new Set();
@@ -2370,7 +2472,7 @@ __export(profile_exports, {
   removeSavedJob: () => removeSavedJob,
   writeProfile: () => writeProfile
 });
-import { join as join4 } from "path";
+import { join as join6 } from "path";
 import { homedir as homedir3 } from "os";
 function blankProfile() {
   return {
@@ -2493,8 +2595,8 @@ var init_profile = __esm({
     "use strict";
     init_src();
     init_crypto_store();
-    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
-    PROFILE_FILE = join4(TERMINALHIRE_DIR2, "profile.enc");
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join6(homedir3(), ".terminalhire");
+    PROFILE_FILE = join6(TERMINALHIRE_DIR2, "profile.enc");
     profileStore = createEncryptedStore(PROFILE_FILE, {
       blank: blankProfile,
       keyPolicy: "keytar-first-file-fallback"
@@ -2563,9 +2665,9 @@ __export(trajectory_exports, {
   runTrajectory: () => runTrajectory,
   runTrajectoryPush: () => runTrajectoryPush
 });
-import { existsSync as existsSync3, readFileSync as readFileSync4, readdirSync, writeFileSync as writeFileSync3 } from "fs";
+import { existsSync as existsSync5, readFileSync as readFileSync5, readdirSync, writeFileSync as writeFileSync4 } from "fs";
 import { homedir as homedir4 } from "os";
-import { join as join5 } from "path";
+import { join as join7 } from "path";
 function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -2597,7 +2699,7 @@ function findJsonlFiles(dir) {
     return out;
   }
   for (const entry of entries) {
-    const full = join5(dir, entry.name);
+    const full = join7(dir, entry.name);
     if (entry.isDirectory()) {
       out.push(...findJsonlFiles(full));
     } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
@@ -2611,7 +2713,7 @@ function loadCorpus(paths) {
   for (const path of paths) {
     let text;
     try {
-      text = readFileSync4(path, "utf8");
+      text = readFileSync5(path, "utf8");
     } catch {
       continue;
     }
@@ -2718,12 +2820,12 @@ function renderMarkdown(view) {
   return lines.join("\n");
 }
 function writeExportArtifacts(score, markdown) {
-  const dir = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
+  const dir = process.env.TERMINALHIRE_DIR || join7(homedir4(), ".terminalhire");
   ensureStateDir(dir);
-  const jsonPath = join5(dir, "trajectory-export.json");
-  const mdPath = join5(dir, "trajectory-export.md");
-  writeFileSync3(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
-  writeFileSync3(mdPath, markdown, "utf8");
+  const jsonPath = join7(dir, "trajectory-export.json");
+  const mdPath = join7(dir, "trajectory-export.md");
+  writeFileSync4(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
+  writeFileSync4(mdPath, markdown, "utf8");
   return { jsonPath, mdPath };
 }
 function renderInward(allNodes, view, files) {
@@ -2742,8 +2844,8 @@ function renderInward(allNodes, view, files) {
   console.log("");
 }
 function buildTrajectory() {
-  const projectsDir = join5(homedir4(), ".claude", "projects");
-  if (!existsSync3(projectsDir)) return null;
+  const projectsDir = join7(homedir4(), ".claude", "projects");
+  if (!existsSync5(projectsDir)) return null;
   const paths = findJsonlFiles(projectsDir);
   if (paths.length === 0) return null;
   const files = loadCorpus(paths);

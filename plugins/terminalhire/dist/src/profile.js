@@ -1,5 +1,5 @@
 // src/profile.ts
-import { join as join3 } from "path";
+import { join as join5 } from "path";
 import { homedir as homedir2 } from "os";
 
 // ../../packages/core/src/vocab/graph.data.ts
@@ -725,10 +725,9 @@ var STAGE4_CONTRACT = [
 import { createHash as createHash2 } from "crypto";
 
 // src/crypto-store.ts
-import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
-import { readFileSync as readFileSync2, writeFileSync, existsSync, renameSync, rmSync } from "fs";
-import { join as join2, dirname, basename } from "path";
-import { homedir } from "os";
+import { createCipheriv, createDecipheriv, randomBytes as randomBytes3 } from "crypto";
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, existsSync as existsSync3, renameSync, rmSync } from "fs";
+import { join as join4, dirname, basename } from "path";
 import { createRequire } from "module";
 
 // src/state-dir.ts
@@ -804,16 +803,115 @@ function ensureStateDirForSecret(dir) {
   applyStateDirSecretPolicy(dir, ensureStateDir(dir));
 }
 
+// src/shared-key.ts
+import { randomBytes as randomBytes2 } from "crypto";
+import { readFileSync as readFileSync2, writeFileSync, existsSync as existsSync2, linkSync, unlinkSync } from "fs";
+import { join as join3 } from "path";
+import { homedir } from "os";
+
+// src/test-race-barrier.ts
+import { closeSync as closeSync2, constants as constants2, existsSync, lstatSync, openSync as openSync2 } from "fs";
+import { join as join2 } from "path";
+var ENV_VAR = "TERMINALHIRE_TEST_RACE_BARRIER_DIR";
+function syncSleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function waitForTestRaceBarrier(phase) {
+  const root = process.env[ENV_VAR];
+  if (!root) return;
+  const phaseDir = join2(root, phase);
+  if (!existsSync(phaseDir)) return;
+  const readyFile = join2(phaseDir, `ready-${process.pid}`);
+  const goFile = join2(phaseDir, "go");
+  const noFollow = constants2.O_NOFOLLOW ?? 0;
+  if (lstatSync(readyFile, { throwIfNoEntry: false })) {
+    throw new Error(
+      `terminalhire: test race barrier "${phase}" found something already at its ready marker path ${readyFile} (regular file or symlink) \u2014 refusing rather than following or overwriting whatever is already there (this only fires under ${ENV_VAR}, never in production).`
+    );
+  }
+  let readyFd;
+  try {
+    readyFd = openSync2(
+      readyFile,
+      constants2.O_CREAT | constants2.O_EXCL | constants2.O_WRONLY | noFollow
+    );
+  } catch (err) {
+    throw new Error(
+      `terminalhire: test race barrier "${phase}" could not create its ready marker at ${readyFile} (${err instanceof Error ? err.message : String(err)}) \u2014 refusing rather than blocking on or writing through whatever is already there (this only fires under ${ENV_VAR}, never in production).`
+    );
+  }
+  closeSync2(readyFd);
+  const deadline = Date.now() + 3e4;
+  while (!existsSync(goFile)) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `terminalhire: test race barrier "${phase}" timed out waiting for ${goFile} (the test process never released it \u2014 this only fires under ${ENV_VAR}, never in production).`
+      );
+    }
+    syncSleepMs(2);
+  }
+}
+
+// src/shared-key.ts
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join3(homedir(), ".terminalhire");
+var KEY_FILE = join3(TERMINALHIRE_DIR, "key");
+var KEY_BYTES = 32;
+var KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
+function isValidKeyHex(value) {
+  return KEY_HEX_RE.test(value);
+}
+function readKeyFileOrThrow() {
+  const raw = readFileSync2(KEY_FILE, "utf8").trim();
+  if (!isValidKeyHex(raw)) {
+    throw new Error(
+      `terminalhire: the shared encryption key at ${KEY_FILE} is not in the expected format (expected exactly ${KEY_BYTES * 2} lowercase-hex characters \u2014 a ${KEY_BYTES}-byte key).
+This key decrypts the GitHub token, local profile, and chat identity stores under ~/.terminalhire \u2014 it should never be hand-edited.
+Recovery: if you intend to reset it, delete the file yourself (this INVALIDATES every encrypted store under ~/.terminalhire, which will need to be re-created/re-authenticated):
+  rm ${KEY_FILE}`
+    );
+  }
+  return Buffer.from(raw, "hex");
+}
+function publishKeyBlob(key) {
+  const tmpFile = `${KEY_FILE}.${process.pid}.${randomBytes2(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync(tmpFile, key.toString("hex"), { encoding: "utf8", mode: 384, flag: "wx" });
+    try {
+      linkSync(tmpFile, KEY_FILE);
+      return true;
+    } catch (err) {
+      if (err?.code === "EEXIST") {
+        return false;
+      }
+      throw err;
+    }
+  } finally {
+    try {
+      unlinkSync(tmpFile);
+    } catch {
+    }
+  }
+}
+function loadOrCreateSharedKey() {
+  ensureStateDirForSecret(TERMINALHIRE_DIR);
+  if (existsSync2(KEY_FILE)) {
+    return readKeyFileOrThrow();
+  }
+  waitForTestRaceBarrier("key");
+  const key = randomBytes2(KEY_BYTES);
+  if (publishKeyBlob(key)) {
+    return key;
+  }
+  return readKeyFileOrThrow();
+}
+
 // src/crypto-store.ts
-var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
-var KEY_FILE = join2(TERMINALHIRE_DIR, "key");
 var KEYTAR_SERVICE = "terminalhire";
 var KEYTAR_ACCOUNT = "profile-key";
 var ALGO = "aes-256-gcm";
-var KEY_BYTES = 32;
 var IV_BYTES = 12;
 function encrypt(plaintext, key) {
-  const iv = randomBytes2(IV_BYTES);
+  const iv = randomBytes3(IV_BYTES);
   const cipher = createCipheriv(ALGO, key, iv);
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -844,21 +942,12 @@ async function tryLoadFromKeytar() {
     if (stored) {
       return Buffer.from(stored, "hex");
     }
-    const key = randomBytes2(KEY_BYTES);
+    const key = randomBytes3(KEY_BYTES);
     await kt.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, key.toString("hex"));
     return key;
   } catch {
     return null;
   }
-}
-function loadOrCreateFileKey() {
-  ensureStateDirForSecret(TERMINALHIRE_DIR);
-  if (existsSync(KEY_FILE)) {
-    return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");
-  }
-  const key = randomBytes2(KEY_BYTES);
-  writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
-  return key;
 }
 function warnStderr(message) {
   process.stderr.write(`${message}
@@ -867,11 +956,11 @@ function warnStderr(message) {
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname(filePath);
   ensureStateDirForSecret(dir);
-  const tmp = join2(
+  const tmp = join4(
     dir,
-    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes2(6).toString("hex")}`
+    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes3(6).toString("hex")}`
   );
-  writeFileSync(tmp, content, { encoding: "utf8", mode: 384 });
+  writeFileSync2(tmp, content, { encoding: "utf8", mode: 384, flag: "wx" });
   renameSync(tmp, filePath);
 }
 var dependentStoreFiles = /* @__PURE__ */ new Set();
@@ -905,16 +994,16 @@ async function resolveKey(filePath, opts) {
     }
     return key;
   }
-  return loadOrCreateFileKey();
+  return loadOrCreateSharedKey();
 }
 function createEncryptedStore(filePath, opts) {
   dependentStoreFiles.add(filePath);
   async function read() {
     const key = await resolveKey(filePath, opts);
     if (!key) return opts.blank();
-    if (!existsSync(filePath)) return opts.blank();
+    if (!existsSync3(filePath)) return opts.blank();
     try {
-      const raw = readFileSync2(filePath, "utf8");
+      const raw = readFileSync3(filePath, "utf8");
       const blob = JSON.parse(raw);
       const plaintext = decrypt(blob, key);
       return JSON.parse(plaintext);
@@ -933,8 +1022,8 @@ function createEncryptedStore(filePath, opts) {
 }
 
 // src/profile.ts
-var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
-var PROFILE_FILE = join3(TERMINALHIRE_DIR2, "profile.enc");
+var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join5(homedir2(), ".terminalhire");
+var PROFILE_FILE = join5(TERMINALHIRE_DIR2, "profile.enc");
 function blankProfile() {
   return {
     version: 3,

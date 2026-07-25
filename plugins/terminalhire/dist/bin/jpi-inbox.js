@@ -2543,7 +2543,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   });
   const { prehash } = eddsaOpts;
   const { BASE, Fp: Fp2, Fn: Fn2 } = Point;
-  const randomBytes6 = eddsaOpts.randomBytes || randomBytes;
+  const randomBytes7 = eddsaOpts.randomBytes || randomBytes;
   const adjustScalarBytes2 = eddsaOpts.adjustScalarBytes || ((bytes) => bytes);
   const domain = eddsaOpts.domain || ((data, ctx, phflag) => {
     _abool2(phflag, "phflag");
@@ -2625,7 +2625,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
     signature: 2 * _size,
     seed: _size
   };
-  function randomSecretKey(seed = randomBytes6(lengths.seed)) {
+  function randomSecretKey(seed = randomBytes7(lengths.seed)) {
     return _abytes2(seed, lengths.seed, "seed");
   }
   function keygen(seed) {
@@ -4423,17 +4423,9 @@ var init_state_dir = __esm({
   }
 });
 
-// src/github-auth.ts
-import { createCipheriv, createDecipheriv, randomBytes as randomBytes3 } from "crypto";
-import {
-  readFileSync as readFileSync2,
-  writeFileSync,
-  existsSync as existsSync2,
-  rmSync,
-  renameSync,
-  linkSync,
-  unlinkSync
-} from "fs";
+// src/shared-key.ts
+import { randomBytes as randomBytes3 } from "crypto";
+import { readFileSync as readFileSync2, writeFileSync, existsSync as existsSync2, linkSync, unlinkSync } from "fs";
 import { join as join3 } from "path";
 import { homedir } from "os";
 function isValidKeyHex(value) {
@@ -4471,7 +4463,7 @@ function publishKeyBlob(key) {
     }
   }
 }
-async function loadKey() {
+function loadOrCreateSharedKey() {
   ensureStateDirForSecret(TERMINALHIRE_DIR);
   if (existsSync2(KEY_FILE)) {
     return readKeyFileOrThrow();
@@ -4483,8 +4475,29 @@ async function loadKey() {
   }
   return readKeyFileOrThrow();
 }
+var TERMINALHIRE_DIR, KEY_FILE, KEY_BYTES, KEY_HEX_RE;
+var init_shared_key = __esm({
+  "src/shared-key.ts"() {
+    "use strict";
+    init_state_dir();
+    init_test_race_barrier();
+    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join3(homedir(), ".terminalhire");
+    KEY_FILE = join3(TERMINALHIRE_DIR, "key");
+    KEY_BYTES = 32;
+    KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
+  }
+});
+
+// src/github-auth.ts
+import { createCipheriv, createDecipheriv, randomBytes as randomBytes4 } from "crypto";
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, existsSync as existsSync3, rmSync, renameSync } from "fs";
+import { join as join4 } from "path";
+import { homedir as homedir2 } from "os";
+async function loadKey() {
+  return loadOrCreateSharedKey();
+}
 function encrypt(plaintext, key) {
-  const iv = randomBytes3(IV_BYTES);
+  const iv = randomBytes4(IV_BYTES);
   const cipher = createCipheriv(ALGO, key, iv);
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -4499,35 +4512,33 @@ function decrypt(blob, key) {
   ]);
   return plain.toString("utf8");
 }
-var TERMINALHIRE_DIR, TOKEN_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, KEY_HEX_RE;
+var TERMINALHIRE_DIR2, TOKEN_FILE, ALGO, IV_BYTES;
 var init_github_auth = __esm({
   "src/github-auth.ts"() {
     "use strict";
     init_state_dir();
-    init_test_race_barrier();
-    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join3(homedir(), ".terminalhire");
-    TOKEN_FILE = join3(TERMINALHIRE_DIR, "github-token.enc");
-    KEY_FILE = join3(TERMINALHIRE_DIR, "key");
+    init_shared_key();
+    init_shared_key();
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join4(homedir2(), ".terminalhire");
+    TOKEN_FILE = join4(TERMINALHIRE_DIR2, "github-token.enc");
     ALGO = "aes-256-gcm";
-    KEY_BYTES = 32;
     IV_BYTES = 12;
-    KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
   }
 });
 
 // src/chat-keystore.ts
-import { existsSync as existsSync3, linkSync as linkSync2, readFileSync as readFileSync3, rmSync as rmSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync2 } from "fs";
-import { randomBytes as randomBytes4 } from "crypto";
-import { homedir as homedir2 } from "os";
-import { join as join4 } from "path";
+import { existsSync as existsSync4, linkSync as linkSync2, readFileSync as readFileSync4, rmSync as rmSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync3 } from "fs";
+import { randomBytes as randomBytes5 } from "crypto";
+import { homedir as homedir3 } from "os";
+import { join as join5 } from "path";
 async function loadOrCreateIdentity() {
   const key = await loadKey();
-  if (existsSync3(IDENTITY_FILE)) {
+  if (existsSync4(IDENTITY_FILE)) {
     return readIdentityFileOrThrow(key);
   }
   waitForTestRaceBarrier("identity");
   const keypair = generateIdentityKeypair();
-  ensureStateDirForSecret(TERMINALHIRE_DIR2);
+  ensureStateDirForSecret(TERMINALHIRE_DIR3);
   const blob = encrypt(JSON.stringify(keypair), key);
   if (publishIdentityBlob(blob)) {
     return keypair;
@@ -4541,7 +4552,7 @@ function isValidChatKeypairShape(value) {
 }
 function readIdentityFileOrThrow(key) {
   try {
-    const raw = readFileSync3(IDENTITY_FILE, "utf8");
+    const raw = readFileSync4(IDENTITY_FILE, "utf8");
     const blob = JSON.parse(raw);
     const decrypted = decrypt(blob, key);
     const parsed = JSON.parse(decrypted);
@@ -4561,9 +4572,9 @@ Recovery: if you intend to reset your chat identity, delete the file yourself an
   }
 }
 function publishIdentityBlob(blob) {
-  const tmpFile = `${IDENTITY_FILE}.${process.pid}.${randomBytes4(6).toString("hex")}.tmp`;
+  const tmpFile = `${IDENTITY_FILE}.${process.pid}.${randomBytes5(6).toString("hex")}.tmp`;
   try {
-    writeFileSync2(tmpFile, JSON.stringify(blob, null, 2), {
+    writeFileSync3(tmpFile, JSON.stringify(blob, null, 2), {
       encoding: "utf8",
       mode: 384,
       flag: "wx"
@@ -4584,7 +4595,7 @@ function publishIdentityBlob(blob) {
     }
   }
 }
-var TERMINALHIRE_DIR2, IDENTITY_FILE, HEX64_RE;
+var TERMINALHIRE_DIR3, IDENTITY_FILE, HEX64_RE;
 var init_chat_keystore = __esm({
   "src/chat-keystore.ts"() {
     "use strict";
@@ -4592,27 +4603,27 @@ var init_chat_keystore = __esm({
     init_src();
     init_github_auth();
     init_state_dir();
-    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join4(homedir2(), ".terminalhire");
-    IDENTITY_FILE = join4(TERMINALHIRE_DIR2, "chat-identity.enc");
+    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join5(homedir3(), ".terminalhire");
+    IDENTITY_FILE = join5(TERMINALHIRE_DIR3, "chat-identity.enc");
     HEX64_RE = /^[0-9a-f]{64}$/;
   }
 });
 
 // src/web-session.ts
-import { chmodSync, existsSync as existsSync4, readFileSync as readFileSync4, rmSync as rmSync3, writeFileSync as writeFileSync3 } from "fs";
-import { homedir as homedir3 } from "os";
-import { join as join5 } from "path";
+import { chmodSync, existsSync as existsSync5, readFileSync as readFileSync5, rmSync as rmSync3, writeFileSync as writeFileSync4 } from "fs";
+import { homedir as homedir4 } from "os";
+import { join as join6 } from "path";
 function terminalhireDir() {
-  return process.env.TERMINALHIRE_DIR || join5(homedir3(), ".terminalhire");
+  return process.env.TERMINALHIRE_DIR || join6(homedir4(), ".terminalhire");
 }
 function webSessionFilePath() {
-  return join5(terminalhireDir(), "web-session");
+  return join6(terminalhireDir(), "web-session");
 }
 function readWebSessionFile() {
   try {
     const path = webSessionFilePath();
-    if (!existsSync4(path)) return null;
-    const v = readFileSync4(path, "utf8").trim();
+    if (!existsSync5(path)) return null;
+    const v = readFileSync5(path, "utf8").trim();
     return v.length > 0 ? v : null;
   } catch {
     return null;
@@ -4632,13 +4643,13 @@ var init_web_session = __esm({
 });
 
 // src/chat-client.ts
-import { existsSync as existsSync5, readFileSync as readFileSync5, writeFileSync as writeFileSync4 } from "fs";
-import { homedir as homedir4 } from "os";
-import { join as join6 } from "path";
+import { existsSync as existsSync6, readFileSync as readFileSync6, writeFileSync as writeFileSync5 } from "fs";
+import { homedir as homedir5 } from "os";
+import { join as join7 } from "path";
 function defaultReadPeerPins() {
   try {
-    if (!existsSync5(PEERS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync5(PEERS_FILE, "utf8"));
+    if (!existsSync6(PEERS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync6(PEERS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, key] of Object.entries(parsed)) {
@@ -4650,8 +4661,8 @@ function defaultReadPeerPins() {
   }
 }
 function defaultWritePeerPins(pins) {
-  ensureStateDir(TERMINALHIRE_DIR3);
-  writeFileSync4(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
+  ensureStateDir(TERMINALHIRE_DIR4);
+  writeFileSync5(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
 }
 function defaultChatClientDeps() {
   return {
@@ -4828,7 +4839,7 @@ function createChatClient(overrides) {
     getSafetyNumber
   };
 }
-var CHAT_BASE, GH_SESSION_COOKIE, TERMINALHIRE_DIR3, PEERS_FILE, REQUEST_TIMEOUT_MS, ChatNotLinkedError, ChatSessionExpiredError, SafetyNumberChangedError, ChatRequestError;
+var CHAT_BASE, GH_SESSION_COOKIE, TERMINALHIRE_DIR4, PEERS_FILE, REQUEST_TIMEOUT_MS, ChatNotLinkedError, ChatSessionExpiredError, SafetyNumberChangedError, ChatRequestError;
 var init_chat_client = __esm({
   "src/chat-client.ts"() {
     "use strict";
@@ -4838,8 +4849,8 @@ var init_chat_client = __esm({
     init_state_dir();
     CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE = "__jpi_gh_session";
-    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join6(homedir4(), ".terminalhire");
-    PEERS_FILE = join6(TERMINALHIRE_DIR3, "chat-peers.json");
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join7(homedir5(), ".terminalhire");
+    PEERS_FILE = join7(TERMINALHIRE_DIR4, "chat-peers.json");
     REQUEST_TIMEOUT_MS = 1e4;
     ChatNotLinkedError = class extends Error {
       constructor() {
@@ -4883,13 +4894,13 @@ var init_chat_client = __esm({
 });
 
 // src/config.ts
-import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, existsSync as existsSync6 } from "fs";
-import { join as join7 } from "path";
-import { homedir as homedir5 } from "os";
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, existsSync as existsSync7 } from "fs";
+import { join as join8 } from "path";
+import { homedir as homedir6 } from "os";
 function readConfig() {
   try {
-    if (!existsSync6(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
-    const raw = readFileSync6(CONFIG_FILE, "utf8");
+    if (!existsSync7(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
+    const raw = readFileSync7(CONFIG_FILE, "utf8");
     const parsed = JSON.parse(raw);
     return { ...DEFAULT_CONFIG, ...parsed };
   } catch {
@@ -4897,7 +4908,7 @@ function readConfig() {
   }
 }
 function writeConfig(config) {
-  ensureStateDir(TERMINALHIRE_DIR4);
+  ensureStateDir(TERMINALHIRE_DIR5);
   const current = readConfig();
   const merged = { ...current, ...config };
   if ("contributePrompted" in merged) {
@@ -4906,15 +4917,15 @@ function writeConfig(config) {
     }
     delete merged.contributePrompted;
   }
-  writeFileSync5(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  writeFileSync6(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
-var TERMINALHIRE_DIR4, CONFIG_FILE, DEFAULT_CONFIG;
+var TERMINALHIRE_DIR5, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join7(homedir5(), ".terminalhire");
-    CONFIG_FILE = join7(TERMINALHIRE_DIR4, "config.json");
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join8(homedir6(), ".terminalhire");
+    CONFIG_FILE = join8(TERMINALHIRE_DIR5, "config.json");
     DEFAULT_CONFIG = {
       nudge: "session",
       peerConnect: false,
@@ -5005,16 +5016,16 @@ __export(jpi_chat_read_exports, {
   syncUnreadBadge: () => syncUnreadBadge,
   writeReadCursor: () => writeReadCursor
 });
-import { existsSync as existsSync7, readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "fs";
-import { homedir as homedir6 } from "os";
-import { join as join8 } from "path";
+import { existsSync as existsSync8, readFileSync as readFileSync8, writeFileSync as writeFileSync7 } from "fs";
+import { homedir as homedir7 } from "os";
+import { join as join9 } from "path";
 async function syncUnreadBadge(deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   const cacheFile = deps.cacheFile ?? INDEX_CACHE_FILE;
   try {
     const cookie = readCookie();
-    if (!cookie || !existsSync7(cacheFile)) return;
+    if (!cookie || !existsSync8(cacheFile)) return;
     const res = await fetchImpl(`${CHAT_BASE2}/api/chat/inbox`, {
       method: "GET",
       headers: { Cookie: `${GH_SESSION_COOKIE2}=${cookie}` },
@@ -5027,16 +5038,16 @@ async function syncUnreadBadge(deps = {}) {
       (sum, it) => sum + (it && typeof it.unreadCount === "number" && it.unreadCount > 0 ? it.unreadCount : 0),
       0
     );
-    const entry = JSON.parse(readFileSync7(cacheFile, "utf8"));
+    const entry = JSON.parse(readFileSync8(cacheFile, "utf8"));
     entry.unreadChat = { count: total };
-    writeFileSync6(cacheFile, JSON.stringify(entry), "utf8");
+    writeFileSync7(cacheFile, JSON.stringify(entry), "utf8");
   } catch {
   }
 }
 function readReadCursors() {
   try {
-    if (!existsSync7(READS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync7(READS_FILE, "utf8"));
+    if (!existsSync8(READS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync8(READS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, iso] of Object.entries(parsed)) {
@@ -5053,8 +5064,8 @@ function writeReadCursor(login, iso, deps = {}) {
   const prev = cursors[login];
   if (prev && iso <= prev) return;
   cursors[login] = iso;
-  ensureStateDir(TERMINALHIRE_DIR5);
-  writeFileSync6(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
+  ensureStateDir(TERMINALHIRE_DIR6);
+  writeFileSync7(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
 }
 async function postReadCursor(peerLogin, lastReadAt, deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
@@ -5403,7 +5414,7 @@ async function runSend(opts = {}) {
   );
   return { ok: true };
 }
-var CHAT_BASE2, GH_SESSION_COOKIE2, TERMINALHIRE_DIR5, READS_FILE, INDEX_CACHE_FILE, REACHABLE_DISPLAY;
+var CHAT_BASE2, GH_SESSION_COOKIE2, TERMINALHIRE_DIR6, READS_FILE, INDEX_CACHE_FILE, REACHABLE_DISPLAY;
 var init_jpi_chat_read = __esm({
   "bin/jpi-chat-read.js"() {
     "use strict";
@@ -5413,21 +5424,20 @@ var init_jpi_chat_read = __esm({
     init_jpi_chat();
     CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE2 = "__jpi_gh_session";
-    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join8(homedir6(), ".terminalhire");
-    READS_FILE = join8(TERMINALHIRE_DIR5, "chat-reads.json");
-    INDEX_CACHE_FILE = join8(TERMINALHIRE_DIR5, "index-cache.json");
+    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join9(homedir7(), ".terminalhire");
+    READS_FILE = join9(TERMINALHIRE_DIR6, "chat-reads.json");
+    INDEX_CACHE_FILE = join9(TERMINALHIRE_DIR6, "index-cache.json");
     REACHABLE_DISPLAY = { shareActivity: false, optin: false, lastSeen: null };
   }
 });
 
 // src/crypto-store.ts
-import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes5 } from "crypto";
-import { readFileSync as readFileSync8, writeFileSync as writeFileSync7, existsSync as existsSync8, renameSync as renameSync2, rmSync as rmSync4 } from "fs";
-import { join as join9, dirname, basename } from "path";
-import { homedir as homedir7 } from "os";
+import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes6 } from "crypto";
+import { readFileSync as readFileSync9, writeFileSync as writeFileSync8, existsSync as existsSync9, renameSync as renameSync2, rmSync as rmSync4 } from "fs";
+import { join as join10, dirname, basename } from "path";
 import { createRequire } from "module";
 function encrypt2(plaintext, key) {
-  const iv = randomBytes5(IV_BYTES2);
+  const iv = randomBytes6(IV_BYTES2);
   const cipher = createCipheriv2(ALGO2, key, iv);
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -5457,21 +5467,12 @@ async function tryLoadFromKeytar() {
     if (stored) {
       return Buffer.from(stored, "hex");
     }
-    const key = randomBytes5(KEY_BYTES2);
+    const key = randomBytes6(KEY_BYTES);
     await kt.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, key.toString("hex"));
     return key;
   } catch {
     return null;
   }
-}
-function loadOrCreateFileKey() {
-  ensureStateDirForSecret(TERMINALHIRE_DIR6);
-  if (existsSync8(KEY_FILE2)) {
-    return Buffer.from(readFileSync8(KEY_FILE2, "utf8").trim(), "hex");
-  }
-  const key = randomBytes5(KEY_BYTES2);
-  writeFileSync7(KEY_FILE2, key.toString("hex"), { mode: 384, encoding: "utf8" });
-  return key;
 }
 function warnStderr(message) {
   process.stderr.write(`${message}
@@ -5480,11 +5481,11 @@ function warnStderr(message) {
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname(filePath);
   ensureStateDirForSecret(dir);
-  const tmp = join9(
+  const tmp = join10(
     dir,
-    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes5(6).toString("hex")}`
+    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes6(6).toString("hex")}`
   );
-  writeFileSync7(tmp, content, { encoding: "utf8", mode: 384 });
+  writeFileSync8(tmp, content, { encoding: "utf8", mode: 384, flag: "wx" });
   renameSync2(tmp, filePath);
 }
 async function deleteKey() {
@@ -5502,7 +5503,7 @@ async function deleteKey() {
     }
   }
   try {
-    rmSync4(KEY_FILE2);
+    rmSync4(KEY_FILE);
   } catch {
   }
 }
@@ -5517,16 +5518,16 @@ async function resolveKey(filePath, opts) {
     }
     return key;
   }
-  return loadOrCreateFileKey();
+  return loadOrCreateSharedKey();
 }
 function createEncryptedStore(filePath, opts) {
   dependentStoreFiles.add(filePath);
   async function read() {
     const key = await resolveKey(filePath, opts);
     if (!key) return opts.blank();
-    if (!existsSync8(filePath)) return opts.blank();
+    if (!existsSync9(filePath)) return opts.blank();
     try {
-      const raw = readFileSync8(filePath, "utf8");
+      const raw = readFileSync9(filePath, "utf8");
       const blob = JSON.parse(raw);
       const plaintext = decrypt2(blob, key);
       return JSON.parse(plaintext);
@@ -5543,17 +5544,15 @@ function createEncryptedStore(filePath, opts) {
   }
   return { read, write };
 }
-var TERMINALHIRE_DIR6, KEY_FILE2, KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO2, KEY_BYTES2, IV_BYTES2, forceKeytarUnavailableForTests, dependentStoreFiles;
+var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO2, IV_BYTES2, forceKeytarUnavailableForTests, dependentStoreFiles;
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join9(homedir7(), ".terminalhire");
-    KEY_FILE2 = join9(TERMINALHIRE_DIR6, "key");
+    init_shared_key();
     KEYTAR_SERVICE = "terminalhire";
     KEYTAR_ACCOUNT = "profile-key";
     ALGO2 = "aes-256-gcm";
-    KEY_BYTES2 = 32;
     IV_BYTES2 = 12;
     forceKeytarUnavailableForTests = false;
     dependentStoreFiles = /* @__PURE__ */ new Set();
@@ -5575,7 +5574,7 @@ __export(profile_exports, {
   removeSavedJob: () => removeSavedJob,
   writeProfile: () => writeProfile
 });
-import { join as join10 } from "path";
+import { join as join11 } from "path";
 import { homedir as homedir8 } from "os";
 function blankProfile() {
   return {
@@ -5698,8 +5697,8 @@ var init_profile = __esm({
     "use strict";
     init_src();
     init_crypto_store();
-    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join10(homedir8(), ".terminalhire");
-    PROFILE_FILE = join10(TERMINALHIRE_DIR7, "profile.enc");
+    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join11(homedir8(), ".terminalhire");
+    PROFILE_FILE = join11(TERMINALHIRE_DIR7, "profile.enc");
     profileStore = createEncryptedStore(PROFILE_FILE, {
       blank: blankProfile,
       keyPolicy: "keytar-first-file-fallback"
@@ -5729,9 +5728,9 @@ var init_profile = __esm({
 
 // bin/jpi-chat.js
 import { createInterface } from "readline";
-import { existsSync as existsSync9, readFileSync as readFileSync9 } from "fs";
+import { existsSync as existsSync10, readFileSync as readFileSync10 } from "fs";
 import { homedir as homedir9 } from "os";
-import { join as join11 } from "path";
+import { join as join12 } from "path";
 function defaultPromptAck({ input = process.stdin, output = process.stdout } = {}) {
   if (!input || input.isTTY !== true) return Promise.resolve(false);
   const rl = createInterface({ input, output });
@@ -5897,9 +5896,9 @@ function mergeMessages(existing, incoming) {
 }
 function readCachedSessionStale() {
   try {
-    const p = join11(process.env.TERMINALHIRE_DIR || join11(homedir9(), ".terminalhire"), "index-cache.json");
-    if (!existsSync9(p)) return false;
-    const cache = JSON.parse(readFileSync9(p, "utf8"));
+    const p = join12(process.env.TERMINALHIRE_DIR || join12(homedir9(), ".terminalhire"), "index-cache.json");
+    if (!existsSync10(p)) return false;
+    const cache = JSON.parse(readFileSync10(p, "utf8"));
     return cache?.sessionStale === true;
   } catch {
     return false;

@@ -1,8 +1,8 @@
 // src/chat-keystore.ts
-import { existsSync as existsSync3, linkSync as linkSync2, readFileSync as readFileSync3, rmSync as rmSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync2 } from "fs";
-import { randomBytes as randomBytes4 } from "crypto";
-import { homedir as homedir2 } from "os";
-import { join as join4 } from "path";
+import { existsSync as existsSync4, linkSync as linkSync2, readFileSync as readFileSync4, rmSync as rmSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync3 } from "fs";
+import { randomBytes as randomBytes5 } from "crypto";
+import { homedir as homedir3 } from "os";
+import { join as join5 } from "path";
 
 // src/test-race-barrier.ts
 import { closeSync, constants, existsSync, lstatSync, openSync } from "fs";
@@ -2216,7 +2216,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   });
   const { prehash } = eddsaOpts;
   const { BASE, Fp: Fp2, Fn: Fn2 } = Point;
-  const randomBytes5 = eddsaOpts.randomBytes || randomBytes;
+  const randomBytes6 = eddsaOpts.randomBytes || randomBytes;
   const adjustScalarBytes2 = eddsaOpts.adjustScalarBytes || ((bytes) => bytes);
   const domain = eddsaOpts.domain || ((data, ctx, phflag) => {
     _abool2(phflag, "phflag");
@@ -2298,7 +2298,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
     signature: 2 * _size,
     seed: _size
   };
-  function randomSecretKey(seed = randomBytes5(lengths.seed)) {
+  function randomSecretKey(seed = randomBytes6(lengths.seed)) {
     return _abytes2(seed, lengths.seed, "seed");
   }
   function keygen(seed) {
@@ -2861,18 +2861,10 @@ var STAGE4_CONTRACT = [
 import { createHash as createHash2 } from "crypto";
 
 // src/github-auth.ts
-import { createCipheriv, createDecipheriv, randomBytes as randomBytes3 } from "crypto";
-import {
-  readFileSync as readFileSync2,
-  writeFileSync,
-  existsSync as existsSync2,
-  rmSync,
-  renameSync,
-  linkSync,
-  unlinkSync
-} from "fs";
-import { join as join3 } from "path";
-import { homedir } from "os";
+import { createCipheriv, createDecipheriv, randomBytes as randomBytes4 } from "crypto";
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, existsSync as existsSync3, rmSync, renameSync } from "fs";
+import { join as join4 } from "path";
+import { homedir as homedir2 } from "os";
 
 // src/state-dir.ts
 import { closeSync as closeSync2, constants as constants2, fchmodSync, fstatSync, mkdirSync, openSync as openSync2 } from "fs";
@@ -2947,13 +2939,14 @@ function ensureStateDirForSecret(dir) {
   applyStateDirSecretPolicy(dir, ensureStateDir(dir));
 }
 
-// src/github-auth.ts
+// src/shared-key.ts
+import { randomBytes as randomBytes3 } from "crypto";
+import { readFileSync as readFileSync2, writeFileSync, existsSync as existsSync2, linkSync, unlinkSync } from "fs";
+import { join as join3 } from "path";
+import { homedir } from "os";
 var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join3(homedir(), ".terminalhire");
-var TOKEN_FILE = join3(TERMINALHIRE_DIR, "github-token.enc");
 var KEY_FILE = join3(TERMINALHIRE_DIR, "key");
-var ALGO = "aes-256-gcm";
 var KEY_BYTES = 32;
-var IV_BYTES = 12;
 var KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
 function isValidKeyHex(value) {
   return KEY_HEX_RE.test(value);
@@ -2990,7 +2983,7 @@ function publishKeyBlob(key) {
     }
   }
 }
-async function loadKey() {
+function loadOrCreateSharedKey() {
   ensureStateDirForSecret(TERMINALHIRE_DIR);
   if (existsSync2(KEY_FILE)) {
     return readKeyFileOrThrow();
@@ -3002,8 +2995,17 @@ async function loadKey() {
   }
   return readKeyFileOrThrow();
 }
+
+// src/github-auth.ts
+var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join4(homedir2(), ".terminalhire");
+var TOKEN_FILE = join4(TERMINALHIRE_DIR2, "github-token.enc");
+var ALGO = "aes-256-gcm";
+var IV_BYTES = 12;
+async function loadKey() {
+  return loadOrCreateSharedKey();
+}
 function encrypt(plaintext, key) {
-  const iv = randomBytes3(IV_BYTES);
+  const iv = randomBytes4(IV_BYTES);
   const cipher = createCipheriv(ALGO, key, iv);
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -3020,17 +3022,17 @@ function decrypt(blob, key) {
 }
 
 // src/chat-keystore.ts
-var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join4(homedir2(), ".terminalhire");
-var IDENTITY_FILE = join4(TERMINALHIRE_DIR2, "chat-identity.enc");
+var TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join5(homedir3(), ".terminalhire");
+var IDENTITY_FILE = join5(TERMINALHIRE_DIR3, "chat-identity.enc");
 var HEX64_RE = /^[0-9a-f]{64}$/;
 async function loadOrCreateIdentity() {
   const key = await loadKey();
-  if (existsSync3(IDENTITY_FILE)) {
+  if (existsSync4(IDENTITY_FILE)) {
     return readIdentityFileOrThrow(key);
   }
   waitForTestRaceBarrier("identity");
   const keypair = generateIdentityKeypair();
-  ensureStateDirForSecret(TERMINALHIRE_DIR2);
+  ensureStateDirForSecret(TERMINALHIRE_DIR3);
   const blob = encrypt(JSON.stringify(keypair), key);
   if (publishIdentityBlob(blob)) {
     return keypair;
@@ -3044,7 +3046,7 @@ function isValidChatKeypairShape(value) {
 }
 function readIdentityFileOrThrow(key) {
   try {
-    const raw = readFileSync3(IDENTITY_FILE, "utf8");
+    const raw = readFileSync4(IDENTITY_FILE, "utf8");
     const blob = JSON.parse(raw);
     const decrypted = decrypt(blob, key);
     const parsed = JSON.parse(decrypted);
@@ -3064,9 +3066,9 @@ Recovery: if you intend to reset your chat identity, delete the file yourself an
   }
 }
 function publishIdentityBlob(blob) {
-  const tmpFile = `${IDENTITY_FILE}.${process.pid}.${randomBytes4(6).toString("hex")}.tmp`;
+  const tmpFile = `${IDENTITY_FILE}.${process.pid}.${randomBytes5(6).toString("hex")}.tmp`;
   try {
-    writeFileSync2(tmpFile, JSON.stringify(blob, null, 2), {
+    writeFileSync3(tmpFile, JSON.stringify(blob, null, 2), {
       encoding: "utf8",
       mode: 384,
       flag: "wx"
