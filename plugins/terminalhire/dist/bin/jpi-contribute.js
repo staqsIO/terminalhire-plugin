@@ -2981,6 +2981,62 @@ var init_profile = __esm({
   }
 });
 
+// src/web-session.ts
+var web_session_exports = {};
+__export(web_session_exports, {
+  clearWebSessionFile: () => clearWebSessionFile,
+  readWebSessionCookie: () => readWebSessionCookie,
+  readWebSessionFile: () => readWebSessionFile,
+  webSessionFilePath: () => webSessionFilePath,
+  writeWebSessionFile: () => writeWebSessionFile
+});
+import { chmodSync, existsSync as existsSync5, readFileSync as readFileSync6, rmSync as rmSync2, writeFileSync as writeFileSync5 } from "fs";
+import { homedir as homedir5 } from "os";
+import { join as join8 } from "path";
+function terminalhireDir() {
+  return process.env.TERMINALHIRE_DIR || join8(homedir5(), ".terminalhire");
+}
+function webSessionFilePath() {
+  return join8(terminalhireDir(), "web-session");
+}
+function readWebSessionFile() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync5(path)) return null;
+    const v = readFileSync6(path, "utf8").trim();
+    return v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+function readWebSessionCookie() {
+  const fromFile = readWebSessionFile();
+  if (fromFile) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return typeof env === "string" && env.length > 0 ? env : null;
+}
+function writeWebSessionFile(token) {
+  ensureStateDirForSecret(terminalhireDir());
+  const path = webSessionFilePath();
+  writeFileSync5(path, token, { mode: 384, encoding: "utf8" });
+  try {
+    chmodSync(path, 384);
+  } catch {
+  }
+}
+function clearWebSessionFile() {
+  try {
+    rmSync2(webSessionFilePath());
+  } catch {
+  }
+}
+var init_web_session = __esm({
+  "src/web-session.ts"() {
+    "use strict";
+    init_state_dir();
+  }
+});
+
 // src/github-auth.ts
 var github_auth_exports = {};
 __export(github_auth_exports, {
@@ -2997,9 +3053,9 @@ __export(github_auth_exports, {
   writeGitHubToken: () => writeGitHubToken
 });
 import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes4 } from "crypto";
-import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, existsSync as existsSync5, rmSync as rmSync2, renameSync as renameSync3 } from "fs";
-import { join as join8 } from "path";
-import { homedir as homedir5 } from "os";
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, existsSync as existsSync6, rmSync as rmSync3, renameSync as renameSync3 } from "fs";
+import { join as join9 } from "path";
+import { homedir as homedir6 } from "os";
 async function loadKey() {
   return loadOrCreateSharedKey();
 }
@@ -3020,10 +3076,10 @@ function decrypt2(blob, key) {
   return plain.toString("utf8");
 }
 async function readGitHubToken() {
-  if (!existsSync5(TOKEN_FILE)) return void 0;
+  if (!existsSync6(TOKEN_FILE)) return void 0;
   try {
     const key = await loadKey();
-    const raw = readFileSync6(TOKEN_FILE, "utf8");
+    const raw = readFileSync7(TOKEN_FILE, "utf8");
     const blob = JSON.parse(raw);
     return decrypt2(blob, key);
   } catch {
@@ -3036,7 +3092,7 @@ async function writeGitHubToken(token) {
   const blob = encrypt2(token, key);
   const tmpFile = `${TOKEN_FILE}.${process.pid}.${randomBytes4(6).toString("hex")}.tmp`;
   try {
-    writeFileSync5(tmpFile, JSON.stringify(blob, null, 2), {
+    writeFileSync6(tmpFile, JSON.stringify(blob, null, 2), {
       encoding: "utf8",
       mode: 384,
       flag: "wx"
@@ -3044,7 +3100,7 @@ async function writeGitHubToken(token) {
     renameSync3(tmpFile, TOKEN_FILE);
   } catch (err) {
     try {
-      rmSync2(tmpFile, { force: true });
+      rmSync3(tmpFile, { force: true });
     } catch {
     }
     throw err;
@@ -3052,12 +3108,12 @@ async function writeGitHubToken(token) {
 }
 async function deleteGitHubToken() {
   try {
-    rmSync2(TOKEN_FILE);
+    rmSync3(TOKEN_FILE);
   } catch {
   }
 }
 async function hasGitHubToken() {
-  return existsSync5(TOKEN_FILE);
+  return existsSync6(TOKEN_FILE);
 }
 async function runDeviceFlow() {
   if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
@@ -3181,8 +3237,8 @@ var init_github_auth = __esm({
     init_state_dir();
     init_shared_key();
     init_shared_key();
-    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join8(homedir5(), ".terminalhire");
-    TOKEN_FILE = join8(TERMINALHIRE_DIR5, "github-token.enc");
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join9(homedir6(), ".terminalhire");
+    TOKEN_FILE = join9(TERMINALHIRE_DIR5, "github-token.enc");
     ALGO2 = "aes-256-gcm";
     IV_BYTES2 = 12;
     GITHUB_SCOPE = "read:user";
@@ -3211,8 +3267,8 @@ __export(repo_experience_exports, {
   recordPolicySnapshot: () => recordPolicySnapshot,
   writeTombstone: () => writeTombstone
 });
-import { join as join9 } from "path";
-import { homedir as homedir6 } from "os";
+import { join as join10 } from "path";
+import { homedir as homedir7 } from "os";
 function blankFile() {
   return { version: 1, repos: {} };
 }
@@ -3419,8 +3475,8 @@ var init_repo_experience = __esm({
     "use strict";
     init_crypto_store();
     init_profile();
-    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join9(homedir6(), ".terminalhire");
-    REPO_EXPERIENCE_FILE = join9(TERMINALHIRE_DIR6, "repo-experience.enc");
+    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join10(homedir7(), ".terminalhire");
+    REPO_EXPERIENCE_FILE = join10(TERMINALHIRE_DIR6, "repo-experience.enc");
     MAX_REPOS = 100;
     MAX_CULTURE_SAMPLES = 12;
     MAX_NOTES = 10;
@@ -3450,17 +3506,17 @@ __export(claims_exports, {
   updateClaim: () => updateClaim
 });
 import {
-  readFileSync as readFileSync7,
-  writeFileSync as writeFileSync6,
+  readFileSync as readFileSync8,
+  writeFileSync as writeFileSync7,
   mkdirSync as mkdirSync2,
   renameSync as renameSync4,
-  existsSync as existsSync6,
-  rmSync as rmSync3,
+  existsSync as existsSync7,
+  rmSync as rmSync4,
   statSync
 } from "fs";
 import { randomBytes as randomBytes5 } from "crypto";
-import { join as join10 } from "path";
-import { homedir as homedir7 } from "os";
+import { join as join11 } from "path";
+import { homedir as homedir8 } from "os";
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -3474,7 +3530,7 @@ function withClaimsLock(fn) {
     } catch {
       try {
         if (Date.now() - statSync(LOCK_DIR).mtimeMs > LOCK_STALE_MS) {
-          rmSync3(LOCK_DIR, { recursive: true, force: true });
+          rmSync4(LOCK_DIR, { recursive: true, force: true });
           continue;
         }
       } catch {
@@ -3490,7 +3546,7 @@ function withClaimsLock(fn) {
   try {
     return fn();
   } finally {
-    rmSync3(LOCK_DIR, { recursive: true, force: true });
+    rmSync4(LOCK_DIR, { recursive: true, force: true });
   }
 }
 function toPushedClaim(claim) {
@@ -3515,8 +3571,8 @@ function normalizeClaim(c) {
 }
 function readClaims() {
   try {
-    if (!existsSync6(CLAIMS_FILE)) return [];
-    const data = JSON.parse(readFileSync7(CLAIMS_FILE, "utf8"));
+    if (!existsSync7(CLAIMS_FILE)) return [];
+    const data = JSON.parse(readFileSync8(CLAIMS_FILE, "utf8"));
     const claims = Array.isArray(data?.claims) ? data.claims : [];
     return claims.map(normalizeClaim);
   } catch {
@@ -3528,7 +3584,7 @@ function writeClaims(claims) {
   const tmp = `${CLAIMS_FILE}.${process.pid}.${randomBytes5(6).toString("hex")}.tmp`;
   const payload = { claims };
   try {
-    writeFileSync6(tmp, JSON.stringify(payload, null, 2), {
+    writeFileSync7(tmp, JSON.stringify(payload, null, 2), {
       encoding: "utf8",
       mode: 384,
       flag: "wx"
@@ -3536,7 +3592,7 @@ function writeClaims(claims) {
     renameSync4(tmp, CLAIMS_FILE);
   } catch (err) {
     try {
-      rmSync3(tmp, { force: true });
+      rmSync4(tmp, { force: true });
     } catch {
     }
     throw err;
@@ -3629,8 +3685,8 @@ var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join10(homedir7(), ".terminalhire");
-    CLAIMS_FILE = join10(TERMINALHIRE_DIR7, "claims.json");
+    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join11(homedir8(), ".terminalhire");
+    CLAIMS_FILE = join11(TERMINALHIRE_DIR7, "claims.json");
     LOCK_DIR = `${CLAIMS_FILE}.lock`;
     LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
     LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
@@ -3669,9 +3725,9 @@ var init_claims = __esm({
 
 // bin/jpi-contribute.js
 init_src();
-import { readFileSync as readFileSync8, writeFileSync as writeFileSync7, renameSync as renameSync5 } from "fs";
-import { join as join11 } from "path";
-import { homedir as homedir8 } from "os";
+import { readFileSync as readFileSync9, writeFileSync as writeFileSync8, renameSync as renameSync5 } from "fs";
+import { join as join12 } from "path";
+import { homedir as homedir9 } from "os";
 import { createHash as createHash3, randomBytes as randomBytes6 } from "crypto";
 
 // bin/cache-store.js
@@ -3777,13 +3833,217 @@ function linkTitle(title, url) {
   return href ? `${safeTitle} (${href})` : safeTitle;
 }
 
+// bin/contribute-repo.js
+init_src();
+var GH_API = "https://api.github.com";
+var GH_SESSION_COOKIE = "__jpi_gh_session";
+var PER_PAGE = 50;
+var REQUEST_TIMEOUT_MS = 15e3;
+var RESERVED_OWNERS = /* @__PURE__ */ new Set([
+  "about",
+  "apps",
+  "codespaces",
+  "collections",
+  "contact",
+  "enterprise",
+  "explore",
+  "features",
+  "join",
+  "login",
+  "marketplace",
+  "new",
+  "notifications",
+  "organizations",
+  "orgs",
+  "pricing",
+  "pulls",
+  "search",
+  "security",
+  "settings",
+  "sponsors",
+  "site",
+  "topics",
+  "trending",
+  "users"
+]);
+var SEGMENT = "[A-Za-z0-9._-]+";
+var SHORTHAND_RE = new RegExp(`^(${SEGMENT})/(${SEGMENT})$`);
+var URL_PATH_RE = new RegExp(`^/(${SEGMENT})/(${SEGMENT})(?:/.*)?$`);
+function parseRepoArg(raw) {
+  const input = String(raw ?? "").trim();
+  if (input === "") return null;
+  let owner;
+  let repo;
+  const shorthand = SHORTHAND_RE.exec(input);
+  if (shorthand) {
+    [, owner, repo] = shorthand;
+  } else {
+    let url;
+    try {
+      url = new URL(input);
+    } catch {
+      return null;
+    }
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    const host = url.hostname.toLowerCase();
+    if (host !== "github.com" && host !== "www.github.com") return null;
+    const m = URL_PATH_RE.exec(url.pathname);
+    if (!m) return null;
+    [, owner, repo] = m;
+  }
+  if (repo.length > 4 && repo.endsWith(".git")) repo = repo.slice(0, -4);
+  if (RESERVED_OWNERS.has(owner.toLowerCase())) return null;
+  for (const seg of [owner, repo]) {
+    if (seg === "" || seg === "." || seg === "..") return null;
+  }
+  return `${owner}/${repo}`;
+}
+function ghHeaders2(token) {
+  const headers = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "terminalhire-contribute",
+    "X-GitHub-Api-Version": "2022-11-28"
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+async function fetchScopedFromServer({ repoFullName, apiBase, cookie, fetchImpl }) {
+  const doFetch = fetchImpl ?? globalThis.fetch;
+  try {
+    const res = await doFetch(`${apiBase}/api/contributions/validate-url`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: apiBase,
+        Cookie: `${GH_SESSION_COOKIE}=${cookie}`
+      },
+      body: JSON.stringify({ url: `https://github.com/${repoFullName}` }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    if (body?.ok !== true || body.kind !== "repo" || !Array.isArray(body.issues)) return null;
+    return body;
+  } catch {
+    return null;
+  }
+}
+async function fetchScopedFromGitHub({ repoFullName, token, fetchImpl }) {
+  const doFetch = fetchImpl ?? globalThis.fetch;
+  let authFailed = false;
+  async function ghGet(path) {
+    const url = `${GH_API}${path}`;
+    const first = await doFetch(url, {
+      headers: ghHeaders2(authFailed ? void 0 : token),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    });
+    if (first.status !== 401 || authFailed || !token) return first;
+    authFailed = true;
+    return doFetch(url, {
+      headers: ghHeaders2(void 0),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    });
+  }
+  const repoRes = await ghGet(`/repos/${repoFullName}`);
+  if (repoRes.status === 404) {
+    throw new Error(`${repoFullName} is not a public repository (or does not exist).`);
+  }
+  if (!repoRes.ok) throw new Error(`GitHub read failed (${repoRes.status}).`);
+  const repo = await repoRes.json();
+  if (repo?.private === true) {
+    throw new Error("Only public repositories can be claimed.");
+  }
+  const issuesRes = await ghGet(
+    `/repos/${repoFullName}/issues?state=open&per_page=${PER_PAGE}&sort=updated&direction=desc`
+  );
+  if (!issuesRes.ok) throw new Error(`GitHub issue read failed (${issuesRes.status}).`);
+  const raw = await issuesRes.json();
+  const issues = (Array.isArray(raw) ? raw : []).filter(
+    (i) => i?.pull_request == null && (!Array.isArray(i.assignees) || i.assignees.length === 0)
+  );
+  return {
+    repo: {
+      repoFullName,
+      canonicalUrl: `https://github.com/${repoFullName}`,
+      stars: typeof repo?.stargazers_count === "number" ? repo.stargazers_count : 0,
+      description: repo?.description ?? null,
+      language: repo?.language ?? null
+    },
+    issues: issues.map((i) => ({
+      number: i.number,
+      title: typeof i.title === "string" ? i.title : "",
+      url: `https://github.com/${repoFullName}/issues/${i.number}`,
+      labels: (Array.isArray(i.labels) ? i.labels : []).map((l) => typeof l === "string" ? l : l?.name ?? "").filter(Boolean),
+      comments: typeof i.comments === "number" ? i.comments : 0,
+      createdAt: typeof i.created_at === "string" ? i.created_at : "",
+      command: null
+      // filled in by the caller once the policy verdict is known
+    }))
+  };
+}
+function tokenizeForTags(parts) {
+  return parts.join(" ").toLowerCase().replace(/[^a-z0-9.\-+#]/g, " ").split(/\s+/).filter(Boolean);
+}
+function toContributionJobs(repo, issues) {
+  return issues.map((issue) => ({
+    id: `contribute:${repo.repoFullName}#${issue.number}`,
+    source: "contribute",
+    title: issue.title,
+    company: repo.repoFullName.split("/")[0],
+    url: issue.url,
+    remote: true,
+    location: "Remote",
+    // Tagged exactly as the crawl tags a discovered issue (title + language +
+    // labels through the shared vocabulary), because match() scores on tags: an
+    // untagged row scores zero and drops out of the ranking entirely.
+    tags: normalize(tokenizeForTags([issue.title, repo.language ?? "", issue.labels.join(" ")])),
+    roleType: "freelance",
+    postedAt: issue.createdAt,
+    applyMode: "direct",
+    contribution: {
+      repoFullName: repo.repoFullName,
+      repoStars: repo.stars,
+      issueNumber: issue.number,
+      labels: issue.labels,
+      issueUrl: issue.url,
+      repoDescription: repo.description ?? null,
+      language: repo.language ?? null,
+      commentsAtDiscovery: issue.comments
+    }
+  }));
+}
+function renderScopedRow(i, result, command) {
+  const job = result.job ?? result;
+  const c = job.contribution ?? {};
+  const num = c.issueNumber != null ? `#${c.issueNumber}` : "";
+  const label = c.labels && c.labels.length ? sanitizeText(c.labels[0]) : "\u2014";
+  const comments = c.commentsAtDiscovery;
+  const chatter = comments > 0 ? ` \xB7 ${comments} comment${comments === 1 ? "" : "s"}` : "";
+  const scorePct = typeof result.score === "number" ? ` \xB7 match ${Math.round(result.score * 100)}%` : "";
+  const line1 = `${i + 1}. ${linkTitle(job.title, c.issueUrl ?? job.url)}`;
+  const line2 = `   ${num} \xB7 ${label}${chatter}${scorePct}`;
+  const line3 = command ? `   \u2192 ${command}` : "   \u2192 no claim command: this repo prohibits AI-generated contributions";
+  return `${line1}
+${line2}
+${line3}`;
+}
+function renderRepoHeader(repo, extras = {}) {
+  const stars = typeof repo.stars === "number" ? `\u2605${repo.stars.toLocaleString()}` : "";
+  const lang = repo.language ? ` \xB7 ${sanitizeText(repo.language)}` : "";
+  const lines = [`  ${sanitizeText(repo.repoFullName)}  ${stars}${lang}`];
+  if (repo.description) lines.push(`  ${sanitizeText(repo.description)}`);
+  if (extras.credentialNote) lines.push(`  ${extras.credentialNote}`);
+  if (extras.policyNote) lines.push(`  policy: ${extras.policyNote}`);
+  return lines.join("\n");
+}
+
 // bin/jpi-contribute.js
-var TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join11(homedir8(), ".terminalhire");
-var INDEX_CACHE_FILE2 = join11(TERMINALHIRE_DIR8, "index-cache.json");
+var TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join12(homedir9(), ".terminalhire");
+var INDEX_CACHE_FILE2 = join12(TERMINALHIRE_DIR8, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
 var CONTINUITY_RANK_DISABLED = process.env["TERMINALHIRE_NO_CONTINUITY_RANK"] === "1";
-var LOCAL_CONTRIB_CACHE_FILE = join11(TERMINALHIRE_DIR8, "contribute-local-cache.json");
+var LOCAL_CONTRIB_CACHE_FILE = join12(TERMINALHIRE_DIR8, "contribute-local-cache.json");
 var LOCAL_DISCOVERY_TTL_MS = 6 * 60 * 60 * 1e3;
 var LOCAL_DISCOVERY_RETRY_TTL_MS = 15 * 60 * 1e3;
 var LOCAL_DISCOVERY_BUDGET_MS = 12e3;
@@ -3794,7 +4054,7 @@ var CONTRIBUTE_OFF = "Contribute is off \u2014 you set contributeEnabled: false 
 var EMPTY_STATE = "Nothing clears the bar right now. We only list issues where a merged PR actually counts toward\nyour r\xE9sum\xE9 \u2014 so the list stays honest. Try again after the next refresh.";
 function readIndexCache() {
   try {
-    const entry = JSON.parse(readFileSync8(INDEX_CACHE_FILE2, "utf8"));
+    const entry = JSON.parse(readFileSync9(INDEX_CACHE_FILE2, "utf8"));
     if (Date.now() - entry.ts < INDEX_TTL_MS) return entry.index;
     return null;
   } catch {
@@ -3904,7 +4164,7 @@ async function fetchStarredSlugs(token, fetchImpl = globalThis.fetch) {
 }
 function readLocalPoolCache() {
   try {
-    return JSON.parse(readFileSync8(LOCAL_CONTRIB_CACHE_FILE, "utf8"));
+    return JSON.parse(readFileSync9(LOCAL_CONTRIB_CACHE_FILE, "utf8"));
   } catch {
     return null;
   }
@@ -3917,7 +4177,7 @@ function writeLocalPoolCache(entry) {
   try {
     ensureStateDir(TERMINALHIRE_DIR8);
     const tmp = `${LOCAL_CONTRIB_CACHE_FILE}.${process.pid}.${randomBytes6(6).toString("hex")}.tmp`;
-    writeFileSync7(tmp, JSON.stringify({ v: LOCAL_CACHE_SCHEMA, ...entry }), {
+    writeFileSync8(tmp, JSON.stringify({ v: LOCAL_CACHE_SCHEMA, ...entry }), {
       encoding: "utf8",
       flag: "wx",
       mode: 384
@@ -4056,6 +4316,84 @@ function renderRow(i, result, claimedIds = /* @__PURE__ */ new Set(), continuity
 ${line2}${tipLine}${noteLine}
 ${line3}`;
 }
+async function readFingerprint(injected) {
+  if (injected) return injected;
+  try {
+    const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+    const profile = await readProfile2();
+    if (profile.skillTags?.length) return profileToFingerprint2(profile);
+  } catch {
+  }
+  return void 0;
+}
+async function runScoped(repoFullName, { log, fetchImpl, useCache, opts }) {
+  const apiBase = opts.apiUrl ?? API_URL;
+  let cookie = opts.webSessionCookie ?? null;
+  if (cookie === null && useCache) {
+    try {
+      const { readWebSessionCookie: readWebSessionCookie2 } = await Promise.resolve().then(() => (init_web_session(), web_session_exports));
+      cookie = readWebSessionCookie2();
+    } catch {
+      cookie = null;
+    }
+  }
+  let listing = null;
+  let sharedIndexNote = null;
+  if (cookie) {
+    listing = await fetchScopedFromServer({ repoFullName, apiBase, cookie, fetchImpl });
+    if (listing?.submitted?.recorded) {
+      sharedIndexNote = listing.submitted.firstTime ? "Added to the shared index \u2014 the next crawl looks for work here for everyone." : "Already in the shared index; your interest moved it up the queue.";
+    }
+  }
+  if (!listing) {
+    let token = opts.token;
+    if (token == null && useCache) {
+      try {
+        const auth = await Promise.resolve().then(() => (init_github_auth(), github_auth_exports));
+        token = await auth.readGitHubToken();
+      } catch {
+        token = void 0;
+      }
+    }
+    try {
+      const direct = await fetchScopedFromGitHub({ repoFullName, token, fetchImpl });
+      listing = { repo: direct.repo, issues: direct.issues, policy: null };
+    } catch (err) {
+      log(`Could not read ${repoFullName}: ${err?.message ?? err}`);
+      return;
+    }
+    if (!cookie) {
+      sharedIndexNote = "Run `terminalhire link` to add repos you look up to the shared index for everyone.";
+    }
+  }
+  const fp = await readFingerprint(opts.fingerprint);
+  const jobs = toContributionJobs(listing.repo, listing.issues);
+  const ranked = await rankLocally(jobs, fp);
+  const rows = ranked.length > 0 ? ranked : jobs.map((job) => ({ job, score: void 0 }));
+  const commandByNumber = new Map((listing.issues ?? []).map((i) => [i.number, i.command ?? null]));
+  const policyScanned = listing.policy != null;
+  log("");
+  log(
+    renderRepoHeader(listing.repo, {
+      credentialNote: listing.repo?.credentialEligible === false ? "\u26A0 a merge here won't earn an accepted-contribution credential" : null,
+      policyNote: policyScanned ? listing.policy.verdict : null
+    })
+  );
+  log("");
+  if (rows.length === 0) {
+    log("  No open, unassigned issues right now.");
+    if (sharedIndexNote) log(`
+  ${sharedIndexNote}`);
+    return;
+  }
+  for (let i = 0; i < rows.length; i++) {
+    const number = rows[i].job.contribution?.issueNumber;
+    const command = policyScanned ? commandByNumber.get(number) ?? null : `terminalhire claim record ${rows[i].job.contribution?.issueUrl ?? rows[i].job.url}`;
+    log(renderScopedRow(i, rows[i], command));
+  }
+  if (sharedIndexNote) log(`
+  ${sharedIndexNote}`);
+}
 async function run(opts = {}) {
   const log = opts.log ?? console.log;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
@@ -4063,6 +4401,11 @@ async function run(opts = {}) {
   try {
     if (!isContributeEnabled()) {
       log(CONTRIBUTE_OFF);
+      return;
+    }
+    const repoArg = parseRepoArg(opts.repo ?? process.argv[2] ?? "");
+    if (repoArg) {
+      await runScoped(repoArg, { log, fetchImpl, useCache, opts });
       return;
     }
     const index = await fetchIndex(fetchImpl, useCache);
