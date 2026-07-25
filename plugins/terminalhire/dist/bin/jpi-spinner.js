@@ -189,17 +189,17 @@ function atomicWriteJson(path, obj) {
 }
 function writeSettingsJson(path, obj, expectedRaw) {
   const target = resolveTarget(path);
-  if (target === null) return false;
+  if (target === null) return { ok: false, reason: "unresolvable-symlink-chain" };
   let currentRaw = null;
   try {
     currentRaw = readFileSync(target, "utf8");
   } catch (err) {
-    if (!err || err.code !== "ENOENT") return false;
+    if (!err || err.code !== "ENOENT") return { ok: false, reason: "settings-changed" };
   }
-  if (currentRaw !== expectedRaw) return false;
+  if (currentRaw !== expectedRaw) return { ok: false, reason: "settings-changed" };
   mkdirSync2(dirname(target), { recursive: true });
   writeFileAtomic(target, JSON.stringify(obj, null, 2) + "\n");
-  return true;
+  return { ok: true };
 }
 function readState() {
   return readJson(spinnerStateFilePath(), { verbs: [], mode: "replace" });
@@ -211,36 +211,63 @@ function writeState(patch) {
 function claimUnion(key, prev, next, extra) {
   writeState({ [key]: [.../* @__PURE__ */ new Set([...prev, ...next])], ...extra });
 }
+function noteSkip(surface, reason) {
+  try {
+    const prev = readState().lastSkip || {};
+    const before = prev[surface] && prev[surface].reason;
+    if (before === (reason || void 0)) return reason;
+    const next = { ...prev, [surface]: reason ? { reason, ts: Date.now() } : void 0 };
+    writeState({ lastSkip: Object.values(next).some(Boolean) ? next : void 0 });
+  } catch {
+  }
+  return reason;
+}
+function readLastSkip() {
+  const st = readState();
+  return st && st.lastSkip && typeof st.lastSkip === "object" ? st.lastSkip : {};
+}
 function applySpinnerVerbs(ourVerbs, mode = "replace") {
   const CLAUDE_SETTINGS = claudeSettingsPath();
   const verbs = (Array.isArray(ourVerbs) ? ourVerbs : []).filter(Boolean);
   if (verbs.length === 0) return clearSpinnerVerbs();
   const read = readSettings(CLAUDE_SETTINGS);
   if (read.status === "unreadable") {
-    return { applied: 0, total: 0, skipped: true, reason: read.reason };
+    return { applied: 0, total: 0, skipped: true, reason: noteSkip("verbs", read.reason) };
   }
   const settings = read.data;
   const present = Object.prototype.hasOwnProperty.call(settings, "spinnerVerbs");
   const existing = settings.spinnerVerbs && typeof settings.spinnerVerbs === "object" && !Array.isArray(settings.spinnerVerbs) ? settings.spinnerVerbs : null;
   if (present && (!existing || !Array.isArray(existing.verbs))) {
-    return { applied: 0, total: 0, skipped: true, reason: "unrecognised-spinnerVerbs" };
+    return {
+      applied: 0,
+      total: 0,
+      skipped: true,
+      reason: noteSkip("verbs", "unrecognised-spinnerVerbs")
+    };
   }
   const prevOurs = new Set(readState().verbs || []);
   const userVerbs = existing ? existing.verbs.filter((v) => !prevOurs.has(v)) : [];
   const newVerbs = [...verbs, ...userVerbs];
   settings.spinnerVerbs = { mode: mode === "append" ? "append" : "replace", verbs: newVerbs };
   claimUnion("verbs", prevOurs, verbs);
-  if (!writeSettingsJson(CLAUDE_SETTINGS, settings, read.raw)) {
-    return { applied: 0, total: 0, skipped: true, reason: "settings-changed" };
+  const wrote = writeSettingsJson(CLAUDE_SETTINGS, settings, read.raw);
+  if (!wrote.ok) {
+    return { applied: 0, total: 0, skipped: true, reason: noteSkip("verbs", wrote.reason) };
   }
   writeState({ verbs, mode });
+  noteSkip("verbs", null);
   return { applied: verbs.length, total: newVerbs.length };
 }
 function clearSpinnerVerbs() {
   const CLAUDE_SETTINGS = claudeSettingsPath();
   const read = readSettings(CLAUDE_SETTINGS);
   if (read.status === "unreadable") {
-    return { cleared: false, keptUserVerbs: 0, skipped: true, reason: read.reason };
+    return {
+      cleared: false,
+      keptUserVerbs: 0,
+      skipped: true,
+      reason: noteSkip("verbs", read.reason)
+    };
   }
   const settings = read.data;
   const prevOurs = new Set(readState().verbs || []);
@@ -256,21 +283,28 @@ function clearSpinnerVerbs() {
     } else {
       delete settings.spinnerVerbs;
     }
-    if (!writeSettingsJson(CLAUDE_SETTINGS, settings, read.raw)) {
-      return { cleared: false, keptUserVerbs: 0, skipped: true, reason: "settings-changed" };
+    const wrote = writeSettingsJson(CLAUDE_SETTINGS, settings, read.raw);
+    if (!wrote.ok) {
+      return {
+        cleared: false,
+        keptUserVerbs: 0,
+        skipped: true,
+        reason: noteSkip("verbs", wrote.reason)
+      };
     }
   }
   try {
     writeState({ verbs: [], mode: readState().mode || "replace" });
   } catch {
   }
+  noteSkip("verbs", null);
   return { cleared: true, keptUserVerbs };
 }
 function clearSpinnerTips() {
   const CLAUDE_SETTINGS = claudeSettingsPath();
   const read = readSettings(CLAUDE_SETTINGS);
   if (read.status === "unreadable") {
-    return { cleared: false, skipped: true, reason: read.reason };
+    return { cleared: false, skipped: true, reason: noteSkip("tips", read.reason) };
   }
   const settings = read.data;
   const st = readState();
@@ -288,14 +322,16 @@ function clearSpinnerTips() {
       if (tipsPrev.enabled !== void 0) settings.spinnerTipsEnabled = tipsPrev.enabled;
       else delete settings.spinnerTipsEnabled;
     }
-    if (!writeSettingsJson(CLAUDE_SETTINGS, settings, read.raw)) {
-      return { cleared: false, skipped: true, reason: "settings-changed" };
+    const wrote = writeSettingsJson(CLAUDE_SETTINGS, settings, read.raw);
+    if (!wrote.ok) {
+      return { cleared: false, skipped: true, reason: noteSkip("tips", wrote.reason) };
     }
   }
   try {
     writeState({ tips: [], tipsPrev: void 0 });
   } catch {
   }
+  noteSkip("tips", null);
   return { cleared: true };
 }
 
@@ -1228,6 +1264,19 @@ async function run() {
     console.log(
       `  frequency: ${sc.frequency}   (always = up to max; sometimes = up to 2; rare = 1 per cycle)`
     );
+    const skips = readLastSkip();
+    const stuck = ["verbs", "tips"].filter((s) => skips[s] && skips[s].reason);
+    if (stuck.length > 0) {
+      console.log("");
+      for (const s of stuck) {
+        const t = Number(skips[s].ts);
+        const when = Number.isFinite(t) ? new Date(t).toISOString().slice(0, 16) : null;
+        console.log(
+          `  NOT written: ${s} \u2014 ${skips[s].reason}${when ? ` (last tried ${when}Z)` : ""}`
+        );
+      }
+      console.log("  settings.json was left exactly as it was. Fix or restore it to resume.");
+    }
     console.log("");
     console.log(
       "  terminalhire spinner --on                      enable (asks consent, backs up settings.json)"

@@ -3642,10 +3642,7 @@ function readMaxContribIssuesScanned() {
   if (raw == null) return DEFAULT_MAX_CONTRIB_ISSUES_SCANNED;
   const n = Number.parseInt(raw, 10);
   if (Number.isNaN(n)) return DEFAULT_MAX_CONTRIB_ISSUES_SCANNED;
-  return Math.min(
-    Math.max(n, MIN_MAX_CONTRIB_ISSUES_SCANNED),
-    MAX_MAX_CONTRIB_ISSUES_SCANNED
-  );
+  return Math.min(Math.max(n, MIN_MAX_CONTRIB_ISSUES_SCANNED), MAX_MAX_CONTRIB_ISSUES_SCANNED);
 }
 function authHeaders2(token) {
   const bearer = token ?? process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
@@ -3819,18 +3816,22 @@ function buildContributionJob(a) {
 }
 async function aggregateContributions(opts = {}) {
   const paceEnabled = opts.paceEnabled ?? !opts.fetchImpl;
-  const client = makeClient(opts.fetchImpl ?? fetchWithTimeout, {
-    paceEnabled,
-    gapMs: readReqGapMs(),
-    // Request-path callers (plan B2) can LOWER the budget but never raise it past the
-    // vetted default — take the min so a per-user pass caps its own wall-clock.
-    budgetMs: Math.min(opts.budgetMs ?? Infinity, readBuildBudgetMs()),
-    sleep: opts.sleepImpl ?? realSleep,
-    now: opts.nowImpl ?? Date.now,
-    // Bound the unguarded probe on the REAL network only; injected-fetch tests get
-    // null so the probe stays deterministic (and its shared spy sleeper untouched).
-    probeTimeoutMs: opts.fetchImpl ? null : PROBE_TIMEOUT_MS
-  }, opts.token);
+  const client = makeClient(
+    opts.fetchImpl ?? fetchWithTimeout,
+    {
+      paceEnabled,
+      gapMs: readReqGapMs(),
+      // Request-path callers (plan B2) can LOWER the budget but never raise it past the
+      // vetted default — take the min so a per-user pass caps its own wall-clock.
+      budgetMs: Math.min(opts.budgetMs ?? Infinity, readBuildBudgetMs()),
+      sleep: opts.sleepImpl ?? realSleep,
+      now: opts.nowImpl ?? Date.now,
+      // Bound the unguarded probe on the REAL network only; injected-fetch tests get
+      // null so the probe stays deterministic (and its shared spy sleeper untouched).
+      probeTimeoutMs: opts.fetchImpl ? null : PROBE_TIMEOUT_MS
+    },
+    opts.token
+  );
   const queries = opts.queries ?? CONTRIB_SEARCH_QUERIES;
   const maxContribItems = readMaxContribItems();
   const startRl = await fetchRateLimit(client);
@@ -4025,8 +4026,10 @@ async function aggregateContributions(opts = {}) {
     vocabCandidates.sort((a, b) => b.stars - a.stars);
     const candidates = [];
     const candSeen = /* @__PURE__ */ new Set();
+    const seedKeys = /* @__PURE__ */ new Set();
     for (const slug of opts.seedSlugs ?? []) {
       const s = slug?.toLowerCase();
+      if (s) seedKeys.add(repoKey(s));
       if (s && !candSeen.has(repoKey(s))) {
         candSeen.add(repoKey(s));
         candidates.push(s);
@@ -4065,7 +4068,8 @@ async function aggregateContributions(opts = {}) {
       if (repo.archived || repo.fork || repo.stargazers_count < MIN_STARS || contributors === void 0 || contributors < MIN_CONTRIBUTORS) {
         continue;
       }
-      const q = `repo:${fullName} is:issue is:open label:${DISCOVERY_ISSUE_LABELS}`;
+      const isSeed = seedKeys.has(repoKey(fullName));
+      const q = isSeed ? `repo:${fullName} is:issue is:open no:assignee` : `repo:${fullName} is:issue is:open label:${DISCOVERY_ISSUE_LABELS}`;
       const searchRes = await client.json(
         `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE2}`
       );
@@ -4073,8 +4077,10 @@ async function aggregateContributions(opts = {}) {
       let perRepoDiscovered = 0;
       for (const issue of repoIssues) {
         if (jobs.length >= maxContribItems) break;
-        if (perRepoDiscovered >= MAX_ISSUES_PER_DISCOVERED_REPO) break;
-        if ((perRepo.get(repoKey(fullName)) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) break;
+        if (perRepoDiscovered >= (isSeed ? MAX_ISSUES_PER_SEEDED_REPO : MAX_ISSUES_PER_DISCOVERED_REPO))
+          break;
+        const perRepoCap = isSeed ? MAX_ISSUES_PER_SEEDED_REPO : MAX_BOUNTIES_PER_DISCOVERED_REPO;
+        if ((perRepo.get(repoKey(fullName)) ?? 0) >= perRepoCap) break;
         const id = `contribute:${repoKey(fullName)}#${issue.number}`;
         if (seen.has(id)) continue;
         if (isAssigned(issue)) continue;
@@ -4141,14 +4147,16 @@ async function aggregateContributions(opts = {}) {
       // A PARTIAL crawl from ANY cause: the governor's budget/secondary abort, an early
       // discovery stop, OR an ordinary /search page failure (supplyFailures) that
       // truncated the primary supply. Any of these ⇒ the pool is incomplete.
-      degraded: Boolean(budgetAborted || secondaryAborted || discoveryBudgetStopped || supplyFailures > 0),
+      degraded: Boolean(
+        budgetAborted || secondaryAborted || discoveryBudgetStopped || supplyFailures > 0
+      ),
       emitted: jobs.length,
       scanned: issues.length
     });
   }
   return jobs;
 }
-var GITHUB_API2, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, DEFAULT_SEARCH_MAX_PAGES, MIN_SEARCH_MAX_PAGES, MAX_SEARCH_MAX_PAGES, DEFAULT_MAX_CONTRIB_ITEMS, MIN_MAX_CONTRIB_ITEMS, MAX_MAX_CONTRIB_ITEMS, DEFAULT_MAX_CONTRIB_ISSUES_SCANNED, MIN_MAX_CONTRIB_ISSUES_SCANNED, MAX_MAX_CONTRIB_ISSUES_SCANNED, MAX_DISCOVERED_REPOS, MAX_ISSUES_PER_DISCOVERED_REPO, DISCOVERY_REPOS_PER_TERM, DISCOVERY_VOCAB_TERMS, DISCOVERY_ISSUE_LABELS, repoKey;
+var GITHUB_API2, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, DEFAULT_SEARCH_MAX_PAGES, MIN_SEARCH_MAX_PAGES, MAX_SEARCH_MAX_PAGES, DEFAULT_MAX_CONTRIB_ITEMS, MIN_MAX_CONTRIB_ITEMS, MAX_MAX_CONTRIB_ITEMS, DEFAULT_MAX_CONTRIB_ISSUES_SCANNED, MIN_MAX_CONTRIB_ISSUES_SCANNED, MAX_MAX_CONTRIB_ISSUES_SCANNED, MAX_DISCOVERED_REPOS, MAX_ISSUES_PER_DISCOVERED_REPO, MAX_ISSUES_PER_SEEDED_REPO, DISCOVERY_REPOS_PER_TERM, DISCOVERY_VOCAB_TERMS, DISCOVERY_ISSUE_LABELS, repoKey;
 var init_contributions = __esm({
   "../../packages/core/src/feeds/contributions.ts"() {
     "use strict";
@@ -4205,6 +4213,7 @@ var init_contributions = __esm({
     MAX_MAX_CONTRIB_ISSUES_SCANNED = 5e3;
     MAX_DISCOVERED_REPOS = 15;
     MAX_ISSUES_PER_DISCOVERED_REPO = 3;
+    MAX_ISSUES_PER_SEEDED_REPO = 10;
     DISCOVERY_REPOS_PER_TERM = 20;
     DISCOVERY_VOCAB_TERMS = ["rust", "go", "python", "typescript"];
     DISCOVERY_ISSUE_LABELS = '"good first issue","help wanted","good-first-issue","help-wanted"';
@@ -25195,7 +25204,8 @@ __export(job_status_store_exports, {
   markClicked: () => markClicked,
   markStatus: () => markStatus,
   readStatusMap: () => readStatusMap,
-  statusFilePath: () => statusFilePath
+  statusFilePath: () => statusFilePath,
+  withLock: () => withLock
 });
 import {
   readFileSync as readFileSync9,
@@ -25205,7 +25215,8 @@ import {
   copyFileSync,
   openSync as openSync3,
   closeSync as closeSync3,
-  unlinkSync as unlinkSync2
+  unlinkSync as unlinkSync2,
+  statSync as statSync2
 } from "fs";
 import { join as join15, dirname as dirname5 } from "path";
 import { homedir as homedir9 } from "os";
@@ -25227,36 +25238,65 @@ function sleepMs(ms) {
     }
   }
 }
-function withLock(fn) {
-  const deadline = Date.now() + 2e3;
+function isLockContention(err, platform) {
+  if (!err) return false;
+  if (err.code === "EEXIST") return true;
+  if (platform === "win32") {
+    return err.code === "EPERM" || err.code === "EACCES" || err.code === "EBUSY";
+  }
+  return false;
+}
+function withLock(fn, deps = {}) {
+  const {
+    openSync: open3 = openSync3,
+    closeSync: close = closeSync3,
+    unlinkSync: unlink2 = unlinkSync2,
+    statSync: stat2 = statSync2,
+    ensureDir = ensureStateDir,
+    sleep: sleep3 = sleepMs,
+    now = Date.now,
+    platform = process.platform,
+    lockFile = LOCK_FILE
+  } = deps;
+  ensureDir(dirname5(lockFile));
+  const giveUpAt = now() + LOCK_GIVEUP_MS;
+  let backoff3 = LOCK_SLEEP_MIN_MS;
   for (; ; ) {
     let fd;
     try {
-      ensureStateDir(dirname5(LOCK_FILE));
-      fd = openSync3(LOCK_FILE, "wx");
+      fd = open3(lockFile, "wx");
     } catch (err) {
-      if (err && err.code === "EEXIST") {
-        if (Date.now() > deadline) {
-          try {
-            unlinkSync2(LOCK_FILE);
-          } catch {
-          }
-          continue;
-        }
-        sleepMs(5);
-        continue;
+      if (!isLockContention(err, platform)) throw err;
+      if (now() > giveUpAt) {
+        throw new Error(
+          `job-status: could not acquire ${lockFile} within ${LOCK_GIVEUP_MS}ms (last error: ${err.code}) \u2014 refusing to write without the lock`,
+          { cause: err }
+        );
       }
-      throw err;
+      let ageMs = null;
+      try {
+        ageMs = now() - stat2(lockFile).mtimeMs;
+      } catch {
+      }
+      if (ageMs !== null && ageMs > LOCK_STALE_MS2) {
+        try {
+          unlink2(lockFile);
+        } catch {
+        }
+      }
+      sleep3(backoff3);
+      backoff3 = Math.min(backoff3 * 2, LOCK_SLEEP_MAX_MS);
+      continue;
     }
     try {
       return fn();
     } finally {
       try {
-        closeSync3(fd);
+        close(fd);
       } catch {
       }
       try {
-        unlinkSync2(LOCK_FILE);
+        unlink2(lockFile);
       } catch {
       }
     }
@@ -25301,7 +25341,7 @@ function markClicked(id) {
     return next[id];
   });
 }
-var TERMINALHIRE_DIR9, STATUS_FILE, LOCK_FILE, BAK_FILE;
+var TERMINALHIRE_DIR9, STATUS_FILE, LOCK_FILE, BAK_FILE, LOCK_STALE_MS2, LOCK_GIVEUP_MS, LOCK_SLEEP_MIN_MS, LOCK_SLEEP_MAX_MS;
 var init_job_status_store = __esm({
   "bin/job-status-store.js"() {
     "use strict";
@@ -25311,6 +25351,10 @@ var init_job_status_store = __esm({
     STATUS_FILE = join15(TERMINALHIRE_DIR9, "job-status.json");
     LOCK_FILE = `${STATUS_FILE}.lock`;
     BAK_FILE = `${STATUS_FILE}.bak`;
+    LOCK_STALE_MS2 = 2e3;
+    LOCK_GIVEUP_MS = 1e4;
+    LOCK_SLEEP_MIN_MS = 5;
+    LOCK_SLEEP_MAX_MS = 50;
   }
 });
 

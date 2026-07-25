@@ -7,7 +7,8 @@ import {
   copyFileSync,
   openSync as openSync2,
   closeSync as closeSync2,
-  unlinkSync
+  unlinkSync,
+  statSync
 } from "fs";
 import { join as join2, dirname } from "path";
 import { homedir } from "os";
@@ -803,36 +804,69 @@ function sleepMs(ms) {
     }
   }
 }
-function withLock(fn) {
-  const deadline = Date.now() + 2e3;
+var LOCK_STALE_MS = 2e3;
+var LOCK_GIVEUP_MS = 1e4;
+var LOCK_SLEEP_MIN_MS = 5;
+var LOCK_SLEEP_MAX_MS = 50;
+function isLockContention(err, platform) {
+  if (!err) return false;
+  if (err.code === "EEXIST") return true;
+  if (platform === "win32") {
+    return err.code === "EPERM" || err.code === "EACCES" || err.code === "EBUSY";
+  }
+  return false;
+}
+function withLock(fn, deps = {}) {
+  const {
+    openSync: open = openSync2,
+    closeSync: close = closeSync2,
+    unlinkSync: unlink = unlinkSync,
+    statSync: stat = statSync,
+    ensureDir = ensureStateDir,
+    sleep = sleepMs,
+    now = Date.now,
+    platform = process.platform,
+    lockFile = LOCK_FILE
+  } = deps;
+  ensureDir(dirname(lockFile));
+  const giveUpAt = now() + LOCK_GIVEUP_MS;
+  let backoff = LOCK_SLEEP_MIN_MS;
   for (; ; ) {
     let fd;
     try {
-      ensureStateDir(dirname(LOCK_FILE));
-      fd = openSync2(LOCK_FILE, "wx");
+      fd = open(lockFile, "wx");
     } catch (err) {
-      if (err && err.code === "EEXIST") {
-        if (Date.now() > deadline) {
-          try {
-            unlinkSync(LOCK_FILE);
-          } catch {
-          }
-          continue;
-        }
-        sleepMs(5);
-        continue;
+      if (!isLockContention(err, platform)) throw err;
+      if (now() > giveUpAt) {
+        throw new Error(
+          `job-status: could not acquire ${lockFile} within ${LOCK_GIVEUP_MS}ms (last error: ${err.code}) \u2014 refusing to write without the lock`,
+          { cause: err }
+        );
       }
-      throw err;
+      let ageMs = null;
+      try {
+        ageMs = now() - stat(lockFile).mtimeMs;
+      } catch {
+      }
+      if (ageMs !== null && ageMs > LOCK_STALE_MS) {
+        try {
+          unlink(lockFile);
+        } catch {
+        }
+      }
+      sleep(backoff);
+      backoff = Math.min(backoff * 2, LOCK_SLEEP_MAX_MS);
+      continue;
     }
     try {
       return fn();
     } finally {
       try {
-        closeSync2(fd);
+        close(fd);
       } catch {
       }
       try {
-        unlinkSync(LOCK_FILE);
+        unlink(lockFile);
       } catch {
       }
     }
@@ -881,5 +915,6 @@ export {
   markClicked,
   markStatus,
   readStatusMap,
-  statusFilePath
+  statusFilePath,
+  withLock
 };

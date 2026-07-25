@@ -4303,10 +4303,7 @@ function readMaxContribIssuesScanned() {
   if (raw == null) return DEFAULT_MAX_CONTRIB_ISSUES_SCANNED;
   const n = Number.parseInt(raw, 10);
   if (Number.isNaN(n)) return DEFAULT_MAX_CONTRIB_ISSUES_SCANNED;
-  return Math.min(
-    Math.max(n, MIN_MAX_CONTRIB_ISSUES_SCANNED),
-    MAX_MAX_CONTRIB_ISSUES_SCANNED
-  );
+  return Math.min(Math.max(n, MIN_MAX_CONTRIB_ISSUES_SCANNED), MAX_MAX_CONTRIB_ISSUES_SCANNED);
 }
 function authHeaders2(token) {
   const bearer = token ?? process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"];
@@ -4480,18 +4477,22 @@ function buildContributionJob(a) {
 }
 async function aggregateContributions(opts = {}) {
   const paceEnabled = opts.paceEnabled ?? !opts.fetchImpl;
-  const client = makeClient(opts.fetchImpl ?? fetchWithTimeout, {
-    paceEnabled,
-    gapMs: readReqGapMs(),
-    // Request-path callers (plan B2) can LOWER the budget but never raise it past the
-    // vetted default — take the min so a per-user pass caps its own wall-clock.
-    budgetMs: Math.min(opts.budgetMs ?? Infinity, readBuildBudgetMs()),
-    sleep: opts.sleepImpl ?? realSleep,
-    now: opts.nowImpl ?? Date.now,
-    // Bound the unguarded probe on the REAL network only; injected-fetch tests get
-    // null so the probe stays deterministic (and its shared spy sleeper untouched).
-    probeTimeoutMs: opts.fetchImpl ? null : PROBE_TIMEOUT_MS
-  }, opts.token);
+  const client = makeClient(
+    opts.fetchImpl ?? fetchWithTimeout,
+    {
+      paceEnabled,
+      gapMs: readReqGapMs(),
+      // Request-path callers (plan B2) can LOWER the budget but never raise it past the
+      // vetted default — take the min so a per-user pass caps its own wall-clock.
+      budgetMs: Math.min(opts.budgetMs ?? Infinity, readBuildBudgetMs()),
+      sleep: opts.sleepImpl ?? realSleep,
+      now: opts.nowImpl ?? Date.now,
+      // Bound the unguarded probe on the REAL network only; injected-fetch tests get
+      // null so the probe stays deterministic (and its shared spy sleeper untouched).
+      probeTimeoutMs: opts.fetchImpl ? null : PROBE_TIMEOUT_MS
+    },
+    opts.token
+  );
   const queries = opts.queries ?? CONTRIB_SEARCH_QUERIES;
   const maxContribItems = readMaxContribItems();
   const startRl = await fetchRateLimit(client);
@@ -4686,8 +4687,10 @@ async function aggregateContributions(opts = {}) {
     vocabCandidates.sort((a, b) => b.stars - a.stars);
     const candidates = [];
     const candSeen = /* @__PURE__ */ new Set();
+    const seedKeys = /* @__PURE__ */ new Set();
     for (const slug of opts.seedSlugs ?? []) {
       const s = slug?.toLowerCase();
+      if (s) seedKeys.add(repoKey(s));
       if (s && !candSeen.has(repoKey(s))) {
         candSeen.add(repoKey(s));
         candidates.push(s);
@@ -4726,7 +4729,8 @@ async function aggregateContributions(opts = {}) {
       if (repo.archived || repo.fork || repo.stargazers_count < MIN_STARS || contributors === void 0 || contributors < MIN_CONTRIBUTORS) {
         continue;
       }
-      const q = `repo:${fullName} is:issue is:open label:${DISCOVERY_ISSUE_LABELS}`;
+      const isSeed = seedKeys.has(repoKey(fullName));
+      const q = isSeed ? `repo:${fullName} is:issue is:open no:assignee` : `repo:${fullName} is:issue is:open label:${DISCOVERY_ISSUE_LABELS}`;
       const searchRes = await client.json(
         `/search/issues?q=${encodeURIComponent(q)}&sort=created&order=desc&per_page=${SEARCH_PER_PAGE2}`
       );
@@ -4734,8 +4738,10 @@ async function aggregateContributions(opts = {}) {
       let perRepoDiscovered = 0;
       for (const issue of repoIssues) {
         if (jobs.length >= maxContribItems) break;
-        if (perRepoDiscovered >= MAX_ISSUES_PER_DISCOVERED_REPO) break;
-        if ((perRepo.get(repoKey(fullName)) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) break;
+        if (perRepoDiscovered >= (isSeed ? MAX_ISSUES_PER_SEEDED_REPO : MAX_ISSUES_PER_DISCOVERED_REPO))
+          break;
+        const perRepoCap = isSeed ? MAX_ISSUES_PER_SEEDED_REPO : MAX_BOUNTIES_PER_DISCOVERED_REPO;
+        if ((perRepo.get(repoKey(fullName)) ?? 0) >= perRepoCap) break;
         const id = `contribute:${repoKey(fullName)}#${issue.number}`;
         if (seen.has(id)) continue;
         if (isAssigned(issue)) continue;
@@ -4802,14 +4808,16 @@ async function aggregateContributions(opts = {}) {
       // A PARTIAL crawl from ANY cause: the governor's budget/secondary abort, an early
       // discovery stop, OR an ordinary /search page failure (supplyFailures) that
       // truncated the primary supply. Any of these ⇒ the pool is incomplete.
-      degraded: Boolean(budgetAborted || secondaryAborted || discoveryBudgetStopped || supplyFailures > 0),
+      degraded: Boolean(
+        budgetAborted || secondaryAborted || discoveryBudgetStopped || supplyFailures > 0
+      ),
       emitted: jobs.length,
       scanned: issues.length
     });
   }
   return jobs;
 }
-var GITHUB_API2, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, DEFAULT_SEARCH_MAX_PAGES, MIN_SEARCH_MAX_PAGES, MAX_SEARCH_MAX_PAGES, DEFAULT_MAX_CONTRIB_ITEMS, MIN_MAX_CONTRIB_ITEMS, MAX_MAX_CONTRIB_ITEMS, DEFAULT_MAX_CONTRIB_ISSUES_SCANNED, MIN_MAX_CONTRIB_ISSUES_SCANNED, MAX_MAX_CONTRIB_ISSUES_SCANNED, MAX_DISCOVERED_REPOS, MAX_ISSUES_PER_DISCOVERED_REPO, DISCOVERY_REPOS_PER_TERM, DISCOVERY_VOCAB_TERMS, DISCOVERY_ISSUE_LABELS, repoKey;
+var GITHUB_API2, CONTRIB_LABEL_QUERIES, CONTRIB_LANGUAGE_QUERIES, CONTRIB_SEARCH_QUERIES, SEARCH_PER_PAGE2, DEFAULT_SEARCH_MAX_PAGES, MIN_SEARCH_MAX_PAGES, MAX_SEARCH_MAX_PAGES, DEFAULT_MAX_CONTRIB_ITEMS, MIN_MAX_CONTRIB_ITEMS, MAX_MAX_CONTRIB_ITEMS, DEFAULT_MAX_CONTRIB_ISSUES_SCANNED, MIN_MAX_CONTRIB_ISSUES_SCANNED, MAX_MAX_CONTRIB_ISSUES_SCANNED, MAX_DISCOVERED_REPOS, MAX_ISSUES_PER_DISCOVERED_REPO, MAX_ISSUES_PER_SEEDED_REPO, DISCOVERY_REPOS_PER_TERM, DISCOVERY_VOCAB_TERMS, DISCOVERY_ISSUE_LABELS, repoKey;
 var init_contributions = __esm({
   "../../packages/core/src/feeds/contributions.ts"() {
     "use strict";
@@ -4866,6 +4874,7 @@ var init_contributions = __esm({
     MAX_MAX_CONTRIB_ISSUES_SCANNED = 5e3;
     MAX_DISCOVERED_REPOS = 15;
     MAX_ISSUES_PER_DISCOVERED_REPO = 3;
+    MAX_ISSUES_PER_SEEDED_REPO = 10;
     DISCOVERY_REPOS_PER_TERM = 20;
     DISCOVERY_VOCAB_TERMS = ["rust", "go", "python", "typescript"];
     DISCOVERY_ISSUE_LABELS = '"good first issue","help wanted","good-first-issue","help-wanted"';
@@ -12376,7 +12385,8 @@ import {
   copyFileSync,
   openSync as openSync3,
   closeSync as closeSync3,
-  unlinkSync as unlinkSync3
+  unlinkSync as unlinkSync3,
+  statSync as statSync2
 } from "fs";
 import { join as join14, dirname as dirname2 } from "path";
 import { homedir as homedir11 } from "os";
