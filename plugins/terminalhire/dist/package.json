@@ -1,6 +1,6 @@
 {
   "name": "terminalhire",
-  "version": "0.39.3",
+  "version": "0.39.4",
   "description": "Local-first job matching for developers — ambient job matches in the Claude Code spinner. Your profile never leaves your machine.",
   "repository": {
     "type": "git",
@@ -27,7 +27,7 @@
     "README.md"
   ],
   "scripts": {
-    "pretest": "npm run build",
+    "pretest": "npm run -w @terminalhire/core build && npm run build",
     "test": "node scripts/run-tests.mjs test",
     "build": "tsup",
     "bundle:plugin": "npm run build && rm -rf ../../plugins/terminalhire/dist && cp -R dist ../../plugins/terminalhire/dist && cp package.json ../../plugins/terminalhire/dist/package.json && cp install.js ../../plugins/terminalhire/dist/install.js && cp statusline-install.js ../../plugins/terminalhire/dist/statusline-install.js && cp postinstall.js ../../plugins/terminalhire/dist/postinstall.js && node ../../scripts/write-bundle-manifest.mjs",

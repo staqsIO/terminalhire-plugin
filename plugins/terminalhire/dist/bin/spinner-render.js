@@ -1390,7 +1390,8 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
       if (!source || !ext) continue;
       const companyRaw = String(m.company).trim().replace(/\s+/g, " ");
       const titleRaw = String(m.title).trim().replace(/\s+/g, " ");
-      const roleKey = `${titleRaw.toLowerCase()}@${companyRaw.toLowerCase()}`;
+      const isRole = source !== "bounty" && source !== "contribute";
+      const roleKey = isRole ? `role@${titleRaw.toLowerCase()}` : `${titleRaw.toLowerCase()}@${companyRaw.toLowerCase()}`;
       const coKey = companyRaw.toLowerCase();
       if (seenRole.has(roleKey)) continue;
       if ((perCompany.get(coKey) || 0) >= COMPANY_CAP) continue;
@@ -1398,7 +1399,6 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
       perCompany.set(coKey, (perCompany.get(coKey) || 0) + 1);
       let title = titleRaw;
       if (title.length > 34) title = title.slice(0, 33).trimEnd() + "\u2026";
-      const company = titleCase(companyRaw);
       const pct = Math.max(1, Math.min(99, Math.round((Number(m.score) || 0) * 100)));
       const token = jobShortToken(String(m.id));
       const url = `${base}/j/${token}`;
@@ -1416,7 +1416,7 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
         out.push(`\u2197 contribute \xB7 ${repoName}${num} \xB7 counts on your r\xE9sum\xE9 \xB7 ${fit} \u2014 ${shortUrl}`);
       } else {
         const fit = m.interest ? m.interest : `${pct}%`;
-        out.push(`\u2197 ${title} @ ${company} \xB7 ${fit} \u2014 ${url}`);
+        out.push(`\u2197 ${title} \xB7 ${fit} \u2014 ${url}`);
       }
       surfacedIds.push(String(m.id));
     }
