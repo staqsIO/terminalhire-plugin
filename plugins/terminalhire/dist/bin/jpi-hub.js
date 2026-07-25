@@ -12584,7 +12584,7 @@ function applyContinuityRank(bounties, continuityOf, { enabled = true } = {}) {
 }
 function filterPaidVisibility(items, { priced = false } = {}) {
   if (priced) return items;
-  return items.filter((j) => j.source !== "bounty");
+  return items.filter((j) => j.source !== "bounty" || j.bounty?.bountySource === "founder");
 }
 function classifyEmptyStatus({ preFilterCount, postFilterCount, priced }) {
   if (postFilterCount > 0) return "ok";

@@ -11360,7 +11360,11 @@ function prompt(question) {
 function formatAmount(b) {
   return b.amountUSD != null ? "$" + b.amountUSD.toLocaleString() : "$\u2014";
 }
-var EFFORT_LABEL = { small: "small (~\xBD day)", medium: "medium (~1 day)", large: "large (multi-day)" };
+var EFFORT_LABEL = {
+  small: "small (~\xBD day)",
+  medium: "medium (~1 day)",
+  large: "large (multi-day)"
+};
 function printBounty(i, job, score, reason, matchedTags, claimedIds = /* @__PURE__ */ new Set(), continuityNote = null) {
   const b = job.bounty ?? {};
   const stars = b.repoStars != null ? ` \xB7 ${b.repoStars}\u2605` : "";
@@ -11373,10 +11377,13 @@ function printBounty(i, job, score, reason, matchedTags, claimedIds = /* @__PURE
   const ref = opportunityShortToken(job.id);
   console.log(`
 ${i + 1}. ${linkTitle(job.title, job.url)} [${ref}]`);
-  console.log(`   ${formatAmount(b)}${effort} \xB7 ${sanitizeText(b.repoFullName ?? job.company)}${stars}${scoreStr}${contend}${badge}`);
+  console.log(
+    `   ${formatAmount(b)}${effort} \xB7 ${sanitizeText(b.repoFullName ?? job.company)}${stars}${scoreStr}${contend}${badge}`
+  );
   if (reason) console.log(`   ${reason}`);
   if (continuityNote) console.log(`   ${continuityNote}`);
-  if (matchedTags && matchedTags.length) console.log(`   Tags matched: ${matchedTags.slice(0, 5).join(", ")}`);
+  if (matchedTags && matchedTags.length)
+    console.log(`   Tags matched: ${matchedTags.slice(0, 5).join(", ")}`);
   console.log(`   id: ${job.id}`);
   console.log(`   Claim: ${sanitizeText(b.claimUrl ?? job.url)}`);
   console.log(
@@ -11422,7 +11429,7 @@ function continuityNoteForRow(entry, isTTY) {
 }
 function filterPaidVisibility(items, { priced = false } = {}) {
   if (priced) return items;
-  return items.filter((j) => j.source !== "bounty");
+  return items.filter((j) => j.source !== "bounty" || j.bounty?.bountySource === "founder");
 }
 function classifyEmptyStatus({ preFilterCount, postFilterCount, priced }) {
   if (postFilterCount > 0) return "ok";
@@ -11483,7 +11490,9 @@ async function run() {
   try {
     const result = await getBounties();
     if (result.status === "empty") {
-      console.log("\nNo bounties available right now. Try again later \u2014 supply refreshes through the day.");
+      console.log(
+        "\nNo bounties available right now. Try again later \u2014 supply refreshes through the day."
+      );
       return;
     }
     if (result.status === "demoted") {
@@ -11510,16 +11519,28 @@ async function run() {
       const r = ranked.get(shown[i].id);
       const continuityEntry = continuityByRepo?.get(shown[i].bounty?.repoFullName);
       const continuityNote = continuityNoteForRow(continuityEntry, process.stdout.isTTY);
-      printBounty(i, shown[i], r?.score ?? 0, r?.reason, r?.matchedTags, claimedIds, continuityNote);
+      printBounty(
+        i,
+        shown[i],
+        r?.score ?? 0,
+        r?.reason,
+        r?.matchedTags,
+        claimedIds,
+        continuityNote
+      );
     }
     if (!SHOW_ALL && bounties.length > shown.length) {
-      console.log(`
-\u2026and ${bounties.length - shown.length} more \u2014 run with --all to see every bounty.`);
+      console.log(
+        `
+\u2026and ${bounties.length - shown.length} more \u2014 run with --all to see every bounty.`
+      );
     }
     if (!process.stdin.isTTY) return;
     console.log("\n" + "\u2500".repeat(70));
-    const pick = await prompt(`
-Enter a number to open a bounty's claim page, or press Enter to exit: `);
+    const pick = await prompt(
+      `
+Enter a number to open a bounty's claim page, or press Enter to exit: `
+    );
     const idx = parseInt(pick, 10) - 1;
     if (Number.isNaN(idx) || idx < 0 || idx >= shown.length) return;
     const chosen = shown[idx];
