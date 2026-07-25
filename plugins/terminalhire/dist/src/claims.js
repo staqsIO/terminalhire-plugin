@@ -223,12 +223,34 @@ function updateClaim(id, patch) {
     return claims[idx];
   });
 }
+function reserveStake(id, stake) {
+  return withClaimsLock(() => {
+    const claims = readClaims();
+    const idx = claims.findIndex((c) => c.id === id);
+    if (idx === -1) return null;
+    if (claims[idx].stake) return null;
+    claims[idx] = { ...claims[idx], stake, updatedAt: nowISO() };
+    writeClaims(claims);
+    return claims[idx];
+  });
+}
 function removeClaim(id) {
   return withClaimsLock(() => {
     const claims = readClaims();
     const next = claims.filter((c) => c.id !== id);
     if (next.length === claims.length) return false;
     writeClaims(next);
+    return true;
+  });
+}
+function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
+  return withClaimsLock(() => {
+    const claims = readClaims();
+    const target = claims.find((c) => c.id === id);
+    if (!target) return false;
+    const actual = target.stake ? target.stake.postedAt : null;
+    if (actual !== expectedStakePostedAt) return false;
+    writeClaims(claims.filter((c) => c.id !== id));
     return true;
   });
 }
@@ -246,6 +268,8 @@ export {
   readClaims,
   recordClaim,
   removeClaim,
+  removeClaimIfStakeMatches,
+  reserveStake,
   toPushedClaim,
   updateClaim
 };

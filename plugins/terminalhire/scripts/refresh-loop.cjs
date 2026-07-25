@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * refresh-loop.js — terminalhire monitor: keeps the job match cache fresh.
+ * refresh-loop.cjs — terminalhire monitor: keeps the job match cache fresh.
  *
  * Cross-platform port of refresh-loop.sh. The .sh launched via `bash …`, which
  * stock Windows PowerShell has no `bash` for, so the SessionStart monitor spawn
  * silently failed on Windows → the spinner cache was never backfilled → an empty
- * spinner forever. This is plain Node (invoked as `node refresh-loop.js <root>`),
+ * spinner forever. This is plain Node (invoked as `node refresh-loop.cjs <root>`),
  * so it runs identically on macOS, Linux, and Windows.
  *
  * Behavior (preserved EXACTLY from the .sh):
@@ -46,7 +46,7 @@ const { homedir } = require('node:os');
 // plausible FIRST creator on a fresh machine (it runs on a loop, before any CLI
 // command), and whichever module creates the dir first wins its mode for the
 // directory's lifetime (TERM-39).
-const { ensureStateDir } = require('./state-dir.js');
+const { ensureStateDir } = require('./state-dir.cjs');
 
 const PLUGIN_ROOT = process.argv[2] || join(dirname(__filename), '..');
 const DISPATCH = join(PLUGIN_ROOT, 'dist', 'bin', 'jpi-dispatch.js');
@@ -336,7 +336,7 @@ function main() {
   loop();
 }
 
-// Run the loop ONLY when executed directly (`node refresh-loop.js …`). When another
+// Run the loop ONLY when executed directly (`node refresh-loop.cjs …`). When another
 // module `require()`s this file (the tests), the lock API is importable without the
 // loop firing — so a concurrent-acquire test can drive acquireLock() in isolation.
 if (require.main === module) {

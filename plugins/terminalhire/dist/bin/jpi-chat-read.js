@@ -2514,7 +2514,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   });
   const { prehash } = eddsaOpts;
   const { BASE, Fp: Fp2, Fn: Fn2 } = Point;
-  const randomBytes4 = eddsaOpts.randomBytes || randomBytes;
+  const randomBytes5 = eddsaOpts.randomBytes || randomBytes;
   const adjustScalarBytes2 = eddsaOpts.adjustScalarBytes || ((bytes) => bytes);
   const domain = eddsaOpts.domain || ((data, ctx, phflag) => {
     _abool2(phflag, "phflag");
@@ -2596,7 +2596,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
     signature: 2 * _size,
     seed: _size
   };
-  function randomSecretKey(seed = randomBytes4(lengths.seed)) {
+  function randomSecretKey(seed = randomBytes5(lengths.seed)) {
     return _abytes2(seed, lengths.seed, "seed");
   }
   function keygen(seed) {
@@ -4122,7 +4122,7 @@ var init_dossier = __esm({
 });
 
 // ../../packages/core/src/credential/synthesis.ts
-var COMPETENCY_NAMES, COMPETENCY_NAME_SET, COMPETENCY_GRADES, COMPETENCY_GRADE_SET, CITATION_CONTRACT, VERIFY_CONTRACT;
+var COMPETENCY_NAMES, COMPETENCY_NAME_SET, COMPETENCY_GRADES, COMPETENCY_GRADE_SET, CITATION_CONTRACT, VERIFY_CONTRACT, STAGE4_CONTRACT;
 var init_synthesis = __esm({
   "../../packages/core/src/credential/synthesis.ts"() {
     "use strict";
@@ -4173,6 +4173,52 @@ var init_synthesis = __esm({
       '{"supported":["c1","c3"]} \u2014 the ids of the claims that survive (omit all others; use',
       '{"supported":[]} if none do). Any surviving id MUST be one you were given.'
     ].join("\n");
+    STAGE4_CONTRACT = [
+      "You are the CLAIM VALIDITY STAGE \u2014 a second, independent, ADVERSARIAL verifier.",
+      "You have NOT seen how any claim below was generated, by whom, or why \u2014 only the",
+      "claims themselves and the source. Your only job is to try to INVALIDATE each claim",
+      "using the FULL, ORIGINAL, UNABRIDGED source object given below \u2014 not a narrow",
+      "excerpt of it, the whole thing.",
+      "",
+      "For each claim: does the FULL source UNEQUIVOCALLY support every assertion in its",
+      "text, with no benefit of the doubt, no inference, no outside knowledge? A claim can",
+      "cite a real, resolvable path and still be FALSE in context \u2014 for example if it",
+      "quotes an early or superseded value while the full record shows the opposite held",
+      "later, or generalizes one narrow fact into a broader claim the record does not",
+      "support. Treat either as UNSUPPORTED. When in doubt, mark it UNSUPPORTED",
+      "(default-to-drop).",
+      "",
+      "ANTICIPATION RULE: a claim asserting the contributor anticipated, or acted ahead",
+      "of, reviewer concerns is supported ONLY if the full record shows the relevant work",
+      "was delivered BEFORE any reviewer raised a related concern. If the full record",
+      "shows a reviewer raised it first, or the ordering cannot be established, that",
+      'specific "anticipated" framing is NOT supported \u2014 mark it UNSUPPORTED rather than',
+      "accept the claim's framing at face value.",
+      "",
+      "OUTPUT FORMAT \u2014 obey exactly: respond with ONLY the JSON object and NOTHING ELSE.",
+      "No preamble, no per-claim commentary, no reasoning prose, no markdown fence, no",
+      "text before or after:",
+      '{"results":[{"id":"c1","supported":true},{"id":"c2","supported":false}]}',
+      "Exactly one entry per claim you were given, each with EXACTLY the keys `id` and",
+      "`supported` and no others."
+    ].join("\n");
+  }
+});
+
+// ../../packages/core/src/credential/ledger.ts
+var init_ledger = __esm({
+  "../../packages/core/src/credential/ledger.ts"() {
+    "use strict";
+  }
+});
+
+// ../../packages/core/src/credential/audit.ts
+var init_audit = __esm({
+  "../../packages/core/src/credential/audit.ts"() {
+    "use strict";
+    init_github();
+    init_contribution_gate();
+    init_vocabulary();
   }
 });
 
@@ -4214,12 +4260,63 @@ var init_src = __esm({
     init_metrics_hygiene();
     init_dossier();
     init_synthesis();
+    init_ledger();
+    init_audit();
     init_short_token();
   }
 });
 
+// src/test-race-barrier.ts
+import { closeSync, constants, existsSync, lstatSync, openSync } from "fs";
+import { join as join2 } from "path";
+function syncSleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function waitForTestRaceBarrier(phase) {
+  const root = process.env[ENV_VAR];
+  if (!root) return;
+  const phaseDir = join2(root, phase);
+  if (!existsSync(phaseDir)) return;
+  const readyFile = join2(phaseDir, `ready-${process.pid}`);
+  const goFile = join2(phaseDir, "go");
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  if (lstatSync(readyFile, { throwIfNoEntry: false })) {
+    throw new Error(
+      `terminalhire: test race barrier "${phase}" found something already at its ready marker path ${readyFile} (regular file or symlink) \u2014 refusing rather than following or overwriting whatever is already there (this only fires under ${ENV_VAR}, never in production).`
+    );
+  }
+  let readyFd;
+  try {
+    readyFd = openSync(
+      readyFile,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | noFollow
+    );
+  } catch (err) {
+    throw new Error(
+      `terminalhire: test race barrier "${phase}" could not create its ready marker at ${readyFile} (${err instanceof Error ? err.message : String(err)}) \u2014 refusing rather than blocking on or writing through whatever is already there (this only fires under ${ENV_VAR}, never in production).`
+    );
+  }
+  closeSync(readyFd);
+  const deadline = Date.now() + 3e4;
+  while (!existsSync(goFile)) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `terminalhire: test race barrier "${phase}" timed out waiting for ${goFile} (the test process never released it \u2014 this only fires under ${ENV_VAR}, never in production).`
+      );
+    }
+    syncSleepMs(2);
+  }
+}
+var ENV_VAR;
+var init_test_race_barrier = __esm({
+  "src/test-race-barrier.ts"() {
+    "use strict";
+    ENV_VAR = "TERMINALHIRE_TEST_RACE_BARRIER_DIR";
+  }
+});
+
 // src/state-dir.ts
-import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
+import { closeSync as closeSync2, constants as constants2, fchmodSync, fstatSync, mkdirSync, openSync as openSync2 } from "fs";
 function warnStateDirOnce(dir, message) {
   if (warnedDirs.has(dir)) return;
   warnedDirs.add(dir);
@@ -4230,10 +4327,10 @@ function warnStateDirOnce(dir, message) {
 }
 function ensureStateDir(dir) {
   mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
-  const noFollow = constants.O_NOFOLLOW ?? 0;
+  const noFollow = constants2.O_NOFOLLOW ?? 0;
   let fd;
   try {
-    fd = openSync(dir, constants.O_RDONLY | noFollow);
+    fd = openSync2(dir, constants2.O_RDONLY | noFollow);
   } catch (err) {
     if (err?.code === "ELOOP") {
       warnStateDirOnce(
@@ -4255,12 +4352,36 @@ function ensureStateDir(dir) {
     return STATE_DIR_UNVERIFIED;
   } finally {
     try {
-      closeSync(fd);
+      closeSync2(fd);
     } catch {
     }
   }
 }
-var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs;
+function applyStateDirSecretPolicy(dir, status) {
+  if (status === STATE_DIR_SYMLINK) {
+    throw new Error(
+      `terminalhire: refusing to write key material into ${dir} \u2014 it is a symlink, not a directory.
+A write through it would FOLLOW THE LINK and place key/token material wherever the symlink points, outside our control and outside the "owner-only" (0700) guarantee this directory is supposed to carry.
+Fix: remove the symlink so terminalhire can recreate it as a real directory \u2014
+  rm ${dir}
+then re-run the command. If the symlink is intentional, point TERMINALHIRE_DIR at a real directory instead of routing it through this one.`
+    );
+  }
+  if (status === STATE_DIR_UNVERIFIED && !warnedUnverifiedSecretWriteThisProcess) {
+    warnedUnverifiedSecretWriteThisProcess = true;
+    try {
+      process.stderr.write(
+        `terminalhire: could not verify ${dir}'s permissions (expected on Windows \u2014 POSIX mode bits do not apply there) \u2014 proceeding, but the "owner-only" guarantee on key/token storage is NOT enforced on this platform.
+`
+      );
+    } catch {
+    }
+  }
+}
+function ensureStateDirForSecret(dir) {
+  applyStateDirSecretPolicy(dir, ensureStateDir(dir));
+}
+var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs, warnedUnverifiedSecretWriteThisProcess;
 var init_state_dir = __esm({
   "src/state-dir.ts"() {
     "use strict";
@@ -4269,22 +4390,69 @@ var init_state_dir = __esm({
     STATE_DIR_SYMLINK = "symlink";
     STATE_DIR_UNVERIFIED = "unverified";
     warnedDirs = /* @__PURE__ */ new Set();
+    warnedUnverifiedSecretWriteThisProcess = false;
   }
 });
 
 // src/github-auth.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes3 } from "crypto";
-import { readFileSync as readFileSync2, writeFileSync, existsSync, rmSync, renameSync } from "fs";
-import { join as join2 } from "path";
+import {
+  readFileSync as readFileSync2,
+  writeFileSync,
+  existsSync as existsSync2,
+  rmSync,
+  renameSync,
+  linkSync,
+  unlinkSync
+} from "fs";
+import { join as join3 } from "path";
 import { homedir } from "os";
-async function loadKey() {
-  ensureStateDir(TERMINALHIRE_DIR);
-  if (existsSync(KEY_FILE)) {
-    return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");
+function isValidKeyHex(value) {
+  return KEY_HEX_RE.test(value);
+}
+function readKeyFileOrThrow() {
+  const raw = readFileSync2(KEY_FILE, "utf8").trim();
+  if (!isValidKeyHex(raw)) {
+    throw new Error(
+      `terminalhire: the shared encryption key at ${KEY_FILE} is not in the expected format (expected exactly ${KEY_BYTES * 2} lowercase-hex characters \u2014 a ${KEY_BYTES}-byte key).
+This key decrypts the GitHub token, local profile, and chat identity stores under ~/.terminalhire \u2014 it should never be hand-edited.
+Recovery: if you intend to reset it, delete the file yourself (this INVALIDATES every encrypted store under ~/.terminalhire, which will need to be re-created/re-authenticated):
+  rm ${KEY_FILE}`
+    );
   }
+  return Buffer.from(raw, "hex");
+}
+function publishKeyBlob(key) {
+  const tmpFile = `${KEY_FILE}.${process.pid}.${randomBytes3(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync(tmpFile, key.toString("hex"), { encoding: "utf8", mode: 384, flag: "wx" });
+    try {
+      linkSync(tmpFile, KEY_FILE);
+      return true;
+    } catch (err) {
+      if (err?.code === "EEXIST") {
+        return false;
+      }
+      throw err;
+    }
+  } finally {
+    try {
+      unlinkSync(tmpFile);
+    } catch {
+    }
+  }
+}
+async function loadKey() {
+  ensureStateDirForSecret(TERMINALHIRE_DIR);
+  if (existsSync2(KEY_FILE)) {
+    return readKeyFileOrThrow();
+  }
+  waitForTestRaceBarrier("key");
   const key = randomBytes3(KEY_BYTES);
-  writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
-  return key;
+  if (publishKeyBlob(key)) {
+    return key;
+  }
+  return readKeyFileOrThrow();
 }
 function encrypt(plaintext, key) {
   const iv = randomBytes3(IV_BYTES);
@@ -4302,62 +4470,119 @@ function decrypt(blob, key) {
   ]);
   return plain.toString("utf8");
 }
-var TERMINALHIRE_DIR, TOKEN_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES;
+var TERMINALHIRE_DIR, TOKEN_FILE, KEY_FILE, ALGO, KEY_BYTES, IV_BYTES, KEY_HEX_RE;
 var init_github_auth = __esm({
   "src/github-auth.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
-    TOKEN_FILE = join2(TERMINALHIRE_DIR, "github-token.enc");
-    KEY_FILE = join2(TERMINALHIRE_DIR, "key");
+    init_test_race_barrier();
+    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join3(homedir(), ".terminalhire");
+    TOKEN_FILE = join3(TERMINALHIRE_DIR, "github-token.enc");
+    KEY_FILE = join3(TERMINALHIRE_DIR, "key");
     ALGO = "aes-256-gcm";
     KEY_BYTES = 32;
     IV_BYTES = 12;
+    KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
   }
 });
 
 // src/chat-keystore.ts
-import { existsSync as existsSync2, readFileSync as readFileSync3, writeFileSync as writeFileSync2, rmSync as rmSync2 } from "fs";
+import { existsSync as existsSync3, linkSync as linkSync2, readFileSync as readFileSync3, rmSync as rmSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync2 } from "fs";
+import { randomBytes as randomBytes4 } from "crypto";
 import { homedir as homedir2 } from "os";
-import { join as join3 } from "path";
+import { join as join4 } from "path";
 async function loadOrCreateIdentity() {
   const key = await loadKey();
-  if (existsSync2(IDENTITY_FILE)) {
-    const blob2 = JSON.parse(readFileSync3(IDENTITY_FILE, "utf8"));
-    return JSON.parse(decrypt(blob2, key));
+  if (existsSync3(IDENTITY_FILE)) {
+    return readIdentityFileOrThrow(key);
   }
+  waitForTestRaceBarrier("identity");
   const keypair = generateIdentityKeypair();
-  ensureStateDir(TERMINALHIRE_DIR2);
+  ensureStateDirForSecret(TERMINALHIRE_DIR2);
   const blob = encrypt(JSON.stringify(keypair), key);
-  writeFileSync2(IDENTITY_FILE, JSON.stringify(blob, null, 2), { mode: 384, encoding: "utf8" });
-  return keypair;
+  if (publishIdentityBlob(blob)) {
+    return keypair;
+  }
+  return readIdentityFileOrThrow(key);
 }
-var TERMINALHIRE_DIR2, IDENTITY_FILE;
+function isValidChatKeypairShape(value) {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value;
+  return typeof v.publicKey === "string" && typeof v.privateKey === "string" && HEX64_RE.test(v.publicKey) && HEX64_RE.test(v.privateKey);
+}
+function readIdentityFileOrThrow(key) {
+  try {
+    const raw = readFileSync3(IDENTITY_FILE, "utf8");
+    const blob = JSON.parse(raw);
+    const decrypted = decrypt(blob, key);
+    const parsed = JSON.parse(decrypted);
+    if (!isValidChatKeypairShape(parsed)) {
+      throw new Error(
+        "decrypted identity has an unexpected shape (expected { publicKey, privateKey }, each a 64-char lowercase-hex string)"
+      );
+    }
+    return parsed;
+  } catch (err) {
+    throw new Error(
+      `terminalhire: the chat identity at ${IDENTITY_FILE} could not be read (${err instanceof Error ? err.message : String(err)}).
+This file holds your chat identity \u2014 regenerating it silently would change your safety number with every connection, which looks identical to a man-in-the-middle attack from their side.
+Recovery: if you intend to reset your chat identity, delete the file yourself and re-run this command:
+  rm ${IDENTITY_FILE}`
+    );
+  }
+}
+function publishIdentityBlob(blob) {
+  const tmpFile = `${IDENTITY_FILE}.${process.pid}.${randomBytes4(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync2(tmpFile, JSON.stringify(blob, null, 2), {
+      encoding: "utf8",
+      mode: 384,
+      flag: "wx"
+    });
+    try {
+      linkSync2(tmpFile, IDENTITY_FILE);
+      return true;
+    } catch (err) {
+      if (err?.code === "EEXIST") {
+        return false;
+      }
+      throw err;
+    }
+  } finally {
+    try {
+      unlinkSync2(tmpFile);
+    } catch {
+    }
+  }
+}
+var TERMINALHIRE_DIR2, IDENTITY_FILE, HEX64_RE;
 var init_chat_keystore = __esm({
   "src/chat-keystore.ts"() {
     "use strict";
+    init_test_race_barrier();
     init_src();
     init_github_auth();
     init_state_dir();
-    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
-    IDENTITY_FILE = join3(TERMINALHIRE_DIR2, "chat-identity.enc");
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join4(homedir2(), ".terminalhire");
+    IDENTITY_FILE = join4(TERMINALHIRE_DIR2, "chat-identity.enc");
+    HEX64_RE = /^[0-9a-f]{64}$/;
   }
 });
 
 // src/web-session.ts
-import { chmodSync, existsSync as existsSync3, readFileSync as readFileSync4, rmSync as rmSync3, writeFileSync as writeFileSync3 } from "fs";
+import { chmodSync, existsSync as existsSync4, readFileSync as readFileSync4, rmSync as rmSync3, writeFileSync as writeFileSync3 } from "fs";
 import { homedir as homedir3 } from "os";
-import { join as join4 } from "path";
+import { join as join5 } from "path";
 function terminalhireDir() {
-  return process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
+  return process.env.TERMINALHIRE_DIR || join5(homedir3(), ".terminalhire");
 }
 function webSessionFilePath() {
-  return join4(terminalhireDir(), "web-session");
+  return join5(terminalhireDir(), "web-session");
 }
 function readWebSessionFile() {
   try {
     const path = webSessionFilePath();
-    if (!existsSync3(path)) return null;
+    if (!existsSync4(path)) return null;
     const v = readFileSync4(path, "utf8").trim();
     return v.length > 0 ? v : null;
   } catch {
@@ -4378,12 +4603,12 @@ var init_web_session = __esm({
 });
 
 // src/chat-client.ts
-import { existsSync as existsSync4, readFileSync as readFileSync5, writeFileSync as writeFileSync4 } from "fs";
+import { existsSync as existsSync5, readFileSync as readFileSync5, writeFileSync as writeFileSync4 } from "fs";
 import { homedir as homedir4 } from "os";
-import { join as join5 } from "path";
+import { join as join6 } from "path";
 function defaultReadPeerPins() {
   try {
-    if (!existsSync4(PEERS_FILE)) return {};
+    if (!existsSync5(PEERS_FILE)) return {};
     const parsed = JSON.parse(readFileSync5(PEERS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
@@ -4584,8 +4809,8 @@ var init_chat_client = __esm({
     init_state_dir();
     CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE = "__jpi_gh_session";
-    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
-    PEERS_FILE = join5(TERMINALHIRE_DIR3, "chat-peers.json");
+    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join6(homedir4(), ".terminalhire");
+    PEERS_FILE = join6(TERMINALHIRE_DIR3, "chat-peers.json");
     REQUEST_TIMEOUT_MS = 1e4;
     ChatNotLinkedError = class extends Error {
       constructor() {
@@ -4629,12 +4854,12 @@ var init_chat_client = __esm({
 });
 
 // src/config.ts
-import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, existsSync as existsSync5 } from "fs";
-import { join as join6 } from "path";
+import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, existsSync as existsSync6 } from "fs";
+import { join as join7 } from "path";
 import { homedir as homedir5 } from "os";
 function readConfig() {
   try {
-    if (!existsSync5(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
+    if (!existsSync6(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
     const raw = readFileSync6(CONFIG_FILE, "utf8");
     const parsed = JSON.parse(raw);
     return { ...DEFAULT_CONFIG, ...parsed };
@@ -4659,8 +4884,8 @@ var init_config = __esm({
   "src/config.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join6(homedir5(), ".terminalhire");
-    CONFIG_FILE = join6(TERMINALHIRE_DIR4, "config.json");
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join7(homedir5(), ".terminalhire");
+    CONFIG_FILE = join7(TERMINALHIRE_DIR4, "config.json");
     DEFAULT_CONFIG = {
       nudge: "session",
       peerConnect: false,
@@ -4733,9 +4958,9 @@ var init_tui_core = __esm({
 
 // bin/jpi-chat.js
 import { createInterface } from "readline";
-import { existsSync as existsSync6, readFileSync as readFileSync7 } from "fs";
+import { existsSync as existsSync7, readFileSync as readFileSync7 } from "fs";
 import { homedir as homedir6 } from "os";
-import { join as join7 } from "path";
+import { join as join8 } from "path";
 function defaultPromptAck({ input = process.stdin, output = process.stdout } = {}) {
   if (!input || input.isTTY !== true) return Promise.resolve(false);
   const rl = createInterface({ input, output });
@@ -4873,16 +5098,16 @@ var init_jpi_chat = __esm({
 });
 
 // bin/jpi-chat-read.js
-import { existsSync as existsSync7, readFileSync as readFileSync8, writeFileSync as writeFileSync6 } from "fs";
+import { existsSync as existsSync8, readFileSync as readFileSync8, writeFileSync as writeFileSync6 } from "fs";
 import { homedir as homedir7 } from "os";
-import { join as join8 } from "path";
+import { join as join9 } from "path";
 async function syncUnreadBadge(deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   const cacheFile = deps.cacheFile ?? INDEX_CACHE_FILE;
   try {
     const cookie = readCookie();
-    if (!cookie || !existsSync7(cacheFile)) return;
+    if (!cookie || !existsSync8(cacheFile)) return;
     const res = await fetchImpl(`${CHAT_BASE3}/api/chat/inbox`, {
       method: "GET",
       headers: { Cookie: `${GH_SESSION_COOKIE3}=${cookie}` },
@@ -4903,7 +5128,7 @@ async function syncUnreadBadge(deps = {}) {
 }
 function readReadCursors() {
   try {
-    if (!existsSync7(READS_FILE)) return {};
+    if (!existsSync8(READS_FILE)) return {};
     const parsed = JSON.parse(readFileSync8(READS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
@@ -5280,9 +5505,9 @@ var init_jpi_chat_read = __esm({
     init_jpi_chat();
     CHAT_BASE3 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE3 = "__jpi_gh_session";
-    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join8(homedir7(), ".terminalhire");
-    READS_FILE = join8(TERMINALHIRE_DIR5, "chat-reads.json");
-    INDEX_CACHE_FILE = join8(TERMINALHIRE_DIR5, "index-cache.json");
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join9(homedir7(), ".terminalhire");
+    READS_FILE = join9(TERMINALHIRE_DIR5, "chat-reads.json");
+    INDEX_CACHE_FILE = join9(TERMINALHIRE_DIR5, "index-cache.json");
     REACHABLE_DISPLAY = { shareActivity: false, optin: false, lastSeen: null };
   }
 });

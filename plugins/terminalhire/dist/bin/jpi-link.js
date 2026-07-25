@@ -51,7 +51,31 @@ function ensureStateDir(dir) {
     }
   }
 }
-var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs;
+function applyStateDirSecretPolicy(dir, status) {
+  if (status === STATE_DIR_SYMLINK) {
+    throw new Error(
+      `terminalhire: refusing to write key material into ${dir} \u2014 it is a symlink, not a directory.
+A write through it would FOLLOW THE LINK and place key/token material wherever the symlink points, outside our control and outside the "owner-only" (0700) guarantee this directory is supposed to carry.
+Fix: remove the symlink so terminalhire can recreate it as a real directory \u2014
+  rm ${dir}
+then re-run the command. If the symlink is intentional, point TERMINALHIRE_DIR at a real directory instead of routing it through this one.`
+    );
+  }
+  if (status === STATE_DIR_UNVERIFIED && !warnedUnverifiedSecretWriteThisProcess) {
+    warnedUnverifiedSecretWriteThisProcess = true;
+    try {
+      process.stderr.write(
+        `terminalhire: could not verify ${dir}'s permissions (expected on Windows \u2014 POSIX mode bits do not apply there) \u2014 proceeding, but the "owner-only" guarantee on key/token storage is NOT enforced on this platform.
+`
+      );
+    } catch {
+    }
+  }
+}
+function ensureStateDirForSecret(dir) {
+  applyStateDirSecretPolicy(dir, ensureStateDir(dir));
+}
+var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs, warnedUnverifiedSecretWriteThisProcess;
 var init_state_dir = __esm({
   "src/state-dir.ts"() {
     "use strict";
@@ -60,6 +84,7 @@ var init_state_dir = __esm({
     STATE_DIR_SYMLINK = "symlink";
     STATE_DIR_UNVERIFIED = "unverified";
     warnedDirs = /* @__PURE__ */ new Set();
+    warnedUnverifiedSecretWriteThisProcess = false;
   }
 });
 
@@ -84,7 +109,7 @@ function readWebSessionFile() {
   }
 }
 function writeWebSessionFile(token) {
-  ensureStateDir(terminalhireDir());
+  ensureStateDirForSecret(terminalhireDir());
   const path = webSessionFilePath();
   writeFileSync(path, token, { mode: 384, encoding: "utf8" });
   try {

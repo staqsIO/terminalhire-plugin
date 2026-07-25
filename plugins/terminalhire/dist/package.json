@@ -1,6 +1,6 @@
 {
   "name": "terminalhire",
-  "version": "0.38.0",
+  "version": "0.39.0",
   "description": "Local-first job matching for developers — ambient job matches in the Claude Code spinner. Your profile never leaves your machine.",
   "repository": {
     "type": "git",
@@ -51,6 +51,7 @@
   "author": "staqs",
   "license": "MIT",
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.112.3",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/node": "^20.12.0",
     "tsup": "^8.5.1",

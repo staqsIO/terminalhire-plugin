@@ -1,7 +1,19 @@
 // src/repo-policy.ts
 import { createHash } from "crypto";
 var GH_API = "https://api.github.com";
+var GH_API_ORIGIN = "https://api.github.com";
 var GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
+function ghHeaders(url, token) {
+  if (!token) return GH_HEADERS;
+  let origin;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    return GH_HEADERS;
+  }
+  if (origin !== GH_API_ORIGIN) return GH_HEADERS;
+  return { ...GH_HEADERS, Authorization: `Bearer ${token}` };
+}
 var MAX_REQUESTS = 7;
 var POLICY_RULESET_VERSION = 2;
 var AI_SIGNAL_PATTERNS = [
@@ -57,15 +69,46 @@ var CANDIDATE_GROUPS = [
   ["AGENTS.md", "AGENTS.MD"],
   [".github/PULL_REQUEST_TEMPLATE.md", "PULL_REQUEST_TEMPLATE.md"]
 ];
-async function fetchContentsFile(fetchImpl, repoFullName, path) {
+function isRateLimited(res) {
+  return res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0";
+}
+async function classifyFailure(res) {
+  if (res.status === 401) return "credential";
+  if (res.status !== 403) return "other";
+  if (res.headers.get("retry-after")) return "throttle";
+  if (res.headers.get("x-ratelimit-remaining") === "0") return "throttle";
+  let message = "";
   try {
-    const res = await fetchImpl(`${GH_API}/repos/${repoFullName}/contents/${path}`, {
-      headers: GH_HEADERS,
+    const peeked = await res.clone().json();
+    message = typeof peeked?.message === "string" ? peeked.message.toLowerCase() : "";
+  } catch {
+    return "other";
+  }
+  if (message.includes("secondary rate limit") || message.includes("abuse")) return "throttle";
+  if (message.includes("bad credentials") || message.includes("requires authentication") || message.includes("must authenticate") || message.includes("login attempts exceeded")) {
+    return "credential";
+  }
+  return "other";
+}
+async function fetchContentsFile(fetchImpl, repoFullName, path, token, onTokenRejected) {
+  try {
+    const url = `${GH_API}/repos/${repoFullName}/contents/${path}`;
+    let res = await fetchImpl(url, {
+      headers: ghHeaders(url, token),
       signal: AbortSignal.timeout(1e4)
     });
+    let failure = await classifyFailure(res);
+    if (token && failure === "credential") {
+      onTokenRejected();
+      res = await fetchImpl(url, { headers: GH_HEADERS, signal: AbortSignal.timeout(1e4) });
+      failure = await classifyFailure(res);
+    }
     if (res.status === 404) return { ok: true, missing: true, content: null };
-    if (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0") {
-      return { ok: false, missing: false, content: null };
+    if (failure === "throttle") {
+      return { ok: false, missing: false, content: null, throttled: true };
+    }
+    if (isRateLimited(res)) {
+      return { ok: false, missing: false, content: null, throttled: true };
     }
     if (!res.ok) return { ok: false, missing: false, content: null };
     const body = await res.json();
@@ -134,6 +177,7 @@ function auditContent(files) {
 }
 async function checkRepoPolicy(repoFullName, opts = {}) {
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  let activeToken = opts.token;
   let requestsUsed = 0;
   let hadError = false;
   let truncated = false;
@@ -145,9 +189,12 @@ async function checkRepoPolicy(repoFullName, opts = {}) {
         break outer;
       }
       requestsUsed++;
-      const outcome = await fetchContentsFile(fetchImpl, repoFullName, path);
+      const outcome = await fetchContentsFile(fetchImpl, repoFullName, path, activeToken, () => {
+        activeToken = void 0;
+      });
       if (!outcome.ok) {
         hadError = true;
+        if (outcome.throttled) break outer;
         continue;
       }
       if (outcome.missing) continue;
@@ -156,6 +203,35 @@ async function checkRepoPolicy(repoFullName, opts = {}) {
   }
   const { hits, requirements, verdict, assignment } = auditContent(files);
   const scanComplete = !hadError && !truncated;
+  if (verdict === "prohibited") {
+    return {
+      status: "flagged",
+      verdict,
+      hits,
+      requirements,
+      assignment,
+      rulesetVersion: POLICY_RULESET_VERSION,
+      contentHash: hashFiles(files),
+      scanComplete,
+      files
+    };
+  }
+  if (!scanComplete) {
+    return {
+      status: "unavailable",
+      // The zero-hit error scan keeps its historical shape (`'unavailable'`,
+      // nothing was classified); a partial scan that DID classify something
+      // keeps that verdict so the display can show it.
+      verdict: hits.length > 0 ? verdict : "unavailable",
+      hits,
+      requirements,
+      assignment,
+      rulesetVersion: POLICY_RULESET_VERSION,
+      contentHash: hashFiles(files),
+      scanComplete,
+      files
+    };
+  }
   if (hits.length > 0) {
     return {
       status: "flagged",
@@ -165,19 +241,8 @@ async function checkRepoPolicy(repoFullName, opts = {}) {
       assignment,
       rulesetVersion: POLICY_RULESET_VERSION,
       contentHash: hashFiles(files),
-      scanComplete
-    };
-  }
-  if (hadError) {
-    return {
-      status: "unavailable",
-      verdict: "unavailable",
-      hits: [],
-      requirements,
-      assignment,
-      rulesetVersion: POLICY_RULESET_VERSION,
-      contentHash: hashFiles(files),
-      scanComplete
+      scanComplete,
+      files
     };
   }
   return {
@@ -188,11 +253,13 @@ async function checkRepoPolicy(repoFullName, opts = {}) {
     assignment,
     rulesetVersion: POLICY_RULESET_VERSION,
     contentHash: hashFiles(files),
-    scanComplete
+    scanComplete,
+    files
   };
 }
 export {
   POLICY_RULESET_VERSION,
   auditContent,
-  checkRepoPolicy
+  checkRepoPolicy,
+  ghHeaders
 };

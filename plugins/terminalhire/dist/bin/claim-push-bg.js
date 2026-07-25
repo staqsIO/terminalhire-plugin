@@ -50,7 +50,31 @@ function ensureStateDir(dir) {
     }
   }
 }
-var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs;
+function applyStateDirSecretPolicy(dir, status) {
+  if (status === STATE_DIR_SYMLINK) {
+    throw new Error(
+      `terminalhire: refusing to write key material into ${dir} \u2014 it is a symlink, not a directory.
+A write through it would FOLLOW THE LINK and place key/token material wherever the symlink points, outside our control and outside the "owner-only" (0700) guarantee this directory is supposed to carry.
+Fix: remove the symlink so terminalhire can recreate it as a real directory \u2014
+  rm ${dir}
+then re-run the command. If the symlink is intentional, point TERMINALHIRE_DIR at a real directory instead of routing it through this one.`
+    );
+  }
+  if (status === STATE_DIR_UNVERIFIED && !warnedUnverifiedSecretWriteThisProcess) {
+    warnedUnverifiedSecretWriteThisProcess = true;
+    try {
+      process.stderr.write(
+        `terminalhire: could not verify ${dir}'s permissions (expected on Windows \u2014 POSIX mode bits do not apply there) \u2014 proceeding, but the "owner-only" guarantee on key/token storage is NOT enforced on this platform.
+`
+      );
+    } catch {
+    }
+  }
+}
+function ensureStateDirForSecret(dir) {
+  applyStateDirSecretPolicy(dir, ensureStateDir(dir));
+}
+var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs, warnedUnverifiedSecretWriteThisProcess;
 var init_state_dir = __esm({
   "src/state-dir.ts"() {
     "use strict";
@@ -59,6 +83,7 @@ var init_state_dir = __esm({
     STATE_DIR_SYMLINK = "symlink";
     STATE_DIR_UNVERIFIED = "unverified";
     warnedDirs = /* @__PURE__ */ new Set();
+    warnedUnverifiedSecretWriteThisProcess = false;
   }
 });
 
@@ -73,6 +98,8 @@ __export(claims_exports, {
   readClaims: () => readClaims,
   recordClaim: () => recordClaim,
   removeClaim: () => removeClaim,
+  removeClaimIfStakeMatches: () => removeClaimIfStakeMatches,
+  reserveStake: () => reserveStake,
   toPushedClaim: () => toPushedClaim,
   updateClaim: () => updateClaim
 });
@@ -81,12 +108,12 @@ import {
   writeFileSync as writeFileSync2,
   mkdirSync as mkdirSync2,
   renameSync as renameSync2,
-  existsSync as existsSync2,
+  existsSync as existsSync3,
   rmSync as rmSync2,
   statSync
 } from "fs";
 import { randomBytes as randomBytes2 } from "crypto";
-import { join as join2 } from "path";
+import { join as join3 } from "path";
 import { homedir as homedir2 } from "os";
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -142,7 +169,7 @@ function normalizeClaim(c) {
 }
 function readClaims() {
   try {
-    if (!existsSync2(CLAIMS_FILE)) return [];
+    if (!existsSync3(CLAIMS_FILE)) return [];
     const data = JSON.parse(readFileSync2(CLAIMS_FILE, "utf8"));
     const claims = Array.isArray(data?.claims) ? data.claims : [];
     return claims.map(normalizeClaim);
@@ -215,12 +242,34 @@ function updateClaim(id, patch) {
     return claims[idx];
   });
 }
+function reserveStake(id, stake) {
+  return withClaimsLock(() => {
+    const claims = readClaims();
+    const idx = claims.findIndex((c) => c.id === id);
+    if (idx === -1) return null;
+    if (claims[idx].stake) return null;
+    claims[idx] = { ...claims[idx], stake, updatedAt: nowISO() };
+    writeClaims(claims);
+    return claims[idx];
+  });
+}
 function removeClaim(id) {
   return withClaimsLock(() => {
     const claims = readClaims();
     const next = claims.filter((c) => c.id !== id);
     if (next.length === claims.length) return false;
     writeClaims(next);
+    return true;
+  });
+}
+function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
+  return withClaimsLock(() => {
+    const claims = readClaims();
+    const target = claims.find((c) => c.id === id);
+    if (!target) return false;
+    const actual = target.stake ? target.stake.postedAt : null;
+    if (actual !== expectedStakePostedAt) return false;
+    writeClaims(claims.filter((c) => c.id !== id));
     return true;
   });
 }
@@ -234,8 +283,8 @@ var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
-    CLAIMS_FILE = join2(TERMINALHIRE_DIR2, "claims.json");
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
+    CLAIMS_FILE = join3(TERMINALHIRE_DIR2, "claims.json");
     LOCK_DIR = `${CLAIMS_FILE}.lock`;
     LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
     LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
@@ -274,30 +323,122 @@ var init_claims = __esm({
 
 // bin/claim-push-bg.js
 import { createHash } from "crypto";
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, existsSync as existsSync3, rmSync as rmSync3 } from "fs";
-import { join as join3 } from "path";
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, existsSync as existsSync4, rmSync as rmSync3 } from "fs";
+import { join as join4 } from "path";
 import { homedir as homedir3 } from "os";
 
 // src/github-auth.ts
 init_state_dir();
 import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
-import { readFileSync, writeFileSync, existsSync, rmSync, renameSync } from "fs";
-import { join } from "path";
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync as existsSync2,
+  rmSync,
+  renameSync,
+  linkSync,
+  unlinkSync
+} from "fs";
+import { join as join2 } from "path";
 import { homedir } from "os";
-var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
-var TOKEN_FILE = join(TERMINALHIRE_DIR, "github-token.enc");
-var KEY_FILE = join(TERMINALHIRE_DIR, "key");
+
+// src/test-race-barrier.ts
+import { closeSync as closeSync2, constants as constants2, existsSync, lstatSync, openSync as openSync2 } from "fs";
+import { join } from "path";
+var ENV_VAR = "TERMINALHIRE_TEST_RACE_BARRIER_DIR";
+function syncSleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function waitForTestRaceBarrier(phase) {
+  const root = process.env[ENV_VAR];
+  if (!root) return;
+  const phaseDir = join(root, phase);
+  if (!existsSync(phaseDir)) return;
+  const readyFile = join(phaseDir, `ready-${process.pid}`);
+  const goFile = join(phaseDir, "go");
+  const noFollow = constants2.O_NOFOLLOW ?? 0;
+  if (lstatSync(readyFile, { throwIfNoEntry: false })) {
+    throw new Error(
+      `terminalhire: test race barrier "${phase}" found something already at its ready marker path ${readyFile} (regular file or symlink) \u2014 refusing rather than following or overwriting whatever is already there (this only fires under ${ENV_VAR}, never in production).`
+    );
+  }
+  let readyFd;
+  try {
+    readyFd = openSync2(
+      readyFile,
+      constants2.O_CREAT | constants2.O_EXCL | constants2.O_WRONLY | noFollow
+    );
+  } catch (err) {
+    throw new Error(
+      `terminalhire: test race barrier "${phase}" could not create its ready marker at ${readyFile} (${err instanceof Error ? err.message : String(err)}) \u2014 refusing rather than blocking on or writing through whatever is already there (this only fires under ${ENV_VAR}, never in production).`
+    );
+  }
+  closeSync2(readyFd);
+  const deadline = Date.now() + 3e4;
+  while (!existsSync(goFile)) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `terminalhire: test race barrier "${phase}" timed out waiting for ${goFile} (the test process never released it \u2014 this only fires under ${ENV_VAR}, never in production).`
+      );
+    }
+    syncSleepMs(2);
+  }
+}
+
+// src/github-auth.ts
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
+var TOKEN_FILE = join2(TERMINALHIRE_DIR, "github-token.enc");
+var KEY_FILE = join2(TERMINALHIRE_DIR, "key");
 var ALGO = "aes-256-gcm";
 var KEY_BYTES = 32;
 var IV_BYTES = 12;
-async function loadKey() {
-  ensureStateDir(TERMINALHIRE_DIR);
-  if (existsSync(KEY_FILE)) {
-    return Buffer.from(readFileSync(KEY_FILE, "utf8").trim(), "hex");
+var KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
+function isValidKeyHex(value) {
+  return KEY_HEX_RE.test(value);
+}
+function readKeyFileOrThrow() {
+  const raw = readFileSync(KEY_FILE, "utf8").trim();
+  if (!isValidKeyHex(raw)) {
+    throw new Error(
+      `terminalhire: the shared encryption key at ${KEY_FILE} is not in the expected format (expected exactly ${KEY_BYTES * 2} lowercase-hex characters \u2014 a ${KEY_BYTES}-byte key).
+This key decrypts the GitHub token, local profile, and chat identity stores under ~/.terminalhire \u2014 it should never be hand-edited.
+Recovery: if you intend to reset it, delete the file yourself (this INVALIDATES every encrypted store under ~/.terminalhire, which will need to be re-created/re-authenticated):
+  rm ${KEY_FILE}`
+    );
   }
+  return Buffer.from(raw, "hex");
+}
+function publishKeyBlob(key) {
+  const tmpFile = `${KEY_FILE}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync(tmpFile, key.toString("hex"), { encoding: "utf8", mode: 384, flag: "wx" });
+    try {
+      linkSync(tmpFile, KEY_FILE);
+      return true;
+    } catch (err) {
+      if (err?.code === "EEXIST") {
+        return false;
+      }
+      throw err;
+    }
+  } finally {
+    try {
+      unlinkSync(tmpFile);
+    } catch {
+    }
+  }
+}
+async function loadKey() {
+  ensureStateDirForSecret(TERMINALHIRE_DIR);
+  if (existsSync2(KEY_FILE)) {
+    return readKeyFileOrThrow();
+  }
+  waitForTestRaceBarrier("key");
   const key = randomBytes(KEY_BYTES);
-  writeFileSync(KEY_FILE, key.toString("hex"), { mode: 384, encoding: "utf8" });
-  return key;
+  if (publishKeyBlob(key)) {
+    return key;
+  }
+  return readKeyFileOrThrow();
 }
 function encrypt(plaintext, key) {
   const iv = randomBytes(IV_BYTES);
@@ -318,21 +459,21 @@ function decrypt(blob, key) {
 
 // bin/claim-push-bg.js
 init_state_dir();
-var TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join3(homedir3(), ".terminalhire");
-var CLAIM_PUSH_AUTO_MARKER = join3(TERMINALHIRE_DIR3, "claim-push-auto.json");
-var CLAIM_PUSH_TOKEN_FILE = join3(TERMINALHIRE_DIR3, "claim-push-token.enc");
-var CLAIM_PUSH_MANUAL_MARKER = join3(TERMINALHIRE_DIR3, "claim-push.json");
+var TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
+var CLAIM_PUSH_AUTO_MARKER = join4(TERMINALHIRE_DIR3, "claim-push-auto.json");
+var CLAIM_PUSH_TOKEN_FILE = join4(TERMINALHIRE_DIR3, "claim-push-token.enc");
+var CLAIM_PUSH_MANUAL_MARKER = join4(TERMINALHIRE_DIR3, "claim-push.json");
 var CLAIM_SYNC_BASE = "https://terminalhire.com";
 var AUTO_CONSENT_VERSION = 2;
 var AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
 async function writePushTokenEnc(rawToken) {
-  ensureStateDir(TERMINALHIRE_DIR3);
+  ensureStateDirForSecret(TERMINALHIRE_DIR3);
   const key = await loadKey();
   const blob = encrypt(rawToken, key);
   writeFileSync3(CLAIM_PUSH_TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 async function readPushTokenEnc() {
-  if (!existsSync3(CLAIM_PUSH_TOKEN_FILE)) return void 0;
+  if (!existsSync4(CLAIM_PUSH_TOKEN_FILE)) return void 0;
   try {
     const key = await loadKey();
     const blob = JSON.parse(readFileSync3(CLAIM_PUSH_TOKEN_FILE, "utf8"));
@@ -349,7 +490,7 @@ function clearPushTokenEnc() {
 }
 function readAutoMarker() {
   try {
-    return existsSync3(CLAIM_PUSH_AUTO_MARKER) ? JSON.parse(readFileSync3(CLAIM_PUSH_AUTO_MARKER, "utf8")) : null;
+    return existsSync4(CLAIM_PUSH_AUTO_MARKER) ? JSON.parse(readFileSync3(CLAIM_PUSH_AUTO_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
@@ -410,13 +551,13 @@ async function shouldNudgeUnpushed() {
     const currentHash = computeSnapshotHash(pushed);
     let manual = null;
     try {
-      manual = existsSync3(CLAIM_PUSH_MANUAL_MARKER) ? JSON.parse(readFileSync3(CLAIM_PUSH_MANUAL_MARKER, "utf8")) : null;
+      manual = existsSync4(CLAIM_PUSH_MANUAL_MARKER) ? JSON.parse(readFileSync3(CLAIM_PUSH_MANUAL_MARKER, "utf8")) : null;
     } catch {
       manual = null;
     }
     return unpushedNudgeGate({
-      autoMarkerExists: existsSync3(CLAIM_PUSH_AUTO_MARKER),
-      tokenFileExists: existsSync3(CLAIM_PUSH_TOKEN_FILE),
+      autoMarkerExists: existsSync4(CLAIM_PUSH_AUTO_MARKER),
+      tokenFileExists: existsSync4(CLAIM_PUSH_TOKEN_FILE),
       manualMarkerExists: !!manual,
       lastSnapshotHash: manual?.lastSnapshotHash ?? null,
       currentHash,
@@ -428,7 +569,7 @@ async function shouldNudgeUnpushed() {
 }
 async function runBackgroundClaimPush({ now = Date.now() } = {}) {
   try {
-    if (!existsSync3(CLAIM_PUSH_AUTO_MARKER) || !existsSync3(CLAIM_PUSH_TOKEN_FILE)) return;
+    if (!existsSync4(CLAIM_PUSH_AUTO_MARKER) || !existsSync4(CLAIM_PUSH_TOKEN_FILE)) return;
     const marker = readAutoMarker();
     if (!marker || !marker.autoConsentedAt) return;
     const { listClaims: listClaims2, toPushedClaim: toPushedClaim2, PUSHED_CLAIM_FIELDS: PUSHED_CLAIM_FIELDS2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));

@@ -51,7 +51,31 @@ function ensureStateDir(dir) {
     }
   }
 }
-var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs;
+function applyStateDirSecretPolicy(dir, status) {
+  if (status === STATE_DIR_SYMLINK) {
+    throw new Error(
+      `terminalhire: refusing to write key material into ${dir} \u2014 it is a symlink, not a directory.
+A write through it would FOLLOW THE LINK and place key/token material wherever the symlink points, outside our control and outside the "owner-only" (0700) guarantee this directory is supposed to carry.
+Fix: remove the symlink so terminalhire can recreate it as a real directory \u2014
+  rm ${dir}
+then re-run the command. If the symlink is intentional, point TERMINALHIRE_DIR at a real directory instead of routing it through this one.`
+    );
+  }
+  if (status === STATE_DIR_UNVERIFIED && !warnedUnverifiedSecretWriteThisProcess) {
+    warnedUnverifiedSecretWriteThisProcess = true;
+    try {
+      process.stderr.write(
+        `terminalhire: could not verify ${dir}'s permissions (expected on Windows \u2014 POSIX mode bits do not apply there) \u2014 proceeding, but the "owner-only" guarantee on key/token storage is NOT enforced on this platform.
+`
+      );
+    } catch {
+    }
+  }
+}
+function ensureStateDirForSecret(dir) {
+  applyStateDirSecretPolicy(dir, ensureStateDir(dir));
+}
+var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs, warnedUnverifiedSecretWriteThisProcess;
 var init_state_dir = __esm({
   "src/state-dir.ts"() {
     "use strict";
@@ -60,6 +84,7 @@ var init_state_dir = __esm({
     STATE_DIR_SYMLINK = "symlink";
     STATE_DIR_UNVERIFIED = "unverified";
     warnedDirs = /* @__PURE__ */ new Set();
+    warnedUnverifiedSecretWriteThisProcess = false;
   }
 });
 
@@ -1288,10 +1313,7 @@ async function fetchGitHubProfile(login, token) {
   const user = await ghFetch(`/users/${login}`, token);
   let repos = [];
   try {
-    repos = await ghFetch(
-      `/users/${login}/repos?sort=pushed&per_page=100`,
-      token
-    );
+    repos = await ghFetch(`/users/${login}/repos?sort=pushed&per_page=100`, token);
   } catch (err) {
     console.warn(`[github] ${login}: repos fetch failed, continuing \u2014`, err);
   }
@@ -1311,13 +1333,8 @@ async function fetchGitHubProfile(login, token) {
   const topics = Array.from(topicSet).slice(0, 30);
   let recentPRorgs;
   try {
-    const q = encodeURIComponent(
-      `type:pr is:merged author:${login} sort:updated`
-    );
-    const result = await ghFetch(
-      `/search/issues?q=${q}&per_page=30`,
-      token
-    );
+    const q = encodeURIComponent(`type:pr is:merged author:${login} sort:updated`);
+    const result = await ghFetch(`/search/issues?q=${q}&per_page=30`, token);
     const orgs = /* @__PURE__ */ new Set();
     for (const item of result.items ?? []) {
       const orgLogin = item.repository?.owner?.login;
@@ -1464,7 +1481,10 @@ function isTrivialPRTitle(title) {
 }
 async function fetchOwnedOrgs(token) {
   try {
-    const memberships = await ghFetch(`/user/memberships/orgs?per_page=100`, token);
+    const memberships = await ghFetch(
+      `/user/memberships/orgs?per_page=100`,
+      token
+    );
     return new Set(
       memberships.filter((m) => m.role === "admin").map((m) => m.organization.login.toLowerCase())
     );
@@ -1494,6 +1514,7 @@ async function fetchRepoMeta(owner, name, token, cache, stats) {
   const cached = cache.get(key);
   if (cached !== void 0) return cached;
   let meta = null;
+  let transientMiss = false;
   try {
     const r = await ghFetch(`/repos/${owner}/${name}`, token);
     const contributors = await repoContributorCount(owner, name, token);
@@ -1511,9 +1532,12 @@ async function fetchRepoMeta(owner, name, token, cache, stats) {
   } catch (err) {
     meta = null;
     const msg = err instanceof Error ? err.message : String(err);
-    if (stats && TRANSIENT_META_ERROR.test(msg)) stats.transient += 1;
+    if (TRANSIENT_META_ERROR.test(msg)) {
+      transientMiss = true;
+      if (stats) stats.transient += 1;
+    }
   }
-  cache.set(key, meta);
+  if (!transientMiss) cache.set(key, meta);
   return meta;
 }
 function emptyCredential(status) {
@@ -1530,6 +1554,62 @@ async function fetchPublicOrgs(login, token) {
     return /* @__PURE__ */ new Set();
   }
 }
+async function evaluateAcceptanceCandidate(item, ctx) {
+  const repo = parseRepoUrl(item.repository_url);
+  if (!repo) return { verdict: "skip" };
+  const ownerLc = repo.owner.toLowerCase();
+  if (ownerLc === ctx.loginLc) return { verdict: "skip" };
+  if (ctx.ownedOrgs.has(ownerLc)) return { verdict: "skip" };
+  if (isTrivialPRTitle(item.title)) return { verdict: "skip" };
+  if (looksLikeContentFarmTitle(item.title)) return { verdict: "skip" };
+  const meta = await fetchRepoMeta(repo.owner, repo.name, ctx.token, ctx.cache, ctx.metaStats);
+  if (ctx.metaStats.transient > 0) return { verdict: "transient" };
+  if (!meta) return { verdict: "skip" };
+  if (meta.private) return { verdict: "skip" };
+  if (meta.archived || meta.fork) return { verdict: "skip" };
+  if (meta.stars < ctx.gates.minStars) return { verdict: "skip" };
+  if (meta.contributors !== void 0 && meta.contributors < ctx.gates.minContributors) {
+    return { verdict: "skip" };
+  }
+  return { verdict: "qualify", meta };
+}
+async function fetchRepoStatus(owner, name, token, cache) {
+  const stats = { transient: 0 };
+  const meta = await fetchRepoMeta(owner, name, token, cache, stats);
+  if (meta) {
+    if (meta.private) return "gone";
+    if (meta.archived) return "archived";
+    return "active";
+  }
+  return stats.transient > 0 ? null : "gone";
+}
+function buildAcceptanceSearchQuery(login) {
+  return encodeURIComponent(
+    `type:pr is:merged is:public author:${login} -user:${login} sort:updated`
+  );
+}
+async function fetchAcceptanceSearchPage(login, token, page) {
+  const q = buildAcceptanceSearchQuery(login);
+  const res = await ghFetch(`/search/issues?q=${q}&per_page=${CANDIDATE_PR_PAGE}&page=${page}`, token);
+  return { items: res.items ?? [], incompleteResults: res.incomplete_results === true };
+}
+async function enrichMaintainerReviewed(prUrl, token) {
+  const ref = parseGitHubRef(prUrl);
+  if (!ref || ref.kind !== "pull") return {};
+  try {
+    const reviews = await ghFetch(
+      `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/reviews?per_page=100`,
+      token
+    );
+    const reviewerAssociations = reviews.map((r) => r.author_association);
+    const tiers = deriveRigorTiers({ reviewerAssociations });
+    return { maintainerReviewed: tiers.maintainerReviewed };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (TRANSIENT_META_ERROR.test(msg)) return { transient: true };
+    return {};
+  }
+}
 async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates = {
   minStars: MIN_STARS,
   minContributors: MIN_CONTRIBUTORS
@@ -1537,13 +1617,14 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
   const computedAt = (/* @__PURE__ */ new Date()).toISOString();
   const loginLc = login.toLowerCase();
   let items;
+  let totalMergedExternal;
   try {
-    const q = encodeURIComponent(`type:pr is:merged is:public author:${login} -user:${login} sort:updated`);
-    const res = await ghFetch(
-      `/search/issues?q=${q}&per_page=${CANDIDATE_PR_PAGE}`,
-      token
-    );
+    const q = buildAcceptanceSearchQuery(login);
+    const res = await ghFetch(`/search/issues?q=${q}&per_page=${CANDIDATE_PR_PAGE}`, token);
     items = res.items ?? [];
+    if (typeof res.total_count === "number" && res.incomplete_results !== true) {
+      totalMergedExternal = res.total_count;
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn("[acceptance] search failed:", msg);
@@ -1554,26 +1635,20 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
   let qualifyingTotal = 0;
   const qualifyingPRs = [];
   const metaStats = { transient: 0 };
+  const ctx = { loginLc, ownedOrgs, token, cache, metaStats, gates };
   for (const item of items) {
-    const repo = parseRepoUrl(item.repository_url);
-    if (!repo) continue;
-    const ownerLc = repo.owner.toLowerCase();
-    if (ownerLc === loginLc) continue;
-    if (ownedOrgs.has(ownerLc)) continue;
-    if (isTrivialPRTitle(item.title)) continue;
-    if (looksLikeContentFarmTitle(item.title)) continue;
-    const meta = await fetchRepoMeta(repo.owner, repo.name, token, cache, metaStats);
-    if (metaStats.transient > 0) {
+    const result = await evaluateAcceptanceCandidate(item, ctx);
+    if (result.verdict === "transient") {
       console.warn(
         `[acceptance] ${login}: per-repo metadata transient failure (${metaStats.transient}) \u2014 degrading to 'rate-limited' rather than a fabricated count`
       );
       return emptyCredential("rate-limited");
     }
-    if (!meta) continue;
-    if (meta.private) continue;
-    if (meta.archived || meta.fork) continue;
-    if (meta.stars < gates.minStars) continue;
-    if (meta.contributors !== void 0 && meta.contributors < gates.minContributors) continue;
+    if (result.verdict === "skip") continue;
+    const meta = result.meta;
+    const repo = parseRepoUrl(item.repository_url);
+    if (!repo) continue;
+    const ownerLc = repo.owner.toLowerCase();
     qualifyingTotal += 1;
     distinctOrgSet.add(ownerLc);
     const mergedAt = item.pull_request?.merged_at ?? item.closed_at ?? item.created_at;
@@ -1609,7 +1684,8 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
         );
         const reviewerAssociations = reviews.map((r) => r.author_association);
         const tiers = deriveRigorTiers({ reviewerAssociations });
-        if (tiers.maintainerReviewed !== void 0) pr.maintainerReviewed = tiers.maintainerReviewed;
+        if (tiers.maintainerReviewed !== void 0)
+          pr.maintainerReviewed = tiers.maintainerReviewed;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (TRANSIENT_META_ERROR.test(msg)) {
@@ -1636,6 +1712,14 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
     qualifyingTotal,
     qualifyingPRs,
     distinctOrgs: distinctOrgSet.size,
+    // TERM-118 truncation honesty: scanned is a fact of this run; the total (and
+    // the derived flag) appear only when the search reported a trustworthy
+    // total_count — absent means "unknown", never "not truncated".
+    candidatesScanned: items.length,
+    ...totalMergedExternal !== void 0 ? {
+      totalMergedExternal,
+      candidatesTruncated: totalMergedExternal > items.length
+    } : {},
     computedAt
   };
 }
@@ -1665,7 +1749,9 @@ async function fetchOpenExternalPRs(login, token, cache = /* @__PURE__ */ new Ma
   }
   let items;
   try {
-    const q = encodeURIComponent(`type:pr is:open is:public author:${login} -user:${login} sort:updated`);
+    const q = encodeURIComponent(
+      `type:pr is:open is:public author:${login} -user:${login} sort:updated`
+    );
     const res = await ghFetch(
       `/search/issues?q=${q}&per_page=${OPEN_PR_PAGE}`,
       token
@@ -1732,7 +1818,11 @@ function resumeRecencyDecay(lastSeenIso, now) {
 async function fetchRepoRecency(login, token) {
   try {
     const repos = await ghFetch(`/users/${login}/repos?sort=pushed&per_page=100`, token);
-    return repos.filter((r) => !r.fork && !!r.pushed_at).map((r) => ({ pushedAt: r.pushed_at, language: r.language ?? null, topics: r.topics ?? [] }));
+    return repos.filter((r) => !r.fork && !!r.pushed_at).map((r) => ({
+      pushedAt: r.pushed_at,
+      language: r.language ?? null,
+      topics: r.topics ?? []
+    }));
   } catch {
     return [];
   }
@@ -1821,7 +1911,12 @@ function deriveResumeTrend(cred, repoRecency, now = Date.now()) {
     else if (recencyScore2 >= 0.5) direction = "up";
     else direction = "down";
     scored.push({
-      t: { domain, direction, recencyScore: Math.round(recencyScore2 * 1e3) / 1e3, mergedPRs: e.mergedPRs },
+      t: {
+        domain,
+        direction,
+        recencyScore: Math.round(recencyScore2 * 1e3) / 1e3,
+        mergedPRs: e.mergedPRs
+      },
       weight
     });
   }
@@ -1830,7 +1925,12 @@ function deriveResumeTrend(cred, repoRecency, now = Date.now()) {
 function parseGitHubRef(url) {
   const m = String(url ?? "").match(/github\.com\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)/);
   if (!m) return null;
-  return { owner: m[1], repo: m[2], number: parseInt(m[4], 10), kind: m[3] === "pull" ? "pull" : "issue" };
+  return {
+    owner: m[1],
+    repo: m[2],
+    number: parseInt(m[4], 10),
+    kind: m[3] === "pull" ? "pull" : "issue"
+  };
 }
 async function ghGraphQL(query, variables, token, signal, governor) {
   const init = {
@@ -1842,7 +1942,8 @@ async function ghGraphQL(query, variables, token, signal, governor) {
   if (governor) {
     const json2 = await governor.graphql(GITHUB_GRAPHQL_URL, init);
     if (json2 === null) return null;
-    if (json2.errors?.length) throw new Error("GitHub GraphQL errors: " + JSON.stringify(json2.errors));
+    if (json2.errors?.length)
+      throw new Error("GitHub GraphQL errors: " + JSON.stringify(json2.errors));
     return json2;
   }
   const res = await fetch(GITHUB_GRAPHQL_URL, init);
@@ -1922,12 +2023,15 @@ function makeScoringGovernor(governor) {
 }
 function reviewerPseudonym(repoFullName, reviewerId) {
   const s = `${repoFullName}:${reviewerId}`;
-  let h = 2166136261;
+  const FNV64_OFFSET = 0xcbf29ce484222325n;
+  const FNV64_PRIME = 0x100000001b3n;
+  const MASK64 = 0xffffffffffffffffn;
+  let h = FNV64_OFFSET;
   for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619) >>> 0;
+    h ^= BigInt(s.charCodeAt(i));
+    h = h * FNV64_PRIME & MASK64;
   }
-  return `R${h.toString(16).padStart(8, "0")}`;
+  return `R${h.toString(16).padStart(16, "0")}`;
 }
 async function fetchPublicOrgsOrNull(login, token, sig) {
   try {
@@ -1962,7 +2066,15 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
     }
   }
   const contributors = gov.tripped() || gov.budgetExhausted() ? null : await repoContributorCount(owner, repo, token, sig);
-  const { closesIssues, linkageSource } = await resolveClosingIssues(owner, repo, number, pr.body ?? "", token, sig, gov);
+  const { closesIssues, linkageSource } = await resolveClosingIssues(
+    owner,
+    repo,
+    number,
+    pr.body ?? "",
+    token,
+    sig,
+    gov
+  );
   let reviewerAssociations;
   let reviewSources;
   if (!gov.tripped() && !gov.budgetExhausted()) {
@@ -1988,7 +2100,8 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
           const humanReviewers = /* @__PURE__ */ new Map();
           for (const r of reviews) {
             if (r.user?.id == null || r.user.login == null) continue;
-            if (isLifecycleBot(r.user) || pr.user?.id != null && r.user.id === pr.user.id) continue;
+            if (isLifecycleBot(r.user) || pr.user?.id != null && r.user.id === pr.user.id)
+              continue;
             const p = reviewerPseudonym(`${owner}/${repo}`, r.user.id);
             if (!humanReviewers.has(p) && humanReviewers.size < AFFILIATION_REVIEWER_CAP) {
               humanReviewers.set(p, r.user.login);
@@ -1999,7 +2112,10 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
             if (gov.tripped() || gov.budgetExhausted()) break;
             const reviewerOrgs = await fetchPublicOrgsOrNull(login, token, sig);
             if (reviewerOrgs == null) continue;
-            shared.set(p, [...reviewerOrgs].some((o) => authorOrgs.has(o)));
+            shared.set(
+              p,
+              [...reviewerOrgs].some((o) => authorOrgs.has(o))
+            );
           }
           for (const src of reviewSources) {
             if (src.pseudonym && shared.has(src.pseudonym)) {
@@ -2242,7 +2358,7 @@ var init_github = __esm({
     init_gh_governor();
     TRACTION_TOP_N = 6;
     MAINTAINER_ENRICH_MAX = 25;
-    CANDIDATE_PR_PAGE = 50;
+    CANDIDATE_PR_PAGE = 100;
     MAX_ENRICH_PRS = 12;
     OPEN_PR_PAGE = 20;
     TRANSIENT_META_ERROR = /HTTP 403|HTTP 429|rate limit|HTTP 5\d\d|timeout|network|fetch failed/i;
@@ -9348,7 +9464,8 @@ function parsePass1(raw) {
     if (c == null || typeof c !== "object") continue;
     const o = c;
     const kind = o.kind;
-    if (kind !== "thesis" && kind !== "decision" && kind !== "competency" && kind !== "bullet") continue;
+    if (kind !== "thesis" && kind !== "decision" && kind !== "competency" && kind !== "bullet")
+      continue;
     const text = typeof o.text === "string" ? o.text.trim() : "";
     if (text.length === 0) continue;
     const cites = Array.isArray(o.cites) ? o.cites.filter((x) => typeof x === "string") : [];
@@ -9367,7 +9484,9 @@ function parsePass1(raw) {
 }
 function parseVerdict(raw) {
   const obj = typeof raw === "string" ? extractJson(raw) : raw;
-  const supported = obj != null && typeof obj === "object" && Array.isArray(obj.supported) ? obj.supported.filter((x) => typeof x === "string") : [];
+  const supported = obj != null && typeof obj === "object" && Array.isArray(obj.supported) ? obj.supported.filter(
+    (x) => typeof x === "string"
+  ) : [];
   return { supported };
 }
 function applyVerdict(claims, verdict) {
@@ -9394,7 +9513,9 @@ function textContainsLogin(text, login) {
 function dropIdentityTokens(forbidden, claims) {
   const logins = forbidden.filter((f) => typeof f === "string" && f.trim().length > 0).map((f) => f.trim());
   if (logins.length === 0) return { kept: claims, dropped: 0 };
-  const patterns = logins.map((f) => new RegExp(`(^|[^a-z0-9-])${escapeRegex(f)}([^a-z0-9-]|$)`, "i"));
+  const patterns = logins.map(
+    (f) => new RegExp(`(^|[^a-z0-9-])${escapeRegex(f)}([^a-z0-9-]|$)`, "i")
+  );
   const kept = claims.filter((c) => !patterns.some((re) => re.test(c.text)));
   return { kept, dropped: claims.length - kept.length };
 }
@@ -9418,6 +9539,101 @@ function dropNgramOverlap(promptSources, claims, maxRun = 10) {
   const kept = claims.filter((c) => !overlaps(c.text));
   return { kept, dropped: claims.length - kept.length };
 }
+function toDroppedClaim(c, reason) {
+  return { id: c.id, kind: c.kind, text: c.text.slice(0, DROPPED_TEXT_MAX), reason };
+}
+function buildVerifyStageSystem() {
+  return STAGE4_CONTRACT;
+}
+function buildVerifyStageUser(claims, source) {
+  const blocks = claims.map((cl) => {
+    const comp = cl.competency ? ` [competency ${cl.competency.name}=${cl.competency.grade}]` : "";
+    return `CLAIM ${cl.id} (${cl.kind})${comp}: ${JSON.stringify(cl.text)}
+  cites: ${cl.cites.join(", ") || "(none)"}`;
+  });
+  return [
+    "FULL ORIGINAL SOURCE (read all of it; nothing below has been narrowed or excerpted):",
+    JSON.stringify(source),
+    "",
+    "CLAIMS TO VALIDATE (each independently):",
+    blocks.join("\n\n")
+  ].join("\n");
+}
+function parseVerifyStageReply(raw, expectedIds) {
+  let obj;
+  if (typeof raw === "string") {
+    try {
+      obj = JSON.parse(raw.trim());
+    } catch {
+      return null;
+    }
+  } else {
+    obj = raw;
+  }
+  if (obj == null || typeof obj !== "object") return null;
+  const topKeys = Object.keys(obj);
+  if (topKeys.length !== 1 || topKeys[0] !== "results") return null;
+  const results = obj.results;
+  if (!Array.isArray(results)) return null;
+  const expected = new Set(expectedIds);
+  const seen = /* @__PURE__ */ new Set();
+  const supported = /* @__PURE__ */ new Set();
+  for (const entry of results) {
+    if (entry == null || typeof entry !== "object") return null;
+    const keys = Object.keys(entry);
+    if (keys.length !== 2 || !keys.includes("id") || !keys.includes("supported")) return null;
+    const id = entry.id;
+    const sup = entry.supported;
+    if (typeof id !== "string" || id.length === 0 || typeof sup !== "boolean") return null;
+    if (!expected.has(id)) return null;
+    if (seen.has(id)) return null;
+    seen.add(id);
+    if (sup) supported.add(id);
+  }
+  if (seen.size !== expected.size) return null;
+  return { supported };
+}
+function earliestIso(timestamps) {
+  let best = null;
+  for (const t of timestamps) {
+    if (Number.isNaN(Date.parse(t))) continue;
+    if (best === null || Date.parse(t) < Date.parse(best)) best = t;
+  }
+  return best;
+}
+function claimTimestamps(source, cites) {
+  const commits = [];
+  const reviews = [];
+  for (const cite of cites) {
+    const m = typeof cite === "string" ? cite.match(/^env:(timeline|reviewThread)\[(\d+)\]/) : null;
+    if (!m) continue;
+    const [, arrName, idx] = m;
+    const entry = resolveCitation(source, `${CITE_PREFIX}${arrName}[${idx}]`);
+    if (!entry.resolved || entry.value == null || typeof entry.value !== "object") continue;
+    const v = entry.value;
+    if (arrName === "timeline") {
+      if (v.kind === "commit" && typeof v.at === "string") commits.push(v.at);
+      else if (v.kind === "review" && typeof v.at === "string") reviews.push(v.at);
+    } else if (arrName === "reviewThread" && typeof v.submittedAt === "string") {
+      reviews.push(v.submittedAt);
+    }
+  }
+  return { commitAt: earliestIso(commits), reviewAt: earliestIso(reviews) };
+}
+function applyAnticipationRule(source, claims) {
+  let reclassifiedCount = 0;
+  const out = claims.map((c) => {
+    if (!ANTICIPATION_RE.test(c.text)) return c;
+    const { commitAt, reviewAt } = claimTimestamps(source, c.cites);
+    if (commitAt === null || reviewAt === null) return c;
+    if (Date.parse(reviewAt) <= Date.parse(commitAt)) {
+      reclassifiedCount += 1;
+      return { ...c, text: c.text.replace(ANTICIPATION_REPLACE_RE, "was responsive to review") };
+    }
+    return c;
+  });
+  return { claims: out, reclassifiedCount };
+}
 function assembleSections(kept) {
   const thesis = kept.find((c) => c.kind === "thesis");
   const decision = kept.find((c) => c.kind === "decision");
@@ -9430,7 +9646,12 @@ function assembleSections(kept) {
   const byName = /* @__PURE__ */ new Map();
   for (const c of kept) {
     if (c.kind !== "competency" || !c.competency) continue;
-    const entry = { name: c.competency.name, grade: c.competency.grade, cites: c.cites, text: c.text };
+    const entry = {
+      name: c.competency.name,
+      grade: c.competency.grade,
+      cites: c.cites,
+      text: c.text
+    };
     const prev = byName.get(entry.name);
     if (!prev || gradeRank[entry.grade] > gradeRank[prev.grade]) byName.set(entry.name, entry);
   }
@@ -9447,13 +9668,13 @@ function assembleRollup(kept) {
   const bullet = kept.find((c) => c.kind === "bullet");
   return { resumeBullet: bullet?.text ?? "" };
 }
-var SYNTHESIS_MODEL, SYNTHESIS_VERSION, ROLLUP_VERSION, CITE_PREFIX, COMPETENCY_NAMES, COMPETENCY_NAME_SET, isCompetencyName, COMPETENCY_GRADES, COMPETENCY_GRADE_SET, isCompetencyGrade, FORBIDDEN_SEGMENTS, TIER_SET, DECISION_SET, INDEPENDENCE_SET, PARTY_SET, LABEL_SET, ASSOCIATION_SET, REVIEW_STATE_SET, SIZE_CLASS_SET, LINKAGE_SET, SYN_PSEUDONYM_RE, SHORT_SHA_RE, ISO_TS_RE, enumOf, boundedCount, boundedNum, validTs, validPseudonym, HYGIENE_PRINCIPLES_S6, CITATION_CONTRACT, VERIFY_CONTRACT;
+var SYNTHESIS_MODEL, SYNTHESIS_VERSION, ROLLUP_VERSION, CITE_PREFIX, COMPETENCY_NAMES, COMPETENCY_NAME_SET, isCompetencyName, COMPETENCY_GRADES, COMPETENCY_GRADE_SET, isCompetencyGrade, FORBIDDEN_SEGMENTS, TIER_SET, DECISION_SET, INDEPENDENCE_SET, PARTY_SET, LABEL_SET, ASSOCIATION_SET, REVIEW_STATE_SET, SIZE_CLASS_SET, LINKAGE_SET, SYN_PSEUDONYM_RE, SHORT_SHA_RE, ISO_TS_RE, enumOf, boundedCount, boundedNum, validTs, validPseudonym, HYGIENE_PRINCIPLES_S6, CITATION_CONTRACT, VERIFY_CONTRACT, DROPPED_TEXT_MAX, STAGE4_CONTRACT, ANTICIPATION_RE, ANTICIPATION_REPLACE_RE;
 var init_synthesis = __esm({
   "../../packages/core/src/credential/synthesis.ts"() {
     "use strict";
     SYNTHESIS_MODEL = "claude-sonnet-5";
-    SYNTHESIS_VERSION = "synthesis/1";
-    ROLLUP_VERSION = "rollup/1";
+    SYNTHESIS_VERSION = "synthesis/2";
+    ROLLUP_VERSION = "rollup/2";
     CITE_PREFIX = "env:";
     COMPETENCY_NAMES = [
       "code-authorship",
@@ -9475,7 +9696,12 @@ var init_synthesis = __esm({
     isCompetencyGrade = (v) => typeof v === "string" && COMPETENCY_GRADE_SET.has(v);
     FORBIDDEN_SEGMENTS = /* @__PURE__ */ new Set(["__proto__", "prototype", "constructor"]);
     TIER_SET = /* @__PURE__ */ new Set(["established", "weak", "flagged"]);
-    DECISION_SET = /* @__PURE__ */ new Set(["frictionless_merge", "defended_finding", "responsive", "none"]);
+    DECISION_SET = /* @__PURE__ */ new Set([
+      "frictionless_merge",
+      "defended_finding",
+      "responsive",
+      "none"
+    ]);
     INDEPENDENCE_SET = /* @__PURE__ */ new Set(["independent", "affiliated", "unverified"]);
     PARTY_SET = /* @__PURE__ */ new Set(["merger", "reviewer"]);
     LABEL_SET = /* @__PURE__ */ new Set(["independent-human", "automation", "self-review"]);
@@ -9489,10 +9715,16 @@ var init_synthesis = __esm({
       "NONE",
       "OWNER"
     ]);
-    REVIEW_STATE_SET = /* @__PURE__ */ new Set(["APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED", "PENDING"]);
+    REVIEW_STATE_SET = /* @__PURE__ */ new Set([
+      "APPROVED",
+      "CHANGES_REQUESTED",
+      "COMMENTED",
+      "DISMISSED",
+      "PENDING"
+    ]);
     SIZE_CLASS_SET = /* @__PURE__ */ new Set(["small", "medium", "large"]);
     LINKAGE_SET = /* @__PURE__ */ new Set(["graphql", "body-keyword"]);
-    SYN_PSEUDONYM_RE = /^R[0-9a-f]{8}$/;
+    SYN_PSEUDONYM_RE = /^R(?:[0-9a-f]{8}|[0-9a-f]{16})$/;
     SHORT_SHA_RE = /^[0-9a-f]{4,40}$/i;
     ISO_TS_RE = /^\d{4}-\d{2}-\d{2}T[0-9:.]+(?:Z|[+-]\d{2}:?\d{2})?$/;
     enumOf = (v, set) => typeof v === "string" && set.has(v) ? v : void 0;
@@ -9537,6 +9769,399 @@ var init_synthesis = __esm({
       '{"supported":["c1","c3"]} \u2014 the ids of the claims that survive (omit all others; use',
       '{"supported":[]} if none do). Any surviving id MUST be one you were given.'
     ].join("\n");
+    DROPPED_TEXT_MAX = 240;
+    STAGE4_CONTRACT = [
+      "You are the CLAIM VALIDITY STAGE \u2014 a second, independent, ADVERSARIAL verifier.",
+      "You have NOT seen how any claim below was generated, by whom, or why \u2014 only the",
+      "claims themselves and the source. Your only job is to try to INVALIDATE each claim",
+      "using the FULL, ORIGINAL, UNABRIDGED source object given below \u2014 not a narrow",
+      "excerpt of it, the whole thing.",
+      "",
+      "For each claim: does the FULL source UNEQUIVOCALLY support every assertion in its",
+      "text, with no benefit of the doubt, no inference, no outside knowledge? A claim can",
+      "cite a real, resolvable path and still be FALSE in context \u2014 for example if it",
+      "quotes an early or superseded value while the full record shows the opposite held",
+      "later, or generalizes one narrow fact into a broader claim the record does not",
+      "support. Treat either as UNSUPPORTED. When in doubt, mark it UNSUPPORTED",
+      "(default-to-drop).",
+      "",
+      "ANTICIPATION RULE: a claim asserting the contributor anticipated, or acted ahead",
+      "of, reviewer concerns is supported ONLY if the full record shows the relevant work",
+      "was delivered BEFORE any reviewer raised a related concern. If the full record",
+      "shows a reviewer raised it first, or the ordering cannot be established, that",
+      'specific "anticipated" framing is NOT supported \u2014 mark it UNSUPPORTED rather than',
+      "accept the claim's framing at face value.",
+      "",
+      "OUTPUT FORMAT \u2014 obey exactly: respond with ONLY the JSON object and NOTHING ELSE.",
+      "No preamble, no per-claim commentary, no reasoning prose, no markdown fence, no",
+      "text before or after:",
+      '{"results":[{"id":"c1","supported":true},{"id":"c2","supported":false}]}',
+      "Exactly one entry per claim you were given, each with EXACTLY the keys `id` and",
+      "`supported` and no others."
+    ].join("\n");
+    ANTICIPATION_RE = /anticipat(?:es|ed|e|ion of)\s+(?:the\s+)?review(?:er|ers)?(?:'s)?\s+concerns?/i;
+    ANTICIPATION_REPLACE_RE = /anticipat(?:es|ed|e|ion of)\s+(?:the\s+)?review(?:er|ers)?(?:'s)?\s+concerns?/gi;
+  }
+});
+
+// ../../packages/core/src/credential/ledger.ts
+function normalizeUrl(url) {
+  return url.trim().replace(/\/+$/, "").toLowerCase();
+}
+function ownerOf(repo) {
+  return (repo.split("/")[0] ?? "").toLowerCase();
+}
+function ledgerEntryFromPR(pr, capturedAt, source) {
+  const { nodeId, ...display } = pr;
+  const entry = {
+    ...display,
+    // Copy nested arrays — a shallow spread would alias the caller's domains.
+    domains: [...pr.domains],
+    capturedAt,
+    capturedStars: pr.repoStars ?? null,
+    repoStatus: "active",
+    statusObservedAt: capturedAt,
+    source
+  };
+  if (nodeId) entry.nodeId = nodeId;
+  return entry;
+}
+function seedFromCredential(cred) {
+  if (!cred || cred.status !== "ok" || !cred.qualifyingPRs || cred.qualifyingPRs.length === 0) {
+    return null;
+  }
+  const entries = cred.qualifyingPRs.map(
+    (pr) => ledgerEntryFromPR(pr, cred.computedAt, "refresh")
+  );
+  return { version: LEDGER_VERSION, entries };
+}
+function emptyLedger() {
+  return { version: LEDGER_VERSION, entries: [] };
+}
+function findMatch(pr, byNodeId, byUrl) {
+  if (pr.nodeId) {
+    const m = byNodeId.get(pr.nodeId);
+    if (m) return m;
+  }
+  const urlMatch = byUrl.get(normalizeUrl(pr.url));
+  if (urlMatch && pr.nodeId && urlMatch.nodeId && urlMatch.nodeId !== pr.nodeId) {
+    return void 0;
+  }
+  return urlMatch;
+}
+function mergeLedger(prior, legacySeed, fresh, nowIso) {
+  if (fresh.status !== "ok") {
+    return prior ?? seedFromCredential(legacySeed) ?? emptyLedger();
+  }
+  const base = prior ?? seedFromCredential(legacySeed) ?? emptyLedger();
+  const entries = base.entries.map((e) => ({ ...e }));
+  const byNodeId = /* @__PURE__ */ new Map();
+  const byUrl = /* @__PURE__ */ new Map();
+  for (const e of entries) {
+    if (e.nodeId) byNodeId.set(e.nodeId, e);
+    byUrl.set(normalizeUrl(e.url), e);
+  }
+  const freshPRs = fresh.qualifyingPRs ?? [];
+  for (const pr of freshPRs) {
+    const match2 = findMatch(pr, byNodeId, byUrl);
+    if (match2) {
+      if (match2.nodeId === void 0 && pr.nodeId) {
+        match2.nodeId = pr.nodeId;
+        byNodeId.set(pr.nodeId, match2);
+      }
+      const oldKey = normalizeUrl(match2.url);
+      const newKey = normalizeUrl(pr.url);
+      if (oldKey !== newKey && byUrl.get(oldKey) === match2) byUrl.delete(oldKey);
+      if (!byUrl.has(newKey)) byUrl.set(newKey, match2);
+      match2.url = pr.url;
+      match2.repo = pr.repo;
+      match2.title = pr.title;
+      if (pr.repoStars !== void 0) match2.repoStars = pr.repoStars;
+      if (pr.repoDescription !== void 0) match2.repoDescription = pr.repoDescription;
+      if (match2.maintainerReviewed === void 0 && pr.maintainerReviewed !== void 0) {
+        match2.maintainerReviewed = pr.maintainerReviewed;
+      }
+      match2.repoStatus = "active";
+      match2.statusObservedAt = nowIso;
+    } else {
+      const entry = ledgerEntryFromPR(pr, nowIso, "refresh");
+      entries.push(entry);
+      if (entry.nodeId) byNodeId.set(entry.nodeId, entry);
+      const appendKey = normalizeUrl(entry.url);
+      if (!byUrl.has(appendKey)) byUrl.set(appendKey, entry);
+    }
+  }
+  return { ...base, version: LEDGER_VERSION, entries };
+}
+function projectCredentialFromLedger(ledger, computedAt) {
+  const buckets = {};
+  const distinctOrgSet = /* @__PURE__ */ new Set();
+  for (const e of ledger.entries) {
+    const owner = ownerOf(e.repo);
+    if (owner) distinctOrgSet.add(owner);
+    for (const d of e.domains) {
+      const b = buckets[d] ?? (buckets[d] = { mergedPRs: 0, distinctOrgs: 0, lastMergedAt: e.mergedAt, orgs: /* @__PURE__ */ new Set() });
+      b.mergedPRs += 1;
+      if (owner) b.orgs.add(owner);
+      if (e.mergedAt > b.lastMergedAt) b.lastMergedAt = e.mergedAt;
+    }
+  }
+  const byDomain = {};
+  for (const [d, b] of Object.entries(buckets)) {
+    byDomain[d] = {
+      mergedPRs: b.mergedPRs,
+      distinctOrgs: b.orgs.size,
+      lastMergedAt: b.lastMergedAt
+    };
+  }
+  const qualifyingPRs = [...ledger.entries].sort((a, b) => a.mergedAt < b.mergedAt ? 1 : a.mergedAt > b.mergedAt ? -1 : 0).map((e) => {
+    const p = {
+      url: e.url,
+      title: e.title,
+      repo: e.repo,
+      domains: [...e.domains],
+      mergedAt: e.mergedAt
+    };
+    if (e.maintainerReviewed !== void 0) p.maintainerReviewed = e.maintainerReviewed;
+    if (e.repoStars !== void 0) p.repoStars = e.repoStars;
+    if (e.repoDescription !== void 0) p.repoDescription = e.repoDescription;
+    return p;
+  });
+  return {
+    status: "ok",
+    byDomain,
+    qualifyingTotal: ledger.entries.length,
+    qualifyingPRs,
+    distinctOrgs: distinctOrgSet.size,
+    computedAt
+  };
+}
+function starBandLabel(stars) {
+  if (stars == null || !Number.isFinite(stars) || stars <= 0) return "";
+  if (stars >= 975) return `${(stars / 1e3).toFixed(1)}k\u2605`;
+  if (stars >= 100) return `~${Math.round(stars / 50) * 50}\u2605`;
+  return "<100\u2605";
+}
+var LEDGER_VERSION;
+var init_ledger = __esm({
+  "../../packages/core/src/credential/ledger.ts"() {
+    "use strict";
+    LEDGER_VERSION = 1;
+  }
+});
+
+// ../../packages/core/src/credential/audit.ts
+function normalizeUrl2(url) {
+  return url.trim().replace(/\/+$/, "").toLowerCase();
+}
+async function runAcceptanceAuditBatch(opts) {
+  const now = opts.now ?? (() => Date.now());
+  const nowIso = opts.nowIso ?? new Date(now()).toISOString();
+  const budgetMs = Math.min(opts.budgetMs ?? DEFAULT_BUDGET_MS, MAX_BUDGET_MS);
+  const maxPages = opts.maxPagesPerBatch ?? DEFAULT_MAX_PAGES;
+  const gates = opts.gates ?? { minStars: MIN_STARS, minContributors: MIN_CONTRIBUTORS };
+  const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const cache = opts.cache ?? /* @__PURE__ */ new Map();
+  const deadline = now() + budgetMs;
+  const entries = opts.ledger.entries.map((e) => ({
+    ...e,
+    domains: [...e.domains]
+  }));
+  const audit = opts.ledger.audit ? {
+    ...opts.ledger.audit,
+    pendingCandidates: opts.ledger.audit.pendingCandidates?.map((c) => ({ ...c }))
+  } : {
+    nextPage: 1,
+    pageRetries: 0,
+    runFinished: false,
+    coverage: "partial",
+    scannedPages: 0,
+    candidatesSeen: 0,
+    appended: 0,
+    startedAt: nowIso,
+    updatedAt: nowIso
+  };
+  audit.pageRetries = 0;
+  const seenNodeIds = /* @__PURE__ */ new Set();
+  const urlToNodeId = /* @__PURE__ */ new Map();
+  for (const e of entries) {
+    if (e.nodeId) seenNodeIds.add(e.nodeId);
+    const k = normalizeUrl2(e.url);
+    if (!urlToNodeId.has(k)) urlToNodeId.set(k, e.nodeId);
+  }
+  const metaStats = { transient: 0 };
+  const ctx = {
+    loginLc: opts.login.toLowerCase(),
+    ownedOrgs: new Set(opts.ownedOrgs.map((o) => o.toLowerCase())),
+    token: opts.token,
+    cache,
+    metaStats,
+    gates
+  };
+  const appendQualifying = (cand, meta) => {
+    const on = parseRepoUrl(cand.repoUrl);
+    const rawDomains = [meta.language ?? "", ...meta.topics].filter(Boolean);
+    const domains = [...new Set(normalize(rawDomains))];
+    const entry = {
+      url: cand.url,
+      title: cand.title,
+      repo: on ? `${on.owner}/${on.name}` : "",
+      domains,
+      mergedAt: cand.mergedAt,
+      repoStars: meta.stars,
+      repoDescription: meta.description,
+      capturedAt: nowIso,
+      capturedStars: meta.stars ?? null,
+      capturedLanguage: meta.language ?? null,
+      // capturedContributors is readonly — set it at construction (never after).
+      ...meta.contributors !== void 0 ? { capturedContributors: meta.contributors } : {},
+      repoStatus: "active",
+      statusObservedAt: nowIso,
+      source: "audit"
+    };
+    if (cand.nodeId) entry.nodeId = cand.nodeId;
+    entries.push(entry);
+    if (entry.nodeId) seenNodeIds.add(entry.nodeId);
+    const uk = normalizeUrl2(entry.url);
+    if (!urlToNodeId.has(uk)) urlToNodeId.set(uk, entry.nodeId);
+    audit.appended += 1;
+  };
+  let progressed = false;
+  let pagesFetched = 0;
+  let outcome = "advanced";
+  batch: while (true) {
+    const haveQueue = audit.pendingCandidates !== void 0 && audit.pendingIndex !== void 0 && audit.pendingIndex < audit.pendingCandidates.length;
+    if (!haveQueue) {
+      if (pagesFetched >= maxPages || now() >= deadline) {
+        outcome = "advanced";
+        break batch;
+      }
+      let page;
+      try {
+        page = await fetchAcceptanceSearchPage(opts.login, opts.token, audit.nextPage);
+      } catch {
+        outcome = progressed ? "advanced" : "failed";
+        break batch;
+      }
+      if (page.incompleteResults) {
+        progressed = true;
+        if (audit.pageRetries < MAX_PAGE_RETRIES) {
+          audit.pageRetries += 1;
+          await sleep(REQ_GAP_MS * (audit.pageRetries + 1));
+          continue batch;
+        }
+        audit.coverage = "partial";
+        outcome = "advanced";
+        break batch;
+      }
+      audit.pageRetries = 0;
+      audit.candidatesSeen += page.items.length;
+      audit.pendingCandidates = page.items.map((it) => ({
+        nodeId: it.node_id,
+        url: it.html_url,
+        repoUrl: it.repository_url,
+        title: it.title,
+        mergedAt: it.pull_request?.merged_at ?? it.closed_at ?? it.created_at
+      }));
+      audit.pendingIndex = 0;
+      pagesFetched += 1;
+    }
+    const queue = audit.pendingCandidates;
+    const pageWasFull = queue.length >= CANDIDATE_PR_PAGE;
+    let idx = audit.pendingIndex ?? 0;
+    while (idx < queue.length) {
+      if (now() >= deadline) {
+        audit.pendingIndex = idx;
+        outcome = "advanced";
+        break batch;
+      }
+      const cand = queue[idx];
+      const nUrl = normalizeUrl2(cand.url);
+      let dup = cand.nodeId !== void 0 && seenNodeIds.has(cand.nodeId);
+      if (!dup && urlToNodeId.has(nUrl)) {
+        const storedNodeId = urlToNodeId.get(nUrl);
+        const nodeIdDisagreement = cand.nodeId !== void 0 && storedNodeId !== void 0 && storedNodeId !== cand.nodeId;
+        dup = !nodeIdDisagreement;
+      }
+      if (dup) {
+        idx += 1;
+        progressed = true;
+        continue;
+      }
+      await sleep(REQ_GAP_MS);
+      if (now() >= deadline) {
+        audit.pendingIndex = idx;
+        outcome = "advanced";
+        break batch;
+      }
+      const item = {
+        node_id: cand.nodeId,
+        title: cand.title,
+        repository_url: cand.repoUrl,
+        html_url: cand.url,
+        created_at: "",
+        closed_at: null,
+        pull_request: { merged_at: cand.mergedAt }
+      };
+      const verdict = await evaluateAcceptanceCandidate(item, ctx);
+      if (verdict.verdict === "transient") {
+        audit.pendingIndex = idx;
+        outcome = "rate-limited";
+        break batch;
+      }
+      if (verdict.verdict === "qualify") appendQualifying(cand, verdict.meta);
+      idx += 1;
+      progressed = true;
+    }
+    audit.pendingIndex = idx;
+    audit.scannedPages += 1;
+    const pageNum = audit.nextPage;
+    audit.pendingCandidates = void 0;
+    audit.pendingIndex = void 0;
+    if (!pageWasFull) {
+      audit.runFinished = true;
+      audit.coverage = "exhaustive";
+      outcome = "complete";
+      break batch;
+    }
+    if (pageNum >= SEARCH_CEILING_PAGE) {
+      audit.runFinished = true;
+      audit.coverage = "search-ceiling";
+      outcome = "complete";
+      break batch;
+    }
+    audit.nextPage = pageNum + 1;
+    audit.coverage = "partial";
+    if (pagesFetched >= maxPages || now() >= deadline) {
+      outcome = "advanced";
+      break batch;
+    }
+  }
+  const enrichable = entries.filter((e) => e.maintainerReviewed === void 0).sort((a, b) => a.mergedAt < b.mergedAt ? 1 : a.mergedAt > b.mergedAt ? -1 : 0).slice(0, MAX_ENRICH_PRS);
+  for (const e of enrichable) {
+    if (now() >= deadline) break;
+    await sleep(REQ_GAP_MS);
+    if (now() >= deadline) break;
+    const r = await enrichMaintainerReviewed(e.url, opts.token);
+    if (r.transient) break;
+    if (r.maintainerReviewed !== void 0) e.maintainerReviewed = r.maintainerReviewed;
+  }
+  audit.updatedAt = nowIso;
+  return { ledger: { ...opts.ledger, entries, audit }, outcome };
+}
+var DEFAULT_BUDGET_MS, MAX_BUDGET_MS, DEFAULT_MAX_PAGES, REQ_GAP_MS, MAX_PAGE_RETRIES, SEARCH_CEILING_PAGE;
+var init_audit = __esm({
+  "../../packages/core/src/credential/audit.ts"() {
+    "use strict";
+    init_github();
+    init_contribution_gate();
+    init_vocabulary();
+    DEFAULT_BUDGET_MS = 6e4;
+    MAX_BUDGET_MS = 9e4;
+    DEFAULT_MAX_PAGES = 3;
+    REQ_GAP_MS = 150;
+    MAX_PAGE_RETRIES = 2;
+    SEARCH_CEILING_PAGE = 10;
   }
 });
 
@@ -9583,6 +10208,7 @@ __export(src_exports, {
   AI_BAN_DENYLIST: () => AI_BAN_DENYLIST,
   ANON_MAINTAINER_LABEL: () => ANON_MAINTAINER_LABEL,
   ASHBY_SLUGS_BY_TIER: () => ASHBY_SLUGS_BY_TIER,
+  CANDIDATE_PR_PAGE: () => CANDIDATE_PR_PAGE,
   CAP_LABELS: () => CAP_LABELS,
   CITE_PREFIX: () => CITE_PREFIX,
   COMPETENCY_GRADES: () => COMPETENCY_GRADES,
@@ -9611,7 +10237,9 @@ __export(src_exports, {
   INTRO_ALLOWED_FIELDS: () => INTRO_ALLOWED_FIELDS,
   INTRO_PENDING_TTL_MS: () => INTRO_PENDING_TTL_MS,
   LANG_LABELS: () => LANG_LABELS,
+  LEDGER_VERSION: () => LEDGER_VERSION,
   LEVER_SLUGS_BY_TIER: () => LEVER_SLUGS_BY_TIER,
+  MAX_ENRICH_PRS: () => MAX_ENRICH_PRS,
   MAX_JOBS_PER_COMPANY: () => MAX_JOBS_PER_COMPANY,
   MENTION_DELTA: () => MENTION_DELTA,
   MERGE_PROBABILITY: () => MERGE_PROBABILITY,
@@ -9640,6 +10268,7 @@ __export(src_exports, {
   aggregate: () => aggregate,
   aggregateBounties: () => aggregateBounties,
   aggregateContributions: () => aggregateContributions,
+  applyAnticipationRule: () => applyAnticipationRule,
   applyVerdict: () => applyVerdict,
   ashby: () => ashby,
   assembleRollup: () => assembleRollup,
@@ -9659,6 +10288,8 @@ __export(src_exports, {
   buildPass2User: () => buildPass2User,
   buildReason: () => buildReason,
   buildRollupSource: () => buildRollupSource,
+  buildVerifyStageSystem: () => buildVerifyStageSystem,
+  buildVerifyStageUser: () => buildVerifyStageUser,
   capJobsPerCompany: () => capJobsPerCompany,
   citablePaths: () => citablePaths,
   citeSourceClass: () => citeSourceClass,
@@ -9694,10 +10325,13 @@ __export(src_exports, {
   dropNgramOverlap: () => dropNgramOverlap,
   dropUnresolvableCites: () => dropUnresolvableCites,
   encryptMessage: () => encryptMessage,
+  enrichMaintainerReviewed: () => enrichMaintainerReviewed,
+  evaluateAcceptanceCandidate: () => evaluateAcceptanceCandidate,
   eventCountsAtFullWeight: () => eventCountsAtFullWeight,
   expandWeighted: () => expandWeighted,
   extractJson: () => extractJson,
   extractSkillTags: () => extractSkillTags,
+  fetchAcceptanceSearchPage: () => fetchAcceptanceSearchPage,
   fetchGitHubProfile: () => fetchGitHubProfile,
   fetchIssueStatus: () => fetchIssueStatus,
   fetchOpenExternalPRs: () => fetchOpenExternalPRs,
@@ -9706,6 +10340,7 @@ __export(src_exports, {
   fetchPRScoringFacts: () => fetchPRScoringFacts,
   fetchRepoRecency: () => fetchRepoRecency,
   fetchRepoReceptivity: () => fetchRepoReceptivity,
+  fetchRepoStatus: () => fetchRepoStatus,
   fetchTrendingSlugs: () => fetchTrendingSlugs,
   flattenTiers: () => flattenTiers,
   funnelCounts: () => funnelCounts,
@@ -9742,6 +10377,7 @@ __export(src_exports, {
   makeGitHubGovernor: () => makeGitHubGovernor,
   makeScoringGovernor: () => makeScoringGovernor,
   match: () => match,
+  mergeLedger: () => mergeLedger,
   mergeProbability: () => mergeProbability,
   mmrRerank: () => mmrRerank,
   normalize: () => normalize,
@@ -9751,11 +10387,14 @@ __export(src_exports, {
   pageMatches: () => pageMatches,
   parseGitHubRef: () => parseGitHubRef,
   parsePass1: () => parsePass1,
+  parseRepoUrl: () => parseRepoUrl,
   parseVerdict: () => parseVerdict,
+  parseVerifyStageReply: () => parseVerifyStageReply,
   passesContributionGate: () => passesContributionGate,
   passesMaturityGate: () => passesMaturityGate,
   personCardToJob: () => personCardToJob,
   projectCardToJob: () => projectCardToJob,
+  projectCredentialFromLedger: () => projectCredentialFromLedger,
   projectForSynthesis: () => projectForSynthesis,
   readBuildBudgetMs: () => readBuildBudgetMs,
   readReqGapMs: () => readReqGapMs,
@@ -9770,12 +10409,16 @@ __export(src_exports, {
   resolveJobToken: () => resolveJobToken,
   revealIntroContacts: () => revealIntroContacts,
   rosterActiveFromContribution: () => rosterActiveFromContribution,
+  runAcceptanceAuditBatch: () => runAcceptanceAuditBatch,
   safetyNumber: () => safetyNumber,
   sameLogin: () => sameLogin,
+  seedFromCredential: () => seedFromCredential,
   setStatus: () => setStatus,
   signalLabel: () => signalLabel,
+  starBandLabel: () => starBandLabel,
   tagDissimilarity: () => tagDissimilarity,
   textContainsLogin: () => textContainsLogin,
+  toDroppedClaim: () => toDroppedClaim,
   tokenize: () => tokenize,
   validateGraph: () => validateGraph,
   validateIntroPayload: () => validateIntroPayload,
@@ -9813,6 +10456,8 @@ var init_src = __esm({
     init_metrics_hygiene();
     init_dossier();
     init_synthesis();
+    init_ledger();
+    init_audit();
     init_short_token();
   }
 });
@@ -9862,7 +10507,7 @@ async function tryLoadFromKeytar() {
   }
 }
 function loadOrCreateFileKey() {
-  ensureStateDir(TERMINALHIRE_DIR4);
+  ensureStateDirForSecret(TERMINALHIRE_DIR4);
   if (existsSync3(KEY_FILE)) {
     return Buffer.from(readFileSync6(KEY_FILE, "utf8").trim(), "hex");
   }
@@ -9876,7 +10521,7 @@ function warnStderr(message) {
 }
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname(filePath);
-  ensureStateDir(dir);
+  ensureStateDirForSecret(dir);
   const tmp = join6(
     dir,
     `.${basename(filePath)}.tmp-${process.pid}-${randomBytes3(6).toString("hex")}`
@@ -11159,19 +11804,114 @@ var init_spinner = __esm({
   }
 });
 
+// src/test-race-barrier.ts
+import { closeSync as closeSync3, constants as constants2, existsSync as existsSync6, lstatSync, openSync as openSync3 } from "fs";
+import { join as join13 } from "path";
+function syncSleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function waitForTestRaceBarrier(phase) {
+  const root = process.env[ENV_VAR];
+  if (!root) return;
+  const phaseDir = join13(root, phase);
+  if (!existsSync6(phaseDir)) return;
+  const readyFile = join13(phaseDir, `ready-${process.pid}`);
+  const goFile = join13(phaseDir, "go");
+  const noFollow = constants2.O_NOFOLLOW ?? 0;
+  if (lstatSync(readyFile, { throwIfNoEntry: false })) {
+    throw new Error(
+      `terminalhire: test race barrier "${phase}" found something already at its ready marker path ${readyFile} (regular file or symlink) \u2014 refusing rather than following or overwriting whatever is already there (this only fires under ${ENV_VAR}, never in production).`
+    );
+  }
+  let readyFd;
+  try {
+    readyFd = openSync3(
+      readyFile,
+      constants2.O_CREAT | constants2.O_EXCL | constants2.O_WRONLY | noFollow
+    );
+  } catch (err) {
+    throw new Error(
+      `terminalhire: test race barrier "${phase}" could not create its ready marker at ${readyFile} (${err instanceof Error ? err.message : String(err)}) \u2014 refusing rather than blocking on or writing through whatever is already there (this only fires under ${ENV_VAR}, never in production).`
+    );
+  }
+  closeSync3(readyFd);
+  const deadline = Date.now() + 3e4;
+  while (!existsSync6(goFile)) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `terminalhire: test race barrier "${phase}" timed out waiting for ${goFile} (the test process never released it \u2014 this only fires under ${ENV_VAR}, never in production).`
+      );
+    }
+    syncSleepMs(2);
+  }
+}
+var ENV_VAR;
+var init_test_race_barrier = __esm({
+  "src/test-race-barrier.ts"() {
+    "use strict";
+    ENV_VAR = "TERMINALHIRE_TEST_RACE_BARRIER_DIR";
+  }
+});
+
 // src/github-auth.ts
 import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes4 } from "crypto";
-import { readFileSync as readFileSync11, writeFileSync as writeFileSync9, existsSync as existsSync6, rmSync as rmSync3, renameSync as renameSync7 } from "fs";
-import { join as join13 } from "path";
+import {
+  readFileSync as readFileSync11,
+  writeFileSync as writeFileSync9,
+  existsSync as existsSync7,
+  rmSync as rmSync3,
+  renameSync as renameSync7,
+  linkSync,
+  unlinkSync as unlinkSync2
+} from "fs";
+import { join as join14 } from "path";
 import { homedir as homedir10 } from "os";
-async function loadKey() {
-  ensureStateDir(TERMINALHIRE_DIR7);
-  if (existsSync6(KEY_FILE2)) {
-    return Buffer.from(readFileSync11(KEY_FILE2, "utf8").trim(), "hex");
+function isValidKeyHex(value) {
+  return KEY_HEX_RE.test(value);
+}
+function readKeyFileOrThrow() {
+  const raw = readFileSync11(KEY_FILE2, "utf8").trim();
+  if (!isValidKeyHex(raw)) {
+    throw new Error(
+      `terminalhire: the shared encryption key at ${KEY_FILE2} is not in the expected format (expected exactly ${KEY_BYTES2 * 2} lowercase-hex characters \u2014 a ${KEY_BYTES2}-byte key).
+This key decrypts the GitHub token, local profile, and chat identity stores under ~/.terminalhire \u2014 it should never be hand-edited.
+Recovery: if you intend to reset it, delete the file yourself (this INVALIDATES every encrypted store under ~/.terminalhire, which will need to be re-created/re-authenticated):
+  rm ${KEY_FILE2}`
+    );
   }
+  return Buffer.from(raw, "hex");
+}
+function publishKeyBlob(key) {
+  const tmpFile = `${KEY_FILE2}.${process.pid}.${randomBytes4(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync9(tmpFile, key.toString("hex"), { encoding: "utf8", mode: 384, flag: "wx" });
+    try {
+      linkSync(tmpFile, KEY_FILE2);
+      return true;
+    } catch (err) {
+      if (err?.code === "EEXIST") {
+        return false;
+      }
+      throw err;
+    }
+  } finally {
+    try {
+      unlinkSync2(tmpFile);
+    } catch {
+    }
+  }
+}
+async function loadKey() {
+  ensureStateDirForSecret(TERMINALHIRE_DIR7);
+  if (existsSync7(KEY_FILE2)) {
+    return readKeyFileOrThrow();
+  }
+  waitForTestRaceBarrier("key");
   const key = randomBytes4(KEY_BYTES2);
-  writeFileSync9(KEY_FILE2, key.toString("hex"), { mode: 384, encoding: "utf8" });
-  return key;
+  if (publishKeyBlob(key)) {
+    return key;
+  }
+  return readKeyFileOrThrow();
 }
 function encrypt2(plaintext, key) {
   const iv = randomBytes4(IV_BYTES2);
@@ -11189,17 +11929,19 @@ function decrypt2(blob, key) {
   ]);
   return plain.toString("utf8");
 }
-var TERMINALHIRE_DIR7, TOKEN_FILE, KEY_FILE2, ALGO2, KEY_BYTES2, IV_BYTES2;
+var TERMINALHIRE_DIR7, TOKEN_FILE, KEY_FILE2, ALGO2, KEY_BYTES2, IV_BYTES2, KEY_HEX_RE;
 var init_github_auth = __esm({
   "src/github-auth.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join13(homedir10(), ".terminalhire");
-    TOKEN_FILE = join13(TERMINALHIRE_DIR7, "github-token.enc");
-    KEY_FILE2 = join13(TERMINALHIRE_DIR7, "key");
+    init_test_race_barrier();
+    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join14(homedir10(), ".terminalhire");
+    TOKEN_FILE = join14(TERMINALHIRE_DIR7, "github-token.enc");
+    KEY_FILE2 = join14(TERMINALHIRE_DIR7, "key");
     ALGO2 = "aes-256-gcm";
     KEY_BYTES2 = 32;
     IV_BYTES2 = 12;
+    KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES2 * 2}}$`);
   }
 });
 
@@ -11214,6 +11956,8 @@ __export(claims_exports, {
   readClaims: () => readClaims,
   recordClaim: () => recordClaim,
   removeClaim: () => removeClaim,
+  removeClaimIfStakeMatches: () => removeClaimIfStakeMatches,
+  reserveStake: () => reserveStake,
   toPushedClaim: () => toPushedClaim,
   updateClaim: () => updateClaim
 });
@@ -11222,12 +11966,12 @@ import {
   writeFileSync as writeFileSync10,
   mkdirSync as mkdirSync3,
   renameSync as renameSync8,
-  existsSync as existsSync7,
+  existsSync as existsSync8,
   rmSync as rmSync4,
   statSync
 } from "fs";
 import { randomBytes as randomBytes5 } from "crypto";
-import { join as join14 } from "path";
+import { join as join15 } from "path";
 import { homedir as homedir11 } from "os";
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -11283,7 +12027,7 @@ function normalizeClaim(c) {
 }
 function readClaims() {
   try {
-    if (!existsSync7(CLAIMS_FILE)) return [];
+    if (!existsSync8(CLAIMS_FILE)) return [];
     const data = JSON.parse(readFileSync12(CLAIMS_FILE, "utf8"));
     const claims = Array.isArray(data?.claims) ? data.claims : [];
     return claims.map(normalizeClaim);
@@ -11356,12 +12100,34 @@ function updateClaim(id, patch) {
     return claims[idx];
   });
 }
+function reserveStake(id, stake) {
+  return withClaimsLock(() => {
+    const claims = readClaims();
+    const idx = claims.findIndex((c) => c.id === id);
+    if (idx === -1) return null;
+    if (claims[idx].stake) return null;
+    claims[idx] = { ...claims[idx], stake, updatedAt: nowISO() };
+    writeClaims(claims);
+    return claims[idx];
+  });
+}
 function removeClaim(id) {
   return withClaimsLock(() => {
     const claims = readClaims();
     const next = claims.filter((c) => c.id !== id);
     if (next.length === claims.length) return false;
     writeClaims(next);
+    return true;
+  });
+}
+function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
+  return withClaimsLock(() => {
+    const claims = readClaims();
+    const target = claims.find((c) => c.id === id);
+    if (!target) return false;
+    const actual = target.stake ? target.stake.postedAt : null;
+    if (actual !== expectedStakePostedAt) return false;
+    writeClaims(claims.filter((c) => c.id !== id));
     return true;
   });
 }
@@ -11375,8 +12141,8 @@ var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join14(homedir11(), ".terminalhire");
-    CLAIMS_FILE = join14(TERMINALHIRE_DIR8, "claims.json");
+    TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join15(homedir11(), ".terminalhire");
+    CLAIMS_FILE = join15(TERMINALHIRE_DIR8, "claims.json");
     LOCK_DIR = `${CLAIMS_FILE}.lock`;
     LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
     LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
@@ -11434,17 +12200,17 @@ __export(claim_push_bg_exports, {
   writePushTokenEnc: () => writePushTokenEnc
 });
 import { createHash as createHash3 } from "crypto";
-import { readFileSync as readFileSync13, writeFileSync as writeFileSync11, existsSync as existsSync8, rmSync as rmSync5 } from "fs";
-import { join as join15 } from "path";
+import { readFileSync as readFileSync13, writeFileSync as writeFileSync11, existsSync as existsSync9, rmSync as rmSync5 } from "fs";
+import { join as join16 } from "path";
 import { homedir as homedir12 } from "os";
 async function writePushTokenEnc(rawToken) {
-  ensureStateDir(TERMINALHIRE_DIR9);
+  ensureStateDirForSecret(TERMINALHIRE_DIR9);
   const key = await loadKey();
   const blob = encrypt2(rawToken, key);
   writeFileSync11(CLAIM_PUSH_TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 async function readPushTokenEnc() {
-  if (!existsSync8(CLAIM_PUSH_TOKEN_FILE)) return void 0;
+  if (!existsSync9(CLAIM_PUSH_TOKEN_FILE)) return void 0;
   try {
     const key = await loadKey();
     const blob = JSON.parse(readFileSync13(CLAIM_PUSH_TOKEN_FILE, "utf8"));
@@ -11461,7 +12227,7 @@ function clearPushTokenEnc() {
 }
 function readAutoMarker() {
   try {
-    return existsSync8(CLAIM_PUSH_AUTO_MARKER) ? JSON.parse(readFileSync13(CLAIM_PUSH_AUTO_MARKER, "utf8")) : null;
+    return existsSync9(CLAIM_PUSH_AUTO_MARKER) ? JSON.parse(readFileSync13(CLAIM_PUSH_AUTO_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
@@ -11522,13 +12288,13 @@ async function shouldNudgeUnpushed() {
     const currentHash = computeSnapshotHash(pushed);
     let manual = null;
     try {
-      manual = existsSync8(CLAIM_PUSH_MANUAL_MARKER) ? JSON.parse(readFileSync13(CLAIM_PUSH_MANUAL_MARKER, "utf8")) : null;
+      manual = existsSync9(CLAIM_PUSH_MANUAL_MARKER) ? JSON.parse(readFileSync13(CLAIM_PUSH_MANUAL_MARKER, "utf8")) : null;
     } catch {
       manual = null;
     }
     return unpushedNudgeGate({
-      autoMarkerExists: existsSync8(CLAIM_PUSH_AUTO_MARKER),
-      tokenFileExists: existsSync8(CLAIM_PUSH_TOKEN_FILE),
+      autoMarkerExists: existsSync9(CLAIM_PUSH_AUTO_MARKER),
+      tokenFileExists: existsSync9(CLAIM_PUSH_TOKEN_FILE),
       manualMarkerExists: !!manual,
       lastSnapshotHash: manual?.lastSnapshotHash ?? null,
       currentHash,
@@ -11540,7 +12306,7 @@ async function shouldNudgeUnpushed() {
 }
 async function runBackgroundClaimPush({ now = Date.now() } = {}) {
   try {
-    if (!existsSync8(CLAIM_PUSH_AUTO_MARKER) || !existsSync8(CLAIM_PUSH_TOKEN_FILE)) return;
+    if (!existsSync9(CLAIM_PUSH_AUTO_MARKER) || !existsSync9(CLAIM_PUSH_TOKEN_FILE)) return;
     const marker = readAutoMarker();
     if (!marker || !marker.autoConsentedAt) return;
     const { listClaims: listClaims2, toPushedClaim: toPushedClaim2, PUSHED_CLAIM_FIELDS: PUSHED_CLAIM_FIELDS2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -11584,10 +12350,10 @@ var init_claim_push_bg = __esm({
     "use strict";
     init_github_auth();
     init_state_dir();
-    TERMINALHIRE_DIR9 = process.env.TERMINALHIRE_DIR || join15(homedir12(), ".terminalhire");
-    CLAIM_PUSH_AUTO_MARKER = join15(TERMINALHIRE_DIR9, "claim-push-auto.json");
-    CLAIM_PUSH_TOKEN_FILE = join15(TERMINALHIRE_DIR9, "claim-push-token.enc");
-    CLAIM_PUSH_MANUAL_MARKER = join15(TERMINALHIRE_DIR9, "claim-push.json");
+    TERMINALHIRE_DIR9 = process.env.TERMINALHIRE_DIR || join16(homedir12(), ".terminalhire");
+    CLAIM_PUSH_AUTO_MARKER = join16(TERMINALHIRE_DIR9, "claim-push-auto.json");
+    CLAIM_PUSH_TOKEN_FILE = join16(TERMINALHIRE_DIR9, "claim-push-token.enc");
+    CLAIM_PUSH_MANUAL_MARKER = join16(TERMINALHIRE_DIR9, "claim-push.json");
     CLAIM_SYNC_BASE = "https://terminalhire.com";
     AUTO_CONSENT_VERSION = 2;
     AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
@@ -11607,18 +12373,18 @@ __export(version_nudge_exports, {
   recordNag: () => recordNag,
   shouldNag: () => shouldNag
 });
-import { readFileSync as readFileSync14, writeFileSync as writeFileSync12, existsSync as existsSync9 } from "fs";
-import { join as join16 } from "path";
+import { readFileSync as readFileSync14, writeFileSync as writeFileSync12, existsSync as existsSync10 } from "fs";
+import { join as join17 } from "path";
 import { homedir as homedir13 } from "os";
 import { fileURLToPath as fileURLToPath2 } from "url";
 function stateDir() {
-  return process.env.TERMINALHIRE_DIR || join16(homedir13(), ".terminalhire");
+  return process.env.TERMINALHIRE_DIR || join17(homedir13(), ".terminalhire");
 }
 function indexCacheFile() {
-  return join16(stateDir(), "index-cache.json");
+  return join17(stateDir(), "index-cache.json");
 }
 function nudgeStateFile() {
-  return join16(stateDir(), "version-nudge.json");
+  return join17(stateDir(), "version-nudge.json");
 }
 function parseVersion(v) {
   if (typeof v !== "string") return null;
@@ -11643,11 +12409,11 @@ function buildStaleNudge(local, latest) {
 function readLocalVersion() {
   try {
     const candidates = [
-      join16(__dirname, "..", "..", "package.json"),
-      join16(__dirname, "..", "package.json")
+      join17(__dirname, "..", "..", "package.json"),
+      join17(__dirname, "..", "package.json")
     ];
     for (const p of candidates) {
-      if (existsSync9(p)) {
+      if (existsSync10(p)) {
         const pkg = JSON.parse(readFileSync14(p, "utf8"));
         if (pkg.version) return pkg.version;
       }

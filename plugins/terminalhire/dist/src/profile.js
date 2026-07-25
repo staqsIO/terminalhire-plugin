@@ -691,6 +691,35 @@ var VERIFY_CONTRACT = [
   '{"supported":["c1","c3"]} \u2014 the ids of the claims that survive (omit all others; use',
   '{"supported":[]} if none do). Any surviving id MUST be one you were given.'
 ].join("\n");
+var STAGE4_CONTRACT = [
+  "You are the CLAIM VALIDITY STAGE \u2014 a second, independent, ADVERSARIAL verifier.",
+  "You have NOT seen how any claim below was generated, by whom, or why \u2014 only the",
+  "claims themselves and the source. Your only job is to try to INVALIDATE each claim",
+  "using the FULL, ORIGINAL, UNABRIDGED source object given below \u2014 not a narrow",
+  "excerpt of it, the whole thing.",
+  "",
+  "For each claim: does the FULL source UNEQUIVOCALLY support every assertion in its",
+  "text, with no benefit of the doubt, no inference, no outside knowledge? A claim can",
+  "cite a real, resolvable path and still be FALSE in context \u2014 for example if it",
+  "quotes an early or superseded value while the full record shows the opposite held",
+  "later, or generalizes one narrow fact into a broader claim the record does not",
+  "support. Treat either as UNSUPPORTED. When in doubt, mark it UNSUPPORTED",
+  "(default-to-drop).",
+  "",
+  "ANTICIPATION RULE: a claim asserting the contributor anticipated, or acted ahead",
+  "of, reviewer concerns is supported ONLY if the full record shows the relevant work",
+  "was delivered BEFORE any reviewer raised a related concern. If the full record",
+  "shows a reviewer raised it first, or the ordering cannot be established, that",
+  'specific "anticipated" framing is NOT supported \u2014 mark it UNSUPPORTED rather than',
+  "accept the claim's framing at face value.",
+  "",
+  "OUTPUT FORMAT \u2014 obey exactly: respond with ONLY the JSON object and NOTHING ELSE.",
+  "No preamble, no per-claim commentary, no reasoning prose, no markdown fence, no",
+  "text before or after:",
+  '{"results":[{"id":"c1","supported":true},{"id":"c2","supported":false}]}',
+  "Exactly one entry per claim you were given, each with EXACTLY the keys `id` and",
+  "`supported` and no others."
+].join("\n");
 
 // ../../packages/core/src/short-token.ts
 import { createHash as createHash2 } from "crypto";
@@ -749,6 +778,31 @@ function ensureStateDir(dir) {
     }
   }
 }
+var warnedUnverifiedSecretWriteThisProcess = false;
+function applyStateDirSecretPolicy(dir, status) {
+  if (status === STATE_DIR_SYMLINK) {
+    throw new Error(
+      `terminalhire: refusing to write key material into ${dir} \u2014 it is a symlink, not a directory.
+A write through it would FOLLOW THE LINK and place key/token material wherever the symlink points, outside our control and outside the "owner-only" (0700) guarantee this directory is supposed to carry.
+Fix: remove the symlink so terminalhire can recreate it as a real directory \u2014
+  rm ${dir}
+then re-run the command. If the symlink is intentional, point TERMINALHIRE_DIR at a real directory instead of routing it through this one.`
+    );
+  }
+  if (status === STATE_DIR_UNVERIFIED && !warnedUnverifiedSecretWriteThisProcess) {
+    warnedUnverifiedSecretWriteThisProcess = true;
+    try {
+      process.stderr.write(
+        `terminalhire: could not verify ${dir}'s permissions (expected on Windows \u2014 POSIX mode bits do not apply there) \u2014 proceeding, but the "owner-only" guarantee on key/token storage is NOT enforced on this platform.
+`
+      );
+    } catch {
+    }
+  }
+}
+function ensureStateDirForSecret(dir) {
+  applyStateDirSecretPolicy(dir, ensureStateDir(dir));
+}
 
 // src/crypto-store.ts
 var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
@@ -798,7 +852,7 @@ async function tryLoadFromKeytar() {
   }
 }
 function loadOrCreateFileKey() {
-  ensureStateDir(TERMINALHIRE_DIR);
+  ensureStateDirForSecret(TERMINALHIRE_DIR);
   if (existsSync(KEY_FILE)) {
     return Buffer.from(readFileSync2(KEY_FILE, "utf8").trim(), "hex");
   }
@@ -812,7 +866,7 @@ function warnStderr(message) {
 }
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname(filePath);
-  ensureStateDir(dir);
+  ensureStateDirForSecret(dir);
   const tmp = join2(
     dir,
     `.${basename(filePath)}.tmp-${process.pid}-${randomBytes2(6).toString("hex")}`

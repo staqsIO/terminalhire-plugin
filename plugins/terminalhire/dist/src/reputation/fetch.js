@@ -614,7 +614,12 @@ var RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
 function parseGitHubRef(url) {
   const m = String(url ?? "").match(/github\.com\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)/);
   if (!m) return null;
-  return { owner: m[1], repo: m[2], number: parseInt(m[4], 10), kind: m[3] === "pull" ? "pull" : "issue" };
+  return {
+    owner: m[1],
+    repo: m[2],
+    number: parseInt(m[4], 10),
+    kind: m[3] === "pull" ? "pull" : "issue"
+  };
 }
 var GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
 async function ghGraphQL(query, variables, token, signal, governor) {
@@ -627,7 +632,8 @@ async function ghGraphQL(query, variables, token, signal, governor) {
   if (governor) {
     const json2 = await governor.graphql(GITHUB_GRAPHQL_URL, init);
     if (json2 === null) return null;
-    if (json2.errors?.length) throw new Error("GitHub GraphQL errors: " + JSON.stringify(json2.errors));
+    if (json2.errors?.length)
+      throw new Error("GitHub GraphQL errors: " + JSON.stringify(json2.errors));
     return json2;
   }
   const res = await fetch(GITHUB_GRAPHQL_URL, init);
@@ -662,12 +668,15 @@ function makeScoringGovernor(governor) {
 }
 function reviewerPseudonym(repoFullName, reviewerId) {
   const s = `${repoFullName}:${reviewerId}`;
-  let h = 2166136261;
+  const FNV64_OFFSET = 0xcbf29ce484222325n;
+  const FNV64_PRIME = 0x100000001b3n;
+  const MASK64 = 0xffffffffffffffffn;
+  let h = FNV64_OFFSET;
   for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619) >>> 0;
+    h ^= BigInt(s.charCodeAt(i));
+    h = h * FNV64_PRIME & MASK64;
   }
-  return `R${h.toString(16).padStart(8, "0")}`;
+  return `R${h.toString(16).padStart(16, "0")}`;
 }
 async function fetchPublicOrgsOrNull(login, token, sig) {
   try {
@@ -703,7 +712,15 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
     }
   }
   const contributors = gov.tripped() || gov.budgetExhausted() ? null : await repoContributorCount(owner, repo, token, sig);
-  const { closesIssues, linkageSource } = await resolveClosingIssues(owner, repo, number, pr.body ?? "", token, sig, gov);
+  const { closesIssues, linkageSource } = await resolveClosingIssues(
+    owner,
+    repo,
+    number,
+    pr.body ?? "",
+    token,
+    sig,
+    gov
+  );
   let reviewerAssociations;
   let reviewSources;
   if (!gov.tripped() && !gov.budgetExhausted()) {
@@ -729,7 +746,8 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
           const humanReviewers = /* @__PURE__ */ new Map();
           for (const r of reviews) {
             if (r.user?.id == null || r.user.login == null) continue;
-            if (isLifecycleBot(r.user) || pr.user?.id != null && r.user.id === pr.user.id) continue;
+            if (isLifecycleBot(r.user) || pr.user?.id != null && r.user.id === pr.user.id)
+              continue;
             const p = reviewerPseudonym(`${owner}/${repo}`, r.user.id);
             if (!humanReviewers.has(p) && humanReviewers.size < AFFILIATION_REVIEWER_CAP) {
               humanReviewers.set(p, r.user.login);
@@ -740,7 +758,10 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
             if (gov.tripped() || gov.budgetExhausted()) break;
             const reviewerOrgs = await fetchPublicOrgsOrNull(login, token, sig);
             if (reviewerOrgs == null) continue;
-            shared.set(p, [...reviewerOrgs].some((o) => authorOrgs.has(o)));
+            shared.set(
+              p,
+              [...reviewerOrgs].some((o) => authorOrgs.has(o))
+            );
           }
           for (const src of reviewSources) {
             if (src.pseudonym && shared.has(src.pseudonym)) {
@@ -1261,6 +1282,35 @@ var VERIFY_CONTRACT = [
   "before or after. Decide internally; emit only the verdict:",
   '{"supported":["c1","c3"]} \u2014 the ids of the claims that survive (omit all others; use',
   '{"supported":[]} if none do). Any surviving id MUST be one you were given.'
+].join("\n");
+var STAGE4_CONTRACT = [
+  "You are the CLAIM VALIDITY STAGE \u2014 a second, independent, ADVERSARIAL verifier.",
+  "You have NOT seen how any claim below was generated, by whom, or why \u2014 only the",
+  "claims themselves and the source. Your only job is to try to INVALIDATE each claim",
+  "using the FULL, ORIGINAL, UNABRIDGED source object given below \u2014 not a narrow",
+  "excerpt of it, the whole thing.",
+  "",
+  "For each claim: does the FULL source UNEQUIVOCALLY support every assertion in its",
+  "text, with no benefit of the doubt, no inference, no outside knowledge? A claim can",
+  "cite a real, resolvable path and still be FALSE in context \u2014 for example if it",
+  "quotes an early or superseded value while the full record shows the opposite held",
+  "later, or generalizes one narrow fact into a broader claim the record does not",
+  "support. Treat either as UNSUPPORTED. When in doubt, mark it UNSUPPORTED",
+  "(default-to-drop).",
+  "",
+  "ANTICIPATION RULE: a claim asserting the contributor anticipated, or acted ahead",
+  "of, reviewer concerns is supported ONLY if the full record shows the relevant work",
+  "was delivered BEFORE any reviewer raised a related concern. If the full record",
+  "shows a reviewer raised it first, or the ordering cannot be established, that",
+  'specific "anticipated" framing is NOT supported \u2014 mark it UNSUPPORTED rather than',
+  "accept the claim's framing at face value.",
+  "",
+  "OUTPUT FORMAT \u2014 obey exactly: respond with ONLY the JSON object and NOTHING ELSE.",
+  "No preamble, no per-claim commentary, no reasoning prose, no markdown fence, no",
+  "text before or after:",
+  '{"results":[{"id":"c1","supported":true},{"id":"c2","supported":false}]}',
+  "Exactly one entry per claim you were given, each with EXACTLY the keys `id` and",
+  "`supported` and no others."
 ].join("\n");
 
 // ../../packages/core/src/short-token.ts

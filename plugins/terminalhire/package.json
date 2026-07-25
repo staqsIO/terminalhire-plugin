@@ -1,0 +1,5 @@
+{
+  "name": "@terminalhire/plugin",
+  "private": true,
+  "type": "module"
+}

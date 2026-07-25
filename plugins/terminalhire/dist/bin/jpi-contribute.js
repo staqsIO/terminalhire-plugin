@@ -982,7 +982,8 @@ async function ghGraphQL(query, variables, token, signal, governor) {
   if (governor) {
     const json2 = await governor.graphql(GITHUB_GRAPHQL_URL, init);
     if (json2 === null) return null;
-    if (json2.errors?.length) throw new Error("GitHub GraphQL errors: " + JSON.stringify(json2.errors));
+    if (json2.errors?.length)
+      throw new Error("GitHub GraphQL errors: " + JSON.stringify(json2.errors));
     return json2;
   }
   const res = await fetch(GITHUB_GRAPHQL_URL, init);
@@ -2342,7 +2343,7 @@ var init_dossier = __esm({
 });
 
 // ../../packages/core/src/credential/synthesis.ts
-var COMPETENCY_NAMES, COMPETENCY_NAME_SET, COMPETENCY_GRADES, COMPETENCY_GRADE_SET, CITATION_CONTRACT, VERIFY_CONTRACT;
+var COMPETENCY_NAMES, COMPETENCY_NAME_SET, COMPETENCY_GRADES, COMPETENCY_GRADE_SET, CITATION_CONTRACT, VERIFY_CONTRACT, STAGE4_CONTRACT;
 var init_synthesis = __esm({
   "../../packages/core/src/credential/synthesis.ts"() {
     "use strict";
@@ -2393,6 +2394,52 @@ var init_synthesis = __esm({
       '{"supported":["c1","c3"]} \u2014 the ids of the claims that survive (omit all others; use',
       '{"supported":[]} if none do). Any surviving id MUST be one you were given.'
     ].join("\n");
+    STAGE4_CONTRACT = [
+      "You are the CLAIM VALIDITY STAGE \u2014 a second, independent, ADVERSARIAL verifier.",
+      "You have NOT seen how any claim below was generated, by whom, or why \u2014 only the",
+      "claims themselves and the source. Your only job is to try to INVALIDATE each claim",
+      "using the FULL, ORIGINAL, UNABRIDGED source object given below \u2014 not a narrow",
+      "excerpt of it, the whole thing.",
+      "",
+      "For each claim: does the FULL source UNEQUIVOCALLY support every assertion in its",
+      "text, with no benefit of the doubt, no inference, no outside knowledge? A claim can",
+      "cite a real, resolvable path and still be FALSE in context \u2014 for example if it",
+      "quotes an early or superseded value while the full record shows the opposite held",
+      "later, or generalizes one narrow fact into a broader claim the record does not",
+      "support. Treat either as UNSUPPORTED. When in doubt, mark it UNSUPPORTED",
+      "(default-to-drop).",
+      "",
+      "ANTICIPATION RULE: a claim asserting the contributor anticipated, or acted ahead",
+      "of, reviewer concerns is supported ONLY if the full record shows the relevant work",
+      "was delivered BEFORE any reviewer raised a related concern. If the full record",
+      "shows a reviewer raised it first, or the ordering cannot be established, that",
+      'specific "anticipated" framing is NOT supported \u2014 mark it UNSUPPORTED rather than',
+      "accept the claim's framing at face value.",
+      "",
+      "OUTPUT FORMAT \u2014 obey exactly: respond with ONLY the JSON object and NOTHING ELSE.",
+      "No preamble, no per-claim commentary, no reasoning prose, no markdown fence, no",
+      "text before or after:",
+      '{"results":[{"id":"c1","supported":true},{"id":"c2","supported":false}]}',
+      "Exactly one entry per claim you were given, each with EXACTLY the keys `id` and",
+      "`supported` and no others."
+    ].join("\n");
+  }
+});
+
+// ../../packages/core/src/credential/ledger.ts
+var init_ledger = __esm({
+  "../../packages/core/src/credential/ledger.ts"() {
+    "use strict";
+  }
+});
+
+// ../../packages/core/src/credential/audit.ts
+var init_audit = __esm({
+  "../../packages/core/src/credential/audit.ts"() {
+    "use strict";
+    init_github();
+    init_contribution_gate();
+    init_vocabulary();
   }
 });
 
@@ -2437,6 +2484,8 @@ var init_src = __esm({
     init_metrics_hygiene();
     init_dossier();
     init_synthesis();
+    init_ledger();
+    init_audit();
     init_short_token();
   }
 });
@@ -2483,7 +2532,31 @@ function ensureStateDir(dir) {
     }
   }
 }
-var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs;
+function applyStateDirSecretPolicy(dir, status) {
+  if (status === STATE_DIR_SYMLINK) {
+    throw new Error(
+      `terminalhire: refusing to write key material into ${dir} \u2014 it is a symlink, not a directory.
+A write through it would FOLLOW THE LINK and place key/token material wherever the symlink points, outside our control and outside the "owner-only" (0700) guarantee this directory is supposed to carry.
+Fix: remove the symlink so terminalhire can recreate it as a real directory \u2014
+  rm ${dir}
+then re-run the command. If the symlink is intentional, point TERMINALHIRE_DIR at a real directory instead of routing it through this one.`
+    );
+  }
+  if (status === STATE_DIR_UNVERIFIED && !warnedUnverifiedSecretWriteThisProcess) {
+    warnedUnverifiedSecretWriteThisProcess = true;
+    try {
+      process.stderr.write(
+        `terminalhire: could not verify ${dir}'s permissions (expected on Windows \u2014 POSIX mode bits do not apply there) \u2014 proceeding, but the "owner-only" guarantee on key/token storage is NOT enforced on this platform.
+`
+      );
+    } catch {
+    }
+  }
+}
+function ensureStateDirForSecret(dir) {
+  applyStateDirSecretPolicy(dir, ensureStateDir(dir));
+}
+var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs, warnedUnverifiedSecretWriteThisProcess;
 var init_state_dir = __esm({
   "src/state-dir.ts"() {
     "use strict";
@@ -2492,6 +2565,7 @@ var init_state_dir = __esm({
     STATE_DIR_SYMLINK = "symlink";
     STATE_DIR_UNVERIFIED = "unverified";
     warnedDirs = /* @__PURE__ */ new Set();
+    warnedUnverifiedSecretWriteThisProcess = false;
   }
 });
 
@@ -2540,7 +2614,7 @@ async function tryLoadFromKeytar() {
   }
 }
 function loadOrCreateFileKey() {
-  ensureStateDir(TERMINALHIRE_DIR3);
+  ensureStateDirForSecret(TERMINALHIRE_DIR3);
   if (existsSync2(KEY_FILE)) {
     return Buffer.from(readFileSync4(KEY_FILE, "utf8").trim(), "hex");
   }
@@ -2554,7 +2628,7 @@ function warnStderr(message) {
 }
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname(filePath);
-  ensureStateDir(dir);
+  ensureStateDirForSecret(dir);
   const tmp = join4(
     dir,
     `.${basename(filePath)}.tmp-${process.pid}-${randomBytes2(6).toString("hex")}`
@@ -2802,10 +2876,60 @@ var init_profile = __esm({
   }
 });
 
+// src/test-race-barrier.ts
+import { closeSync as closeSync2, constants as constants2, existsSync as existsSync3, lstatSync, openSync as openSync2 } from "fs";
+import { join as join6 } from "path";
+function syncSleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function waitForTestRaceBarrier(phase) {
+  const root = process.env[ENV_VAR];
+  if (!root) return;
+  const phaseDir = join6(root, phase);
+  if (!existsSync3(phaseDir)) return;
+  const readyFile = join6(phaseDir, `ready-${process.pid}`);
+  const goFile = join6(phaseDir, "go");
+  const noFollow = constants2.O_NOFOLLOW ?? 0;
+  if (lstatSync(readyFile, { throwIfNoEntry: false })) {
+    throw new Error(
+      `terminalhire: test race barrier "${phase}" found something already at its ready marker path ${readyFile} (regular file or symlink) \u2014 refusing rather than following or overwriting whatever is already there (this only fires under ${ENV_VAR}, never in production).`
+    );
+  }
+  let readyFd;
+  try {
+    readyFd = openSync2(
+      readyFile,
+      constants2.O_CREAT | constants2.O_EXCL | constants2.O_WRONLY | noFollow
+    );
+  } catch (err) {
+    throw new Error(
+      `terminalhire: test race barrier "${phase}" could not create its ready marker at ${readyFile} (${err instanceof Error ? err.message : String(err)}) \u2014 refusing rather than blocking on or writing through whatever is already there (this only fires under ${ENV_VAR}, never in production).`
+    );
+  }
+  closeSync2(readyFd);
+  const deadline = Date.now() + 3e4;
+  while (!existsSync3(goFile)) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `terminalhire: test race barrier "${phase}" timed out waiting for ${goFile} (the test process never released it \u2014 this only fires under ${ENV_VAR}, never in production).`
+      );
+    }
+    syncSleepMs(2);
+  }
+}
+var ENV_VAR;
+var init_test_race_barrier = __esm({
+  "src/test-race-barrier.ts"() {
+    "use strict";
+    ENV_VAR = "TERMINALHIRE_TEST_RACE_BARRIER_DIR";
+  }
+});
+
 // src/github-auth.ts
 var github_auth_exports = {};
 __export(github_auth_exports, {
   GITHUB_SCOPE: () => GITHUB_SCOPE,
+  __publishKeyBlobForTests: () => __publishKeyBlobForTests,
   decrypt: () => decrypt2,
   deleteGitHubToken: () => deleteGitHubToken,
   encrypt: () => encrypt2,
@@ -2817,17 +2941,66 @@ __export(github_auth_exports, {
   writeGitHubToken: () => writeGitHubToken
 });
 import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes3 } from "crypto";
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, existsSync as existsSync3, rmSync as rmSync2, renameSync as renameSync3 } from "fs";
-import { join as join6 } from "path";
+import {
+  readFileSync as readFileSync5,
+  writeFileSync as writeFileSync4,
+  existsSync as existsSync4,
+  rmSync as rmSync2,
+  renameSync as renameSync3,
+  linkSync,
+  unlinkSync
+} from "fs";
+import { join as join7 } from "path";
 import { homedir as homedir5 } from "os";
-async function loadKey() {
-  ensureStateDir(TERMINALHIRE_DIR5);
-  if (existsSync3(KEY_FILE2)) {
-    return Buffer.from(readFileSync5(KEY_FILE2, "utf8").trim(), "hex");
+function isValidKeyHex(value) {
+  return KEY_HEX_RE.test(value);
+}
+function readKeyFileOrThrow() {
+  const raw = readFileSync5(KEY_FILE2, "utf8").trim();
+  if (!isValidKeyHex(raw)) {
+    throw new Error(
+      `terminalhire: the shared encryption key at ${KEY_FILE2} is not in the expected format (expected exactly ${KEY_BYTES2 * 2} lowercase-hex characters \u2014 a ${KEY_BYTES2}-byte key).
+This key decrypts the GitHub token, local profile, and chat identity stores under ~/.terminalhire \u2014 it should never be hand-edited.
+Recovery: if you intend to reset it, delete the file yourself (this INVALIDATES every encrypted store under ~/.terminalhire, which will need to be re-created/re-authenticated):
+  rm ${KEY_FILE2}`
+    );
   }
+  return Buffer.from(raw, "hex");
+}
+function publishKeyBlob(key) {
+  const tmpFile = `${KEY_FILE2}.${process.pid}.${randomBytes3(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync4(tmpFile, key.toString("hex"), { encoding: "utf8", mode: 384, flag: "wx" });
+    try {
+      linkSync(tmpFile, KEY_FILE2);
+      return true;
+    } catch (err) {
+      if (err?.code === "EEXIST") {
+        return false;
+      }
+      throw err;
+    }
+  } finally {
+    try {
+      unlinkSync(tmpFile);
+    } catch {
+    }
+  }
+}
+async function loadKey() {
+  ensureStateDirForSecret(TERMINALHIRE_DIR5);
+  if (existsSync4(KEY_FILE2)) {
+    return readKeyFileOrThrow();
+  }
+  waitForTestRaceBarrier("key");
   const key = randomBytes3(KEY_BYTES2);
-  writeFileSync4(KEY_FILE2, key.toString("hex"), { mode: 384, encoding: "utf8" });
-  return key;
+  if (publishKeyBlob(key)) {
+    return key;
+  }
+  return readKeyFileOrThrow();
+}
+function __publishKeyBlobForTests(key) {
+  return publishKeyBlob(key);
 }
 function encrypt2(plaintext, key) {
   const iv = randomBytes3(IV_BYTES2);
@@ -2846,7 +3019,7 @@ function decrypt2(blob, key) {
   return plain.toString("utf8");
 }
 async function readGitHubToken() {
-  if (!existsSync3(TOKEN_FILE)) return void 0;
+  if (!existsSync4(TOKEN_FILE)) return void 0;
   try {
     const key = await loadKey();
     const raw = readFileSync5(TOKEN_FILE, "utf8");
@@ -2857,7 +3030,7 @@ async function readGitHubToken() {
   }
 }
 async function writeGitHubToken(token) {
-  ensureStateDir(TERMINALHIRE_DIR5);
+  ensureStateDirForSecret(TERMINALHIRE_DIR5);
   const key = await loadKey();
   const blob = encrypt2(token, key);
   const tmpFile = `${TOKEN_FILE}.${process.pid}.${randomBytes3(6).toString("hex")}.tmp`;
@@ -2883,7 +3056,7 @@ async function deleteGitHubToken() {
   }
 }
 async function hasGitHubToken() {
-  return existsSync3(TOKEN_FILE);
+  return existsSync4(TOKEN_FILE);
 }
 async function runDeviceFlow() {
   if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
@@ -3000,14 +3173,15 @@ async function resolveStoredLogin() {
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-var TERMINALHIRE_DIR5, TOKEN_FILE, KEY_FILE2, ALGO2, KEY_BYTES2, IV_BYTES2, GITHUB_SCOPE, DEVICE_CODE_URL, ACCESS_TOKEN_URL, BAKED_IN_CLIENT_ID, MOCK_TOKEN, MOCK_LOGIN;
+var TERMINALHIRE_DIR5, TOKEN_FILE, KEY_FILE2, ALGO2, KEY_BYTES2, IV_BYTES2, GITHUB_SCOPE, DEVICE_CODE_URL, ACCESS_TOKEN_URL, BAKED_IN_CLIENT_ID, KEY_HEX_RE, MOCK_TOKEN, MOCK_LOGIN;
 var init_github_auth = __esm({
   "src/github-auth.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join6(homedir5(), ".terminalhire");
-    TOKEN_FILE = join6(TERMINALHIRE_DIR5, "github-token.enc");
-    KEY_FILE2 = join6(TERMINALHIRE_DIR5, "key");
+    init_test_race_barrier();
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join7(homedir5(), ".terminalhire");
+    TOKEN_FILE = join7(TERMINALHIRE_DIR5, "github-token.enc");
+    KEY_FILE2 = join7(TERMINALHIRE_DIR5, "key");
     ALGO2 = "aes-256-gcm";
     KEY_BYTES2 = 32;
     IV_BYTES2 = 12;
@@ -3015,6 +3189,7 @@ var init_github_auth = __esm({
     DEVICE_CODE_URL = "https://github.com/login/device/code";
     ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
     BAKED_IN_CLIENT_ID = "Ov23lignE2ZSBe0J3a6B";
+    KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES2 * 2}}$`);
     MOCK_TOKEN = "mock-github-token-jpi-dev";
     MOCK_LOGIN = "janedev";
   }
@@ -3037,7 +3212,7 @@ __export(repo_experience_exports, {
   recordPolicySnapshot: () => recordPolicySnapshot,
   writeTombstone: () => writeTombstone
 });
-import { join as join7 } from "path";
+import { join as join8 } from "path";
 import { homedir as homedir6 } from "os";
 function blankFile() {
   return { version: 1, repos: {} };
@@ -3245,8 +3420,8 @@ var init_repo_experience = __esm({
     "use strict";
     init_crypto_store();
     init_profile();
-    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join7(homedir6(), ".terminalhire");
-    REPO_EXPERIENCE_FILE = join7(TERMINALHIRE_DIR6, "repo-experience.enc");
+    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join8(homedir6(), ".terminalhire");
+    REPO_EXPERIENCE_FILE = join8(TERMINALHIRE_DIR6, "repo-experience.enc");
     MAX_REPOS = 100;
     MAX_CULTURE_SAMPLES = 12;
     MAX_NOTES = 10;
@@ -3270,6 +3445,8 @@ __export(claims_exports, {
   readClaims: () => readClaims,
   recordClaim: () => recordClaim,
   removeClaim: () => removeClaim,
+  removeClaimIfStakeMatches: () => removeClaimIfStakeMatches,
+  reserveStake: () => reserveStake,
   toPushedClaim: () => toPushedClaim,
   updateClaim: () => updateClaim
 });
@@ -3278,12 +3455,12 @@ import {
   writeFileSync as writeFileSync5,
   mkdirSync as mkdirSync2,
   renameSync as renameSync4,
-  existsSync as existsSync4,
+  existsSync as existsSync5,
   rmSync as rmSync3,
   statSync
 } from "fs";
 import { randomBytes as randomBytes4 } from "crypto";
-import { join as join8 } from "path";
+import { join as join9 } from "path";
 import { homedir as homedir7 } from "os";
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -3339,7 +3516,7 @@ function normalizeClaim(c) {
 }
 function readClaims() {
   try {
-    if (!existsSync4(CLAIMS_FILE)) return [];
+    if (!existsSync5(CLAIMS_FILE)) return [];
     const data = JSON.parse(readFileSync6(CLAIMS_FILE, "utf8"));
     const claims = Array.isArray(data?.claims) ? data.claims : [];
     return claims.map(normalizeClaim);
@@ -3412,12 +3589,34 @@ function updateClaim(id, patch) {
     return claims[idx];
   });
 }
+function reserveStake(id, stake) {
+  return withClaimsLock(() => {
+    const claims = readClaims();
+    const idx = claims.findIndex((c) => c.id === id);
+    if (idx === -1) return null;
+    if (claims[idx].stake) return null;
+    claims[idx] = { ...claims[idx], stake, updatedAt: nowISO2() };
+    writeClaims(claims);
+    return claims[idx];
+  });
+}
 function removeClaim(id) {
   return withClaimsLock(() => {
     const claims = readClaims();
     const next = claims.filter((c) => c.id !== id);
     if (next.length === claims.length) return false;
     writeClaims(next);
+    return true;
+  });
+}
+function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
+  return withClaimsLock(() => {
+    const claims = readClaims();
+    const target = claims.find((c) => c.id === id);
+    if (!target) return false;
+    const actual = target.stake ? target.stake.postedAt : null;
+    if (actual !== expectedStakePostedAt) return false;
+    writeClaims(claims.filter((c) => c.id !== id));
     return true;
   });
 }
@@ -3431,8 +3630,8 @@ var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join8(homedir7(), ".terminalhire");
-    CLAIMS_FILE = join8(TERMINALHIRE_DIR7, "claims.json");
+    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join9(homedir7(), ".terminalhire");
+    CLAIMS_FILE = join9(TERMINALHIRE_DIR7, "claims.json");
     LOCK_DIR = `${CLAIMS_FILE}.lock`;
     LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
     LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
@@ -3472,7 +3671,7 @@ var init_claims = __esm({
 // bin/jpi-contribute.js
 init_src();
 import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, renameSync as renameSync5 } from "fs";
-import { join as join9 } from "path";
+import { join as join10 } from "path";
 import { homedir as homedir8 } from "os";
 import { createHash as createHash3, randomBytes as randomBytes5 } from "crypto";
 
@@ -3580,12 +3779,12 @@ function linkTitle(title, url) {
 }
 
 // bin/jpi-contribute.js
-var TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join9(homedir8(), ".terminalhire");
-var INDEX_CACHE_FILE2 = join9(TERMINALHIRE_DIR8, "index-cache.json");
+var TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join10(homedir8(), ".terminalhire");
+var INDEX_CACHE_FILE2 = join10(TERMINALHIRE_DIR8, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
 var CONTINUITY_RANK_DISABLED = process.env["TERMINALHIRE_NO_CONTINUITY_RANK"] === "1";
-var LOCAL_CONTRIB_CACHE_FILE = join9(TERMINALHIRE_DIR8, "contribute-local-cache.json");
+var LOCAL_CONTRIB_CACHE_FILE = join10(TERMINALHIRE_DIR8, "contribute-local-cache.json");
 var LOCAL_DISCOVERY_TTL_MS = 6 * 60 * 60 * 1e3;
 var LOCAL_DISCOVERY_RETRY_TTL_MS = 15 * 60 * 1e3;
 var LOCAL_DISCOVERY_BUDGET_MS = 12e3;
@@ -3788,6 +3987,11 @@ function continuityNoteForRow(entry, isTTY) {
   const word = n === 1 ? "once" : n === 2 ? "twice" : `${n} times`;
   return `\u2191 you've merged here ${word}`;
 }
+function contestedTipForRow(job) {
+  const openPRs = job?.contribution?.openPRsAtDiscovery ?? 0;
+  if (!(openPRs > 0)) return null;
+  return "\u26A0 contested \u2014 stake your claim early \xB7 terminalhire.com/social-layer";
+}
 var LANGUAGES = /* @__PURE__ */ new Set([
   "typescript",
   "javascript",
@@ -3843,11 +4047,14 @@ function renderRow(i, result, claimedIds = /* @__PURE__ */ new Set(), continuity
   const badge = claimed ? " \xB7 \u25CF claimed by you" : "";
   const line1 = `${i + 1}. ${linkTitle(job.title, c.issueUrl ?? job.url)} [${ref}]`;
   const line2 = `   ${repo} \xB7 ${num} \xB7 ${label} \xB7 ${lang} \xB7 ${scorePct}${badge}`;
+  const contestedTip = contestedTipForRow(job);
+  const tipLine = contestedTip ? `
+   ${contestedTip}` : "";
   const noteLine = continuityNote ? `
    ${continuityNote}` : "";
   const line3 = claimed ? `   \u2192 claimed by you \u2014 terminalhire claim status ${job.id}` : `   \u2192 terminalhire claim ${ref}`;
   return `${line1}
-${line2}${noteLine}
+${line2}${tipLine}${noteLine}
 ${line3}`;
 }
 async function run(opts = {}) {
@@ -3938,6 +4145,7 @@ async function run(opts = {}) {
 }
 export {
   applyContinuityRank,
+  contestedTipForRow,
   continuityNoteForRow,
   localContributionDiscovery,
   mergeContribDedup,

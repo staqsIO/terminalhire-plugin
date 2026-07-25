@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 // The state dir holds key material, so it must be created at 0700 — a bare
 // mkdirSync here would create it at the 0755 umask default, and whichever
 // module creates it FIRST wins its mode for the directory's lifetime (TERM-39).
-import { ensureStateDir } from './state-dir.js';
+import { ensureStateDir } from './state-dir.cjs';
 
 const TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), '.terminalhire');
 const NUDGE_FILE = join(TERMINALHIRE_DIR, 'nudged.json');

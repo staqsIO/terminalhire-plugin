@@ -65,6 +65,13 @@ var NUDGE_COUNTER_FILE = join(TERMINALHIRE_DIR, "nudge-counter.json");
 var LEARNED_FILE = join(TERMINALHIRE_DIR, "learned-sessions.json");
 var INDEX_CACHE_TTL_MS = 15 * 60 * 1e3;
 var __dirname = fileURLToPath(new URL(".", import.meta.url));
+function envMs(name, fallback) {
+  if (process.env.TERMINALHIRE_STDIN_TEST !== "1") return fallback;
+  const raw = process.env[name];
+  if (raw === void 0 || raw === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
 function readStdinSync() {
   if (isatty(0)) return {};
   try {
@@ -73,9 +80,9 @@ function readStdinSync() {
     sock.unref();
   } catch {
   }
-  const IDLE_MS = 200;
-  const STREAM_IDLE_MS = 500;
-  const MAX_TOTAL_MS = 1500;
+  const IDLE_MS = envMs("TERMINALHIRE_STDIN_IDLE_MS", 200);
+  const STREAM_IDLE_MS = envMs("TERMINALHIRE_STDIN_STREAM_IDLE_MS", 500);
+  const MAX_TOTAL_MS = envMs("TERMINALHIRE_STDIN_MAX_TOTAL_MS", 1500);
   const start = Date.now();
   let lastProgress = start;
   const idle = new Int32Array(new SharedArrayBuffer(4));
@@ -136,9 +143,9 @@ function readStdinWin32() {
         resolve({});
       }
     };
-    const IDLE_MS = 200;
-    const STREAM_IDLE_MS = 500;
-    const MAX_TOTAL_MS = 1500;
+    const IDLE_MS = envMs("TERMINALHIRE_STDIN_IDLE_MS", 200);
+    const STREAM_IDLE_MS = envMs("TERMINALHIRE_STDIN_STREAM_IDLE_MS", 500);
+    const MAX_TOTAL_MS = envMs("TERMINALHIRE_STDIN_MAX_TOTAL_MS", 1500);
     const started = Date.now();
     const arm = (ms) => {
       clearTimeout(timer);

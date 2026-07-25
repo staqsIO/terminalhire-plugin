@@ -1,5 +1,5 @@
 /**
- * state-dir.js — shared, mode-consistent ~/.terminalhire state-directory creation
+ * state-dir.cjs — shared, mode-consistent ~/.terminalhire state-directory creation
  * for the PLUGIN scripts (TERM-39).
  *
  * This is the plugin-side copy of `apps/cli/src/state-dir.ts`. It is INLINED
@@ -13,17 +13,24 @@
  *   apps/cli/src/state-dir.ts        (the reference implementation)
  *   apps/cli/install.js
  *   apps/cli/statusline-install.js
- *   plugins/terminalhire/scripts/state-dir.js   (this file)
+ *   plugins/terminalhire/scripts/state-dir.cjs  (this file)
  * `apps/cli/test/state-dir-copy-drift.test.js` compares them mechanically and
  * fails on divergence — a drifted copy silently reintroduces the original bug.
  *
- * COMMONJS ON PURPOSE. `plugins/terminalhire/` has no package.json, so the
- * nearest one is the repo root, which declares no `"type"`. That makes
- * `refresh-loop.js` (which uses require/module.exports) CommonJS, while
- * `session-nudge.js` is detected as ESM from its syntax. A CJS helper is
- * loadable from BOTH — `require()` from the former, a named `import` from the
- * latter (via cjs-module-lexer). An ESM helper would break `refresh-loop.js` on
- * Node 20.0–20.18, where `require(esm)` does not yet exist.
+ * COMMONJS ON PURPOSE, AND NOW DECLARED RATHER THAN INFERRED (TERM-67).
+ * `plugins/terminalhire/package.json` sets `"type": "module"`, so every `.js`
+ * here is unambiguously ESM and this helper carries an explicit `.cjs`.
+ *
+ * Before TERM-67 there was no package.json at all: the nearest one was the repo
+ * root, which declares no `"type"`, so `.js` defaulted to CommonJS and
+ * `session-nudge.js` only ran because Node FAILED to parse it as CJS and then
+ * reparsed it as ESM — a version-dependent fallback, not a contract, plus a
+ * MODULE_TYPELESS_PACKAGE_JSON warning and a reparse on every session start.
+ *
+ * This file stays CJS because it is loaded from BOTH sides — `require()` from
+ * `refresh-loop.cjs`, a named `import` from `session-nudge.js` (via
+ * cjs-module-lexer). An ESM helper would break the former on Node 20.0–20.18,
+ * where `require(esm)` does not yet exist.
  *
  * PROBLEM this fixes: the state dir (encryption key, github-token.enc,
  * chat-identity.enc, …) was created with `mode: 0o700` in some modules and with
@@ -70,7 +77,7 @@ const STATE_DIR_MODE = 0o700;
  * narrower (a platform/filesystem where chmod is a no-op or errors, e.g.
  * Windows) and swallowing them never hides a "couldn't create the state dir" bug.
  *
- * NOTE for callers that must not throw (refresh-loop.js's acquireLock fails OPEN
+ * NOTE for callers that must not throw (refresh-loop.cjs's acquireLock fails OPEN
  * on an unusable lock dir): keep your existing try/catch around the CALL. This
  * function's throw-on-create contract is identical to the bare `mkdirSync` it
  * replaces, so wrapping behaviour does not need to change.
