@@ -15,7 +15,7 @@ function ghHeaders(url, token) {
   return { ...GH_HEADERS, Authorization: `Bearer ${token}` };
 }
 var MAX_REQUESTS = 7;
-var POLICY_RULESET_VERSION = 2;
+var POLICY_RULESET_VERSION = 3;
 var AI_SIGNAL_PATTERNS = [
   { label: "AI", re: /\bAI\b/i },
   { label: "artificial intelligence", re: /artificial intelligence/i },
@@ -47,6 +47,16 @@ var DISCLOSURE_PATTERNS = [
   new RegExp(`\\b${AI_TERM}[\\s-]assist\\w*[^.\\n]{0,60}\\b(?:must|should|required?)\\b`, "i"),
   // PR-template checkbox, e.g. "- [ ] I used AI tools and have reviewed the output"
   new RegExp(`\\[ \\][^\\n]{0,80}\\b${AI_TERM}`, "i")
+];
+var DISCLOSURE_ENFORCEMENT_PATTERNS = [
+  new RegExp(
+    `(?:if|unless|without|absent)\\b[^.\\n]{0,120}disclos\\w*[^.\\n]{0,120}\\b(?:is|are|will be|may be)\\s+(?:\\w+\\s+)?(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
+    "i"
+  ),
+  new RegExp(
+    `(?:fail\\w*\\s+to\\s+disclose|undisclosed)[^.\\n]{0,120}\\b(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
+    "i"
+  )
 ];
 var REQUIREMENT_PATTERNS = [
   // `/take` bot first: its docs usually also say "assign", and the bot is the
@@ -124,7 +134,14 @@ async function fetchContentsFile(fetchImpl, repoFullName, path, token, onTokenRe
   }
 }
 function classifyLine(line) {
-  if (PROHIBITED_PATTERNS.some((re) => re.test(line))) return "prohibited";
+  if (PROHIBITED_PATTERNS.some((re) => re.test(line))) {
+    let residual = line;
+    for (const re of DISCLOSURE_ENFORCEMENT_PATTERNS) {
+      residual = residual.replace(new RegExp(re.source, "gi"), "");
+    }
+    if (PROHIBITED_PATTERNS.some((re) => re.test(residual))) return "prohibited";
+    return "disclosure-required";
+  }
   if (DISCLOSURE_PATTERNS.some((re) => re.test(line))) return "disclosure-required";
   if (AI_SIGNAL_PATTERNS.some((p) => p.re.test(line))) return "ai-mentioned";
   return null;
