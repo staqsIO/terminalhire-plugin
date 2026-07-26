@@ -2697,7 +2697,7 @@ var init_shared_key = __esm({
 
 // src/crypto-store.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes3 } from "crypto";
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, existsSync as existsSync4, renameSync as renameSync2, rmSync } from "fs";
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, existsSync as existsSync4, renameSync as renameSync2, rmSync, readdirSync } from "fs";
 import { join as join6, dirname, basename } from "path";
 import { createRequire } from "module";
 function encrypt(plaintext, key) {
@@ -2753,10 +2753,25 @@ function atomicWriteFileSync(filePath, content) {
   renameSync2(tmp, filePath);
 }
 async function deleteKey() {
-  for (const filePath of dependentStoreFiles) {
+  const stateDir = dirname(KEY_FILE);
+  let encFiles;
+  try {
+    encFiles = readdirSync(stateDir).filter((f) => f.endsWith(".enc"));
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+    encFiles = [];
+  }
+  for (const name of encFiles) {
     try {
-      rmSync(filePath);
-    } catch {
+      rmSync(join6(stateDir, name));
+    } catch (e) {
+      const code = e.code;
+      if (code !== "ENOENT") {
+        throw new Error(
+          `could not delete ${name} (${code ?? "unknown error"}). Your encryption key was NOT deleted, so nothing has been orphaned. Close any other running terminalhire process and re-run \u2014 repeating the delete is safe.`,
+          { cause: e }
+        );
+      }
     }
   }
   if (!forceKeytarUnavailableForTests && !skipKeychain()) {
@@ -2768,7 +2783,8 @@ async function deleteKey() {
   }
   try {
     rmSync(KEY_FILE);
-  } catch {
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
   }
 }
 async function resolveKey(filePath, opts) {
@@ -2785,7 +2801,6 @@ async function resolveKey(filePath, opts) {
   return loadOrCreateSharedKey();
 }
 function createEncryptedStore(filePath, opts) {
-  dependentStoreFiles.add(filePath);
   async function read() {
     const key = await resolveKey(filePath, opts);
     if (!key) return opts.blank();
@@ -2808,7 +2823,7 @@ function createEncryptedStore(filePath, opts) {
   }
   return { read, write };
 }
-var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, IV_BYTES, forceKeytarUnavailableForTests, dependentStoreFiles;
+var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, IV_BYTES, forceKeytarUnavailableForTests;
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
@@ -2819,7 +2834,6 @@ var init_crypto_store = __esm({
     ALGO = "aes-256-gcm";
     IV_BYTES = 12;
     forceKeytarUnavailableForTests = false;
-    dependentStoreFiles = /* @__PURE__ */ new Set();
   }
 });
 

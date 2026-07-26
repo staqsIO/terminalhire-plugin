@@ -5081,6 +5081,23 @@ function hasClickableUrl(url) {
     return false;
   }
 }
+function dropUnmatchable(jobs) {
+  const dropped = /* @__PURE__ */ new Map();
+  const kept = jobs.filter((job) => {
+    if (!TAG_FILTERED_SOURCES.has(job.source)) return true;
+    if (job.tags.length > 0) return true;
+    dropped.set(job.source, (dropped.get(job.source) ?? 0) + 1);
+    return false;
+  });
+  const total = jobs.length - kept.length;
+  if (total > 0) {
+    const perSource = [...dropped.entries()].sort((a, b) => b[1] - a[1]).map(([source, n]) => `${source} ${n}`).join(", ");
+    console.info(
+      `[indexer] dropped ${total} untagged of ${jobs.length} (unmatchable by any profile): ${perSource}`
+    );
+  }
+  return kept;
+}
 async function buildIndex(opts) {
   const includePartners = opts?.includePartners ?? true;
   const publicJobs = await aggregate(opts);
@@ -5097,7 +5114,7 @@ async function buildIndex(opts) {
       allJobs.push(job);
     }
   }
-  const jobs = allJobs.map(({ raw: _raw, ...rest }) => rest);
+  const jobs = dropUnmatchable(allJobs.map(({ raw: _raw, ...rest }) => rest));
   const index = {
     builtAt: (/* @__PURE__ */ new Date()).toISOString(),
     jobs
@@ -5111,6 +5128,7 @@ async function buildIndex(opts) {
   }
   return index;
 }
+var TAG_FILTERED_SOURCES;
 var init_indexer = __esm({
   "../../packages/core/src/indexer.ts"() {
     "use strict";
@@ -5120,6 +5138,15 @@ var init_indexer = __esm({
     init_github();
     init_gh_governor();
     init_winnability();
+    TAG_FILTERED_SOURCES = /* @__PURE__ */ new Set([
+      "greenhouse",
+      "ashby",
+      "lever",
+      "workable",
+      "himalayas",
+      "wwr",
+      "hn"
+    ]);
   }
 });
 
@@ -8561,10 +8588,13 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
     daysAgo = Math.max(0, Math.round(ageDays2));
     recencyBadge = { lastMergedAt: mostRecent, state: ageDays2 <= thresholdDays ? "live" : "dormant" };
   }
-  const exactOrgCount = typeof credential.distinctOrgs === "number" && credential.distinctOrgs > 0;
-  const orgCount = exactOrgCount ? credential.distinctOrgs : Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
+  const hasDistinctOrgs = Object.prototype.hasOwnProperty.call(credential, "distinctOrgs");
+  const rawDistinctOrgs = credential.distinctOrgs;
+  const exactOrgCount = hasDistinctOrgs && typeof rawDistinctOrgs === "number" && Number.isSafeInteger(rawDistinctOrgs) && rawDistinctOrgs > 0;
+  const malformedDistinctOrgs = ok && hasDistinctOrgs && !exactOrgCount;
+  const orgCount = exactOrgCount ? rawDistinctOrgs : Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
   let proofSentence;
-  if (!ok) {
+  if (!ok || malformedDistinctOrgs) {
     proofSentence = "Contribution credential unavailable \u2014 could not verify.";
   } else {
     const prs = credential.qualifyingTotal;
@@ -8575,9 +8605,10 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
   }
   const enrichedPRs = ok ? credential.qualifyingPRs ?? [] : [];
   const maintainerReviewedCount = enrichedPRs.some((p) => p.maintainerReviewed !== void 0) ? enrichedPRs.filter((p) => p.maintainerReviewed === true).length : void 0;
-  const auditableBadge = ok ? {
+  const auditableBadge = ok && !malformedDistinctOrgs ? {
     mergedTotal: credential.qualifyingTotal,
     distinctOrgs: orgCount,
+    distinctOrgsExact: exactOrgCount,
     thresholds: { stars: MIN_STARS, contributors: MIN_CONTRIBUTORS },
     ...maintainerReviewedCount !== void 0 ? { maintainerReviewedCount } : {}
   } : null;
@@ -10332,6 +10363,7 @@ __export(src_exports, {
   displayableDrift: () => displayableDrift,
   dropIdentityTokens: () => dropIdentityTokens,
   dropNgramOverlap: () => dropNgramOverlap,
+  dropUnmatchable: () => dropUnmatchable,
   dropUnresolvableCites: () => dropUnresolvableCites,
   encryptMessage: () => encryptMessage,
   enrichMaintainerReviewed: () => enrichMaintainerReviewed,
@@ -10587,7 +10619,7 @@ var init_shared_key = __esm({
 
 // src/crypto-store.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes4 } from "crypto";
-import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, existsSync as existsSync5, renameSync as renameSync3, rmSync as rmSync2 } from "fs";
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, existsSync as existsSync5, renameSync as renameSync3, rmSync as rmSync2, readdirSync } from "fs";
 import { join as join8, dirname, basename } from "path";
 import { createRequire } from "module";
 function encrypt(plaintext, key) {
@@ -10643,10 +10675,25 @@ function atomicWriteFileSync(filePath, content) {
   renameSync3(tmp, filePath);
 }
 async function deleteKey() {
-  for (const filePath of dependentStoreFiles) {
+  const stateDir2 = dirname(KEY_FILE);
+  let encFiles;
+  try {
+    encFiles = readdirSync(stateDir2).filter((f) => f.endsWith(".enc"));
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+    encFiles = [];
+  }
+  for (const name of encFiles) {
     try {
-      rmSync2(filePath);
-    } catch {
+      rmSync2(join8(stateDir2, name));
+    } catch (e) {
+      const code = e.code;
+      if (code !== "ENOENT") {
+        throw new Error(
+          `could not delete ${name} (${code ?? "unknown error"}). Your encryption key was NOT deleted, so nothing has been orphaned. Close any other running terminalhire process and re-run \u2014 repeating the delete is safe.`,
+          { cause: e }
+        );
+      }
     }
   }
   if (!forceKeytarUnavailableForTests && !skipKeychain()) {
@@ -10658,7 +10705,8 @@ async function deleteKey() {
   }
   try {
     rmSync2(KEY_FILE);
-  } catch {
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
   }
 }
 async function resolveKey(filePath, opts) {
@@ -10675,7 +10723,6 @@ async function resolveKey(filePath, opts) {
   return loadOrCreateSharedKey();
 }
 function createEncryptedStore(filePath, opts) {
-  dependentStoreFiles.add(filePath);
   async function read() {
     const key = await resolveKey(filePath, opts);
     if (!key) return opts.blank();
@@ -10698,7 +10745,7 @@ function createEncryptedStore(filePath, opts) {
   }
   return { read, write };
 }
-var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, IV_BYTES, forceKeytarUnavailableForTests, dependentStoreFiles;
+var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, IV_BYTES, forceKeytarUnavailableForTests;
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
@@ -10709,7 +10756,6 @@ var init_crypto_store = __esm({
     ALGO = "aes-256-gcm";
     IV_BYTES = 12;
     forceKeytarUnavailableForTests = false;
-    dependentStoreFiles = /* @__PURE__ */ new Set();
   }
 });
 
@@ -11045,7 +11091,7 @@ var signal_exports = {};
 __export(signal_exports, {
   extractFingerprint: () => extractFingerprint
 });
-import { readFileSync as readFileSync9, readdirSync } from "fs";
+import { readFileSync as readFileSync9, readdirSync as readdirSync2 } from "fs";
 import { execFileSync } from "child_process";
 import { join as join11 } from "path";
 function safeGit(args, cwd) {
@@ -11103,7 +11149,7 @@ function workspaceMemberDirs(cwd) {
   for (const group of ["apps", "packages"]) {
     try {
       const groupDir = join11(cwd, group);
-      for (const e of readdirSync(groupDir, { withFileTypes: true })) {
+      for (const e of readdirSync2(groupDir, { withFileTypes: true })) {
         if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join11(groupDir, e.name));
       }
     } catch {
@@ -11145,13 +11191,13 @@ function tokensFromFileExtensions(cwd) {
   const scanDirs = [cwd];
   try {
     const srcDir = join11(cwd, "src");
-    readdirSync(srcDir);
+    readdirSync2(srcDir);
     scanDirs.push(srcDir);
   } catch {
   }
   for (const dir of scanDirs) {
     try {
-      const entries = readdirSync(dir, { withFileTypes: true });
+      const entries = readdirSync2(dir, { withFileTypes: true });
       for (const e of entries) {
         if (!e.isFile()) continue;
         const dotIdx = e.name.lastIndexOf(".");
@@ -12858,10 +12904,19 @@ var CONTRIBUTE_SLOTS_THIN = 8;
 var MIX_PRESETS = { jobs: CONTRIBUTE_SLOTS, balanced: 8, credential: 12 };
 var DEFAULT_MIX = "balanced";
 var ROLE_STABLE_MAX = 8;
+var MIN_TAIL_SLOTS = 2;
 var ROLE_ROTATE_WINDOW = 60;
 var ROTATE_WINDOW_MS = 5 * 60 * 1e3;
 var ROLE_HEAD_POOL = 12;
 var ROLE_HEAD_ROTATE_MS = 60 * 60 * 1e3;
+var ROLE_BAND_FLOOR = 55;
+var ROLE_BAND_FRACTION = 0.25;
+function roleBandSize(tailLength) {
+  return Math.min(
+    tailLength,
+    Math.max(ROLE_BAND_FLOOR, Math.ceil(tailLength * ROLE_BAND_FRACTION))
+  );
+}
 var LEAD_ROTATE_ENV = "TH_LEAD_ROTATE";
 var LEAD_ROTATE_MS = 25 * 60 * 1e3;
 var ROTATE_PHASE_ENV = "TH_ROTATE_PHASE";
@@ -12926,7 +12981,7 @@ function budgetSlots(results, opts = {}) {
   const roleMatches = list.filter(
     (r) => r && r.job && r.job.source !== "bounty" && r.job.source !== "contribute"
   );
-  const roleStable = Math.min(ROLE_STABLE_MAX, roleSlots);
+  const roleStable = Math.min(ROLE_STABLE_MAX, Math.max(1, roleSlots - MIN_TAIL_SLOTS));
   const headPoolSize = Math.max(roleStable, ROLE_HEAD_POOL);
   const headPool = roleMatches.slice(0, headPoolSize);
   const headIndex = new Map(headPool.map((r, i) => [r, i]));
@@ -12937,7 +12992,20 @@ function budgetSlots(results, opts = {}) {
     stableRoles = [...selectedHead.slice(o), ...selectedHead.slice(0, o)];
   }
   const tailRoles = roleMatches.slice(headPoolSize);
-  const rotatedRoles = lastSurfaceOf ? orderByStaleness(tailRoles, lastSurfaceOf) : rotate(tailRoles.slice(0, ROLE_ROTATE_WINDOW), rNow);
+  let rotatedRoles;
+  if (lastSurfaceOf) {
+    const band = roleBandSize(tailRoles.length);
+    const inBand = orderByStaleness(tailRoles.slice(0, band), lastSurfaceOf);
+    const beyond = orderByStaleness(tailRoles.slice(band), lastSurfaceOf);
+    const tailSlots = Math.max(0, roleSlots - stableRoles.length);
+    if (beyond.length > 0 && tailSlots >= 2) {
+      rotatedRoles = [...inBand.slice(0, tailSlots - 1), beyond[0], ...inBand.slice(tailSlots - 1)];
+    } else {
+      rotatedRoles = orderByStaleness(tailRoles, lastSurfaceOf);
+    }
+  } else {
+    rotatedRoles = rotate(tailRoles.slice(0, ROLE_ROTATE_WINDOW), rNow);
+  }
   const roleTop = [...stableRoles, ...rotatedRoles].slice(0, roleSlots);
   return { roleTop, bountyTop, contributeTop, interestTop, interestJobTop };
 }

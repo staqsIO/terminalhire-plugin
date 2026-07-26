@@ -15,7 +15,7 @@ function ghHeaders(url, token) {
   return { ...GH_HEADERS, Authorization: `Bearer ${token}` };
 }
 var MAX_REQUESTS = 7;
-var POLICY_RULESET_VERSION = 3;
+var POLICY_RULESET_VERSION = 6;
 var AI_SIGNAL_PATTERNS = [
   { label: "AI", re: /\bAI\b/i },
   { label: "artificial intelligence", re: /artificial intelligence/i },
@@ -65,9 +65,15 @@ var REQUIREMENT_PATTERNS = [
   { kind: "assignment-required", re: /(?:request|ask|wait)[^.\n]{0,40}\bassign/i },
   { kind: "assignment-required", re: /\bassigned before\b/i },
   { kind: "assignment-required", re: /\bself[\s-]assign/i },
+  // A bare "do not open PRs" can govern agent workflow without requiring
+  // maintainer assignment. Keep assignment/claim context in the same sentence.
   {
     kind: "assignment-required",
-    re: /do not (?:open|submit)[^.\n]{0,40}\b(?:prs?|pull requests?)\b/i
+    re: /\b(?:(?:un)?assign(?:ed|ment)?|(?:un)?claim(?:ed|ing)?)\b[^.?!\n]{0,40}\bdo not (?:open|submit)[^.?!\n]{0,40}\b(?:prs?|pull requests?)\b/i
+  },
+  {
+    kind: "assignment-required",
+    re: /do not (?:open|submit)[^.?!\n]{0,40}\b(?:prs?|pull requests?)\b[^.?!\n]{0,40}\b(?:(?:un)?assign(?:ed|ment)?|(?:un)?claim(?:ed|ing)?)\b/i
   },
   { kind: "cla-required", re: /\bCLA\b/ },
   { kind: "cla-required", re: /contributor licen[cs]e agreement/i },
