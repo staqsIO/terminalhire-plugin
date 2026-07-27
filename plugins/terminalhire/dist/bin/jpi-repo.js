@@ -1826,6 +1826,7 @@ var claims_exports = {};
 __export(claims_exports, {
   PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
   acceptedPRRate: () => acceptedPRRate,
+  countAwaitingFounderApproval: () => countAwaitingFounderApproval,
   findClaim: () => findClaim,
   listClaims: () => listClaims,
   nextPolledState: () => nextPolledState,
@@ -2006,6 +2007,15 @@ function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
     writeClaims(claims.filter((c) => c.id !== id));
     return true;
   });
+}
+function countAwaitingFounderApproval(claims = readClaims()) {
+  try {
+    return claims.filter(
+      (c) => c.approval?.mode === "approval-only" && c.approval?.state === "pending"
+    ).length;
+  } catch {
+    return 0;
+  }
 }
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;

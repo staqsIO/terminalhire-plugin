@@ -2521,7 +2521,7 @@ async function fetchOwnedRepoTraction(login, token) {
   for (const r of enrichCandidates) {
     r.externalContributors = await repoExternalContributorCount(login, r.name, login, token);
   }
-  const gate = qualifiesMaintainer(
+  const gate2 = qualifiesMaintainer(
     ranked.map((r) => ({
       name: r.name,
       stars: r.stars,
@@ -2530,15 +2530,15 @@ async function fetchOwnedRepoTraction(login, token) {
       fork: false
     }))
   );
-  const best = gate.qualifies ? ranked.find((r) => r.name === gate.bestRepoName) ?? null : null;
+  const best = gate2.qualifies ? ranked.find((r) => r.name === gate2.bestRepoName) ?? null : null;
   return {
     status: "ok",
     totalStars,
     totalForks,
     reposWithStars,
     top: ranked.slice(0, TRACTION_TOP_N),
-    qualifies: gate.qualifies,
-    bestRepoName: gate.bestRepoName,
+    qualifies: gate2.qualifies,
+    bestRepoName: gate2.bestRepoName,
     bestRepoExternalContributors: best ? best.externalContributors : null,
     bestRepoStars: best ? best.stars : null,
     computedAt
@@ -3246,6 +3246,7 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
     mergedAt: pr.merged_at ?? null,
     authorId: pr.user?.id ?? null,
     authorLogin: pr.user?.login ?? null,
+    authorAssociation: pr.author_association ?? null,
     mergedById: pr.merged_by?.id ?? null,
     mergedByLogin: pr.merged_by?.login ?? null,
     closesIssues,
@@ -10225,6 +10226,15 @@ function computeEventIndependence(facts) {
       }
     };
   }
+  if (facts.authorAssociation != null && AFFILIATED_AUTHOR_ASSOCIATIONS.has(facts.authorAssociation.toUpperCase())) {
+    return {
+      merger: {
+        party: "merger",
+        independence: "affiliated",
+        reasons: [`PR author is affiliated with the target repo (${facts.authorAssociation})`]
+      }
+    };
+  }
   return {
     merger: {
       party: "merger",
@@ -10255,7 +10265,7 @@ function computeReviewerIndependence(signals) {
   }
   return { party: "reviewer", independence: "unverified", reasons: ["affiliation signal absent (read failed/skipped)"] };
 }
-var PROVENANCE, MS_PER_DAY;
+var PROVENANCE, MS_PER_DAY, AFFILIATED_AUTHOR_ASSOCIATIONS;
 var init_independence = __esm({
   "../../packages/core/src/credential/independence.ts"() {
     "use strict";
@@ -10270,6 +10280,7 @@ var init_independence = __esm({
       CONTRIB_FLOOR: 5
     };
     MS_PER_DAY = 864e5;
+    AFFILIATED_AUTHOR_ASSOCIATIONS = /* @__PURE__ */ new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
   }
 });
 
@@ -13360,12 +13371,13 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
     opts.seenHistory
   );
   const orderForEmit = (list) => {
-    const bountyQ = list.filter((m) => m && m.source === "bounty");
+    const pinnedQ = list.filter((m) => m && m.source === "bounty" && m.founderClaimable === true);
+    const bountyQ = list.filter((m) => m && m.source === "bounty" && m.founderClaimable !== true);
     const contributeQ = list.filter((m) => m && m.source === "contribute");
     const roleQ = interleaveBySource(
       list.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
     );
-    const ordered = [];
+    const ordered = [...pinnedQ];
     let bi = 0;
     let ri = 0;
     let ci = 0;
@@ -14130,6 +14142,11 @@ var init_directory2 = __esm({
 });
 
 // bin/match-slots.js
+function selectFounderBountyPicks(jobs) {
+  return (Array.isArray(jobs) ? jobs : []).filter(
+    (job) => job && job.source === "bounty" && job.bounty && job.bounty.bountySource === "founder"
+  ).map((job) => ({ job, score: 0, matchedTags: [] }));
+}
 function roleBandSize(tailLength) {
   return Math.min(
     tailLength,
@@ -14168,6 +14185,7 @@ function budgetSlots(results, opts = {}) {
     mix = DEFAULT_MIX,
     totalSlots = TOTAL_SLOTS,
     now = Date.now(),
+    founderBountyPicks = [],
     interestPicks = [],
     interestJobPicks = [],
     interestJobSlots = INTEREST_JOB_SLOTS,
@@ -14177,10 +14195,35 @@ function budgetSlots(results, opts = {}) {
   } = opts;
   const list = Array.isArray(results) ? results : [];
   const rNow = now + (Number.isFinite(phaseMs) ? phaseMs : 0);
-  const bountyMatches = list.filter(
-    (r) => r && r.job && r.job.source === "bounty" && typeof r.score === "number" && r.score >= BOUNTY_MIN_MATCH
+  const scoredBountyResults = list.filter(
+    (r) => r && r.job && r.job.source === "bounty" && typeof r.score === "number"
   );
-  const bountyTop = [...bountyMatches].sort((a, b) => b.score - a.score).slice(0, BOUNTY_SLOTS);
+  const bountyMatches = scoredBountyResults.filter((r) => r.score >= BOUNTY_MIN_MATCH);
+  const rankedBountyMatches = [...bountyMatches].sort((a, b) => b.score - a.score);
+  const scoredById = new Map(
+    scoredBountyResults.filter((r) => typeof r.job.id === "string").map((r) => [r.job.id, r])
+  );
+  const founderCandidates = [
+    ...Array.isArray(founderBountyPicks) ? founderBountyPicks : [],
+    ...scoredBountyResults
+  ].filter(
+    (r) => r && r.job && r.job.source === "bounty" && r.job.bounty && r.job.bounty.bountySource === "founder"
+  );
+  const seenBountyIds = /* @__PURE__ */ new Set();
+  const founderTop = [];
+  for (const candidate of founderCandidates) {
+    const id = candidate.job.id;
+    if (typeof id !== "string" || id.length === 0 || seenBountyIds.has(id)) continue;
+    seenBountyIds.add(id);
+    founderTop.push(scoredById.get(id) ?? candidate);
+  }
+  const scrapedTop = rankedBountyMatches.filter((r) => {
+    const id = r.job.id;
+    if (r.job.bounty?.bountySource === "founder" || seenBountyIds.has(id)) return false;
+    if (typeof id === "string" && id.length > 0) seenBountyIds.add(id);
+    return true;
+  });
+  const bountyTop = [...founderTop, ...scrapedTop].slice(0, BOUNTY_SLOTS);
   const contributeMatches = list.filter((r) => r && r.job && r.job.source === "contribute");
   const mixBaseline = Object.hasOwn(MIX_PRESETS, mix) ? MIX_PRESETS[mix] : MIX_PRESETS[DEFAULT_MIX];
   const contributeCap = thinProfile && contributeEnabled ? Math.max(mixBaseline, CONTRIBUTE_SLOTS_THIN) : mixBaseline;
@@ -14564,6 +14607,16 @@ var init_jpi_project = __esm({
   }
 });
 
+// bin/founder-pin.js
+function isPinnedFounderBounty(j) {
+  return j?.bounty?.bountySource === "founder" && j?.bounty?.claimable === true;
+}
+var init_founder_pin = __esm({
+  "bin/founder-pin.js"() {
+    "use strict";
+  }
+});
+
 // src/repo-experience.ts
 var repo_experience_exports = {};
 __export(repo_experience_exports, {
@@ -14808,6 +14861,7 @@ var claims_exports = {};
 __export(claims_exports, {
   PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
   acceptedPRRate: () => acceptedPRRate,
+  countAwaitingFounderApproval: () => countAwaitingFounderApproval,
   findClaim: () => findClaim,
   listClaims: () => listClaims,
   nextPolledState: () => nextPolledState,
@@ -14989,6 +15043,15 @@ function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
     return true;
   });
 }
+function countAwaitingFounderApproval(claims = readClaims()) {
+  try {
+    return claims.filter(
+      (c) => c.approval?.mode === "approval-only" && c.approval?.state === "pending"
+    ).length;
+  } catch {
+    return 0;
+  }
+}
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;
   const merged = claims.filter((c) => c.state === "merged").length;
@@ -15037,6 +15100,44 @@ var init_claims = __esm({
   }
 });
 
+// bin/founder-paid-badge.js
+var founder_paid_badge_exports = {};
+__export(founder_paid_badge_exports, {
+  acknowledgeFounderPaid: () => acknowledgeFounderPaid,
+  computeFounderPaid: () => computeFounderPaid,
+  openPaidIds: () => openPaidIds
+});
+function openPaidIds(index) {
+  const jobs = index && index.jobs || [];
+  const ids = [];
+  for (const j of jobs) {
+    if (!j || typeof j.id !== "string") continue;
+    if (isPinnedFounderBounty(j)) ids.push(j.id);
+  }
+  return [...new Set(ids)].sort();
+}
+function gate(openIds, seenIds) {
+  const seen = new Set(seenIds);
+  const acknowledged = openIds.filter((id) => seen.has(id));
+  return { count: openIds.length - acknowledged.length, acknowledged };
+}
+function computeFounderPaid(index, previous) {
+  const open3 = openPaidIds(index);
+  const prior = previous && previous.acknowledged;
+  if (!Array.isArray(prior)) return { count: 0, acknowledged: open3 };
+  return gate(open3, prior);
+}
+function acknowledgeFounderPaid({ shown = [], open: open3 = [], previous } = {}) {
+  const prior = previous && Array.isArray(previous.acknowledged) ? previous.acknowledged : [];
+  return gate(openPaidIds({ jobs: open3 }), [...prior, ...openPaidIds({ jobs: shown })]);
+}
+var init_founder_paid_badge = __esm({
+  "bin/founder-paid-badge.js"() {
+    "use strict";
+    init_founder_pin();
+  }
+});
+
 // bin/jpi-bounties.js
 var jpi_bounties_exports = {};
 __export(jpi_bounties_exports, {
@@ -15045,6 +15146,7 @@ __export(jpi_bounties_exports, {
   continuityNoteForRow: () => continuityNoteForRow,
   filterPaidVisibility: () => filterPaidVisibility,
   getBounties: () => getBounties,
+  isPinnedFounderBounty: () => isPinnedFounderBounty,
   printBounty: () => printBounty,
   rankBounties: () => rankBounties,
   run: () => run5
@@ -15113,6 +15215,7 @@ ${i + 1}. ${linkTitle(job.title, job.url)} [${ref}]`);
 }
 function rankBounties(bounties, { rankMode = "winnability", scoreOf = () => 0 } = {}) {
   const legacy = rankMode === "legacy";
+  const pin = (j) => isPinnedFounderBounty(j) ? 1 : 0;
   const contested = (j) => (j.bounty?.competingOpenPRs ?? 0) > 0 ? 1 : 0;
   const amt = (j) => j.bounty?.amountUSD ?? -1;
   const winTier = (j) => {
@@ -15122,12 +15225,13 @@ function rankBounties(bounties, { rankMode = "winnability", scoreOf = () => 0 } 
   };
   const winVal = (j) => j.winnabilityScore ?? 0;
   bounties.sort(
-    (a, b) => (legacy ? 0 : winTier(b) - winTier(a)) || (legacy ? 0 : winVal(b) - winVal(a)) || contested(a) - contested(b) || scoreOf(b) - scoreOf(a) || amt(b) - amt(a)
+    (a, b) => pin(b) - pin(a) || (legacy ? 0 : winTier(b) - winTier(a)) || (legacy ? 0 : winVal(b) - winVal(a)) || contested(a) - contested(b) || scoreOf(b) - scoreOf(a) || amt(b) - amt(a)
   );
   return bounties;
 }
 function applyContinuityRank(bounties, continuityOf, { enabled = true } = {}) {
   if (!enabled) return bounties;
+  const pin = (j) => isPinnedFounderBounty(j) ? 1 : 0;
   const winTier = (j) => {
     const s = j.winnabilityScore;
     if (s == null) return 1;
@@ -15139,7 +15243,9 @@ function applyContinuityRank(bounties, continuityOf, { enabled = true } = {}) {
     const c = repo ? continuityOf(repo) || 0 : 0;
     return s * (1 + 0.15 * c);
   };
-  bounties.sort((a, b) => winTier(b) - winTier(a) || effectiveVal(b) - effectiveVal(a));
+  bounties.sort(
+    (a, b) => pin(b) - pin(a) || winTier(b) - winTier(a) || effectiveVal(b) - effectiveVal(a)
+  );
   return bounties;
 }
 function continuityNoteForRow(entry, isTTY) {
@@ -15250,6 +15356,18 @@ async function run5() {
         continuityNote
       );
     }
+    try {
+      const { acknowledgeFounderPaid: acknowledgeFounderPaid2 } = await Promise.resolve().then(() => (init_founder_paid_badge(), founder_paid_badge_exports));
+      const { readCacheEntry: readCacheEntry2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
+      updateIndexCache({
+        founderPaid: acknowledgeFounderPaid2({
+          shown,
+          open: bounties,
+          previous: (readCacheEntry2() ?? {}).founderPaid
+        })
+      });
+    } catch {
+    }
     if (!SHOW_ALL3 && bounties.length > shown.length) {
       console.log(
         `
@@ -15282,6 +15400,7 @@ var init_jpi_bounties = __esm({
     init_src();
     init_cache_store();
     init_sanitize();
+    init_founder_pin();
     TERMINALHIRE_DIR12 = process.env.TERMINALHIRE_DIR || join22(homedir17(), ".terminalhire");
     INDEX_CACHE_FILE3 = join22(TERMINALHIRE_DIR12, "index-cache.json");
     INDEX_TTL_MS3 = 15 * 60 * 1e3;
@@ -15991,6 +16110,12 @@ var init_jpi_contribute = __esm({
 });
 
 // src/policy-acks.ts
+var policy_acks_exports = {};
+__export(policy_acks_exports, {
+  POLICY_ACKS_FILE: () => POLICY_ACKS_FILE,
+  findPolicyAck: () => findPolicyAck,
+  rememberPolicyAck: () => rememberPolicyAck
+});
 import { lstatSync as lstatSync3, readFileSync as readFileSync20, writeFileSync as writeFileSync15 } from "fs";
 import { join as join24 } from "path";
 import { homedir as homedir19 } from "os";
@@ -16042,7 +16167,7 @@ function rememberPolicyAck(ack) {
   } catch {
   }
 }
-var TERMINALHIRE_DIR14, ACKS_FILE, REMEMBERABLE_VERDICTS, HEX64;
+var TERMINALHIRE_DIR14, ACKS_FILE, REMEMBERABLE_VERDICTS, HEX64, POLICY_ACKS_FILE;
 var init_policy_acks = __esm({
   "src/policy-acks.ts"() {
     "use strict";
@@ -16051,6 +16176,7 @@ var init_policy_acks = __esm({
     ACKS_FILE = join24(TERMINALHIRE_DIR14, "policy-acks.json");
     REMEMBERABLE_VERDICTS = /* @__PURE__ */ new Set(["ai-mentioned", "disclosure-required"]);
     HEX64 = /^[0-9a-f]{64}$/;
+    POLICY_ACKS_FILE = ACKS_FILE;
   }
 });
 
@@ -16187,7 +16313,7 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
     const { listClaims: listClaims2, toPushedClaim: toPushedClaim2, PUSHED_CLAIM_FIELDS: PUSHED_CLAIM_FIELDS2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
     const pushed = listClaims2().map((c) => toPushedClaim2(c));
     const currentHash = computeSnapshotHash(pushed);
-    const gate = backgroundPushGate({
+    const gate2 = backgroundPushGate({
       autoMarkerExists: true,
       tokenFileExists: true,
       lastPushedAt: marker.lastPushedAt ?? null,
@@ -16196,7 +16322,7 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
       currentHash,
       lastSnapshotHash: marker.lastSnapshotHash ?? null
     });
-    if (!gate.push) return;
+    if (!gate2.push) return;
     const token = await readPushTokenEnc();
     if (!token) return;
     const consentReceipt = {
@@ -16232,302 +16358,6 @@ var init_claim_push_bg = __esm({
     CLAIM_SYNC_BASE = "https://terminalhire.com";
     AUTO_CONSENT_VERSION = 2;
     AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
-  }
-});
-
-// src/repo-policy.ts
-var repo_policy_exports = {};
-__export(repo_policy_exports, {
-  POLICY_RULESET_VERSION: () => POLICY_RULESET_VERSION,
-  auditContent: () => auditContent,
-  checkRepoPolicy: () => checkRepoPolicy,
-  ghHeaders: () => ghHeaders3
-});
-import { createHash as createHash5 } from "crypto";
-function ghHeaders3(url, token) {
-  if (!token) return GH_HEADERS;
-  let origin;
-  try {
-    origin = new URL(url).origin;
-  } catch {
-    return GH_HEADERS;
-  }
-  if (origin !== GH_API_ORIGIN) return GH_HEADERS;
-  return { ...GH_HEADERS, Authorization: `Bearer ${token}` };
-}
-function isRateLimited(res) {
-  return res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0";
-}
-async function classifyFailure(res) {
-  if (res.status === 401) return "credential";
-  if (res.status !== 403) return "other";
-  if (res.headers.get("retry-after")) return "throttle";
-  if (res.headers.get("x-ratelimit-remaining") === "0") return "throttle";
-  let message = "";
-  try {
-    const peeked = await res.clone().json();
-    message = typeof peeked?.message === "string" ? peeked.message.toLowerCase() : "";
-  } catch {
-    return "other";
-  }
-  if (message.includes("secondary rate limit") || message.includes("abuse")) return "throttle";
-  if (message.includes("bad credentials") || message.includes("requires authentication") || message.includes("must authenticate") || message.includes("login attempts exceeded")) {
-    return "credential";
-  }
-  return "other";
-}
-async function fetchContentsFile(fetchImpl, repoFullName, path6, token, onTokenRejected) {
-  try {
-    const url = `${GH_API2}/repos/${repoFullName}/contents/${path6}`;
-    let res = await fetchImpl(url, {
-      headers: ghHeaders3(url, token),
-      signal: AbortSignal.timeout(1e4)
-    });
-    let failure = await classifyFailure(res);
-    if (token && failure === "credential") {
-      onTokenRejected();
-      res = await fetchImpl(url, { headers: GH_HEADERS, signal: AbortSignal.timeout(1e4) });
-      failure = await classifyFailure(res);
-    }
-    if (res.status === 404) return { ok: true, missing: true, content: null };
-    if (failure === "throttle") {
-      return { ok: false, missing: false, content: null, throttled: true };
-    }
-    if (isRateLimited(res)) {
-      return { ok: false, missing: false, content: null, throttled: true };
-    }
-    if (!res.ok) return { ok: false, missing: false, content: null };
-    const body = await res.json();
-    if (typeof body.content !== "string") return { ok: false, missing: false, content: null };
-    if (body.encoding !== "base64") return { ok: false, missing: false, content: null };
-    const raw = Buffer.from(body.content.replace(/\n/g, ""), "base64");
-    if (typeof body.size === "number" && raw.length !== body.size) {
-      return { ok: false, missing: false, content: null };
-    }
-    return { ok: true, missing: false, content: raw.toString("utf8") };
-  } catch {
-    return { ok: false, missing: false, content: null };
-  }
-}
-function classifyLine(line) {
-  if (PROHIBITED_PATTERNS.some((re) => re.test(line))) {
-    let residual = line;
-    for (const re of DISCLOSURE_ENFORCEMENT_PATTERNS) {
-      residual = residual.replace(new RegExp(re.source, "gi"), "");
-    }
-    if (PROHIBITED_PATTERNS.some((re) => re.test(residual))) return "prohibited";
-    return "disclosure-required";
-  }
-  if (DISCLOSURE_PATTERNS.some((re) => re.test(line))) return "disclosure-required";
-  if (AI_SIGNAL_PATTERNS.some((p) => p.re.test(line))) return "ai-mentioned";
-  return null;
-}
-function sanitizeExcerpt(text) {
-  return text.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, "");
-}
-function excerptAround(lines, i) {
-  const start = Math.max(0, i - 2);
-  const end = Math.min(lines.length, i + 3);
-  return sanitizeExcerpt(lines.slice(start, end).join("\n"));
-}
-function hashFiles(files) {
-  if (files.length === 0) return null;
-  const h = createHash5("sha256");
-  for (const { file, content } of files) h.update(`${file}
-${content}
-`);
-  return h.digest("hex");
-}
-function auditContent(files) {
-  const hits = [];
-  const requirements = [];
-  const seenKinds = /* @__PURE__ */ new Set();
-  for (const { file, content } of files) {
-    const lines = content.split("\n");
-    for (let i = 0; i < lines.length; i++) {
-      const rule = classifyLine(lines[i]);
-      if (rule) hits.push({ file, excerpt: excerptAround(lines, i), rule });
-      for (const { kind, re } of REQUIREMENT_PATTERNS) {
-        if (seenKinds.has(kind) || !re.test(lines[i])) continue;
-        seenKinds.add(kind);
-        requirements.push({ kind, file, excerpt: excerptAround(lines, i) });
-      }
-    }
-  }
-  let verdict = "clean";
-  for (const h of hits) {
-    if (verdict === "clean" || VERDICT_SEVERITY[h.rule] > VERDICT_SEVERITY[verdict]) {
-      verdict = h.rule;
-    }
-  }
-  const assignment = seenKinds.has("take-bot") ? "take-bot" : seenKinds.has("assignment-required") ? "required" : "none";
-  return { hits, requirements, verdict, assignment };
-}
-async function checkRepoPolicy(repoFullName, opts = {}) {
-  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
-  let activeToken = opts.token;
-  let requestsUsed = 0;
-  let hadError = false;
-  let truncated = false;
-  const files = [];
-  outer: for (const group of CANDIDATE_GROUPS) {
-    for (const path6 of group) {
-      if (requestsUsed >= MAX_REQUESTS) {
-        truncated = true;
-        break outer;
-      }
-      requestsUsed++;
-      const outcome = await fetchContentsFile(fetchImpl, repoFullName, path6, activeToken, () => {
-        activeToken = void 0;
-      });
-      if (!outcome.ok) {
-        hadError = true;
-        if (outcome.throttled) break outer;
-        continue;
-      }
-      if (outcome.missing) continue;
-      if (outcome.content) files.push({ file: path6, content: outcome.content });
-    }
-  }
-  const { hits, requirements, verdict, assignment } = auditContent(files);
-  const scanComplete = !hadError && !truncated;
-  if (verdict === "prohibited") {
-    return {
-      status: "flagged",
-      verdict,
-      hits,
-      requirements,
-      assignment,
-      rulesetVersion: POLICY_RULESET_VERSION,
-      contentHash: hashFiles(files),
-      scanComplete,
-      files
-    };
-  }
-  if (!scanComplete) {
-    return {
-      status: "unavailable",
-      // The zero-hit error scan keeps its historical shape (`'unavailable'`,
-      // nothing was classified); a partial scan that DID classify something
-      // keeps that verdict so the display can show it.
-      verdict: hits.length > 0 ? verdict : "unavailable",
-      hits,
-      requirements,
-      assignment,
-      rulesetVersion: POLICY_RULESET_VERSION,
-      contentHash: hashFiles(files),
-      scanComplete,
-      files
-    };
-  }
-  if (hits.length > 0) {
-    return {
-      status: "flagged",
-      verdict,
-      hits,
-      requirements,
-      assignment,
-      rulesetVersion: POLICY_RULESET_VERSION,
-      contentHash: hashFiles(files),
-      scanComplete,
-      files
-    };
-  }
-  return {
-    status: "clean",
-    verdict: "clean",
-    hits: [],
-    requirements,
-    assignment,
-    rulesetVersion: POLICY_RULESET_VERSION,
-    contentHash: hashFiles(files),
-    scanComplete,
-    files
-  };
-}
-var GH_API2, GH_API_ORIGIN, GH_HEADERS, MAX_REQUESTS, POLICY_RULESET_VERSION, AI_SIGNAL_PATTERNS, AI_TERM, PROHIBITED_PATTERNS, DISCLOSURE_PATTERNS, DISCLOSURE_ENFORCEMENT_PATTERNS, REQUIREMENT_PATTERNS, CANDIDATE_GROUPS, VERDICT_SEVERITY;
-var init_repo_policy = __esm({
-  "src/repo-policy.ts"() {
-    "use strict";
-    GH_API2 = "https://api.github.com";
-    GH_API_ORIGIN = "https://api.github.com";
-    GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
-    MAX_REQUESTS = 7;
-    POLICY_RULESET_VERSION = 6;
-    AI_SIGNAL_PATTERNS = [
-      { label: "AI", re: /\bAI\b/i },
-      { label: "artificial intelligence", re: /artificial intelligence/i },
-      { label: "LLM", re: /\bLLMs?\b/i },
-      { label: "language model", re: /language model/i },
-      { label: "Copilot", re: /\bcopilot\b/i },
-      { label: "ChatGPT", re: /\bchatgpt\b/i },
-      { label: "Claude", re: /\bclaude\b/i },
-      { label: "generative", re: /\bgenerative\b/i },
-      { label: "machine-generated", re: /machine[\s-]generated/i }
-    ];
-    AI_TERM = "(?:ai|llms?|generative(?:\\s+ai)?|artificial intelligence|language models?|copilot|chatgpt|claude|machine[\\s-]generated)";
-    PROHIBITED_PATTERNS = [
-      new RegExp(`prohibit\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
-      /did not write the code yourself/i,
-      new RegExp(`(?:not|never|don'?t|won'?t)\\s+accept\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
-      new RegExp(
-        `\\bno\\s+${AI_TERM}[^.\\n]{0,40}\\b(?:prs?|pull requests?|contributions?|code|patch(?:es)?|commits?|submissions?)\\b`,
-        "i"
-      ),
-      new RegExp(
-        `\\b${AI_TERM}[^.\\n]{0,60}\\b(?:is|are|will be)\\s+(?:\\w+\\s+)?(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
-        "i"
-      )
-    ];
-    DISCLOSURE_PATTERNS = [
-      new RegExp(`disclos\\w+[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
-      new RegExp(`\\b${AI_TERM}[^.\\n]{0,60}disclos`, "i"),
-      new RegExp(`\\b${AI_TERM}[\\s-]assist\\w*[^.\\n]{0,60}\\b(?:must|should|required?)\\b`, "i"),
-      // PR-template checkbox, e.g. "- [ ] I used AI tools and have reviewed the output"
-      new RegExp(`\\[ \\][^\\n]{0,80}\\b${AI_TERM}`, "i")
-    ];
-    DISCLOSURE_ENFORCEMENT_PATTERNS = [
-      new RegExp(
-        `(?:if|unless|without|absent)\\b[^.\\n]{0,120}disclos\\w*[^.\\n]{0,120}\\b(?:is|are|will be|may be)\\s+(?:\\w+\\s+)?(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
-        "i"
-      ),
-      new RegExp(
-        `(?:fail\\w*\\s+to\\s+disclose|undisclosed)[^.\\n]{0,120}\\b(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
-        "i"
-      )
-    ];
-    REQUIREMENT_PATTERNS = [
-      // `/take` bot first: its docs usually also say "assign", and the bot is the
-      // more specific expectation (post exactly `/take`, not a prose request).
-      { kind: "take-bot", re: /(?:^|[\s`"'(])\/take\b/m },
-      { kind: "assignment-required", re: /(?:request|ask|wait)[^.\n]{0,40}\bassign/i },
-      { kind: "assignment-required", re: /\bassigned before\b/i },
-      { kind: "assignment-required", re: /\bself[\s-]assign/i },
-      // A bare "do not open PRs" can govern agent workflow without requiring
-      // maintainer assignment. Keep assignment/claim context in the same sentence.
-      {
-        kind: "assignment-required",
-        re: /\b(?:(?:un)?assign(?:ed|ment)?|(?:un)?claim(?:ed|ing)?)\b[^.?!\n]{0,40}\bdo not (?:open|submit)[^.?!\n]{0,40}\b(?:prs?|pull requests?)\b/i
-      },
-      {
-        kind: "assignment-required",
-        re: /do not (?:open|submit)[^.?!\n]{0,40}\b(?:prs?|pull requests?)\b[^.?!\n]{0,40}\b(?:(?:un)?assign(?:ed|ment)?|(?:un)?claim(?:ed|ing)?)\b/i
-      },
-      { kind: "cla-required", re: /\bCLA\b/ },
-      { kind: "cla-required", re: /contributor licen[cs]e agreement/i },
-      { kind: "discussion-first", re: /open an issue (?:first|before)/i },
-      { kind: "discussion-first", re: /discuss\w*[^.\n]{0,40}\bbefore\b/i }
-    ];
-    CANDIDATE_GROUPS = [
-      ["CONTRIBUTING.md", ".github/CONTRIBUTING.md", "docs/CONTRIBUTING.md"],
-      ["AGENTS.md", "AGENTS.MD"],
-      [".github/PULL_REQUEST_TEMPLATE.md", "PULL_REQUEST_TEMPLATE.md"]
-    ];
-    VERDICT_SEVERITY = {
-      "ai-mentioned": 1,
-      "disclosure-required": 2,
-      prohibited: 3
-    };
   }
 });
 
@@ -22260,10 +22090,10 @@ async function setupSkills(ctx) {
     try {
       const versionId = await resolveSkillVersion(client, skill.skill_id, skill.version);
       const version2 = await client.beta.skills.versions.retrieve(versionId, { skill_id: skill.skill_id });
-      let dirname9 = path3.basename(version2.name.trim());
-      if (dirname9 === "" || dirname9 === "." || dirname9 === "..")
-        dirname9 = skill.skill_id;
-      const dest = path3.resolve(skillsRoot, dirname9);
+      let dirname10 = path3.basename(version2.name.trim());
+      if (dirname10 === "" || dirname10 === "." || dirname10 === "..")
+        dirname10 = skill.skill_id;
+      const dest = path3.resolve(skillsRoot, dirname10);
       if (dest !== skillsRoot && !dest.startsWith(skillsRoot + path3.sep)) {
         log.warn("skill name escapes the skills dir; skipping", {
           component: "agent-tool-context",
@@ -22468,8 +22298,8 @@ function betaBashTool(ctx) {
     },
     run: async ({ command, restart, timeout_ms }, context) => {
       const prev = tail;
-      const gate = promiseWithResolvers();
-      tail = gate.promise;
+      const gate2 = promiseWithResolvers();
+      tail = gate2.promise;
       try {
         await prev;
       } catch {
@@ -22501,7 +22331,7 @@ function betaBashTool(ctx) {
           throw new ToolError(`bash: ${e instanceof Error ? e.message : String(e)}`);
         }
       } finally {
-        gate.resolve();
+        gate2.resolve();
       }
     },
     close: () => {
@@ -29673,7 +29503,7 @@ __export(repo_policy_semantic_exports, {
   makeAnthropicSemanticGenerate: () => makeAnthropicSemanticGenerate,
   quoteFound: () => quoteFound
 });
-import { createHash as createHash6 } from "crypto";
+import { createHash as createHash5 } from "crypto";
 import { homedir as homedir21 } from "os";
 import { join as join29 } from "path";
 import { readFileSync as readFileSync22, writeFileSync as writeFileSync17 } from "fs";
@@ -29790,7 +29620,7 @@ function writeCachedSemantic(entry) {
   }
 }
 function contentHashOf(files) {
-  const h = createHash6("sha256");
+  const h = createHash5("sha256");
   for (const { file, content } of [...files].sort((a, b) => a.file.localeCompare(b.file))) {
     h.update(`${file.length}:${file} ${content.length}:${content} `);
   }
@@ -29963,6 +29793,339 @@ var init_repo_policy_semantic = __esm({
   }
 });
 
+// src/repo-policy.ts
+var repo_policy_exports = {};
+__export(repo_policy_exports, {
+  FOUNDER_DECLARATION_SOURCE: () => FOUNDER_DECLARATION_SOURCE,
+  POLICY_RULESET_VERSION: () => POLICY_RULESET_VERSION,
+  auditContent: () => auditContent,
+  auditDeclaredPolicy: () => auditDeclaredPolicy,
+  checkRepoPolicy: () => checkRepoPolicy,
+  ghHeaders: () => ghHeaders3
+});
+import { createHash as createHash6 } from "crypto";
+function ghHeaders3(url, token) {
+  if (!token) return GH_HEADERS;
+  let origin;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    return GH_HEADERS;
+  }
+  if (origin !== GH_API_ORIGIN) return GH_HEADERS;
+  return { ...GH_HEADERS, Authorization: `Bearer ${token}` };
+}
+function isRateLimited(res) {
+  return res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0";
+}
+async function classifyFailure(res) {
+  if (res.status === 401) return "credential";
+  if (res.status !== 403) return "other";
+  if (res.headers.get("retry-after")) return "throttle";
+  if (res.headers.get("x-ratelimit-remaining") === "0") return "throttle";
+  let message = "";
+  try {
+    const peeked = await res.clone().json();
+    message = typeof peeked?.message === "string" ? peeked.message.toLowerCase() : "";
+  } catch {
+    return "other";
+  }
+  if (message.includes("secondary rate limit") || message.includes("abuse")) return "throttle";
+  if (message.includes("bad credentials") || message.includes("requires authentication") || message.includes("must authenticate") || message.includes("login attempts exceeded")) {
+    return "credential";
+  }
+  return "other";
+}
+async function fetchContentsFile(fetchImpl, repoFullName, path6, token, onTokenRejected) {
+  try {
+    const url = `${GH_API2}/repos/${repoFullName}/contents/${path6}`;
+    let res = await fetchImpl(url, {
+      headers: ghHeaders3(url, token),
+      signal: AbortSignal.timeout(1e4)
+    });
+    let failure = await classifyFailure(res);
+    if (token && failure === "credential") {
+      onTokenRejected();
+      res = await fetchImpl(url, { headers: GH_HEADERS, signal: AbortSignal.timeout(1e4) });
+      failure = await classifyFailure(res);
+    }
+    if (res.status === 404) return { ok: true, missing: true, content: null };
+    if (failure === "throttle") {
+      return { ok: false, missing: false, content: null, throttled: true };
+    }
+    if (isRateLimited(res)) {
+      return { ok: false, missing: false, content: null, throttled: true };
+    }
+    if (!res.ok) return { ok: false, missing: false, content: null };
+    const body = await res.json();
+    if (typeof body.content !== "string") return { ok: false, missing: false, content: null };
+    if (body.encoding !== "base64") return { ok: false, missing: false, content: null };
+    const raw = Buffer.from(body.content.replace(/\n/g, ""), "base64");
+    if (typeof body.size === "number" && raw.length !== body.size) {
+      return { ok: false, missing: false, content: null };
+    }
+    return { ok: true, missing: false, content: raw.toString("utf8") };
+  } catch {
+    return { ok: false, missing: false, content: null };
+  }
+}
+function classifyLine(line) {
+  if (PROHIBITED_PATTERNS.some((re) => re.test(line))) {
+    let residual = line;
+    for (const re of DISCLOSURE_ENFORCEMENT_PATTERNS) {
+      residual = residual.replace(new RegExp(re.source, "gi"), "");
+    }
+    if (PROHIBITED_PATTERNS.some((re) => re.test(residual))) return "prohibited";
+    return "disclosure-required";
+  }
+  if (DISCLOSURE_PATTERNS.some((re) => re.test(line))) return "disclosure-required";
+  if (AI_SIGNAL_PATTERNS.some((p) => p.re.test(line))) return "ai-mentioned";
+  return null;
+}
+function sanitizeExcerpt(text) {
+  return text.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, "");
+}
+function excerptAround(lines, i) {
+  const start = Math.max(0, i - 2);
+  const end = Math.min(lines.length, i + 3);
+  return sanitizeExcerpt(lines.slice(start, end).join("\n"));
+}
+function hashFiles(files) {
+  if (files.length === 0) return null;
+  const h = createHash6("sha256");
+  for (const { file, content } of files) h.update(`${file}
+${content}
+`);
+  return h.digest("hex");
+}
+function auditContent(files) {
+  const hits = [];
+  const requirements = [];
+  const seenKinds = /* @__PURE__ */ new Set();
+  for (const { file, content } of files) {
+    const lines = content.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const rule = classifyLine(lines[i]);
+      if (rule) hits.push({ file, excerpt: excerptAround(lines, i), rule });
+      for (const { kind, re } of REQUIREMENT_PATTERNS) {
+        if (seenKinds.has(kind) || !re.test(lines[i])) continue;
+        seenKinds.add(kind);
+        requirements.push({ kind, file, excerpt: excerptAround(lines, i) });
+      }
+    }
+  }
+  let verdict = "clean";
+  for (const h of hits) {
+    if (verdict === "clean" || VERDICT_SEVERITY[h.rule] > VERDICT_SEVERITY[verdict]) {
+      verdict = h.rule;
+    }
+  }
+  const assignment = seenKinds.has("take-bot") ? "take-bot" : seenKinds.has("assignment-required") ? "required" : "none";
+  return { hits, requirements, verdict, assignment };
+}
+async function checkRepoPolicy(repoFullName, opts = {}) {
+  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  let activeToken = opts.token;
+  let requestsUsed = 0;
+  let hadError = false;
+  let truncated = false;
+  const files = [];
+  outer: for (const group of CANDIDATE_GROUPS) {
+    for (const path6 of group) {
+      if (requestsUsed >= MAX_REQUESTS) {
+        truncated = true;
+        break outer;
+      }
+      requestsUsed++;
+      const outcome = await fetchContentsFile(fetchImpl, repoFullName, path6, activeToken, () => {
+        activeToken = void 0;
+      });
+      if (!outcome.ok) {
+        hadError = true;
+        if (outcome.throttled) break outer;
+        continue;
+      }
+      if (outcome.missing) continue;
+      if (outcome.content) files.push({ file: path6, content: outcome.content });
+    }
+  }
+  const { hits, requirements, verdict, assignment } = auditContent(files);
+  const scanComplete = !hadError && !truncated;
+  if (verdict === "prohibited") {
+    return {
+      status: "flagged",
+      verdict,
+      hits,
+      requirements,
+      assignment,
+      rulesetVersion: POLICY_RULESET_VERSION,
+      contentHash: hashFiles(files),
+      scanComplete,
+      files
+    };
+  }
+  if (!scanComplete) {
+    return {
+      status: "unavailable",
+      // The zero-hit error scan keeps its historical shape (`'unavailable'`,
+      // nothing was classified); a partial scan that DID classify something
+      // keeps that verdict so the display can show it.
+      verdict: hits.length > 0 ? verdict : "unavailable",
+      hits,
+      requirements,
+      assignment,
+      rulesetVersion: POLICY_RULESET_VERSION,
+      contentHash: hashFiles(files),
+      scanComplete,
+      files
+    };
+  }
+  if (hits.length > 0) {
+    return {
+      status: "flagged",
+      verdict,
+      hits,
+      requirements,
+      assignment,
+      rulesetVersion: POLICY_RULESET_VERSION,
+      contentHash: hashFiles(files),
+      scanComplete,
+      files
+    };
+  }
+  return {
+    status: "clean",
+    verdict: "clean",
+    hits: [],
+    requirements,
+    assignment,
+    rulesetVersion: POLICY_RULESET_VERSION,
+    contentHash: hashFiles(files),
+    scanComplete,
+    files
+  };
+}
+function auditDeclaredPolicy(declaration) {
+  const text = typeof declaration === "string" ? declaration.trim() : "";
+  if (text === "") {
+    return {
+      status: "unavailable",
+      verdict: "unavailable",
+      hits: [],
+      requirements: [],
+      assignment: "none",
+      rulesetVersion: POLICY_RULESET_VERSION,
+      contentHash: null,
+      scanComplete: false,
+      files: []
+    };
+  }
+  const files = [{ file: FOUNDER_DECLARATION_SOURCE, content: text }];
+  const { hits, requirements, verdict, assignment } = auditContent(files);
+  return {
+    // Same status rule as a scanned repo: any classified hit → 'flagged' (the
+    // verdict says how severe), no hit → 'clean'. The declaration is one short
+    // text that was read in full, so the incomplete-scan precedence above can
+    // never apply here.
+    status: hits.length > 0 ? "flagged" : "clean",
+    verdict,
+    hits,
+    requirements,
+    assignment,
+    rulesetVersion: POLICY_RULESET_VERSION,
+    contentHash: hashFiles(files),
+    scanComplete: true,
+    files
+  };
+}
+var GH_API2, GH_API_ORIGIN, GH_HEADERS, MAX_REQUESTS, POLICY_RULESET_VERSION, AI_SIGNAL_PATTERNS, AI_TERM, PROHIBITED_PATTERNS, DISCLOSURE_PATTERNS, DISCLOSURE_ENFORCEMENT_PATTERNS, REQUIREMENT_PATTERNS, CANDIDATE_GROUPS, VERDICT_SEVERITY, FOUNDER_DECLARATION_SOURCE;
+var init_repo_policy = __esm({
+  "src/repo-policy.ts"() {
+    "use strict";
+    GH_API2 = "https://api.github.com";
+    GH_API_ORIGIN = "https://api.github.com";
+    GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
+    MAX_REQUESTS = 7;
+    POLICY_RULESET_VERSION = 7;
+    AI_SIGNAL_PATTERNS = [
+      { label: "AI", re: /\bAI\b/i },
+      { label: "artificial intelligence", re: /artificial intelligence/i },
+      { label: "LLM", re: /\bLLMs?\b/i },
+      { label: "language model", re: /language model/i },
+      { label: "Copilot", re: /\bcopilot\b/i },
+      { label: "ChatGPT", re: /\bchatgpt\b/i },
+      { label: "Claude", re: /\bclaude\b/i },
+      { label: "generative", re: /\bgenerative\b/i },
+      { label: "machine-generated", re: /machine[\s-]generated/i },
+      { label: "agent workflow", re: /\b(?:ai|coding|autonomous|llm)[\s-]agents?\b/i }
+    ];
+    AI_TERM = "(?:ai|llms?|generative(?:\\s+ai)?|artificial intelligence|language models?|copilot|chatgpt|claude|machine[\\s-]generated|(?:ai|coding|autonomous|llm)[\\s-]agents?)";
+    PROHIBITED_PATTERNS = [
+      new RegExp(`prohibit\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
+      /did not write the code yourself/i,
+      new RegExp(`(?:not|never|don'?t|won'?t)\\s+accept\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
+      new RegExp(
+        `\\bno\\s+${AI_TERM}[^.\\n]{0,40}\\b(?:prs?|pull requests?|contributions?|code|patch(?:es)?|commits?|submissions?)\\b`,
+        "i"
+      ),
+      new RegExp(
+        `\\b${AI_TERM}[^.\\n]{0,60}\\b(?:is|are|will be)\\s+(?:\\w+\\s+)?(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
+        "i"
+      )
+    ];
+    DISCLOSURE_PATTERNS = [
+      new RegExp(`disclos\\w+[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
+      new RegExp(`\\b${AI_TERM}[^.\\n]{0,60}disclos`, "i"),
+      new RegExp(`\\b${AI_TERM}[\\s-]assist\\w*[^.\\n]{0,60}\\b(?:must|should|required?)\\b`, "i"),
+      // PR-template checkbox, e.g. "- [ ] I used AI tools and have reviewed the output"
+      new RegExp(`\\[ \\][^\\n]{0,80}\\b${AI_TERM}`, "i")
+    ];
+    DISCLOSURE_ENFORCEMENT_PATTERNS = [
+      new RegExp(
+        `(?:if|unless|without|absent)\\b[^.\\n]{0,120}disclos\\w*[^.\\n]{0,120}\\b(?:is|are|will be|may be)\\s+(?:\\w+\\s+)?(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
+        "i"
+      ),
+      new RegExp(
+        `(?:fail\\w*\\s+to\\s+disclose|undisclosed)[^.\\n]{0,120}\\b(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
+        "i"
+      )
+    ];
+    REQUIREMENT_PATTERNS = [
+      // `/take` bot first: its docs usually also say "assign", and the bot is the
+      // more specific expectation (post exactly `/take`, not a prose request).
+      { kind: "take-bot", re: /(?:^|[\s`"'(])\/take\b/m },
+      { kind: "assignment-required", re: /(?:request|ask|wait)[^.\n]{0,40}\bassign/i },
+      { kind: "assignment-required", re: /\bassigned before\b/i },
+      { kind: "assignment-required", re: /\bself[\s-]assign/i },
+      // A bare "do not open PRs" can govern agent workflow without requiring
+      // maintainer assignment. Keep assignment/claim context in the same sentence.
+      {
+        kind: "assignment-required",
+        re: /\b(?:(?:un)?assign(?:ed|ment)?|(?:un)?claim(?:ed|ing)?)\b[^.?!\n]{0,40}\bdo not (?:open|submit)[^.?!\n]{0,40}\b(?:prs?|pull requests?)\b/i
+      },
+      {
+        kind: "assignment-required",
+        re: /do not (?:open|submit)[^.?!\n]{0,40}\b(?:prs?|pull requests?)\b[^.?!\n]{0,40}\b(?:(?:un)?assign(?:ed|ment)?|(?:un)?claim(?:ed|ing)?)\b/i
+      },
+      { kind: "cla-required", re: /\bCLA\b/ },
+      { kind: "cla-required", re: /contributor licen[cs]e agreement/i },
+      { kind: "discussion-first", re: /open an issue (?:first|before)/i },
+      { kind: "discussion-first", re: /discuss\w*[^.\n]{0,40}\bbefore\b/i }
+    ];
+    CANDIDATE_GROUPS = [
+      ["CONTRIBUTING.md", ".github/CONTRIBUTING.md", "docs/CONTRIBUTING.md"],
+      ["AGENTS.md", "AGENTS.MD"],
+      [".github/PULL_REQUEST_TEMPLATE.md", "PULL_REQUEST_TEMPLATE.md"]
+    ];
+    VERDICT_SEVERITY = {
+      "ai-mentioned": 1,
+      "disclosure-required": 2,
+      prohibited: 3
+    };
+    FOUNDER_DECLARATION_SOURCE = "founder-declaration";
+  }
+});
+
 // src/progress.ts
 var progress_exports = {};
 __export(progress_exports, {
@@ -30067,6 +30230,41 @@ var init_progress = __esm({
     "use strict";
     FRAME_MS = 80;
     CLEAR_LINE = "\x1B[2K\r";
+  }
+});
+
+// bin/approved-claims-badge.js
+var approved_claims_badge_exports = {};
+__export(approved_claims_badge_exports, {
+  acknowledgeApprovedClaim: () => acknowledgeApprovedClaim,
+  computeApprovedClaims: () => computeApprovedClaims
+});
+function normalizeIds(claimIds) {
+  if (!Array.isArray(claimIds)) return [];
+  return [...new Set(claimIds.filter((id) => typeof id === "string" && id !== ""))].sort();
+}
+function computeApprovedClaims(claimIds, previous) {
+  const approved = normalizeIds(claimIds);
+  const prior = previous && Array.isArray(previous.acknowledged) ? new Set(previous.acknowledged) : /* @__PURE__ */ new Set();
+  const acknowledged = approved.filter((id) => prior.has(id));
+  return { count: approved.length - acknowledged.length, acknowledged };
+}
+function acknowledgeApprovedClaim(claimId, previous) {
+  const prior = previous && Array.isArray(previous.acknowledged) ? previous.acknowledged : [];
+  if (typeof claimId !== "string" || claimId === "") {
+    const acknowledged2 = [...new Set(prior)].sort();
+    const count2 = previous && typeof previous.count === "number" ? previous.count : 0;
+    return { count: count2, acknowledged: acknowledged2 };
+  }
+  const acknowledged = [.../* @__PURE__ */ new Set([...prior, claimId])].sort();
+  const prevCount = previous && typeof previous.count === "number" ? previous.count : 0;
+  const alreadyKnown = prior.includes(claimId);
+  const count = alreadyKnown ? prevCount : Math.max(0, prevCount - 1);
+  return { count, acknowledged };
+}
+var init_approved_claims_badge = __esm({
+  "bin/approved-claims-badge.js"() {
+    "use strict";
   }
 });
 
@@ -30267,10 +30465,14 @@ __export(jpi_claim_exports, {
   CLAIM_CONSENT_VERSION: () => CLAIM_CONSENT_VERSION,
   backgroundEnableFailed: () => backgroundEnableFailed,
   buildAssignmentComment: () => buildAssignmentComment,
+  buildPatchSubmission: () => buildPatchSubmission,
   buildStakeComment: () => buildStakeComment,
   buildStandDownComment: () => buildStandDownComment,
   buildSubmitBody: () => buildSubmitBody,
   cmdRecord: () => cmdRecord,
+  cmdRuns: () => cmdRuns,
+  cmdSlice: () => cmdSlice,
+  cmdSubmit: () => cmdSubmit,
   countOpenPRsReferencingIssue: () => countOpenPRsReferencingIssue,
   diffContention: () => diffContention,
   explicitForkConsent: () => explicitForkConsent,
@@ -30278,8 +30480,10 @@ __export(jpi_claim_exports, {
   findClaimableInCache: () => findClaimableInCache,
   fmtAge: () => fmtAge,
   fmtContestedWarning: () => fmtContestedWarning,
+  founderPostingIdOf: () => founderPostingIdOf,
   isContested: () => isContested,
   isStrayArgShortRefClaim: () => isStrayArgShortRefClaim,
+  isTerminalRunStatus: () => isTerminalRunStatus,
   isVerblessShortRefClaim: () => isVerblessShortRefClaim,
   listMergedPRsReferencingIssue: () => listMergedPRsReferencingIssue,
   listOpenPRsReferencingIssue: () => listOpenPRsReferencingIssue,
@@ -30287,19 +30491,26 @@ __export(jpi_claim_exports, {
   normalizeIntent: () => normalizeIntent,
   pickBodySource: () => pickBodySource,
   pickExistingPr: () => pickExistingPr,
+  renderRunView: () => renderRunView,
+  renderServerRefusal: () => renderServerRefusal,
   resolveBounty: () => resolveBounty,
   resolveSubmitWorktree: () => resolveSubmitWorktree,
   revokeFailureAction: () => revokeFailureAction,
   run: () => run7,
+  runsGiveUpMessage: () => runsGiveUpMessage,
+  safeSliceRelPath: () => safeSliceRelPath,
   selectCompetingPrs: () => selectCompetingPrs,
   selectPushRemote: () => selectPushRemote,
   shouldRequestAssignment: () => shouldRequestAssignment,
+  sliceWorkDirFor: () => sliceWorkDirFor,
   stakeDecision: () => stakeDecision,
   startBranchFor: () => startBranchFor,
-  workDirFor: () => workDirFor
+  watchRunsLoop: () => watchRunsLoop,
+  workDirFor: () => workDirFor,
+  writeSliceFiles: () => writeSliceFiles
 });
-import { readFileSync as readFileSync23, writeFileSync as writeFileSync18, mkdirSync as mkdirSync5, existsSync as existsSync14, rmSync as rmSync7 } from "fs";
-import { join as join30 } from "path";
+import { readFileSync as readFileSync23, writeFileSync as writeFileSync18, mkdirSync as mkdirSync5, existsSync as existsSync14, rmSync as rmSync7, readdirSync as readdirSync2 } from "fs";
+import { join as join30, dirname as dirname8, isAbsolute as isAbsolute4, resolve as pathResolve } from "path";
 import { homedir as homedir22, hostname as osHostname } from "os";
 import { execFile as execFile3 } from "child_process";
 import { promisify as promisify3 } from "util";
@@ -30344,20 +30555,30 @@ function buildSubmitBody(issueNumber, opts = {}) {
   return `${closesLine}${main}${AI_DISCLOSURE_NOTE}`;
 }
 function printPolicySection(policy) {
+  const declared = policy.provenance === "founder-declaration";
+  const subject = declared ? "this posting's declared policy" : "this repo";
   const verdict = policy.verdict ?? (policy.status === "flagged" ? "ai-mentioned" : policy.status);
   if (verdict === "prohibited") {
     console.log(
-      "\n  POLICY: \u2717 this repo PROHIBITS AI-generated contributions \u2014 READ BEFORE CLAIMING:"
+      `
+  POLICY: \u2717 ${subject} PROHIBITS AI-generated contributions \u2014 READ BEFORE CLAIMING:`
     );
   } else if (verdict === "disclosure-required") {
-    console.log("\n  POLICY: \u26A0 this repo requires disclosing AI assistance \u2014 READ BEFORE WORKING:");
+    console.log(
+      `
+  POLICY: \u26A0 ${subject} requires disclosing AI assistance \u2014 READ BEFORE WORKING:`
+    );
   } else if (verdict === "ai-mentioned") {
     console.log(
       "\n  POLICY: \u26A0 possible AI-assistance policy language found \u2014 READ BEFORE WORKING:"
     );
   } else if (policy.status === "unavailable") {
     console.log(
-      "\n  POLICY: could not read this repo's CONTRIBUTING/PR-template/AGENTS docs (rate-limited or unreachable) \u2014 read them yourself before working."
+      declared ? "\n  POLICY: the founder declared no AI-assistance policy on this posting \u2014 there is nothing to read; acknowledging means working without a stated policy." : "\n  POLICY: could not read this repo's CONTRIBUTING/PR-template/AGENTS docs (rate-limited or unreachable) \u2014 read them yourself before working."
+    );
+  } else if (declared) {
+    console.log(
+      "  policy: no AI-assistance restriction in the founder's declared policy (shown above verbatim when flagged)"
     );
   } else if (policy.semantic?.status === "not-configured" && (policy.files?.length ?? 0) > 0) {
     console.log(
@@ -30571,7 +30792,11 @@ function extractClaimableFields(job) {
       // can prefer it over a live re-count that degrades to null under a rate limit
       // / >100-PR page. Display/fallback ONLY — the contention gate still forces a
       // LIVE recount (see resolveBounty); the snapshot never decides contention.
-      openPRsAtDiscovery: c.openPRsAtDiscovery
+      openPRsAtDiscovery: c.openPRsAtDiscovery,
+      // A contribute issue is never first-party founder supply.
+      founderPosting: false,
+      claimMode: "open",
+      aiDeclaration: null
     };
   }
   const b = job.bounty ?? {};
@@ -30583,7 +30808,16 @@ function extractClaimableFields(job) {
     amountUSD: b.amountUSD ?? null,
     source: "bounty",
     // Bounties carry no discovery-time PR proof — always live-count (unchanged).
-    openPRsAtDiscovery: void 0
+    openPRsAtDiscovery: void 0,
+    // TERM-142 — first-party founder supply drives a different record path: Gate 0
+    // reads the DECLARED policy below (there is no repo to scan — `repoFullName`
+    // here is the posting's opaque handle, V-9), and recording registers the claim
+    // server-side (Decision 4). Both fields follow the index row's absent-means-
+    // default conventions: claimMode absent = open, aiDeclaration absent = the
+    // founder declared nothing.
+    founderPosting: b.bountySource === "founder",
+    claimMode: b.claimMode === "approval-only" ? "approval-only" : "open",
+    aiDeclaration: typeof b.aiDeclaration === "string" && b.aiDeclaration.trim() !== "" ? b.aiDeclaration : null
   };
 }
 function parseGitHubUrl(url) {
@@ -30935,6 +31169,9 @@ function printMetric(rate) {
 }
 async function resolveBounty(arg) {
   let bountyId, title, repoFullName, issueUrl, amountUSD, source, openPRsAtDiscovery, indexNativeId;
+  let founderPosting = false;
+  let claimMode = "open";
+  let aiDeclaration = null;
   let job = findClaimableInCache(arg) ?? (looksLikeShortRef(arg) ? findClaimableByShortRef(arg) : null);
   let freshPool;
   if (!job && looksLikeShortRef(arg)) {
@@ -30942,7 +31179,18 @@ async function resolveBounty(arg) {
     if (freshPool) job = findByShortRefInPool(freshPool, arg);
   }
   if (job) {
-    ({ bountyId, title, repoFullName, issueUrl, amountUSD, source, openPRsAtDiscovery } = extractClaimableFields(job));
+    ({
+      bountyId,
+      title,
+      repoFullName,
+      issueUrl,
+      amountUSD,
+      source,
+      openPRsAtDiscovery,
+      founderPosting,
+      claimMode,
+      aiDeclaration
+    } = extractClaimableFields(job));
     indexNativeId = bountyId;
   } else {
     const parsed = parseGitHubUrl(arg);
@@ -30999,7 +31247,14 @@ async function resolveBounty(arg) {
     // Live open-PR count for the contention decision only (Fix 2). Distinct from
     // `openPRs`, which may be the discovery-time snapshot used for display.
     openPRsLive,
-    issueNumber: ghIssue ? ghIssue.number : null
+    issueNumber: ghIssue ? ghIssue.number : null,
+    // TERM-142 — founder-posting facts for cmdRecord's declared-policy gate and
+    // registration call. The URL tier can never resolve a founder posting (its
+    // claimUrl is a docs page, not a GitHub issue), so the defaults above are
+    // correct there: a URL-tier claim is never treated as founder supply.
+    founderPosting,
+    claimMode,
+    aiDeclaration
   };
 }
 function fmtOpenPRsLine(b) {
@@ -31026,6 +31281,123 @@ function fmtContestedWarning(b) {
     parts.push(`${b.openPRsLive} open PR${b.openPRsLive === 1 ? "" : "s"} referencing it`);
   }
   return `  \u26A0 This issue looks taken: ${parts.join(" / ")}. A merged PR here is unlikely.`;
+}
+async function mintRegistrationProof() {
+  console.log("\n  This founder posting registers your claim with terminalhire, so your");
+  console.log("  GitHub identity has to be verified once in the browser.");
+  let begin;
+  try {
+    const r = await fetch(`${CLAIM_SYNC_BASE2}/api/claim-sync/begin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hostname: osHostname() }),
+      signal: AbortSignal.timeout(1e4)
+    });
+    if (!r.ok) {
+      console.error(`  Could not start verification: /api/claim-sync/begin returned ${r.status}.`);
+      return null;
+    }
+    begin = await r.json();
+  } catch (err) {
+    console.error(
+      `  Could not start verification: ${err instanceof Error ? err.message : String(err)}`
+    );
+    return null;
+  }
+  const { challenge, verifyUrl } = begin || {};
+  if (!challenge || !verifyUrl) {
+    console.error("  Could not start verification: malformed begin response.");
+    return null;
+  }
+  console.log("\n  Open this URL to authorize (sign in with GitHub, then Confirm):");
+  console.log(`    ${verifyUrl}`);
+  console.log("\n  (Attempting to open it automatically...)");
+  openInBrowser(verifyUrl);
+  console.log("  Waiting for browser verification...");
+  const deadline = Date.now() + CLAIM_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await claimSleep(CLAIM_POLL_INTERVAL_MS);
+    let statusRes;
+    try {
+      statusRes = await fetch(
+        `${CLAIM_SYNC_BASE2}/api/claim-sync/status?challenge=${encodeURIComponent(challenge)}`,
+        { signal: AbortSignal.timeout(1e4) }
+      );
+    } catch {
+      continue;
+    }
+    if (!statusRes.ok) continue;
+    let body;
+    try {
+      body = await statusRes.json();
+    } catch {
+      continue;
+    }
+    if (body && body.status === "verified" && body.proofToken) return body.proofToken;
+  }
+  console.error("\n  Timed out waiting for browser verification (10 min).");
+  return null;
+}
+async function registerFounderClaim(b) {
+  const postingId = b.bountyId.replace(/^bounty:founder:/, "");
+  const refuse = (reason) => {
+    console.error(
+      `
+terminalhire claim: refusing to record \u2014 ${reason}
+  Nothing was recorded: a founder-posting claim registers with terminalhire BEFORE
+  it is recorded locally (fail-closed), so a posting that is gone, taken, or
+  unverifiable is never claimed on stale cache data.`
+    );
+    process.exit(1);
+  };
+  let auth = null;
+  try {
+    const stored = await readPushTokenEnc();
+    if (stored) auth = { pushToken: stored };
+  } catch {
+  }
+  if (!auth) {
+    const proofToken = await mintRegistrationProof();
+    if (!proofToken) {
+      refuse("could not verify your GitHub identity with terminalhire (see above).");
+    }
+    auth = { proofToken };
+  }
+  console.log("\n  Registering this claim with terminalhire (founder posting)...");
+  let res;
+  try {
+    res = await fetch(`${CLAIM_SYNC_BASE2}/api/claim/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bountyId: postingId, ...auth }),
+      signal: AbortSignal.timeout(1e4)
+    });
+  } catch (err) {
+    refuse(
+      `terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}), so the posting could not be revalidated.`
+    );
+  }
+  if (!res.ok) {
+    let body2 = null;
+    try {
+      body2 = await res.json();
+    } catch {
+    }
+    const detail = body2?.message || body2?.error || "";
+    refuse(
+      detail ? `the server refused this claim (${res.status}): ${detail}` : `the server refused this claim (${res.status}).`
+    );
+  }
+  let body;
+  try {
+    body = await res.json();
+  } catch {
+    body = null;
+  }
+  if (!body || body.ok !== true) {
+    refuse("malformed registration response from the server.");
+  }
+  return { claimId: typeof body.claimId === "string" ? body.claimId : null };
 }
 async function cmdRecord(arg, flags = {}) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -31068,10 +31440,20 @@ ${contestedWarning}`);
       process.exit(1);
     }
   }
-  const { checkRepoPolicy: checkRepoPolicy2 } = await Promise.resolve().then(() => (init_repo_policy(), repo_policy_exports));
-  const keywordPolicy = await checkRepoPolicy2(b.repoFullName, { token: await policyScanToken() });
   const { applySemanticPolicyGate: applySemanticPolicyGate2 } = await Promise.resolve().then(() => (init_repo_policy_semantic(), repo_policy_semantic_exports));
-  const policy = await applySemanticPolicyGate2(b.repoFullName, keywordPolicy);
+  let policy;
+  if (b.founderPosting) {
+    const { auditDeclaredPolicy: auditDeclaredPolicy2 } = await Promise.resolve().then(() => (init_repo_policy(), repo_policy_exports));
+    const declared = await applySemanticPolicyGate2(
+      b.repoFullName,
+      auditDeclaredPolicy2(b.aiDeclaration)
+    );
+    policy = { ...declared, provenance: "founder-declaration" };
+  } else {
+    const { checkRepoPolicy: checkRepoPolicy2 } = await Promise.resolve().then(() => (init_repo_policy(), repo_policy_exports));
+    const keywordPolicy = await checkRepoPolicy2(b.repoFullName, { token: await policyScanToken() });
+    policy = await applySemanticPolicyGate2(b.repoFullName, keywordPolicy);
+  }
   printPolicySection(policy);
   if (process.stdout.isTTY) {
     try {
@@ -31087,18 +31469,20 @@ ${contestedWarning}`);
     } catch {
     }
   }
+  const policySubject = policy.provenance === "founder-declaration" ? "this founder posting" : b.repoFullName;
   let ackedAt = null;
   if (policy.verdict === "prohibited") {
     let acked = Boolean(flags["ack-policy-prohibited"]);
     if (!acked && process.stdin.isTTY) {
       acked = await confirm(
-        "\n  This repo PROHIBITS AI-generated contributions \u2014 continuing means everything you submit must be hand-written by you. Continue? (y/N) "
+        `
+  ${policy.provenance === "founder-declaration" ? "This posting's declared policy" : "This repo"} PROHIBITS AI-generated contributions \u2014 continuing means everything you submit must be hand-written by you. Continue? (y/N) `
       );
     }
     if (!acked) {
       console.error(
         `
-terminalhire claim: refusing to record \u2014 ${b.repoFullName} prohibits AI-generated contributions.
+terminalhire claim: refusing to record \u2014 ${policySubject} prohibits AI-generated contributions.
   Read the excerpts above. If you will hand-write the work yourself, re-run with
   --ack-policy-prohibited (or confirm interactively). --ack-policy is not enough here.`
       );
@@ -31114,7 +31498,8 @@ terminalhire claim: refusing to record \u2014 ${b.repoFullName} prohibits AI-gen
       );
       ackedAt = prior.ackedAt;
     } else {
-      const reason = policy.status === "flagged" ? "This repo has AI-assistance policy language" : (policy.hits?.length ?? 0) > 0 ? "This repo's policy scan was cut short \u2014 AI-policy language was found in what WAS read, and other governing docs went unread" : "This repo's contribution policy could not be checked";
+      const declaredProvenance = policy.provenance === "founder-declaration";
+      const reason = policy.status === "flagged" ? declaredProvenance ? "This posting's declared policy has AI-assistance language" : "This repo has AI-assistance policy language" : (policy.hits?.length ?? 0) > 0 ? "This repo's policy scan was cut short \u2014 AI-policy language was found in what WAS read, and other governing docs went unread" : declaredProvenance ? "The founder declared no AI-assistance policy on this posting" : "This repo's contribution policy could not be checked";
       let acked = Boolean(flags["ack-policy"]);
       if (!acked && process.stdin.isTTY) {
         acked = await confirm(
@@ -31124,7 +31509,9 @@ terminalhire claim: refusing to record \u2014 ${b.repoFullName} prohibits AI-gen
       }
       if (!acked) {
         console.error(
-          `
+          declaredProvenance ? `
+terminalhire claim: refusing to record. ${reason}.
+  Re-run with --ack-policy to acknowledge and proceed (or confirm interactively).` : `
 terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribution policy first.
   Re-run with --ack-policy once you have (or confirm interactively).`
         );
@@ -31143,6 +31530,24 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
     }
   } else {
     console.log("  (default AI-assistance disclosure still applies at submit)");
+  }
+  let approval;
+  if (b.founderPosting) {
+    if (claims.findClaim(b.bountyId)) {
+      console.error(
+        `terminalhire claim: claim already exists for '${b.bountyId}' \u2014 run 'terminalhire claim status ${b.bountyId}' or 'terminalhire claim release ${b.bountyId}'`
+      );
+      process.exit(1);
+    }
+    const registration = await registerFounderClaim(b);
+    approval = {
+      mode: b.claimMode,
+      // 'pending' = the founder reviews claimants before access exists; `claim
+      // start` renders the wait. An open posting has no approval step — 'granted'.
+      state: b.claimMode === "approval-only" ? "pending" : "granted",
+      claimId: registration.claimId,
+      registeredAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
   }
   const kind = b.source === "contribute" ? "contribution" : "bounty";
   let claim;
@@ -31166,8 +31571,13 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
         assignment: policy.assignment,
         requirements: (policy.requirements ?? []).map((r) => r.kind),
         rulesetVersion: policy.rulesetVersion,
-        ackedAt
-      }
+        ackedAt,
+        // TERM-142 provenance marker — 'founder-declaration' when this policy came
+        // from the founder's declared text rather than scanned repo docs.
+        ...policy.provenance ? { provenance: policy.provenance } : {}
+      },
+      // Registration receipt + approval wait (founder postings only; see claims.ts).
+      ...approval ? { approval } : {}
     });
   } catch (err) {
     console.error(`terminalhire claim: ${err.message ?? err}`);
@@ -31182,6 +31592,26 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
     const { markStatus: markStatus2 } = await Promise.resolve().then(() => (init_job_status_store(), job_status_store_exports));
     markStatus2(b.indexNativeId, "claimed");
   } catch {
+  }
+  if (claim.approval) {
+    console.log(`
+\u2713 Claimed: ${claim.title}`);
+    console.log(`  id:      ${claim.id}`);
+    console.log(`  posting: ${claim.repoFullName}`);
+    console.log(`  amount:  ${fmtAmount(claim.amountUSD)}`);
+    console.log(
+      `  registered with terminalhire${claim.approval.claimId ? ` (server claim ${claim.approval.claimId})` : ""}`
+    );
+    if (claim.approval.state === "pending") {
+      console.log("\n  This posting is approval-only: the founder reviews claimants before any");
+      console.log("  access exists. Access is pending \u2014 founder postings are never forked or");
+      console.log("  cloned; once the founder approves, your work slice is delivered through");
+      console.log("  terminalhire.");
+    } else {
+      console.log("\n  Founder postings are never forked or cloned \u2014 the work arrives as a");
+      console.log("  read-slice through terminalhire, and your patch goes back the same way.");
+    }
+    return;
   }
   console.log(`
 \u2713 Claimed: ${claim.title}`);
@@ -31694,6 +32124,23 @@ When it's done:  terminalhire claim submit ${id}`);
       return;
     }
   }
+  if (claim.approval) {
+    console.log(`
+${claim.title}`);
+    if (claim.approval.state === "pending") {
+      console.log(
+        "\n  Access is pending \u2014 this approval-only posting needs the founder to approve"
+      );
+      console.log("  your claim before any work can be delivered. No fork was attempted: founder");
+      console.log("  postings are never forked or cloned; once approved, your work slice is");
+      console.log("  delivered through terminalhire.");
+    } else {
+      console.log("\n  No fork was attempted \u2014 founder postings are never forked or cloned. Your");
+      console.log("  work slice is delivered through terminalhire, and your patch goes back the");
+      console.log("  same way.");
+    }
+    return;
+  }
   if (flags.here) {
     await cmdStartHere(claims, claim, flags);
     return;
@@ -31849,6 +32296,439 @@ async function cmdStartHere(claims, claim, flags = {}) {
   console.log(`
   When the work is done:  terminalhire claim submit ${claim.id}`);
 }
+function runsGiveUpMessage(id, attempts = RUNS_POLL_ATTEMPTS, intervalMs = RUNS_POLL_INTERVAL_MS) {
+  const mins = Math.round(attempts * intervalMs / 6e4);
+  return `terminalhire claim runs: no finished result after ${attempts} checks at ${Math.round(intervalMs / 1e3)}s intervals (~${mins} min) \u2014 giving up. CI may still be running; re-run 'terminalhire claim runs ${id}' later.`;
+}
+function founderPostingIdOf(claim) {
+  return String(claim.bountyId).replace(/^bounty:founder:/, "");
+}
+function sliceWorkDirFor(claimLocalId) {
+  const safe = String(claimLocalId).replace(/[^A-Za-z0-9._-]/g, "-");
+  return join30(homedir22(), "terminalhire", "work", `slice-${safe}`);
+}
+function renderServerRefusal(status, body) {
+  const code = body && typeof body.error === "string" ? body.error : null;
+  const prose = body && typeof body.message === "string" ? body.message : null;
+  if (prose) return `the server refused (${status}${code ? ` ${code}` : ""}): ${prose}`;
+  if (code) return `the server refused (${status} ${code}).`;
+  return `the server refused (${status}).`;
+}
+function safeSliceRelPath(p) {
+  if (typeof p !== "string" || p.length === 0) return false;
+  if (isAbsolute4(p) || p.includes("\\") || /^[A-Za-z]:/.test(p)) return false;
+  return p.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
+}
+function writeSliceFiles(destDir, files) {
+  for (const f of files) {
+    if (!safeSliceRelPath(f.path)) {
+      throw new Error(`slice contained an unsafe path ('${f.path}') \u2014 refusing the whole slice`);
+    }
+  }
+  const written = [];
+  const unavailable = [];
+  for (const f of files) {
+    if (typeof f.content === "string") {
+      const abs = join30(destDir, f.path);
+      mkdirSync5(dirname8(abs), { recursive: true });
+      writeFileSync18(abs, f.content, "utf8");
+      written.push(f.path);
+    } else {
+      unavailable.push({ path: f.path, reason: f.unavailableReason || "(no reason given)" });
+    }
+  }
+  return { written, unavailable };
+}
+function buildPatchSubmission({ bountyId, claimId, patch, authorName, authorEmail, auth }) {
+  if (auth && "pushToken" in auth) {
+    throw new Error(
+      "patch submission must never authenticate with the persistent pushToken \u2014 refusing"
+    );
+  }
+  if (!auth || typeof auth.proofToken !== "string" || auth.proofToken.length === 0) {
+    throw new Error(
+      "patch submission requires a single-use ownership proofToken (purpose claim-push) \u2014 refusing"
+    );
+  }
+  for (const [k, v] of Object.entries({ bountyId, claimId, patch, authorName, authorEmail })) {
+    if (typeof v !== "string" || v.length === 0) throw new Error(`${k} is required`);
+  }
+  return { bountyId, claimId, patch, authorName, authorEmail, proofToken: auth.proofToken };
+}
+function renderRunView(run30, message) {
+  const lines = [];
+  const sha = run30.commitSha ? String(run30.commitSha).slice(0, 10) : null;
+  lines.push(`  run:        ${run30.branch ?? "(no branch)"}${sha ? ` @ ${sha}` : ""}`);
+  lines.push(
+    `  status:     ${run30.status}${run30.conclusion ? ` \xB7 conclusion: ${run30.conclusion}` : ""}`
+  );
+  if (Array.isArray(run30.failingJobs) && run30.failingJobs.length > 0) {
+    lines.push(`  failing:    ${run30.failingJobs.join(", ")}`);
+  }
+  if (run30.previewUrl) lines.push(`  preview:    ${run30.previewUrl}`);
+  if (run30.roundTrips != null) lines.push(`  round trips: ${run30.roundTrips}`);
+  if (run30.logTail) {
+    lines.push("  \u2500\u2500 log tail \u2500\u2500");
+    for (const l of String(run30.logTail).split("\n")) lines.push(`  \u2502 ${l}`);
+  }
+  if (message) lines.push(`  ${message}`);
+  return lines.join("\n");
+}
+function isTerminalRunStatus(status) {
+  return status === "completed" || status === "no-ci";
+}
+async function watchRunsLoop({
+  id,
+  fetchOnce,
+  attempts = RUNS_POLL_ATTEMPTS,
+  intervalMs = RUNS_POLL_INTERVAL_MS,
+  sleep: sleep4 = claimSleep,
+  log = console.log
+}) {
+  for (let i = 1; i <= attempts; i++) {
+    const r = await fetchOnce();
+    if (r.kind === "refusal") {
+      log(`terminalhire claim: ${renderServerRefusal(r.status, r.body)}`);
+      return { outcome: "refused" };
+    }
+    if (r.kind === "network") {
+      log(`  (attempt ${i}/${attempts}: terminalhire unreachable \u2014 ${r.error}; retrying)`);
+    } else {
+      log(`
+  [check ${i}/${attempts}]`);
+      log(renderRunView(r.run, r.message));
+      if (isTerminalRunStatus(r.run.status)) return { outcome: "done", run: r.run };
+    }
+    if (i < attempts) await sleep4(intervalMs);
+  }
+  log(runsGiveUpMessage(id, attempts, intervalMs));
+  return { outcome: "gave-up" };
+}
+function requireFounderLoopClaim(claims, id, verb) {
+  if (!id) {
+    console.error(`Usage: terminalhire claim ${verb} <id>`);
+    process.exit(1);
+  }
+  const claim = claims.findClaim(id);
+  if (!claim) {
+    console.error(`terminalhire claim: no claim with id '${id}'.`);
+    process.exit(1);
+  }
+  if (!claim.approval) {
+    console.error(
+      `terminalhire claim: ${id} is not a founder-posting claim \u2014 '${verb}' only applies to founder postings (OSS claims work through fork + PR: 'claim start' / 'claim submit').`
+    );
+    process.exit(1);
+  }
+  if (!claim.approval.claimId) {
+    console.error(
+      `terminalhire claim: ${id} carries no server claim id \u2014 its registration receipt is incomplete, so the server cannot match this claim to you. Re-record the claim.`
+    );
+    process.exit(1);
+  }
+  return claim;
+}
+async function requireReadPushToken(what) {
+  let stored = null;
+  try {
+    stored = await readPushTokenEnc();
+  } catch {
+  }
+  if (!stored) {
+    console.error(
+      `terminalhire claim: ${what} needs the persistent push token, and none is enrolled on this machine.
+  Enroll once (browser verification): terminalhire claim --push`
+    );
+    process.exit(1);
+  }
+  return stored;
+}
+async function cmdSlice(id, flags = {}) {
+  const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+  const claim = requireFounderLoopClaim(claims, id, "slice");
+  const pushToken = await requireReadPushToken("fetching your granted slice");
+  let res;
+  try {
+    res = await fetch(`${CLAIM_SYNC_BASE2}/api/claim/slice`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bountyId: founderPostingIdOf(claim),
+        claimId: claim.approval.claimId,
+        pushToken
+      }),
+      signal: AbortSignal.timeout(3e4)
+    });
+  } catch (err) {
+    console.error(
+      `terminalhire claim: terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}) \u2014 nothing was written.`
+    );
+    process.exit(1);
+  }
+  let body = null;
+  try {
+    body = await res.json();
+  } catch {
+  }
+  if (!res.ok) {
+    console.error(`terminalhire claim: ${renderServerRefusal(res.status, body)}`);
+    process.exit(1);
+  }
+  if (!body || body.ok !== true || !Array.isArray(body.files)) {
+    console.error(
+      "terminalhire claim: malformed slice response from the server \u2014 nothing was written."
+    );
+    process.exit(1);
+  }
+  let dest = flags.dir ? pathResolve(String(flags.dir)) : sliceWorkDirFor(claim.id);
+  if (existsSync14(dest) && readdirSync2(dest).length > 0) {
+    console.error(
+      `terminalhire claim: ${dest} already has content \u2014 refusing to overwrite it.
+  Re-fetching is fine, but into a fresh directory: terminalhire claim slice ${id} --dir <path>`
+    );
+    process.exit(1);
+  }
+  mkdirSync5(dest, { recursive: true });
+  const { written, unavailable } = writeSliceFiles(dest, body.files);
+  try {
+    if (claim.approval.mode === "approval-only") {
+      const { acknowledgeApprovedClaim: acknowledgeApprovedClaim2 } = await Promise.resolve().then(() => (init_approved_claims_badge(), approved_claims_badge_exports));
+      const { readCacheEntry: readCacheEntry2, updateIndexCache: updateIndexCache2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
+      updateIndexCache2({
+        approvedClaims: acknowledgeApprovedClaim2(
+          claim.approval.claimId,
+          (readCacheEntry2() ?? {}).approvedClaims
+        )
+      });
+    }
+  } catch {
+  }
+  console.log(`
+\u2713 Slice received: ${body.title ?? claim.title}`);
+  console.log(
+    `  tier: ${body.tier} \xB7 ${written.length} file(s) written of ${body.totalCount} granted` + (body.excludedCount ? ` (${body.excludedCount} excluded by the founder's slice)` : "")
+  );
+  for (const u of unavailable) {
+    console.log(`  \u26A0 ${u.path} \u2014 no file written: ${u.reason}`);
+  }
+  if (body.spec) {
+    console.log("\n  \u2500\u2500 spec \u2500\u2500");
+    for (const l of String(body.spec).split("\n")) console.log(`  ${l}`);
+  }
+  const branch = `claim/${String(claim.id).replace(/[^A-Za-z0-9._-]/g, "-")}`;
+  try {
+    await sh("git", ["-C", dest, "init"]);
+    await sh("git", ["-C", dest, "add", "-A"]);
+    await sh("git", [
+      "-C",
+      dest,
+      "-c",
+      "user.name=terminalhire",
+      "-c",
+      "user.email=slice@terminalhire.com",
+      "commit",
+      "--no-verify",
+      "-m",
+      `slice baseline for ${claim.id}`
+    ]);
+    await sh("git", ["-C", dest, "checkout", "-b", branch]);
+    dest = await sh("git", ["-C", dest, "rev-parse", "--show-toplevel"]);
+  } catch (err) {
+    console.error(
+      `terminalhire claim: slice written to ${dest}, but the git baseline could not be created (${err.stderr || err.message || err}) \u2014 'claim submit' needs it to compute your patch.`
+    );
+    process.exit(1);
+  }
+  claims.updateClaim(claim.id, { worktreePath: dest, branch, state: "working" });
+  console.log(`
+  worktree: ${dest}`);
+  console.log(`  branch:   ${branch}`);
+  console.log(
+    `
+  Author your change there (commit as you go), then:  terminalhire claim submit ${claim.id}`
+  );
+}
+async function cmdRuns(id, flags = {}) {
+  const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+  const claim = requireFounderLoopClaim(claims, id, "runs");
+  const pushToken = await requireReadPushToken("reading CI results");
+  const fetchOnce = async () => {
+    let res;
+    try {
+      res = await fetch(`${CLAIM_SYNC_BASE2}/api/patch/runs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bountyId: founderPostingIdOf(claim),
+          claimId: claim.approval.claimId,
+          pushToken
+        }),
+        signal: AbortSignal.timeout(3e4)
+      });
+    } catch (err) {
+      return { kind: "network", error: err instanceof Error ? err.message : String(err) };
+    }
+    let body = null;
+    try {
+      body = await res.json();
+    } catch {
+    }
+    if (!res.ok) return { kind: "refusal", status: res.status, body };
+    if (!body || body.ok !== true || !body.run) {
+      return { kind: "refusal", status: res.status, body: { error: "malformed-response" } };
+    }
+    return { kind: "ok", run: body.run, message: body.message ?? null };
+  };
+  if (flags.watch) {
+    console.log(
+      `  Watching CI for ${id} \u2014 up to ${RUNS_POLL_ATTEMPTS} checks, one every ${Math.round(RUNS_POLL_INTERVAL_MS / 1e3)}s.`
+    );
+    const out = await watchRunsLoop({ id, fetchOnce });
+    if (out.outcome === "refused") process.exit(1);
+    return;
+  }
+  const r = await fetchOnce();
+  if (r.kind === "network") {
+    console.error(`terminalhire claim: terminalhire is unreachable (${r.error}).`);
+    process.exit(1);
+  }
+  if (r.kind === "refusal") {
+    console.error(`terminalhire claim: ${renderServerRefusal(r.status, r.body)}`);
+    process.exit(1);
+  }
+  console.log(`
+${claim.title}`);
+  console.log(renderRunView(r.run, r.message));
+  if (!isTerminalRunStatus(r.run.status)) {
+    console.log(`
+  Still running \u2014 poll it: terminalhire claim runs ${id} --watch`);
+  }
+}
+async function submitFounderPatch({ claims, claim, id, wt, flags }) {
+  let roots;
+  try {
+    roots = (await sh("git", ["-C", wt, "rev-list", "--max-parents=0", "HEAD"])).split("\n").filter(Boolean);
+  } catch (err) {
+    console.error(
+      `terminalhire claim: could not read the slice baseline in ${wt} (${err.stderr || err.message || err}).`
+    );
+    process.exit(1);
+  }
+  if (roots.length !== 1) {
+    console.error(
+      `terminalhire claim: ${wt} has ${roots.length} root commits \u2014 cannot determine the slice baseline to diff against. Re-fetch the slice into a fresh directory: terminalhire claim slice ${id} --dir <path>`
+    );
+    process.exit(1);
+  }
+  const base = roots[0];
+  let patch;
+  try {
+    ({ stdout: patch } = await pExecFile("git", ["-C", wt, "diff", base, "HEAD"], {
+      shell: false,
+      maxBuffer: 16 * 1024 * 1024
+    }));
+    patch = String(patch);
+  } catch (err) {
+    console.error(
+      `terminalhire claim: could not compute the patch (${err.stderr || err.message || err}).`
+    );
+    process.exit(1);
+  }
+  if (!patch.trim()) {
+    console.error(
+      "terminalhire claim: no changes vs the delivered slice \u2014 nothing to submit. Commit your work first."
+    );
+    process.exit(1);
+  }
+  const touched = (await sh("git", ["-C", wt, "diff", "--name-only", base, "HEAD"])).split("\n").filter(Boolean);
+  const authorName = await sh("git", ["-C", wt, "log", "-1", "--format=%an"]);
+  const authorEmail = await sh("git", ["-C", wt, "log", "-1", "--format=%ae"]);
+  console.log(`
+  SUBMIT \xB7 ${claim.title}`);
+  console.log("  delivery: platform-applied patch (founder posting) \u2014 no fork, no push,");
+  console.log("            no GitHub access; terminalhire applies it server-side.");
+  console.log(`  worktree: ${wt}`);
+  console.log(`  files:    ${touched.length} changed \u2014 ${touched.join(", ")}`);
+  console.log(
+    `  author:   ${authorName} <${authorEmail}> (from your HEAD commit; sent as patch authorship)`
+  );
+  let ok;
+  if (flags.yes) {
+    console.log("\n  --yes supplied \u2014 skipping interactive confirm.");
+    ok = true;
+  } else if (!process.stdin.isTTY) {
+    console.error(
+      "\nterminalhire claim: stdin is not a TTY \u2014 cannot ask for confirmation.\n  Re-run with --yes to confirm non-interactively (a human must type it;\n  agents/skills must never pass --yes)."
+    );
+    process.exit(1);
+  } else {
+    ok = await confirm(`
+  Submit this patch to the founder's posting via terminalhire? (y/N) `);
+  }
+  if (!ok) {
+    console.log("Aborted \u2014 nothing submitted.");
+    return;
+  }
+  const proofToken = await mintRegistrationProof();
+  if (!proofToken) {
+    console.error(
+      "terminalhire claim: could not verify your GitHub identity with terminalhire (see above) \u2014 nothing was submitted."
+    );
+    process.exit(1);
+  }
+  let submission;
+  try {
+    submission = buildPatchSubmission({
+      bountyId: founderPostingIdOf(claim),
+      claimId: claim.approval.claimId,
+      patch,
+      authorName,
+      authorEmail,
+      auth: { proofToken }
+    });
+  } catch (err) {
+    console.error(`terminalhire claim: ${err.message}`);
+    process.exit(1);
+  }
+  console.log("\n  Submitting the patch through terminalhire...");
+  let res;
+  try {
+    res = await fetch(`${CLAIM_SYNC_BASE2}/api/patch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(submission),
+      // The server applies the patch and pushes the branch inside this request —
+      // give it more room than a plain read.
+      signal: AbortSignal.timeout(6e4)
+    });
+  } catch (err) {
+    console.error(
+      `terminalhire claim: terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}) \u2014 nothing was submitted.`
+    );
+    process.exit(1);
+  }
+  let body = null;
+  try {
+    body = await res.json();
+  } catch {
+  }
+  if (!res.ok) {
+    console.error(`terminalhire claim: ${renderServerRefusal(res.status, body)}`);
+    process.exit(1);
+  }
+  if (!body || body.ok !== true) {
+    console.error("terminalhire claim: malformed patch response from the server.");
+    process.exit(1);
+  }
+  claims.updateClaim(id, { state: "submitted" });
+  console.log(`
+\u2713 Patch applied by terminalhire`);
+  console.log(`  branch:    ${body.branch}`);
+  console.log(`  commit:    ${body.commitSha}`);
+  if (Array.isArray(body.touchedPaths)) console.log(`  touched:   ${body.touchedPaths.join(", ")}`);
+  console.log(`
+  Read the CI result:  terminalhire claim runs ${id} --watch`);
+}
 async function cmdSubmit(id, flags = {}) {
   const worktreeOverride = flags.worktree;
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -31954,6 +32834,10 @@ async function cmdSubmit(id, flags = {}) {
     ]);
     untrackedFiles = untrackedOut.split("\n").filter((l) => l.startsWith("?? ")).map((l) => l.slice(3).trim()).filter(Boolean);
   } catch {
+  }
+  if (claim.approval) {
+    await submitFounderPatch({ claims, claim, id, wt, flags });
+    return;
   }
   let ghUser;
   try {
@@ -32779,6 +33663,15 @@ async function run7() {
       case "attach":
         await cmdAttach(positional[0], flags.worktree, flags.branch);
         break;
+      // Founder-posting dev loop (phase 5b): receive the granted slice / read CI
+      // results. NOT a second submit verb — founder submission branches INSIDE
+      // `submit` on posting type.
+      case "slice":
+        await cmdSlice(positional[0], flags);
+        break;
+      case "runs":
+        await cmdRuns(positional[0], flags);
+        break;
       case "submit":
         await cmdSubmit(positional[0], flags);
         break;
@@ -32790,7 +33683,7 @@ async function run7() {
         break;
       default:
         console.error(
-          `terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | list | status | update | submit | audit | release`
+          `terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | slice | list | status | update | submit | runs | audit | release`
         );
         process.exit(1);
     }
@@ -32799,7 +33692,7 @@ async function run7() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR17, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL6, CLAIM_SYNC_BASE2, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, GH_API3, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, ISSUE_OUTCOME_TERMINAL;
+var TERMINALHIRE_DIR17, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL6, CLAIM_SYNC_BASE2, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, GH_API3, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
@@ -32832,6 +33725,8 @@ var init_jpi_claim = __esm({
     STAKE_POSTING_GRACE_MS = STAKE_POST_TIMEOUT_MS + 15e3;
     TAKE_BOT_REPOS = /* @__PURE__ */ new Set(["paradedb/paradedb"]);
     ISSUE_OUTCOME_TERMINAL = /* @__PURE__ */ new Set(["own-merge", "other-merge", "closed-unmerged"]);
+    RUNS_POLL_INTERVAL_MS = 15e3;
+    RUNS_POLL_ATTEMPTS = 20;
   }
 });
 
@@ -33619,7 +34514,7 @@ __export(trajectory_exports, {
   runTrajectory: () => runTrajectory,
   runTrajectoryPush: () => runTrajectoryPush
 });
-import { existsSync as existsSync15, readFileSync as readFileSync24, readdirSync as readdirSync2, writeFileSync as writeFileSync19 } from "fs";
+import { existsSync as existsSync15, readFileSync as readFileSync24, readdirSync as readdirSync3, writeFileSync as writeFileSync19 } from "fs";
 import { homedir as homedir23 } from "os";
 import { join as join31 } from "path";
 function isRecord4(value) {
@@ -33648,7 +34543,7 @@ function findJsonlFiles(dir) {
   const out = [];
   let entries;
   try {
-    entries = readdirSync2(dir, { withFileTypes: true, encoding: "utf8" });
+    entries = readdirSync3(dir, { withFileTypes: true, encoding: "utf8" });
   } catch {
     return out;
   }
@@ -38138,7 +39033,7 @@ __export(mcp_config_exports, {
 import { homedir as homedir28 } from "os";
 import { join as join36 } from "path";
 import { existsSync as existsSync20, readFileSync as readFileSync29, copyFileSync as copyFileSync2, writeFileSync as writeFileSync23, mkdirSync as mkdirSync6 } from "fs";
-import { dirname as dirname8 } from "path";
+import { dirname as dirname9 } from "path";
 function serverEntry() {
   return { command: SERVER_COMMAND, args: [...SERVER_ARGS] };
 }
@@ -38174,8 +39069,8 @@ function printConfigText() {
   L.push("terminalhire mcp \u2014 host configuration snippets");
   L.push("");
   L.push("  Paste the snippet for your editor / CLI. Every snippet launches the");
-  L.push("  globally-installed `terminalhire mcp` stdio server (read-only, zero");
-  L.push("  network egress). Plugin-only users: install the CLI so `terminalhire`");
+  L.push("  globally-installed `terminalhire mcp` stdio server (offline match tools;");
+  L.push("  public-read/local-write claim tools). Plugin-only users: install the CLI so `terminalhire`");
   L.push("  is on your PATH \u2014 foreign hosts launch that binary, not the plugin.");
   L.push("");
   L.push("  This command writes NOTHING. To let `terminalhire init` merge the entry");
@@ -38240,7 +39135,7 @@ function writeServerToFile(configPath, serversKey, entry = serverEntry()) {
     backupPath = `${configPath}.terminalhire-backup-${ts}`;
     copyFileSync2(configPath, backupPath);
   } else {
-    mkdirSync6(dirname8(configPath), { recursive: true });
+    mkdirSync6(dirname9(configPath), { recursive: true });
   }
   writeFileSync23(configPath, merged.text, "utf8");
   return { status: "written", backupPath, added: merged.added };
@@ -38251,9 +39146,11 @@ async function initMcpStep({
   home = homedir28(),
   out = console.log
 } = {}) {
-  out("  Expose your LOCAL matches to your editor / CLI as an MCP server.");
-  out("  Read-only, zero network egress \u2014 the same on-device data the spinner shows.");
-  out("  Tools: jobs, bounties, contribute, inbox (counts only). See docs/mcp-tools.md.");
+  out("  Expose your LOCAL matches and claim ledger to your editor / CLI as an MCP server.");
+  out("  Match tools stay offline; claim preview reads public GitHub data; record stays local.");
+  out(
+    "  Tools: jobs, bounties, contribute, inbox, claim_preview, claim_record. See docs/mcp-tools.md."
+  );
   out("");
   if (!isTTY) {
     out("  stdin is not interactive \u2014 skipping MCP setup.");
@@ -60433,6 +61330,8 @@ __export(jpi_mcp_exports, {
   TOOL_NAMES: () => TOOL_NAMES,
   bountiesResult: () => bountiesResult,
   buildToolResult: () => buildToolResult,
+  claimPreviewResult: () => claimPreviewResult,
+  claimRecordResult: () => claimRecordResult,
   contributeResult: () => contributeResult,
   inboxResult: () => inboxResult,
   jobsResult: () => jobsResult,
@@ -60511,6 +61410,214 @@ function inboxResult(entry) {
     lastRefresh: typeof entry.ts === "number" ? new Date(entry.ts).toISOString() : null
   };
 }
+function publicPolicy(policy) {
+  return {
+    status: policy.status,
+    verdict: policy.verdict,
+    assignment: policy.assignment,
+    rulesetVersion: policy.rulesetVersion,
+    scanComplete: policy.scanComplete,
+    hits: policy.hits ?? [],
+    requirements: policy.requirements ?? []
+  };
+}
+function publicClaim(claim) {
+  return {
+    id: claim.id,
+    title: claim.title,
+    repoFullName: claim.repoFullName,
+    issueUrl: claim.issueUrl,
+    amountUSD: claim.amountUSD,
+    kind: claim.kind,
+    state: claim.state,
+    claimedAt: claim.claimedAt
+  };
+}
+async function readPolicyToken() {
+  try {
+    const { readGitHubToken: readGitHubToken2 } = await Promise.resolve().then(() => (init_github_auth(), github_auth_exports));
+    return await readGitHubToken2() || void 0;
+  } catch {
+    return void 0;
+  }
+}
+async function resolveClaimPreview(opportunity, { semantic = false } = {}) {
+  if (typeof opportunity !== "string" || opportunity.trim().length === 0) {
+    return {
+      status: "invalid_request",
+      hint: "Pass an indexed bounty/contribution id, short reference, or GitHub issue URL in `opportunity`."
+    };
+  }
+  const { resolveBounty: resolveBounty2, isContested: isContested2 } = await Promise.resolve().then(() => (init_jpi_claim(), jpi_claim_exports));
+  const bounty = await resolveBounty2(opportunity.trim());
+  if (!bounty) {
+    return {
+      status: "not_found",
+      hint: "The opportunity is not in the local claimable index and is not a GitHub issue URL."
+    };
+  }
+  const { checkRepoPolicy: checkRepoPolicy2 } = await Promise.resolve().then(() => (init_repo_policy(), repo_policy_exports));
+  const keywordPolicy = await checkRepoPolicy2(bounty.repoFullName, {
+    token: await readPolicyToken()
+  });
+  let policy = keywordPolicy;
+  if (semantic) {
+    const { applySemanticPolicyGate: applySemanticPolicyGate2 } = await Promise.resolve().then(() => (init_repo_policy_semantic(), repo_policy_semantic_exports));
+    policy = await applySemanticPolicyGate2(bounty.repoFullName, keywordPolicy);
+  }
+  return {
+    status: "ok",
+    claimable: bounty.issueState !== "closed",
+    bountyId: bounty.bountyId,
+    indexNativeId: bounty.indexNativeId,
+    title: bounty.title,
+    repoFullName: bounty.repoFullName,
+    issueUrl: bounty.issueUrl,
+    amountUSD: bounty.amountUSD,
+    kind: bounty.source === "contribute" ? "contribution" : "bounty",
+    issueState: bounty.issueState,
+    openPRs: bounty.openPRs,
+    assignees: bounty.assignees,
+    contested: isContested2(bounty),
+    policy: publicPolicy(policy),
+    _policy: policy
+  };
+}
+function withoutInternalPolicy(preview) {
+  const { _policy, indexNativeId, ...result } = preview;
+  return result;
+}
+async function claimPreviewResult(args5 = {}) {
+  try {
+    const preview = await resolveClaimPreview(args5.opportunity);
+    return preview.status === "ok" ? withoutInternalPolicy(preview) : preview;
+  } catch {
+    return {
+      status: "error",
+      hint: "Claim preview failed. Run `terminalhire claim preview <id|issueUrl>` locally for diagnostics."
+    };
+  }
+}
+async function claimRecordResult(args5 = {}) {
+  try {
+    const preview = await resolveClaimPreview(args5.opportunity, { semantic: true });
+    if (preview.status !== "ok") return preview;
+    const visible = withoutInternalPolicy(preview);
+    if (!preview.claimable) {
+      return {
+        status: "not_claimable",
+        hint: "The GitHub issue is closed.",
+        preview: visible
+      };
+    }
+    const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+    const existing = claims.findClaim(preview.bountyId);
+    if (existing) {
+      return {
+        status: "already_claimed",
+        claim: publicClaim(existing),
+        hint: "The local claims ledger already contains this opportunity."
+      };
+    }
+    const policy = preview._policy;
+    if (policy.verdict === "prohibited") {
+      return {
+        status: "human_action_required",
+        reason: "prohibited_policy",
+        hint: "This repository prohibits AI-assisted contributions. MCP cannot acknowledge that policy. Review it yourself and use the interactive `terminalhire claim record` command only if the work will comply.",
+        preview: visible
+      };
+    }
+    const requiredAcknowledgements = [];
+    if (preview.contested && args5.acknowledgeContested !== true) {
+      requiredAcknowledgements.push("contested");
+    }
+    let ackedAt = null;
+    if (policy.status === "flagged" || policy.status === "unavailable") {
+      const { findPolicyAck: findPolicyAck2 } = await Promise.resolve().then(() => (init_policy_acks(), policy_acks_exports));
+      const prior = policy.status === "flagged" && policy.scanComplete ? findPolicyAck2(preview.repoFullName, policy.contentHash, policy.rulesetVersion) : null;
+      if (prior) {
+        ackedAt = prior.ackedAt;
+      } else if (args5.acknowledgePolicy !== true) {
+        requiredAcknowledgements.push("policy");
+      } else {
+        ackedAt = (/* @__PURE__ */ new Date()).toISOString();
+      }
+    }
+    if (requiredAcknowledgements.length > 0) {
+      return {
+        status: "ack_required",
+        requiredAcknowledgements,
+        hint: "Review the preview, then retry with the matching boolean acknowledgement fields. No claim was recorded.",
+        preview: visible
+      };
+    }
+    if (ackedAt && policy.status === "flagged" && policy.scanComplete) {
+      const { rememberPolicyAck: rememberPolicyAck2 } = await Promise.resolve().then(() => (init_policy_acks(), policy_acks_exports));
+      rememberPolicyAck2({
+        repo: preview.repoFullName,
+        contentHash: policy.contentHash,
+        rulesetVersion: policy.rulesetVersion,
+        verdict: policy.verdict,
+        ackedAt
+      });
+    }
+    let claim;
+    try {
+      claim = claims.recordClaim({
+        id: preview.bountyId,
+        bountyId: preview.bountyId,
+        title: preview.title,
+        repoFullName: preview.repoFullName,
+        issueUrl: preview.issueUrl,
+        amountUSD: preview.amountUSD,
+        openPRsAtClaim: preview.openPRs,
+        kind: preview.kind,
+        policy: {
+          status: policy.status,
+          verdict: policy.verdict,
+          assignment: policy.assignment,
+          requirements: (policy.requirements ?? []).map((r) => r.kind),
+          rulesetVersion: policy.rulesetVersion,
+          ackedAt
+        }
+      });
+    } catch (err) {
+      const raced = claims.findClaim(preview.bountyId);
+      if (raced) {
+        return {
+          status: "already_claimed",
+          claim: publicClaim(raced),
+          hint: "Another local caller recorded this opportunity first."
+        };
+      }
+      throw err;
+    }
+    try {
+      const { recordPolicySnapshot: recordPolicySnapshot2 } = await Promise.resolve().then(() => (init_repo_experience(), repo_experience_exports));
+      await recordPolicySnapshot2(preview.repoFullName, policy);
+    } catch {
+    }
+    try {
+      const { markStatus: markStatus2 } = await Promise.resolve().then(() => (init_job_status_store(), job_status_store_exports));
+      markStatus2(preview.indexNativeId, "claimed");
+    } catch {
+    }
+    return {
+      status: "recorded",
+      claim: publicClaim(claim),
+      next: {
+        humanCommand: `terminalhire claim start ${claim.id}`,
+        note: "Starting work and submitting remain human-invoked; MCP never forks, pushes, or opens a PR."
+      }
+    };
+  } catch {
+    return {
+      status: "error",
+      hint: "Claim recording failed. Run `terminalhire claim record <id|issueUrl>` locally for diagnostics."
+    };
+  }
+}
 function buildToolResult(name, args5, entry, contributeEnabled, order = {}) {
   const limit2 = args5?.limit;
   switch (name) {
@@ -60552,6 +61659,14 @@ async function run15() {
   server.setRequestHandler(CallToolRequestSchema2, async (req) => {
     const name = req.params?.name;
     const args5 = req.params?.arguments ?? {};
+    if (name === "claim_preview") {
+      const result2 = await claimPreviewResult(args5);
+      return { content: [{ type: "text", text: JSON.stringify(result2) }] };
+    }
+    if (name === "claim_record") {
+      const result2 = await claimRecordResult(args5);
+      return { content: [{ type: "text", text: JSON.stringify(result2) }] };
+    }
     const entry = readCacheEntry();
     let contributeEnabled = false;
     if (name === "contribute") {
@@ -60573,7 +61688,7 @@ async function run15() {
   const transport = new StdioServerTransport2();
   await server.connect(transport);
 }
-var TOOL_NAMES, notOnboarded, optInRequired, isRole, MCP_ROTATE_MS, LIMIT_SCHEMA, EMPTY_SCHEMA, TOOL_DEFS;
+var TOOL_NAMES, notOnboarded, optInRequired, isRole, MCP_ROTATE_MS, LIMIT_SCHEMA, EMPTY_SCHEMA, CLAIM_PREVIEW_SCHEMA, CLAIM_RECORD_SCHEMA, TOOL_DEFS;
 var init_jpi_mcp = __esm({
   "bin/jpi-mcp.js"() {
     "use strict";
@@ -60581,7 +61696,14 @@ var init_jpi_mcp = __esm({
     init_match_slots();
     init_spinner_select();
     init_spinner_seen();
-    TOOL_NAMES = ["jobs", "bounties", "contribute", "inbox"];
+    TOOL_NAMES = [
+      "jobs",
+      "bounties",
+      "contribute",
+      "inbox",
+      "claim_preview",
+      "claim_record"
+    ];
     notOnboarded = () => ({
       status: "not_onboarded",
       hint: "No local match cache found. Run `terminalhire init` (or `terminalhire refresh`) first \u2014 matching happens on your machine."
@@ -60605,6 +61727,34 @@ var init_jpi_mcp = __esm({
       additionalProperties: false
     };
     EMPTY_SCHEMA = { type: "object", properties: {}, additionalProperties: false };
+    CLAIM_PREVIEW_SCHEMA = {
+      type: "object",
+      required: ["opportunity"],
+      properties: {
+        opportunity: {
+          type: "string",
+          minLength: 1,
+          description: "Indexed bounty/contribution id, 8-character short reference, or GitHub issue URL."
+        }
+      },
+      additionalProperties: false
+    };
+    CLAIM_RECORD_SCHEMA = {
+      type: "object",
+      required: ["opportunity"],
+      properties: {
+        ...CLAIM_PREVIEW_SCHEMA.properties,
+        acknowledgePolicy: {
+          type: "boolean",
+          description: "True only after reviewing a flagged or unavailable policy scan. Cannot acknowledge a prohibited policy."
+        },
+        acknowledgeContested: {
+          type: "boolean",
+          description: "True only after reviewing the current assignee/open-PR contention warning."
+        }
+      },
+      additionalProperties: false
+    };
     TOOL_DEFS = [
       {
         name: "jobs",
@@ -60625,6 +61775,16 @@ var init_jpi_mcp = __esm({
         name: "inbox",
         description: "Inbox METADATA ONLY: unread-message and pending-intro COUNTS plus last-refresh time. Never returns message text, handles, subjects, or previews.",
         inputSchema: EMPTY_SCHEMA
+      },
+      {
+        name: "claim_preview",
+        description: "Preview a bounty or contribution before claiming. Performs governed public reads for issue freshness, contention, and repository policy; writes nothing.",
+        inputSchema: CLAIM_PREVIEW_SCHEMA
+      },
+      {
+        name: "claim_record",
+        description: "Record a claim in the local Terminalhire ledger after policy/contention checks. Never starts work, forks, pushes, submits, or opens a PR.",
+        inputSchema: CLAIM_RECORD_SCHEMA
       }
     ];
   }
@@ -61236,7 +62396,7 @@ var signal_exports = {};
 __export(signal_exports, {
   extractFingerprint: () => extractFingerprint
 });
-import { readFileSync as readFileSync30, readdirSync as readdirSync3 } from "fs";
+import { readFileSync as readFileSync30, readdirSync as readdirSync4 } from "fs";
 import { execFileSync } from "child_process";
 import { join as join37 } from "path";
 function safeGit(args5, cwd) {
@@ -61294,7 +62454,7 @@ function workspaceMemberDirs(cwd) {
   for (const group of ["apps", "packages"]) {
     try {
       const groupDir = join37(cwd, group);
-      for (const e of readdirSync3(groupDir, { withFileTypes: true })) {
+      for (const e of readdirSync4(groupDir, { withFileTypes: true })) {
         if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join37(groupDir, e.name));
       }
     } catch {
@@ -61336,13 +62496,13 @@ function tokensFromFileExtensions(cwd) {
   const scanDirs = [cwd];
   try {
     const srcDir = join37(cwd, "src");
-    readdirSync3(srcDir);
+    readdirSync4(srcDir);
     scanDirs.push(srcDir);
   } catch {
   }
   for (const dir of scanDirs) {
     try {
-      const entries = readdirSync3(dir, { withFileTypes: true });
+      const entries = readdirSync4(dir, { withFileTypes: true });
       for (const e of entries) {
         if (!e.isFile()) continue;
         const dotIdx = e.name.lastIndexOf(".");
@@ -62348,7 +63508,7 @@ async function run25() {
   console.log("     (with backup + your explicit consent before any file is touched)");
   console.log("  5. Optionally show connection notifications in your statusLine");
   console.log("     (\u{1F4AC} unread + intro requests only \u2014 never job ads; separate consent)");
-  console.log("  6. Optionally register terminalhire as a read-only MCP server for your");
+  console.log("  6. Optionally register terminalhire as a local-first MCP server for your");
   console.log("     editor / CLI (VS Code, Cursor, Codex, Gemini, Claude Code; per-host consent)");
   console.log("  7. Optionally register th:// claim links to open in this terminal");
   console.log("");
@@ -62482,7 +63642,7 @@ async function run25() {
     console.log("  statusLine setup did not complete. Run manually: node statusline-install.js");
   }
   console.log("");
-  console.log("Step 6/7 \u2014 Register terminalhire as a read-only MCP server (optional)");
+  console.log("Step 6/7 \u2014 Register terminalhire as a local-first MCP server (optional)");
   console.log("");
   console.log("  Exposes your LOCAL matches (jobs, bounties, contribute, inbox counts) to");
   console.log("  a host LLM \u2014 VS Code, Cursor, Codex, Gemini, Claude Code. Read-only, zero");
@@ -62605,6 +63765,65 @@ var init_job_status_suppress = __esm({
   }
 });
 
+// bin/approved-claims-sync.js
+var approved_claims_sync_exports = {};
+__export(approved_claims_sync_exports, {
+  approvalsNudgeGate: () => approvalsNudgeGate,
+  approvalsSyncGate: () => approvalsSyncGate,
+  buildApprovalsNudge: () => buildApprovalsNudge,
+  syncApprovedClaims: () => syncApprovedClaims
+});
+function approvalsSyncGate({ autoMarkerExists, tokenFileExists }) {
+  if (!autoMarkerExists || !tokenFileExists) return { sync: false, reason: "not-opted-in" };
+  return { sync: true, reason: "ok" };
+}
+function approvalsNudgeGate({ autoMarkerExists, tokenFileExists, awaitingApproval }) {
+  if (approvalsSyncGate({ autoMarkerExists, tokenFileExists }).sync) return false;
+  return Number.isInteger(awaitingApproval) && awaitingApproval > 0;
+}
+function buildApprovalsNudge(awaitingApproval) {
+  if (!Number.isInteger(awaitingApproval) || awaitingApproval <= 0) return null;
+  const n = awaitingApproval;
+  return `  \u26A0 ${n} claim${n === 1 ? "" : "s"} awaiting founder approval \u2014 terminalhire cannot check in the background until you enrol:
+    terminalhire claim --push --keep-updated    (or check one now: terminalhire claim slice <id>)`;
+}
+async function syncApprovedClaims({
+  readAutoMarker: readAutoMarker2,
+  readPushTokenEnc: readPushTokenEnc2,
+  readPrevious,
+  fetchImpl = fetch,
+  computeApprovedClaims: computeApprovedClaims2,
+  timeoutMs = 15e3
+} = {}) {
+  try {
+    const marker = readAutoMarker2();
+    const token = await readPushTokenEnc2();
+    if (!approvalsSyncGate({ autoMarkerExists: !!marker, tokenFileExists: !!token }).sync) {
+      return null;
+    }
+    const res = await fetchImpl(`${CLAIM_SYNC_BASE3}/api/claim/approvals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pushToken: token }),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    if (!res || !res.ok) return null;
+    const body = await res.json();
+    const claimIds = body && Array.isArray(body.claimIds) ? body.claimIds : null;
+    if (!claimIds) return null;
+    return computeApprovedClaims2(claimIds, readPrevious());
+  } catch {
+    return null;
+  }
+}
+var CLAIM_SYNC_BASE3;
+var init_approved_claims_sync = __esm({
+  "bin/approved-claims-sync.js"() {
+    "use strict";
+    CLAIM_SYNC_BASE3 = "https://terminalhire.com";
+  }
+});
+
 // bin/beta-nudge.js
 var beta_nudge_exports = {};
 __export(beta_nudge_exports, {
@@ -62696,6 +63915,7 @@ async function run26() {
         let results = softTags.length > 0 ? match2(fp, pool, pool.length, Date.now(), { softTags }) : match2(fp, pool, pool.length);
         const statusMap = readStatusMap2();
         results = suppressEngaged(results, statusMap);
+        const founderBountyPicks = suppressEngaged(selectFounderBountyPicks(jobs), statusMap);
         matchCount = results.length;
         if (MMR_RERANK_ENABLED2) {
           const isRoleResult = (r) => r.job.source !== "bounty" && r.job.source !== "contribute";
@@ -62737,6 +63957,7 @@ async function run26() {
             thinProfile,
             contributeEnabled: isContributeEnabled(),
             mix: getSurfaceMix(),
+            founderBountyPicks,
             interestPicks,
             interestJobPicks,
             lastSurfaceOf,
@@ -62760,7 +63981,13 @@ async function run26() {
           // 037: only the interest slot carries this (spinner renders the label
           // in place of a meaningless 0-score percentage). Spread-conditional so
           // every non-interest card keeps its exact pre-037 key set.
-          ...r.interestLabel ? { interest: r.interestLabel } : {}
+          ...r.interestLabel ? { interest: r.interestLabel } : {},
+          // TERM-227: the ONE pin bit — a live, claimable FOUNDER bounty leads
+          // the tip rotation (the exception to roles-first; see orderForEmit in
+          // spinner-render.js). Spread-conditional like `interest` above, so
+          // every other card keeps its exact prior key set; the strict
+          // `claimable === true` means an old index (bit absent) never pins.
+          ...r.job.bounty?.bountySource === "founder" && r.job.bounty?.claimable === true ? { founderClaimable: true } : {}
         });
         topMatches = [
           ...roleTop,
@@ -62879,6 +64106,27 @@ async function run26() {
       unpushedClaims = await shouldNudgeUnpushed2();
     } catch {
     }
+    let founderPaid;
+    try {
+      const { computeFounderPaid: computeFounderPaid2 } = await Promise.resolve().then(() => (init_founder_paid_badge(), founder_paid_badge_exports));
+      const { readCacheEntry: readCacheEntry2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
+      founderPaid = computeFounderPaid2(index, (readCacheEntry2() ?? {}).founderPaid);
+    } catch {
+    }
+    let approvedClaims;
+    try {
+      const { syncApprovedClaims: syncApprovedClaims2 } = await Promise.resolve().then(() => (init_approved_claims_sync(), approved_claims_sync_exports));
+      const { computeApprovedClaims: computeApprovedClaims2 } = await Promise.resolve().then(() => (init_approved_claims_badge(), approved_claims_badge_exports));
+      const { readAutoMarker: readAutoMarker2, readPushTokenEnc: readPushTokenEnc2 } = await Promise.resolve().then(() => (init_claim_push_bg(), claim_push_bg_exports));
+      const { readCacheEntry: readCacheEntry2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
+      approvedClaims = await syncApprovedClaims2({
+        readAutoMarker: readAutoMarker2,
+        readPushTokenEnc: readPushTokenEnc2,
+        readPrevious: () => (readCacheEntry2() ?? {}).approvedClaims,
+        computeApprovedClaims: computeApprovedClaims2
+      });
+    } catch {
+    }
     const cacheEntry = {
       index,
       matchCount,
@@ -62889,6 +64137,8 @@ async function run26() {
       sessionStale,
       unpushedClaims
     };
+    if (founderPaid) cacheEntry.founderPaid = founderPaid;
+    if (approvedClaims) cacheEntry.approvedClaims = approvedClaims;
     updateIndexCache(cacheEntry);
     try {
       const { readSpinnerConfig: readSpinnerConfig2, renderRefreshSurface: renderRefreshSurface2 } = await Promise.resolve().then(() => (init_spinner(), spinner_exports));
@@ -62945,6 +64195,23 @@ async function run26() {
     try {
       const { runBackgroundClaimPush: runBackgroundClaimPush2 } = await Promise.resolve().then(() => (init_claim_push_bg(), claim_push_bg_exports));
       await runBackgroundClaimPush2();
+    } catch {
+    }
+    try {
+      const { approvalsNudgeGate: approvalsNudgeGate2, buildApprovalsNudge: buildApprovalsNudge2 } = await Promise.resolve().then(() => (init_approved_claims_sync(), approved_claims_sync_exports));
+      const { readAutoMarker: readAutoMarker2, readPushTokenEnc: readPushTokenEnc2 } = await Promise.resolve().then(() => (init_claim_push_bg(), claim_push_bg_exports));
+      const { countAwaitingFounderApproval: countAwaitingFounderApproval2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
+      const awaitingApproval = countAwaitingFounderApproval2();
+      const fire = approvalsNudgeGate2({
+        autoMarkerExists: !!readAutoMarker2(),
+        tokenFileExists: !!await readPushTokenEnc2(),
+        awaitingApproval
+      });
+      if (fire) {
+        const nudge = buildApprovalsNudge2(awaitingApproval);
+        if (nudge) process.stderr.write(`${nudge}
+`);
+      }
     } catch {
     }
     process.exit(0);
@@ -63598,7 +64865,7 @@ if (!firstArg || firstArg === "help" || firstArg === "--help" || firstArg === "-
     "  terminalhire inbox                          Interactive inbox: navigate conversations, open/read, act on invites"
   );
   console.log(
-    "  terminalhire mcp                            Read-only stdio MCP server (local matches for a host LLM); --help for tools"
+    "  terminalhire mcp                            Local-first MCP: matches + local claim preview/record; --help for tools"
   );
   console.log(
     "  terminalhire mcp --print-config             Print host config snippets (VS Code/Cursor/Codex/Gemini/Claude Code)"
@@ -63824,12 +65091,13 @@ if (firstArg === "mcp") {
   }
   if (flags.includes("--help") || flags.includes("-h")) {
     console.log("");
-    console.log("terminalhire mcp \u2014 read-only stdio MCP server (local match surface)");
+    console.log("terminalhire mcp \u2014 local-first stdio MCP server");
     console.log("");
     console.log("  Speaks the Model Context Protocol over stdio so a host LLM (Claude");
-    console.log("  Desktop, an editor extension) can read your on-device matches. It makes");
-    console.log("  ZERO network calls: every answer comes from the local index cache the");
-    console.log("  spinner already builds. It is READ-ONLY \u2014 no tool changes any state.");
+    console.log("  Desktop, an editor extension) can read your on-device matches, preview");
+    console.log("  claimable work, and record claim intent in your local ledger. Match tools");
+    console.log("  stay offline. Claim tools make bounded public GitHub reads; record writes");
+    console.log("  local state only and never forks, pushes, submits, or opens a PR.");
     console.log("");
     console.log("  Tools:");
     console.log("    jobs [limit]        Locally-matched job roles");
@@ -63838,6 +65106,8 @@ if (firstArg === "mcp") {
       "    contribute [limit]  Contribution opportunities \u2014 on by default (opt_in_required only if you set contributeEnabled: false)"
     );
     console.log("    inbox               Unread + pending-intro COUNTS only (never message text)");
+    console.log("    claim_preview       Preview policy, freshness, and contention (no write)");
+    console.log("    claim_record        Record local intent only (never start/push/submit)");
     console.log("");
     console.log("  There is deliberately no intro accept/decline tool: consented intros");
     console.log("  require a human-typed yes, which an LLM must not be able to satisfy.");
@@ -63867,7 +65137,7 @@ if (firstArg === "mcp-chat") {
     console.log("");
     console.log("  Unlike `terminalhire mcp`, this server is NOT zero-egress (a reply is sent)");
     console.log("  and NOT read-only. It is OPT-IN: add it yourself as a separate mcpServers");
-    console.log("  entry \u2014 `mcp` stays the default pure, read-only surface.");
+    console.log("  entry \u2014 `mcp` stays the default bounded match/claim surface.");
     console.log("");
     console.log("  There is deliberately NO accept/consent tool: consented intros still require");
     console.log(

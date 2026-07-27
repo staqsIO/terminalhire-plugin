@@ -254,6 +254,15 @@ function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
     return true;
   });
 }
+function countAwaitingFounderApproval(claims = readClaims()) {
+  try {
+    return claims.filter(
+      (c) => c.approval?.mode === "approval-only" && c.approval?.state === "pending"
+    ).length;
+  } catch {
+    return 0;
+  }
+}
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;
   const merged = claims.filter((c) => c.state === "merged").length;
@@ -262,6 +271,7 @@ function acceptedPRRate(claims = readClaims()) {
 export {
   PUSHED_CLAIM_FIELDS,
   acceptedPRRate,
+  countAwaitingFounderApproval,
   findClaim,
   listClaims,
   nextPolledState,

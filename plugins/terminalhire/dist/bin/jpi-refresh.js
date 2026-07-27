@@ -88,6 +88,48 @@ var init_state_dir = __esm({
   }
 });
 
+// bin/cache-store.js
+var cache_store_exports = {};
+__export(cache_store_exports, {
+  readCacheEntry: () => readCacheEntry,
+  updateIndexCache: () => updateIndexCache
+});
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, renameSync as renameSync2 } from "fs";
+import { join as join2 } from "path";
+import { homedir as homedir2 } from "os";
+function readCacheEntry() {
+  try {
+    return JSON.parse(readFileSync2(INDEX_CACHE_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function updateIndexCache(patch) {
+  ensureStateDir(TERMINALHIRE_DIR2);
+  const existing = readCacheEntry() ?? {};
+  const entry = {
+    ...existing,
+    ...patch,
+    schemaVersion: SCHEMA_VERSION,
+    ts: Date.now()
+  };
+  const tmp = `${INDEX_CACHE_FILE}.${process.pid}.${tmpCounter++}.tmp`;
+  writeFileSync2(tmp, JSON.stringify(entry), "utf8");
+  renameSync2(tmp, INDEX_CACHE_FILE);
+  return entry;
+}
+var TERMINALHIRE_DIR2, INDEX_CACHE_FILE, SCHEMA_VERSION, tmpCounter;
+var init_cache_store = __esm({
+  "bin/cache-store.js"() {
+    "use strict";
+    init_state_dir();
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
+    INDEX_CACHE_FILE = join2(TERMINALHIRE_DIR2, "index-cache.json");
+    SCHEMA_VERSION = 1;
+    tmpCounter = 0;
+  }
+});
+
 // src/config.ts
 var config_exports = {};
 __export(config_exports, {
@@ -1446,7 +1488,7 @@ async function fetchOwnedRepoTraction(login, token) {
   for (const r of enrichCandidates) {
     r.externalContributors = await repoExternalContributorCount(login, r.name, login, token);
   }
-  const gate = qualifiesMaintainer(
+  const gate2 = qualifiesMaintainer(
     ranked.map((r) => ({
       name: r.name,
       stars: r.stars,
@@ -1455,15 +1497,15 @@ async function fetchOwnedRepoTraction(login, token) {
       fork: false
     }))
   );
-  const best = gate.qualifies ? ranked.find((r) => r.name === gate.bestRepoName) ?? null : null;
+  const best = gate2.qualifies ? ranked.find((r) => r.name === gate2.bestRepoName) ?? null : null;
   return {
     status: "ok",
     totalStars,
     totalForks,
     reposWithStars,
     top: ranked.slice(0, TRACTION_TOP_N),
-    qualifies: gate.qualifies,
-    bestRepoName: gate.bestRepoName,
+    qualifies: gate2.qualifies,
+    bestRepoName: gate2.bestRepoName,
     bestRepoExternalContributors: best ? best.externalContributors : null,
     bestRepoStars: best ? best.stars : null,
     computedAt
@@ -2171,6 +2213,7 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
     mergedAt: pr.merged_at ?? null,
     authorId: pr.user?.id ?? null,
     authorLogin: pr.user?.login ?? null,
+    authorAssociation: pr.author_association ?? null,
     mergedById: pr.merged_by?.id ?? null,
     mergedByLogin: pr.merged_by?.login ?? null,
     closesIssues,
@@ -8858,6 +8901,15 @@ function computeEventIndependence(facts) {
       }
     };
   }
+  if (facts.authorAssociation != null && AFFILIATED_AUTHOR_ASSOCIATIONS.has(facts.authorAssociation.toUpperCase())) {
+    return {
+      merger: {
+        party: "merger",
+        independence: "affiliated",
+        reasons: [`PR author is affiliated with the target repo (${facts.authorAssociation})`]
+      }
+    };
+  }
   return {
     merger: {
       party: "merger",
@@ -8888,7 +8940,7 @@ function computeReviewerIndependence(signals) {
   }
   return { party: "reviewer", independence: "unverified", reasons: ["affiliation signal absent (read failed/skipped)"] };
 }
-var PROVENANCE, MS_PER_DAY;
+var PROVENANCE, MS_PER_DAY, AFFILIATED_AUTHOR_ASSOCIATIONS;
 var init_independence = __esm({
   "../../packages/core/src/credential/independence.ts"() {
     "use strict";
@@ -8903,6 +8955,7 @@ var init_independence = __esm({
       CONTRIB_FLOOR: 5
     };
     MS_PER_DAY = 864e5;
+    AFFILIATED_AUTHOR_ASSOCIATIONS = /* @__PURE__ */ new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
   }
 });
 
@@ -12020,12 +12073,13 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
     opts.seenHistory
   );
   const orderForEmit = (list) => {
-    const bountyQ = list.filter((m) => m && m.source === "bounty");
+    const pinnedQ = list.filter((m) => m && m.source === "bounty" && m.founderClaimable === true);
+    const bountyQ = list.filter((m) => m && m.source === "bounty" && m.founderClaimable !== true);
     const contributeQ = list.filter((m) => m && m.source === "contribute");
     const roleQ = interleaveBySource(
       list.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
     );
-    const ordered = [];
+    const ordered = [...pinnedQ];
     let bi = 0;
     let ri = 0;
     let ci = 0;
@@ -12231,6 +12285,7 @@ var claims_exports = {};
 __export(claims_exports, {
   PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
   acceptedPRRate: () => acceptedPRRate,
+  countAwaitingFounderApproval: () => countAwaitingFounderApproval,
   findClaim: () => findClaim,
   listClaims: () => listClaims,
   nextPolledState: () => nextPolledState,
@@ -12411,6 +12466,15 @@ function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
     writeClaims(claims.filter((c) => c.id !== id));
     return true;
   });
+}
+function countAwaitingFounderApproval(claims = readClaims()) {
+  try {
+    return claims.filter(
+      (c) => c.approval?.mode === "approval-only" && c.approval?.state === "pending"
+    ).length;
+  } catch {
+    return 0;
+  }
 }
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;
@@ -12593,7 +12657,7 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
     const { listClaims: listClaims2, toPushedClaim: toPushedClaim2, PUSHED_CLAIM_FIELDS: PUSHED_CLAIM_FIELDS2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
     const pushed = listClaims2().map((c) => toPushedClaim2(c));
     const currentHash = computeSnapshotHash(pushed);
-    const gate = backgroundPushGate({
+    const gate2 = backgroundPushGate({
       autoMarkerExists: true,
       tokenFileExists: true,
       lastPushedAt: marker.lastPushedAt ?? null,
@@ -12602,7 +12666,7 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
       currentHash,
       lastSnapshotHash: marker.lastSnapshotHash ?? null
     });
-    if (!gate.push) return;
+    if (!gate2.push) return;
     const token = await readPushTokenEnc();
     if (!token) return;
     const consentReceipt = {
@@ -12638,6 +12702,148 @@ var init_claim_push_bg = __esm({
     CLAIM_SYNC_BASE = "https://terminalhire.com";
     AUTO_CONSENT_VERSION = 2;
     AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
+  }
+});
+
+// bin/founder-pin.js
+function isPinnedFounderBounty(j) {
+  return j?.bounty?.bountySource === "founder" && j?.bounty?.claimable === true;
+}
+var init_founder_pin = __esm({
+  "bin/founder-pin.js"() {
+    "use strict";
+  }
+});
+
+// bin/founder-paid-badge.js
+var founder_paid_badge_exports = {};
+__export(founder_paid_badge_exports, {
+  acknowledgeFounderPaid: () => acknowledgeFounderPaid,
+  computeFounderPaid: () => computeFounderPaid,
+  openPaidIds: () => openPaidIds
+});
+function openPaidIds(index) {
+  const jobs = index && index.jobs || [];
+  const ids = [];
+  for (const j of jobs) {
+    if (!j || typeof j.id !== "string") continue;
+    if (isPinnedFounderBounty(j)) ids.push(j.id);
+  }
+  return [...new Set(ids)].sort();
+}
+function gate(openIds, seenIds) {
+  const seen = new Set(seenIds);
+  const acknowledged = openIds.filter((id) => seen.has(id));
+  return { count: openIds.length - acknowledged.length, acknowledged };
+}
+function computeFounderPaid(index, previous) {
+  const open = openPaidIds(index);
+  const prior = previous && previous.acknowledged;
+  if (!Array.isArray(prior)) return { count: 0, acknowledged: open };
+  return gate(open, prior);
+}
+function acknowledgeFounderPaid({ shown = [], open = [], previous } = {}) {
+  const prior = previous && Array.isArray(previous.acknowledged) ? previous.acknowledged : [];
+  return gate(openPaidIds({ jobs: open }), [...prior, ...openPaidIds({ jobs: shown })]);
+}
+var init_founder_paid_badge = __esm({
+  "bin/founder-paid-badge.js"() {
+    "use strict";
+    init_founder_pin();
+  }
+});
+
+// bin/approved-claims-sync.js
+var approved_claims_sync_exports = {};
+__export(approved_claims_sync_exports, {
+  approvalsNudgeGate: () => approvalsNudgeGate,
+  approvalsSyncGate: () => approvalsSyncGate,
+  buildApprovalsNudge: () => buildApprovalsNudge,
+  syncApprovedClaims: () => syncApprovedClaims
+});
+function approvalsSyncGate({ autoMarkerExists, tokenFileExists }) {
+  if (!autoMarkerExists || !tokenFileExists) return { sync: false, reason: "not-opted-in" };
+  return { sync: true, reason: "ok" };
+}
+function approvalsNudgeGate({ autoMarkerExists, tokenFileExists, awaitingApproval }) {
+  if (approvalsSyncGate({ autoMarkerExists, tokenFileExists }).sync) return false;
+  return Number.isInteger(awaitingApproval) && awaitingApproval > 0;
+}
+function buildApprovalsNudge(awaitingApproval) {
+  if (!Number.isInteger(awaitingApproval) || awaitingApproval <= 0) return null;
+  const n = awaitingApproval;
+  return `  \u26A0 ${n} claim${n === 1 ? "" : "s"} awaiting founder approval \u2014 terminalhire cannot check in the background until you enrol:
+    terminalhire claim --push --keep-updated    (or check one now: terminalhire claim slice <id>)`;
+}
+async function syncApprovedClaims({
+  readAutoMarker: readAutoMarker2,
+  readPushTokenEnc: readPushTokenEnc2,
+  readPrevious,
+  fetchImpl = fetch,
+  computeApprovedClaims: computeApprovedClaims2,
+  timeoutMs = 15e3
+} = {}) {
+  try {
+    const marker = readAutoMarker2();
+    const token = await readPushTokenEnc2();
+    if (!approvalsSyncGate({ autoMarkerExists: !!marker, tokenFileExists: !!token }).sync) {
+      return null;
+    }
+    const res = await fetchImpl(`${CLAIM_SYNC_BASE2}/api/claim/approvals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pushToken: token }),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    if (!res || !res.ok) return null;
+    const body = await res.json();
+    const claimIds = body && Array.isArray(body.claimIds) ? body.claimIds : null;
+    if (!claimIds) return null;
+    return computeApprovedClaims2(claimIds, readPrevious());
+  } catch {
+    return null;
+  }
+}
+var CLAIM_SYNC_BASE2;
+var init_approved_claims_sync = __esm({
+  "bin/approved-claims-sync.js"() {
+    "use strict";
+    CLAIM_SYNC_BASE2 = "https://terminalhire.com";
+  }
+});
+
+// bin/approved-claims-badge.js
+var approved_claims_badge_exports = {};
+__export(approved_claims_badge_exports, {
+  acknowledgeApprovedClaim: () => acknowledgeApprovedClaim,
+  computeApprovedClaims: () => computeApprovedClaims
+});
+function normalizeIds(claimIds) {
+  if (!Array.isArray(claimIds)) return [];
+  return [...new Set(claimIds.filter((id) => typeof id === "string" && id !== ""))].sort();
+}
+function computeApprovedClaims(claimIds, previous) {
+  const approved = normalizeIds(claimIds);
+  const prior = previous && Array.isArray(previous.acknowledged) ? new Set(previous.acknowledged) : /* @__PURE__ */ new Set();
+  const acknowledged = approved.filter((id) => prior.has(id));
+  return { count: approved.length - acknowledged.length, acknowledged };
+}
+function acknowledgeApprovedClaim(claimId, previous) {
+  const prior = previous && Array.isArray(previous.acknowledged) ? previous.acknowledged : [];
+  if (typeof claimId !== "string" || claimId === "") {
+    const acknowledged2 = [...new Set(prior)].sort();
+    const count2 = previous && typeof previous.count === "number" ? previous.count : 0;
+    return { count: count2, acknowledged: acknowledged2 };
+  }
+  const acknowledged = [.../* @__PURE__ */ new Set([...prior, claimId])].sort();
+  const prevCount = previous && typeof previous.count === "number" ? previous.count : 0;
+  const alreadyKnown = prior.includes(claimId);
+  const count = alreadyKnown ? prevCount : Math.max(0, prevCount - 1);
+  return { count, acknowledged };
+}
+var init_approved_claims_badge = __esm({
+  "bin/approved-claims-badge.js"() {
+    "use strict";
   }
 });
 
@@ -12861,41 +13067,18 @@ function excludeOwnCard(results, ownLogin) {
   });
 }
 
-// bin/cache-store.js
-init_state_dir();
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, renameSync as renameSync2 } from "fs";
-import { join as join2 } from "path";
-import { homedir as homedir2 } from "os";
-var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
-var INDEX_CACHE_FILE = join2(TERMINALHIRE_DIR2, "index-cache.json");
-var SCHEMA_VERSION = 1;
-var tmpCounter = 0;
-function readCacheEntry() {
-  try {
-    return JSON.parse(readFileSync2(INDEX_CACHE_FILE, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function updateIndexCache(patch) {
-  ensureStateDir(TERMINALHIRE_DIR2);
-  const existing = readCacheEntry() ?? {};
-  const entry = {
-    ...existing,
-    ...patch,
-    schemaVersion: SCHEMA_VERSION,
-    ts: Date.now()
-  };
-  const tmp = `${INDEX_CACHE_FILE}.${process.pid}.${tmpCounter++}.tmp`;
-  writeFileSync2(tmp, JSON.stringify(entry), "utf8");
-  renameSync2(tmp, INDEX_CACHE_FILE);
-  return entry;
-}
+// bin/jpi-refresh.js
+init_cache_store();
 
 // bin/match-slots.js
 var TOTAL_SLOTS = 25;
 var BOUNTY_SLOTS = 3;
 var BOUNTY_MIN_MATCH = 0.5;
+function selectFounderBountyPicks(jobs) {
+  return (Array.isArray(jobs) ? jobs : []).filter(
+    (job) => job && job.source === "bounty" && job.bounty && job.bounty.bountySource === "founder"
+  ).map((job) => ({ job, score: 0, matchedTags: [] }));
+}
 var INTEREST_CONTRIBUTE_SLOTS = 1;
 var INTEREST_JOB_SLOTS = 1;
 var INTEREST_SLOT_LABEL = "Stretch";
@@ -12953,6 +13136,7 @@ function budgetSlots(results, opts = {}) {
     mix = DEFAULT_MIX,
     totalSlots = TOTAL_SLOTS,
     now = Date.now(),
+    founderBountyPicks = [],
     interestPicks = [],
     interestJobPicks = [],
     interestJobSlots = INTEREST_JOB_SLOTS,
@@ -12962,10 +13146,35 @@ function budgetSlots(results, opts = {}) {
   } = opts;
   const list = Array.isArray(results) ? results : [];
   const rNow = now + (Number.isFinite(phaseMs) ? phaseMs : 0);
-  const bountyMatches = list.filter(
-    (r) => r && r.job && r.job.source === "bounty" && typeof r.score === "number" && r.score >= BOUNTY_MIN_MATCH
+  const scoredBountyResults = list.filter(
+    (r) => r && r.job && r.job.source === "bounty" && typeof r.score === "number"
   );
-  const bountyTop = [...bountyMatches].sort((a, b) => b.score - a.score).slice(0, BOUNTY_SLOTS);
+  const bountyMatches = scoredBountyResults.filter((r) => r.score >= BOUNTY_MIN_MATCH);
+  const rankedBountyMatches = [...bountyMatches].sort((a, b) => b.score - a.score);
+  const scoredById = new Map(
+    scoredBountyResults.filter((r) => typeof r.job.id === "string").map((r) => [r.job.id, r])
+  );
+  const founderCandidates = [
+    ...Array.isArray(founderBountyPicks) ? founderBountyPicks : [],
+    ...scoredBountyResults
+  ].filter(
+    (r) => r && r.job && r.job.source === "bounty" && r.job.bounty && r.job.bounty.bountySource === "founder"
+  );
+  const seenBountyIds = /* @__PURE__ */ new Set();
+  const founderTop = [];
+  for (const candidate of founderCandidates) {
+    const id = candidate.job.id;
+    if (typeof id !== "string" || id.length === 0 || seenBountyIds.has(id)) continue;
+    seenBountyIds.add(id);
+    founderTop.push(scoredById.get(id) ?? candidate);
+  }
+  const scrapedTop = rankedBountyMatches.filter((r) => {
+    const id = r.job.id;
+    if (r.job.bounty?.bountySource === "founder" || seenBountyIds.has(id)) return false;
+    if (typeof id === "string" && id.length > 0) seenBountyIds.add(id);
+    return true;
+  });
+  const bountyTop = [...founderTop, ...scrapedTop].slice(0, BOUNTY_SLOTS);
   const contributeMatches = list.filter((r) => r && r.job && r.job.source === "contribute");
   const mixBaseline = Object.hasOwn(MIX_PRESETS, mix) ? MIX_PRESETS[mix] : MIX_PRESETS[DEFAULT_MIX];
   const contributeCap = thinProfile && contributeEnabled ? Math.max(mixBaseline, CONTRIBUTE_SLOTS_THIN) : mixBaseline;
@@ -13166,6 +13375,7 @@ async function run() {
         let results = softTags.length > 0 ? match2(fp, pool, pool.length, Date.now(), { softTags }) : match2(fp, pool, pool.length);
         const statusMap = readStatusMap2();
         results = suppressEngaged(results, statusMap);
+        const founderBountyPicks = suppressEngaged(selectFounderBountyPicks(jobs), statusMap);
         matchCount = results.length;
         if (MMR_RERANK_ENABLED) {
           const isRoleResult = (r) => r.job.source !== "bounty" && r.job.source !== "contribute";
@@ -13207,6 +13417,7 @@ async function run() {
             thinProfile,
             contributeEnabled: isContributeEnabled(),
             mix: getSurfaceMix(),
+            founderBountyPicks,
             interestPicks,
             interestJobPicks,
             lastSurfaceOf,
@@ -13230,7 +13441,13 @@ async function run() {
           // 037: only the interest slot carries this (spinner renders the label
           // in place of a meaningless 0-score percentage). Spread-conditional so
           // every non-interest card keeps its exact pre-037 key set.
-          ...r.interestLabel ? { interest: r.interestLabel } : {}
+          ...r.interestLabel ? { interest: r.interestLabel } : {},
+          // TERM-227: the ONE pin bit — a live, claimable FOUNDER bounty leads
+          // the tip rotation (the exception to roles-first; see orderForEmit in
+          // spinner-render.js). Spread-conditional like `interest` above, so
+          // every other card keeps its exact prior key set; the strict
+          // `claimable === true` means an old index (bit absent) never pins.
+          ...r.job.bounty?.bountySource === "founder" && r.job.bounty?.claimable === true ? { founderClaimable: true } : {}
         });
         topMatches = [
           ...roleTop,
@@ -13349,6 +13566,27 @@ async function run() {
       unpushedClaims = await shouldNudgeUnpushed2();
     } catch {
     }
+    let founderPaid;
+    try {
+      const { computeFounderPaid: computeFounderPaid2 } = await Promise.resolve().then(() => (init_founder_paid_badge(), founder_paid_badge_exports));
+      const { readCacheEntry: readCacheEntry2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
+      founderPaid = computeFounderPaid2(index, (readCacheEntry2() ?? {}).founderPaid);
+    } catch {
+    }
+    let approvedClaims;
+    try {
+      const { syncApprovedClaims: syncApprovedClaims2 } = await Promise.resolve().then(() => (init_approved_claims_sync(), approved_claims_sync_exports));
+      const { computeApprovedClaims: computeApprovedClaims2 } = await Promise.resolve().then(() => (init_approved_claims_badge(), approved_claims_badge_exports));
+      const { readAutoMarker: readAutoMarker2, readPushTokenEnc: readPushTokenEnc2 } = await Promise.resolve().then(() => (init_claim_push_bg(), claim_push_bg_exports));
+      const { readCacheEntry: readCacheEntry2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
+      approvedClaims = await syncApprovedClaims2({
+        readAutoMarker: readAutoMarker2,
+        readPushTokenEnc: readPushTokenEnc2,
+        readPrevious: () => (readCacheEntry2() ?? {}).approvedClaims,
+        computeApprovedClaims: computeApprovedClaims2
+      });
+    } catch {
+    }
     const cacheEntry = {
       index,
       matchCount,
@@ -13359,6 +13597,8 @@ async function run() {
       sessionStale,
       unpushedClaims
     };
+    if (founderPaid) cacheEntry.founderPaid = founderPaid;
+    if (approvedClaims) cacheEntry.approvedClaims = approvedClaims;
     updateIndexCache(cacheEntry);
     try {
       const { readSpinnerConfig: readSpinnerConfig2, renderRefreshSurface: renderRefreshSurface2 } = await Promise.resolve().then(() => (init_spinner(), spinner_exports));
@@ -13415,6 +13655,23 @@ async function run() {
     try {
       const { runBackgroundClaimPush: runBackgroundClaimPush2 } = await Promise.resolve().then(() => (init_claim_push_bg(), claim_push_bg_exports));
       await runBackgroundClaimPush2();
+    } catch {
+    }
+    try {
+      const { approvalsNudgeGate: approvalsNudgeGate2, buildApprovalsNudge: buildApprovalsNudge2 } = await Promise.resolve().then(() => (init_approved_claims_sync(), approved_claims_sync_exports));
+      const { readAutoMarker: readAutoMarker2, readPushTokenEnc: readPushTokenEnc2 } = await Promise.resolve().then(() => (init_claim_push_bg(), claim_push_bg_exports));
+      const { countAwaitingFounderApproval: countAwaitingFounderApproval2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
+      const awaitingApproval = countAwaitingFounderApproval2();
+      const fire = approvalsNudgeGate2({
+        autoMarkerExists: !!readAutoMarker2(),
+        tokenFileExists: !!await readPushTokenEnc2(),
+        awaitingApproval
+      });
+      if (fire) {
+        const nudge = buildApprovalsNudge2(awaitingApproval);
+        if (nudge) process.stderr.write(`${nudge}
+`);
+      }
     } catch {
     }
     process.exit(0);

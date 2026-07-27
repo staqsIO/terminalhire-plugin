@@ -89,8 +89,8 @@ function printConfigText() {
   L.push("terminalhire mcp \u2014 host configuration snippets");
   L.push("");
   L.push("  Paste the snippet for your editor / CLI. Every snippet launches the");
-  L.push("  globally-installed `terminalhire mcp` stdio server (read-only, zero");
-  L.push("  network egress). Plugin-only users: install the CLI so `terminalhire`");
+  L.push("  globally-installed `terminalhire mcp` stdio server (offline match tools;");
+  L.push("  public-read/local-write claim tools). Plugin-only users: install the CLI so `terminalhire`");
   L.push("  is on your PATH \u2014 foreign hosts launch that binary, not the plugin.");
   L.push("");
   L.push("  This command writes NOTHING. To let `terminalhire init` merge the entry");
@@ -166,9 +166,11 @@ async function initMcpStep({
   home = homedir(),
   out = console.log
 } = {}) {
-  out("  Expose your LOCAL matches to your editor / CLI as an MCP server.");
-  out("  Read-only, zero network egress \u2014 the same on-device data the spinner shows.");
-  out("  Tools: jobs, bounties, contribute, inbox (counts only). See docs/mcp-tools.md.");
+  out("  Expose your LOCAL matches and claim ledger to your editor / CLI as an MCP server.");
+  out("  Match tools stay offline; claim preview reads public GitHub data; record stays local.");
+  out(
+    "  Tools: jobs, bounties, contribute, inbox, claim_preview, claim_record. See docs/mcp-tools.md."
+  );
   out("");
   if (!isTTY) {
     out("  stdin is not interactive \u2014 skipping MCP setup.");

@@ -1258,7 +1258,7 @@ async function fetchOwnedRepoTraction(login, token) {
   for (const r of enrichCandidates) {
     r.externalContributors = await repoExternalContributorCount(login, r.name, login, token);
   }
-  const gate = qualifiesMaintainer(
+  const gate2 = qualifiesMaintainer(
     ranked.map((r) => ({
       name: r.name,
       stars: r.stars,
@@ -1267,15 +1267,15 @@ async function fetchOwnedRepoTraction(login, token) {
       fork: false
     }))
   );
-  const best = gate.qualifies ? ranked.find((r) => r.name === gate.bestRepoName) ?? null : null;
+  const best = gate2.qualifies ? ranked.find((r) => r.name === gate2.bestRepoName) ?? null : null;
   return {
     status: "ok",
     totalStars,
     totalForks,
     reposWithStars,
     top: ranked.slice(0, TRACTION_TOP_N),
-    qualifies: gate.qualifies,
-    bestRepoName: gate.bestRepoName,
+    qualifies: gate2.qualifies,
+    bestRepoName: gate2.bestRepoName,
     bestRepoExternalContributors: best ? best.externalContributors : null,
     bestRepoStars: best ? best.stars : null,
     computedAt
@@ -1983,6 +1983,7 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
     mergedAt: pr.merged_at ?? null,
     authorId: pr.user?.id ?? null,
     authorLogin: pr.user?.login ?? null,
+    authorAssociation: pr.author_association ?? null,
     mergedById: pr.merged_by?.id ?? null,
     mergedByLogin: pr.merged_by?.login ?? null,
     closesIssues,
@@ -8670,6 +8671,15 @@ function computeEventIndependence(facts) {
       }
     };
   }
+  if (facts.authorAssociation != null && AFFILIATED_AUTHOR_ASSOCIATIONS.has(facts.authorAssociation.toUpperCase())) {
+    return {
+      merger: {
+        party: "merger",
+        independence: "affiliated",
+        reasons: [`PR author is affiliated with the target repo (${facts.authorAssociation})`]
+      }
+    };
+  }
   return {
     merger: {
       party: "merger",
@@ -8700,7 +8710,7 @@ function computeReviewerIndependence(signals) {
   }
   return { party: "reviewer", independence: "unverified", reasons: ["affiliation signal absent (read failed/skipped)"] };
 }
-var PROVENANCE, MS_PER_DAY;
+var PROVENANCE, MS_PER_DAY, AFFILIATED_AUTHOR_ASSOCIATIONS;
 var init_independence = __esm({
   "../../packages/core/src/credential/independence.ts"() {
     "use strict";
@@ -8715,6 +8725,7 @@ var init_independence = __esm({
       CONTRIB_FLOOR: 5
     };
     MS_PER_DAY = 864e5;
+    AFFILIATED_AUTHOR_ASSOCIATIONS = /* @__PURE__ */ new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
   }
 });
 
@@ -10394,6 +10405,58 @@ var init_state_dir = __esm({
   }
 });
 
+// bin/cache-store.js
+var cache_store_exports = {};
+__export(cache_store_exports, {
+  readCacheEntry: () => readCacheEntry,
+  updateIndexCache: () => updateIndexCache
+});
+import { readFileSync as readFileSync2, writeFileSync, renameSync } from "fs";
+import { join as join2 } from "path";
+import { homedir } from "os";
+function readCacheEntry() {
+  try {
+    return JSON.parse(readFileSync2(INDEX_CACHE_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function updateIndexCache(patch) {
+  ensureStateDir(TERMINALHIRE_DIR);
+  const existing = readCacheEntry() ?? {};
+  const entry = {
+    ...existing,
+    ...patch,
+    schemaVersion: SCHEMA_VERSION2,
+    ts: Date.now()
+  };
+  const tmp = `${INDEX_CACHE_FILE}.${process.pid}.${tmpCounter++}.tmp`;
+  writeFileSync(tmp, JSON.stringify(entry), "utf8");
+  renameSync(tmp, INDEX_CACHE_FILE);
+  return entry;
+}
+var TERMINALHIRE_DIR, INDEX_CACHE_FILE, SCHEMA_VERSION2, tmpCounter;
+var init_cache_store = __esm({
+  "bin/cache-store.js"() {
+    "use strict";
+    init_state_dir();
+    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
+    INDEX_CACHE_FILE = join2(TERMINALHIRE_DIR, "index-cache.json");
+    SCHEMA_VERSION2 = 1;
+    tmpCounter = 0;
+  }
+});
+
+// bin/founder-pin.js
+function isPinnedFounderBounty(j) {
+  return j?.bounty?.bountySource === "founder" && j?.bounty?.claimable === true;
+}
+var init_founder_pin = __esm({
+  "bin/founder-pin.js"() {
+    "use strict";
+  }
+});
+
 // src/test-race-barrier.ts
 import { closeSync as closeSync2, constants as constants2, existsSync, lstatSync, openSync as openSync2 } from "fs";
 import { join as join3 } from "path";
@@ -11061,6 +11124,7 @@ var claims_exports = {};
 __export(claims_exports, {
   PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
   acceptedPRRate: () => acceptedPRRate,
+  countAwaitingFounderApproval: () => countAwaitingFounderApproval,
   findClaim: () => findClaim,
   listClaims: () => listClaims,
   nextPolledState: () => nextPolledState,
@@ -11242,6 +11306,15 @@ function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
     return true;
   });
 }
+function countAwaitingFounderApproval(claims = readClaims()) {
+  try {
+    return claims.filter(
+      (c) => c.approval?.mode === "approval-only" && c.approval?.state === "pending"
+    ).length;
+  } catch {
+    return 0;
+  }
+}
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;
   const merged = claims.filter((c) => c.state === "merged").length;
@@ -11290,43 +11363,51 @@ var init_claims = __esm({
   }
 });
 
+// bin/founder-paid-badge.js
+var founder_paid_badge_exports = {};
+__export(founder_paid_badge_exports, {
+  acknowledgeFounderPaid: () => acknowledgeFounderPaid,
+  computeFounderPaid: () => computeFounderPaid,
+  openPaidIds: () => openPaidIds
+});
+function openPaidIds(index) {
+  const jobs = index && index.jobs || [];
+  const ids = [];
+  for (const j of jobs) {
+    if (!j || typeof j.id !== "string") continue;
+    if (isPinnedFounderBounty(j)) ids.push(j.id);
+  }
+  return [...new Set(ids)].sort();
+}
+function gate(openIds, seenIds) {
+  const seen = new Set(seenIds);
+  const acknowledged = openIds.filter((id) => seen.has(id));
+  return { count: openIds.length - acknowledged.length, acknowledged };
+}
+function computeFounderPaid(index, previous) {
+  const open = openPaidIds(index);
+  const prior = previous && previous.acknowledged;
+  if (!Array.isArray(prior)) return { count: 0, acknowledged: open };
+  return gate(open, prior);
+}
+function acknowledgeFounderPaid({ shown = [], open = [], previous } = {}) {
+  const prior = previous && Array.isArray(previous.acknowledged) ? previous.acknowledged : [];
+  return gate(openPaidIds({ jobs: open }), [...prior, ...openPaidIds({ jobs: shown })]);
+}
+var init_founder_paid_badge = __esm({
+  "bin/founder-paid-badge.js"() {
+    "use strict";
+    init_founder_pin();
+  }
+});
+
 // bin/jpi-bounties.js
 init_src();
+init_cache_store();
 import { readFileSync as readFileSync6 } from "fs";
 import { join as join9 } from "path";
 import { homedir as homedir6 } from "os";
 import { createInterface } from "readline";
-
-// bin/cache-store.js
-init_state_dir();
-import { readFileSync as readFileSync2, writeFileSync, renameSync } from "fs";
-import { join as join2 } from "path";
-import { homedir } from "os";
-var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
-var INDEX_CACHE_FILE = join2(TERMINALHIRE_DIR, "index-cache.json");
-var SCHEMA_VERSION2 = 1;
-var tmpCounter = 0;
-function readCacheEntry() {
-  try {
-    return JSON.parse(readFileSync2(INDEX_CACHE_FILE, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function updateIndexCache(patch) {
-  ensureStateDir(TERMINALHIRE_DIR);
-  const existing = readCacheEntry() ?? {};
-  const entry = {
-    ...existing,
-    ...patch,
-    schemaVersion: SCHEMA_VERSION2,
-    ts: Date.now()
-  };
-  const tmp = `${INDEX_CACHE_FILE}.${process.pid}.${tmpCounter++}.tmp`;
-  writeFileSync(tmp, JSON.stringify(entry), "utf8");
-  renameSync(tmp, INDEX_CACHE_FILE);
-  return entry;
-}
 
 // bin/sanitize.js
 var CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
@@ -11360,6 +11441,7 @@ function linkTitle(title, url) {
 }
 
 // bin/jpi-bounties.js
+init_founder_pin();
 var TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join9(homedir6(), ".terminalhire");
 var INDEX_CACHE_FILE2 = join9(TERMINALHIRE_DIR6, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
@@ -11438,6 +11520,7 @@ ${i + 1}. ${linkTitle(job.title, job.url)} [${ref}]`);
 }
 function rankBounties(bounties, { rankMode = "winnability", scoreOf = () => 0 } = {}) {
   const legacy = rankMode === "legacy";
+  const pin = (j) => isPinnedFounderBounty(j) ? 1 : 0;
   const contested = (j) => (j.bounty?.competingOpenPRs ?? 0) > 0 ? 1 : 0;
   const amt = (j) => j.bounty?.amountUSD ?? -1;
   const winTier = (j) => {
@@ -11447,12 +11530,13 @@ function rankBounties(bounties, { rankMode = "winnability", scoreOf = () => 0 } 
   };
   const winVal = (j) => j.winnabilityScore ?? 0;
   bounties.sort(
-    (a, b) => (legacy ? 0 : winTier(b) - winTier(a)) || (legacy ? 0 : winVal(b) - winVal(a)) || contested(a) - contested(b) || scoreOf(b) - scoreOf(a) || amt(b) - amt(a)
+    (a, b) => pin(b) - pin(a) || (legacy ? 0 : winTier(b) - winTier(a)) || (legacy ? 0 : winVal(b) - winVal(a)) || contested(a) - contested(b) || scoreOf(b) - scoreOf(a) || amt(b) - amt(a)
   );
   return bounties;
 }
 function applyContinuityRank(bounties, continuityOf, { enabled = true } = {}) {
   if (!enabled) return bounties;
+  const pin = (j) => isPinnedFounderBounty(j) ? 1 : 0;
   const winTier = (j) => {
     const s = j.winnabilityScore;
     if (s == null) return 1;
@@ -11464,7 +11548,9 @@ function applyContinuityRank(bounties, continuityOf, { enabled = true } = {}) {
     const c = repo ? continuityOf(repo) || 0 : 0;
     return s * (1 + 0.15 * c);
   };
-  bounties.sort((a, b) => winTier(b) - winTier(a) || effectiveVal(b) - effectiveVal(a));
+  bounties.sort(
+    (a, b) => pin(b) - pin(a) || winTier(b) - winTier(a) || effectiveVal(b) - effectiveVal(a)
+  );
   return bounties;
 }
 function continuityNoteForRow(entry, isTTY) {
@@ -11575,6 +11661,18 @@ async function run() {
         continuityNote
       );
     }
+    try {
+      const { acknowledgeFounderPaid: acknowledgeFounderPaid2 } = await Promise.resolve().then(() => (init_founder_paid_badge(), founder_paid_badge_exports));
+      const { readCacheEntry: readCacheEntry2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
+      updateIndexCache({
+        founderPaid: acknowledgeFounderPaid2({
+          shown,
+          open: bounties,
+          previous: (readCacheEntry2() ?? {}).founderPaid
+        })
+      });
+    } catch {
+    }
     if (!SHOW_ALL && bounties.length > shown.length) {
       console.log(
         `
@@ -11606,6 +11704,7 @@ export {
   continuityNoteForRow,
   filterPaidVisibility,
   getBounties,
+  isPinnedFounderBounty,
   printBounty,
   rankBounties,
   run

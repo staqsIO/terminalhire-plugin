@@ -1983,6 +1983,7 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
     mergedAt: pr.merged_at ?? null,
     authorId: pr.user?.id ?? null,
     authorLogin: pr.user?.login ?? null,
+    authorAssociation: pr.author_association ?? null,
     mergedById: pr.merged_by?.id ?? null,
     mergedByLogin: pr.merged_by?.login ?? null,
     closesIssues,
@@ -8670,6 +8671,15 @@ function computeEventIndependence(facts) {
       }
     };
   }
+  if (facts.authorAssociation != null && AFFILIATED_AUTHOR_ASSOCIATIONS.has(facts.authorAssociation.toUpperCase())) {
+    return {
+      merger: {
+        party: "merger",
+        independence: "affiliated",
+        reasons: [`PR author is affiliated with the target repo (${facts.authorAssociation})`]
+      }
+    };
+  }
   return {
     merger: {
       party: "merger",
@@ -8700,7 +8710,7 @@ function computeReviewerIndependence(signals) {
   }
   return { party: "reviewer", independence: "unverified", reasons: ["affiliation signal absent (read failed/skipped)"] };
 }
-var PROVENANCE, MS_PER_DAY;
+var PROVENANCE, MS_PER_DAY, AFFILIATED_AUTHOR_ASSOCIATIONS;
 var init_independence = __esm({
   "../../packages/core/src/credential/independence.ts"() {
     "use strict";
@@ -8715,6 +8725,7 @@ var init_independence = __esm({
       CONTRIB_FLOOR: 5
     };
     MS_PER_DAY = 864e5;
+    AFFILIATED_AUTHOR_ASSOCIATIONS = /* @__PURE__ */ new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
   }
 });
 
@@ -10371,8 +10382,8 @@ function printConfigText() {
   L.push("terminalhire mcp \u2014 host configuration snippets");
   L.push("");
   L.push("  Paste the snippet for your editor / CLI. Every snippet launches the");
-  L.push("  globally-installed `terminalhire mcp` stdio server (read-only, zero");
-  L.push("  network egress). Plugin-only users: install the CLI so `terminalhire`");
+  L.push("  globally-installed `terminalhire mcp` stdio server (offline match tools;");
+  L.push("  public-read/local-write claim tools). Plugin-only users: install the CLI so `terminalhire`");
   L.push("  is on your PATH \u2014 foreign hosts launch that binary, not the plugin.");
   L.push("");
   L.push("  This command writes NOTHING. To let `terminalhire init` merge the entry");
@@ -10448,9 +10459,11 @@ async function initMcpStep({
   home = homedir2(),
   out = console.log
 } = {}) {
-  out("  Expose your LOCAL matches to your editor / CLI as an MCP server.");
-  out("  Read-only, zero network egress \u2014 the same on-device data the spinner shows.");
-  out("  Tools: jobs, bounties, contribute, inbox (counts only). See docs/mcp-tools.md.");
+  out("  Expose your LOCAL matches and claim ledger to your editor / CLI as an MCP server.");
+  out("  Match tools stay offline; claim preview reads public GitHub data; record stays local.");
+  out(
+    "  Tools: jobs, bounties, contribute, inbox, claim_preview, claim_record. See docs/mcp-tools.md."
+  );
   out("");
   if (!isTTY) {
     out("  stdin is not interactive \u2014 skipping MCP setup.");
@@ -10701,7 +10714,7 @@ async function run() {
   console.log("     (with backup + your explicit consent before any file is touched)");
   console.log("  5. Optionally show connection notifications in your statusLine");
   console.log("     (\u{1F4AC} unread + intro requests only \u2014 never job ads; separate consent)");
-  console.log("  6. Optionally register terminalhire as a read-only MCP server for your");
+  console.log("  6. Optionally register terminalhire as a local-first MCP server for your");
   console.log("     editor / CLI (VS Code, Cursor, Codex, Gemini, Claude Code; per-host consent)");
   console.log("  7. Optionally register th:// claim links to open in this terminal");
   console.log("");
@@ -10835,7 +10848,7 @@ async function run() {
     console.log("  statusLine setup did not complete. Run manually: node statusline-install.js");
   }
   console.log("");
-  console.log("Step 6/7 \u2014 Register terminalhire as a read-only MCP server (optional)");
+  console.log("Step 6/7 \u2014 Register terminalhire as a local-first MCP server (optional)");
   console.log("");
   console.log("  Exposes your LOCAL matches (jobs, bounties, contribute, inbox counts) to");
   console.log("  a host LLM \u2014 VS Code, Cursor, Codex, Gemini, Claude Code. Read-only, zero");

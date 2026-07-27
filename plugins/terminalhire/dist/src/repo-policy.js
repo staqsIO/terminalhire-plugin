@@ -15,7 +15,7 @@ function ghHeaders(url, token) {
   return { ...GH_HEADERS, Authorization: `Bearer ${token}` };
 }
 var MAX_REQUESTS = 7;
-var POLICY_RULESET_VERSION = 6;
+var POLICY_RULESET_VERSION = 7;
 var AI_SIGNAL_PATTERNS = [
   { label: "AI", re: /\bAI\b/i },
   { label: "artificial intelligence", re: /artificial intelligence/i },
@@ -25,9 +25,10 @@ var AI_SIGNAL_PATTERNS = [
   { label: "ChatGPT", re: /\bchatgpt\b/i },
   { label: "Claude", re: /\bclaude\b/i },
   { label: "generative", re: /\bgenerative\b/i },
-  { label: "machine-generated", re: /machine[\s-]generated/i }
+  { label: "machine-generated", re: /machine[\s-]generated/i },
+  { label: "agent workflow", re: /\b(?:ai|coding|autonomous|llm)[\s-]agents?\b/i }
 ];
-var AI_TERM = "(?:ai|llms?|generative(?:\\s+ai)?|artificial intelligence|language models?|copilot|chatgpt|claude|machine[\\s-]generated)";
+var AI_TERM = "(?:ai|llms?|generative(?:\\s+ai)?|artificial intelligence|language models?|copilot|chatgpt|claude|machine[\\s-]generated|(?:ai|coding|autonomous|llm)[\\s-]agents?)";
 var PROHIBITED_PATTERNS = [
   new RegExp(`prohibit\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
   /did not write the code yourself/i,
@@ -280,9 +281,45 @@ async function checkRepoPolicy(repoFullName, opts = {}) {
     files
   };
 }
+var FOUNDER_DECLARATION_SOURCE = "founder-declaration";
+function auditDeclaredPolicy(declaration) {
+  const text = typeof declaration === "string" ? declaration.trim() : "";
+  if (text === "") {
+    return {
+      status: "unavailable",
+      verdict: "unavailable",
+      hits: [],
+      requirements: [],
+      assignment: "none",
+      rulesetVersion: POLICY_RULESET_VERSION,
+      contentHash: null,
+      scanComplete: false,
+      files: []
+    };
+  }
+  const files = [{ file: FOUNDER_DECLARATION_SOURCE, content: text }];
+  const { hits, requirements, verdict, assignment } = auditContent(files);
+  return {
+    // Same status rule as a scanned repo: any classified hit → 'flagged' (the
+    // verdict says how severe), no hit → 'clean'. The declaration is one short
+    // text that was read in full, so the incomplete-scan precedence above can
+    // never apply here.
+    status: hits.length > 0 ? "flagged" : "clean",
+    verdict,
+    hits,
+    requirements,
+    assignment,
+    rulesetVersion: POLICY_RULESET_VERSION,
+    contentHash: hashFiles(files),
+    scanComplete: true,
+    files
+  };
+}
 export {
+  FOUNDER_DECLARATION_SOURCE,
   POLICY_RULESET_VERSION,
   auditContent,
+  auditDeclaredPolicy,
   checkRepoPolicy,
   ghHeaders
 };
