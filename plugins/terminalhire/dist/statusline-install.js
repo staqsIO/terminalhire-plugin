@@ -269,22 +269,68 @@ async function install({ ask: injectedAsk } = {}) {
   console.log('  • node statusline-install.js --uninstall   (restores your prior statusLine)');
   console.log('');
 
+  // `[Y/n]`, Enter = yes — the same shape as init's GitHub sign-in and th:// steps.
+  //
+  // This used to demand the literal word "yes", which made it the STRICTEST prompt in
+  // onboarding: Enter declined, `y` declined, and the reflex way to dismiss a prompt
+  // turned it off. It sat one step below a prompt that sends a credential and accepts
+  // Enter. That asymmetry was not a decision anyone made; it read as caution but its
+  // practical effect was that the surface carrying every connection notification was
+  // off for people who thought they had said yes — chased twice as a code defect
+  // before anyone looked at the prompt.
+  //
+  // The consent itself is unchanged and still real: the disclosure above is printed in
+  // full, an explicit `n` declines, a non-interactive stdin installs NOTHING, an
+  // existing statusLine is preserved rather than replaced, and a timestamped backup is
+  // written before any change. What moved is the default answer, not whether one is
+  // asked for.
+  const interactive = Boolean(process.stdin.isTTY);
   const answer = await ask(
-    'Enable the connection-notification statusLine? Type "yes" to continue: ',
+    interactive
+      ? 'Enable the connection-notification statusLine? [Y/n] (Enter = yes): '
+      : 'Enable the connection-notification statusLine? Type "yes" to continue: ',
   );
-  if (answer === null && !process.stdin.isTTY) {
-    // Non-interactive stdin with no input — do NOT silently proceed to a prompt that
-    // resolves empty and fail-closes. Say so plainly and skip (explicit, not a fake abort).
-    console.log(
-      '\n  stdin is not interactive — run `terminalhire statusline --on` in a real terminal to enable.',
-    );
-    asker.close();
-    return 0;
-  }
-  if (answer !== 'yes') {
-    console.log('\nAborted — nothing was changed.');
-    asker.close();
-    return 0;
+
+  if (!interactive) {
+    // Enter-means-yes is a default for a HUMAN who just read the disclosure. It is not
+    // consent a pipe, a CI runner, or an unattended script can express by sending a
+    // newline — and one of those sending "\n" is indistinguishable from a person
+    // pressing Enter once you stop looking at isTTY. So the non-interactive path keeps
+    // the OLD bar, the literal word, and nothing else installs.
+    const typedYes = String(answer ?? '').trim() === 'yes';
+    if (!typedYes) {
+      console.log(
+        '\n  stdin is not interactive — run `terminalhire statusline --on` in a real terminal to enable.',
+      );
+      asker.close();
+      return 0;
+    }
+  } else {
+    // ALLOWLIST, not a denylist. The first version of this asked "is it n or no?"
+    // and installed on everything else — which meant `null` installed, and `ask`
+    // resolves null on EOF, on Ctrl-D, and whenever the shared readline closes
+    // because the human bailed out of `init` mid-flow. `String(null ?? '')` is the
+    // empty string, indistinguishable from pressing Enter. So did "nope", "cancel",
+    // and an `n` still wrapped in bracketed-paste bytes. Under the old literal-"yes"
+    // bar every one of those aborted; a denylist silently turned each into consent
+    // to write another program's config file.
+    //
+    // The `th://` prompt eight steps below in the same flow (jpi-init.js) already
+    // allowlists `'' | y | yes`. Two consecutive consent prompts disagreeing about
+    // which way an unrecognised answer falls is how a regression gets waved through.
+    // Narrow by TYPE, not by listing the non-strings that must not consent. Excluding
+    // `null` by value left `undefined` consenting — `String(undefined ?? '')` is also
+    // the empty string — so the guard only closed the hole it had already been shown.
+    // Both real askers resolve `string | null` today, which is exactly why this must
+    // not depend on that: a third `ask` is one refactor away, and it would arrive as
+    // the same EOF bug wearing a different value.
+    const a = typeof answer === 'string' ? answer.trim().toLowerCase() : null;
+    const consented = a === '' || a === 'y' || a === 'yes';
+    if (!consented) {
+      console.log('\nAborted — nothing was changed.');
+      asker.close();
+      return 0;
+    }
   }
 
   const src = resolveLauncherSource();

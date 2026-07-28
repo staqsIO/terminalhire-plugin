@@ -4,7 +4,7 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { pathToFileURL } from "url";
+import { pathToFileURL, fileURLToPath } from "url";
 var INDEX_CACHE_FILE = join(
   process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire"),
   "index-cache.json"
@@ -38,6 +38,38 @@ function approvedClaimsCount(entry) {
   const n = entry && entry.approvedClaims && entry.approvedClaims.count;
   return typeof n === "number" && n > 0 ? n : 0;
 }
+var SEMVER_HEAD = /^(\d+)\.(\d+)\.(\d+)/;
+function parsePatchTriple(v) {
+  if (typeof v !== "string") return null;
+  const m = SEMVER_HEAD.exec(v.trim().replace(/^v/, ""));
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+function isBehind(local, latest) {
+  const a = parsePatchTriple(local);
+  const b = parsePatchTriple(latest);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i++) {
+    if (a[i] < b[i]) return true;
+    if (a[i] > b[i]) return false;
+  }
+  return false;
+}
+function localVersion() {
+  const here = fileURLToPath(new URL(".", import.meta.url));
+  for (const p of [join(here, "..", "..", "package.json"), join(here, "..", "package.json")]) {
+    try {
+      const pkg = JSON.parse(readFileSync(p, "utf8"));
+      if (pkg.name === "terminalhire" && pkg.version) return pkg.version;
+    } catch {
+    }
+  }
+  return null;
+}
+function updateAvailable(entry) {
+  const latest = entry && entry.index && entry.index.cliVersion;
+  const local = localVersion();
+  return isBehind(local, latest) ? `${local} \u2192 ${latest}` : "";
+}
 function render() {
   try {
     const entry = readFreshCache();
@@ -58,6 +90,8 @@ function render() {
     } else if (stale) {
       segments.push("\u26A0 terminalhire session expired \u2014 run: th link");
     }
+    const update = updateAvailable(entry);
+    if (update) segments.push(`\u2B06 terminalhire ${update} \u2014 run: th update`);
     return segments.join("  \xB7  ");
   } catch {
     return "";

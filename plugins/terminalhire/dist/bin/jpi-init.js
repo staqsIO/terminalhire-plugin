@@ -10772,15 +10772,11 @@ async function run() {
   console.log("");
   console.log("  Fetching anonymous job index (no dev data sent)...");
   const jobsScript = resolveScript("jpi-jobs");
-  const seedChild = spawnSync(
-    process.execPath,
-    [jobsScript, "--limit", "0"],
-    {
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, TERMINALHIRE_SEED_ONLY: "1" },
-      timeout: 15e3
-    }
-  );
+  const seedChild = spawnSync(process.execPath, [jobsScript, "--limit", "0"], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, TERMINALHIRE_SEED_ONLY: "1" },
+    timeout: 15e3
+  });
   if (seedChild.status === 0) {
     console.log("  Job cache seeded successfully.");
   } else {
@@ -10812,7 +10808,9 @@ async function run() {
   console.log("");
   console.log("  This is the only step that modifies a system file.");
   console.log("  A timestamped backup is created before any change.");
-  console.log("  Disable at any time: node install.js --uninstall  (or terminalhire spinner --off)");
+  console.log(
+    "  Disable at any time: node install.js --uninstall  (or terminalhire spinner --off)"
+  );
   console.log("");
   try {
     const installMod = await import(pathToFileURL(resolveInstallJs()).href);
@@ -10831,9 +10829,10 @@ async function run() {
   console.log("");
   console.log("  A statusLine that shows ONLY personal connection signals \u2014 \u{1F4AC} unread");
   console.log("  messages and inbound intro requests. Never job ads (those stay in the");
-  console.log("  spinner). Local cache read, zero network. Separate consent + backup;");
-  console.log("  it stays current across plugin updates and preserves any existing");
-  console.log("  statusLine you have. Remove any time: node statusline-install.js --uninstall");
+  console.log("  spinner). Local cache read, zero network. On by default; backs up and");
+  console.log("  preserves any existing statusLine, and stays current across plugin");
+  console.log("  updates. Answer n to skip, or remove later with:");
+  console.log("    terminalhire statusline --off");
   console.log("");
   try {
     const statuslineMod = await import(pathToFileURL(resolveStatuslineInstallJs()).href);
@@ -10841,7 +10840,9 @@ async function run() {
       await statuslineMod.installStatusline({ ask });
     } else {
       console.log("");
-      console.log("  statusLine setup unavailable in this build. Run manually: node statusline-install.js");
+      console.log(
+        "  statusLine setup unavailable in this build. Run manually: node statusline-install.js"
+      );
     }
   } catch {
     console.log("");
@@ -10870,7 +10871,9 @@ async function run() {
   console.log("  this terminal (one-time OS registration; macOS may show an Automation");
   console.log("  prompt the first time a link is opened). Nothing is sent anywhere \u2014 it");
   console.log("  only wires th://claim/<token> links on this machine to a local, read-only");
-  console.log("  `terminalhire claim preview <token>`. Undo any time: terminalhire protocol unregister");
+  console.log(
+    "  `terminalhire claim preview <token>`. Undo any time: terminalhire protocol unregister"
+  );
   console.log("");
   const protocolAnswer = await ask("Register th:// claim links now? [Y/n] (Enter = yes): ");
   const doProtocol = protocolAnswer === "" || protocolAnswer === "y" || protocolAnswer === "yes";

@@ -24831,6 +24831,14 @@ function warnStderr(message) {
   process.stderr.write(`${message}
 `);
 }
+function makeWarnOnce() {
+  const seen = /* @__PURE__ */ new Set();
+  return (message) => {
+    if (seen.has(message)) return;
+    seen.add(message);
+    warnStderr(message);
+  };
+}
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname4(filePath);
   ensureStateDirForSecret(dir);
@@ -24876,11 +24884,11 @@ async function deleteKey() {
     if (e.code !== "ENOENT") throw e;
   }
 }
-async function resolveKey(filePath, opts) {
+async function resolveKey(filePath, opts, warnOnce) {
   if (opts.keyPolicy === "keychain-required") {
     const key = await tryLoadFromKeytar();
     if (!key) {
-      warnStderr(
+      warnOnce(
         `crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`
       );
       return null;
@@ -24890,8 +24898,9 @@ async function resolveKey(filePath, opts) {
   return loadOrCreateSharedKey();
 }
 function createEncryptedStore(filePath, opts) {
+  const warnOnce = makeWarnOnce();
   async function read() {
-    const key = await resolveKey(filePath, opts);
+    const key = await resolveKey(filePath, opts, warnOnce);
     if (!key) return opts.blank();
     if (!existsSync6(filePath)) return opts.blank();
     try {
@@ -24900,12 +24909,12 @@ function createEncryptedStore(filePath, opts) {
       const plaintext = decrypt2(blob, key);
       return JSON.parse(plaintext);
     } catch {
-      warnStderr(`crypto-store: failed to decrypt ${filePath} \u2014 returning blank`);
+      warnOnce(`crypto-store: failed to decrypt ${filePath} \u2014 returning blank`);
       return opts.blank();
     }
   }
   async function write(value) {
-    const key = await resolveKey(filePath, opts);
+    const key = await resolveKey(filePath, opts, warnOnce);
     if (!key) return;
     const blob = encrypt2(JSON.stringify(value), key);
     atomicWriteFileSync(filePath, JSON.stringify(blob, null, 2));
