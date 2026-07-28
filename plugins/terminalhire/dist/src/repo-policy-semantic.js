@@ -288,7 +288,7 @@ var VERSION;
 var init_version = __esm({
   "../../node_modules/@anthropic-ai/sdk/version.mjs"() {
     "use strict";
-    VERSION = "0.112.3";
+    VERSION = "0.112.5";
   }
 });
 
@@ -11905,11 +11905,21 @@ var init_client = __esm({
               this._applyCredentialBaseURL(result.baseURL);
             } else if (options.profile != null) {
               this._authState.resolution = this._resolveDefaultCredentials(options.profile);
-            } else {
+            } else if (this._shouldResolveDefaultCredentials()) {
               this._authState.resolution = this._resolveDefaultCredentials();
             }
           }
         }
+      }
+      /**
+       * Whether to lazily resolve auth from the default credential chain when no
+       * explicit auth is configured. Called once from the constructor, so
+       * overrides must not depend on subclass instance state. Subclasses that
+       * bring their own auth scheme return false so unrelated local credentials
+       * are never resolved or allowed to supply a base URL.
+       */
+      _shouldResolveDefaultCredentials() {
+        return true;
       }
       /**
        * Stores a profile/config-supplied base URL on the shared auth state and, if

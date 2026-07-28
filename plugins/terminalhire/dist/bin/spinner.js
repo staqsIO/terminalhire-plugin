@@ -1391,13 +1391,12 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
     opts.seenHistory
   );
   const orderForEmit = (list) => {
-    const pinnedQ = list.filter((m) => m && m.source === "bounty" && m.founderClaimable === true);
-    const bountyQ = list.filter((m) => m && m.source === "bounty" && m.founderClaimable !== true);
+    const bountyQ = list.filter((m) => m && m.source === "bounty");
     const contributeQ = list.filter((m) => m && m.source === "contribute");
     const roleQ = interleaveBySource(
       list.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
     );
-    const ordered = [...pinnedQ];
+    const ordered = [];
     let bi = 0;
     let ri = 0;
     let ci = 0;

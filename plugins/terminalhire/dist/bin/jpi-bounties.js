@@ -1258,7 +1258,7 @@ async function fetchOwnedRepoTraction(login, token) {
   for (const r of enrichCandidates) {
     r.externalContributors = await repoExternalContributorCount(login, r.name, login, token);
   }
-  const gate2 = qualifiesMaintainer(
+  const gate = qualifiesMaintainer(
     ranked.map((r) => ({
       name: r.name,
       stars: r.stars,
@@ -1267,15 +1267,15 @@ async function fetchOwnedRepoTraction(login, token) {
       fork: false
     }))
   );
-  const best = gate2.qualifies ? ranked.find((r) => r.name === gate2.bestRepoName) ?? null : null;
+  const best = gate.qualifies ? ranked.find((r) => r.name === gate.bestRepoName) ?? null : null;
   return {
     status: "ok",
     totalStars,
     totalForks,
     reposWithStars,
     top: ranked.slice(0, TRACTION_TOP_N),
-    qualifies: gate2.qualifies,
-    bestRepoName: gate2.bestRepoName,
+    qualifies: gate.qualifies,
+    bestRepoName: gate.bestRepoName,
     bestRepoExternalContributors: best ? best.externalContributors : null,
     bestRepoStars: best ? best.stars : null,
     computedAt
@@ -1983,7 +1983,6 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
     mergedAt: pr.merged_at ?? null,
     authorId: pr.user?.id ?? null,
     authorLogin: pr.user?.login ?? null,
-    authorAssociation: pr.author_association ?? null,
     mergedById: pr.merged_by?.id ?? null,
     mergedByLogin: pr.merged_by?.login ?? null,
     closesIssues,
@@ -4894,23 +4893,6 @@ function hasClickableUrl(url) {
     return false;
   }
 }
-function dropUnmatchable(jobs) {
-  const dropped = /* @__PURE__ */ new Map();
-  const kept = jobs.filter((job) => {
-    if (!TAG_FILTERED_SOURCES.has(job.source)) return true;
-    if (job.tags.length > 0) return true;
-    dropped.set(job.source, (dropped.get(job.source) ?? 0) + 1);
-    return false;
-  });
-  const total = jobs.length - kept.length;
-  if (total > 0) {
-    const perSource = [...dropped.entries()].sort((a, b) => b[1] - a[1]).map(([source, n]) => `${source} ${n}`).join(", ");
-    console.info(
-      `[indexer] dropped ${total} untagged of ${jobs.length} (unmatchable by any profile): ${perSource}`
-    );
-  }
-  return kept;
-}
 async function buildIndex(opts) {
   const includePartners = opts?.includePartners ?? true;
   const publicJobs = await aggregate(opts);
@@ -4927,7 +4909,7 @@ async function buildIndex(opts) {
       allJobs.push(job);
     }
   }
-  const jobs = dropUnmatchable(allJobs.map(({ raw: _raw, ...rest }) => rest));
+  const jobs = allJobs.map(({ raw: _raw, ...rest }) => rest);
   const index = {
     builtAt: (/* @__PURE__ */ new Date()).toISOString(),
     jobs
@@ -4941,7 +4923,6 @@ async function buildIndex(opts) {
   }
   return index;
 }
-var TAG_FILTERED_SOURCES;
 var init_indexer = __esm({
   "../../packages/core/src/indexer.ts"() {
     "use strict";
@@ -4951,15 +4932,6 @@ var init_indexer = __esm({
     init_github();
     init_gh_governor();
     init_winnability();
-    TAG_FILTERED_SOURCES = /* @__PURE__ */ new Set([
-      "greenhouse",
-      "ashby",
-      "lever",
-      "workable",
-      "himalayas",
-      "wwr",
-      "hn"
-    ]);
   }
 });
 
@@ -8401,13 +8373,10 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
     daysAgo = Math.max(0, Math.round(ageDays2));
     recencyBadge = { lastMergedAt: mostRecent, state: ageDays2 <= thresholdDays ? "live" : "dormant" };
   }
-  const hasDistinctOrgs = Object.prototype.hasOwnProperty.call(credential, "distinctOrgs");
-  const rawDistinctOrgs = credential.distinctOrgs;
-  const exactOrgCount = hasDistinctOrgs && typeof rawDistinctOrgs === "number" && Number.isSafeInteger(rawDistinctOrgs) && rawDistinctOrgs > 0;
-  const malformedDistinctOrgs = ok && hasDistinctOrgs && !exactOrgCount;
-  const orgCount = exactOrgCount ? rawDistinctOrgs : Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
+  const exactOrgCount = typeof credential.distinctOrgs === "number" && credential.distinctOrgs > 0;
+  const orgCount = exactOrgCount ? credential.distinctOrgs : Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
   let proofSentence;
-  if (!ok || malformedDistinctOrgs) {
+  if (!ok) {
     proofSentence = "Contribution credential unavailable \u2014 could not verify.";
   } else {
     const prs = credential.qualifyingTotal;
@@ -8418,10 +8387,9 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
   }
   const enrichedPRs = ok ? credential.qualifyingPRs ?? [] : [];
   const maintainerReviewedCount = enrichedPRs.some((p) => p.maintainerReviewed !== void 0) ? enrichedPRs.filter((p) => p.maintainerReviewed === true).length : void 0;
-  const auditableBadge = ok && !malformedDistinctOrgs ? {
+  const auditableBadge = ok ? {
     mergedTotal: credential.qualifyingTotal,
     distinctOrgs: orgCount,
-    distinctOrgsExact: exactOrgCount,
     thresholds: { stars: MIN_STARS, contributors: MIN_CONTRIBUTORS },
     ...maintainerReviewedCount !== void 0 ? { maintainerReviewedCount } : {}
   } : null;
@@ -8671,15 +8639,6 @@ function computeEventIndependence(facts) {
       }
     };
   }
-  if (facts.authorAssociation != null && AFFILIATED_AUTHOR_ASSOCIATIONS.has(facts.authorAssociation.toUpperCase())) {
-    return {
-      merger: {
-        party: "merger",
-        independence: "affiliated",
-        reasons: [`PR author is affiliated with the target repo (${facts.authorAssociation})`]
-      }
-    };
-  }
   return {
     merger: {
       party: "merger",
@@ -8710,7 +8669,7 @@ function computeReviewerIndependence(signals) {
   }
   return { party: "reviewer", independence: "unverified", reasons: ["affiliation signal absent (read failed/skipped)"] };
 }
-var PROVENANCE, MS_PER_DAY, AFFILIATED_AUTHOR_ASSOCIATIONS;
+var PROVENANCE, MS_PER_DAY;
 var init_independence = __esm({
   "../../packages/core/src/credential/independence.ts"() {
     "use strict";
@@ -8725,7 +8684,6 @@ var init_independence = __esm({
       CONTRIB_FLOOR: 5
     };
     MS_PER_DAY = 864e5;
-    AFFILIATED_AUTHOR_ASSOCIATIONS = /* @__PURE__ */ new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
   }
 });
 
@@ -10186,7 +10144,6 @@ __export(src_exports, {
   displayableDrift: () => displayableDrift,
   dropIdentityTokens: () => dropIdentityTokens,
   dropNgramOverlap: () => dropNgramOverlap,
-  dropUnmatchable: () => dropUnmatchable,
   dropUnresolvableCites: () => dropUnresolvableCites,
   encryptMessage: () => encryptMessage,
   enrichMaintainerReviewed: () => enrichMaintainerReviewed,
@@ -10405,58 +10362,6 @@ var init_state_dir = __esm({
   }
 });
 
-// bin/cache-store.js
-var cache_store_exports = {};
-__export(cache_store_exports, {
-  readCacheEntry: () => readCacheEntry,
-  updateIndexCache: () => updateIndexCache
-});
-import { readFileSync as readFileSync2, writeFileSync, renameSync } from "fs";
-import { join as join2 } from "path";
-import { homedir } from "os";
-function readCacheEntry() {
-  try {
-    return JSON.parse(readFileSync2(INDEX_CACHE_FILE, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function updateIndexCache(patch) {
-  ensureStateDir(TERMINALHIRE_DIR);
-  const existing = readCacheEntry() ?? {};
-  const entry = {
-    ...existing,
-    ...patch,
-    schemaVersion: SCHEMA_VERSION2,
-    ts: Date.now()
-  };
-  const tmp = `${INDEX_CACHE_FILE}.${process.pid}.${tmpCounter++}.tmp`;
-  writeFileSync(tmp, JSON.stringify(entry), "utf8");
-  renameSync(tmp, INDEX_CACHE_FILE);
-  return entry;
-}
-var TERMINALHIRE_DIR, INDEX_CACHE_FILE, SCHEMA_VERSION2, tmpCounter;
-var init_cache_store = __esm({
-  "bin/cache-store.js"() {
-    "use strict";
-    init_state_dir();
-    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
-    INDEX_CACHE_FILE = join2(TERMINALHIRE_DIR, "index-cache.json");
-    SCHEMA_VERSION2 = 1;
-    tmpCounter = 0;
-  }
-});
-
-// bin/founder-pin.js
-function isPinnedFounderBounty(j) {
-  return j?.bounty?.bountySource === "founder" && j?.bounty?.claimable === true;
-}
-var init_founder_pin = __esm({
-  "bin/founder-pin.js"() {
-    "use strict";
-  }
-});
-
 // src/test-race-barrier.ts
 import { closeSync as closeSync2, constants as constants2, existsSync, lstatSync, openSync as openSync2 } from "fs";
 import { join as join3 } from "path";
@@ -10573,7 +10478,7 @@ var init_shared_key = __esm({
 
 // src/crypto-store.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes4 } from "crypto";
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, existsSync as existsSync3, renameSync as renameSync2, rmSync, readdirSync } from "fs";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, existsSync as existsSync3, renameSync as renameSync2, rmSync } from "fs";
 import { join as join5, dirname, basename } from "path";
 import { createRequire } from "module";
 function encrypt(plaintext, key) {
@@ -10629,25 +10534,10 @@ function atomicWriteFileSync(filePath, content) {
   renameSync2(tmp, filePath);
 }
 async function deleteKey() {
-  const stateDir = dirname(KEY_FILE);
-  let encFiles;
-  try {
-    encFiles = readdirSync(stateDir).filter((f) => f.endsWith(".enc"));
-  } catch (e) {
-    if (e.code !== "ENOENT") throw e;
-    encFiles = [];
-  }
-  for (const name of encFiles) {
+  for (const filePath of dependentStoreFiles) {
     try {
-      rmSync(join5(stateDir, name));
-    } catch (e) {
-      const code = e.code;
-      if (code !== "ENOENT") {
-        throw new Error(
-          `could not delete ${name} (${code ?? "unknown error"}). Your encryption key was NOT deleted, so nothing has been orphaned. Close any other running terminalhire process and re-run \u2014 repeating the delete is safe.`,
-          { cause: e }
-        );
-      }
+      rmSync(filePath);
+    } catch {
     }
   }
   if (!forceKeytarUnavailableForTests && !skipKeychain()) {
@@ -10659,8 +10549,7 @@ async function deleteKey() {
   }
   try {
     rmSync(KEY_FILE);
-  } catch (e) {
-    if (e.code !== "ENOENT") throw e;
+  } catch {
   }
 }
 async function resolveKey(filePath, opts) {
@@ -10677,6 +10566,7 @@ async function resolveKey(filePath, opts) {
   return loadOrCreateSharedKey();
 }
 function createEncryptedStore(filePath, opts) {
+  dependentStoreFiles.add(filePath);
   async function read() {
     const key = await resolveKey(filePath, opts);
     if (!key) return opts.blank();
@@ -10699,7 +10589,7 @@ function createEncryptedStore(filePath, opts) {
   }
   return { read, write };
 }
-var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, IV_BYTES, forceKeytarUnavailableForTests;
+var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, IV_BYTES, forceKeytarUnavailableForTests, dependentStoreFiles;
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
@@ -10710,6 +10600,7 @@ var init_crypto_store = __esm({
     ALGO = "aes-256-gcm";
     IV_BYTES = 12;
     forceKeytarUnavailableForTests = false;
+    dependentStoreFiles = /* @__PURE__ */ new Set();
   }
 });
 
@@ -11124,7 +11015,6 @@ var claims_exports = {};
 __export(claims_exports, {
   PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
   acceptedPRRate: () => acceptedPRRate,
-  countAwaitingFounderApproval: () => countAwaitingFounderApproval,
   findClaim: () => findClaim,
   listClaims: () => listClaims,
   nextPolledState: () => nextPolledState,
@@ -11306,15 +11196,6 @@ function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
     return true;
   });
 }
-function countAwaitingFounderApproval(claims = readClaims()) {
-  try {
-    return claims.filter(
-      (c) => c.approval?.mode === "approval-only" && c.approval?.state === "pending"
-    ).length;
-  } catch {
-    return 0;
-  }
-}
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;
   const merged = claims.filter((c) => c.state === "merged").length;
@@ -11363,50 +11244,43 @@ var init_claims = __esm({
   }
 });
 
-// bin/founder-paid-badge.js
-var founder_paid_badge_exports = {};
-__export(founder_paid_badge_exports, {
-  acknowledgeFounderPaid: () => acknowledgeFounderPaid,
-  computeFounderPaid: () => computeFounderPaid,
-  openPaidIds: () => openPaidIds
-});
-function openPaidIds(index) {
-  const jobs = index && index.jobs || [];
-  const ids = [];
-  for (const j of jobs) {
-    if (!j || typeof j.id !== "string") continue;
-    if (isPinnedFounderBounty(j)) ids.push(j.id);
-  }
-  return [...new Set(ids)].sort();
-}
-function gate(openIds, seenIds) {
-  const seen = new Set(seenIds);
-  const acknowledged = openIds.filter((id) => seen.has(id));
-  return { count: openIds.length - acknowledged.length, acknowledged };
-}
-function computeFounderPaid(index, previous) {
-  const open = openPaidIds(index);
-  const prior = previous && previous.acknowledged;
-  return gate(open, Array.isArray(prior) ? prior : []);
-}
-function acknowledgeFounderPaid({ shown = [], open = [], previous } = {}) {
-  const prior = previous && Array.isArray(previous.acknowledged) ? previous.acknowledged : [];
-  return gate(openPaidIds({ jobs: open }), [...prior, ...openPaidIds({ jobs: shown })]);
-}
-var init_founder_paid_badge = __esm({
-  "bin/founder-paid-badge.js"() {
-    "use strict";
-    init_founder_pin();
-  }
-});
-
 // bin/jpi-bounties.js
 init_src();
-init_cache_store();
 import { readFileSync as readFileSync6 } from "fs";
 import { join as join9 } from "path";
 import { homedir as homedir6 } from "os";
 import { createInterface } from "readline";
+
+// bin/cache-store.js
+init_state_dir();
+import { readFileSync as readFileSync2, writeFileSync, renameSync } from "fs";
+import { join as join2 } from "path";
+import { homedir } from "os";
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
+var INDEX_CACHE_FILE = join2(TERMINALHIRE_DIR, "index-cache.json");
+var SCHEMA_VERSION2 = 1;
+var tmpCounter = 0;
+function readCacheEntry() {
+  try {
+    return JSON.parse(readFileSync2(INDEX_CACHE_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function updateIndexCache(patch) {
+  ensureStateDir(TERMINALHIRE_DIR);
+  const existing = readCacheEntry() ?? {};
+  const entry = {
+    ...existing,
+    ...patch,
+    schemaVersion: SCHEMA_VERSION2,
+    ts: Date.now()
+  };
+  const tmp = `${INDEX_CACHE_FILE}.${process.pid}.${tmpCounter++}.tmp`;
+  writeFileSync(tmp, JSON.stringify(entry), "utf8");
+  renameSync(tmp, INDEX_CACHE_FILE);
+  return entry;
+}
 
 // bin/sanitize.js
 var CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
@@ -11440,7 +11314,6 @@ function linkTitle(title, url) {
 }
 
 // bin/jpi-bounties.js
-init_founder_pin();
 var TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join9(homedir6(), ".terminalhire");
 var INDEX_CACHE_FILE2 = join9(TERMINALHIRE_DIR6, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
@@ -11464,7 +11337,7 @@ function readIndexCache() {
   }
 }
 function writeIndexCache(index) {
-  updateIndexCache({ index, indexETag: "" });
+  updateIndexCache({ index });
 }
 async function fetchIndex() {
   const cached = readIndexCache();
@@ -11487,11 +11360,7 @@ function prompt(question) {
 function formatAmount(b) {
   return b.amountUSD != null ? "$" + b.amountUSD.toLocaleString() : "$\u2014";
 }
-var EFFORT_LABEL = {
-  small: "small (~\xBD day)",
-  medium: "medium (~1 day)",
-  large: "large (multi-day)"
-};
+var EFFORT_LABEL = { small: "small (~\xBD day)", medium: "medium (~1 day)", large: "large (multi-day)" };
 function printBounty(i, job, score, reason, matchedTags, claimedIds = /* @__PURE__ */ new Set(), continuityNote = null) {
   const b = job.bounty ?? {};
   const stars = b.repoStars != null ? ` \xB7 ${b.repoStars}\u2605` : "";
@@ -11504,13 +11373,10 @@ function printBounty(i, job, score, reason, matchedTags, claimedIds = /* @__PURE
   const ref = opportunityShortToken(job.id);
   console.log(`
 ${i + 1}. ${linkTitle(job.title, job.url)} [${ref}]`);
-  console.log(
-    `   ${formatAmount(b)}${effort} \xB7 ${sanitizeText(b.repoFullName ?? job.company)}${stars}${scoreStr}${contend}${badge}`
-  );
+  console.log(`   ${formatAmount(b)}${effort} \xB7 ${sanitizeText(b.repoFullName ?? job.company)}${stars}${scoreStr}${contend}${badge}`);
   if (reason) console.log(`   ${reason}`);
   if (continuityNote) console.log(`   ${continuityNote}`);
-  if (matchedTags && matchedTags.length)
-    console.log(`   Tags matched: ${matchedTags.slice(0, 5).join(", ")}`);
+  if (matchedTags && matchedTags.length) console.log(`   Tags matched: ${matchedTags.slice(0, 5).join(", ")}`);
   console.log(`   id: ${job.id}`);
   console.log(`   Claim: ${sanitizeText(b.claimUrl ?? job.url)}`);
   console.log(
@@ -11519,7 +11385,6 @@ ${i + 1}. ${linkTitle(job.title, job.url)} [${ref}]`);
 }
 function rankBounties(bounties, { rankMode = "winnability", scoreOf = () => 0 } = {}) {
   const legacy = rankMode === "legacy";
-  const pin = (j) => isPinnedFounderBounty(j) ? 1 : 0;
   const contested = (j) => (j.bounty?.competingOpenPRs ?? 0) > 0 ? 1 : 0;
   const amt = (j) => j.bounty?.amountUSD ?? -1;
   const winTier = (j) => {
@@ -11529,13 +11394,12 @@ function rankBounties(bounties, { rankMode = "winnability", scoreOf = () => 0 } 
   };
   const winVal = (j) => j.winnabilityScore ?? 0;
   bounties.sort(
-    (a, b) => pin(b) - pin(a) || (legacy ? 0 : winTier(b) - winTier(a)) || (legacy ? 0 : winVal(b) - winVal(a)) || contested(a) - contested(b) || scoreOf(b) - scoreOf(a) || amt(b) - amt(a)
+    (a, b) => (legacy ? 0 : winTier(b) - winTier(a)) || (legacy ? 0 : winVal(b) - winVal(a)) || contested(a) - contested(b) || scoreOf(b) - scoreOf(a) || amt(b) - amt(a)
   );
   return bounties;
 }
 function applyContinuityRank(bounties, continuityOf, { enabled = true } = {}) {
   if (!enabled) return bounties;
-  const pin = (j) => isPinnedFounderBounty(j) ? 1 : 0;
   const winTier = (j) => {
     const s = j.winnabilityScore;
     if (s == null) return 1;
@@ -11547,9 +11411,7 @@ function applyContinuityRank(bounties, continuityOf, { enabled = true } = {}) {
     const c = repo ? continuityOf(repo) || 0 : 0;
     return s * (1 + 0.15 * c);
   };
-  bounties.sort(
-    (a, b) => pin(b) - pin(a) || winTier(b) - winTier(a) || effectiveVal(b) - effectiveVal(a)
-  );
+  bounties.sort((a, b) => winTier(b) - winTier(a) || effectiveVal(b) - effectiveVal(a));
   return bounties;
 }
 function continuityNoteForRow(entry, isTTY) {
@@ -11560,7 +11422,7 @@ function continuityNoteForRow(entry, isTTY) {
 }
 function filterPaidVisibility(items, { priced = false } = {}) {
   if (priced) return items;
-  return items.filter((j) => j.source !== "bounty" || j.bounty?.bountySource === "founder");
+  return items.filter((j) => j.source !== "bounty");
 }
 function classifyEmptyStatus({ preFilterCount, postFilterCount, priced }) {
   if (postFilterCount > 0) return "ok";
@@ -11621,9 +11483,7 @@ async function run() {
   try {
     const result = await getBounties();
     if (result.status === "empty") {
-      console.log(
-        "\nNo bounties available right now. Try again later \u2014 supply refreshes through the day."
-      );
+      console.log("\nNo bounties available right now. Try again later \u2014 supply refreshes through the day.");
       return;
     }
     if (result.status === "demoted") {
@@ -11650,40 +11510,16 @@ async function run() {
       const r = ranked.get(shown[i].id);
       const continuityEntry = continuityByRepo?.get(shown[i].bounty?.repoFullName);
       const continuityNote = continuityNoteForRow(continuityEntry, process.stdout.isTTY);
-      printBounty(
-        i,
-        shown[i],
-        r?.score ?? 0,
-        r?.reason,
-        r?.matchedTags,
-        claimedIds,
-        continuityNote
-      );
-    }
-    try {
-      const { acknowledgeFounderPaid: acknowledgeFounderPaid2 } = await Promise.resolve().then(() => (init_founder_paid_badge(), founder_paid_badge_exports));
-      const { readCacheEntry: readCacheEntry2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
-      updateIndexCache({
-        founderPaid: acknowledgeFounderPaid2({
-          shown,
-          open: bounties,
-          previous: (readCacheEntry2() ?? {}).founderPaid
-        })
-      });
-    } catch {
+      printBounty(i, shown[i], r?.score ?? 0, r?.reason, r?.matchedTags, claimedIds, continuityNote);
     }
     if (!SHOW_ALL && bounties.length > shown.length) {
-      console.log(
-        `
-\u2026and ${bounties.length - shown.length} more \u2014 run with --all to see every bounty.`
-      );
+      console.log(`
+\u2026and ${bounties.length - shown.length} more \u2014 run with --all to see every bounty.`);
     }
     if (!process.stdin.isTTY) return;
     console.log("\n" + "\u2500".repeat(70));
-    const pick = await prompt(
-      `
-Enter a number to open a bounty's claim page, or press Enter to exit: `
-    );
+    const pick = await prompt(`
+Enter a number to open a bounty's claim page, or press Enter to exit: `);
     const idx = parseInt(pick, 10) - 1;
     if (Number.isNaN(idx) || idx < 0 || idx >= shown.length) return;
     const chosen = shown[idx];
@@ -11703,7 +11539,6 @@ export {
   continuityNoteForRow,
   filterPaidVisibility,
   getBounties,
-  isPinnedFounderBounty,
   printBounty,
   rankBounties,
   run

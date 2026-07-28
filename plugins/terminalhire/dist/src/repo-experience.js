@@ -4,7 +4,7 @@ import { homedir as homedir3 } from "os";
 
 // src/crypto-store.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync3, renameSync, rmSync, readdirSync } from "fs";
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync3, renameSync, rmSync } from "fs";
 import { join as join3, dirname, basename } from "path";
 import { createRequire } from "module";
 
@@ -241,6 +241,7 @@ function atomicWriteFileSync(filePath, content) {
   writeFileSync2(tmp, content, { encoding: "utf8", mode: 384, flag: "wx" });
   renameSync(tmp, filePath);
 }
+var dependentStoreFiles = /* @__PURE__ */ new Set();
 async function resolveKey(filePath, opts) {
   if (opts.keyPolicy === "keychain-required") {
     const key = await tryLoadFromKeytar();
@@ -255,6 +256,7 @@ async function resolveKey(filePath, opts) {
   return loadOrCreateSharedKey();
 }
 function createEncryptedStore(filePath, opts) {
+  dependentStoreFiles.add(filePath);
   async function read() {
     const key = await resolveKey(filePath, opts);
     if (!key) return opts.blank();

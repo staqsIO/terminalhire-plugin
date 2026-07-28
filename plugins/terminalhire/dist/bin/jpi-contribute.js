@@ -2697,7 +2697,7 @@ var init_shared_key = __esm({
 
 // src/crypto-store.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes3 } from "crypto";
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, existsSync as existsSync4, renameSync as renameSync2, rmSync, readdirSync } from "fs";
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, existsSync as existsSync4, renameSync as renameSync2, rmSync } from "fs";
 import { join as join6, dirname, basename } from "path";
 import { createRequire } from "module";
 function encrypt(plaintext, key) {
@@ -2753,25 +2753,10 @@ function atomicWriteFileSync(filePath, content) {
   renameSync2(tmp, filePath);
 }
 async function deleteKey() {
-  const stateDir = dirname(KEY_FILE);
-  let encFiles;
-  try {
-    encFiles = readdirSync(stateDir).filter((f) => f.endsWith(".enc"));
-  } catch (e) {
-    if (e.code !== "ENOENT") throw e;
-    encFiles = [];
-  }
-  for (const name of encFiles) {
+  for (const filePath of dependentStoreFiles) {
     try {
-      rmSync(join6(stateDir, name));
-    } catch (e) {
-      const code = e.code;
-      if (code !== "ENOENT") {
-        throw new Error(
-          `could not delete ${name} (${code ?? "unknown error"}). Your encryption key was NOT deleted, so nothing has been orphaned. Close any other running terminalhire process and re-run \u2014 repeating the delete is safe.`,
-          { cause: e }
-        );
-      }
+      rmSync(filePath);
+    } catch {
     }
   }
   if (!forceKeytarUnavailableForTests && !skipKeychain()) {
@@ -2783,8 +2768,7 @@ async function deleteKey() {
   }
   try {
     rmSync(KEY_FILE);
-  } catch (e) {
-    if (e.code !== "ENOENT") throw e;
+  } catch {
   }
 }
 async function resolveKey(filePath, opts) {
@@ -2801,6 +2785,7 @@ async function resolveKey(filePath, opts) {
   return loadOrCreateSharedKey();
 }
 function createEncryptedStore(filePath, opts) {
+  dependentStoreFiles.add(filePath);
   async function read() {
     const key = await resolveKey(filePath, opts);
     if (!key) return opts.blank();
@@ -2823,7 +2808,7 @@ function createEncryptedStore(filePath, opts) {
   }
   return { read, write };
 }
-var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, IV_BYTES, forceKeytarUnavailableForTests;
+var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, IV_BYTES, forceKeytarUnavailableForTests, dependentStoreFiles;
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
@@ -2834,6 +2819,7 @@ var init_crypto_store = __esm({
     ALGO = "aes-256-gcm";
     IV_BYTES = 12;
     forceKeytarUnavailableForTests = false;
+    dependentStoreFiles = /* @__PURE__ */ new Set();
   }
 });
 
@@ -3517,7 +3503,6 @@ var claims_exports = {};
 __export(claims_exports, {
   PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
   acceptedPRRate: () => acceptedPRRate,
-  countAwaitingFounderApproval: () => countAwaitingFounderApproval,
   findClaim: () => findClaim,
   listClaims: () => listClaims,
   nextPolledState: () => nextPolledState,
@@ -3698,15 +3683,6 @@ function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
     writeClaims(claims.filter((c) => c.id !== id));
     return true;
   });
-}
-function countAwaitingFounderApproval(claims = readClaims()) {
-  try {
-    return claims.filter(
-      (c) => c.approval?.mode === "approval-only" && c.approval?.state === "pending"
-    ).length;
-  } catch {
-    return 0;
-  }
 }
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;
@@ -4095,7 +4071,7 @@ function readIndexCache() {
   }
 }
 function writeIndexCache(index) {
-  updateIndexCache({ index, indexETag: "" });
+  updateIndexCache({ index });
 }
 async function fetchIndex(fetchImpl, useCache = true) {
   if (useCache) {

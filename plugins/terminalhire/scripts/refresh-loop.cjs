@@ -8,9 +8,9 @@
  * spinner forever. This is plain Node (invoked as `node refresh-loop.cjs <root>`),
  * so it runs identically on macOS, Linux, and Windows.
  *
- * Behavior:
+ * Behavior (preserved EXACTLY from the .sh):
  *   • Runs the plugin-bundled engine's `refresh` once immediately, then sleeps
- *     120s (TERMINALHIRE_REFRESH_INTERVAL override, in seconds) and repeats.
+ *     600s (TERMINALHIRE_REFRESH_INTERVAL override, in seconds) and repeats.
  *   • Fail-closed: any error in a refresh tick is silently ignored; the loop
  *     continues.
  *   • Invokes the engine by ABSOLUTE path (never the bare `terminalhire` on
@@ -51,19 +51,8 @@ const { ensureStateDir } = require('./state-dir.cjs');
 const PLUGIN_ROOT = process.argv[2] || join(dirname(__filename), '..');
 const DISPATCH = join(PLUGIN_ROOT, 'dist', 'bin', 'jpi-dispatch.js');
 
-// Seconds between ticks.
-//
-// 600 → 120 (TERM-281). The old value was set when every tick downloaded the whole
-// ~378KB index, so polling five times as often would have cost five times the
-// bandwidth to learn nothing had changed. The engine now sends `If-None-Match`, and an
-// unchanged tick is a 304 with no body — so the interval is no longer paying for the
-// payload, and the founder→developer handoff stops waiting up to ten minutes on this
-// sleep alone.
-//
-// The floor is not here. `/api/index` is edge-cached for 300s, so that window bounds
-// pickup no matter how often this loop runs; going below ~120 buys little until the
-// beacon work in TERM-279 lands.
-const SLEEP_SECONDS = Number(process.env.TERMINALHIRE_REFRESH_INTERVAL) || 120;
+// Seconds — matches the .sh SLEEP_INTERVAL default of 600.
+const SLEEP_SECONDS = Number(process.env.TERMINALHIRE_REFRESH_INTERVAL) || 600;
 
 // TERMINALHIRE_DIR override mirrors the CLI (spinner.js / jpi-refresh.js) so the
 // lock lives alongside the shared cache — and so tests can isolate it.
@@ -114,28 +103,12 @@ function readOwner() {
  * duration under the non-overlapping recursive setTimeout) without expiring a
  * legitimately long-lived monitor the way a plain startedAt TTL would.
  *
- * THE FLOOR IS LOAD-BEARING, and it is why this is not a bare multiple. A pure
- * 3× ties the staleness threshold to a number chosen for something else — how
- * often to poll. When the interval dropped 600s → 120s (TERM-281) that silently
- * moved "a tick is taking too long" from 1200s to 240s, and a tick is an
- * unbounded spawnSync: index fetch, directory fetch, a credentialled approved-
- * claims sync, and a background claim push that talks git over the network. A
- * tick that merely runs long would then read as a dead owner, and the takeover
- * SIGTERMs the live monitor mid-tick — leaving its orphaned refresh child racing
- * a fresh one through the same read-merge-write. Lost update, not corruption,
- * and nothing in a green suite would show it. The demo override
- * (TERMINALHIRE_REFRESH_INTERVAL=45) would have made it routine at 90s.
- *
- * 900s is the floor because it is the same order as the statusline's own 15-minute
- * cache-age gate: past that, a monitor that has not written is not doing its job by
- * any measure the product uses.
- *
  * COMPAT: markers written by pre-heartbeat versions carry no `lastBeat` and
  * are never rewritten — for those, keep pure PID-liveness semantics rather
  * than declaring every old-version live monitor stale (which would double-run
  * it). Old markers age out as monitors restart on plugin update.
  */
-const STALE_BEAT_MS = Math.max(3 * SLEEP_SECONDS, 900) * 1000;
+const STALE_BEAT_MS = 3 * SLEEP_SECONDS * 1000;
 
 function markerIsStale(marker) {
   return typeof marker.lastBeat === 'number' && Date.now() - marker.lastBeat > STALE_BEAT_MS;
@@ -162,9 +135,7 @@ function ownerIsLive() {
  */
 function readOwnVersion() {
   try {
-    return (
-      JSON.parse(readFileSync(join(PLUGIN_ROOT, 'dist', 'package.json'), 'utf8')).version || '0.0.0'
-    );
+    return JSON.parse(readFileSync(join(PLUGIN_ROOT, 'dist', 'package.json'), 'utf8')).version || '0.0.0';
   } catch {
     return '0.0.0';
   }
@@ -173,12 +144,8 @@ const OWN_VERSION = readOwnVersion();
 
 /** Numeric dot-segment version compare → -1|0|1. Missing/garbage reads as 0.0.0. */
 function versionCmp(a, b) {
-  const pa = String(a || '0')
-    .split('.')
-    .map((n) => parseInt(n, 10) || 0);
-  const pb = String(b || '0')
-    .split('.')
-    .map((n) => parseInt(n, 10) || 0);
+  const pa = String(a || '0').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || '0').split('.').map((n) => parseInt(n, 10) || 0);
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const d = (pa[i] || 0) - (pb[i] || 0);
     if (d !== 0) return d < 0 ? -1 : 1;
@@ -192,9 +159,7 @@ function sleepMs(ms) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
   } catch {
     const end = Date.now() + ms;
-    while (Date.now() < end) {
-      /* fallback spin */
-    }
+    while (Date.now() < end) { /* fallback spin */ }
   }
 }
 
@@ -379,15 +344,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-  // Exported so a test can assert the SHIPPED cadence and the env override against the
-  // value the module actually computes, rather than against its source text.
-  SLEEP_SECONDS,
-  acquireLock,
-  releaseLock,
-  ownerIsLive,
-  readOwner,
-  isAlive,
-  beat,
-  OWNER_TAG,
-  STALE_BEAT_MS,
+  acquireLock, releaseLock, ownerIsLive, readOwner, isAlive, beat,
+  OWNER_TAG, STALE_BEAT_MS,
 };
