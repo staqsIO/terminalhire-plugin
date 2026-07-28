@@ -817,6 +817,7 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
     mergedAt: pr.merged_at ?? null,
     authorId: pr.user?.id ?? null,
     authorLogin: pr.user?.login ?? null,
+    authorAssociation: pr.author_association ?? null,
     mergedById: pr.merged_by?.id ?? null,
     mergedByLogin: pr.merged_by?.login ?? null,
     closesIssues,

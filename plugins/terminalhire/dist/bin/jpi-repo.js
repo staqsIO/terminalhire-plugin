@@ -204,7 +204,7 @@ var init_shared_key = __esm({
 
 // src/crypto-store.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync3, renameSync, rmSync } from "fs";
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync3, renameSync, rmSync, readdirSync } from "fs";
 import { join as join3, dirname, basename } from "path";
 import { createRequire } from "module";
 function encrypt(plaintext, key) {
@@ -273,7 +273,6 @@ async function resolveKey(filePath, opts) {
   return loadOrCreateSharedKey();
 }
 function createEncryptedStore(filePath, opts) {
-  dependentStoreFiles.add(filePath);
   async function read() {
     const key = await resolveKey(filePath, opts);
     if (!key) return opts.blank();
@@ -296,7 +295,7 @@ function createEncryptedStore(filePath, opts) {
   }
   return { read, write };
 }
-var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, IV_BYTES, forceKeytarUnavailableForTests, dependentStoreFiles;
+var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, IV_BYTES, forceKeytarUnavailableForTests;
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
@@ -307,7 +306,6 @@ var init_crypto_store = __esm({
     ALGO = "aes-256-gcm";
     IV_BYTES = 12;
     forceKeytarUnavailableForTests = false;
-    dependentStoreFiles = /* @__PURE__ */ new Set();
   }
 });
 
@@ -1826,8 +1824,10 @@ var init_repo_experience = __esm({
 // src/claims.ts
 var claims_exports = {};
 __export(claims_exports, {
+  CLAIM_STATES: () => CLAIM_STATES,
   PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
   acceptedPRRate: () => acceptedPRRate,
+  countAwaitingFounderApproval: () => countAwaitingFounderApproval,
   findClaim: () => findClaim,
   listClaims: () => listClaims,
   nextPolledState: () => nextPolledState,
@@ -2009,12 +2009,21 @@ function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
     return true;
   });
 }
+function countAwaitingFounderApproval(claims = readClaims()) {
+  try {
+    return claims.filter(
+      (c) => c.approval?.mode === "approval-only" && c.approval?.state === "pending"
+    ).length;
+  } catch {
+    return 0;
+  }
+}
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR4, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS;
+var TERMINALHIRE_DIR4, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
@@ -2025,6 +2034,22 @@ var init_claims = __esm({
     LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
     LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
     LOCK_TIMEOUT_MS = Number(process.env.TERMINALHIRE_LOCK_TIMEOUT_MS) || 5e3;
+    CLAIM_STATES = Object.freeze([
+      "claimed",
+      // recorded, not started
+      "working",
+      // background executor running / work in progress
+      "in-review",
+      // gate ran / dev reviewing the diff
+      "ready",
+      // passed review, cleared to submit
+      "submitted",
+      // PR opened on the source platform (awaiting maintainer)
+      "merged",
+      // PR merged — accepted; counts toward the metric
+      "abandoned"
+      // released, or PR closed unmerged
+    ]);
     PUSHED_CLAIM_FIELDS = [
       "kind",
       "repoFullName",

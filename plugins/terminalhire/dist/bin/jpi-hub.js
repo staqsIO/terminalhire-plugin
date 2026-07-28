@@ -462,8 +462,10 @@ var init_state_dir = __esm({
 // src/claims.ts
 var claims_exports = {};
 __export(claims_exports, {
+  CLAIM_STATES: () => CLAIM_STATES,
   PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
   acceptedPRRate: () => acceptedPRRate,
+  countAwaitingFounderApproval: () => countAwaitingFounderApproval,
   findClaim: () => findClaim,
   listClaims: () => listClaims,
   nextPolledState: () => nextPolledState,
@@ -645,12 +647,21 @@ function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
     return true;
   });
 }
+function countAwaitingFounderApproval(claims = readClaims()) {
+  try {
+    return claims.filter(
+      (c) => c.approval?.mode === "approval-only" && c.approval?.state === "pending"
+    ).length;
+  } catch {
+    return 0;
+  }
+}
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS;
+var TERMINALHIRE_DIR, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
@@ -661,6 +672,22 @@ var init_claims = __esm({
     LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
     LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
     LOCK_TIMEOUT_MS = Number(process.env.TERMINALHIRE_LOCK_TIMEOUT_MS) || 5e3;
+    CLAIM_STATES = Object.freeze([
+      "claimed",
+      // recorded, not started
+      "working",
+      // background executor running / work in progress
+      "in-review",
+      // gate ran / dev reviewing the diff
+      "ready",
+      // passed review, cleared to submit
+      "submitted",
+      // PR opened on the source platform (awaiting maintainer)
+      "merged",
+      // PR merged — accepted; counts toward the metric
+      "abandoned"
+      // released, or PR closed unmerged
+    ]);
     PUSHED_CLAIM_FIELDS = [
       "kind",
       "repoFullName",
@@ -2667,6 +2694,7 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
     mergedAt: pr.merged_at ?? null,
     authorId: pr.user?.id ?? null,
     authorLogin: pr.user?.login ?? null,
+    authorAssociation: pr.author_association ?? null,
     mergedById: pr.merged_by?.id ?? null,
     mergedByLogin: pr.merged_by?.login ?? null,
     closesIssues,
@@ -5577,6 +5605,23 @@ function hasClickableUrl(url) {
     return false;
   }
 }
+function dropUnmatchable(jobs) {
+  const dropped = /* @__PURE__ */ new Map();
+  const kept = jobs.filter((job) => {
+    if (!TAG_FILTERED_SOURCES.has(job.source)) return true;
+    if (job.tags.length > 0) return true;
+    dropped.set(job.source, (dropped.get(job.source) ?? 0) + 1);
+    return false;
+  });
+  const total = jobs.length - kept.length;
+  if (total > 0) {
+    const perSource = [...dropped.entries()].sort((a, b) => b[1] - a[1]).map(([source, n]) => `${source} ${n}`).join(", ");
+    console.info(
+      `[indexer] dropped ${total} untagged of ${jobs.length} (unmatchable by any profile): ${perSource}`
+    );
+  }
+  return kept;
+}
 async function buildIndex(opts) {
   const includePartners = opts?.includePartners ?? true;
   const publicJobs = await aggregate(opts);
@@ -5593,7 +5638,7 @@ async function buildIndex(opts) {
       allJobs.push(job);
     }
   }
-  const jobs = allJobs.map(({ raw: _raw, ...rest }) => rest);
+  const jobs = dropUnmatchable(allJobs.map(({ raw: _raw, ...rest }) => rest));
   const index = {
     builtAt: (/* @__PURE__ */ new Date()).toISOString(),
     jobs
@@ -5607,6 +5652,7 @@ async function buildIndex(opts) {
   }
   return index;
 }
+var TAG_FILTERED_SOURCES;
 var init_indexer = __esm({
   "../../packages/core/src/indexer.ts"() {
     "use strict";
@@ -5616,6 +5662,15 @@ var init_indexer = __esm({
     init_github();
     init_gh_governor();
     init_winnability();
+    TAG_FILTERED_SOURCES = /* @__PURE__ */ new Set([
+      "greenhouse",
+      "ashby",
+      "lever",
+      "workable",
+      "himalayas",
+      "wwr",
+      "hn"
+    ]);
   }
 });
 
@@ -9057,10 +9112,13 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
     daysAgo = Math.max(0, Math.round(ageDays2));
     recencyBadge = { lastMergedAt: mostRecent, state: ageDays2 <= thresholdDays ? "live" : "dormant" };
   }
-  const exactOrgCount = typeof credential.distinctOrgs === "number" && credential.distinctOrgs > 0;
-  const orgCount = exactOrgCount ? credential.distinctOrgs : Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
+  const hasDistinctOrgs = Object.prototype.hasOwnProperty.call(credential, "distinctOrgs");
+  const rawDistinctOrgs = credential.distinctOrgs;
+  const exactOrgCount = hasDistinctOrgs && typeof rawDistinctOrgs === "number" && Number.isSafeInteger(rawDistinctOrgs) && rawDistinctOrgs > 0;
+  const malformedDistinctOrgs = ok && hasDistinctOrgs && !exactOrgCount;
+  const orgCount = exactOrgCount ? rawDistinctOrgs : Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
   let proofSentence;
-  if (!ok) {
+  if (!ok || malformedDistinctOrgs) {
     proofSentence = "Contribution credential unavailable \u2014 could not verify.";
   } else {
     const prs = credential.qualifyingTotal;
@@ -9071,9 +9129,10 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
   }
   const enrichedPRs = ok ? credential.qualifyingPRs ?? [] : [];
   const maintainerReviewedCount = enrichedPRs.some((p) => p.maintainerReviewed !== void 0) ? enrichedPRs.filter((p) => p.maintainerReviewed === true).length : void 0;
-  const auditableBadge = ok ? {
+  const auditableBadge = ok && !malformedDistinctOrgs ? {
     mergedTotal: credential.qualifyingTotal,
     distinctOrgs: orgCount,
+    distinctOrgsExact: exactOrgCount,
     thresholds: { stars: MIN_STARS, contributors: MIN_CONTRIBUTORS },
     ...maintainerReviewedCount !== void 0 ? { maintainerReviewedCount } : {}
   } : null;
@@ -9323,6 +9382,15 @@ function computeEventIndependence(facts) {
       }
     };
   }
+  if (facts.authorAssociation != null && AFFILIATED_AUTHOR_ASSOCIATIONS.has(facts.authorAssociation.toUpperCase())) {
+    return {
+      merger: {
+        party: "merger",
+        independence: "affiliated",
+        reasons: [`PR author is affiliated with the target repo (${facts.authorAssociation})`]
+      }
+    };
+  }
   return {
     merger: {
       party: "merger",
@@ -9353,7 +9421,7 @@ function computeReviewerIndependence(signals) {
   }
   return { party: "reviewer", independence: "unverified", reasons: ["affiliation signal absent (read failed/skipped)"] };
 }
-var PROVENANCE, MS_PER_DAY;
+var PROVENANCE, MS_PER_DAY, AFFILIATED_AUTHOR_ASSOCIATIONS;
 var init_independence = __esm({
   "../../packages/core/src/credential/independence.ts"() {
     "use strict";
@@ -9368,6 +9436,7 @@ var init_independence = __esm({
       CONTRIB_FLOOR: 5
     };
     MS_PER_DAY = 864e5;
+    AFFILIATED_AUTHOR_ASSOCIATIONS = /* @__PURE__ */ new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
   }
 });
 
@@ -10828,6 +10897,7 @@ __export(src_exports, {
   displayableDrift: () => displayableDrift,
   dropIdentityTokens: () => dropIdentityTokens,
   dropNgramOverlap: () => dropNgramOverlap,
+  dropUnmatchable: () => dropUnmatchable,
   dropUnresolvableCites: () => dropUnresolvableCites,
   encryptMessage: () => encryptMessage,
   enrichMaintainerReviewed: () => enrichMaintainerReviewed,
@@ -11083,7 +11153,7 @@ var init_shared_key = __esm({
 
 // src/crypto-store.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes5 } from "crypto";
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, existsSync as existsSync4, renameSync as renameSync2, rmSync as rmSync2 } from "fs";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, existsSync as existsSync4, renameSync as renameSync2, rmSync as rmSync2, readdirSync } from "fs";
 import { join as join5, dirname, basename } from "path";
 import { createRequire } from "module";
 function encrypt(plaintext, key) {
@@ -11139,10 +11209,25 @@ function atomicWriteFileSync(filePath, content) {
   renameSync2(tmp, filePath);
 }
 async function deleteKey() {
-  for (const filePath of dependentStoreFiles) {
+  const stateDir = dirname(KEY_FILE);
+  let encFiles;
+  try {
+    encFiles = readdirSync(stateDir).filter((f) => f.endsWith(".enc"));
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+    encFiles = [];
+  }
+  for (const name of encFiles) {
     try {
-      rmSync2(filePath);
-    } catch {
+      rmSync2(join5(stateDir, name));
+    } catch (e) {
+      const code = e.code;
+      if (code !== "ENOENT") {
+        throw new Error(
+          `could not delete ${name} (${code ?? "unknown error"}). Your encryption key was NOT deleted, so nothing has been orphaned. Close any other running terminalhire process and re-run \u2014 repeating the delete is safe.`,
+          { cause: e }
+        );
+      }
     }
   }
   if (!forceKeytarUnavailableForTests && !skipKeychain()) {
@@ -11154,7 +11239,8 @@ async function deleteKey() {
   }
   try {
     rmSync2(KEY_FILE);
-  } catch {
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
   }
 }
 async function resolveKey(filePath, opts) {
@@ -11171,7 +11257,6 @@ async function resolveKey(filePath, opts) {
   return loadOrCreateSharedKey();
 }
 function createEncryptedStore(filePath, opts) {
-  dependentStoreFiles.add(filePath);
   async function read() {
     const key = await resolveKey(filePath, opts);
     if (!key) return opts.blank();
@@ -11194,7 +11279,7 @@ function createEncryptedStore(filePath, opts) {
   }
   return { read, write };
 }
-var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, IV_BYTES, forceKeytarUnavailableForTests, dependentStoreFiles;
+var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, IV_BYTES, forceKeytarUnavailableForTests;
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
@@ -11205,7 +11290,6 @@ var init_crypto_store = __esm({
     ALGO = "aes-256-gcm";
     IV_BYTES = 12;
     forceKeytarUnavailableForTests = false;
-    dependentStoreFiles = /* @__PURE__ */ new Set();
   }
 });
 
@@ -12003,6 +12087,53 @@ var init_jpi_chat_read = __esm({
   }
 });
 
+// bin/cache-store.js
+import { readFileSync as readFileSync13, writeFileSync as writeFileSync11, renameSync as renameSync5 } from "fs";
+import { join as join15 } from "path";
+import { homedir as homedir12 } from "os";
+function readCacheEntry() {
+  try {
+    return JSON.parse(readFileSync13(INDEX_CACHE_FILE2, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function updateIndexCache(patch) {
+  ensureStateDir(TERMINALHIRE_DIR10);
+  const existing = readCacheEntry() ?? {};
+  const entry = {
+    ...existing,
+    ...patch,
+    schemaVersion: SCHEMA_VERSION2,
+    ts: Date.now()
+  };
+  const tmp = `${INDEX_CACHE_FILE2}.${process.pid}.${tmpCounter++}.tmp`;
+  writeFileSync11(tmp, JSON.stringify(entry), "utf8");
+  renameSync5(tmp, INDEX_CACHE_FILE2);
+  return entry;
+}
+var TERMINALHIRE_DIR10, INDEX_CACHE_FILE2, SCHEMA_VERSION2, tmpCounter;
+var init_cache_store = __esm({
+  "bin/cache-store.js"() {
+    "use strict";
+    init_state_dir();
+    TERMINALHIRE_DIR10 = process.env.TERMINALHIRE_DIR || join15(homedir12(), ".terminalhire");
+    INDEX_CACHE_FILE2 = join15(TERMINALHIRE_DIR10, "index-cache.json");
+    SCHEMA_VERSION2 = 1;
+    tmpCounter = 0;
+  }
+});
+
+// bin/founder-pin.js
+function isPinnedFounderBounty(j) {
+  return j?.bounty?.bountySource === "founder" && j?.bounty?.claimable === true;
+}
+var init_founder_pin = __esm({
+  "bin/founder-pin.js"() {
+    "use strict";
+  }
+});
+
 // src/repo-experience.ts
 var repo_experience_exports = {};
 __export(repo_experience_exports, {
@@ -12395,38 +12526,8 @@ var STATUS_FILE = join14(TERMINALHIRE_DIR9, "job-status.json");
 var LOCK_FILE = `${STATUS_FILE}.lock`;
 var BAK_FILE = `${STATUS_FILE}.bak`;
 
-// bin/cache-store.js
-init_state_dir();
-import { readFileSync as readFileSync13, writeFileSync as writeFileSync11, renameSync as renameSync5 } from "fs";
-import { join as join15 } from "path";
-import { homedir as homedir12 } from "os";
-var TERMINALHIRE_DIR10 = process.env.TERMINALHIRE_DIR || join15(homedir12(), ".terminalhire");
-var INDEX_CACHE_FILE2 = join15(TERMINALHIRE_DIR10, "index-cache.json");
-var SCHEMA_VERSION2 = 1;
-var tmpCounter = 0;
-function readCacheEntry() {
-  try {
-    return JSON.parse(readFileSync13(INDEX_CACHE_FILE2, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function updateIndexCache(patch) {
-  ensureStateDir(TERMINALHIRE_DIR10);
-  const existing = readCacheEntry() ?? {};
-  const entry = {
-    ...existing,
-    ...patch,
-    schemaVersion: SCHEMA_VERSION2,
-    ts: Date.now()
-  };
-  const tmp = `${INDEX_CACHE_FILE2}.${process.pid}.${tmpCounter++}.tmp`;
-  writeFileSync11(tmp, JSON.stringify(entry), "utf8");
-  renameSync5(tmp, INDEX_CACHE_FILE2);
-  return entry;
-}
-
 // bin/jpi-jobs.js
+init_cache_store();
 var __dirname = fileURLToPath2(new URL(".", import.meta.url));
 var TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join16(homedir13(), ".terminalhire");
 var INDEX_CACHE_FILE3 = join16(TERMINALHIRE_DIR11, "index-cache.json");
@@ -12457,7 +12558,7 @@ function readIndexCache() {
   }
 }
 function writeIndexCache(index) {
-  updateIndexCache({ index });
+  updateIndexCache({ index, indexETag: "" });
 }
 async function fetchIndex() {
   const cached = readIndexCache();
@@ -12513,10 +12614,12 @@ async function getJobMatches({ quiet = false, offline = false } = {}) {
 
 // bin/jpi-bounties.js
 init_src();
+init_cache_store();
 import { readFileSync as readFileSync15 } from "fs";
 import { join as join18 } from "path";
 import { homedir as homedir15 } from "os";
 import { createInterface as createInterface3 } from "readline";
+init_founder_pin();
 var TERMINALHIRE_DIR13 = process.env.TERMINALHIRE_DIR || join18(homedir15(), ".terminalhire");
 var INDEX_CACHE_FILE4 = join18(TERMINALHIRE_DIR13, "index-cache.json");
 var INDEX_TTL_MS2 = 15 * 60 * 1e3;
@@ -12540,7 +12643,7 @@ function readIndexCache2() {
   }
 }
 function writeIndexCache2(index) {
-  updateIndexCache({ index });
+  updateIndexCache({ index, indexETag: "" });
 }
 async function fetchIndex2() {
   const cached = readIndexCache2();
@@ -12553,6 +12656,7 @@ async function fetchIndex2() {
 }
 function rankBounties(bounties, { rankMode = "winnability", scoreOf = () => 0 } = {}) {
   const legacy = rankMode === "legacy";
+  const pin = (j) => isPinnedFounderBounty(j) ? 1 : 0;
   const contested = (j) => (j.bounty?.competingOpenPRs ?? 0) > 0 ? 1 : 0;
   const amt = (j) => j.bounty?.amountUSD ?? -1;
   const winTier = (j) => {
@@ -12562,12 +12666,13 @@ function rankBounties(bounties, { rankMode = "winnability", scoreOf = () => 0 } 
   };
   const winVal = (j) => j.winnabilityScore ?? 0;
   bounties.sort(
-    (a, b) => (legacy ? 0 : winTier(b) - winTier(a)) || (legacy ? 0 : winVal(b) - winVal(a)) || contested(a) - contested(b) || scoreOf(b) - scoreOf(a) || amt(b) - amt(a)
+    (a, b) => pin(b) - pin(a) || (legacy ? 0 : winTier(b) - winTier(a)) || (legacy ? 0 : winVal(b) - winVal(a)) || contested(a) - contested(b) || scoreOf(b) - scoreOf(a) || amt(b) - amt(a)
   );
   return bounties;
 }
 function applyContinuityRank(bounties, continuityOf, { enabled = true } = {}) {
   if (!enabled) return bounties;
+  const pin = (j) => isPinnedFounderBounty(j) ? 1 : 0;
   const winTier = (j) => {
     const s = j.winnabilityScore;
     if (s == null) return 1;
@@ -12579,12 +12684,14 @@ function applyContinuityRank(bounties, continuityOf, { enabled = true } = {}) {
     const c = repo ? continuityOf(repo) || 0 : 0;
     return s * (1 + 0.15 * c);
   };
-  bounties.sort((a, b) => winTier(b) - winTier(a) || effectiveVal(b) - effectiveVal(a));
+  bounties.sort(
+    (a, b) => pin(b) - pin(a) || winTier(b) - winTier(a) || effectiveVal(b) - effectiveVal(a)
+  );
   return bounties;
 }
 function filterPaidVisibility(items, { priced = false } = {}) {
   if (priced) return items;
-  return items.filter((j) => j.source !== "bounty");
+  return items.filter((j) => j.source !== "bounty" || j.bounty?.bountySource === "founder");
 }
 function classifyEmptyStatus({ preFilterCount, postFilterCount, priced }) {
   if (postFilterCount > 0) return "ok";
@@ -12779,6 +12886,7 @@ async function getDevs({ quiet = false, offline = false } = {}) {
 }
 
 // bin/jpi-hub.js
+init_cache_store();
 init_intro2();
 init_open_url();
 var KEY_CTRL_K = "\v";

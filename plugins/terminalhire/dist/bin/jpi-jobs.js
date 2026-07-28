@@ -1983,6 +1983,7 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
     mergedAt: pr.merged_at ?? null,
     authorId: pr.user?.id ?? null,
     authorLogin: pr.user?.login ?? null,
+    authorAssociation: pr.author_association ?? null,
     mergedById: pr.merged_by?.id ?? null,
     mergedByLogin: pr.merged_by?.login ?? null,
     closesIssues,
@@ -4893,6 +4894,23 @@ function hasClickableUrl(url) {
     return false;
   }
 }
+function dropUnmatchable(jobs) {
+  const dropped = /* @__PURE__ */ new Map();
+  const kept = jobs.filter((job) => {
+    if (!TAG_FILTERED_SOURCES.has(job.source)) return true;
+    if (job.tags.length > 0) return true;
+    dropped.set(job.source, (dropped.get(job.source) ?? 0) + 1);
+    return false;
+  });
+  const total = jobs.length - kept.length;
+  if (total > 0) {
+    const perSource = [...dropped.entries()].sort((a, b) => b[1] - a[1]).map(([source, n]) => `${source} ${n}`).join(", ");
+    console.info(
+      `[indexer] dropped ${total} untagged of ${jobs.length} (unmatchable by any profile): ${perSource}`
+    );
+  }
+  return kept;
+}
 async function buildIndex(opts) {
   const includePartners = opts?.includePartners ?? true;
   const publicJobs = await aggregate(opts);
@@ -4909,7 +4927,7 @@ async function buildIndex(opts) {
       allJobs.push(job);
     }
   }
-  const jobs = allJobs.map(({ raw: _raw, ...rest }) => rest);
+  const jobs = dropUnmatchable(allJobs.map(({ raw: _raw, ...rest }) => rest));
   const index = {
     builtAt: (/* @__PURE__ */ new Date()).toISOString(),
     jobs
@@ -4923,6 +4941,7 @@ async function buildIndex(opts) {
   }
   return index;
 }
+var TAG_FILTERED_SOURCES;
 var init_indexer = __esm({
   "../../packages/core/src/indexer.ts"() {
     "use strict";
@@ -4932,6 +4951,15 @@ var init_indexer = __esm({
     init_github();
     init_gh_governor();
     init_winnability();
+    TAG_FILTERED_SOURCES = /* @__PURE__ */ new Set([
+      "greenhouse",
+      "ashby",
+      "lever",
+      "workable",
+      "himalayas",
+      "wwr",
+      "hn"
+    ]);
   }
 });
 
@@ -8373,10 +8401,13 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
     daysAgo = Math.max(0, Math.round(ageDays2));
     recencyBadge = { lastMergedAt: mostRecent, state: ageDays2 <= thresholdDays ? "live" : "dormant" };
   }
-  const exactOrgCount = typeof credential.distinctOrgs === "number" && credential.distinctOrgs > 0;
-  const orgCount = exactOrgCount ? credential.distinctOrgs : Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
+  const hasDistinctOrgs = Object.prototype.hasOwnProperty.call(credential, "distinctOrgs");
+  const rawDistinctOrgs = credential.distinctOrgs;
+  const exactOrgCount = hasDistinctOrgs && typeof rawDistinctOrgs === "number" && Number.isSafeInteger(rawDistinctOrgs) && rawDistinctOrgs > 0;
+  const malformedDistinctOrgs = ok && hasDistinctOrgs && !exactOrgCount;
+  const orgCount = exactOrgCount ? rawDistinctOrgs : Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
   let proofSentence;
-  if (!ok) {
+  if (!ok || malformedDistinctOrgs) {
     proofSentence = "Contribution credential unavailable \u2014 could not verify.";
   } else {
     const prs = credential.qualifyingTotal;
@@ -8387,9 +8418,10 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
   }
   const enrichedPRs = ok ? credential.qualifyingPRs ?? [] : [];
   const maintainerReviewedCount = enrichedPRs.some((p) => p.maintainerReviewed !== void 0) ? enrichedPRs.filter((p) => p.maintainerReviewed === true).length : void 0;
-  const auditableBadge = ok ? {
+  const auditableBadge = ok && !malformedDistinctOrgs ? {
     mergedTotal: credential.qualifyingTotal,
     distinctOrgs: orgCount,
+    distinctOrgsExact: exactOrgCount,
     thresholds: { stars: MIN_STARS, contributors: MIN_CONTRIBUTORS },
     ...maintainerReviewedCount !== void 0 ? { maintainerReviewedCount } : {}
   } : null;
@@ -8639,6 +8671,15 @@ function computeEventIndependence(facts) {
       }
     };
   }
+  if (facts.authorAssociation != null && AFFILIATED_AUTHOR_ASSOCIATIONS.has(facts.authorAssociation.toUpperCase())) {
+    return {
+      merger: {
+        party: "merger",
+        independence: "affiliated",
+        reasons: [`PR author is affiliated with the target repo (${facts.authorAssociation})`]
+      }
+    };
+  }
   return {
     merger: {
       party: "merger",
@@ -8669,7 +8710,7 @@ function computeReviewerIndependence(signals) {
   }
   return { party: "reviewer", independence: "unverified", reasons: ["affiliation signal absent (read failed/skipped)"] };
 }
-var PROVENANCE, MS_PER_DAY;
+var PROVENANCE, MS_PER_DAY, AFFILIATED_AUTHOR_ASSOCIATIONS;
 var init_independence = __esm({
   "../../packages/core/src/credential/independence.ts"() {
     "use strict";
@@ -8684,6 +8725,7 @@ var init_independence = __esm({
       CONTRIB_FLOOR: 5
     };
     MS_PER_DAY = 864e5;
+    AFFILIATED_AUTHOR_ASSOCIATIONS = /* @__PURE__ */ new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
   }
 });
 
@@ -10144,6 +10186,7 @@ __export(src_exports, {
   displayableDrift: () => displayableDrift,
   dropIdentityTokens: () => dropIdentityTokens,
   dropNgramOverlap: () => dropNgramOverlap,
+  dropUnmatchable: () => dropUnmatchable,
   dropUnresolvableCites: () => dropUnresolvableCites,
   encryptMessage: () => encryptMessage,
   enrichMaintainerReviewed: () => enrichMaintainerReviewed,
@@ -11034,12 +11077,13 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
     opts.seenHistory
   );
   const orderForEmit = (list) => {
-    const bountyQ = list.filter((m) => m && m.source === "bounty");
+    const pinnedQ = list.filter((m) => m && m.source === "bounty" && m.founderClaimable === true);
+    const bountyQ = list.filter((m) => m && m.source === "bounty" && m.founderClaimable !== true);
     const contributeQ = list.filter((m) => m && m.source === "contribute");
     const roleQ = interleaveBySource(
       list.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
     );
-    const ordered = [];
+    const ordered = [...pinnedQ];
     let bi = 0;
     let ri = 0;
     let ci = 0;
@@ -11318,7 +11362,7 @@ var init_shared_key = __esm({
 
 // src/crypto-store.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes4 } from "crypto";
-import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, existsSync as existsSync5, renameSync as renameSync5, rmSync } from "fs";
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, existsSync as existsSync5, renameSync as renameSync5, rmSync, readdirSync } from "fs";
 import { join as join9, dirname as dirname4, basename as basename2 } from "path";
 import { createRequire } from "module";
 function encrypt(plaintext, key) {
@@ -11374,10 +11418,25 @@ function atomicWriteFileSync(filePath, content) {
   renameSync5(tmp, filePath);
 }
 async function deleteKey() {
-  for (const filePath of dependentStoreFiles) {
+  const stateDir = dirname4(KEY_FILE);
+  let encFiles;
+  try {
+    encFiles = readdirSync(stateDir).filter((f) => f.endsWith(".enc"));
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+    encFiles = [];
+  }
+  for (const name of encFiles) {
     try {
-      rmSync(filePath);
-    } catch {
+      rmSync(join9(stateDir, name));
+    } catch (e) {
+      const code = e.code;
+      if (code !== "ENOENT") {
+        throw new Error(
+          `could not delete ${name} (${code ?? "unknown error"}). Your encryption key was NOT deleted, so nothing has been orphaned. Close any other running terminalhire process and re-run \u2014 repeating the delete is safe.`,
+          { cause: e }
+        );
+      }
     }
   }
   if (!forceKeytarUnavailableForTests && !skipKeychain()) {
@@ -11389,7 +11448,8 @@ async function deleteKey() {
   }
   try {
     rmSync(KEY_FILE);
-  } catch {
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
   }
 }
 async function resolveKey(filePath, opts) {
@@ -11406,7 +11466,6 @@ async function resolveKey(filePath, opts) {
   return loadOrCreateSharedKey();
 }
 function createEncryptedStore(filePath, opts) {
-  dependentStoreFiles.add(filePath);
   async function read() {
     const key = await resolveKey(filePath, opts);
     if (!key) return opts.blank();
@@ -11429,7 +11488,7 @@ function createEncryptedStore(filePath, opts) {
   }
   return { read, write };
 }
-var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, IV_BYTES, forceKeytarUnavailableForTests, dependentStoreFiles;
+var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, IV_BYTES, forceKeytarUnavailableForTests;
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
@@ -11440,7 +11499,6 @@ var init_crypto_store = __esm({
     ALGO = "aes-256-gcm";
     IV_BYTES = 12;
     forceKeytarUnavailableForTests = false;
-    dependentStoreFiles = /* @__PURE__ */ new Set();
   }
 });
 
@@ -12083,7 +12141,7 @@ function readIndexCache() {
   }
 }
 function writeIndexCache(index) {
-  updateIndexCache({ index });
+  updateIndexCache({ index, indexETag: "" });
 }
 async function fetchIndex() {
   const cached = readIndexCache();

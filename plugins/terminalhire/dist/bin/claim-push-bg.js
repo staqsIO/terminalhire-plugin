@@ -90,8 +90,10 @@ var init_state_dir = __esm({
 // src/claims.ts
 var claims_exports = {};
 __export(claims_exports, {
+  CLAIM_STATES: () => CLAIM_STATES,
   PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
   acceptedPRRate: () => acceptedPRRate,
+  countAwaitingFounderApproval: () => countAwaitingFounderApproval,
   findClaim: () => findClaim,
   listClaims: () => listClaims,
   nextPolledState: () => nextPolledState,
@@ -273,12 +275,21 @@ function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
     return true;
   });
 }
+function countAwaitingFounderApproval(claims = readClaims()) {
+  try {
+    return claims.filter(
+      (c) => c.approval?.mode === "approval-only" && c.approval?.state === "pending"
+    ).length;
+  } catch {
+    return 0;
+  }
+}
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR3, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS;
+var TERMINALHIRE_DIR3, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
@@ -289,6 +300,22 @@ var init_claims = __esm({
     LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
     LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
     LOCK_TIMEOUT_MS = Number(process.env.TERMINALHIRE_LOCK_TIMEOUT_MS) || 5e3;
+    CLAIM_STATES = Object.freeze([
+      "claimed",
+      // recorded, not started
+      "working",
+      // background executor running / work in progress
+      "in-review",
+      // gate ran / dev reviewing the diff
+      "ready",
+      // passed review, cleared to submit
+      "submitted",
+      // PR opened on the source platform (awaiting maintainer)
+      "merged",
+      // PR merged — accepted; counts toward the metric
+      "abandoned"
+      // released, or PR closed unmerged
+    ]);
     PUSHED_CLAIM_FIELDS = [
       "kind",
       "repoFullName",

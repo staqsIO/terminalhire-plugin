@@ -15,7 +15,7 @@ function ghHeaders(url, token) {
   return { ...GH_HEADERS, Authorization: `Bearer ${token}` };
 }
 var MAX_REQUESTS = 7;
-var POLICY_RULESET_VERSION = 2;
+var POLICY_RULESET_VERSION = 7;
 var AI_SIGNAL_PATTERNS = [
   { label: "AI", re: /\bAI\b/i },
   { label: "artificial intelligence", re: /artificial intelligence/i },
@@ -25,9 +25,10 @@ var AI_SIGNAL_PATTERNS = [
   { label: "ChatGPT", re: /\bchatgpt\b/i },
   { label: "Claude", re: /\bclaude\b/i },
   { label: "generative", re: /\bgenerative\b/i },
-  { label: "machine-generated", re: /machine[\s-]generated/i }
+  { label: "machine-generated", re: /machine[\s-]generated/i },
+  { label: "agent workflow", re: /\b(?:ai|coding|autonomous|llm)[\s-]agents?\b/i }
 ];
-var AI_TERM = "(?:ai|llms?|generative(?:\\s+ai)?|artificial intelligence|language models?|copilot|chatgpt|claude|machine[\\s-]generated)";
+var AI_TERM = "(?:ai|llms?|generative(?:\\s+ai)?|artificial intelligence|language models?|copilot|chatgpt|claude|machine[\\s-]generated|(?:ai|coding|autonomous|llm)[\\s-]agents?)";
 var PROHIBITED_PATTERNS = [
   new RegExp(`prohibit\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
   /did not write the code yourself/i,
@@ -48,6 +49,16 @@ var DISCLOSURE_PATTERNS = [
   // PR-template checkbox, e.g. "- [ ] I used AI tools and have reviewed the output"
   new RegExp(`\\[ \\][^\\n]{0,80}\\b${AI_TERM}`, "i")
 ];
+var DISCLOSURE_ENFORCEMENT_PATTERNS = [
+  new RegExp(
+    `(?:if|unless|without|absent)\\b[^.\\n]{0,120}disclos\\w*[^.\\n]{0,120}\\b(?:is|are|will be|may be)\\s+(?:\\w+\\s+)?(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
+    "i"
+  ),
+  new RegExp(
+    `(?:fail\\w*\\s+to\\s+disclose|undisclosed)[^.\\n]{0,120}\\b(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
+    "i"
+  )
+];
 var REQUIREMENT_PATTERNS = [
   // `/take` bot first: its docs usually also say "assign", and the bot is the
   // more specific expectation (post exactly `/take`, not a prose request).
@@ -55,9 +66,15 @@ var REQUIREMENT_PATTERNS = [
   { kind: "assignment-required", re: /(?:request|ask|wait)[^.\n]{0,40}\bassign/i },
   { kind: "assignment-required", re: /\bassigned before\b/i },
   { kind: "assignment-required", re: /\bself[\s-]assign/i },
+  // A bare "do not open PRs" can govern agent workflow without requiring
+  // maintainer assignment. Keep assignment/claim context in the same sentence.
   {
     kind: "assignment-required",
-    re: /do not (?:open|submit)[^.\n]{0,40}\b(?:prs?|pull requests?)\b/i
+    re: /\b(?:(?:un)?assign(?:ed|ment)?|(?:un)?claim(?:ed|ing)?)\b[^.?!\n]{0,40}\bdo not (?:open|submit)[^.?!\n]{0,40}\b(?:prs?|pull requests?)\b/i
+  },
+  {
+    kind: "assignment-required",
+    re: /do not (?:open|submit)[^.?!\n]{0,40}\b(?:prs?|pull requests?)\b[^.?!\n]{0,40}\b(?:(?:un)?assign(?:ed|ment)?|(?:un)?claim(?:ed|ing)?)\b/i
   },
   { kind: "cla-required", re: /\bCLA\b/ },
   { kind: "cla-required", re: /contributor licen[cs]e agreement/i },
@@ -124,7 +141,14 @@ async function fetchContentsFile(fetchImpl, repoFullName, path, token, onTokenRe
   }
 }
 function classifyLine(line) {
-  if (PROHIBITED_PATTERNS.some((re) => re.test(line))) return "prohibited";
+  if (PROHIBITED_PATTERNS.some((re) => re.test(line))) {
+    let residual = line;
+    for (const re of DISCLOSURE_ENFORCEMENT_PATTERNS) {
+      residual = residual.replace(new RegExp(re.source, "gi"), "");
+    }
+    if (PROHIBITED_PATTERNS.some((re) => re.test(residual))) return "prohibited";
+    return "disclosure-required";
+  }
   if (DISCLOSURE_PATTERNS.some((re) => re.test(line))) return "disclosure-required";
   if (AI_SIGNAL_PATTERNS.some((p) => p.re.test(line))) return "ai-mentioned";
   return null;
@@ -257,9 +281,45 @@ async function checkRepoPolicy(repoFullName, opts = {}) {
     files
   };
 }
+var FOUNDER_DECLARATION_SOURCE = "founder-declaration";
+function auditDeclaredPolicy(declaration) {
+  const text = typeof declaration === "string" ? declaration.trim() : "";
+  if (text === "") {
+    return {
+      status: "unavailable",
+      verdict: "unavailable",
+      hits: [],
+      requirements: [],
+      assignment: "none",
+      rulesetVersion: POLICY_RULESET_VERSION,
+      contentHash: null,
+      scanComplete: false,
+      files: []
+    };
+  }
+  const files = [{ file: FOUNDER_DECLARATION_SOURCE, content: text }];
+  const { hits, requirements, verdict, assignment } = auditContent(files);
+  return {
+    // Same status rule as a scanned repo: any classified hit → 'flagged' (the
+    // verdict says how severe), no hit → 'clean'. The declaration is one short
+    // text that was read in full, so the incomplete-scan precedence above can
+    // never apply here.
+    status: hits.length > 0 ? "flagged" : "clean",
+    verdict,
+    hits,
+    requirements,
+    assignment,
+    rulesetVersion: POLICY_RULESET_VERSION,
+    contentHash: hashFiles(files),
+    scanComplete: true,
+    files
+  };
+}
 export {
+  FOUNDER_DECLARATION_SOURCE,
   POLICY_RULESET_VERSION,
   auditContent,
+  auditDeclaredPolicy,
   checkRepoPolicy,
   ghHeaders
 };

@@ -1983,6 +1983,7 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
     mergedAt: pr.merged_at ?? null,
     authorId: pr.user?.id ?? null,
     authorLogin: pr.user?.login ?? null,
+    authorAssociation: pr.author_association ?? null,
     mergedById: pr.merged_by?.id ?? null,
     mergedByLogin: pr.merged_by?.login ?? null,
     closesIssues,
@@ -4893,6 +4894,23 @@ function hasClickableUrl(url) {
     return false;
   }
 }
+function dropUnmatchable(jobs) {
+  const dropped = /* @__PURE__ */ new Map();
+  const kept = jobs.filter((job) => {
+    if (!TAG_FILTERED_SOURCES.has(job.source)) return true;
+    if (job.tags.length > 0) return true;
+    dropped.set(job.source, (dropped.get(job.source) ?? 0) + 1);
+    return false;
+  });
+  const total = jobs.length - kept.length;
+  if (total > 0) {
+    const perSource = [...dropped.entries()].sort((a, b) => b[1] - a[1]).map(([source, n]) => `${source} ${n}`).join(", ");
+    console.info(
+      `[indexer] dropped ${total} untagged of ${jobs.length} (unmatchable by any profile): ${perSource}`
+    );
+  }
+  return kept;
+}
 async function buildIndex(opts) {
   const includePartners = opts?.includePartners ?? true;
   const publicJobs = await aggregate(opts);
@@ -4909,7 +4927,7 @@ async function buildIndex(opts) {
       allJobs.push(job);
     }
   }
-  const jobs = allJobs.map(({ raw: _raw, ...rest }) => rest);
+  const jobs = dropUnmatchable(allJobs.map(({ raw: _raw, ...rest }) => rest));
   const index = {
     builtAt: (/* @__PURE__ */ new Date()).toISOString(),
     jobs
@@ -4923,6 +4941,7 @@ async function buildIndex(opts) {
   }
   return index;
 }
+var TAG_FILTERED_SOURCES;
 var init_indexer = __esm({
   "../../packages/core/src/indexer.ts"() {
     "use strict";
@@ -4932,6 +4951,15 @@ var init_indexer = __esm({
     init_github();
     init_gh_governor();
     init_winnability();
+    TAG_FILTERED_SOURCES = /* @__PURE__ */ new Set([
+      "greenhouse",
+      "ashby",
+      "lever",
+      "workable",
+      "himalayas",
+      "wwr",
+      "hn"
+    ]);
   }
 });
 
@@ -8373,10 +8401,13 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
     daysAgo = Math.max(0, Math.round(ageDays2));
     recencyBadge = { lastMergedAt: mostRecent, state: ageDays2 <= thresholdDays ? "live" : "dormant" };
   }
-  const exactOrgCount = typeof credential.distinctOrgs === "number" && credential.distinctOrgs > 0;
-  const orgCount = exactOrgCount ? credential.distinctOrgs : Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
+  const hasDistinctOrgs = Object.prototype.hasOwnProperty.call(credential, "distinctOrgs");
+  const rawDistinctOrgs = credential.distinctOrgs;
+  const exactOrgCount = hasDistinctOrgs && typeof rawDistinctOrgs === "number" && Number.isSafeInteger(rawDistinctOrgs) && rawDistinctOrgs > 0;
+  const malformedDistinctOrgs = ok && hasDistinctOrgs && !exactOrgCount;
+  const orgCount = exactOrgCount ? rawDistinctOrgs : Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
   let proofSentence;
-  if (!ok) {
+  if (!ok || malformedDistinctOrgs) {
     proofSentence = "Contribution credential unavailable \u2014 could not verify.";
   } else {
     const prs = credential.qualifyingTotal;
@@ -8387,9 +8418,10 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
   }
   const enrichedPRs = ok ? credential.qualifyingPRs ?? [] : [];
   const maintainerReviewedCount = enrichedPRs.some((p) => p.maintainerReviewed !== void 0) ? enrichedPRs.filter((p) => p.maintainerReviewed === true).length : void 0;
-  const auditableBadge = ok ? {
+  const auditableBadge = ok && !malformedDistinctOrgs ? {
     mergedTotal: credential.qualifyingTotal,
     distinctOrgs: orgCount,
+    distinctOrgsExact: exactOrgCount,
     thresholds: { stars: MIN_STARS, contributors: MIN_CONTRIBUTORS },
     ...maintainerReviewedCount !== void 0 ? { maintainerReviewedCount } : {}
   } : null;
@@ -8639,6 +8671,15 @@ function computeEventIndependence(facts) {
       }
     };
   }
+  if (facts.authorAssociation != null && AFFILIATED_AUTHOR_ASSOCIATIONS.has(facts.authorAssociation.toUpperCase())) {
+    return {
+      merger: {
+        party: "merger",
+        independence: "affiliated",
+        reasons: [`PR author is affiliated with the target repo (${facts.authorAssociation})`]
+      }
+    };
+  }
   return {
     merger: {
       party: "merger",
@@ -8669,7 +8710,7 @@ function computeReviewerIndependence(signals) {
   }
   return { party: "reviewer", independence: "unverified", reasons: ["affiliation signal absent (read failed/skipped)"] };
 }
-var PROVENANCE, MS_PER_DAY;
+var PROVENANCE, MS_PER_DAY, AFFILIATED_AUTHOR_ASSOCIATIONS;
 var init_independence = __esm({
   "../../packages/core/src/credential/independence.ts"() {
     "use strict";
@@ -8684,6 +8725,7 @@ var init_independence = __esm({
       CONTRIB_FLOOR: 5
     };
     MS_PER_DAY = 864e5;
+    AFFILIATED_AUTHOR_ASSOCIATIONS = /* @__PURE__ */ new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
   }
 });
 
@@ -10144,6 +10186,7 @@ __export(src_exports, {
   displayableDrift: () => displayableDrift,
   dropIdentityTokens: () => dropIdentityTokens,
   dropNgramOverlap: () => dropNgramOverlap,
+  dropUnmatchable: () => dropUnmatchable,
   dropUnresolvableCites: () => dropUnresolvableCites,
   encryptMessage: () => encryptMessage,
   enrichMaintainerReviewed: () => enrichMaintainerReviewed,
@@ -10339,8 +10382,8 @@ function printConfigText() {
   L.push("terminalhire mcp \u2014 host configuration snippets");
   L.push("");
   L.push("  Paste the snippet for your editor / CLI. Every snippet launches the");
-  L.push("  globally-installed `terminalhire mcp` stdio server (read-only, zero");
-  L.push("  network egress). Plugin-only users: install the CLI so `terminalhire`");
+  L.push("  globally-installed `terminalhire mcp` stdio server (offline match tools;");
+  L.push("  public-read/local-write claim tools). Plugin-only users: install the CLI so `terminalhire`");
   L.push("  is on your PATH \u2014 foreign hosts launch that binary, not the plugin.");
   L.push("");
   L.push("  This command writes NOTHING. To let `terminalhire init` merge the entry");
@@ -10416,9 +10459,11 @@ async function initMcpStep({
   home = homedir2(),
   out = console.log
 } = {}) {
-  out("  Expose your LOCAL matches to your editor / CLI as an MCP server.");
-  out("  Read-only, zero network egress \u2014 the same on-device data the spinner shows.");
-  out("  Tools: jobs, bounties, contribute, inbox (counts only). See docs/mcp-tools.md.");
+  out("  Expose your LOCAL matches and claim ledger to your editor / CLI as an MCP server.");
+  out("  Match tools stay offline; claim preview reads public GitHub data; record stays local.");
+  out(
+    "  Tools: jobs, bounties, contribute, inbox, claim_preview, claim_record. See docs/mcp-tools.md."
+  );
   out("");
   if (!isTTY) {
     out("  stdin is not interactive \u2014 skipping MCP setup.");
@@ -10669,7 +10714,7 @@ async function run() {
   console.log("     (with backup + your explicit consent before any file is touched)");
   console.log("  5. Optionally show connection notifications in your statusLine");
   console.log("     (\u{1F4AC} unread + intro requests only \u2014 never job ads; separate consent)");
-  console.log("  6. Optionally register terminalhire as a read-only MCP server for your");
+  console.log("  6. Optionally register terminalhire as a local-first MCP server for your");
   console.log("     editor / CLI (VS Code, Cursor, Codex, Gemini, Claude Code; per-host consent)");
   console.log("  7. Optionally register th:// claim links to open in this terminal");
   console.log("");
@@ -10683,9 +10728,7 @@ async function run() {
   console.log("  until you explicitly consent to a specific lead.");
   console.log("");
   const githubAnswer = await ask("Sign in with GitHub now? [Y/n] (Enter = yes, n = stay local): ");
-  const couldNotAsk = githubAnswer === null;
-  const doGitHub = !couldNotAsk && (githubAnswer === "" || githubAnswer === "y" || githubAnswer === "yes");
-  let signedIn = false;
+  const doGitHub = githubAnswer === "" || githubAnswer === "y" || githubAnswer === "yes";
   if (doGitHub) {
     console.log("");
     console.log("  Starting GitHub device flow...");
@@ -10706,7 +10749,6 @@ async function run() {
       console.log("  GitHub sign-in did not complete. Continuing without GitHub.");
       console.log("  You can sign in any time with: terminalhire login");
     } else {
-      signedIn = true;
       try {
         const { maybePromptPeerConnect } = await import(pathToFileURL(resolveScript("peer-connect-prompt")).href);
         let login;
@@ -10720,13 +10762,6 @@ async function run() {
       } catch {
       }
     }
-  } else if (couldNotAsk) {
-    console.log("");
-    console.log("  \u26A0 No answer could be read \u2014 this terminal is not interactive.");
-    console.log("    You were NOT signed in, and nothing was changed.");
-    console.log("");
-    console.log("    Connect GitHub with:   terminalhire login");
-    console.log("    Or re-run onboarding:  terminalhire init   (in an interactive terminal)");
   } else {
     console.log("");
     console.log("  Staying local-only. Tags accumulate from your personal project sessions.");
@@ -10737,11 +10772,15 @@ async function run() {
   console.log("");
   console.log("  Fetching anonymous job index (no dev data sent)...");
   const jobsScript = resolveScript("jpi-jobs");
-  const seedChild = spawnSync(process.execPath, [jobsScript, "--limit", "0"], {
-    stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, TERMINALHIRE_SEED_ONLY: "1" },
-    timeout: 15e3
-  });
+  const seedChild = spawnSync(
+    process.execPath,
+    [jobsScript, "--limit", "0"],
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, TERMINALHIRE_SEED_ONLY: "1" },
+      timeout: 15e3
+    }
+  );
   if (seedChild.status === 0) {
     console.log("  Job cache seeded successfully.");
   } else {
@@ -10773,9 +10812,7 @@ async function run() {
   console.log("");
   console.log("  This is the only step that modifies a system file.");
   console.log("  A timestamped backup is created before any change.");
-  console.log(
-    "  Disable at any time: node install.js --uninstall  (or terminalhire spinner --off)"
-  );
+  console.log("  Disable at any time: node install.js --uninstall  (or terminalhire spinner --off)");
   console.log("");
   try {
     const installMod = await import(pathToFileURL(resolveInstallJs()).href);
@@ -10804,16 +10841,14 @@ async function run() {
       await statuslineMod.installStatusline({ ask });
     } else {
       console.log("");
-      console.log(
-        "  statusLine setup unavailable in this build. Run manually: node statusline-install.js"
-      );
+      console.log("  statusLine setup unavailable in this build. Run manually: node statusline-install.js");
     }
   } catch {
     console.log("");
     console.log("  statusLine setup did not complete. Run manually: node statusline-install.js");
   }
   console.log("");
-  console.log("Step 6/7 \u2014 Register terminalhire as a read-only MCP server (optional)");
+  console.log("Step 6/7 \u2014 Register terminalhire as a local-first MCP server (optional)");
   console.log("");
   console.log("  Exposes your LOCAL matches (jobs, bounties, contribute, inbox counts) to");
   console.log("  a host LLM \u2014 VS Code, Cursor, Codex, Gemini, Claude Code. Read-only, zero");
@@ -10835,9 +10870,7 @@ async function run() {
   console.log("  this terminal (one-time OS registration; macOS may show an Automation");
   console.log("  prompt the first time a link is opened). Nothing is sent anywhere \u2014 it");
   console.log("  only wires th://claim/<token> links on this machine to a local, read-only");
-  console.log(
-    "  `terminalhire claim preview <token>`. Undo any time: terminalhire protocol unregister"
-  );
+  console.log("  `terminalhire claim preview <token>`. Undo any time: terminalhire protocol unregister");
   console.log("");
   const protocolAnswer = await ask("Register th:// claim links now? [Y/n] (Enter = yes): ");
   const doProtocol = protocolAnswer === "" || protocolAnswer === "y" || protocolAnswer === "yes";
@@ -10853,17 +10886,6 @@ async function run() {
     }
   }
   rl.close();
-  if (!signedIn) {
-    console.log("");
-    console.log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
-    console.log("\u2502  One thing still missing: GitHub                                \u2502");
-    console.log("\u2502                                                                  \u2502");
-    console.log("\u2502    terminalhire login                                           \u2502");
-    console.log("\u2502                                                                  \u2502");
-    console.log("\u2502  Public profile only (read:user). Your matches stay generic     \u2502");
-    console.log("\u2502  until your languages and repos are known.                      \u2502");
-    console.log("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518");
-  }
   console.log("");
   console.log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
   console.log("\u2502  terminalhire init complete!                                    \u2502");

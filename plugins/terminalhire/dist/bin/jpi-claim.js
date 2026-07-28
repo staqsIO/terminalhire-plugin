@@ -2006,6 +2006,7 @@ async function fetchPRScoringFacts(prUrl, token, signal, governor) {
     mergedAt: pr.merged_at ?? null,
     authorId: pr.user?.id ?? null,
     authorLogin: pr.user?.login ?? null,
+    authorAssociation: pr.author_association ?? null,
     mergedById: pr.merged_by?.id ?? null,
     mergedByLogin: pr.merged_by?.login ?? null,
     closesIssues,
@@ -4916,6 +4917,23 @@ function hasClickableUrl(url) {
     return false;
   }
 }
+function dropUnmatchable(jobs) {
+  const dropped = /* @__PURE__ */ new Map();
+  const kept = jobs.filter((job) => {
+    if (!TAG_FILTERED_SOURCES.has(job.source)) return true;
+    if (job.tags.length > 0) return true;
+    dropped.set(job.source, (dropped.get(job.source) ?? 0) + 1);
+    return false;
+  });
+  const total = jobs.length - kept.length;
+  if (total > 0) {
+    const perSource = [...dropped.entries()].sort((a, b) => b[1] - a[1]).map(([source, n]) => `${source} ${n}`).join(", ");
+    console.info(
+      `[indexer] dropped ${total} untagged of ${jobs.length} (unmatchable by any profile): ${perSource}`
+    );
+  }
+  return kept;
+}
 async function buildIndex(opts) {
   const includePartners = opts?.includePartners ?? true;
   const publicJobs = await aggregate(opts);
@@ -4932,7 +4950,7 @@ async function buildIndex(opts) {
       allJobs.push(job);
     }
   }
-  const jobs = allJobs.map(({ raw: _raw, ...rest }) => rest);
+  const jobs = dropUnmatchable(allJobs.map(({ raw: _raw, ...rest }) => rest));
   const index = {
     builtAt: (/* @__PURE__ */ new Date()).toISOString(),
     jobs
@@ -4946,6 +4964,7 @@ async function buildIndex(opts) {
   }
   return index;
 }
+var TAG_FILTERED_SOURCES;
 var init_indexer = __esm({
   "../../packages/core/src/indexer.ts"() {
     "use strict";
@@ -4955,6 +4974,15 @@ var init_indexer = __esm({
     init_github();
     init_gh_governor();
     init_winnability();
+    TAG_FILTERED_SOURCES = /* @__PURE__ */ new Set([
+      "greenhouse",
+      "ashby",
+      "lever",
+      "workable",
+      "himalayas",
+      "wwr",
+      "hn"
+    ]);
   }
 });
 
@@ -8396,10 +8424,13 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
     daysAgo = Math.max(0, Math.round(ageDays2));
     recencyBadge = { lastMergedAt: mostRecent, state: ageDays2 <= thresholdDays ? "live" : "dormant" };
   }
-  const exactOrgCount = typeof credential.distinctOrgs === "number" && credential.distinctOrgs > 0;
-  const orgCount = exactOrgCount ? credential.distinctOrgs : Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
+  const hasDistinctOrgs = Object.prototype.hasOwnProperty.call(credential, "distinctOrgs");
+  const rawDistinctOrgs = credential.distinctOrgs;
+  const exactOrgCount = hasDistinctOrgs && typeof rawDistinctOrgs === "number" && Number.isSafeInteger(rawDistinctOrgs) && rawDistinctOrgs > 0;
+  const malformedDistinctOrgs = ok && hasDistinctOrgs && !exactOrgCount;
+  const orgCount = exactOrgCount ? rawDistinctOrgs : Object.values(domains).reduce((m, d) => Math.max(m, d.distinctOrgs), 0);
   let proofSentence;
-  if (!ok) {
+  if (!ok || malformedDistinctOrgs) {
     proofSentence = "Contribution credential unavailable \u2014 could not verify.";
   } else {
     const prs = credential.qualifyingTotal;
@@ -8410,9 +8441,10 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
   }
   const enrichedPRs = ok ? credential.qualifyingPRs ?? [] : [];
   const maintainerReviewedCount = enrichedPRs.some((p) => p.maintainerReviewed !== void 0) ? enrichedPRs.filter((p) => p.maintainerReviewed === true).length : void 0;
-  const auditableBadge = ok ? {
+  const auditableBadge = ok && !malformedDistinctOrgs ? {
     mergedTotal: credential.qualifyingTotal,
     distinctOrgs: orgCount,
+    distinctOrgsExact: exactOrgCount,
     thresholds: { stars: MIN_STARS, contributors: MIN_CONTRIBUTORS },
     ...maintainerReviewedCount !== void 0 ? { maintainerReviewedCount } : {}
   } : null;
@@ -8662,6 +8694,15 @@ function computeEventIndependence(facts) {
       }
     };
   }
+  if (facts.authorAssociation != null && AFFILIATED_AUTHOR_ASSOCIATIONS.has(facts.authorAssociation.toUpperCase())) {
+    return {
+      merger: {
+        party: "merger",
+        independence: "affiliated",
+        reasons: [`PR author is affiliated with the target repo (${facts.authorAssociation})`]
+      }
+    };
+  }
   return {
     merger: {
       party: "merger",
@@ -8692,7 +8733,7 @@ function computeReviewerIndependence(signals) {
   }
   return { party: "reviewer", independence: "unverified", reasons: ["affiliation signal absent (read failed/skipped)"] };
 }
-var PROVENANCE, MS_PER_DAY;
+var PROVENANCE, MS_PER_DAY, AFFILIATED_AUTHOR_ASSOCIATIONS;
 var init_independence = __esm({
   "../../packages/core/src/credential/independence.ts"() {
     "use strict";
@@ -8707,6 +8748,7 @@ var init_independence = __esm({
       CONTRIB_FLOOR: 5
     };
     MS_PER_DAY = 864e5;
+    AFFILIATED_AUTHOR_ASSOCIATIONS = /* @__PURE__ */ new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
   }
 });
 
@@ -10167,6 +10209,7 @@ __export(src_exports, {
   displayableDrift: () => displayableDrift,
   dropIdentityTokens: () => dropIdentityTokens,
   dropNgramOverlap: () => dropNgramOverlap,
+  dropUnmatchable: () => dropUnmatchable,
   dropUnresolvableCites: () => dropUnresolvableCites,
   encryptMessage: () => encryptMessage,
   enrichMaintainerReviewed: () => enrichMaintainerReviewed,
@@ -10388,8 +10431,10 @@ var init_state_dir = __esm({
 // src/claims.ts
 var claims_exports = {};
 __export(claims_exports, {
+  CLAIM_STATES: () => CLAIM_STATES,
   PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
   acceptedPRRate: () => acceptedPRRate,
+  countAwaitingFounderApproval: () => countAwaitingFounderApproval,
   findClaim: () => findClaim,
   listClaims: () => listClaims,
   nextPolledState: () => nextPolledState,
@@ -10571,12 +10616,21 @@ function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
     return true;
   });
 }
+function countAwaitingFounderApproval(claims = readClaims()) {
+  try {
+    return claims.filter(
+      (c) => c.approval?.mode === "approval-only" && c.approval?.state === "pending"
+    ).length;
+  } catch {
+    return 0;
+  }
+}
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR2, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS;
+var TERMINALHIRE_DIR2, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
@@ -10587,6 +10641,22 @@ var init_claims = __esm({
     LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
     LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
     LOCK_TIMEOUT_MS = Number(process.env.TERMINALHIRE_LOCK_TIMEOUT_MS) || 5e3;
+    CLAIM_STATES = Object.freeze([
+      "claimed",
+      // recorded, not started
+      "working",
+      // background executor running / work in progress
+      "in-review",
+      // gate ran / dev reviewing the diff
+      "ready",
+      // passed review, cleared to submit
+      "submitted",
+      // PR opened on the source platform (awaiting maintainer)
+      "merged",
+      // PR merged — accepted; counts toward the metric
+      "abandoned"
+      // released, or PR closed unmerged
+    ]);
     PUSHED_CLAIM_FIELDS = [
       "kind",
       "repoFullName",
@@ -10949,279 +11019,6 @@ var init_github_auth = __esm({
   }
 });
 
-// src/repo-policy.ts
-var repo_policy_exports = {};
-__export(repo_policy_exports, {
-  POLICY_RULESET_VERSION: () => POLICY_RULESET_VERSION,
-  auditContent: () => auditContent,
-  checkRepoPolicy: () => checkRepoPolicy,
-  ghHeaders: () => ghHeaders2
-});
-import { createHash as createHash4 } from "crypto";
-function ghHeaders2(url, token) {
-  if (!token) return GH_HEADERS;
-  let origin;
-  try {
-    origin = new URL(url).origin;
-  } catch {
-    return GH_HEADERS;
-  }
-  if (origin !== GH_API_ORIGIN) return GH_HEADERS;
-  return { ...GH_HEADERS, Authorization: `Bearer ${token}` };
-}
-function isRateLimited(res) {
-  return res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0";
-}
-async function classifyFailure(res) {
-  if (res.status === 401) return "credential";
-  if (res.status !== 403) return "other";
-  if (res.headers.get("retry-after")) return "throttle";
-  if (res.headers.get("x-ratelimit-remaining") === "0") return "throttle";
-  let message = "";
-  try {
-    const peeked = await res.clone().json();
-    message = typeof peeked?.message === "string" ? peeked.message.toLowerCase() : "";
-  } catch {
-    return "other";
-  }
-  if (message.includes("secondary rate limit") || message.includes("abuse")) return "throttle";
-  if (message.includes("bad credentials") || message.includes("requires authentication") || message.includes("must authenticate") || message.includes("login attempts exceeded")) {
-    return "credential";
-  }
-  return "other";
-}
-async function fetchContentsFile(fetchImpl, repoFullName, path5, token, onTokenRejected) {
-  try {
-    const url = `${GH_API}/repos/${repoFullName}/contents/${path5}`;
-    let res = await fetchImpl(url, {
-      headers: ghHeaders2(url, token),
-      signal: AbortSignal.timeout(1e4)
-    });
-    let failure = await classifyFailure(res);
-    if (token && failure === "credential") {
-      onTokenRejected();
-      res = await fetchImpl(url, { headers: GH_HEADERS, signal: AbortSignal.timeout(1e4) });
-      failure = await classifyFailure(res);
-    }
-    if (res.status === 404) return { ok: true, missing: true, content: null };
-    if (failure === "throttle") {
-      return { ok: false, missing: false, content: null, throttled: true };
-    }
-    if (isRateLimited(res)) {
-      return { ok: false, missing: false, content: null, throttled: true };
-    }
-    if (!res.ok) return { ok: false, missing: false, content: null };
-    const body = await res.json();
-    if (typeof body.content !== "string") return { ok: false, missing: false, content: null };
-    if (body.encoding !== "base64") return { ok: false, missing: false, content: null };
-    const raw = Buffer.from(body.content.replace(/\n/g, ""), "base64");
-    if (typeof body.size === "number" && raw.length !== body.size) {
-      return { ok: false, missing: false, content: null };
-    }
-    return { ok: true, missing: false, content: raw.toString("utf8") };
-  } catch {
-    return { ok: false, missing: false, content: null };
-  }
-}
-function classifyLine(line) {
-  if (PROHIBITED_PATTERNS.some((re) => re.test(line))) return "prohibited";
-  if (DISCLOSURE_PATTERNS.some((re) => re.test(line))) return "disclosure-required";
-  if (AI_SIGNAL_PATTERNS.some((p) => p.re.test(line))) return "ai-mentioned";
-  return null;
-}
-function sanitizeExcerpt(text) {
-  return text.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, "");
-}
-function excerptAround(lines, i) {
-  const start = Math.max(0, i - 2);
-  const end = Math.min(lines.length, i + 3);
-  return sanitizeExcerpt(lines.slice(start, end).join("\n"));
-}
-function hashFiles(files) {
-  if (files.length === 0) return null;
-  const h = createHash4("sha256");
-  for (const { file, content } of files) h.update(`${file}
-${content}
-`);
-  return h.digest("hex");
-}
-function auditContent(files) {
-  const hits = [];
-  const requirements = [];
-  const seenKinds = /* @__PURE__ */ new Set();
-  for (const { file, content } of files) {
-    const lines = content.split("\n");
-    for (let i = 0; i < lines.length; i++) {
-      const rule = classifyLine(lines[i]);
-      if (rule) hits.push({ file, excerpt: excerptAround(lines, i), rule });
-      for (const { kind, re } of REQUIREMENT_PATTERNS) {
-        if (seenKinds.has(kind) || !re.test(lines[i])) continue;
-        seenKinds.add(kind);
-        requirements.push({ kind, file, excerpt: excerptAround(lines, i) });
-      }
-    }
-  }
-  let verdict = "clean";
-  for (const h of hits) {
-    if (verdict === "clean" || VERDICT_SEVERITY[h.rule] > VERDICT_SEVERITY[verdict]) {
-      verdict = h.rule;
-    }
-  }
-  const assignment = seenKinds.has("take-bot") ? "take-bot" : seenKinds.has("assignment-required") ? "required" : "none";
-  return { hits, requirements, verdict, assignment };
-}
-async function checkRepoPolicy(repoFullName, opts = {}) {
-  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
-  let activeToken = opts.token;
-  let requestsUsed = 0;
-  let hadError = false;
-  let truncated = false;
-  const files = [];
-  outer: for (const group of CANDIDATE_GROUPS) {
-    for (const path5 of group) {
-      if (requestsUsed >= MAX_REQUESTS) {
-        truncated = true;
-        break outer;
-      }
-      requestsUsed++;
-      const outcome = await fetchContentsFile(fetchImpl, repoFullName, path5, activeToken, () => {
-        activeToken = void 0;
-      });
-      if (!outcome.ok) {
-        hadError = true;
-        if (outcome.throttled) break outer;
-        continue;
-      }
-      if (outcome.missing) continue;
-      if (outcome.content) files.push({ file: path5, content: outcome.content });
-    }
-  }
-  const { hits, requirements, verdict, assignment } = auditContent(files);
-  const scanComplete = !hadError && !truncated;
-  if (verdict === "prohibited") {
-    return {
-      status: "flagged",
-      verdict,
-      hits,
-      requirements,
-      assignment,
-      rulesetVersion: POLICY_RULESET_VERSION,
-      contentHash: hashFiles(files),
-      scanComplete,
-      files
-    };
-  }
-  if (!scanComplete) {
-    return {
-      status: "unavailable",
-      // The zero-hit error scan keeps its historical shape (`'unavailable'`,
-      // nothing was classified); a partial scan that DID classify something
-      // keeps that verdict so the display can show it.
-      verdict: hits.length > 0 ? verdict : "unavailable",
-      hits,
-      requirements,
-      assignment,
-      rulesetVersion: POLICY_RULESET_VERSION,
-      contentHash: hashFiles(files),
-      scanComplete,
-      files
-    };
-  }
-  if (hits.length > 0) {
-    return {
-      status: "flagged",
-      verdict,
-      hits,
-      requirements,
-      assignment,
-      rulesetVersion: POLICY_RULESET_VERSION,
-      contentHash: hashFiles(files),
-      scanComplete,
-      files
-    };
-  }
-  return {
-    status: "clean",
-    verdict: "clean",
-    hits: [],
-    requirements,
-    assignment,
-    rulesetVersion: POLICY_RULESET_VERSION,
-    contentHash: hashFiles(files),
-    scanComplete,
-    files
-  };
-}
-var GH_API, GH_API_ORIGIN, GH_HEADERS, MAX_REQUESTS, POLICY_RULESET_VERSION, AI_SIGNAL_PATTERNS, AI_TERM, PROHIBITED_PATTERNS, DISCLOSURE_PATTERNS, REQUIREMENT_PATTERNS, CANDIDATE_GROUPS, VERDICT_SEVERITY;
-var init_repo_policy = __esm({
-  "src/repo-policy.ts"() {
-    "use strict";
-    GH_API = "https://api.github.com";
-    GH_API_ORIGIN = "https://api.github.com";
-    GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
-    MAX_REQUESTS = 7;
-    POLICY_RULESET_VERSION = 2;
-    AI_SIGNAL_PATTERNS = [
-      { label: "AI", re: /\bAI\b/i },
-      { label: "artificial intelligence", re: /artificial intelligence/i },
-      { label: "LLM", re: /\bLLMs?\b/i },
-      { label: "language model", re: /language model/i },
-      { label: "Copilot", re: /\bcopilot\b/i },
-      { label: "ChatGPT", re: /\bchatgpt\b/i },
-      { label: "Claude", re: /\bclaude\b/i },
-      { label: "generative", re: /\bgenerative\b/i },
-      { label: "machine-generated", re: /machine[\s-]generated/i }
-    ];
-    AI_TERM = "(?:ai|llms?|generative(?:\\s+ai)?|artificial intelligence|language models?|copilot|chatgpt|claude|machine[\\s-]generated)";
-    PROHIBITED_PATTERNS = [
-      new RegExp(`prohibit\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
-      /did not write the code yourself/i,
-      new RegExp(`(?:not|never|don'?t|won'?t)\\s+accept\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
-      new RegExp(
-        `\\bno\\s+${AI_TERM}[^.\\n]{0,40}\\b(?:prs?|pull requests?|contributions?|code|patch(?:es)?|commits?|submissions?)\\b`,
-        "i"
-      ),
-      new RegExp(
-        `\\b${AI_TERM}[^.\\n]{0,60}\\b(?:is|are|will be)\\s+(?:\\w+\\s+)?(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
-        "i"
-      )
-    ];
-    DISCLOSURE_PATTERNS = [
-      new RegExp(`disclos\\w+[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
-      new RegExp(`\\b${AI_TERM}[^.\\n]{0,60}disclos`, "i"),
-      new RegExp(`\\b${AI_TERM}[\\s-]assist\\w*[^.\\n]{0,60}\\b(?:must|should|required?)\\b`, "i"),
-      // PR-template checkbox, e.g. "- [ ] I used AI tools and have reviewed the output"
-      new RegExp(`\\[ \\][^\\n]{0,80}\\b${AI_TERM}`, "i")
-    ];
-    REQUIREMENT_PATTERNS = [
-      // `/take` bot first: its docs usually also say "assign", and the bot is the
-      // more specific expectation (post exactly `/take`, not a prose request).
-      { kind: "take-bot", re: /(?:^|[\s`"'(])\/take\b/m },
-      { kind: "assignment-required", re: /(?:request|ask|wait)[^.\n]{0,40}\bassign/i },
-      { kind: "assignment-required", re: /\bassigned before\b/i },
-      { kind: "assignment-required", re: /\bself[\s-]assign/i },
-      {
-        kind: "assignment-required",
-        re: /do not (?:open|submit)[^.\n]{0,40}\b(?:prs?|pull requests?)\b/i
-      },
-      { kind: "cla-required", re: /\bCLA\b/ },
-      { kind: "cla-required", re: /contributor licen[cs]e agreement/i },
-      { kind: "discussion-first", re: /open an issue (?:first|before)/i },
-      { kind: "discussion-first", re: /discuss\w*[^.\n]{0,40}\bbefore\b/i }
-    ];
-    CANDIDATE_GROUPS = [
-      ["CONTRIBUTING.md", ".github/CONTRIBUTING.md", "docs/CONTRIBUTING.md"],
-      ["AGENTS.md", "AGENTS.MD"],
-      [".github/PULL_REQUEST_TEMPLATE.md", "PULL_REQUEST_TEMPLATE.md"]
-    ];
-    VERDICT_SEVERITY = {
-      "ai-mentioned": 1,
-      "disclosure-required": 2,
-      prohibited: 3
-    };
-  }
-});
-
 // ../../packages/core/src/policy-audit.ts
 function fence(nonce, body) {
   return `<<<UNTRUSTED-${nonce}
@@ -11560,7 +11357,7 @@ var VERSION;
 var init_version = __esm({
   "../../node_modules/@anthropic-ai/sdk/version.mjs"() {
     "use strict";
-    VERSION = "0.112.5";
+    VERSION = "0.112.3";
   }
 });
 
@@ -16951,10 +16748,10 @@ async function setupSkills(ctx) {
     try {
       const versionId = await resolveSkillVersion(client, skill.skill_id, skill.version);
       const version = await client.beta.skills.versions.retrieve(versionId, { skill_id: skill.skill_id });
-      let dirname6 = path3.basename(version.name.trim());
-      if (dirname6 === "" || dirname6 === "." || dirname6 === "..")
-        dirname6 = skill.skill_id;
-      const dest = path3.resolve(skillsRoot, dirname6);
+      let dirname7 = path3.basename(version.name.trim());
+      if (dirname7 === "" || dirname7 === "." || dirname7 === "..")
+        dirname7 = skill.skill_id;
+      const dest = path3.resolve(skillsRoot, dirname7);
       if (dest !== skillsRoot && !dest.startsWith(skillsRoot + path3.sep)) {
         log.warn("skill name escapes the skills dir; skipping", {
           component: "agent-tool-context",
@@ -23177,21 +22974,11 @@ var init_client = __esm({
               this._applyCredentialBaseURL(result.baseURL);
             } else if (options.profile != null) {
               this._authState.resolution = this._resolveDefaultCredentials(options.profile);
-            } else if (this._shouldResolveDefaultCredentials()) {
+            } else {
               this._authState.resolution = this._resolveDefaultCredentials();
             }
           }
         }
-      }
-      /**
-       * Whether to lazily resolve auth from the default credential chain when no
-       * explicit auth is configured. Called once from the constructor, so
-       * overrides must not depend on subclass instance state. Subclasses that
-       * bring their own auth scheme return false so unrelated local credentials
-       * are never resolved or allowed to supply a base URL.
-       */
-      _shouldResolveDefaultCredentials() {
-        return true;
       }
       /**
        * Stores a profile/config-supplied base URL on the shared auth state and, if
@@ -24374,7 +24161,7 @@ __export(repo_policy_semantic_exports, {
   makeAnthropicSemanticGenerate: () => makeAnthropicSemanticGenerate,
   quoteFound: () => quoteFound
 });
-import { createHash as createHash5 } from "crypto";
+import { createHash as createHash4 } from "crypto";
 import { homedir as homedir6 } from "os";
 import { join as join11 } from "path";
 import { readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "fs";
@@ -24491,7 +24278,7 @@ function writeCachedSemantic(entry) {
   }
 }
 function contentHashOf(files) {
-  const h = createHash5("sha256");
+  const h = createHash4("sha256");
   for (const { file, content } of [...files].sort((a, b) => a.file.localeCompare(b.file))) {
     h.update(`${file.length}:${file} ${content.length}:${content} `);
   }
@@ -24664,9 +24451,342 @@ var init_repo_policy_semantic = __esm({
   }
 });
 
+// src/repo-policy.ts
+var repo_policy_exports = {};
+__export(repo_policy_exports, {
+  FOUNDER_DECLARATION_SOURCE: () => FOUNDER_DECLARATION_SOURCE,
+  POLICY_RULESET_VERSION: () => POLICY_RULESET_VERSION,
+  auditContent: () => auditContent,
+  auditDeclaredPolicy: () => auditDeclaredPolicy,
+  checkRepoPolicy: () => checkRepoPolicy,
+  ghHeaders: () => ghHeaders2
+});
+import { createHash as createHash5 } from "crypto";
+function ghHeaders2(url, token) {
+  if (!token) return GH_HEADERS;
+  let origin;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    return GH_HEADERS;
+  }
+  if (origin !== GH_API_ORIGIN) return GH_HEADERS;
+  return { ...GH_HEADERS, Authorization: `Bearer ${token}` };
+}
+function isRateLimited(res) {
+  return res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0";
+}
+async function classifyFailure(res) {
+  if (res.status === 401) return "credential";
+  if (res.status !== 403) return "other";
+  if (res.headers.get("retry-after")) return "throttle";
+  if (res.headers.get("x-ratelimit-remaining") === "0") return "throttle";
+  let message = "";
+  try {
+    const peeked = await res.clone().json();
+    message = typeof peeked?.message === "string" ? peeked.message.toLowerCase() : "";
+  } catch {
+    return "other";
+  }
+  if (message.includes("secondary rate limit") || message.includes("abuse")) return "throttle";
+  if (message.includes("bad credentials") || message.includes("requires authentication") || message.includes("must authenticate") || message.includes("login attempts exceeded")) {
+    return "credential";
+  }
+  return "other";
+}
+async function fetchContentsFile(fetchImpl, repoFullName, path5, token, onTokenRejected) {
+  try {
+    const url = `${GH_API}/repos/${repoFullName}/contents/${path5}`;
+    let res = await fetchImpl(url, {
+      headers: ghHeaders2(url, token),
+      signal: AbortSignal.timeout(1e4)
+    });
+    let failure = await classifyFailure(res);
+    if (token && failure === "credential") {
+      onTokenRejected();
+      res = await fetchImpl(url, { headers: GH_HEADERS, signal: AbortSignal.timeout(1e4) });
+      failure = await classifyFailure(res);
+    }
+    if (res.status === 404) return { ok: true, missing: true, content: null };
+    if (failure === "throttle") {
+      return { ok: false, missing: false, content: null, throttled: true };
+    }
+    if (isRateLimited(res)) {
+      return { ok: false, missing: false, content: null, throttled: true };
+    }
+    if (!res.ok) return { ok: false, missing: false, content: null };
+    const body = await res.json();
+    if (typeof body.content !== "string") return { ok: false, missing: false, content: null };
+    if (body.encoding !== "base64") return { ok: false, missing: false, content: null };
+    const raw = Buffer.from(body.content.replace(/\n/g, ""), "base64");
+    if (typeof body.size === "number" && raw.length !== body.size) {
+      return { ok: false, missing: false, content: null };
+    }
+    return { ok: true, missing: false, content: raw.toString("utf8") };
+  } catch {
+    return { ok: false, missing: false, content: null };
+  }
+}
+function classifyLine(line) {
+  if (PROHIBITED_PATTERNS.some((re) => re.test(line))) {
+    let residual = line;
+    for (const re of DISCLOSURE_ENFORCEMENT_PATTERNS) {
+      residual = residual.replace(new RegExp(re.source, "gi"), "");
+    }
+    if (PROHIBITED_PATTERNS.some((re) => re.test(residual))) return "prohibited";
+    return "disclosure-required";
+  }
+  if (DISCLOSURE_PATTERNS.some((re) => re.test(line))) return "disclosure-required";
+  if (AI_SIGNAL_PATTERNS.some((p) => p.re.test(line))) return "ai-mentioned";
+  return null;
+}
+function sanitizeExcerpt(text) {
+  return text.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, "");
+}
+function excerptAround(lines, i) {
+  const start = Math.max(0, i - 2);
+  const end = Math.min(lines.length, i + 3);
+  return sanitizeExcerpt(lines.slice(start, end).join("\n"));
+}
+function hashFiles(files) {
+  if (files.length === 0) return null;
+  const h = createHash5("sha256");
+  for (const { file, content } of files) h.update(`${file}
+${content}
+`);
+  return h.digest("hex");
+}
+function auditContent(files) {
+  const hits = [];
+  const requirements = [];
+  const seenKinds = /* @__PURE__ */ new Set();
+  for (const { file, content } of files) {
+    const lines = content.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const rule = classifyLine(lines[i]);
+      if (rule) hits.push({ file, excerpt: excerptAround(lines, i), rule });
+      for (const { kind, re } of REQUIREMENT_PATTERNS) {
+        if (seenKinds.has(kind) || !re.test(lines[i])) continue;
+        seenKinds.add(kind);
+        requirements.push({ kind, file, excerpt: excerptAround(lines, i) });
+      }
+    }
+  }
+  let verdict = "clean";
+  for (const h of hits) {
+    if (verdict === "clean" || VERDICT_SEVERITY[h.rule] > VERDICT_SEVERITY[verdict]) {
+      verdict = h.rule;
+    }
+  }
+  const assignment = seenKinds.has("take-bot") ? "take-bot" : seenKinds.has("assignment-required") ? "required" : "none";
+  return { hits, requirements, verdict, assignment };
+}
+async function checkRepoPolicy(repoFullName, opts = {}) {
+  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  let activeToken = opts.token;
+  let requestsUsed = 0;
+  let hadError = false;
+  let truncated = false;
+  const files = [];
+  outer: for (const group of CANDIDATE_GROUPS) {
+    for (const path5 of group) {
+      if (requestsUsed >= MAX_REQUESTS) {
+        truncated = true;
+        break outer;
+      }
+      requestsUsed++;
+      const outcome = await fetchContentsFile(fetchImpl, repoFullName, path5, activeToken, () => {
+        activeToken = void 0;
+      });
+      if (!outcome.ok) {
+        hadError = true;
+        if (outcome.throttled) break outer;
+        continue;
+      }
+      if (outcome.missing) continue;
+      if (outcome.content) files.push({ file: path5, content: outcome.content });
+    }
+  }
+  const { hits, requirements, verdict, assignment } = auditContent(files);
+  const scanComplete = !hadError && !truncated;
+  if (verdict === "prohibited") {
+    return {
+      status: "flagged",
+      verdict,
+      hits,
+      requirements,
+      assignment,
+      rulesetVersion: POLICY_RULESET_VERSION,
+      contentHash: hashFiles(files),
+      scanComplete,
+      files
+    };
+  }
+  if (!scanComplete) {
+    return {
+      status: "unavailable",
+      // The zero-hit error scan keeps its historical shape (`'unavailable'`,
+      // nothing was classified); a partial scan that DID classify something
+      // keeps that verdict so the display can show it.
+      verdict: hits.length > 0 ? verdict : "unavailable",
+      hits,
+      requirements,
+      assignment,
+      rulesetVersion: POLICY_RULESET_VERSION,
+      contentHash: hashFiles(files),
+      scanComplete,
+      files
+    };
+  }
+  if (hits.length > 0) {
+    return {
+      status: "flagged",
+      verdict,
+      hits,
+      requirements,
+      assignment,
+      rulesetVersion: POLICY_RULESET_VERSION,
+      contentHash: hashFiles(files),
+      scanComplete,
+      files
+    };
+  }
+  return {
+    status: "clean",
+    verdict: "clean",
+    hits: [],
+    requirements,
+    assignment,
+    rulesetVersion: POLICY_RULESET_VERSION,
+    contentHash: hashFiles(files),
+    scanComplete,
+    files
+  };
+}
+function auditDeclaredPolicy(declaration) {
+  const text = typeof declaration === "string" ? declaration.trim() : "";
+  if (text === "") {
+    return {
+      status: "unavailable",
+      verdict: "unavailable",
+      hits: [],
+      requirements: [],
+      assignment: "none",
+      rulesetVersion: POLICY_RULESET_VERSION,
+      contentHash: null,
+      scanComplete: false,
+      files: []
+    };
+  }
+  const files = [{ file: FOUNDER_DECLARATION_SOURCE, content: text }];
+  const { hits, requirements, verdict, assignment } = auditContent(files);
+  return {
+    // Same status rule as a scanned repo: any classified hit → 'flagged' (the
+    // verdict says how severe), no hit → 'clean'. The declaration is one short
+    // text that was read in full, so the incomplete-scan precedence above can
+    // never apply here.
+    status: hits.length > 0 ? "flagged" : "clean",
+    verdict,
+    hits,
+    requirements,
+    assignment,
+    rulesetVersion: POLICY_RULESET_VERSION,
+    contentHash: hashFiles(files),
+    scanComplete: true,
+    files
+  };
+}
+var GH_API, GH_API_ORIGIN, GH_HEADERS, MAX_REQUESTS, POLICY_RULESET_VERSION, AI_SIGNAL_PATTERNS, AI_TERM, PROHIBITED_PATTERNS, DISCLOSURE_PATTERNS, DISCLOSURE_ENFORCEMENT_PATTERNS, REQUIREMENT_PATTERNS, CANDIDATE_GROUPS, VERDICT_SEVERITY, FOUNDER_DECLARATION_SOURCE;
+var init_repo_policy = __esm({
+  "src/repo-policy.ts"() {
+    "use strict";
+    GH_API = "https://api.github.com";
+    GH_API_ORIGIN = "https://api.github.com";
+    GH_HEADERS = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
+    MAX_REQUESTS = 7;
+    POLICY_RULESET_VERSION = 7;
+    AI_SIGNAL_PATTERNS = [
+      { label: "AI", re: /\bAI\b/i },
+      { label: "artificial intelligence", re: /artificial intelligence/i },
+      { label: "LLM", re: /\bLLMs?\b/i },
+      { label: "language model", re: /language model/i },
+      { label: "Copilot", re: /\bcopilot\b/i },
+      { label: "ChatGPT", re: /\bchatgpt\b/i },
+      { label: "Claude", re: /\bclaude\b/i },
+      { label: "generative", re: /\bgenerative\b/i },
+      { label: "machine-generated", re: /machine[\s-]generated/i },
+      { label: "agent workflow", re: /\b(?:ai|coding|autonomous|llm)[\s-]agents?\b/i }
+    ];
+    AI_TERM = "(?:ai|llms?|generative(?:\\s+ai)?|artificial intelligence|language models?|copilot|chatgpt|claude|machine[\\s-]generated|(?:ai|coding|autonomous|llm)[\\s-]agents?)";
+    PROHIBITED_PATTERNS = [
+      new RegExp(`prohibit\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
+      /did not write the code yourself/i,
+      new RegExp(`(?:not|never|don'?t|won'?t)\\s+accept\\w*[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
+      new RegExp(
+        `\\bno\\s+${AI_TERM}[^.\\n]{0,40}\\b(?:prs?|pull requests?|contributions?|code|patch(?:es)?|commits?|submissions?)\\b`,
+        "i"
+      ),
+      new RegExp(
+        `\\b${AI_TERM}[^.\\n]{0,60}\\b(?:is|are|will be)\\s+(?:\\w+\\s+)?(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
+        "i"
+      )
+    ];
+    DISCLOSURE_PATTERNS = [
+      new RegExp(`disclos\\w+[^.\\n]{0,60}\\b${AI_TERM}`, "i"),
+      new RegExp(`\\b${AI_TERM}[^.\\n]{0,60}disclos`, "i"),
+      new RegExp(`\\b${AI_TERM}[\\s-]assist\\w*[^.\\n]{0,60}\\b(?:must|should|required?)\\b`, "i"),
+      // PR-template checkbox, e.g. "- [ ] I used AI tools and have reviewed the output"
+      new RegExp(`\\[ \\][^\\n]{0,80}\\b${AI_TERM}`, "i")
+    ];
+    DISCLOSURE_ENFORCEMENT_PATTERNS = [
+      new RegExp(
+        `(?:if|unless|without|absent)\\b[^.\\n]{0,120}disclos\\w*[^.\\n]{0,120}\\b(?:is|are|will be|may be)\\s+(?:\\w+\\s+)?(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
+        "i"
+      ),
+      new RegExp(
+        `(?:fail\\w*\\s+to\\s+disclose|undisclosed)[^.\\n]{0,120}\\b(?:not accepted|not allowed|banned|rejected|removed|closed|reverted|prohibited|forbidden)`,
+        "i"
+      )
+    ];
+    REQUIREMENT_PATTERNS = [
+      // `/take` bot first: its docs usually also say "assign", and the bot is the
+      // more specific expectation (post exactly `/take`, not a prose request).
+      { kind: "take-bot", re: /(?:^|[\s`"'(])\/take\b/m },
+      { kind: "assignment-required", re: /(?:request|ask|wait)[^.\n]{0,40}\bassign/i },
+      { kind: "assignment-required", re: /\bassigned before\b/i },
+      { kind: "assignment-required", re: /\bself[\s-]assign/i },
+      // A bare "do not open PRs" can govern agent workflow without requiring
+      // maintainer assignment. Keep assignment/claim context in the same sentence.
+      {
+        kind: "assignment-required",
+        re: /\b(?:(?:un)?assign(?:ed|ment)?|(?:un)?claim(?:ed|ing)?)\b[^.?!\n]{0,40}\bdo not (?:open|submit)[^.?!\n]{0,40}\b(?:prs?|pull requests?)\b/i
+      },
+      {
+        kind: "assignment-required",
+        re: /do not (?:open|submit)[^.?!\n]{0,40}\b(?:prs?|pull requests?)\b[^.?!\n]{0,40}\b(?:(?:un)?assign(?:ed|ment)?|(?:un)?claim(?:ed|ing)?)\b/i
+      },
+      { kind: "cla-required", re: /\bCLA\b/ },
+      { kind: "cla-required", re: /contributor licen[cs]e agreement/i },
+      { kind: "discussion-first", re: /open an issue (?:first|before)/i },
+      { kind: "discussion-first", re: /discuss\w*[^.\n]{0,40}\bbefore\b/i }
+    ];
+    CANDIDATE_GROUPS = [
+      ["CONTRIBUTING.md", ".github/CONTRIBUTING.md", "docs/CONTRIBUTING.md"],
+      ["AGENTS.md", "AGENTS.MD"],
+      [".github/PULL_REQUEST_TEMPLATE.md", "PULL_REQUEST_TEMPLATE.md"]
+    ];
+    VERDICT_SEVERITY = {
+      "ai-mentioned": 1,
+      "disclosure-required": 2,
+      prohibited: 3
+    };
+    FOUNDER_DECLARATION_SOURCE = "founder-declaration";
+  }
+});
+
 // src/crypto-store.ts
 import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes6 } from "crypto";
-import { readFileSync as readFileSync8, writeFileSync as writeFileSync7, existsSync as existsSync6, renameSync as renameSync3, rmSync as rmSync4 } from "fs";
+import { readFileSync as readFileSync8, writeFileSync as writeFileSync7, existsSync as existsSync6, renameSync as renameSync3, rmSync as rmSync4, readdirSync } from "fs";
 import { join as join12, dirname as dirname4, basename as basename3 } from "path";
 import { createRequire } from "module";
 function encrypt2(plaintext, key) {
@@ -24722,10 +24842,25 @@ function atomicWriteFileSync(filePath, content) {
   renameSync3(tmp, filePath);
 }
 async function deleteKey() {
-  for (const filePath of dependentStoreFiles) {
+  const stateDir = dirname4(KEY_FILE);
+  let encFiles;
+  try {
+    encFiles = readdirSync(stateDir).filter((f) => f.endsWith(".enc"));
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+    encFiles = [];
+  }
+  for (const name of encFiles) {
     try {
-      rmSync4(filePath);
-    } catch {
+      rmSync4(join12(stateDir, name));
+    } catch (e) {
+      const code = e.code;
+      if (code !== "ENOENT") {
+        throw new Error(
+          `could not delete ${name} (${code ?? "unknown error"}). Your encryption key was NOT deleted, so nothing has been orphaned. Close any other running terminalhire process and re-run \u2014 repeating the delete is safe.`,
+          { cause: e }
+        );
+      }
     }
   }
   if (!forceKeytarUnavailableForTests && !skipKeychain()) {
@@ -24737,7 +24872,8 @@ async function deleteKey() {
   }
   try {
     rmSync4(KEY_FILE);
-  } catch {
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
   }
 }
 async function resolveKey(filePath, opts) {
@@ -24754,7 +24890,6 @@ async function resolveKey(filePath, opts) {
   return loadOrCreateSharedKey();
 }
 function createEncryptedStore(filePath, opts) {
-  dependentStoreFiles.add(filePath);
   async function read() {
     const key = await resolveKey(filePath, opts);
     if (!key) return opts.blank();
@@ -24777,7 +24912,7 @@ function createEncryptedStore(filePath, opts) {
   }
   return { read, write };
 }
-var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO2, IV_BYTES2, forceKeytarUnavailableForTests, dependentStoreFiles;
+var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO2, IV_BYTES2, forceKeytarUnavailableForTests;
 var init_crypto_store = __esm({
   "src/crypto-store.ts"() {
     "use strict";
@@ -24788,7 +24923,6 @@ var init_crypto_store = __esm({
     ALGO2 = "aes-256-gcm";
     IV_BYTES2 = 12;
     forceKeytarUnavailableForTests = false;
-    dependentStoreFiles = /* @__PURE__ */ new Set();
   }
 });
 
@@ -25358,6 +25492,190 @@ var init_job_status_store = __esm({
   }
 });
 
+// src/progress.ts
+var progress_exports = {};
+__export(progress_exports, {
+  createProgress: () => createProgress,
+  defaultSink: () => defaultSink,
+  isEnabled: () => isEnabled,
+  parseGitProgress: () => parseGitProgress,
+  shStream: () => shStream,
+  splitProgressChunk: () => splitProgressChunk
+});
+function defaultSink() {
+  return {
+    write: (chunk) => process.stderr.write(chunk),
+    isTTY: Boolean(process.stderr.isTTY),
+    stdoutIsTTY: Boolean(process.stdout.isTTY),
+    ci: Boolean(process.env["CI"]),
+    now: () => Date.now()
+  };
+}
+function isEnabled(sink) {
+  return sink.isTTY && sink.stdoutIsTTY && !sink.ci;
+}
+function createProgress(sink = defaultSink()) {
+  const enabled = isEnabled(sink);
+  let label = "";
+  let lastFrame = -Infinity;
+  function render(text, permanent) {
+    if (!enabled) return;
+    sink.write(CLEAR_LINE + text + (permanent ? "\n" : ""));
+  }
+  return {
+    enabled,
+    start(next) {
+      label = next;
+      lastFrame = sink.now();
+      render(`  ${label}\u2026`, false);
+    },
+    update(detail) {
+      if (!enabled) return;
+      const t = sink.now();
+      if (t - lastFrame < FRAME_MS) return;
+      lastFrame = t;
+      render(`  ${label}\u2026 ${detail}`, false);
+    },
+    succeed(detail) {
+      render(`  \u2713 ${label}${detail ? ` ${detail}` : ""}`, true);
+      label = "";
+    },
+    fail(detail) {
+      render(`  \u2717 ${label}${detail ? ` ${detail}` : ""}`, true);
+      label = "";
+    }
+  };
+}
+function parseGitProgress(line) {
+  const m = /^(?:remote:\s*)?([A-Za-z][A-Za-z ]*?):\s+(\d{1,3})%/.exec(line.trim());
+  if (!m) return null;
+  const percent = Number(m[2]);
+  if (!Number.isInteger(percent) || percent < 0 || percent > 100) return null;
+  return { phase: (m[1] ?? "").trim().toLowerCase(), percent };
+}
+function splitProgressChunk(chunk) {
+  return chunk.split(/[\r\n]+/).filter((s) => s.trim().length > 0);
+}
+function shStream(cmd, args, opts = {}) {
+  const cap = opts.maxStderrBytes ?? 64 * 1024;
+  return new Promise((resolve4, reject) => {
+    void (async () => {
+      const spawn3 = opts.spawnFn ?? (await import("child_process")).spawn;
+      const child = spawn3(cmd, args, { shell: false, stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "";
+      let stderr = "";
+      child.stdout?.setEncoding("utf8");
+      child.stdout?.on("data", (d) => {
+        stdout += d;
+      });
+      child.stderr?.setEncoding("utf8");
+      child.stderr?.on("data", (d) => {
+        stderr = (stderr + d).slice(-cap);
+        opts.onStderr?.(d);
+      });
+      child.on("error", (err) => reject(err));
+      child.on("close", (code, signal) => {
+        if (code === 0) {
+          resolve4({ stdout: stdout.trim(), stderr });
+          return;
+        }
+        const err = new Error(
+          `${cmd} ${args[0] ?? ""} exited ${signal ? `on ${signal}` : `with code ${code}`}`
+        );
+        err.stdout = stdout.trim();
+        err.stderr = stderr;
+        err.code = code;
+        reject(err);
+      });
+    })();
+  });
+}
+var FRAME_MS, CLEAR_LINE;
+var init_progress = __esm({
+  "src/progress.ts"() {
+    "use strict";
+    FRAME_MS = 80;
+    CLEAR_LINE = "\x1B[2K\r";
+  }
+});
+
+// bin/approved-claims-badge.js
+var approved_claims_badge_exports = {};
+__export(approved_claims_badge_exports, {
+  acknowledgeApprovedClaim: () => acknowledgeApprovedClaim,
+  computeApprovedClaims: () => computeApprovedClaims
+});
+function normalizeIds(claimIds) {
+  if (!Array.isArray(claimIds)) return [];
+  return [...new Set(claimIds.filter((id) => typeof id === "string" && id !== ""))].sort();
+}
+function computeApprovedClaims(claimIds, previous) {
+  const approved = normalizeIds(claimIds);
+  const prior = previous && Array.isArray(previous.acknowledged) ? new Set(previous.acknowledged) : /* @__PURE__ */ new Set();
+  const acknowledged = approved.filter((id) => prior.has(id));
+  return { count: approved.length - acknowledged.length, acknowledged };
+}
+function acknowledgeApprovedClaim(claimId, previous) {
+  const prior = previous && Array.isArray(previous.acknowledged) ? previous.acknowledged : [];
+  if (typeof claimId !== "string" || claimId === "") {
+    const acknowledged2 = [...new Set(prior)].sort();
+    const count2 = previous && typeof previous.count === "number" ? previous.count : 0;
+    return { count: count2, acknowledged: acknowledged2 };
+  }
+  const acknowledged = [.../* @__PURE__ */ new Set([...prior, claimId])].sort();
+  const prevCount = previous && typeof previous.count === "number" ? previous.count : 0;
+  const alreadyKnown = prior.includes(claimId);
+  const count = alreadyKnown ? prevCount : Math.max(0, prevCount - 1);
+  return { count, acknowledged };
+}
+var init_approved_claims_badge = __esm({
+  "bin/approved-claims-badge.js"() {
+    "use strict";
+  }
+});
+
+// bin/cache-store.js
+var cache_store_exports = {};
+__export(cache_store_exports, {
+  readCacheEntry: () => readCacheEntry,
+  updateIndexCache: () => updateIndexCache
+});
+import { readFileSync as readFileSync10, writeFileSync as writeFileSync9, renameSync as renameSync5 } from "fs";
+import { join as join16 } from "path";
+import { homedir as homedir10 } from "os";
+function readCacheEntry() {
+  try {
+    return JSON.parse(readFileSync10(INDEX_CACHE_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function updateIndexCache(patch) {
+  ensureStateDir(TERMINALHIRE_DIR10);
+  const existing = readCacheEntry() ?? {};
+  const entry = {
+    ...existing,
+    ...patch,
+    schemaVersion: SCHEMA_VERSION2,
+    ts: Date.now()
+  };
+  const tmp = `${INDEX_CACHE_FILE}.${process.pid}.${tmpCounter++}.tmp`;
+  writeFileSync9(tmp, JSON.stringify(entry), "utf8");
+  renameSync5(tmp, INDEX_CACHE_FILE);
+  return entry;
+}
+var TERMINALHIRE_DIR10, INDEX_CACHE_FILE, SCHEMA_VERSION2, tmpCounter;
+var init_cache_store = __esm({
+  "bin/cache-store.js"() {
+    "use strict";
+    init_state_dir();
+    TERMINALHIRE_DIR10 = process.env.TERMINALHIRE_DIR || join16(homedir10(), ".terminalhire");
+    INDEX_CACHE_FILE = join16(TERMINALHIRE_DIR10, "index-cache.json");
+    SCHEMA_VERSION2 = 1;
+    tmpCounter = 0;
+  }
+});
+
 // src/acceptance-score.ts
 var acceptance_score_exports = {};
 __export(acceptance_score_exports, {
@@ -25550,9 +25868,9 @@ var init_audit2 = __esm({
 
 // bin/jpi-claim.js
 init_src();
-import { readFileSync as readFileSync10, writeFileSync as writeFileSync9, mkdirSync as mkdirSync3, existsSync as existsSync8, rmSync as rmSync5 } from "fs";
-import { join as join16 } from "path";
-import { homedir as homedir10, hostname as osHostname } from "os";
+import { readFileSync as readFileSync11, writeFileSync as writeFileSync10, mkdirSync as mkdirSync3, existsSync as existsSync8, rmSync as rmSync5, readdirSync as readdirSync2 } from "fs";
+import { join as join17, dirname as dirname6, isAbsolute as isAbsolute3, resolve as pathResolve } from "path";
+import { homedir as homedir11, hostname as osHostname } from "os";
 import { execFile as execFile3 } from "child_process";
 import { promisify as promisify3 } from "util";
 import { createInterface as createInterface2 } from "readline";
@@ -25662,6 +25980,16 @@ async function writePushTokenEnc(rawToken) {
   const blob = encrypt(rawToken, key);
   writeFileSync5(CLAIM_PUSH_TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
+async function readPushTokenEnc() {
+  if (!existsSync5(CLAIM_PUSH_TOKEN_FILE)) return void 0;
+  try {
+    const key = await loadKey();
+    const blob = JSON.parse(readFileSync6(CLAIM_PUSH_TOKEN_FILE, "utf8"));
+    return decrypt(blob, key);
+  } catch {
+    return void 0;
+  }
+}
 function clearPushTokenEnc() {
   try {
     rmSync3(CLAIM_PUSH_TOKEN_FILE);
@@ -25720,13 +26048,13 @@ async function shouldNudgeUnpushed() {
 }
 
 // bin/jpi-claim.js
-var TERMINALHIRE_DIR10 = process.env.TERMINALHIRE_DIR || join16(homedir10(), ".terminalhire");
-var INDEX_CACHE_FILE = join16(TERMINALHIRE_DIR10, "index-cache.json");
-var CLAIM_PUSH_MARKER = join16(TERMINALHIRE_DIR10, "claim-push.json");
-var REPO_CONTINUITY_NUDGE_MARKER = join16(TERMINALHIRE_DIR10, "repo-continuity-nudged.json");
+var TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join17(homedir11(), ".terminalhire");
+var INDEX_CACHE_FILE2 = join17(TERMINALHIRE_DIR11, "index-cache.json");
+var CLAIM_PUSH_MARKER = join17(TERMINALHIRE_DIR11, "claim-push.json");
+var REPO_CONTINUITY_NUDGE_MARKER = join17(TERMINALHIRE_DIR11, "repo-continuity-nudged.json");
 function readNudgedClaimIds() {
   try {
-    const raw = JSON.parse(readFileSync10(REPO_CONTINUITY_NUDGE_MARKER, "utf8"));
+    const raw = JSON.parse(readFileSync11(REPO_CONTINUITY_NUDGE_MARKER, "utf8"));
     return new Set(Array.isArray(raw.claimIds) ? raw.claimIds : []);
   } catch {
     return /* @__PURE__ */ new Set();
@@ -25736,8 +26064,8 @@ function markClaimNudged(id) {
   try {
     const ids = readNudgedClaimIds();
     ids.add(id);
-    ensureStateDir(TERMINALHIRE_DIR10);
-    writeFileSync9(REPO_CONTINUITY_NUDGE_MARKER, JSON.stringify({ claimIds: [...ids] }), "utf8");
+    ensureStateDir(TERMINALHIRE_DIR11);
+    writeFileSync10(REPO_CONTINUITY_NUDGE_MARKER, JSON.stringify({ claimIds: [...ids] }), "utf8");
   } catch {
   }
 }
@@ -25773,20 +26101,30 @@ function buildSubmitBody(issueNumber, opts = {}) {
   return `${closesLine}${main}${AI_DISCLOSURE_NOTE}`;
 }
 function printPolicySection(policy) {
+  const declared = policy.provenance === "founder-declaration";
+  const subject = declared ? "this posting's declared policy" : "this repo";
   const verdict = policy.verdict ?? (policy.status === "flagged" ? "ai-mentioned" : policy.status);
   if (verdict === "prohibited") {
     console.log(
-      "\n  POLICY: \u2717 this repo PROHIBITS AI-generated contributions \u2014 READ BEFORE CLAIMING:"
+      `
+  POLICY: \u2717 ${subject} PROHIBITS AI-generated contributions \u2014 READ BEFORE CLAIMING:`
     );
   } else if (verdict === "disclosure-required") {
-    console.log("\n  POLICY: \u26A0 this repo requires disclosing AI assistance \u2014 READ BEFORE WORKING:");
+    console.log(
+      `
+  POLICY: \u26A0 ${subject} requires disclosing AI assistance \u2014 READ BEFORE WORKING:`
+    );
   } else if (verdict === "ai-mentioned") {
     console.log(
       "\n  POLICY: \u26A0 possible AI-assistance policy language found \u2014 READ BEFORE WORKING:"
     );
   } else if (policy.status === "unavailable") {
     console.log(
-      "\n  POLICY: could not read this repo's CONTRIBUTING/PR-template/AGENTS docs (rate-limited or unreachable) \u2014 read them yourself before working."
+      declared ? "\n  POLICY: the founder declared no AI-assistance policy on this posting \u2014 there is nothing to read; acknowledging means working without a stated policy." : "\n  POLICY: could not read this repo's CONTRIBUTING/PR-template/AGENTS docs (rate-limited or unreachable) \u2014 read them yourself before working."
+    );
+  } else if (declared) {
+    console.log(
+      "  policy: no AI-assistance restriction in the founder's declared policy (shown above verbatim when flagged)"
     );
   } else if (policy.semantic?.status === "not-configured" && (policy.files?.length ?? 0) > 0) {
     console.log(
@@ -25935,8 +26273,8 @@ function pickExistingPr(prListJson, ghUser) {
   return match2 && typeof match2.url === "string" ? match2.url : null;
 }
 function readClaimablePool() {
-  if (!existsSync8(INDEX_CACHE_FILE)) return [];
-  const entry = JSON.parse(readFileSync10(INDEX_CACHE_FILE, "utf8"));
+  if (!existsSync8(INDEX_CACHE_FILE2)) return [];
+  const entry = JSON.parse(readFileSync11(INDEX_CACHE_FILE2, "utf8"));
   const bounties = (entry?.index?.jobs ?? []).filter((j) => j.source === "bounty");
   const contributions = (entry?.index?.contribute ?? []).filter((j) => j.source === "contribute");
   return [...bounties, ...contributions];
@@ -26002,7 +26340,11 @@ function extractClaimableFields(job) {
       // can prefer it over a live re-count that degrades to null under a rate limit
       // / >100-PR page. Display/fallback ONLY — the contention gate still forces a
       // LIVE recount (see resolveBounty); the snapshot never decides contention.
-      openPRsAtDiscovery: c.openPRsAtDiscovery
+      openPRsAtDiscovery: c.openPRsAtDiscovery,
+      // A contribute issue is never first-party founder supply.
+      founderPosting: false,
+      claimMode: "open",
+      aiDeclaration: null
     };
   }
   const b = job.bounty ?? {};
@@ -26014,7 +26356,16 @@ function extractClaimableFields(job) {
     amountUSD: b.amountUSD ?? null,
     source: "bounty",
     // Bounties carry no discovery-time PR proof — always live-count (unchanged).
-    openPRsAtDiscovery: void 0
+    openPRsAtDiscovery: void 0,
+    // TERM-142 — first-party founder supply drives a different record path: Gate 0
+    // reads the DECLARED policy below (there is no repo to scan — `repoFullName`
+    // here is the posting's opaque handle, V-9), and recording registers the claim
+    // server-side (Decision 4). Both fields follow the index row's absent-means-
+    // default conventions: claimMode absent = open, aiDeclaration absent = the
+    // founder declared nothing.
+    founderPosting: b.bountySource === "founder",
+    claimMode: b.claimMode === "approval-only" ? "approval-only" : "open",
+    aiDeclaration: typeof b.aiDeclaration === "string" && b.aiDeclaration.trim() !== "" ? b.aiDeclaration : null
   };
 }
 function parseGitHubUrl(url) {
@@ -26371,8 +26722,43 @@ function printMetric(rate) {
   console.log(`
 \u{1F4CA} Accepted-PR rate: ${rate.merged}/${rate.total} claims merged (${pct}%)`);
 }
+var SUBMIT_ACCEPTS = Object.freeze(["working", "ready"]);
+function nextStepFor(c) {
+  const founder = Boolean(c.approval);
+  switch (c.state) {
+    case "claimed":
+      return founder ? { cmd: `terminalhire claim slice ${c.id}`, why: "collect your granted work slice" } : { cmd: `terminalhire claim start ${c.id}`, why: "fork + clone into a worktree" };
+    // NOT grouped with the two below. `cmdSubmit` accepts 'working' and 'ready'
+    // and nothing else, so pointing an 'in-review' claim at submit would hand the
+    // developer a command that exits 1 — and submit's own refusal then advises
+    // `claim start`, which a founder claim can never use either. Two dead ends in
+    // a row is worse than the silence this block replaced.
+    case "in-review":
+      return {
+        cmd: `terminalhire claim update ${c.id} ready`,
+        why: "clear the review gate \u2014 submit only accepts working/ready"
+      };
+    case "working":
+    case "ready":
+      return { cmd: `terminalhire claim submit ${c.id}`, why: "push the branch + open the PR" };
+    case "submitted":
+      return founder ? { cmd: `terminalhire claim runs ${c.id} --watch`, why: "read the CI result" } : { cmd: `terminalhire claim status ${c.id}`, why: "poll the PR merge state" };
+    default:
+      return null;
+  }
+}
+function printNextSteps(list) {
+  const steps = list.map(nextStepFor).filter(Boolean);
+  if (steps.length === 0) return;
+  const width = Math.max(...steps.map((s) => s.cmd.length));
+  console.log("\n  Next:");
+  for (const s of steps) console.log(`    ${s.cmd.padEnd(width)}   \u2014 ${s.why}`);
+}
 async function resolveBounty(arg) {
   let bountyId, title, repoFullName, issueUrl, amountUSD, source, openPRsAtDiscovery, indexNativeId;
+  let founderPosting = false;
+  let claimMode = "open";
+  let aiDeclaration = null;
   let job = findClaimableInCache(arg) ?? (looksLikeShortRef(arg) ? findClaimableByShortRef(arg) : null);
   let freshPool;
   if (!job && looksLikeShortRef(arg)) {
@@ -26380,7 +26766,18 @@ async function resolveBounty(arg) {
     if (freshPool) job = findByShortRefInPool(freshPool, arg);
   }
   if (job) {
-    ({ bountyId, title, repoFullName, issueUrl, amountUSD, source, openPRsAtDiscovery } = extractClaimableFields(job));
+    ({
+      bountyId,
+      title,
+      repoFullName,
+      issueUrl,
+      amountUSD,
+      source,
+      openPRsAtDiscovery,
+      founderPosting,
+      claimMode,
+      aiDeclaration
+    } = extractClaimableFields(job));
     indexNativeId = bountyId;
   } else {
     const parsed = parseGitHubUrl(arg);
@@ -26437,7 +26834,14 @@ async function resolveBounty(arg) {
     // Live open-PR count for the contention decision only (Fix 2). Distinct from
     // `openPRs`, which may be the discovery-time snapshot used for display.
     openPRsLive,
-    issueNumber: ghIssue ? ghIssue.number : null
+    issueNumber: ghIssue ? ghIssue.number : null,
+    // TERM-142 — founder-posting facts for cmdRecord's declared-policy gate and
+    // registration call. The URL tier can never resolve a founder posting (its
+    // claimUrl is a docs page, not a GitHub issue), so the defaults above are
+    // correct there: a URL-tier claim is never treated as founder supply.
+    founderPosting,
+    claimMode,
+    aiDeclaration
   };
 }
 function fmtOpenPRsLine(b) {
@@ -26464,6 +26868,123 @@ function fmtContestedWarning(b) {
     parts.push(`${b.openPRsLive} open PR${b.openPRsLive === 1 ? "" : "s"} referencing it`);
   }
   return `  \u26A0 This issue looks taken: ${parts.join(" / ")}. A merged PR here is unlikely.`;
+}
+async function mintRegistrationProof() {
+  console.log("\n  This founder posting registers your claim with terminalhire, so your");
+  console.log("  GitHub identity has to be verified once in the browser.");
+  let begin;
+  try {
+    const r = await fetch(`${CLAIM_SYNC_BASE}/api/claim-sync/begin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hostname: osHostname() }),
+      signal: AbortSignal.timeout(1e4)
+    });
+    if (!r.ok) {
+      console.error(`  Could not start verification: /api/claim-sync/begin returned ${r.status}.`);
+      return null;
+    }
+    begin = await r.json();
+  } catch (err) {
+    console.error(
+      `  Could not start verification: ${err instanceof Error ? err.message : String(err)}`
+    );
+    return null;
+  }
+  const { challenge, verifyUrl } = begin || {};
+  if (!challenge || !verifyUrl) {
+    console.error("  Could not start verification: malformed begin response.");
+    return null;
+  }
+  console.log("\n  Open this URL to authorize (sign in with GitHub, then Confirm):");
+  console.log(`    ${verifyUrl}`);
+  console.log("\n  (Attempting to open it automatically...)");
+  openInBrowser(verifyUrl);
+  console.log("  Waiting for browser verification...");
+  const deadline = Date.now() + CLAIM_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await claimSleep(CLAIM_POLL_INTERVAL_MS);
+    let statusRes;
+    try {
+      statusRes = await fetch(
+        `${CLAIM_SYNC_BASE}/api/claim-sync/status?challenge=${encodeURIComponent(challenge)}`,
+        { signal: AbortSignal.timeout(1e4) }
+      );
+    } catch {
+      continue;
+    }
+    if (!statusRes.ok) continue;
+    let body;
+    try {
+      body = await statusRes.json();
+    } catch {
+      continue;
+    }
+    if (body && body.status === "verified" && body.proofToken) return body.proofToken;
+  }
+  console.error("\n  Timed out waiting for browser verification (10 min).");
+  return null;
+}
+async function registerFounderClaim(b) {
+  const postingId = b.bountyId.replace(/^bounty:founder:/, "");
+  const refuse = (reason) => {
+    console.error(
+      `
+terminalhire claim: refusing to record \u2014 ${reason}
+  Nothing was recorded: a founder-posting claim registers with terminalhire BEFORE
+  it is recorded locally (fail-closed), so a posting that is gone, taken, or
+  unverifiable is never claimed on stale cache data.`
+    );
+    process.exit(1);
+  };
+  let auth = null;
+  try {
+    const stored = await readPushTokenEnc();
+    if (stored) auth = { pushToken: stored };
+  } catch {
+  }
+  if (!auth) {
+    const proofToken = await mintRegistrationProof();
+    if (!proofToken) {
+      refuse("could not verify your GitHub identity with terminalhire (see above).");
+    }
+    auth = { proofToken };
+  }
+  console.log("\n  Registering this claim with terminalhire (founder posting)...");
+  let res;
+  try {
+    res = await fetch(`${CLAIM_SYNC_BASE}/api/claim/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bountyId: postingId, ...auth }),
+      signal: AbortSignal.timeout(1e4)
+    });
+  } catch (err) {
+    refuse(
+      `terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}), so the posting could not be revalidated.`
+    );
+  }
+  if (!res.ok) {
+    let body2 = null;
+    try {
+      body2 = await res.json();
+    } catch {
+    }
+    const detail = body2?.message || body2?.error || "";
+    refuse(
+      detail ? `the server refused this claim (${res.status}): ${detail}` : `the server refused this claim (${res.status}).`
+    );
+  }
+  let body;
+  try {
+    body = await res.json();
+  } catch {
+    body = null;
+  }
+  if (!body || body.ok !== true) {
+    refuse("malformed registration response from the server.");
+  }
+  return { claimId: typeof body.claimId === "string" ? body.claimId : null };
 }
 async function cmdRecord(arg, flags = {}) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -26506,10 +27027,20 @@ ${contestedWarning}`);
       process.exit(1);
     }
   }
-  const { checkRepoPolicy: checkRepoPolicy2 } = await Promise.resolve().then(() => (init_repo_policy(), repo_policy_exports));
-  const keywordPolicy = await checkRepoPolicy2(b.repoFullName, { token: await policyScanToken() });
   const { applySemanticPolicyGate: applySemanticPolicyGate2 } = await Promise.resolve().then(() => (init_repo_policy_semantic(), repo_policy_semantic_exports));
-  const policy = await applySemanticPolicyGate2(b.repoFullName, keywordPolicy);
+  let policy;
+  if (b.founderPosting) {
+    const { auditDeclaredPolicy: auditDeclaredPolicy2 } = await Promise.resolve().then(() => (init_repo_policy(), repo_policy_exports));
+    const declared = await applySemanticPolicyGate2(
+      b.repoFullName,
+      auditDeclaredPolicy2(b.aiDeclaration)
+    );
+    policy = { ...declared, provenance: "founder-declaration" };
+  } else {
+    const { checkRepoPolicy: checkRepoPolicy2 } = await Promise.resolve().then(() => (init_repo_policy(), repo_policy_exports));
+    const keywordPolicy = await checkRepoPolicy2(b.repoFullName, { token: await policyScanToken() });
+    policy = await applySemanticPolicyGate2(b.repoFullName, keywordPolicy);
+  }
   printPolicySection(policy);
   if (process.stdout.isTTY) {
     try {
@@ -26525,18 +27056,20 @@ ${contestedWarning}`);
     } catch {
     }
   }
+  const policySubject = policy.provenance === "founder-declaration" ? "this founder posting" : b.repoFullName;
   let ackedAt = null;
   if (policy.verdict === "prohibited") {
     let acked = Boolean(flags["ack-policy-prohibited"]);
     if (!acked && process.stdin.isTTY) {
       acked = await confirm(
-        "\n  This repo PROHIBITS AI-generated contributions \u2014 continuing means everything you submit must be hand-written by you. Continue? (y/N) "
+        `
+  ${policy.provenance === "founder-declaration" ? "This posting's declared policy" : "This repo"} PROHIBITS AI-generated contributions \u2014 continuing means everything you submit must be hand-written by you. Continue? (y/N) `
       );
     }
     if (!acked) {
       console.error(
         `
-terminalhire claim: refusing to record \u2014 ${b.repoFullName} prohibits AI-generated contributions.
+terminalhire claim: refusing to record \u2014 ${policySubject} prohibits AI-generated contributions.
   Read the excerpts above. If you will hand-write the work yourself, re-run with
   --ack-policy-prohibited (or confirm interactively). --ack-policy is not enough here.`
       );
@@ -26552,7 +27085,8 @@ terminalhire claim: refusing to record \u2014 ${b.repoFullName} prohibits AI-gen
       );
       ackedAt = prior.ackedAt;
     } else {
-      const reason = policy.status === "flagged" ? "This repo has AI-assistance policy language" : (policy.hits?.length ?? 0) > 0 ? "This repo's policy scan was cut short \u2014 AI-policy language was found in what WAS read, and other governing docs went unread" : "This repo's contribution policy could not be checked";
+      const declaredProvenance = policy.provenance === "founder-declaration";
+      const reason = policy.status === "flagged" ? declaredProvenance ? "This posting's declared policy has AI-assistance language" : "This repo has AI-assistance policy language" : (policy.hits?.length ?? 0) > 0 ? "This repo's policy scan was cut short \u2014 AI-policy language was found in what WAS read, and other governing docs went unread" : declaredProvenance ? "The founder declared no AI-assistance policy on this posting" : "This repo's contribution policy could not be checked";
       let acked = Boolean(flags["ack-policy"]);
       if (!acked && process.stdin.isTTY) {
         acked = await confirm(
@@ -26562,7 +27096,9 @@ terminalhire claim: refusing to record \u2014 ${b.repoFullName} prohibits AI-gen
       }
       if (!acked) {
         console.error(
-          `
+          declaredProvenance ? `
+terminalhire claim: refusing to record. ${reason}.
+  Re-run with --ack-policy to acknowledge and proceed (or confirm interactively).` : `
 terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribution policy first.
   Re-run with --ack-policy once you have (or confirm interactively).`
         );
@@ -26581,6 +27117,24 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
     }
   } else {
     console.log("  (default AI-assistance disclosure still applies at submit)");
+  }
+  let approval;
+  if (b.founderPosting) {
+    if (claims.findClaim(b.bountyId)) {
+      console.error(
+        `terminalhire claim: claim already exists for '${b.bountyId}' \u2014 run 'terminalhire claim status ${b.bountyId}' or 'terminalhire claim release ${b.bountyId}'`
+      );
+      process.exit(1);
+    }
+    const registration = await registerFounderClaim(b);
+    approval = {
+      mode: b.claimMode,
+      // 'pending' = the founder reviews claimants before access exists; `claim
+      // start` renders the wait. An open posting has no approval step — 'granted'.
+      state: b.claimMode === "approval-only" ? "pending" : "granted",
+      claimId: registration.claimId,
+      registeredAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
   }
   const kind = b.source === "contribute" ? "contribution" : "bounty";
   let claim;
@@ -26604,8 +27158,13 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
         assignment: policy.assignment,
         requirements: (policy.requirements ?? []).map((r) => r.kind),
         rulesetVersion: policy.rulesetVersion,
-        ackedAt
-      }
+        ackedAt,
+        // TERM-142 provenance marker — 'founder-declaration' when this policy came
+        // from the founder's declared text rather than scanned repo docs.
+        ...policy.provenance ? { provenance: policy.provenance } : {}
+      },
+      // Registration receipt + approval wait (founder postings only; see claims.ts).
+      ...approval ? { approval } : {}
     });
   } catch (err) {
     console.error(`terminalhire claim: ${err.message ?? err}`);
@@ -26620,6 +27179,26 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
     const { markStatus: markStatus2 } = await Promise.resolve().then(() => (init_job_status_store(), job_status_store_exports));
     markStatus2(b.indexNativeId, "claimed");
   } catch {
+  }
+  if (claim.approval) {
+    console.log(`
+\u2713 Claimed: ${claim.title}`);
+    console.log(`  id:      ${claim.id}`);
+    console.log(`  posting: ${claim.repoFullName}`);
+    console.log(`  amount:  ${fmtAmount(claim.amountUSD)}`);
+    console.log(
+      `  registered with terminalhire${claim.approval.claimId ? ` (server claim ${claim.approval.claimId})` : ""}`
+    );
+    if (claim.approval.state === "pending") {
+      console.log("\n  This posting is approval-only: the founder reviews claimants before any");
+      console.log("  access exists. Access is pending \u2014 founder postings are never forked or");
+      console.log("  cloned; once the founder approves, your work slice is delivered through");
+      console.log("  terminalhire.");
+    } else {
+      console.log("\n  Founder postings are never forked or cloned \u2014 the work arrives as a");
+      console.log("  read-slice through terminalhire, and your patch goes back the same way.");
+    }
+    return;
   }
   console.log(`
 \u2713 Claimed: ${claim.title}`);
@@ -26746,6 +27325,7 @@ ${list.length} ${active ? "active " : ""}claim${list.length === 1 ? "" : "s"}:
     console.log(`    id: ${c.id}${pr}`);
   }
   printMetric(claims.acceptedPRRate());
+  printNextSteps(list);
   try {
     if (await shouldNudgeUnpushed()) {
       console.log(
@@ -26894,7 +27474,7 @@ async function cmdStatus(id) {
 }
 async function cmdUpdate(id, state, prUrl) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
-  const VALID = ["claimed", "working", "in-review", "ready", "submitted", "merged", "abandoned"];
+  const VALID = claims.CLAIM_STATES;
   if (!id || !state || !VALID.includes(state)) {
     console.error("Usage: terminalhire claim update <id> <state> [prUrl]");
     console.error("  state: " + VALID.join(" | "));
@@ -27070,7 +27650,7 @@ async function cmdAttach(id, worktree, branch) {
 function workDirFor(repoFullName, issueNumber) {
   const [owner, repo] = String(repoFullName).split("/");
   const suffix = issueNumber ? `-${issueNumber}` : "";
-  return join16(homedir10(), "terminalhire", "work", `${owner}-${repo}${suffix}`);
+  return join17(homedir11(), "terminalhire", "work", `${owner}-${repo}${suffix}`);
 }
 function startBranchFor(repoFullName, issueNumber) {
   const repo = String(repoFullName).split("/")[1] || "claim";
@@ -27133,6 +27713,23 @@ When it's done:  terminalhire claim submit ${id}`);
       return;
     }
   }
+  if (claim.approval) {
+    console.log(`
+${claim.title}`);
+    if (claim.approval.state === "pending") {
+      console.log(
+        "\n  Access is pending \u2014 this approval-only posting needs the founder to approve"
+      );
+      console.log("  your claim before any work can be delivered. No fork was attempted: founder");
+      console.log("  postings are never forked or cloned; once approved, your work slice is");
+      console.log("  delivered through terminalhire.");
+    } else {
+      console.log("\n  No fork was attempted \u2014 founder postings are never forked or cloned. Your");
+      console.log("  work slice is delivered through terminalhire, and your patch goes back the");
+      console.log("  same way.");
+    }
+    return;
+  }
   if (flags.here) {
     await cmdStartHere(claims, claim, flags);
     return;
@@ -27170,19 +27767,35 @@ terminalhire claim: not started \u2014 starting forks ${claim.repoFullName} to y
     );
     process.exit(1);
   }
-  mkdirSync3(join16(homedir10(), "terminalhire", "work"), { recursive: true });
+  mkdirSync3(join17(homedir11(), "terminalhire", "work"), { recursive: true });
+  const { createProgress: createProgress2, parseGitProgress: parseGitProgress2, splitProgressChunk: splitProgressChunk2, shStream: shStream2 } = await Promise.resolve().then(() => (init_progress(), progress_exports));
+  const progress = createProgress2();
   let forkFullName;
+  progress.start(`forking ${claim.repoFullName}`);
   try {
     forkFullName = await ensureForkExists(claim.repoFullName, ghUser);
+    progress.succeed(`\u2192 ${forkFullName}`);
   } catch (err) {
+    progress.fail();
     console.error(
       `terminalhire claim: could not create your fork of ${claim.repoFullName}. ${err.message ?? err}`
     );
     process.exit(1);
   }
+  progress.start(`cloning ${forkFullName}`);
   try {
-    await sh("gh", ["repo", "clone", forkFullName, destDir]);
+    await shStream2("gh", ["repo", "clone", forkFullName, destDir, "--", "--progress"], {
+      onStderr: (chunk) => {
+        if (!progress.enabled) return;
+        for (const line of splitProgressChunk2(chunk)) {
+          const p = parseGitProgress2(line);
+          if (p) progress.update(`${p.phase} ${p.percent}%`);
+        }
+      }
+    });
+    progress.succeed();
   } catch (err) {
+    progress.fail();
     try {
       rmSync5(destDir, { recursive: true, force: true });
     } catch {
@@ -27208,7 +27821,14 @@ terminalhire claim: not started \u2014 starting forks ${claim.repoFullName} to y
     }
   }
   const branch = startBranchFor(claim.repoFullName, issueNumber);
-  await sh("git", ["-C", destDir, "checkout", "-b", branch]);
+  progress.start(`cutting branch ${branch}`);
+  try {
+    await sh("git", ["-C", destDir, "checkout", "-b", branch]);
+    progress.succeed();
+  } catch (err) {
+    progress.fail();
+    throw err;
+  }
   const toplevel = await sh("git", ["-C", destDir, "rev-parse", "--show-toplevel"]);
   claims.updateClaim(id, { worktreePath: toplevel, branch, state: "working" });
   await postClaimStake(claim, flags, ghUser);
@@ -27265,6 +27885,441 @@ async function cmdStartHere(claims, claim, flags = {}) {
   console.log(`
   When the work is done:  terminalhire claim submit ${claim.id}`);
 }
+var RUNS_POLL_INTERVAL_MS = 15e3;
+var RUNS_POLL_ATTEMPTS = 20;
+function runsGiveUpMessage(id, attempts = RUNS_POLL_ATTEMPTS, intervalMs = RUNS_POLL_INTERVAL_MS) {
+  const mins = Math.round(attempts * intervalMs / 6e4);
+  return `terminalhire claim runs: no finished result after ${attempts} checks at ${Math.round(intervalMs / 1e3)}s intervals (~${mins} min) \u2014 giving up. CI may still be running; re-run 'terminalhire claim runs ${id}' later.`;
+}
+function founderPostingIdOf(claim) {
+  return String(claim.bountyId).replace(/^bounty:founder:/, "");
+}
+function sliceWorkDirFor(claimLocalId) {
+  const safe = String(claimLocalId).replace(/[^A-Za-z0-9._-]/g, "-");
+  return join17(homedir11(), "terminalhire", "work", `slice-${safe}`);
+}
+function renderServerRefusal(status, body) {
+  const code = body && typeof body.error === "string" ? body.error : null;
+  const prose = body && typeof body.message === "string" ? body.message : null;
+  if (prose) return `the server refused (${status}${code ? ` ${code}` : ""}): ${prose}`;
+  if (code) return `the server refused (${status} ${code}).`;
+  return `the server refused (${status}).`;
+}
+function safeSliceRelPath(p) {
+  if (typeof p !== "string" || p.length === 0) return false;
+  if (isAbsolute3(p) || p.includes("\\") || /^[A-Za-z]:/.test(p)) return false;
+  return p.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
+}
+function writeSliceFiles(destDir, files) {
+  for (const f of files) {
+    if (!safeSliceRelPath(f.path)) {
+      throw new Error(`slice contained an unsafe path ('${f.path}') \u2014 refusing the whole slice`);
+    }
+  }
+  const written = [];
+  const unavailable = [];
+  for (const f of files) {
+    if (typeof f.content === "string") {
+      const abs = join17(destDir, f.path);
+      mkdirSync3(dirname6(abs), { recursive: true });
+      writeFileSync10(abs, f.content, "utf8");
+      written.push(f.path);
+    } else {
+      unavailable.push({ path: f.path, reason: f.unavailableReason || "(no reason given)" });
+    }
+  }
+  return { written, unavailable };
+}
+function buildPatchSubmission({ bountyId, claimId, patch, authorName, authorEmail, auth }) {
+  if (auth && "pushToken" in auth) {
+    throw new Error(
+      "patch submission must never authenticate with the persistent pushToken \u2014 refusing"
+    );
+  }
+  if (!auth || typeof auth.proofToken !== "string" || auth.proofToken.length === 0) {
+    throw new Error(
+      "patch submission requires a single-use ownership proofToken (purpose claim-push) \u2014 refusing"
+    );
+  }
+  for (const [k, v] of Object.entries({ bountyId, claimId, patch, authorName, authorEmail })) {
+    if (typeof v !== "string" || v.length === 0) throw new Error(`${k} is required`);
+  }
+  return { bountyId, claimId, patch, authorName, authorEmail, proofToken: auth.proofToken };
+}
+function renderRunView(run2, message) {
+  const lines = [];
+  const sha = run2.commitSha ? String(run2.commitSha).slice(0, 10) : null;
+  lines.push(`  run:        ${run2.branch ?? "(no branch)"}${sha ? ` @ ${sha}` : ""}`);
+  lines.push(
+    `  status:     ${run2.status}${run2.conclusion ? ` \xB7 conclusion: ${run2.conclusion}` : ""}`
+  );
+  if (Array.isArray(run2.failingJobs) && run2.failingJobs.length > 0) {
+    lines.push(`  failing:    ${run2.failingJobs.join(", ")}`);
+  }
+  if (run2.previewUrl) lines.push(`  preview:    ${run2.previewUrl}`);
+  if (run2.roundTrips != null) lines.push(`  round trips: ${run2.roundTrips}`);
+  if (run2.logTail) {
+    lines.push("  \u2500\u2500 log tail \u2500\u2500");
+    for (const l of String(run2.logTail).split("\n")) lines.push(`  \u2502 ${l}`);
+  }
+  if (message) lines.push(`  ${message}`);
+  return lines.join("\n");
+}
+function isTerminalRunStatus(status) {
+  return status === "completed" || status === "no-ci";
+}
+async function watchRunsLoop({
+  id,
+  fetchOnce,
+  attempts = RUNS_POLL_ATTEMPTS,
+  intervalMs = RUNS_POLL_INTERVAL_MS,
+  sleep: sleep3 = claimSleep,
+  log = console.log
+}) {
+  for (let i = 1; i <= attempts; i++) {
+    const r = await fetchOnce();
+    if (r.kind === "refusal") {
+      log(`terminalhire claim: ${renderServerRefusal(r.status, r.body)}`);
+      return { outcome: "refused" };
+    }
+    if (r.kind === "network") {
+      log(`  (attempt ${i}/${attempts}: terminalhire unreachable \u2014 ${r.error}; retrying)`);
+    } else {
+      log(`
+  [check ${i}/${attempts}]`);
+      log(renderRunView(r.run, r.message));
+      if (isTerminalRunStatus(r.run.status)) return { outcome: "done", run: r.run };
+    }
+    if (i < attempts) await sleep3(intervalMs);
+  }
+  log(runsGiveUpMessage(id, attempts, intervalMs));
+  return { outcome: "gave-up" };
+}
+function requireFounderLoopClaim(claims, id, verb) {
+  if (!id) {
+    console.error(`Usage: terminalhire claim ${verb} <id>`);
+    process.exit(1);
+  }
+  const claim = claims.findClaim(id);
+  if (!claim) {
+    console.error(`terminalhire claim: no claim with id '${id}'.`);
+    process.exit(1);
+  }
+  if (!claim.approval) {
+    console.error(
+      `terminalhire claim: ${id} is not a founder-posting claim \u2014 '${verb}' only applies to founder postings (OSS claims work through fork + PR: 'claim start' / 'claim submit').`
+    );
+    process.exit(1);
+  }
+  if (!claim.approval.claimId) {
+    console.error(
+      `terminalhire claim: ${id} carries no server claim id \u2014 its registration receipt is incomplete, so the server cannot match this claim to you. Re-record the claim.`
+    );
+    process.exit(1);
+  }
+  return claim;
+}
+async function requireReadPushToken(what) {
+  let stored = null;
+  try {
+    stored = await readPushTokenEnc();
+  } catch {
+  }
+  if (!stored) {
+    console.error(
+      `terminalhire claim: ${what} needs the persistent push token, and none is enrolled on this machine.
+  Enroll once (browser verification): terminalhire claim --push`
+    );
+    process.exit(1);
+  }
+  return stored;
+}
+async function cmdSlice(id, flags = {}) {
+  const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+  const claim = requireFounderLoopClaim(claims, id, "slice");
+  const pushToken = await requireReadPushToken("fetching your granted slice");
+  let res;
+  try {
+    res = await fetch(`${CLAIM_SYNC_BASE}/api/claim/slice`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bountyId: founderPostingIdOf(claim),
+        claimId: claim.approval.claimId,
+        pushToken
+      }),
+      signal: AbortSignal.timeout(3e4)
+    });
+  } catch (err) {
+    console.error(
+      `terminalhire claim: terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}) \u2014 nothing was written.`
+    );
+    process.exit(1);
+  }
+  let body = null;
+  try {
+    body = await res.json();
+  } catch {
+  }
+  if (!res.ok) {
+    console.error(`terminalhire claim: ${renderServerRefusal(res.status, body)}`);
+    process.exit(1);
+  }
+  if (!body || body.ok !== true || !Array.isArray(body.files)) {
+    console.error(
+      "terminalhire claim: malformed slice response from the server \u2014 nothing was written."
+    );
+    process.exit(1);
+  }
+  let dest = flags.dir ? pathResolve(String(flags.dir)) : sliceWorkDirFor(claim.id);
+  if (existsSync8(dest) && readdirSync2(dest).length > 0) {
+    console.error(
+      `terminalhire claim: ${dest} already has content \u2014 refusing to overwrite it.
+  Re-fetching is fine, but into a fresh directory: terminalhire claim slice ${id} --dir <path>`
+    );
+    process.exit(1);
+  }
+  mkdirSync3(dest, { recursive: true });
+  const { written, unavailable } = writeSliceFiles(dest, body.files);
+  try {
+    if (claim.approval.mode === "approval-only") {
+      const { acknowledgeApprovedClaim: acknowledgeApprovedClaim2 } = await Promise.resolve().then(() => (init_approved_claims_badge(), approved_claims_badge_exports));
+      const { readCacheEntry: readCacheEntry2, updateIndexCache: updateIndexCache2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
+      updateIndexCache2({
+        approvedClaims: acknowledgeApprovedClaim2(
+          claim.approval.claimId,
+          (readCacheEntry2() ?? {}).approvedClaims
+        )
+      });
+    }
+  } catch {
+  }
+  console.log(`
+\u2713 Slice received: ${body.title ?? claim.title}`);
+  console.log(
+    `  tier: ${body.tier} \xB7 ${written.length} file(s) written of ${body.totalCount} granted` + (body.excludedCount ? ` (${body.excludedCount} excluded by the founder's slice)` : "")
+  );
+  for (const u of unavailable) {
+    console.log(`  \u26A0 ${u.path} \u2014 no file written: ${u.reason}`);
+  }
+  if (body.spec) {
+    console.log("\n  \u2500\u2500 spec \u2500\u2500");
+    for (const l of String(body.spec).split("\n")) console.log(`  ${l}`);
+  }
+  const branch = `claim/${String(claim.id).replace(/[^A-Za-z0-9._-]/g, "-")}`;
+  try {
+    await sh("git", ["-C", dest, "init"]);
+    await sh("git", ["-C", dest, "add", "-A"]);
+    await sh("git", [
+      "-C",
+      dest,
+      "-c",
+      "user.name=terminalhire",
+      "-c",
+      "user.email=slice@terminalhire.com",
+      "commit",
+      "--no-verify",
+      "-m",
+      `slice baseline for ${claim.id}`
+    ]);
+    await sh("git", ["-C", dest, "checkout", "-b", branch]);
+    dest = await sh("git", ["-C", dest, "rev-parse", "--show-toplevel"]);
+  } catch (err) {
+    console.error(
+      `terminalhire claim: slice written to ${dest}, but the git baseline could not be created (${err.stderr || err.message || err}) \u2014 'claim submit' needs it to compute your patch.`
+    );
+    process.exit(1);
+  }
+  claims.updateClaim(claim.id, { worktreePath: dest, branch, state: "working" });
+  console.log(`
+  worktree: ${dest}`);
+  console.log(`  branch:   ${branch}`);
+  console.log(
+    `
+  Author your change there (commit as you go), then:  terminalhire claim submit ${claim.id}`
+  );
+}
+async function cmdRuns(id, flags = {}) {
+  const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+  const claim = requireFounderLoopClaim(claims, id, "runs");
+  const pushToken = await requireReadPushToken("reading CI results");
+  const fetchOnce = async () => {
+    let res;
+    try {
+      res = await fetch(`${CLAIM_SYNC_BASE}/api/patch/runs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bountyId: founderPostingIdOf(claim),
+          claimId: claim.approval.claimId,
+          pushToken
+        }),
+        signal: AbortSignal.timeout(3e4)
+      });
+    } catch (err) {
+      return { kind: "network", error: err instanceof Error ? err.message : String(err) };
+    }
+    let body = null;
+    try {
+      body = await res.json();
+    } catch {
+    }
+    if (!res.ok) return { kind: "refusal", status: res.status, body };
+    if (!body || body.ok !== true || !body.run) {
+      return { kind: "refusal", status: res.status, body: { error: "malformed-response" } };
+    }
+    return { kind: "ok", run: body.run, message: body.message ?? null };
+  };
+  if (flags.watch) {
+    console.log(
+      `  Watching CI for ${id} \u2014 up to ${RUNS_POLL_ATTEMPTS} checks, one every ${Math.round(RUNS_POLL_INTERVAL_MS / 1e3)}s.`
+    );
+    const out = await watchRunsLoop({ id, fetchOnce });
+    if (out.outcome === "refused") process.exit(1);
+    return;
+  }
+  const r = await fetchOnce();
+  if (r.kind === "network") {
+    console.error(`terminalhire claim: terminalhire is unreachable (${r.error}).`);
+    process.exit(1);
+  }
+  if (r.kind === "refusal") {
+    console.error(`terminalhire claim: ${renderServerRefusal(r.status, r.body)}`);
+    process.exit(1);
+  }
+  console.log(`
+${claim.title}`);
+  console.log(renderRunView(r.run, r.message));
+  if (!isTerminalRunStatus(r.run.status)) {
+    console.log(`
+  Still running \u2014 poll it: terminalhire claim runs ${id} --watch`);
+  }
+}
+async function submitFounderPatch({ claims, claim, id, wt, flags }) {
+  let roots;
+  try {
+    roots = (await sh("git", ["-C", wt, "rev-list", "--max-parents=0", "HEAD"])).split("\n").filter(Boolean);
+  } catch (err) {
+    console.error(
+      `terminalhire claim: could not read the slice baseline in ${wt} (${err.stderr || err.message || err}).`
+    );
+    process.exit(1);
+  }
+  if (roots.length !== 1) {
+    console.error(
+      `terminalhire claim: ${wt} has ${roots.length} root commits \u2014 cannot determine the slice baseline to diff against. Re-fetch the slice into a fresh directory: terminalhire claim slice ${id} --dir <path>`
+    );
+    process.exit(1);
+  }
+  const base = roots[0];
+  let patch;
+  try {
+    ({ stdout: patch } = await pExecFile("git", ["-C", wt, "diff", base, "HEAD"], {
+      shell: false,
+      maxBuffer: 16 * 1024 * 1024
+    }));
+    patch = String(patch);
+  } catch (err) {
+    console.error(
+      `terminalhire claim: could not compute the patch (${err.stderr || err.message || err}).`
+    );
+    process.exit(1);
+  }
+  if (!patch.trim()) {
+    console.error(
+      "terminalhire claim: no changes vs the delivered slice \u2014 nothing to submit. Commit your work first."
+    );
+    process.exit(1);
+  }
+  const touched = (await sh("git", ["-C", wt, "diff", "--name-only", base, "HEAD"])).split("\n").filter(Boolean);
+  const authorName = await sh("git", ["-C", wt, "log", "-1", "--format=%an"]);
+  const authorEmail = await sh("git", ["-C", wt, "log", "-1", "--format=%ae"]);
+  console.log(`
+  SUBMIT \xB7 ${claim.title}`);
+  console.log("  delivery: platform-applied patch (founder posting) \u2014 no fork, no push,");
+  console.log("            no GitHub access; terminalhire applies it server-side.");
+  console.log(`  worktree: ${wt}`);
+  console.log(`  files:    ${touched.length} changed \u2014 ${touched.join(", ")}`);
+  console.log(
+    `  author:   ${authorName} <${authorEmail}> (from your HEAD commit; sent as patch authorship)`
+  );
+  let ok;
+  if (flags.yes) {
+    console.log("\n  --yes supplied \u2014 skipping interactive confirm.");
+    ok = true;
+  } else if (!process.stdin.isTTY) {
+    console.error(
+      "\nterminalhire claim: stdin is not a TTY \u2014 cannot ask for confirmation.\n  Re-run with --yes to confirm non-interactively (a human must type it;\n  agents/skills must never pass --yes)."
+    );
+    process.exit(1);
+  } else {
+    ok = await confirm(`
+  Submit this patch to the founder's posting via terminalhire? (y/N) `);
+  }
+  if (!ok) {
+    console.log("Aborted \u2014 nothing submitted.");
+    return;
+  }
+  const proofToken = await mintRegistrationProof();
+  if (!proofToken) {
+    console.error(
+      "terminalhire claim: could not verify your GitHub identity with terminalhire (see above) \u2014 nothing was submitted."
+    );
+    process.exit(1);
+  }
+  let submission;
+  try {
+    submission = buildPatchSubmission({
+      bountyId: founderPostingIdOf(claim),
+      claimId: claim.approval.claimId,
+      patch,
+      authorName,
+      authorEmail,
+      auth: { proofToken }
+    });
+  } catch (err) {
+    console.error(`terminalhire claim: ${err.message}`);
+    process.exit(1);
+  }
+  console.log("\n  Submitting the patch through terminalhire...");
+  let res;
+  try {
+    res = await fetch(`${CLAIM_SYNC_BASE}/api/patch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(submission),
+      // The server applies the patch and pushes the branch inside this request —
+      // give it more room than a plain read.
+      signal: AbortSignal.timeout(6e4)
+    });
+  } catch (err) {
+    console.error(
+      `terminalhire claim: terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}) \u2014 nothing was submitted.`
+    );
+    process.exit(1);
+  }
+  let body = null;
+  try {
+    body = await res.json();
+  } catch {
+  }
+  if (!res.ok) {
+    console.error(`terminalhire claim: ${renderServerRefusal(res.status, body)}`);
+    process.exit(1);
+  }
+  if (!body || body.ok !== true) {
+    console.error("terminalhire claim: malformed patch response from the server.");
+    process.exit(1);
+  }
+  claims.updateClaim(id, { state: "submitted" });
+  console.log(`
+\u2713 Patch applied by terminalhire`);
+  console.log(`  branch:    ${body.branch}`);
+  console.log(`  commit:    ${body.commitSha}`);
+  if (Array.isArray(body.touchedPaths)) console.log(`  touched:   ${body.touchedPaths.join(", ")}`);
+  console.log(`
+  Read the CI result:  terminalhire claim runs ${id} --watch`);
+}
 async function cmdSubmit(id, flags = {}) {
   const worktreeOverride = flags.worktree;
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -27279,7 +28334,7 @@ async function cmdSubmit(id, flags = {}) {
     console.error(`terminalhire claim: no claim with id '${id}'.`);
     process.exit(1);
   }
-  if (claim.state !== "working" && claim.state !== "ready") {
+  if (!SUBMIT_ACCEPTS.includes(claim.state)) {
     console.error(
       `terminalhire claim: ${id} is '${claim.state}'. Submit runs once work has started ('working', via 'claim start') or the review gate cleared it ('ready'). Start it first:
   terminalhire claim start ${id}`
@@ -27370,6 +28425,10 @@ async function cmdSubmit(id, flags = {}) {
     ]);
     untrackedFiles = untrackedOut.split("\n").filter((l) => l.startsWith("?? ")).map((l) => l.slice(3).trim()).filter(Boolean);
   } catch {
+  }
+  if (claim.approval) {
+    await submitFounderPatch({ claims, claim, id, wt, flags });
+    return;
   }
   let ghUser;
   try {
@@ -27479,7 +28538,7 @@ async function cmdSubmit(id, flags = {}) {
   const head = `${ghUser}:${claim.branch}`;
   const title = flags.title || claim.title;
   const noBody = Boolean(flags["no-body"]);
-  const prBodyPath = join16(wt, "PR-BODY.md");
+  const prBodyPath = join17(wt, "PR-BODY.md");
   const bodySource = pickBodySource({
     bodyFileFlag: flags["body-file"],
     noBody,
@@ -27489,7 +28548,7 @@ async function cmdSubmit(id, flags = {}) {
   let bodyDescr;
   if (bodySource === "body-file") {
     try {
-      bodyText = readFileSync10(flags["body-file"], "utf8");
+      bodyText = readFileSync11(flags["body-file"], "utf8");
     } catch (err) {
       console.error(
         `terminalhire claim: could not read --body-file '${flags["body-file"]}': ${err.message ?? err}`
@@ -27498,7 +28557,7 @@ async function cmdSubmit(id, flags = {}) {
     }
     bodyDescr = `--body-file ${flags["body-file"]}`;
   } else if (bodySource === "pr-body") {
-    bodyText = readFileSync10(prBodyPath, "utf8");
+    bodyText = readFileSync11(prBodyPath, "utf8");
     bodyDescr = "PR-BODY.md (auto-detected)";
   } else {
     bodyDescr = "(default: Closes + disclosure)";
@@ -27714,14 +28773,14 @@ function claimSleep(ms) {
 }
 function readClaimPushMarker() {
   try {
-    return existsSync8(CLAIM_PUSH_MARKER) ? JSON.parse(readFileSync10(CLAIM_PUSH_MARKER, "utf8")) : null;
+    return existsSync8(CLAIM_PUSH_MARKER) ? JSON.parse(readFileSync11(CLAIM_PUSH_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
 }
 function writeClaimPushMarker(marker) {
-  ensureStateDir(TERMINALHIRE_DIR10);
-  writeFileSync9(CLAIM_PUSH_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  ensureStateDir(TERMINALHIRE_DIR11);
+  writeFileSync10(CLAIM_PUSH_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearClaimPushMarker() {
   try {
@@ -28195,6 +29254,15 @@ async function run() {
       case "attach":
         await cmdAttach(positional[0], flags.worktree, flags.branch);
         break;
+      // Founder-posting dev loop (phase 5b): receive the granted slice / read CI
+      // results. NOT a second submit verb — founder submission branches INSIDE
+      // `submit` on posting type.
+      case "slice":
+        await cmdSlice(positional[0], flags);
+        break;
+      case "runs":
+        await cmdRuns(positional[0], flags);
+        break;
       case "submit":
         await cmdSubmit(positional[0], flags);
         break;
@@ -28206,7 +29274,7 @@ async function run() {
         break;
       default:
         console.error(
-          `terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | list | status | update | submit | audit | release`
+          `terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | slice | list | status | update | submit | runs | audit | release`
         );
         process.exit(1);
     }
@@ -28218,12 +29286,17 @@ async function run() {
 export {
   AI_DISCLOSURE_NOTE,
   CLAIM_CONSENT_VERSION,
+  SUBMIT_ACCEPTS,
   backgroundEnableFailed,
   buildAssignmentComment,
+  buildPatchSubmission,
   buildStakeComment,
   buildStandDownComment,
   buildSubmitBody,
   cmdRecord,
+  cmdRuns,
+  cmdSlice,
+  cmdSubmit,
   countOpenPRsReferencingIssue,
   diffContention,
   explicitForkConsent,
@@ -28231,25 +29304,36 @@ export {
   findClaimableInCache,
   fmtAge,
   fmtContestedWarning,
+  founderPostingIdOf,
   isContested,
   isStrayArgShortRefClaim,
+  isTerminalRunStatus,
   isVerblessShortRefClaim,
   listMergedPRsReferencingIssue,
   listOpenPRsReferencingIssue,
   matchReferencingPrs,
+  nextStepFor,
   normalizeIntent,
   pickBodySource,
   pickExistingPr,
+  printNextSteps,
+  renderRunView,
+  renderServerRefusal,
   resolveBounty,
   resolveSubmitWorktree,
   revokeFailureAction,
   run,
+  runsGiveUpMessage,
+  safeSliceRelPath,
   selectCompetingPrs,
   selectPushRemote,
   shouldRequestAssignment,
+  sliceWorkDirFor,
   stakeDecision,
   startBranchFor,
-  workDirFor
+  watchRunsLoop,
+  workDirFor,
+  writeSliceFiles
 };
 /*! Bundled license information:
 

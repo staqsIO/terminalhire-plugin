@@ -99,6 +99,22 @@ function withClaimsLock(fn) {
     rmSync(LOCK_DIR, { recursive: true, force: true });
   }
 }
+var CLAIM_STATES = Object.freeze([
+  "claimed",
+  // recorded, not started
+  "working",
+  // background executor running / work in progress
+  "in-review",
+  // gate ran / dev reviewing the diff
+  "ready",
+  // passed review, cleared to submit
+  "submitted",
+  // PR opened on the source platform (awaiting maintainer)
+  "merged",
+  // PR merged — accepted; counts toward the metric
+  "abandoned"
+  // released, or PR closed unmerged
+]);
 var PUSHED_CLAIM_FIELDS = [
   "kind",
   "repoFullName",
@@ -254,14 +270,25 @@ function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
     return true;
   });
 }
+function countAwaitingFounderApproval(claims = readClaims()) {
+  try {
+    return claims.filter(
+      (c) => c.approval?.mode === "approval-only" && c.approval?.state === "pending"
+    ).length;
+  } catch {
+    return 0;
+  }
+}
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
 export {
+  CLAIM_STATES,
   PUSHED_CLAIM_FIELDS,
   acceptedPRRate,
+  countAwaitingFounderApproval,
   findClaim,
   listClaims,
   nextPolledState,
