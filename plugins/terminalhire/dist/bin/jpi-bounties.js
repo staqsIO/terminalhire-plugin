@@ -11387,8 +11387,7 @@ function gate(openIds, seenIds) {
 function computeFounderPaid(index, previous) {
   const open = openPaidIds(index);
   const prior = previous && previous.acknowledged;
-  if (!Array.isArray(prior)) return { count: 0, acknowledged: open };
-  return gate(open, prior);
+  return gate(open, Array.isArray(prior) ? prior : []);
 }
 function acknowledgeFounderPaid({ shown = [], open = [], previous } = {}) {
   const prior = previous && Array.isArray(previous.acknowledged) ? previous.acknowledged : [];
@@ -11465,7 +11464,7 @@ function readIndexCache() {
   }
 }
 function writeIndexCache(index) {
-  updateIndexCache({ index });
+  updateIndexCache({ index, indexETag: "" });
 }
 async function fetchIndex() {
   const cached = readIndexCache();

@@ -13710,7 +13710,7 @@ function readIndexCache() {
   }
 }
 function writeIndexCache(index) {
-  updateIndexCache({ index });
+  updateIndexCache({ index, indexETag: "" });
 }
 async function fetchIndex() {
   const cached2 = readIndexCache();
@@ -15124,8 +15124,7 @@ function gate(openIds, seenIds) {
 function computeFounderPaid(index, previous) {
   const open3 = openPaidIds(index);
   const prior = previous && previous.acknowledged;
-  if (!Array.isArray(prior)) return { count: 0, acknowledged: open3 };
-  return gate(open3, prior);
+  return gate(open3, Array.isArray(prior) ? prior : []);
 }
 function acknowledgeFounderPaid({ shown = [], open: open3 = [], previous } = {}) {
   const prior = previous && Array.isArray(previous.acknowledged) ? previous.acknowledged : [];
@@ -15165,7 +15164,7 @@ function readIndexCache2() {
   }
 }
 function writeIndexCache2(index) {
-  updateIndexCache({ index });
+  updateIndexCache({ index, indexETag: "" });
 }
 async function fetchIndex2() {
   const cached2 = readIndexCache2();
@@ -15659,7 +15658,7 @@ function readIndexCache3() {
   }
 }
 function writeIndexCache3(index) {
-  updateIndexCache({ index });
+  updateIndexCache({ index, indexETag: "" });
 }
 async function fetchIndex3(fetchImpl, useCache = true) {
   if (useCache) {
@@ -63850,18 +63849,41 @@ import { hostname, homedir as osHomedir } from "os";
 async function run26() {
   try {
     let index;
+    let indexETag;
+    const cachedForRevalidation = readCacheEntry() ?? {};
+    let sendValidator = typeof cachedForRevalidation.indexETag === "string" && cachedForRevalidation.indexETag !== "";
     for (let attempt2 = 1; ; attempt2++) {
       try {
         const res = await fetch(`${API_URL8}/api/index`, {
           signal: AbortSignal.timeout(15e3),
-          headers: { Accept: "application/json" }
+          headers: sendValidator ? { Accept: "application/json", "If-None-Match": cachedForRevalidation.indexETag } : { Accept: "application/json" }
         });
+        if (res.status === 304) {
+          const cached2 = cachedForRevalidation.index;
+          if (cached2 && Array.isArray(cached2.jobs)) {
+            index = cached2;
+            indexETag = cachedForRevalidation.indexETag;
+            break;
+          }
+          sendValidator = false;
+          if (attempt2 >= 2) {
+            process.stderr.write(
+              "terminalhire refresh: 304 with no usable cached index \u2014 giving up this tick\n"
+            );
+            process.exit(1);
+          }
+          process.stderr.write(
+            "terminalhire refresh: 304 but the cached index is unusable (re-fetching in full)\n"
+          );
+          continue;
+        }
         if (!res.ok) {
           process.stderr.write(`terminalhire refresh: index fetch failed (HTTP ${res.status})
 `);
           process.exit(1);
         }
         index = await res.json();
+        indexETag = res.headers.get("etag") ?? "";
         break;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -64139,6 +64161,7 @@ async function run26() {
     };
     if (founderPaid) cacheEntry.founderPaid = founderPaid;
     if (approvedClaims) cacheEntry.approvedClaims = approvedClaims;
+    cacheEntry.indexETag = indexETag ?? "";
     updateIndexCache(cacheEntry);
     try {
       const { readSpinnerConfig: readSpinnerConfig2, renderRefreshSurface: renderRefreshSurface2 } = await Promise.resolve().then(() => (init_spinner(), spinner_exports));

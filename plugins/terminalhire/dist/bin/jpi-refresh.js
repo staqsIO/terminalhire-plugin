@@ -12739,8 +12739,7 @@ function gate(openIds, seenIds) {
 function computeFounderPaid(index, previous) {
   const open = openPaidIds(index);
   const prior = previous && previous.acknowledged;
-  if (!Array.isArray(prior)) return { count: 0, acknowledged: open };
-  return gate(open, prior);
+  return gate(open, Array.isArray(prior) ? prior : []);
 }
 function acknowledgeFounderPaid({ shown = [], open = [], previous } = {}) {
   const prior = previous && Array.isArray(previous.acknowledged) ? previous.acknowledged : [];
@@ -13310,18 +13309,41 @@ var MMR_K = 8;
 async function run() {
   try {
     let index;
+    let indexETag;
+    const cachedForRevalidation = readCacheEntry() ?? {};
+    let sendValidator = typeof cachedForRevalidation.indexETag === "string" && cachedForRevalidation.indexETag !== "";
     for (let attempt = 1; ; attempt++) {
       try {
         const res = await fetch(`${API_URL2}/api/index`, {
           signal: AbortSignal.timeout(15e3),
-          headers: { Accept: "application/json" }
+          headers: sendValidator ? { Accept: "application/json", "If-None-Match": cachedForRevalidation.indexETag } : { Accept: "application/json" }
         });
+        if (res.status === 304) {
+          const cached = cachedForRevalidation.index;
+          if (cached && Array.isArray(cached.jobs)) {
+            index = cached;
+            indexETag = cachedForRevalidation.indexETag;
+            break;
+          }
+          sendValidator = false;
+          if (attempt >= 2) {
+            process.stderr.write(
+              "terminalhire refresh: 304 with no usable cached index \u2014 giving up this tick\n"
+            );
+            process.exit(1);
+          }
+          process.stderr.write(
+            "terminalhire refresh: 304 but the cached index is unusable (re-fetching in full)\n"
+          );
+          continue;
+        }
         if (!res.ok) {
           process.stderr.write(`terminalhire refresh: index fetch failed (HTTP ${res.status})
 `);
           process.exit(1);
         }
         index = await res.json();
+        indexETag = res.headers.get("etag") ?? "";
         break;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -13599,6 +13621,7 @@ async function run() {
     };
     if (founderPaid) cacheEntry.founderPaid = founderPaid;
     if (approvedClaims) cacheEntry.approvedClaims = approvedClaims;
+    cacheEntry.indexETag = indexETag ?? "";
     updateIndexCache(cacheEntry);
     try {
       const { readSpinnerConfig: readSpinnerConfig2, renderRefreshSurface: renderRefreshSurface2 } = await Promise.resolve().then(() => (init_spinner(), spinner_exports));

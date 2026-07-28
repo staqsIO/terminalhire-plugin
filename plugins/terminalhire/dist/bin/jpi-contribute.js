@@ -4095,7 +4095,7 @@ function readIndexCache() {
   }
 }
 function writeIndexCache(index) {
-  updateIndexCache({ index });
+  updateIndexCache({ index, indexETag: "" });
 }
 async function fetchIndex(fetchImpl, useCache = true) {
   if (useCache) {

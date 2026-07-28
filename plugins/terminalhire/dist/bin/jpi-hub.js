@@ -12541,7 +12541,7 @@ function readIndexCache() {
   }
 }
 function writeIndexCache(index) {
-  updateIndexCache({ index });
+  updateIndexCache({ index, indexETag: "" });
 }
 async function fetchIndex() {
   const cached = readIndexCache();
@@ -12626,7 +12626,7 @@ function readIndexCache2() {
   }
 }
 function writeIndexCache2(index) {
-  updateIndexCache({ index });
+  updateIndexCache({ index, indexETag: "" });
 }
 async function fetchIndex2() {
   const cached = readIndexCache2();
