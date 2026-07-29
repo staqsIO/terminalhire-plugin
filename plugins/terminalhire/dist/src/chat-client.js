@@ -615,11 +615,11 @@ var INTRO_ALLOWED_SET = new Set(INTRO_ALLOWED_FIELDS);
 var INTRO_PENDING_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
 var INTRO_ACCEPTED_TTL_MS = 365 * 24 * 60 * 60 * 1e3;
 
-// ../../../term-333/node_modules/@noble/hashes/esm/cryptoNode.js
+// ../../node_modules/@noble/hashes/esm/cryptoNode.js
 import * as nc from "crypto";
 var crypto = nc && typeof nc === "object" && "webcrypto" in nc ? nc.webcrypto : nc && typeof nc === "object" && "randomBytes" in nc ? nc : void 0;
 
-// ../../../term-333/node_modules/@noble/hashes/esm/utils.js
+// ../../node_modules/@noble/hashes/esm/utils.js
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -746,7 +746,7 @@ function randomBytes(bytesLength = 32) {
   throw new Error("crypto.getRandomValues must be defined");
 }
 
-// ../../../term-333/node_modules/@noble/hashes/esm/_md.js
+// ../../node_modules/@noble/hashes/esm/_md.js
 function setBigUint64(view, byteOffset, value, isLE2) {
   if (typeof view.setBigUint64 === "function")
     return view.setBigUint64(byteOffset, value, isLE2);
@@ -868,7 +868,7 @@ var SHA512_IV = /* @__PURE__ */ Uint32Array.from([
   327033209
 ]);
 
-// ../../../term-333/node_modules/@noble/hashes/esm/_u64.js
+// ../../node_modules/@noble/hashes/esm/_u64.js
 var U32_MASK64 = /* @__PURE__ */ BigInt(2 ** 32 - 1);
 var _32n = /* @__PURE__ */ BigInt(32);
 function fromBig(n, le = false) {
@@ -903,7 +903,7 @@ var add4H = (low, Ah, Bh, Ch, Dh) => Ah + Bh + Ch + Dh + (low / 2 ** 32 | 0) | 0
 var add5L = (Al, Bl, Cl, Dl, El) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0) + (Dl >>> 0) + (El >>> 0);
 var add5H = (low, Ah, Bh, Ch, Dh, Eh) => Ah + Bh + Ch + Dh + Eh + (low / 2 ** 32 | 0) | 0;
 
-// ../../../term-333/node_modules/@noble/hashes/esm/sha2.js
+// ../../node_modules/@noble/hashes/esm/sha2.js
 var K512 = /* @__PURE__ */ (() => split([
   "0x428a2f98d728ae22",
   "0x7137449123ef65cd",
@@ -1103,7 +1103,7 @@ var SHA512 = class extends HashMD {
 };
 var sha512 = /* @__PURE__ */ createHasher(() => new SHA512());
 
-// ../../../term-333/node_modules/@noble/curves/esm/utils.js
+// ../../node_modules/@noble/curves/esm/utils.js
 var _0n = /* @__PURE__ */ BigInt(0);
 var _1n = /* @__PURE__ */ BigInt(1);
 function _abool2(value, title = "") {
@@ -1216,7 +1216,7 @@ function memoized(fn) {
   };
 }
 
-// ../../../term-333/node_modules/@noble/curves/esm/abstract/modular.js
+// ../../node_modules/@noble/curves/esm/abstract/modular.js
 var _0n2 = BigInt(0);
 var _1n2 = BigInt(1);
 var _2n = /* @__PURE__ */ BigInt(2);
@@ -1542,7 +1542,7 @@ function Field(ORDER, bitLenOrOpts, isLE2 = false, opts = {}) {
   return Object.freeze(f);
 }
 
-// ../../../term-333/node_modules/@noble/curves/esm/abstract/curve.js
+// ../../node_modules/@noble/curves/esm/abstract/curve.js
 var _0n3 = BigInt(0);
 var _1n3 = BigInt(1);
 function negateCt(condition, item) {
@@ -1805,7 +1805,7 @@ function _createCurveFields(type, CURVE, curveOpts = {}, FpFnLE) {
   return { CURVE, Fp: Fp2, Fn: Fn2 };
 }
 
-// ../../../term-333/node_modules/@noble/curves/esm/abstract/edwards.js
+// ../../node_modules/@noble/curves/esm/abstract/edwards.js
 var _0n4 = BigInt(0);
 var _1n4 = BigInt(1);
 var _2n2 = BigInt(2);
@@ -2356,7 +2356,7 @@ function twistedEdwards(c) {
   return _eddsa_new_output_to_legacy(c, EDDSA);
 }
 
-// ../../../term-333/node_modules/@noble/curves/esm/abstract/montgomery.js
+// ../../node_modules/@noble/curves/esm/abstract/montgomery.js
 var _0n5 = BigInt(0);
 var _1n5 = BigInt(1);
 var _2n3 = BigInt(2);
@@ -2476,7 +2476,7 @@ function montgomery(curveDef) {
   };
 }
 
-// ../../../term-333/node_modules/@noble/curves/esm/ed25519.js
+// ../../node_modules/@noble/curves/esm/ed25519.js
 var _0n6 = /* @__PURE__ */ BigInt(0);
 var _1n6 = BigInt(1);
 var _2n4 = BigInt(2);
@@ -2711,7 +2711,7 @@ _RistrettoPoint.ZERO = /* @__PURE__ */ (() => new _RistrettoPoint(ed25519.Point.
 _RistrettoPoint.Fp = /* @__PURE__ */ (() => Fp)();
 _RistrettoPoint.Fn = /* @__PURE__ */ (() => Fn)();
 
-// ../../../term-333/node_modules/@noble/ciphers/esm/utils.js
+// ../../node_modules/@noble/ciphers/esm/utils.js
 function isBytes2(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -2867,7 +2867,7 @@ function copyBytes2(bytes) {
   return Uint8Array.from(bytes);
 }
 
-// ../../../term-333/node_modules/@noble/ciphers/esm/_arx.js
+// ../../node_modules/@noble/ciphers/esm/_arx.js
 var _utf8ToBytes = (str) => Uint8Array.from(str.split("").map((c) => c.charCodeAt(0)));
 var sigma16 = _utf8ToBytes("expand 16-byte k");
 var sigma32 = _utf8ToBytes("expand 32-byte k");
@@ -2975,7 +2975,7 @@ function createCipher(core, opts) {
   };
 }
 
-// ../../../term-333/node_modules/@noble/ciphers/esm/_poly1305.js
+// ../../node_modules/@noble/ciphers/esm/_poly1305.js
 var u8to16 = (a, i) => a[i++] & 255 | (a[i++] & 255) << 8;
 var Poly1305 = class {
   constructor(key) {
@@ -3230,7 +3230,7 @@ function wrapConstructorWithKey(hashCons) {
 }
 var poly1305 = wrapConstructorWithKey((key) => new Poly1305(key));
 
-// ../../../term-333/node_modules/@noble/ciphers/esm/chacha.js
+// ../../node_modules/@noble/ciphers/esm/chacha.js
 function chachaCore(s, k, n, out, cnt, rounds = 20) {
   let y00 = s[0], y01 = s[1], y02 = s[2], y03 = s[3], y04 = k[0], y05 = k[1], y06 = k[2], y07 = k[3], y08 = k[4], y09 = k[5], y10 = k[6], y11 = k[7], y12 = cnt, y13 = n[0], y14 = n[1], y15 = n[2];
   let x00 = y00, x01 = y01, x02 = y02, x03 = y03, x04 = y04, x05 = y05, x06 = y06, x07 = y07, x08 = y08, x09 = y09, x10 = y10, x11 = y11, x12 = y12, x13 = y13, x14 = y14, x15 = y15;

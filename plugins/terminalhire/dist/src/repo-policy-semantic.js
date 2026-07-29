@@ -31,7 +31,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/tslib.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/tslib.mjs
 function __classPrivateFieldSet(receiver, state, value, kind, f) {
   if (kind === "m")
     throw new TypeError("Private method is not writable");
@@ -49,15 +49,15 @@ function __classPrivateFieldGet(receiver, state, kind, f) {
   return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
 }
 var init_tslib = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/tslib.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/tslib.mjs"() {
     "use strict";
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/uuid.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/utils/uuid.mjs
 var uuid4;
 var init_uuid = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/uuid.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/utils/uuid.mjs"() {
     "use strict";
     uuid4 = function() {
       const { crypto: crypto2 } = globalThis;
@@ -72,7 +72,7 @@ var init_uuid = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/errors.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/errors.mjs
 function isAbortError(err) {
   return typeof err === "object" && err !== null && // Spec-compliant fetch implementations
   ("name" in err && err.name === "AbortError" || // Expo fetch
@@ -80,7 +80,7 @@ function isAbortError(err) {
 }
 var castToError;
 var init_errors = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/errors.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/errors.mjs"() {
     "use strict";
     castToError = (err) => {
       if (err instanceof Error)
@@ -109,10 +109,10 @@ var init_errors = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/core/error.mjs
+// ../../node_modules/@anthropic-ai/sdk/core/error.mjs
 var AnthropicError, APIError, APIUserAbortError, APIConnectionError, APIConnectionTimeoutError, RetryableError, BadRequestError, AuthenticationError, PermissionDeniedError, NotFoundError, ConflictError, UnprocessableEntityError, RateLimitError, InternalServerError;
 var init_error = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/core/error.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/core/error.mjs"() {
     "use strict";
     init_errors();
     AnthropicError = class extends Error {
@@ -215,7 +215,7 @@ var init_error = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/values.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/utils/values.mjs
 function maybeObj(x) {
   if (typeof x !== "object") {
     return {};
@@ -234,7 +234,7 @@ function hasOwn(obj, key) {
 }
 var startsWithSchemeRegexp, isAbsoluteURL, isArray, isReadonlyArray, validatePositiveInteger, safeJSON;
 var init_values = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/values.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/utils/values.mjs"() {
     "use strict";
     init_error();
     startsWithSchemeRegexp = /^[a-z][a-z0-9+.-]*:/i;
@@ -262,10 +262,10 @@ var init_values = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/sleep.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/utils/sleep.mjs
 var sleep;
 var init_sleep = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/sleep.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/utils/sleep.mjs"() {
     "use strict";
     sleep = (ms, signal) => new Promise((resolve4) => {
       if (signal?.aborted)
@@ -283,16 +283,16 @@ var init_sleep = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/version.mjs
+// ../../node_modules/@anthropic-ai/sdk/version.mjs
 var VERSION;
 var init_version = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/version.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/version.mjs"() {
     "use strict";
     VERSION = "0.112.3";
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/detect-platform.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/detect-platform.mjs
 function getDetectedPlatform() {
   if (typeof Deno !== "undefined" && Deno.build != null) {
     return "deno";
@@ -330,7 +330,7 @@ function getBrowserInfo() {
 }
 var isRunningInBrowser, getPlatformProperties, normalizeArch, normalizePlatform, _platformHeaders, getPlatformHeaders;
 var init_detect_platform = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/detect-platform.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/detect-platform.mjs"() {
     "use strict";
     init_version();
     isRunningInBrowser = () => {
@@ -432,7 +432,7 @@ var init_detect_platform = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/shims.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/shims.mjs
 function getDefaultFetch() {
   if (typeof fetch !== "undefined") {
     return fetch;
@@ -504,15 +504,15 @@ async function CancelReadableStream(stream) {
   await cancelPromise;
 }
 var init_shims = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/shims.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/shims.mjs"() {
     "use strict";
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/request-options.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/request-options.mjs
 var BetaFallbackState, FallbackEncoder;
 var init_request_options = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/request-options.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/request-options.mjs"() {
     "use strict";
     BetaFallbackState = class {
     };
@@ -527,10 +527,10 @@ var init_request_options = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/qs/formats.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/qs/formats.mjs
 var default_format, default_formatter, formatters, RFC1738;
 var init_formats = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/qs/formats.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/qs/formats.mjs"() {
     "use strict";
     default_format = "RFC3986";
     default_formatter = (v) => String(v);
@@ -542,7 +542,7 @@ var init_formats = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/qs/utils.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/qs/utils.mjs
 function is_buffer(obj) {
   if (!obj || typeof obj !== "object") {
     return false;
@@ -561,7 +561,7 @@ function maybe_map(val, fn) {
 }
 var has, hex_table, limit, encode;
 var init_utils = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/qs/utils.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/qs/utils.mjs"() {
     "use strict";
     init_formats();
     init_values();
@@ -629,7 +629,7 @@ var init_utils = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/qs/stringify.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/qs/stringify.mjs
 function is_non_nullish_primitive(v) {
   return typeof v === "string" || typeof v === "number" || typeof v === "boolean" || typeof v === "symbol" || typeof v === "bigint";
 }
@@ -869,7 +869,7 @@ function stringify(object, opts = {}) {
 }
 var array_prefix_generators, push_to_array, toISOString, defaults, sentinel;
 var init_stringify = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/qs/stringify.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/qs/stringify.mjs"() {
     "use strict";
     init_utils();
     init_formats();
@@ -915,18 +915,18 @@ var init_stringify = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/query.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/utils/query.mjs
 function stringifyQuery(query) {
   return stringify(query, { arrayFormat: "brackets" });
 }
 var init_query = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/query.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/utils/query.mjs"() {
     "use strict";
     init_stringify();
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/types.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/credentials/types.mjs
 function requireSecureTokenEndpoint(baseURL) {
   if (!baseURL)
     return;
@@ -1073,7 +1073,7 @@ async function readLimitedText(resp) {
 }
 var GRANT_TYPE_JWT_BEARER, GRANT_TYPE_REFRESH_TOKEN, TOKEN_ENDPOINT, OAUTH_API_BETA_HEADER, FEDERATION_BETA_HEADER, ADVISORY_REFRESH_THRESHOLD_IN_SECONDS, MANDATORY_REFRESH_THRESHOLD_IN_SECONDS, ADVISORY_REFRESH_BACKOFF_IN_SECONDS, MAX_TOKEN_RESPONSE_BYTES, MAX_ERROR_BODY_CHARS, SAFE_ERROR_KEYS, WorkloadIdentityError;
 var init_types = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/types.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/credentials/types.mjs"() {
     "use strict";
     init_error();
     GRANT_TYPE_JWT_BEARER = "urn:ietf:params:oauth:grant-type:jwt-bearer";
@@ -1098,20 +1098,20 @@ var init_types = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/time.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/utils/time.mjs
 function nowAsSeconds() {
   return Math.floor(Date.now() / 1e3);
 }
 var init_time = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/time.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/utils/time.mjs"() {
     "use strict";
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/token-cache.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/credentials/token-cache.mjs
 var TokenCache;
 var init_token_cache = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/token-cache.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/credentials/token-cache.mjs"() {
     "use strict";
     init_types();
     init_time();
@@ -1205,10 +1205,10 @@ var init_token_cache = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/env.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/utils/env.mjs
 var readEnv;
 var init_env = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/env.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/utils/env.mjs"() {
     "use strict";
     readEnv = (env) => {
       if (typeof globalThis.process !== "undefined") {
@@ -1222,7 +1222,7 @@ var init_env = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/bytes.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/utils/bytes.mjs
 function concatBytes(buffers) {
   let length = 0;
   for (const buffer of buffers) {
@@ -1246,21 +1246,21 @@ function decodeUTF8(bytes) {
 }
 var encodeUTF8_, decodeUTF8_;
 var init_bytes = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/bytes.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/utils/bytes.mjs"() {
     "use strict";
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/base64.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/utils/base64.mjs
 var init_base64 = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/base64.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/utils/base64.mjs"() {
     "use strict";
     init_error();
     init_bytes();
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/log.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/utils/log.mjs
 function noop() {
 }
 function makeLogFn(fnLevel, logger, logLevel) {
@@ -1302,7 +1302,7 @@ function defaultLogger() {
 }
 var defaultLogLevel, levelNumbers, parseLogLevel, noopLogger, cachedLoggers, lastEnvLevel, cachedDefaultLogger, formatRequestDetails;
 var init_log = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/log.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/utils/log.mjs"() {
     "use strict";
     init_values();
     init_env();
@@ -1353,9 +1353,9 @@ var init_log = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/utils.mjs
 var init_utils2 = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/utils.mjs"() {
     "use strict";
     init_values();
     init_base64();
@@ -1367,7 +1367,7 @@ var init_utils2 = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/core/credentials.mjs
+// ../../node_modules/@anthropic-ai/sdk/core/credentials.mjs
 function validateProfileName(name) {
   if (!name) {
     throw new Error("profile name is empty");
@@ -1384,7 +1384,7 @@ function validateProfileName(name) {
 }
 var CREDENTIALS_FILE_VERSION, PROFILE_NAME_PATTERN, loadConfigWithSource, getCredentialsPath, getRootConfigPath, supportsLocalConfigFiles, getActiveProfileName;
 var init_credentials = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/core/credentials.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/core/credentials.mjs"() {
     "use strict";
     init_detect_platform();
     init_utils2();
@@ -1549,7 +1549,7 @@ var init_credentials = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/identity-token.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/credentials/identity-token.mjs
 function identityTokenFromFile(path5) {
   if (!path5) {
     throw new AnthropicError("Identity token file path is empty");
@@ -1576,13 +1576,13 @@ function identityTokenFromValue(token) {
   return () => token;
 }
 var init_identity_token = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/identity-token.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/credentials/identity-token.mjs"() {
     "use strict";
     init_error();
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/oidc-federation.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/credentials/oidc-federation.mjs
 function oidcFederationProvider(config) {
   return async () => {
     requireSecureTokenEndpoint(config.baseURL);
@@ -1640,7 +1640,7 @@ function oidcFederationProvider(config) {
   };
 }
 var init_oidc_federation = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/oidc-federation.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/credentials/oidc-federation.mjs"() {
     "use strict";
     init_types();
     init_time();
@@ -1648,7 +1648,7 @@ var init_oidc_federation = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/user-oauth.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/credentials/user-oauth.mjs
 function userOAuthProvider(config) {
   return async (opts) => {
     const fs4 = await import("fs");
@@ -1722,7 +1722,7 @@ function userOAuthProvider(config) {
   };
 }
 var init_user_oauth = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/user-oauth.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/credentials/user-oauth.mjs"() {
     "use strict";
     init_credentials();
     init_types();
@@ -1731,7 +1731,7 @@ var init_user_oauth = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/credential-chain.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/credentials/credential-chain.mjs
 function resolveCredentialsFromConfig(config, options) {
   const credentialsPath = config.authentication.credentials_path ?? null;
   const effectiveBaseURL = (config.base_url || options.baseURL).replace(/\/+$/, "");
@@ -1863,7 +1863,7 @@ function cachedExchangeProvider(exchange, credentialsPath, onCacheWriteError, on
   };
 }
 var init_credential_chain = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/credential-chain.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/credentials/credential-chain.mjs"() {
     "use strict";
     init_env();
     init_credentials();
@@ -1875,7 +1875,7 @@ var init_credential_chain = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/decoders/line.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/decoders/line.mjs
 function findNewlineIndex(buffer, startIndex) {
   const newline = 10;
   const carriage = 13;
@@ -1907,7 +1907,7 @@ function findDoubleNewlineIndex(buffer) {
 }
 var _LineDecoder_buffer, _LineDecoder_carriageReturnIndex, LineDecoder;
 var init_line = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/decoders/line.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/decoders/line.mjs"() {
     "use strict";
     init_tslib();
     init_bytes();
@@ -1958,7 +1958,7 @@ var init_line = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/core/streaming.mjs
+// ../../node_modules/@anthropic-ai/sdk/core/streaming.mjs
 async function* _iterSSEMessages(response, controller) {
   if (!response.body) {
     controller.abort();
@@ -2013,7 +2013,7 @@ function partition(str, delimiter2) {
 }
 var _Stream_client, Stream, SSEDecoder;
 var init_streaming = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/core/streaming.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/core/streaming.mjs"() {
     "use strict";
     init_tslib();
     init_error();
@@ -2235,7 +2235,7 @@ var init_streaming = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/parse.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/parse.mjs
 async function defaultParseResponse(client, props) {
   const { response, requestLogID, retryOfRequestLogID, startTime } = props;
   const body = await (async () => {
@@ -2282,14 +2282,14 @@ function addRequestID(value, response) {
   });
 }
 var init_parse = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/parse.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/parse.mjs"() {
     "use strict";
     init_streaming();
     init_log();
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/core/middleware.mjs
+// ../../node_modules/@anthropic-ai/sdk/core/middleware.mjs
 function isFetchOriginError(err) {
   return typeof err === "object" && err !== null && fetchOriginErrors.has(err);
 }
@@ -2385,7 +2385,7 @@ function applyMiddleware(fetchFn, middleware, options, client) {
 }
 var fetchOriginErrors;
 var init_middleware = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/core/middleware.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/core/middleware.mjs"() {
     "use strict";
     init_errors();
     init_parse();
@@ -2396,10 +2396,10 @@ var init_middleware = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/core/api-promise.mjs
+// ../../node_modules/@anthropic-ai/sdk/core/api-promise.mjs
 var _APIPromise_client, APIPromise;
 var init_api_promise = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/core/api-promise.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/core/api-promise.mjs"() {
     "use strict";
     init_tslib();
     init_parse();
@@ -2466,10 +2466,10 @@ var init_api_promise = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/core/pagination.mjs
+// ../../node_modules/@anthropic-ai/sdk/core/pagination.mjs
 var _AbstractPage_client, AbstractPage, PagePromise, Page, PageCursor, BidirectionalPageCursor;
 var init_pagination = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/core/pagination.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/core/pagination.mjs"() {
     "use strict";
     init_tslib();
     init_error();
@@ -2625,7 +2625,7 @@ var init_pagination = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/uploads.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/uploads.mjs
 function makeFile(fileBits, fileName, options) {
   checkFileSupport();
   return new File(fileBits, fileName ?? "unknown_file", options);
@@ -2656,7 +2656,7 @@ function supportsFormData(fetchObject) {
 }
 var checkFileSupport, isAsyncIterable, multipartFormRequestOptions, supportsFormDataMap, createForm, isNamedBlob, addFormValue;
 var init_uploads = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/uploads.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/uploads.mjs"() {
     "use strict";
     init_shims();
     checkFileSupport = () => {
@@ -2710,7 +2710,7 @@ var init_uploads = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/to-file.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/to-file.mjs
 async function toFile(value, name, options) {
   checkFileSupport();
   value = await value;
@@ -2764,7 +2764,7 @@ function propsForError(value) {
 }
 var isBlobLike, isFileLike, isResponseLike;
 var init_to_file = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/to-file.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/to-file.mjs"() {
     "use strict";
     init_uploads();
     init_uploads();
@@ -2774,25 +2774,25 @@ var init_to_file = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/core/uploads.mjs
+// ../../node_modules/@anthropic-ai/sdk/core/uploads.mjs
 var init_uploads2 = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/core/uploads.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/core/uploads.mjs"() {
     "use strict";
     init_to_file();
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/shared.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/shared.mjs
 var init_shared = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/shared.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/shared.mjs"() {
     "use strict";
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/core/resource.mjs
+// ../../node_modules/@anthropic-ai/sdk/core/resource.mjs
 var APIResource;
 var init_resource = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/core/resource.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/core/resource.mjs"() {
     "use strict";
     APIResource = class {
       constructor(client) {
@@ -2802,7 +2802,7 @@ var init_resource = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/headers.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/headers.mjs
 function* iterateHeaders(headers) {
   if (!headers)
     return;
@@ -2843,7 +2843,7 @@ function* iterateHeaders(headers) {
 }
 var brand_privateNullableHeaders, clearSentinel, APPEND_HEADERS, appendHeaderValue, buildHeaders;
 var init_headers = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/headers.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/headers.mjs"() {
     "use strict";
     init_values();
     brand_privateNullableHeaders = /* @__PURE__ */ Symbol.for("brand.privateNullableHeaders");
@@ -2896,13 +2896,13 @@ var init_headers = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/path.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/utils/path.mjs
 function encodeURIPath(str) {
   return str.replace(/[^A-Za-z0-9\-._~!$&'()*+,;=:@]+/g, encodeURIComponent);
 }
 var EMPTY, createPathTagFunction, path;
 var init_path = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/path.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/utils/path.mjs"() {
     "use strict";
     init_error();
     EMPTY = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.create(null));
@@ -2958,10 +2958,10 @@ ${underline}`);
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/deployment-runs.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/deployment-runs.mjs
 var DeploymentRuns;
 var init_deployment_runs = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/deployment-runs.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/deployment-runs.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -3015,10 +3015,10 @@ var init_deployment_runs = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/deployments.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/deployments.mjs
 var Deployments;
 var init_deployments = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/deployments.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/deployments.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -3213,10 +3213,10 @@ var init_deployments = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/dreams.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/dreams.mjs
 var Dreams;
 var init_dreams = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/dreams.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/dreams.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -3331,7 +3331,7 @@ var init_dreams = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/stainless-helper-header.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/stainless-helper-header.mjs
 function helperHeader(value) {
   return { [STAINLESS_HELPER_HEADER]: value };
 }
@@ -3378,7 +3378,7 @@ function stainlessHelperHeaderFromFile(file) {
 }
 var STAINLESS_HELPER_HEADER, STAINLESS_HELPER_METHOD_HEADER, SDK_HELPER_SYMBOL;
 var init_stainless_helper_header = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/stainless-helper-header.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/stainless-helper-header.mjs"() {
     "use strict";
     STAINLESS_HELPER_HEADER = "x-stainless-helper";
     STAINLESS_HELPER_METHOD_HEADER = "x-stainless-helper-method";
@@ -3386,10 +3386,10 @@ var init_stainless_helper_header = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/files.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/files.mjs
 var Files;
 var init_files = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/files.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/files.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -3512,10 +3512,10 @@ var init_files = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/models.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/models.mjs
 var Models;
 var init_models = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/models.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/models.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -3574,10 +3574,10 @@ var init_models = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/user-profiles.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/user-profiles.mjs
 var UserProfiles;
 var init_user_profiles = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/user-profiles.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/user-profiles.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -3694,9 +3694,9 @@ var init_user_profiles = __esm({
   }
 });
 
-// ../../../term-333/node_modules/standardwebhooks/dist/timing_safe_equal.js
+// ../../node_modules/standardwebhooks/dist/timing_safe_equal.js
 var require_timing_safe_equal = __commonJS({
-  "../../../term-333/node_modules/standardwebhooks/dist/timing_safe_equal.js"(exports) {
+  "../../node_modules/standardwebhooks/dist/timing_safe_equal.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.timingSafeEqual = void 0;
@@ -3729,9 +3729,9 @@ var require_timing_safe_equal = __commonJS({
   }
 });
 
-// ../../../term-333/node_modules/@stablelib/base64/lib/base64.js
+// ../../node_modules/@stablelib/base64/lib/base64.js
 var require_base64 = __commonJS({
-  "../../../term-333/node_modules/@stablelib/base64/lib/base64.js"(exports) {
+  "../../node_modules/@stablelib/base64/lib/base64.js"(exports) {
     "use strict";
     var __extends = exports && exports.__extends || /* @__PURE__ */ (function() {
       var extendStatics = function(d, b) {
@@ -3942,9 +3942,9 @@ var require_base64 = __commonJS({
   }
 });
 
-// ../../../term-333/node_modules/fast-sha256/sha256.js
+// ../../node_modules/fast-sha256/sha256.js
 var require_sha256 = __commonJS({
-  "../../../term-333/node_modules/fast-sha256/sha256.js"(exports, module) {
+  "../../node_modules/fast-sha256/sha256.js"(exports, module) {
     "use strict";
     (function(root, factory) {
       var exports2 = {};
@@ -4367,9 +4367,9 @@ var require_sha256 = __commonJS({
   }
 });
 
-// ../../../term-333/node_modules/standardwebhooks/dist/index.js
+// ../../node_modules/standardwebhooks/dist/index.js
 var require_dist = __commonJS({
-  "../../../term-333/node_modules/standardwebhooks/dist/index.js"(exports) {
+  "../../node_modules/standardwebhooks/dist/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.Webhook = exports.WebhookVerificationError = void 0;
@@ -4474,10 +4474,10 @@ var require_dist = __commonJS({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/webhooks.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/webhooks.mjs
 var import_standardwebhooks, Webhooks;
 var init_webhooks = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/webhooks.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/webhooks.mjs"() {
     "use strict";
     init_resource();
     import_standardwebhooks = __toESM(require_dist(), 1);
@@ -4496,10 +4496,10 @@ var init_webhooks = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/agents/versions.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/agents/versions.mjs
 var Versions;
 var init_versions = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/agents/versions.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/agents/versions.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -4534,10 +4534,10 @@ var init_versions = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/agents/agents.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/agents/agents.mjs
 var Agents;
 var init_agents = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/agents/agents.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/agents/agents.mjs"() {
     "use strict";
     init_resource();
     init_versions();
@@ -4666,7 +4666,7 @@ var init_agents = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/abort.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/utils/abort.mjs
 function linkAbort(external, controller) {
   if (!external)
     return () => {
@@ -4681,12 +4681,12 @@ function linkAbort(external, controller) {
   return () => external.removeEventListener("abort", onAbort);
 }
 var init_abort = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/abort.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/utils/abort.mjs"() {
     "use strict";
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/backoff.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/utils/backoff.mjs
 function isStatus(e, code) {
   return e instanceof APIError && e.status === code;
 }
@@ -4706,13 +4706,13 @@ function applyJitter(ms) {
   return ms * (1 - Math.random() * 0.25);
 }
 var init_backoff = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/backoff.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/utils/backoff.mjs"() {
     "use strict";
     init_error();
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/helper-client.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/helper-client.mjs
 function copyClientForHelper(client, { authToken, helper }) {
   if (!authToken) {
     throw new AnthropicError(`copyClientForHelper: expected a non-empty authToken but received ${JSON.stringify(authToken)}`);
@@ -4738,7 +4738,7 @@ function copyClientForHelper(client, { authToken, helper }) {
   });
 }
 var init_helper_client = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/helper-client.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/helper-client.mjs"() {
     "use strict";
     init_error();
     init_headers();
@@ -4746,7 +4746,7 @@ var init_helper_client = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/environments/poller.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/environments/poller.mjs
 function backoff2(attempt) {
   return backoff(attempt, POLL_BACKOFF_BASE_MS, POLL_BACKOFF_CAP_MS);
 }
@@ -4757,7 +4757,7 @@ function defaultWorkerId() {
 }
 var _WorkPoller_runnerClient, _WorkPoller_consumed, _WorkPoller_controller, _WorkPoller_detachExternal, _WorkPoller_autoStop, _WorkPoller_drain, _WorkPoller_blockMs, _WorkPoller_reclaimOlderThanMs, _WorkPoller_requestOpts, POLL_BLOCK_MS, POLL_BACKOFF_BASE_MS, POLL_BACKOFF_CAP_MS, WorkPoller;
 var init_poller = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/environments/poller.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/environments/poller.mjs"() {
     "use strict";
     init_tslib();
     init_error();
@@ -4880,10 +4880,10 @@ var init_poller = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/async-queue.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/utils/async-queue.mjs
 var _AsyncQueue_items, _AsyncQueue_waiters, _AsyncQueue_closed, AsyncQueue;
 var init_async_queue = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/async-queue.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/utils/async-queue.mjs"() {
     "use strict";
     init_tslib();
     AsyncQueue = class {
@@ -4950,10 +4950,10 @@ var init_async_queue = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/ToolError.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/tools/ToolError.mjs
 var ToolError;
 var init_ToolError = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/ToolError.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/tools/ToolError.mjs"() {
     "use strict";
     ToolError = class extends Error {
       constructor(content) {
@@ -4970,7 +4970,7 @@ var init_ToolError = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/BetaRunnableTool.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/tools/BetaRunnableTool.mjs
 function toolName(tool) {
   return "name" in tool ? tool.name : tool.mcp_server_name;
 }
@@ -4987,13 +4987,13 @@ async function runRunnableTool(tool, rawInput, context) {
   }
 }
 var init_BetaRunnableTool = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/BetaRunnableTool.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/tools/BetaRunnableTool.mjs"() {
     "use strict";
     init_ToolError();
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/SessionToolRunner.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/tools/SessionToolRunner.mjs
 function isEndTurnIdle(ev) {
   return ev.type === "session.status_idle" && ev.stop_reason?.type === "end_turn";
 }
@@ -5026,7 +5026,7 @@ function toSessionContent(content) {
 }
 var _IdleClock_maxIdleMs, _IdleClock_onExpire, _IdleClock_blockers, _IdleClock_armPending, _IdleClock_timer, _SessionToolRunner_instances, _SessionToolRunner_consumed, _SessionToolRunner_controller, _SessionToolRunner_detachExternal, _SessionToolRunner_requestOpts, _SessionToolRunner_toolByName, _SessionToolRunner_logger, _SessionToolRunner_seen, _SessionToolRunner_answered, _SessionToolRunner_confirmationVerdicts, _SessionToolRunner_awaitingConfirmation, _SessionToolRunner_results, _SessionToolRunner_inFlightCount, _SessionToolRunner_onIdle, _SessionToolRunner_idleClock, _SessionToolRunner_requestOptions, _SessionToolRunner_streamLoop, _SessionToolRunner_reconcile, _SessionToolRunner_ingestHistory, _SessionToolRunner_handleStreamEvent, _SessionToolRunner_routeToolEvent, _SessionToolRunner_noteConfirmation, _SessionToolRunner_applyVerdict, _SessionToolRunner_surfaceCall, _SessionToolRunner_execute, _SessionToolRunner_sendResult, _SessionToolRunner_drain, STREAM_BACKOFF_START_MS, STREAM_BACKOFF_CAP_MS, TOOL_TIMEOUT_MS, DRAIN_TIMEOUT_MS, SEND_RETRIES, DEFAULT_MAX_IDLE_MS, IdleClock, SessionToolRunner;
 var init_SessionToolRunner = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/SessionToolRunner.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/tools/SessionToolRunner.mjs"() {
     "use strict";
     init_tslib();
     init_error();
@@ -5502,15 +5502,15 @@ var init_SessionToolRunner = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/transform-json-schema.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/transform-json-schema.mjs
 var init_transform_json_schema = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/transform-json-schema.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/transform-json-schema.mjs"() {
     "use strict";
     init_utils2();
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/helpers/beta/json-schema.mjs
+// ../../node_modules/@anthropic-ai/sdk/helpers/beta/json-schema.mjs
 function betaTool(options) {
   if (options.inputSchema.type !== "object") {
     throw new Error(`JSON schema for tool "${options.name}" must be an object, but got ${options.inputSchema.type}`);
@@ -5526,14 +5526,14 @@ function betaTool(options) {
   };
 }
 var init_json_schema = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/helpers/beta/json-schema.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/helpers/beta/json-schema.mjs"() {
     "use strict";
     init_sdk();
     init_transform_json_schema();
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/promise.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/utils/promise.mjs
 function promiseWithResolvers() {
   let resolve4;
   let reject;
@@ -5544,12 +5544,12 @@ function promiseWithResolvers() {
   return { promise, resolve: resolve4, reject };
 }
 var init_promise = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/promise.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/utils/promise.mjs"() {
     "use strict";
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/tools/agent-toolset/fs-util.mjs
+// ../../node_modules/@anthropic-ai/sdk/tools/agent-toolset/fs-util.mjs
 import * as fs from "fs/promises";
 import * as path2 from "path";
 import { randomUUID } from "crypto";
@@ -5650,7 +5650,7 @@ function fsErrorMessage(err, file) {
 }
 var DIR_CREATE_MODE, FILE_CREATE_MODE;
 var init_fs_util = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/tools/agent-toolset/fs-util.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/tools/agent-toolset/fs-util.mjs"() {
     "use strict";
     init_ToolError();
     DIR_CREATE_MODE = 493;
@@ -5658,7 +5658,7 @@ var init_fs_util = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/tools/agent-toolset/skills.mjs
+// ../../node_modules/@anthropic-ai/sdk/tools/agent-toolset/skills.mjs
 import * as fs2 from "fs/promises";
 import * as fssync from "fs";
 import * as path3 from "path";
@@ -5815,7 +5815,7 @@ async function readHead(file, n) {
 }
 var execFileAsync;
 var init_skills = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/tools/agent-toolset/skills.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/tools/agent-toolset/skills.mjs"() {
     "use strict";
     init_error();
     init_log();
@@ -5824,7 +5824,7 @@ var init_skills = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/tools/agent-toolset/node.mjs
+// ../../node_modules/@anthropic-ai/sdk/tools/agent-toolset/node.mjs
 var node_exports = {};
 __export(node_exports, {
   BashSession: () => BashSession,
@@ -6279,7 +6279,7 @@ async function findRg() {
 }
 var _BashSession_instances, _BashSession_proc, _BashSession_buf, _BashSession_truncated, _BashSession_closed, _BashSession_waiting, _BashSession_append, BASH_OUTPUT_LIMIT, BASH_DEFAULT_TIMEOUT_MS, DEFAULT_MAX_FILE_BYTES, GREP_OUTPUT_LIMIT, GREP_MAX_LINE_LENGTH, GLOB_RESULT_LIMIT, ANSI_RE, fsGlob, BashSession, WALK_MAX_DEPTH, WALK_MAX_ENTRIES;
 var init_node = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/tools/agent-toolset/node.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/tools/agent-toolset/node.mjs"() {
     "use strict";
     init_tslib();
     init_error();
@@ -6422,7 +6422,7 @@ ${out}`;
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/environments/worker.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/environments/worker.mjs
 async function forceStop(client, work, log, requestOptions) {
   try {
     await client.beta.environments.work.stop(
@@ -6476,7 +6476,7 @@ async function heartbeatLoop(client, work, ctrl, logger, requestOptions) {
 }
 var _EnvironmentWorker_instances, _EnvironmentWorker_signal, _EnvironmentWorker_handleItem, HEARTBEAT_DEFAULT_MS, NO_HEARTBEAT_SENTINEL, EnvironmentWorker;
 var init_worker = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/environments/worker.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/environments/worker.mjs"() {
     "use strict";
     init_tslib();
     init_error();
@@ -6635,10 +6635,10 @@ var init_worker = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/environments/work.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/environments/work.mjs
 var Work;
 var init_work = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/environments/work.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/environments/work.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -6909,10 +6909,10 @@ var init_work = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/environments/environments.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/environments/environments.mjs
 var Environments;
 var init_environments = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/environments/environments.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/environments/environments.mjs"() {
     "use strict";
     init_resource();
     init_work();
@@ -7060,10 +7060,10 @@ var init_environments = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memories.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memories.mjs
 var Memories;
 var init_memories = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memories.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memories.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -7192,10 +7192,10 @@ var init_memories = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-versions.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-versions.mjs
 var MemoryVersions;
 var init_memory_versions = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-versions.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-versions.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -7275,10 +7275,10 @@ var init_memory_versions = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-stores.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-stores.mjs
 var MemoryStores;
 var init_memory_stores = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-stores.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-stores.mjs"() {
     "use strict";
     init_resource();
     init_memories();
@@ -7421,18 +7421,18 @@ var init_memory_stores = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/error.mjs
+// ../../node_modules/@anthropic-ai/sdk/error.mjs
 var init_error2 = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/error.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/error.mjs"() {
     "use strict";
     init_error();
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/decoders/jsonl.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/decoders/jsonl.mjs
 var JSONLDecoder;
 var init_jsonl = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/decoders/jsonl.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/decoders/jsonl.mjs"() {
     "use strict";
     init_error();
     init_shims();
@@ -7470,10 +7470,10 @@ var init_jsonl = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/messages/batches.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/messages/batches.mjs
 var Batches;
 var init_batches = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/messages/batches.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/messages/batches.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -7677,10 +7677,10 @@ var init_batches = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/constants.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/constants.mjs
 var MODEL_NONSTREAMING_TOKENS;
 var init_constants = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/constants.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/constants.mjs"() {
     "use strict";
     MODEL_NONSTREAMING_TOKENS = {
       "claude-opus-4-20250514": 8192,
@@ -7695,7 +7695,7 @@ var init_constants = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/beta-parser.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/beta-parser.mjs
 function getOutputFormat(params) {
   return params?.output_format ?? params?.output_config?.format;
 }
@@ -7768,24 +7768,24 @@ function parseBetaOutputFormat(params, content) {
   }
 }
 var init_beta_parser = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/beta-parser.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/beta-parser.mjs"() {
     "use strict";
     init_error();
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/streaming.mjs
+// ../../node_modules/@anthropic-ai/sdk/streaming.mjs
 var init_streaming2 = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/streaming.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/streaming.mjs"() {
     "use strict";
     init_streaming();
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/_vendor/partial-json-parser/parser.mjs
+// ../../node_modules/@anthropic-ai/sdk/_vendor/partial-json-parser/parser.mjs
 var tokenize, strip, unstrip, generate, partialParse;
 var init_parser = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/_vendor/partial-json-parser/parser.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/_vendor/partial-json-parser/parser.mjs"() {
     "use strict";
     tokenize = (input) => {
       let current = 0;
@@ -8010,7 +8010,7 @@ var init_parser = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/message-stream-utils.mjs
+// ../../node_modules/@anthropic-ai/sdk/internal/message-stream-utils.mjs
 function withLazyInput(prev, jsonBuf) {
   const next = {};
   for (const key of Object.keys(prev)) {
@@ -8035,14 +8035,14 @@ function withLazyInput(prev, jsonBuf) {
 }
 var JSON_BUF_PROPERTY;
 var init_message_stream_utils = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/message-stream-utils.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/internal/message-stream-utils.mjs"() {
     "use strict";
     init_parser();
     JSON_BUF_PROPERTY = "__json_buf";
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/BetaMessageStream.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/BetaMessageStream.mjs
 function tracksToolInput(content) {
   return content.type === "tool_use" || content.type === "server_tool_use" || content.type === "mcp_tool_use";
 }
@@ -8050,7 +8050,7 @@ function checkNever(x) {
 }
 var _BetaMessageStream_instances, _BetaMessageStream_currentMessageSnapshot, _BetaMessageStream_params, _BetaMessageStream_connectedPromise, _BetaMessageStream_resolveConnectedPromise, _BetaMessageStream_rejectConnectedPromise, _BetaMessageStream_endPromise, _BetaMessageStream_resolveEndPromise, _BetaMessageStream_rejectEndPromise, _BetaMessageStream_listeners, _BetaMessageStream_ended, _BetaMessageStream_errored, _BetaMessageStream_aborted, _BetaMessageStream_catchingPromiseCreated, _BetaMessageStream_response, _BetaMessageStream_request_id, _BetaMessageStream_logger, _BetaMessageStream_getFinalMessage, _BetaMessageStream_getFinalText, _BetaMessageStream_handleError, _BetaMessageStream_beginRequest, _BetaMessageStream_addStreamEvent, _BetaMessageStream_endRequest, _BetaMessageStream_accumulateMessage, _BetaMessageStream_toolInputParseError, BetaMessageStream;
 var init_BetaMessageStream = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/BetaMessageStream.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/BetaMessageStream.mjs"() {
     "use strict";
     init_tslib();
     init_stainless_helper_header();
@@ -8664,10 +8664,10 @@ var init_BetaMessageStream = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/CompactionControl.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/tools/CompactionControl.mjs
 var DEFAULT_TOKEN_THRESHOLD, DEFAULT_SUMMARY_PROMPT;
 var init_CompactionControl = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/CompactionControl.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/tools/CompactionControl.mjs"() {
     "use strict";
     DEFAULT_TOKEN_THRESHOLD = 1e5;
     DEFAULT_SUMMARY_PROMPT = `You have been working on the task described above but have not yet completed it. Write a continuation summary that will allow you (or another instance of yourself) to resume work efficiently in a future context window where the conversation history will be replaced with this summary. Your summary should be structured, concise, and actionable. Include:
@@ -8696,7 +8696,7 @@ Wrap your summary in <summary></summary> tags.`;
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/BetaToolRunner.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/tools/BetaToolRunner.mjs
 async function generateToolResponse(params, lastMessage = params.messages.at(-1), requestOptions) {
   if (!lastMessage || lastMessage.role !== "assistant" || !lastMessage.content || typeof lastMessage.content === "string") {
     return null;
@@ -8746,7 +8746,7 @@ async function generateToolResponse(params, lastMessage = params.messages.at(-1)
 }
 var _BetaToolRunner_instances, _BetaToolRunner_consumed, _BetaToolRunner_mutated, _BetaToolRunner_state, _BetaToolRunner_options, _BetaToolRunner_message, _BetaToolRunner_toolResponse, _BetaToolRunner_completion, _BetaToolRunner_iterationCount, _BetaToolRunner_checkAndCompact, _BetaToolRunner_generateToolResponse, BetaToolRunner;
 var init_BetaToolRunner = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/BetaToolRunner.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/tools/BetaToolRunner.mjs"() {
     "use strict";
     init_tslib();
     init_ToolError();
@@ -9048,7 +9048,7 @@ var init_BetaToolRunner = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/messages/messages.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/messages/messages.mjs
 function transformOutputFormat(params) {
   if (!params.output_format) {
     return params;
@@ -9067,7 +9067,7 @@ function transformOutputFormat(params) {
 }
 var DEPRECATED_MODELS, MODELS_TO_WARN_WITH_THINKING_ENABLED, Messages;
 var init_messages = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/messages/messages.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/messages/messages.mjs"() {
     "use strict";
     init_error2();
     init_batches();
@@ -9216,10 +9216,10 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/events.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/events.mjs
 var Events;
 var init_events = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/events.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/events.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -9337,10 +9337,10 @@ var init_events = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/resources.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/resources.mjs
 var Resources;
 var init_resources = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/resources.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/resources.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -9471,10 +9471,10 @@ var init_resources = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/events.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/events.mjs
 var Events2;
 var init_events2 = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/events.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/events.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -9533,10 +9533,10 @@ var init_events2 = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/threads.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/threads.mjs
 var Threads;
 var init_threads = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/threads.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/threads.mjs"() {
     "use strict";
     init_resource();
     init_events2();
@@ -9622,10 +9622,10 @@ var init_threads = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/sessions.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/sessions.mjs
 var Sessions;
 var init_sessions = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/sessions.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/sessions.mjs"() {
     "use strict";
     init_resource();
     init_events();
@@ -9781,10 +9781,10 @@ var init_sessions = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/skills/versions.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/skills/versions.mjs
 var Versions2;
 var init_versions2 = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/skills/versions.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/skills/versions.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -9912,10 +9912,10 @@ var init_versions2 = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/skills/skills.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/skills/skills.mjs
 var Skills;
 var init_skills2 = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/skills/skills.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/skills/skills.mjs"() {
     "use strict";
     init_resource();
     init_versions2();
@@ -10013,10 +10013,10 @@ var init_skills2 = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/tunnels/certificates.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/tunnels/certificates.mjs
 var Certificates;
 var init_certificates = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/tunnels/certificates.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/tunnels/certificates.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -10144,10 +10144,10 @@ var init_certificates = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/tunnels/tunnels.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/tunnels/tunnels.mjs
 var Tunnels;
 var init_tunnels = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/tunnels/tunnels.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/tunnels/tunnels.mjs"() {
     "use strict";
     init_resource();
     init_certificates();
@@ -10326,10 +10326,10 @@ var init_tunnels = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/vaults/credentials.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/vaults/credentials.mjs
 var Credentials;
 var init_credentials2 = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/vaults/credentials.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/vaults/credentials.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -10505,10 +10505,10 @@ var init_credentials2 = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/vaults/vaults.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/vaults/vaults.mjs
 var Vaults;
 var init_vaults = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/vaults/vaults.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/vaults/vaults.mjs"() {
     "use strict";
     init_resource();
     init_credentials2();
@@ -10655,10 +10655,10 @@ var init_vaults = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/beta.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/beta/beta.mjs
 var Beta;
 var init_beta = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/beta.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/beta/beta.mjs"() {
     "use strict";
     init_resource();
     init_deployment_runs();
@@ -10729,10 +10729,10 @@ var init_beta = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/completions.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/completions.mjs
 var Completions;
 var init_completions = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/completions.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/completions.mjs"() {
     "use strict";
     init_resource();
     init_headers();
@@ -10754,7 +10754,7 @@ var init_completions = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/parser.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/parser.mjs
 function getOutputFormat2(params) {
   return params?.output_config?.format;
 }
@@ -10815,13 +10815,13 @@ function parseOutputFormat(params, content) {
   }
 }
 var init_parser2 = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/parser.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/parser.mjs"() {
     "use strict";
     init_error();
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/MessageStream.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/MessageStream.mjs
 function tracksToolInput2(content) {
   return content.type === "tool_use" || content.type === "server_tool_use";
 }
@@ -10829,7 +10829,7 @@ function checkNever2(x) {
 }
 var _MessageStream_instances, _MessageStream_currentMessageSnapshot, _MessageStream_params, _MessageStream_connectedPromise, _MessageStream_resolveConnectedPromise, _MessageStream_rejectConnectedPromise, _MessageStream_endPromise, _MessageStream_resolveEndPromise, _MessageStream_rejectEndPromise, _MessageStream_listeners, _MessageStream_ended, _MessageStream_errored, _MessageStream_aborted, _MessageStream_catchingPromiseCreated, _MessageStream_response, _MessageStream_request_id, _MessageStream_logger, _MessageStream_getFinalMessage, _MessageStream_getFinalText, _MessageStream_handleError, _MessageStream_beginRequest, _MessageStream_addStreamEvent, _MessageStream_endRequest, _MessageStream_accumulateMessage, MessageStream;
 var init_MessageStream = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/MessageStream.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/MessageStream.mjs"() {
     "use strict";
     init_tslib();
     init_stainless_helper_header();
@@ -11402,10 +11402,10 @@ var init_MessageStream = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/messages/batches.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/messages/batches.mjs
 var Batches2;
 var init_batches2 = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/messages/batches.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/messages/batches.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -11563,10 +11563,10 @@ var init_batches2 = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/messages/messages.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/messages/messages.mjs
 var Messages2, DEPRECATED_MODELS2, MODELS_TO_WARN_WITH_THINKING_ENABLED2;
 var init_messages2 = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/messages/messages.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/messages/messages.mjs"() {
     "use strict";
     init_resource();
     init_headers();
@@ -11710,10 +11710,10 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/models.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/models.mjs
 var Models2;
 var init_models2 = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/models.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/models.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -11757,9 +11757,9 @@ var init_models2 = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/index.mjs
+// ../../node_modules/@anthropic-ai/sdk/resources/index.mjs
 var init_resources2 = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/index.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/resources/index.mjs"() {
     "use strict";
     init_shared();
     init_beta();
@@ -11769,10 +11769,10 @@ var init_resources2 = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/client.mjs
+// ../../node_modules/@anthropic-ai/sdk/client.mjs
 var _BaseAnthropic_instances, _a, _BaseAnthropic_encoder, _BaseAnthropic_baseURLOverridden, HUMAN_PROMPT, AI_PROMPT, BaseAnthropic, Anthropic;
 var init_client = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/client.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/client.mjs"() {
     "use strict";
     init_tslib();
     init_uuid();
@@ -12545,7 +12545,7 @@ var init_client = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/middleware.mjs
+// ../../node_modules/@anthropic-ai/sdk/lib/middleware.mjs
 function stripFallbackBlocks(body) {
   const messages = body.messages.map((message) => Array.isArray(message.content) ? { ...message, content: message.content.filter((block) => block.type !== "fallback") } : message).filter((message) => !Array.isArray(message.content) || message.content.length > 0);
   return { ...body, messages };
@@ -12984,7 +12984,7 @@ function makeAbort(controller, signal) {
 }
 var encoder, DEFAULT_BETAS, BlockTracker;
 var init_middleware2 = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/middleware.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/lib/middleware.mjs"() {
     "use strict";
     init_error();
     init_streaming();
@@ -13040,7 +13040,7 @@ var init_middleware2 = __esm({
   }
 });
 
-// ../../../term-333/node_modules/@anthropic-ai/sdk/index.mjs
+// ../../node_modules/@anthropic-ai/sdk/index.mjs
 var sdk_exports = {};
 __export(sdk_exports, {
   AI_PROMPT: () => AI_PROMPT,
@@ -13069,7 +13069,7 @@ __export(sdk_exports, {
   toFile: () => toFile
 });
 var init_sdk = __esm({
-  "../../../term-333/node_modules/@anthropic-ai/sdk/index.mjs"() {
+  "../../node_modules/@anthropic-ai/sdk/index.mjs"() {
     "use strict";
     init_client();
     init_uploads2();
