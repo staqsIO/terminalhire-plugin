@@ -1362,6 +1362,7 @@ async function fetchRepoMeta(owner, name, token, cache, stats) {
       topics: r.topics ?? [],
       // `|| null` collapses "" → null so an empty description never crosses the wire.
       description: r.description || null,
+      defaultBranch: r.default_branch || "main",
       contributors
     };
   } catch (err) {
@@ -1626,6 +1627,131 @@ async function fetchOpenExternalPRs(login, token, cache = /* @__PURE__ */ new Ma
     });
   }
   return out;
+}
+async function fetchCarriedContributions(login, token, cache = /* @__PURE__ */ new Map(), gates = {
+  minStars: MIN_STARS,
+  minContributors: MIN_CONTRIBUTORS
+}) {
+  if (!token) return [];
+  const loginLc = login.toLowerCase();
+  let ownedOrgs;
+  try {
+    ownedOrgs = await fetchPublicOrgs(login, token);
+  } catch {
+    return null;
+  }
+  let items;
+  try {
+    const q = encodeURIComponent(
+      `type:pr is:closed is:unmerged is:public author:${login} -user:${login} sort:updated`
+    );
+    const res = await ghFetch(
+      `/search/issues?q=${q}&per_page=${CARRIED_PR_PAGE}`,
+      token
+    );
+    items = res.items ?? [];
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn("[carried] search failed:", msg);
+    return null;
+  }
+  const metaStats = { transient: 0 };
+  const out = [];
+  let probes = 0;
+  for (const item of items) {
+    if (probes >= MAX_CARRIED_PROBES) {
+      console.warn(
+        `[carried] ${login}: probe cap ${MAX_CARRIED_PROBES} reached \u2014 later closed PRs not examined`
+      );
+      break;
+    }
+    const repo = parseRepoUrl(item.repository_url);
+    if (!repo) continue;
+    const ownerLc = repo.owner.toLowerCase();
+    if (ownerLc === loginLc) continue;
+    if (ownedOrgs.has(ownerLc)) continue;
+    if (isTrivialPRTitle(item.title)) continue;
+    const meta = await fetchRepoMeta(repo.owner, repo.name, token, cache, metaStats);
+    if (metaStats.transient > 0) {
+      console.warn(
+        `[carried] ${login}: per-repo metadata transient failure (${metaStats.transient}) \u2014 returning null (keep prior)`
+      );
+      return null;
+    }
+    if (!meta) continue;
+    if (meta.private) continue;
+    if (meta.archived || meta.fork) continue;
+    if (meta.stars < gates.minStars) continue;
+    if (meta.contributors !== void 0 && meta.contributors < gates.minContributors) continue;
+    const ref = parseGitHubRef(item.html_url);
+    if (!ref || ref.kind !== "pull") continue;
+    probes += 1;
+    let carried;
+    try {
+      carried = await probeCarriedPR(login, loginLc, ref, meta.defaultBranch, item, token);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (TRANSIENT_META_ERROR.test(msg)) {
+        console.warn(`[carried] ${login}: probe transient failure \u2014 returning null (keep prior)`);
+        return null;
+      }
+      continue;
+    }
+    if (carried) out.push(carried);
+  }
+  return out;
+}
+async function probeCarriedPR(login, loginLc, ref, defaultBranch, item, token) {
+  const prCommits = await ghFetch(
+    `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/commits?per_page=100`,
+    token
+  );
+  const mine = prCommits.filter((c) => c.author?.login?.toLowerCase() === loginLc);
+  if (mine.length === 0) return null;
+  const mineShas = new Set(mine.map((c) => c.sha));
+  const dates = mine.map((c) => c.commit?.author?.date).filter((d) => !!d);
+  const since = dates.length > 0 ? dates.reduce((a, b) => a < b ? a : b) : void 0;
+  const q = new URLSearchParams({ author: login, sha: defaultBranch, per_page: "100" });
+  if (since) q.set("since", since);
+  const landedList = await ghFetch(
+    `/repos/${ref.owner}/${ref.repo}/commits?${q.toString()}`,
+    token
+  );
+  const landed = landedList.filter((c) => c.author?.login?.toLowerCase() === loginLc).filter((c) => mineShas.has(c.sha));
+  if (landed.length === 0) return null;
+  const mergedPullsBySha = /* @__PURE__ */ new Map();
+  const probeShas = landed.slice(0, CARRIED_SHA_PROBE_CAP);
+  if (landed.length > probeShas.length) {
+    console.warn(
+      `[carried] ${ref.owner}/${ref.repo}#${ref.number}: ${landed.length} landed commits exceeds probe cap ${CARRIED_SHA_PROBE_CAP} \u2014 crediting only the probed ones`
+    );
+  }
+  for (const c of probeShas) {
+    const pulls = await ghFetch(
+      `/repos/${ref.owner}/${ref.repo}/commits/${c.sha}/pulls?per_page=10`,
+      token
+    );
+    mergedPullsBySha.set(
+      c.sha,
+      pulls.filter((p) => !!p.merged_at)
+    );
+  }
+  const ownedByMergedPath = (sha) => (mergedPullsBySha.get(sha) ?? []).some((p) => p.user?.login?.toLowerCase() === loginLc);
+  const credited = probeShas.filter((c) => !ownedByMergedPath(c.sha));
+  if (credited.length === 0) return null;
+  const landedDates = credited.map((c) => c.commit?.author?.date).filter((d) => !!d);
+  const landedAt = landedDates.length > 0 ? landedDates.reduce((a, b) => a > b ? a : b) : item.created_at;
+  const carrierPrUrl = credited.flatMap((c) => mergedPullsBySha.get(c.sha) ?? []).find((p) => p.html_url !== item.html_url)?.html_url;
+  return {
+    closedPrUrl: item.html_url,
+    title: item.title,
+    repoFullName: `${ref.owner}/${ref.repo}`,
+    // CREDITED, not `landed`: a commit the merged accumulator already owns must not
+    // reappear as this row's evidence, or the same work is counted on both paths.
+    landedShas: credited.map((c) => c.sha),
+    carrierPrUrl,
+    landedAt
+  };
 }
 function acceptanceCountForDomains(cred, domains) {
   if (cred.status !== "ok") return 0;
@@ -2182,7 +2308,7 @@ async function fetchPRLifecycle(prUrl, token, signal, governor) {
     complete
   };
 }
-var TRACTION_TOP_N, MAINTAINER_ENRICH_MAX, CANDIDATE_PR_PAGE, MAX_ENRICH_PRS, OPEN_PR_PAGE, TRANSIENT_META_ERROR, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE, RECEPTIVITY_RECENCY_DAYS, RECEPTIVITY_RECENCY_FLOOR, GITHUB_GRAPHQL_URL, AFFILIATION_REVIEWER_CAP, LIFECYCLE_BOT_LOGINS;
+var TRACTION_TOP_N, MAINTAINER_ENRICH_MAX, CANDIDATE_PR_PAGE, MAX_ENRICH_PRS, OPEN_PR_PAGE, TRANSIENT_META_ERROR, CARRIED_PR_PAGE, MAX_CARRIED_PROBES, CARRIED_SHA_PROBE_CAP, RESUME_DECAY_HALF_LIFE_MS, RESUME_MIN_SCORE, RECEPTIVITY_RECENCY_DAYS, RECEPTIVITY_RECENCY_FLOOR, GITHUB_GRAPHQL_URL, AFFILIATION_REVIEWER_CAP, LIFECYCLE_BOT_LOGINS;
 var init_github = __esm({
   "../../packages/core/src/github.ts"() {
     "use strict";
@@ -2198,6 +2324,9 @@ var init_github = __esm({
     MAX_ENRICH_PRS = 12;
     OPEN_PR_PAGE = 20;
     TRANSIENT_META_ERROR = /HTTP 403|HTTP 429|rate limit|HTTP 5\d\d|timeout|network|fetch failed/i;
+    CARRIED_PR_PAGE = 20;
+    MAX_CARRIED_PROBES = 10;
+    CARRIED_SHA_PROBE_CAP = 20;
     RESUME_DECAY_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1e3;
     RESUME_MIN_SCORE = 0.05;
     RECEPTIVITY_RECENCY_DAYS = 180;
@@ -10219,6 +10348,7 @@ __export(src_exports, {
   extractJson: () => extractJson,
   extractSkillTags: () => extractSkillTags,
   fetchAcceptanceSearchPage: () => fetchAcceptanceSearchPage,
+  fetchCarriedContributions: () => fetchCarriedContributions,
   fetchGitHubProfile: () => fetchGitHubProfile,
   fetchIssueStatus: () => fetchIssueStatus,
   fetchOpenExternalPRs: () => fetchOpenExternalPRs,
@@ -27960,18 +28090,62 @@ function renderRunView(run2, message) {
   const sha = run2.commitSha ? String(run2.commitSha).slice(0, 10) : null;
   lines.push(`  run:        ${run2.branch ?? "(no branch)"}${sha ? ` @ ${sha}` : ""}`);
   lines.push(
-    `  status:     ${run2.status}${run2.conclusion ? ` \xB7 conclusion: ${run2.conclusion}` : ""}`
+    `  status:     ${terminalSafeInline(run2.status)}${run2.conclusion ? ` \xB7 conclusion: ${terminalSafeInline(run2.conclusion)}` : ""}`
   );
   if (Array.isArray(run2.failingJobs) && run2.failingJobs.length > 0) {
-    lines.push(`  failing:    ${run2.failingJobs.join(", ")}`);
+    lines.push(`  failing:    ${run2.failingJobs.map(terminalSafeInline).join(", ")}`);
   }
-  if (run2.previewUrl) lines.push(`  preview:    ${run2.previewUrl}`);
+  if (run2.previewUrl) lines.push(`  preview:    ${terminalSafeInline(run2.previewUrl)}`);
   if (run2.roundTrips != null) lines.push(`  round trips: ${run2.roundTrips}`);
   if (run2.logTail) {
     lines.push("  \u2500\u2500 log tail \u2500\u2500");
-    for (const l of String(run2.logTail).split("\n")) lines.push(`  \u2502 ${l}`);
+    for (const l of terminalSafeLines(run2.logTail)) lines.push(`  \u2502 ${l}`);
   }
   if (message) lines.push(`  ${message}`);
+  return lines.join("\n");
+}
+var CLAIM_EVENT_LABEL = {
+  claimed: "you claimed this",
+  claimant_approved: "the founder approved you to start",
+  branch_created: "your branch was created",
+  patch_submitted: "you submitted a change",
+  ci_result: "checks reported",
+  pr_opened: "you finished \u2014 waiting on the founder",
+  feedback: "the founder sent feedback",
+  accepted: "the founder accepted",
+  rejected: "the founder rejected"
+};
+var LINE_BREAKS = /\r\n|[\r\n\v\f\u0085\u2028\u2029]/;
+var CONTROL_CHARS = /[\u0000-\u001F\u007F-\u009F]/g;
+function terminalSafeLines(raw) {
+  if (typeof raw !== "string" || raw === "") return [];
+  return raw.split(LINE_BREAKS).map((l) => l.replace(CONTROL_CHARS, ""));
+}
+function terminalSafeInline(raw) {
+  return terminalSafeLines(raw).join(" ");
+}
+function shortWhen(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const month = d.toLocaleString("en-US", { month: "short", timeZone: "UTC" }).toLowerCase();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${month} ${d.getUTCDate()} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
+function renderClaimHistory(attempts, timeline) {
+  const runs = Array.isArray(attempts) ? attempts : [];
+  const told = (Array.isArray(timeline) ? timeline : []).filter((e) => CLAIM_EVENT_LABEL[e?.kind]);
+  if (runs.length < 2 && told.length === 0) return "";
+  const lines = ["", "  \u2500\u2500 how this got here \u2500\u2500"];
+  for (const a of runs) {
+    const sha = a.commitSha ? String(a.commitSha).slice(0, 10) : "";
+    const jobs = Array.isArray(a.failingJobs) && a.failingJobs.length > 0 ? ` \u2014 ${a.failingJobs.map(terminalSafeInline).join(", ")}` : "";
+    const outcome = a.conclusion ? `checks ${terminalSafeInline(a.conclusion)}${jobs}` : a.status === "no-ci" ? "no checks ran" : "checks running";
+    lines.push(`  attempt ${a.attemptNumber}  ${sha}  ${outcome}  ${shortWhen(a.at)}`);
+  }
+  for (const e of told) {
+    lines.push(`  ${shortWhen(e.at)}  ${CLAIM_EVENT_LABEL[e.kind]}`);
+    for (const l of terminalSafeLines(e.note)) lines.push(`    \u2502 ${l}`);
+  }
   return lines.join("\n");
 }
 function isTerminalRunStatus(status) {
@@ -28177,7 +28351,13 @@ async function cmdRuns(id, flags = {}) {
     if (!body || body.ok !== true || !body.run) {
       return { kind: "refusal", status: res.status, body: { error: "malformed-response" } };
     }
-    return { kind: "ok", run: body.run, message: body.message ?? null };
+    return {
+      kind: "ok",
+      run: body.run,
+      message: body.message ?? null,
+      attempts: Array.isArray(body.attempts) ? body.attempts : [],
+      timeline: Array.isArray(body.timeline) ? body.timeline : []
+    };
   };
   if (flags.watch) {
     console.log(
@@ -28199,6 +28379,8 @@ async function cmdRuns(id, flags = {}) {
   console.log(`
 ${claim.title}`);
   console.log(renderRunView(r.run, r.message));
+  const history = renderClaimHistory(r.attempts, r.timeline);
+  if (history) console.log(history);
   if (!isTerminalRunStatus(r.run.status)) {
     console.log(`
   Still running \u2014 poll it: terminalhire claim runs ${id} --watch`);
@@ -29326,6 +29508,7 @@ export {
   pickBodySource,
   pickExistingPr,
   printNextSteps,
+  renderClaimHistory,
   renderRunView,
   renderServerRefusal,
   resolveBounty,
@@ -29340,6 +29523,8 @@ export {
   sliceWorkDirFor,
   stakeDecision,
   startBranchFor,
+  terminalSafeInline,
+  terminalSafeLines,
   watchRunsLoop,
   workDirFor,
   writeSliceFiles
