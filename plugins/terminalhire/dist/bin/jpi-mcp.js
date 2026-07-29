@@ -26349,6 +26349,7 @@ __export(jpi_claim_exports, {
   stakeDecision: () => stakeDecision,
   startBranchFor: () => startBranchFor,
   submitRefusalFor: () => submitRefusalFor,
+  syncFounderApprovals: () => syncFounderApprovals,
   terminalSafeInline: () => terminalSafeInline,
   terminalSafeLines: () => terminalSafeLines,
   watchRunsLoop: () => watchRunsLoop,
@@ -27773,13 +27774,15 @@ async function cmdPreview(arg, { json } = {}) {
 }
 async function cmdList(active) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
-  const list = claims.listClaims({ active });
+  let list = claims.listClaims({ active });
   if (list.length === 0) {
     console.log(
       active ? "No active claims." : "No claims yet. Use `terminalhire claim record <bountyId>`."
     );
     return;
   }
+  await syncFounderApprovals(claims, list);
+  list = claims.listClaims({ active });
   console.log(`
 ${list.length} ${active ? "active " : ""}claim${list.length === 1 ? "" : "s"}:
 `);
@@ -27861,6 +27864,36 @@ async function fetchFounderApprovals(pushToken, fetchImpl = fetch) {
     return null;
   }
 }
+async function syncFounderApprovals(claimsModule, targets) {
+  const founderTargets = targets.filter((c) => Boolean(c.approval));
+  let approvalsChecked = false;
+  let approvalsUnavailable = false;
+  let pushToken = null;
+  if (founderTargets.length > 0) {
+    try {
+      pushToken = await readPushTokenEnc();
+    } catch {
+      pushToken = null;
+    }
+    if (pushToken) {
+      const approvals = await fetchFounderApprovals(pushToken);
+      if (approvals) {
+        approvalsChecked = true;
+        const approved = new Set(approvals.claimIds);
+        for (const c of founderTargets) {
+          if (c.approval?.claimId && c.approval.state === "pending" && approved.has(c.approval.claimId)) {
+            claimsModule.updateClaim(c.id, {
+              approval: { ...c.approval, state: "granted" }
+            });
+          }
+        }
+      } else {
+        approvalsUnavailable = true;
+      }
+    }
+  }
+  return { pushToken, approvalsChecked, approvalsUnavailable };
+}
 function founderClaimStanding(claim, approvalsChecked) {
   switch (claim.state) {
     case "merged":
@@ -27890,30 +27923,13 @@ async function cmdStatus(id) {
   const founderTargets = targets.filter((c) => Boolean(c.approval));
   let approvalsChecked = false;
   let approvalsUnavailable = false;
+  let pushToken = null;
   if (founderTargets.length > 0) {
-    let pushToken = null;
-    try {
-      pushToken = await readPushTokenEnc();
-    } catch {
-      pushToken = null;
-    }
-    if (pushToken) {
-      const approvals = await fetchFounderApprovals(pushToken);
-      if (approvals) {
-        approvalsChecked = true;
-        const approved = new Set(approvals.claimIds);
-        for (const c of founderTargets) {
-          if (c.approval?.claimId && approved.has(c.approval.claimId)) {
-            claims.updateClaim(c.id, {
-              approval: { ...c.approval, state: "granted" }
-            });
-          }
-        }
-        targets = id ? [claims.findClaim(id)].filter(Boolean) : claims.listClaims();
-      } else {
-        approvalsUnavailable = true;
-      }
-    }
+    const syncRes = await syncFounderApprovals(claims, targets);
+    pushToken = syncRes.pushToken;
+    approvalsChecked = syncRes.approvalsChecked;
+    approvalsUnavailable = syncRes.approvalsUnavailable;
+    targets = id ? [claims.findClaim(id)].filter(Boolean) : claims.listClaims();
     console.log("\n  Founder claims:");
     for (const c of targets.filter((claim) => Boolean(claim.approval))) {
       console.log(`  ${founderClaimStanding(c, approvalsChecked)} \u2014 ${c.title}`);
@@ -28223,6 +28239,8 @@ async function ensureForkExists(repoFullName, ghUser) {
 async function cmdStart(id, flags = {}) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
   if (!id) {
+    let list = claims.listClaims({ active: true });
+    await syncFounderApprovals(claims, list);
     const startable = claims.listClaims({ active: true }).filter((c) => c.state === "claimed");
     if (startable.length === 0) {
       console.log("No claims ready to start. Claim one first:  terminalhire claim <ref>");
@@ -28240,10 +28258,14 @@ ${startable.length} claim${startable.length === 1 ? "" : "s"} ready to start:
     console.log("\nRun the command under the one you want to start.");
     return;
   }
-  const claim = claims.findClaim(id);
+  let claim = claims.findClaim(id);
   if (!claim) {
     console.error(`terminalhire claim: no claim with id '${id}'.`);
     process.exit(1);
+  }
+  if (claim.approval?.state === "pending") {
+    await syncFounderApprovals(claims, [claim]);
+    claim = claims.findClaim(id);
   }
   if (claim.worktreePath) {
     let stillThere = false;
