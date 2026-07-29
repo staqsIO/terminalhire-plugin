@@ -281,6 +281,7 @@ __export(github_auth_exports, {
   hasGitHubToken: () => hasGitHubToken,
   loadKey: () => loadKey,
   readGitHubToken: () => readGitHubToken,
+  requireStoredLogin: () => requireStoredLogin,
   resolveStoredLogin: () => resolveStoredLogin,
   runDeviceFlow: () => runDeviceFlow,
   writeGitHubToken: () => writeGitHubToken
@@ -458,6 +459,22 @@ async function resolveStoredLogin() {
     return await fetchAuthedLogin(token);
   } catch {
     return void 0;
+  }
+}
+async function requireStoredLogin() {
+  if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
+    return MOCK_LOGIN;
+  }
+  const token = await readGitHubToken();
+  if (!token) {
+    throw new Error("no readable GitHub sign-in is stored on this machine");
+  }
+  try {
+    return await fetchAuthedLogin(token);
+  } catch (err) {
+    throw new Error(
+      `the stored GitHub sign-in could not be verified (${err instanceof Error ? err.message : String(err)})`
+    );
   }
 }
 function sleep(ms) {
@@ -5841,17 +5858,17 @@ var init_directoryThreshold = __esm({
   }
 });
 
-// ../../node_modules/@noble/hashes/esm/cryptoNode.js
+// ../../../term-333/node_modules/@noble/hashes/esm/cryptoNode.js
 import * as nc from "crypto";
 var crypto;
 var init_cryptoNode = __esm({
-  "../../node_modules/@noble/hashes/esm/cryptoNode.js"() {
+  "../../../term-333/node_modules/@noble/hashes/esm/cryptoNode.js"() {
     "use strict";
     crypto = nc && typeof nc === "object" && "webcrypto" in nc ? nc.webcrypto : nc && typeof nc === "object" && "randomBytes" in nc ? nc : void 0;
   }
 });
 
-// ../../node_modules/@noble/hashes/esm/utils.js
+// ../../../term-333/node_modules/@noble/hashes/esm/utils.js
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -5971,7 +5988,7 @@ function randomBytes3(bytesLength = 32) {
 }
 var hasHexBuiltin, hexes, asciis, Hash;
 var init_utils = __esm({
-  "../../node_modules/@noble/hashes/esm/utils.js"() {
+  "../../../term-333/node_modules/@noble/hashes/esm/utils.js"() {
     "use strict";
     init_cryptoNode();
     hasHexBuiltin = /* @__PURE__ */ (() => (
@@ -5985,7 +6002,7 @@ var init_utils = __esm({
   }
 });
 
-// ../../node_modules/@noble/hashes/esm/_md.js
+// ../../../term-333/node_modules/@noble/hashes/esm/_md.js
 function setBigUint64(view, byteOffset, value, isLE2) {
   if (typeof view.setBigUint64 === "function")
     return view.setBigUint64(byteOffset, value, isLE2);
@@ -6000,7 +6017,7 @@ function setBigUint64(view, byteOffset, value, isLE2) {
 }
 var HashMD, SHA512_IV;
 var init_md = __esm({
-  "../../node_modules/@noble/hashes/esm/_md.js"() {
+  "../../../term-333/node_modules/@noble/hashes/esm/_md.js"() {
     "use strict";
     init_utils();
     HashMD = class extends Hash {
@@ -6114,7 +6131,7 @@ var init_md = __esm({
   }
 });
 
-// ../../node_modules/@noble/hashes/esm/_u64.js
+// ../../../term-333/node_modules/@noble/hashes/esm/_u64.js
 function fromBig(n, le = false) {
   if (le)
     return { h: Number(n & U32_MASK64), l: Number(n >> _32n & U32_MASK64) };
@@ -6136,7 +6153,7 @@ function add(Ah, Al, Bh, Bl) {
 }
 var U32_MASK64, _32n, shrSH, shrSL, rotrSH, rotrSL, rotrBH, rotrBL, add3L, add3H, add4L, add4H, add5L, add5H;
 var init_u64 = __esm({
-  "../../node_modules/@noble/hashes/esm/_u64.js"() {
+  "../../../term-333/node_modules/@noble/hashes/esm/_u64.js"() {
     "use strict";
     U32_MASK64 = /* @__PURE__ */ BigInt(2 ** 32 - 1);
     _32n = /* @__PURE__ */ BigInt(32);
@@ -6155,10 +6172,10 @@ var init_u64 = __esm({
   }
 });
 
-// ../../node_modules/@noble/hashes/esm/sha2.js
+// ../../../term-333/node_modules/@noble/hashes/esm/sha2.js
 var K512, SHA512_Kh, SHA512_Kl, SHA512_W_H, SHA512_W_L, SHA512, sha512;
 var init_sha2 = __esm({
-  "../../node_modules/@noble/hashes/esm/sha2.js"() {
+  "../../../term-333/node_modules/@noble/hashes/esm/sha2.js"() {
     "use strict";
     init_md();
     init_u64();
@@ -6364,7 +6381,7 @@ var init_sha2 = __esm({
   }
 });
 
-// ../../node_modules/@noble/curves/esm/utils.js
+// ../../../term-333/node_modules/@noble/curves/esm/utils.js
 function _abool2(value, title = "") {
   if (typeof value !== "boolean") {
     const prefix = title && `"${title}"`;
@@ -6471,7 +6488,7 @@ function memoized(fn) {
 }
 var _0n, _1n, isPosBig, bitMask, notImplemented;
 var init_utils2 = __esm({
-  "../../node_modules/@noble/curves/esm/utils.js"() {
+  "../../../term-333/node_modules/@noble/curves/esm/utils.js"() {
     "use strict";
     init_utils();
     init_utils();
@@ -6485,7 +6502,7 @@ var init_utils2 = __esm({
   }
 });
 
-// ../../node_modules/@noble/curves/esm/abstract/modular.js
+// ../../../term-333/node_modules/@noble/curves/esm/abstract/modular.js
 function mod(a, b) {
   const result = a % b;
   return result >= _0n2 ? result : b + result;
@@ -6782,7 +6799,7 @@ function Field(ORDER, bitLenOrOpts, isLE2 = false, opts = {}) {
 }
 var _0n2, _1n2, _2n, _3n, _4n, _5n, _7n, _8n, _9n, _16n, isNegativeLE, FIELD_FIELDS;
 var init_modular = __esm({
-  "../../node_modules/@noble/curves/esm/abstract/modular.js"() {
+  "../../../term-333/node_modules/@noble/curves/esm/abstract/modular.js"() {
     "use strict";
     init_utils2();
     _0n2 = BigInt(0);
@@ -6818,7 +6835,7 @@ var init_modular = __esm({
   }
 });
 
-// ../../node_modules/@noble/curves/esm/abstract/curve.js
+// ../../../term-333/node_modules/@noble/curves/esm/abstract/curve.js
 function negateCt(condition, item) {
   const neg = item.negate();
   return condition ? neg : item;
@@ -6951,7 +6968,7 @@ function _createCurveFields(type, CURVE, curveOpts = {}, FpFnLE) {
 }
 var _0n3, _1n3, pointPrecomputes, pointWindowSizes, wNAF;
 var init_curve = __esm({
-  "../../node_modules/@noble/curves/esm/abstract/curve.js"() {
+  "../../../term-333/node_modules/@noble/curves/esm/abstract/curve.js"() {
     "use strict";
     init_utils2();
     init_modular();
@@ -7089,7 +7106,7 @@ var init_curve = __esm({
   }
 });
 
-// ../../node_modules/@noble/curves/esm/abstract/edwards.js
+// ../../../term-333/node_modules/@noble/curves/esm/abstract/edwards.js
 function isEdValidXY(Fp2, CURVE, x, y) {
   const x2 = Fp2.sqr(x);
   const y2 = Fp2.sqr(y);
@@ -7570,7 +7587,7 @@ function twistedEdwards(c) {
 }
 var _0n4, _1n4, _2n2, _8n2, PrimeEdwardsPoint;
 var init_edwards = __esm({
-  "../../node_modules/@noble/curves/esm/abstract/edwards.js"() {
+  "../../../term-333/node_modules/@noble/curves/esm/abstract/edwards.js"() {
     "use strict";
     init_utils2();
     init_curve();
@@ -7649,7 +7666,7 @@ var init_edwards = __esm({
   }
 });
 
-// ../../node_modules/@noble/curves/esm/abstract/montgomery.js
+// ../../../term-333/node_modules/@noble/curves/esm/abstract/montgomery.js
 function validateOpts(curve) {
   _validateObject(curve, {
     adjustScalarBytes: "function",
@@ -7767,7 +7784,7 @@ function montgomery(curveDef) {
 }
 var _0n5, _1n5, _2n3;
 var init_montgomery = __esm({
-  "../../node_modules/@noble/curves/esm/abstract/montgomery.js"() {
+  "../../../term-333/node_modules/@noble/curves/esm/abstract/montgomery.js"() {
     "use strict";
     init_utils2();
     init_modular();
@@ -7777,7 +7794,7 @@ var init_montgomery = __esm({
   }
 });
 
-// ../../node_modules/@noble/curves/esm/ed25519.js
+// ../../../term-333/node_modules/@noble/curves/esm/ed25519.js
 function ed25519_pow_2_252_3(x) {
   const _10n = BigInt(10), _20n = BigInt(20), _40n = BigInt(40), _80n = BigInt(80);
   const P = ed25519_CURVE_p;
@@ -7855,7 +7872,7 @@ function ristretto255_map(bytes) {
 }
 var _0n6, _1n6, _2n4, _3n2, _5n2, _8n3, ed25519_CURVE_p, ed25519_CURVE, ED25519_SQRT_M1, Fp, Fn, ed25519Defaults, ed25519, x25519, SQRT_M1, SQRT_AD_MINUS_ONE, INVSQRT_A_MINUS_D, ONE_MINUS_D_SQ, D_MINUS_ONE_SQ, invertSqrt, MAX_255B, bytes255ToNumberLE, _RistrettoPoint;
 var init_ed25519 = __esm({
-  "../../node_modules/@noble/curves/esm/ed25519.js"() {
+  "../../../term-333/node_modules/@noble/curves/esm/ed25519.js"() {
     "use strict";
     init_sha2();
     init_utils();
@@ -8025,7 +8042,7 @@ var init_ed25519 = __esm({
   }
 });
 
-// ../../node_modules/@noble/ciphers/esm/utils.js
+// ../../../term-333/node_modules/@noble/ciphers/esm/utils.js
 function isBytes2(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -8132,7 +8149,7 @@ function copyBytes2(bytes) {
 }
 var isLE, wrapCipher;
 var init_utils3 = __esm({
-  "../../node_modules/@noble/ciphers/esm/utils.js"() {
+  "../../../term-333/node_modules/@noble/ciphers/esm/utils.js"() {
     "use strict";
     isLE = /* @__PURE__ */ (() => new Uint8Array(new Uint32Array([287454020]).buffer)[0] === 68)();
     wrapCipher = /* @__NO_SIDE_EFFECTS__ */ (params, constructor) => {
@@ -8187,7 +8204,7 @@ var init_utils3 = __esm({
   }
 });
 
-// ../../node_modules/@noble/ciphers/esm/_arx.js
+// ../../../term-333/node_modules/@noble/ciphers/esm/_arx.js
 function rotl(a, b) {
   return a << b | a >>> 32 - b;
 }
@@ -8287,7 +8304,7 @@ function createCipher(core, opts) {
 }
 var _utf8ToBytes, sigma16, sigma32, sigma16_32, sigma32_32, BLOCK_LEN, BLOCK_LEN32, MAX_COUNTER, U32_EMPTY;
 var init_arx = __esm({
-  "../../node_modules/@noble/ciphers/esm/_arx.js"() {
+  "../../../term-333/node_modules/@noble/ciphers/esm/_arx.js"() {
     "use strict";
     init_utils3();
     _utf8ToBytes = (str) => Uint8Array.from(str.split("").map((c) => c.charCodeAt(0)));
@@ -8302,7 +8319,7 @@ var init_arx = __esm({
   }
 });
 
-// ../../node_modules/@noble/ciphers/esm/_poly1305.js
+// ../../../term-333/node_modules/@noble/ciphers/esm/_poly1305.js
 function wrapConstructorWithKey(hashCons) {
   const hashC = (msg, key) => hashCons(key).update(toBytes2(msg)).digest();
   const tmp = hashCons(new Uint8Array(32));
@@ -8313,7 +8330,7 @@ function wrapConstructorWithKey(hashCons) {
 }
 var u8to16, Poly1305, poly1305;
 var init_poly1305 = __esm({
-  "../../node_modules/@noble/ciphers/esm/_poly1305.js"() {
+  "../../../term-333/node_modules/@noble/ciphers/esm/_poly1305.js"() {
     "use strict";
     init_utils3();
     u8to16 = (a, i) => a[i++] & 255 | (a[i++] & 255) << 8;
@@ -8564,7 +8581,7 @@ var init_poly1305 = __esm({
   }
 });
 
-// ../../node_modules/@noble/ciphers/esm/chacha.js
+// ../../../term-333/node_modules/@noble/ciphers/esm/chacha.js
 function chachaCore(s, k, n, out, cnt, rounds = 20) {
   let y00 = s[0], y01 = s[1], y02 = s[2], y03 = s[3], y04 = k[0], y05 = k[1], y06 = k[2], y07 = k[3], y08 = k[4], y09 = k[5], y10 = k[6], y11 = k[7], y12 = cnt, y13 = n[0], y14 = n[1], y15 = n[2];
   let x00 = y00, x01 = y01, x02 = y02, x03 = y03, x04 = y04, x05 = y05, x06 = y06, x07 = y07, x08 = y08, x09 = y09, x10 = y10, x11 = y11, x12 = y12, x13 = y13, x14 = y14, x15 = y15;
@@ -8744,7 +8761,7 @@ function computeTag(fn, key, nonce, data, AAD) {
 }
 var chacha20, xchacha20, ZEROS16, updatePadded, ZEROS32, _poly1305_aead, chacha20poly1305, xchacha20poly1305;
 var init_chacha = __esm({
-  "../../node_modules/@noble/ciphers/esm/chacha.js"() {
+  "../../../term-333/node_modules/@noble/ciphers/esm/chacha.js"() {
     "use strict";
     init_arx();
     init_poly1305();
@@ -11318,6 +11335,13 @@ function clearPushTokenEnc() {
   } catch {
   }
 }
+function readAutoMarker() {
+  try {
+    return existsSync5(CLAIM_PUSH_AUTO_MARKER) ? JSON.parse(readFileSync8(CLAIM_PUSH_AUTO_MARKER, "utf8")) : null;
+  } catch {
+    return null;
+  }
+}
 function writeAutoMarker(marker) {
   ensureStateDir(TERMINALHIRE_DIR6);
   writeFileSync7(CLAIM_PUSH_AUTO_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
@@ -11330,6 +11354,28 @@ function clearAutoMarker() {
 }
 function computeSnapshotHash(pushed) {
   return createHash3("sha256").update(JSON.stringify(pushed)).digest("hex");
+}
+function backgroundPushGate(params) {
+  const {
+    autoMarkerExists,
+    tokenFileExists,
+    lastPushedAt,
+    now,
+    throttleMs,
+    currentHash,
+    lastSnapshotHash
+  } = params;
+  if (!autoMarkerExists || !tokenFileExists) {
+    return { push: false, reason: "not-opted-in" };
+  }
+  const last = lastPushedAt ? Date.parse(lastPushedAt) : NaN;
+  if (!Number.isNaN(last) && now - last < throttleMs) {
+    return { push: false, reason: "throttled" };
+  }
+  if (lastSnapshotHash && lastSnapshotHash === currentHash) {
+    return { push: false, reason: "unchanged" };
+  }
+  return { push: true, reason: "ok" };
 }
 function unpushedNudgeGate(params) {
   const {
@@ -11368,7 +11414,53 @@ async function shouldNudgeUnpushed() {
     return false;
   }
 }
-var TERMINALHIRE_DIR6, CLAIM_PUSH_AUTO_MARKER, CLAIM_PUSH_TOKEN_FILE, CLAIM_PUSH_MANUAL_MARKER, AUTO_CONSENT_VERSION, AUTO_PUSH_THROTTLE_MS;
+async function runBackgroundClaimPush({ now = Date.now() } = {}) {
+  try {
+    if (!existsSync5(CLAIM_PUSH_AUTO_MARKER) || !existsSync5(CLAIM_PUSH_TOKEN_FILE)) {
+      return { pushed: false, reason: "not-opted-in" };
+    }
+    const marker = readAutoMarker();
+    if (!marker || !marker.autoConsentedAt) return { pushed: false, reason: "not-opted-in" };
+    const { listClaims: listClaims2, toPushedClaim: toPushedClaim2, PUSHED_CLAIM_FIELDS: PUSHED_CLAIM_FIELDS2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
+    const pushed = listClaims2().map((c) => toPushedClaim2(c));
+    const currentHash = computeSnapshotHash(pushed);
+    const gate = backgroundPushGate({
+      autoMarkerExists: true,
+      tokenFileExists: true,
+      lastPushedAt: marker.lastPushedAt ?? null,
+      now,
+      throttleMs: AUTO_PUSH_THROTTLE_MS,
+      currentHash,
+      lastSnapshotHash: marker.lastSnapshotHash ?? null
+    });
+    if (!gate.push) return { pushed: false, reason: gate.reason };
+    const token = await readPushTokenEnc();
+    if (!token) return { pushed: false, reason: "unreadable-token" };
+    const consentReceipt = {
+      consentedAt: marker.autoConsentedAt,
+      version: AUTO_CONSENT_VERSION,
+      fields: PUSHED_CLAIM_FIELDS2
+    };
+    const res = await fetch(`${CLAIM_SYNC_BASE}/api/claim-sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ consentToken: consentReceipt, claims: pushed, pushToken: token }),
+      signal: AbortSignal.timeout(1e4)
+    });
+    if (!res.ok) {
+      return { pushed: false, reason: `server-${res.status}` };
+    }
+    writeAutoMarker({
+      ...marker,
+      lastPushedAt: new Date(now).toISOString(),
+      lastSnapshotHash: currentHash
+    });
+    return { pushed: true, reason: "ok" };
+  } catch {
+    return { pushed: false, reason: "failed" };
+  }
+}
+var TERMINALHIRE_DIR6, CLAIM_PUSH_AUTO_MARKER, CLAIM_PUSH_TOKEN_FILE, CLAIM_PUSH_MANUAL_MARKER, CLAIM_SYNC_BASE, AUTO_CONSENT_VERSION, AUTO_PUSH_THROTTLE_MS;
 var init_claim_push_bg = __esm({
   "bin/claim-push-bg.js"() {
     "use strict";
@@ -11378,6 +11470,7 @@ var init_claim_push_bg = __esm({
     CLAIM_PUSH_AUTO_MARKER = join9(TERMINALHIRE_DIR6, "claim-push-auto.json");
     CLAIM_PUSH_TOKEN_FILE = join9(TERMINALHIRE_DIR6, "claim-push-token.enc");
     CLAIM_PUSH_MANUAL_MARKER = join9(TERMINALHIRE_DIR6, "claim-push.json");
+    CLAIM_SYNC_BASE = "https://terminalhire.com";
     AUTO_CONSENT_VERSION = 2;
     AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
   }
@@ -11464,7 +11557,7 @@ LAST thing in your reply, in a fenced \`\`\`json block. Nothing after it.`;
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/tslib.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/tslib.mjs
 function __classPrivateFieldSet(receiver, state, value, kind, f) {
   if (kind === "m")
     throw new TypeError("Private method is not writable");
@@ -11482,15 +11575,15 @@ function __classPrivateFieldGet(receiver, state, kind, f) {
   return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
 }
 var init_tslib = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/tslib.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/tslib.mjs"() {
     "use strict";
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/utils/uuid.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/uuid.mjs
 var uuid4;
 var init_uuid = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/utils/uuid.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/uuid.mjs"() {
     "use strict";
     uuid4 = function() {
       const { crypto: crypto3 } = globalThis;
@@ -11505,7 +11598,7 @@ var init_uuid = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/errors.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/errors.mjs
 function isAbortError(err) {
   return typeof err === "object" && err !== null && // Spec-compliant fetch implementations
   ("name" in err && err.name === "AbortError" || // Expo fetch
@@ -11513,7 +11606,7 @@ function isAbortError(err) {
 }
 var castToError;
 var init_errors = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/errors.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/errors.mjs"() {
     "use strict";
     castToError = (err) => {
       if (err instanceof Error)
@@ -11542,10 +11635,10 @@ var init_errors = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/core/error.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/core/error.mjs
 var AnthropicError, APIError, APIUserAbortError, APIConnectionError, APIConnectionTimeoutError, RetryableError, BadRequestError, AuthenticationError, PermissionDeniedError, NotFoundError, ConflictError, UnprocessableEntityError, RateLimitError, InternalServerError;
 var init_error = __esm({
-  "../../node_modules/@anthropic-ai/sdk/core/error.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/core/error.mjs"() {
     "use strict";
     init_errors();
     AnthropicError = class extends Error {
@@ -11648,7 +11741,7 @@ var init_error = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/utils/values.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/values.mjs
 function maybeObj(x) {
   if (typeof x !== "object") {
     return {};
@@ -11667,7 +11760,7 @@ function hasOwn(obj, key) {
 }
 var startsWithSchemeRegexp, isAbsoluteURL, isArray, isReadonlyArray, validatePositiveInteger, safeJSON;
 var init_values = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/utils/values.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/values.mjs"() {
     "use strict";
     init_error();
     startsWithSchemeRegexp = /^[a-z][a-z0-9+.-]*:/i;
@@ -11695,10 +11788,10 @@ var init_values = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/utils/sleep.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/sleep.mjs
 var sleep2;
 var init_sleep = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/utils/sleep.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/sleep.mjs"() {
     "use strict";
     sleep2 = (ms, signal) => new Promise((resolve4) => {
       if (signal?.aborted)
@@ -11716,16 +11809,16 @@ var init_sleep = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/version.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/version.mjs
 var VERSION;
 var init_version = __esm({
-  "../../node_modules/@anthropic-ai/sdk/version.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/version.mjs"() {
     "use strict";
     VERSION = "0.112.3";
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/detect-platform.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/detect-platform.mjs
 function getDetectedPlatform() {
   if (typeof Deno !== "undefined" && Deno.build != null) {
     return "deno";
@@ -11763,7 +11856,7 @@ function getBrowserInfo() {
 }
 var isRunningInBrowser, getPlatformProperties, normalizeArch, normalizePlatform, _platformHeaders, getPlatformHeaders;
 var init_detect_platform = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/detect-platform.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/detect-platform.mjs"() {
     "use strict";
     init_version();
     isRunningInBrowser = () => {
@@ -11865,7 +11958,7 @@ var init_detect_platform = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/shims.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/shims.mjs
 function getDefaultFetch() {
   if (typeof fetch !== "undefined") {
     return fetch;
@@ -11937,15 +12030,15 @@ async function CancelReadableStream(stream) {
   await cancelPromise;
 }
 var init_shims = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/shims.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/shims.mjs"() {
     "use strict";
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/request-options.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/request-options.mjs
 var BetaFallbackState, FallbackEncoder;
 var init_request_options = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/request-options.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/request-options.mjs"() {
     "use strict";
     BetaFallbackState = class {
     };
@@ -11960,10 +12053,10 @@ var init_request_options = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/qs/formats.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/qs/formats.mjs
 var default_format, default_formatter, formatters, RFC1738;
 var init_formats = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/qs/formats.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/qs/formats.mjs"() {
     "use strict";
     default_format = "RFC3986";
     default_formatter = (v) => String(v);
@@ -11975,7 +12068,7 @@ var init_formats = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/qs/utils.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/qs/utils.mjs
 function is_buffer(obj) {
   if (!obj || typeof obj !== "object") {
     return false;
@@ -11994,7 +12087,7 @@ function maybe_map(val, fn) {
 }
 var has, hex_table, limit, encode;
 var init_utils4 = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/qs/utils.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/qs/utils.mjs"() {
     "use strict";
     init_formats();
     init_values();
@@ -12062,7 +12155,7 @@ var init_utils4 = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/qs/stringify.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/qs/stringify.mjs
 function is_non_nullish_primitive(v) {
   return typeof v === "string" || typeof v === "number" || typeof v === "boolean" || typeof v === "symbol" || typeof v === "bigint";
 }
@@ -12302,7 +12395,7 @@ function stringify(object3, opts = {}) {
 }
 var array_prefix_generators, push_to_array, toISOString, defaults, sentinel;
 var init_stringify = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/qs/stringify.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/qs/stringify.mjs"() {
     "use strict";
     init_utils4();
     init_formats();
@@ -12348,18 +12441,18 @@ var init_stringify = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/utils/query.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/query.mjs
 function stringifyQuery(query) {
   return stringify(query, { arrayFormat: "brackets" });
 }
 var init_query = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/utils/query.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/query.mjs"() {
     "use strict";
     init_stringify();
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/credentials/types.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/types.mjs
 function requireSecureTokenEndpoint(baseURL) {
   if (!baseURL)
     return;
@@ -12506,7 +12599,7 @@ async function readLimitedText(resp) {
 }
 var GRANT_TYPE_JWT_BEARER, GRANT_TYPE_REFRESH_TOKEN, TOKEN_ENDPOINT, OAUTH_API_BETA_HEADER, FEDERATION_BETA_HEADER, ADVISORY_REFRESH_THRESHOLD_IN_SECONDS, MANDATORY_REFRESH_THRESHOLD_IN_SECONDS, ADVISORY_REFRESH_BACKOFF_IN_SECONDS, MAX_TOKEN_RESPONSE_BYTES, MAX_ERROR_BODY_CHARS, SAFE_ERROR_KEYS, WorkloadIdentityError;
 var init_types3 = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/credentials/types.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/types.mjs"() {
     "use strict";
     init_error();
     GRANT_TYPE_JWT_BEARER = "urn:ietf:params:oauth:grant-type:jwt-bearer";
@@ -12531,20 +12624,20 @@ var init_types3 = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/utils/time.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/time.mjs
 function nowAsSeconds() {
   return Math.floor(Date.now() / 1e3);
 }
 var init_time = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/utils/time.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/time.mjs"() {
     "use strict";
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/credentials/token-cache.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/token-cache.mjs
 var TokenCache;
 var init_token_cache = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/credentials/token-cache.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/token-cache.mjs"() {
     "use strict";
     init_types3();
     init_time();
@@ -12638,10 +12731,10 @@ var init_token_cache = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/utils/env.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/env.mjs
 var readEnv;
 var init_env = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/utils/env.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/env.mjs"() {
     "use strict";
     readEnv = (env) => {
       if (typeof globalThis.process !== "undefined") {
@@ -12655,7 +12748,7 @@ var init_env = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/utils/bytes.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/bytes.mjs
 function concatBytes2(buffers) {
   let length = 0;
   for (const buffer of buffers) {
@@ -12679,21 +12772,21 @@ function decodeUTF8(bytes) {
 }
 var encodeUTF8_, decodeUTF8_;
 var init_bytes = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/utils/bytes.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/bytes.mjs"() {
     "use strict";
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/utils/base64.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/base64.mjs
 var init_base64 = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/utils/base64.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/base64.mjs"() {
     "use strict";
     init_error();
     init_bytes();
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/utils/log.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/log.mjs
 function noop() {
 }
 function makeLogFn(fnLevel, logger, logLevel) {
@@ -12735,7 +12828,7 @@ function defaultLogger() {
 }
 var defaultLogLevel, levelNumbers, parseLogLevel, noopLogger, cachedLoggers, lastEnvLevel, cachedDefaultLogger, formatRequestDetails;
 var init_log = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/utils/log.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/log.mjs"() {
     "use strict";
     init_values();
     init_env();
@@ -12786,9 +12879,9 @@ var init_log = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/utils.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils.mjs
 var init_utils5 = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/utils.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils.mjs"() {
     "use strict";
     init_values();
     init_base64();
@@ -12800,7 +12893,7 @@ var init_utils5 = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/core/credentials.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/core/credentials.mjs
 function validateProfileName(name) {
   if (!name) {
     throw new Error("profile name is empty");
@@ -12817,7 +12910,7 @@ function validateProfileName(name) {
 }
 var CREDENTIALS_FILE_VERSION, PROFILE_NAME_PATTERN, loadConfigWithSource, getCredentialsPath, getRootConfigPath, supportsLocalConfigFiles, getActiveProfileName;
 var init_credentials = __esm({
-  "../../node_modules/@anthropic-ai/sdk/core/credentials.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/core/credentials.mjs"() {
     "use strict";
     init_detect_platform();
     init_utils5();
@@ -12982,7 +13075,7 @@ var init_credentials = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/credentials/identity-token.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/identity-token.mjs
 function identityTokenFromFile(path5) {
   if (!path5) {
     throw new AnthropicError("Identity token file path is empty");
@@ -13009,13 +13102,13 @@ function identityTokenFromValue(token) {
   return () => token;
 }
 var init_identity_token = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/credentials/identity-token.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/identity-token.mjs"() {
     "use strict";
     init_error();
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/credentials/oidc-federation.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/oidc-federation.mjs
 function oidcFederationProvider(config2) {
   return async () => {
     requireSecureTokenEndpoint(config2.baseURL);
@@ -13073,7 +13166,7 @@ function oidcFederationProvider(config2) {
   };
 }
 var init_oidc_federation = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/credentials/oidc-federation.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/oidc-federation.mjs"() {
     "use strict";
     init_types3();
     init_time();
@@ -13081,7 +13174,7 @@ var init_oidc_federation = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/credentials/user-oauth.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/user-oauth.mjs
 function userOAuthProvider(config2) {
   return async (opts) => {
     const fs4 = await import("fs");
@@ -13155,7 +13248,7 @@ function userOAuthProvider(config2) {
   };
 }
 var init_user_oauth = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/credentials/user-oauth.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/user-oauth.mjs"() {
     "use strict";
     init_credentials();
     init_types3();
@@ -13164,7 +13257,7 @@ var init_user_oauth = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/credentials/credential-chain.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/credential-chain.mjs
 function resolveCredentialsFromConfig(config2, options) {
   const credentialsPath = config2.authentication.credentials_path ?? null;
   const effectiveBaseURL = (config2.base_url || options.baseURL).replace(/\/+$/, "");
@@ -13296,7 +13389,7 @@ function cachedExchangeProvider(exchange, credentialsPath, onCacheWriteError, on
   };
 }
 var init_credential_chain = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/credentials/credential-chain.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/credentials/credential-chain.mjs"() {
     "use strict";
     init_env();
     init_credentials();
@@ -13308,7 +13401,7 @@ var init_credential_chain = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/decoders/line.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/decoders/line.mjs
 function findNewlineIndex(buffer, startIndex) {
   const newline = 10;
   const carriage = 13;
@@ -13340,7 +13433,7 @@ function findDoubleNewlineIndex(buffer) {
 }
 var _LineDecoder_buffer, _LineDecoder_carriageReturnIndex, LineDecoder;
 var init_line = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/decoders/line.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/decoders/line.mjs"() {
     "use strict";
     init_tslib();
     init_bytes();
@@ -13391,7 +13484,7 @@ var init_line = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/core/streaming.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/core/streaming.mjs
 async function* _iterSSEMessages(response, controller) {
   if (!response.body) {
     controller.abort();
@@ -13446,7 +13539,7 @@ function partition(str, delimiter2) {
 }
 var _Stream_client, Stream, SSEDecoder;
 var init_streaming = __esm({
-  "../../node_modules/@anthropic-ai/sdk/core/streaming.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/core/streaming.mjs"() {
     "use strict";
     init_tslib();
     init_error();
@@ -13668,7 +13761,7 @@ var init_streaming = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/parse.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/parse.mjs
 async function defaultParseResponse(client, props) {
   const { response, requestLogID, retryOfRequestLogID, startTime } = props;
   const body = await (async () => {
@@ -13715,14 +13808,14 @@ function addRequestID(value, response) {
   });
 }
 var init_parse = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/parse.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/parse.mjs"() {
     "use strict";
     init_streaming();
     init_log();
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/core/middleware.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/core/middleware.mjs
 function isFetchOriginError(err) {
   return typeof err === "object" && err !== null && fetchOriginErrors.has(err);
 }
@@ -13818,7 +13911,7 @@ function applyMiddleware(fetchFn, middleware, options, client) {
 }
 var fetchOriginErrors;
 var init_middleware = __esm({
-  "../../node_modules/@anthropic-ai/sdk/core/middleware.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/core/middleware.mjs"() {
     "use strict";
     init_errors();
     init_parse();
@@ -13829,10 +13922,10 @@ var init_middleware = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/core/api-promise.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/core/api-promise.mjs
 var _APIPromise_client, APIPromise;
 var init_api_promise = __esm({
-  "../../node_modules/@anthropic-ai/sdk/core/api-promise.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/core/api-promise.mjs"() {
     "use strict";
     init_tslib();
     init_parse();
@@ -13899,10 +13992,10 @@ var init_api_promise = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/core/pagination.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/core/pagination.mjs
 var _AbstractPage_client, AbstractPage, PagePromise, Page, PageCursor, BidirectionalPageCursor;
 var init_pagination = __esm({
-  "../../node_modules/@anthropic-ai/sdk/core/pagination.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/core/pagination.mjs"() {
     "use strict";
     init_tslib();
     init_error();
@@ -14058,7 +14151,7 @@ var init_pagination = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/uploads.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/uploads.mjs
 function makeFile(fileBits, fileName, options) {
   checkFileSupport();
   return new File(fileBits, fileName ?? "unknown_file", options);
@@ -14089,7 +14182,7 @@ function supportsFormData(fetchObject) {
 }
 var checkFileSupport, isAsyncIterable, multipartFormRequestOptions, supportsFormDataMap, createForm, isNamedBlob, addFormValue;
 var init_uploads = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/uploads.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/uploads.mjs"() {
     "use strict";
     init_shims();
     checkFileSupport = () => {
@@ -14143,7 +14236,7 @@ var init_uploads = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/to-file.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/to-file.mjs
 async function toFile(value, name, options) {
   checkFileSupport();
   value = await value;
@@ -14197,7 +14290,7 @@ function propsForError(value) {
 }
 var isBlobLike, isFileLike, isResponseLike;
 var init_to_file = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/to-file.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/to-file.mjs"() {
     "use strict";
     init_uploads();
     init_uploads();
@@ -14207,25 +14300,25 @@ var init_to_file = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/core/uploads.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/core/uploads.mjs
 var init_uploads2 = __esm({
-  "../../node_modules/@anthropic-ai/sdk/core/uploads.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/core/uploads.mjs"() {
     "use strict";
     init_to_file();
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/shared.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/shared.mjs
 var init_shared = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/shared.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/shared.mjs"() {
     "use strict";
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/core/resource.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/core/resource.mjs
 var APIResource;
 var init_resource = __esm({
-  "../../node_modules/@anthropic-ai/sdk/core/resource.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/core/resource.mjs"() {
     "use strict";
     APIResource = class {
       constructor(client) {
@@ -14235,7 +14328,7 @@ var init_resource = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/headers.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/headers.mjs
 function* iterateHeaders(headers) {
   if (!headers)
     return;
@@ -14276,7 +14369,7 @@ function* iterateHeaders(headers) {
 }
 var brand_privateNullableHeaders, clearSentinel, APPEND_HEADERS, appendHeaderValue, buildHeaders;
 var init_headers = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/headers.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/headers.mjs"() {
     "use strict";
     init_values();
     brand_privateNullableHeaders = /* @__PURE__ */ Symbol.for("brand.privateNullableHeaders");
@@ -14329,13 +14422,13 @@ var init_headers = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/utils/path.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/path.mjs
 function encodeURIPath(str) {
   return str.replace(/[^A-Za-z0-9\-._~!$&'()*+,;=:@]+/g, encodeURIComponent);
 }
 var EMPTY, createPathTagFunction, path;
 var init_path = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/utils/path.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/path.mjs"() {
     "use strict";
     init_error();
     EMPTY = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.create(null));
@@ -14391,10 +14484,10 @@ ${underline}`);
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/deployment-runs.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/deployment-runs.mjs
 var DeploymentRuns;
 var init_deployment_runs = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/deployment-runs.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/deployment-runs.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -14448,10 +14541,10 @@ var init_deployment_runs = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/deployments.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/deployments.mjs
 var Deployments;
 var init_deployments = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/deployments.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/deployments.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -14646,10 +14739,10 @@ var init_deployments = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/dreams.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/dreams.mjs
 var Dreams;
 var init_dreams = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/dreams.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/dreams.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -14764,7 +14857,7 @@ var init_dreams = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/stainless-helper-header.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/stainless-helper-header.mjs
 function helperHeader(value) {
   return { [STAINLESS_HELPER_HEADER]: value };
 }
@@ -14811,7 +14904,7 @@ function stainlessHelperHeaderFromFile(file) {
 }
 var STAINLESS_HELPER_HEADER, STAINLESS_HELPER_METHOD_HEADER, SDK_HELPER_SYMBOL;
 var init_stainless_helper_header = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/stainless-helper-header.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/stainless-helper-header.mjs"() {
     "use strict";
     STAINLESS_HELPER_HEADER = "x-stainless-helper";
     STAINLESS_HELPER_METHOD_HEADER = "x-stainless-helper-method";
@@ -14819,10 +14912,10 @@ var init_stainless_helper_header = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/files.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/files.mjs
 var Files;
 var init_files = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/files.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/files.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -14945,10 +15038,10 @@ var init_files = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/models.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/models.mjs
 var Models;
 var init_models = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/models.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/models.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -15007,10 +15100,10 @@ var init_models = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/user-profiles.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/user-profiles.mjs
 var UserProfiles;
 var init_user_profiles = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/user-profiles.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/user-profiles.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -15127,9 +15220,9 @@ var init_user_profiles = __esm({
   }
 });
 
-// ../../node_modules/standardwebhooks/dist/timing_safe_equal.js
+// ../../../term-333/node_modules/standardwebhooks/dist/timing_safe_equal.js
 var require_timing_safe_equal = __commonJS({
-  "../../node_modules/standardwebhooks/dist/timing_safe_equal.js"(exports) {
+  "../../../term-333/node_modules/standardwebhooks/dist/timing_safe_equal.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.timingSafeEqual = void 0;
@@ -15162,9 +15255,9 @@ var require_timing_safe_equal = __commonJS({
   }
 });
 
-// ../../node_modules/@stablelib/base64/lib/base64.js
+// ../../../term-333/node_modules/@stablelib/base64/lib/base64.js
 var require_base64 = __commonJS({
-  "../../node_modules/@stablelib/base64/lib/base64.js"(exports) {
+  "../../../term-333/node_modules/@stablelib/base64/lib/base64.js"(exports) {
     "use strict";
     var __extends = exports && exports.__extends || /* @__PURE__ */ (function() {
       var extendStatics = function(d, b) {
@@ -15375,9 +15468,9 @@ var require_base64 = __commonJS({
   }
 });
 
-// ../../node_modules/fast-sha256/sha256.js
+// ../../../term-333/node_modules/fast-sha256/sha256.js
 var require_sha256 = __commonJS({
-  "../../node_modules/fast-sha256/sha256.js"(exports, module) {
+  "../../../term-333/node_modules/fast-sha256/sha256.js"(exports, module) {
     "use strict";
     (function(root, factory) {
       var exports2 = {};
@@ -15800,9 +15893,9 @@ var require_sha256 = __commonJS({
   }
 });
 
-// ../../node_modules/standardwebhooks/dist/index.js
+// ../../../term-333/node_modules/standardwebhooks/dist/index.js
 var require_dist = __commonJS({
-  "../../node_modules/standardwebhooks/dist/index.js"(exports) {
+  "../../../term-333/node_modules/standardwebhooks/dist/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.Webhook = exports.WebhookVerificationError = void 0;
@@ -15907,10 +16000,10 @@ var require_dist = __commonJS({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/webhooks.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/webhooks.mjs
 var import_standardwebhooks, Webhooks;
 var init_webhooks = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/webhooks.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/webhooks.mjs"() {
     "use strict";
     init_resource();
     import_standardwebhooks = __toESM(require_dist(), 1);
@@ -15929,10 +16022,10 @@ var init_webhooks = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/agents/versions.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/agents/versions.mjs
 var Versions;
 var init_versions = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/agents/versions.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/agents/versions.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -15967,10 +16060,10 @@ var init_versions = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/agents/agents.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/agents/agents.mjs
 var Agents;
 var init_agents = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/agents/agents.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/agents/agents.mjs"() {
     "use strict";
     init_resource();
     init_versions();
@@ -16099,7 +16192,7 @@ var init_agents = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/utils/abort.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/abort.mjs
 function linkAbort(external, controller) {
   if (!external)
     return () => {
@@ -16114,12 +16207,12 @@ function linkAbort(external, controller) {
   return () => external.removeEventListener("abort", onAbort);
 }
 var init_abort = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/utils/abort.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/abort.mjs"() {
     "use strict";
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/utils/backoff.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/backoff.mjs
 function isStatus(e, code) {
   return e instanceof APIError && e.status === code;
 }
@@ -16139,13 +16232,13 @@ function applyJitter(ms) {
   return ms * (1 - Math.random() * 0.25);
 }
 var init_backoff = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/utils/backoff.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/backoff.mjs"() {
     "use strict";
     init_error();
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/helper-client.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/helper-client.mjs
 function copyClientForHelper(client, { authToken, helper }) {
   if (!authToken) {
     throw new AnthropicError(`copyClientForHelper: expected a non-empty authToken but received ${JSON.stringify(authToken)}`);
@@ -16171,7 +16264,7 @@ function copyClientForHelper(client, { authToken, helper }) {
   });
 }
 var init_helper_client = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/helper-client.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/helper-client.mjs"() {
     "use strict";
     init_error();
     init_headers();
@@ -16179,7 +16272,7 @@ var init_helper_client = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/environments/poller.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/environments/poller.mjs
 function backoff2(attempt) {
   return backoff(attempt, POLL_BACKOFF_BASE_MS, POLL_BACKOFF_CAP_MS);
 }
@@ -16190,7 +16283,7 @@ function defaultWorkerId() {
 }
 var _WorkPoller_runnerClient, _WorkPoller_consumed, _WorkPoller_controller, _WorkPoller_detachExternal, _WorkPoller_autoStop, _WorkPoller_drain, _WorkPoller_blockMs, _WorkPoller_reclaimOlderThanMs, _WorkPoller_requestOpts, POLL_BLOCK_MS, POLL_BACKOFF_BASE_MS, POLL_BACKOFF_CAP_MS, WorkPoller;
 var init_poller = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/environments/poller.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/environments/poller.mjs"() {
     "use strict";
     init_tslib();
     init_error();
@@ -16313,10 +16406,10 @@ var init_poller = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/utils/async-queue.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/async-queue.mjs
 var _AsyncQueue_items, _AsyncQueue_waiters, _AsyncQueue_closed, AsyncQueue;
 var init_async_queue = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/utils/async-queue.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/async-queue.mjs"() {
     "use strict";
     init_tslib();
     AsyncQueue = class {
@@ -16383,10 +16476,10 @@ var init_async_queue = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/tools/ToolError.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/ToolError.mjs
 var ToolError;
 var init_ToolError = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/tools/ToolError.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/ToolError.mjs"() {
     "use strict";
     ToolError = class extends Error {
       constructor(content) {
@@ -16403,7 +16496,7 @@ var init_ToolError = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/tools/BetaRunnableTool.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/BetaRunnableTool.mjs
 function toolName(tool) {
   return "name" in tool ? tool.name : tool.mcp_server_name;
 }
@@ -16420,13 +16513,13 @@ async function runRunnableTool(tool, rawInput, context) {
   }
 }
 var init_BetaRunnableTool = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/tools/BetaRunnableTool.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/BetaRunnableTool.mjs"() {
     "use strict";
     init_ToolError();
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/tools/SessionToolRunner.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/SessionToolRunner.mjs
 function isEndTurnIdle(ev) {
   return ev.type === "session.status_idle" && ev.stop_reason?.type === "end_turn";
 }
@@ -16459,7 +16552,7 @@ function toSessionContent(content) {
 }
 var _IdleClock_maxIdleMs, _IdleClock_onExpire, _IdleClock_blockers, _IdleClock_armPending, _IdleClock_timer, _SessionToolRunner_instances, _SessionToolRunner_consumed, _SessionToolRunner_controller, _SessionToolRunner_detachExternal, _SessionToolRunner_requestOpts, _SessionToolRunner_toolByName, _SessionToolRunner_logger, _SessionToolRunner_seen, _SessionToolRunner_answered, _SessionToolRunner_confirmationVerdicts, _SessionToolRunner_awaitingConfirmation, _SessionToolRunner_results, _SessionToolRunner_inFlightCount, _SessionToolRunner_onIdle, _SessionToolRunner_idleClock, _SessionToolRunner_requestOptions, _SessionToolRunner_streamLoop, _SessionToolRunner_reconcile, _SessionToolRunner_ingestHistory, _SessionToolRunner_handleStreamEvent, _SessionToolRunner_routeToolEvent, _SessionToolRunner_noteConfirmation, _SessionToolRunner_applyVerdict, _SessionToolRunner_surfaceCall, _SessionToolRunner_execute, _SessionToolRunner_sendResult, _SessionToolRunner_drain, STREAM_BACKOFF_START_MS, STREAM_BACKOFF_CAP_MS, TOOL_TIMEOUT_MS, DRAIN_TIMEOUT_MS, SEND_RETRIES, DEFAULT_MAX_IDLE_MS, IdleClock, SessionToolRunner;
 var init_SessionToolRunner = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/tools/SessionToolRunner.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/SessionToolRunner.mjs"() {
     "use strict";
     init_tslib();
     init_error();
@@ -16935,15 +17028,15 @@ var init_SessionToolRunner = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/transform-json-schema.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/transform-json-schema.mjs
 var init_transform_json_schema = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/transform-json-schema.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/transform-json-schema.mjs"() {
     "use strict";
     init_utils5();
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/helpers/beta/json-schema.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/helpers/beta/json-schema.mjs
 function betaTool(options) {
   if (options.inputSchema.type !== "object") {
     throw new Error(`JSON schema for tool "${options.name}" must be an object, but got ${options.inputSchema.type}`);
@@ -16959,14 +17052,14 @@ function betaTool(options) {
   };
 }
 var init_json_schema = __esm({
-  "../../node_modules/@anthropic-ai/sdk/helpers/beta/json-schema.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/helpers/beta/json-schema.mjs"() {
     "use strict";
     init_sdk();
     init_transform_json_schema();
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/utils/promise.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/promise.mjs
 function promiseWithResolvers() {
   let resolve4;
   let reject;
@@ -16977,12 +17070,12 @@ function promiseWithResolvers() {
   return { promise, resolve: resolve4, reject };
 }
 var init_promise = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/utils/promise.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/utils/promise.mjs"() {
     "use strict";
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/tools/agent-toolset/fs-util.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/tools/agent-toolset/fs-util.mjs
 import * as fs from "fs/promises";
 import * as path2 from "path";
 import { randomUUID } from "crypto";
@@ -17083,7 +17176,7 @@ function fsErrorMessage(err, file) {
 }
 var DIR_CREATE_MODE, FILE_CREATE_MODE;
 var init_fs_util = __esm({
-  "../../node_modules/@anthropic-ai/sdk/tools/agent-toolset/fs-util.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/tools/agent-toolset/fs-util.mjs"() {
     "use strict";
     init_ToolError();
     DIR_CREATE_MODE = 493;
@@ -17091,7 +17184,7 @@ var init_fs_util = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/tools/agent-toolset/skills.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/tools/agent-toolset/skills.mjs
 import * as fs2 from "fs/promises";
 import * as fssync from "fs";
 import * as path3 from "path";
@@ -17248,7 +17341,7 @@ async function readHead(file, n) {
 }
 var execFileAsync;
 var init_skills = __esm({
-  "../../node_modules/@anthropic-ai/sdk/tools/agent-toolset/skills.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/tools/agent-toolset/skills.mjs"() {
     "use strict";
     init_error();
     init_log();
@@ -17257,7 +17350,7 @@ var init_skills = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/tools/agent-toolset/node.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/tools/agent-toolset/node.mjs
 var node_exports = {};
 __export(node_exports, {
   BashSession: () => BashSession,
@@ -17712,7 +17805,7 @@ async function findRg() {
 }
 var _BashSession_instances, _BashSession_proc, _BashSession_buf, _BashSession_truncated, _BashSession_closed, _BashSession_waiting, _BashSession_append, BASH_OUTPUT_LIMIT, BASH_DEFAULT_TIMEOUT_MS, DEFAULT_MAX_FILE_BYTES, GREP_OUTPUT_LIMIT, GREP_MAX_LINE_LENGTH, GLOB_RESULT_LIMIT, ANSI_RE, fsGlob, BashSession, WALK_MAX_DEPTH, WALK_MAX_ENTRIES;
 var init_node = __esm({
-  "../../node_modules/@anthropic-ai/sdk/tools/agent-toolset/node.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/tools/agent-toolset/node.mjs"() {
     "use strict";
     init_tslib();
     init_error();
@@ -17855,7 +17948,7 @@ ${out}`;
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/environments/worker.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/environments/worker.mjs
 async function forceStop(client, work, log, requestOptions) {
   try {
     await client.beta.environments.work.stop(
@@ -17909,7 +18002,7 @@ async function heartbeatLoop(client, work, ctrl, logger, requestOptions) {
 }
 var _EnvironmentWorker_instances, _EnvironmentWorker_signal, _EnvironmentWorker_handleItem, HEARTBEAT_DEFAULT_MS, NO_HEARTBEAT_SENTINEL, EnvironmentWorker;
 var init_worker = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/environments/worker.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/environments/worker.mjs"() {
     "use strict";
     init_tslib();
     init_error();
@@ -18068,10 +18161,10 @@ var init_worker = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/environments/work.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/environments/work.mjs
 var Work;
 var init_work = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/environments/work.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/environments/work.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -18342,10 +18435,10 @@ var init_work = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/environments/environments.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/environments/environments.mjs
 var Environments;
 var init_environments = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/environments/environments.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/environments/environments.mjs"() {
     "use strict";
     init_resource();
     init_work();
@@ -18493,10 +18586,10 @@ var init_environments = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memories.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memories.mjs
 var Memories;
 var init_memories = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memories.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memories.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -18625,10 +18718,10 @@ var init_memories = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-versions.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-versions.mjs
 var MemoryVersions;
 var init_memory_versions = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-versions.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-versions.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -18708,10 +18801,10 @@ var init_memory_versions = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-stores.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-stores.mjs
 var MemoryStores;
 var init_memory_stores = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-stores.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-stores.mjs"() {
     "use strict";
     init_resource();
     init_memories();
@@ -18854,18 +18947,18 @@ var init_memory_stores = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/error.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/error.mjs
 var init_error2 = __esm({
-  "../../node_modules/@anthropic-ai/sdk/error.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/error.mjs"() {
     "use strict";
     init_error();
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/decoders/jsonl.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/decoders/jsonl.mjs
 var JSONLDecoder;
 var init_jsonl = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/decoders/jsonl.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/decoders/jsonl.mjs"() {
     "use strict";
     init_error();
     init_shims();
@@ -18903,10 +18996,10 @@ var init_jsonl = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/messages/batches.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/messages/batches.mjs
 var Batches;
 var init_batches = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/messages/batches.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/messages/batches.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -19110,10 +19203,10 @@ var init_batches = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/constants.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/constants.mjs
 var MODEL_NONSTREAMING_TOKENS;
 var init_constants = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/constants.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/constants.mjs"() {
     "use strict";
     MODEL_NONSTREAMING_TOKENS = {
       "claude-opus-4-20250514": 8192,
@@ -19128,7 +19221,7 @@ var init_constants = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/beta-parser.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/beta-parser.mjs
 function getOutputFormat(params) {
   return params?.output_format ?? params?.output_config?.format;
 }
@@ -19201,24 +19294,24 @@ function parseBetaOutputFormat(params, content) {
   }
 }
 var init_beta_parser = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/beta-parser.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/beta-parser.mjs"() {
     "use strict";
     init_error();
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/streaming.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/streaming.mjs
 var init_streaming2 = __esm({
-  "../../node_modules/@anthropic-ai/sdk/streaming.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/streaming.mjs"() {
     "use strict";
     init_streaming();
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/_vendor/partial-json-parser/parser.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/_vendor/partial-json-parser/parser.mjs
 var tokenize5, strip, unstrip, generate, partialParse;
 var init_parser = __esm({
-  "../../node_modules/@anthropic-ai/sdk/_vendor/partial-json-parser/parser.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/_vendor/partial-json-parser/parser.mjs"() {
     "use strict";
     tokenize5 = (input) => {
       let current = 0;
@@ -19443,7 +19536,7 @@ var init_parser = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/internal/message-stream-utils.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/internal/message-stream-utils.mjs
 function withLazyInput(prev, jsonBuf) {
   const next = {};
   for (const key of Object.keys(prev)) {
@@ -19468,14 +19561,14 @@ function withLazyInput(prev, jsonBuf) {
 }
 var JSON_BUF_PROPERTY;
 var init_message_stream_utils = __esm({
-  "../../node_modules/@anthropic-ai/sdk/internal/message-stream-utils.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/internal/message-stream-utils.mjs"() {
     "use strict";
     init_parser();
     JSON_BUF_PROPERTY = "__json_buf";
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/BetaMessageStream.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/BetaMessageStream.mjs
 function tracksToolInput(content) {
   return content.type === "tool_use" || content.type === "server_tool_use" || content.type === "mcp_tool_use";
 }
@@ -19483,7 +19576,7 @@ function checkNever(x) {
 }
 var _BetaMessageStream_instances, _BetaMessageStream_currentMessageSnapshot, _BetaMessageStream_params, _BetaMessageStream_connectedPromise, _BetaMessageStream_resolveConnectedPromise, _BetaMessageStream_rejectConnectedPromise, _BetaMessageStream_endPromise, _BetaMessageStream_resolveEndPromise, _BetaMessageStream_rejectEndPromise, _BetaMessageStream_listeners, _BetaMessageStream_ended, _BetaMessageStream_errored, _BetaMessageStream_aborted, _BetaMessageStream_catchingPromiseCreated, _BetaMessageStream_response, _BetaMessageStream_request_id, _BetaMessageStream_logger, _BetaMessageStream_getFinalMessage, _BetaMessageStream_getFinalText, _BetaMessageStream_handleError, _BetaMessageStream_beginRequest, _BetaMessageStream_addStreamEvent, _BetaMessageStream_endRequest, _BetaMessageStream_accumulateMessage, _BetaMessageStream_toolInputParseError, BetaMessageStream;
 var init_BetaMessageStream = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/BetaMessageStream.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/BetaMessageStream.mjs"() {
     "use strict";
     init_tslib();
     init_stainless_helper_header();
@@ -20097,10 +20190,10 @@ var init_BetaMessageStream = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/tools/CompactionControl.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/CompactionControl.mjs
 var DEFAULT_TOKEN_THRESHOLD, DEFAULT_SUMMARY_PROMPT;
 var init_CompactionControl = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/tools/CompactionControl.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/CompactionControl.mjs"() {
     "use strict";
     DEFAULT_TOKEN_THRESHOLD = 1e5;
     DEFAULT_SUMMARY_PROMPT = `You have been working on the task described above but have not yet completed it. Write a continuation summary that will allow you (or another instance of yourself) to resume work efficiently in a future context window where the conversation history will be replaced with this summary. Your summary should be structured, concise, and actionable. Include:
@@ -20129,7 +20222,7 @@ Wrap your summary in <summary></summary> tags.`;
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/tools/BetaToolRunner.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/BetaToolRunner.mjs
 async function generateToolResponse(params, lastMessage = params.messages.at(-1), requestOptions) {
   if (!lastMessage || lastMessage.role !== "assistant" || !lastMessage.content || typeof lastMessage.content === "string") {
     return null;
@@ -20179,7 +20272,7 @@ async function generateToolResponse(params, lastMessage = params.messages.at(-1)
 }
 var _BetaToolRunner_instances, _BetaToolRunner_consumed, _BetaToolRunner_mutated, _BetaToolRunner_state, _BetaToolRunner_options, _BetaToolRunner_message, _BetaToolRunner_toolResponse, _BetaToolRunner_completion, _BetaToolRunner_iterationCount, _BetaToolRunner_checkAndCompact, _BetaToolRunner_generateToolResponse, BetaToolRunner;
 var init_BetaToolRunner = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/tools/BetaToolRunner.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/tools/BetaToolRunner.mjs"() {
     "use strict";
     init_tslib();
     init_ToolError();
@@ -20481,7 +20574,7 @@ var init_BetaToolRunner = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/messages/messages.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/messages/messages.mjs
 function transformOutputFormat(params) {
   if (!params.output_format) {
     return params;
@@ -20500,7 +20593,7 @@ function transformOutputFormat(params) {
 }
 var DEPRECATED_MODELS, MODELS_TO_WARN_WITH_THINKING_ENABLED, Messages;
 var init_messages = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/messages/messages.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/messages/messages.mjs"() {
     "use strict";
     init_error2();
     init_batches();
@@ -20649,10 +20742,10 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/events.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/events.mjs
 var Events;
 var init_events = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/events.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/events.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -20770,10 +20863,10 @@ var init_events = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/resources.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/resources.mjs
 var Resources;
 var init_resources = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/resources.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/resources.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -20904,10 +20997,10 @@ var init_resources = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/events.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/events.mjs
 var Events2;
 var init_events2 = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/events.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/events.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -20966,10 +21059,10 @@ var init_events2 = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/threads.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/threads.mjs
 var Threads;
 var init_threads = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/threads.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/threads.mjs"() {
     "use strict";
     init_resource();
     init_events2();
@@ -21055,10 +21148,10 @@ var init_threads = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/sessions.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/sessions.mjs
 var Sessions;
 var init_sessions = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/sessions/sessions.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/sessions/sessions.mjs"() {
     "use strict";
     init_resource();
     init_events();
@@ -21214,10 +21307,10 @@ var init_sessions = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/skills/versions.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/skills/versions.mjs
 var Versions2;
 var init_versions2 = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/skills/versions.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/skills/versions.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -21345,10 +21438,10 @@ var init_versions2 = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/skills/skills.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/skills/skills.mjs
 var Skills;
 var init_skills2 = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/skills/skills.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/skills/skills.mjs"() {
     "use strict";
     init_resource();
     init_versions2();
@@ -21446,10 +21539,10 @@ var init_skills2 = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/tunnels/certificates.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/tunnels/certificates.mjs
 var Certificates;
 var init_certificates = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/tunnels/certificates.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/tunnels/certificates.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -21577,10 +21670,10 @@ var init_certificates = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/tunnels/tunnels.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/tunnels/tunnels.mjs
 var Tunnels;
 var init_tunnels = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/tunnels/tunnels.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/tunnels/tunnels.mjs"() {
     "use strict";
     init_resource();
     init_certificates();
@@ -21759,10 +21852,10 @@ var init_tunnels = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/vaults/credentials.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/vaults/credentials.mjs
 var Credentials;
 var init_credentials2 = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/vaults/credentials.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/vaults/credentials.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -21938,10 +22031,10 @@ var init_credentials2 = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/vaults/vaults.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/vaults/vaults.mjs
 var Vaults;
 var init_vaults = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/vaults/vaults.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/vaults/vaults.mjs"() {
     "use strict";
     init_resource();
     init_credentials2();
@@ -22088,10 +22181,10 @@ var init_vaults = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/beta/beta.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/beta.mjs
 var Beta;
 var init_beta = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/beta/beta.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/beta/beta.mjs"() {
     "use strict";
     init_resource();
     init_deployment_runs();
@@ -22162,10 +22255,10 @@ var init_beta = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/completions.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/completions.mjs
 var Completions;
 var init_completions = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/completions.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/completions.mjs"() {
     "use strict";
     init_resource();
     init_headers();
@@ -22187,7 +22280,7 @@ var init_completions = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/parser.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/parser.mjs
 function getOutputFormat2(params) {
   return params?.output_config?.format;
 }
@@ -22248,13 +22341,13 @@ function parseOutputFormat(params, content) {
   }
 }
 var init_parser2 = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/parser.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/parser.mjs"() {
     "use strict";
     init_error();
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/MessageStream.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/MessageStream.mjs
 function tracksToolInput2(content) {
   return content.type === "tool_use" || content.type === "server_tool_use";
 }
@@ -22262,7 +22355,7 @@ function checkNever2(x) {
 }
 var _MessageStream_instances, _MessageStream_currentMessageSnapshot, _MessageStream_params, _MessageStream_connectedPromise, _MessageStream_resolveConnectedPromise, _MessageStream_rejectConnectedPromise, _MessageStream_endPromise, _MessageStream_resolveEndPromise, _MessageStream_rejectEndPromise, _MessageStream_listeners, _MessageStream_ended, _MessageStream_errored, _MessageStream_aborted, _MessageStream_catchingPromiseCreated, _MessageStream_response, _MessageStream_request_id, _MessageStream_logger, _MessageStream_getFinalMessage, _MessageStream_getFinalText, _MessageStream_handleError, _MessageStream_beginRequest, _MessageStream_addStreamEvent, _MessageStream_endRequest, _MessageStream_accumulateMessage, MessageStream;
 var init_MessageStream = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/MessageStream.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/MessageStream.mjs"() {
     "use strict";
     init_tslib();
     init_stainless_helper_header();
@@ -22835,10 +22928,10 @@ var init_MessageStream = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/messages/batches.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/messages/batches.mjs
 var Batches2;
 var init_batches2 = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/messages/batches.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/messages/batches.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -22996,10 +23089,10 @@ var init_batches2 = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/messages/messages.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/messages/messages.mjs
 var Messages2, DEPRECATED_MODELS2, MODELS_TO_WARN_WITH_THINKING_ENABLED2;
 var init_messages2 = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/messages/messages.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/messages/messages.mjs"() {
     "use strict";
     init_resource();
     init_headers();
@@ -23143,10 +23236,10 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/models.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/models.mjs
 var Models2;
 var init_models2 = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/models.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/models.mjs"() {
     "use strict";
     init_resource();
     init_pagination();
@@ -23190,9 +23283,9 @@ var init_models2 = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/resources/index.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/resources/index.mjs
 var init_resources2 = __esm({
-  "../../node_modules/@anthropic-ai/sdk/resources/index.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/resources/index.mjs"() {
     "use strict";
     init_shared();
     init_beta();
@@ -23202,10 +23295,10 @@ var init_resources2 = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/client.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/client.mjs
 var _BaseAnthropic_instances, _a, _BaseAnthropic_encoder, _BaseAnthropic_baseURLOverridden, HUMAN_PROMPT, AI_PROMPT, BaseAnthropic, Anthropic;
 var init_client = __esm({
-  "../../node_modules/@anthropic-ai/sdk/client.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/client.mjs"() {
     "use strict";
     init_tslib();
     init_uuid();
@@ -23978,7 +24071,7 @@ var init_client = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/lib/middleware.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/lib/middleware.mjs
 function stripFallbackBlocks(body) {
   const messages = body.messages.map((message) => Array.isArray(message.content) ? { ...message, content: message.content.filter((block) => block.type !== "fallback") } : message).filter((message) => !Array.isArray(message.content) || message.content.length > 0);
   return { ...body, messages };
@@ -24417,7 +24510,7 @@ function makeAbort(controller, signal) {
 }
 var encoder, DEFAULT_BETAS, BlockTracker;
 var init_middleware2 = __esm({
-  "../../node_modules/@anthropic-ai/sdk/lib/middleware.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/lib/middleware.mjs"() {
     "use strict";
     init_error();
     init_streaming();
@@ -24473,7 +24566,7 @@ var init_middleware2 = __esm({
   }
 });
 
-// ../../node_modules/@anthropic-ai/sdk/index.mjs
+// ../../../term-333/node_modules/@anthropic-ai/sdk/index.mjs
 var sdk_exports = {};
 __export(sdk_exports, {
   AI_PROMPT: () => AI_PROMPT,
@@ -24502,7 +24595,7 @@ __export(sdk_exports, {
   toFile: () => toFile
 });
 var init_sdk = __esm({
-  "../../node_modules/@anthropic-ai/sdk/index.mjs"() {
+  "../../../term-333/node_modules/@anthropic-ai/sdk/index.mjs"() {
     "use strict";
     init_client();
     init_uploads2();
@@ -26202,6 +26295,7 @@ var jpi_claim_exports = {};
 __export(jpi_claim_exports, {
   AI_DISCLOSURE_NOTE: () => AI_DISCLOSURE_NOTE,
   CLAIM_CONSENT_VERSION: () => CLAIM_CONSENT_VERSION,
+  REVISE_RECOVERY_STATES: () => REVISE_RECOVERY_STATES,
   SUBMIT_ACCEPTS: () => SUBMIT_ACCEPTS,
   backgroundEnableFailed: () => backgroundEnableFailed,
   buildAssignmentComment: () => buildAssignmentComment,
@@ -26209,17 +26303,21 @@ __export(jpi_claim_exports, {
   buildStakeComment: () => buildStakeComment,
   buildStandDownComment: () => buildStandDownComment,
   buildSubmitBody: () => buildSubmitBody,
+  claimUpdatePatch: () => claimUpdatePatch,
   cmdRecord: () => cmdRecord,
   cmdRuns: () => cmdRuns,
   cmdSlice: () => cmdSlice,
+  cmdStatus: () => cmdStatus,
   cmdSubmit: () => cmdSubmit,
   countOpenPRsReferencingIssue: () => countOpenPRsReferencingIssue,
   diffContention: () => diffContention,
   explicitForkConsent: () => explicitForkConsent,
+  fetchFounderApprovals: () => fetchFounderApprovals,
   findClaimableByShortRef: () => findClaimableByShortRef,
   findClaimableInCache: () => findClaimableInCache,
   fmtAge: () => fmtAge,
   fmtContestedWarning: () => fmtContestedWarning,
+  founderClaimStanding: () => founderClaimStanding,
   founderPostingIdOf: () => founderPostingIdOf,
   isContested: () => isContested,
   isStrayArgShortRefClaim: () => isStrayArgShortRefClaim,
@@ -26238,6 +26336,7 @@ __export(jpi_claim_exports, {
   renderServerRefusal: () => renderServerRefusal,
   resolveBounty: () => resolveBounty,
   resolveSubmitWorktree: () => resolveSubmitWorktree,
+  reviseRecoveryCommand: () => reviseRecoveryCommand,
   revokeFailureAction: () => revokeFailureAction,
   run: () => run,
   runsGiveUpMessage: () => runsGiveUpMessage,
@@ -26248,6 +26347,7 @@ __export(jpi_claim_exports, {
   sliceWorkDirFor: () => sliceWorkDirFor,
   stakeDecision: () => stakeDecision,
   startBranchFor: () => startBranchFor,
+  submitRefusalFor: () => submitRefusalFor,
   terminalSafeInline: () => terminalSafeInline,
   terminalSafeLines: () => terminalSafeLines,
   watchRunsLoop: () => watchRunsLoop,
@@ -26912,8 +27012,35 @@ function printMetric(rate) {
   console.log(`
 \u{1F4CA} Accepted-PR rate: ${rate.merged}/${rate.total} claims merged (${pct}%)`);
 }
+function reviseRecoveryCommand(id) {
+  return `terminalhire claim update ${id} ready`;
+}
+function claimUpdatePatch(claim, state, prUrl) {
+  const patch = { state };
+  if (prUrl) patch.prUrl = prUrl;
+  if (state === "ready" && claim?.review?.verdict === "revise") patch.review = null;
+  return patch;
+}
+function submitRefusalFor(claim) {
+  if (!SUBMIT_ACCEPTS.includes(claim.state)) {
+    return `terminalhire claim: ${claim.id} is '${claim.state}'. Submit runs once work has started ('working', via 'claim start') or the review gate cleared it ('ready'). Start it first:
+  terminalhire claim start ${claim.id}`;
+  }
+  if (claim.review?.verdict === "revise") {
+    return `terminalhire claim: ${claim.id} review verdict is 'revise' \u2014 the gate said do not submit. Resolve the blockers and re-run review, then mark it ready:
+  ${reviseRecoveryCommand(claim.id)}`;
+  }
+  return null;
+}
 function nextStepFor(c) {
   const founder = Boolean(c.approval);
+  if (c.review?.verdict === "revise" && REVISE_RECOVERY_STATES.includes(c.state)) {
+    return {
+      cmd: reviseRecoveryCommand(c.id),
+      before: "fix the blockers and re-run review, then",
+      why: "mark the claim ready and clear the stale verdict"
+    };
+  }
   switch (c.state) {
     case "claimed":
       return founder ? { cmd: `terminalhire claim slice ${c.id}`, why: "collect your granted work slice" } : { cmd: `terminalhire claim start ${c.id}`, why: "fork + clone into a worktree" };
@@ -26941,7 +27068,10 @@ function printNextSteps(list) {
   if (steps.length === 0) return;
   const width = Math.max(...steps.map((s) => s.cmd.length));
   console.log("\n  Next:");
-  for (const s of steps) console.log(`    ${s.cmd.padEnd(width)}   \u2014 ${s.why}`);
+  for (const s of steps) {
+    if (s.before) console.log(`    ${s.before}:`);
+    console.log(`    ${s.cmd.padEnd(width)}   \u2014 ${s.why}`);
+  }
 }
 async function resolveBounty(arg) {
   let bountyId, title, repoFullName, issueUrl, amountUSD, source, openPRsAtDiscovery, indexNativeId;
@@ -27063,7 +27193,7 @@ async function mintRegistrationProof() {
   console.log("  GitHub identity has to be verified once in the browser.");
   let begin;
   try {
-    const r = await fetch(`${CLAIM_SYNC_BASE}/api/claim-sync/begin`, {
+    const r = await fetch(`${CLAIM_SYNC_BASE2}/api/claim-sync/begin`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ hostname: osHostname() }),
@@ -27096,7 +27226,7 @@ async function mintRegistrationProof() {
     let statusRes;
     try {
       statusRes = await fetch(
-        `${CLAIM_SYNC_BASE}/api/claim-sync/status?challenge=${encodeURIComponent(challenge)}`,
+        `${CLAIM_SYNC_BASE2}/api/claim-sync/status?challenge=${encodeURIComponent(challenge)}`,
         { signal: AbortSignal.timeout(1e4) }
       );
     } catch {
@@ -27114,6 +27244,35 @@ async function mintRegistrationProof() {
   console.error("\n  Timed out waiting for browser verification (10 min).");
   return null;
 }
+function proofTokenLogin(token) {
+  try {
+    if (typeof token !== "string") return void 0;
+    const dot = token.indexOf(".");
+    if (dot <= 0) return void 0;
+    const payload = JSON.parse(Buffer.from(token.slice(0, dot), "base64url").toString("utf8"));
+    return typeof payload?.login === "string" && payload.login.length > 0 ? payload.login : void 0;
+  } catch {
+    return void 0;
+  }
+}
+async function localLoginForPaidBrowserClaim() {
+  let timer;
+  try {
+    const { requireStoredLogin: requireStoredLogin2 } = await Promise.resolve().then(() => (init_github_auth(), github_auth_exports));
+    return await Promise.race([
+      requireStoredLogin2(),
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("GitHub identity verification timed out after 4 seconds")),
+          4e3
+        );
+        if (typeof timer.unref === "function") timer.unref();
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 async function registerFounderClaim(b) {
   const postingId = b.bountyId.replace(/^bounty:founder:/, "");
   const refuse = (reason) => {
@@ -27127,39 +27286,95 @@ terminalhire claim: refusing to record \u2014 ${reason}
     process.exit(1);
   };
   let auth = null;
+  let storedPushToken = null;
   try {
     const stored = await readPushTokenEnc();
-    if (stored) auth = { pushToken: stored };
+    if (stored) {
+      storedPushToken = stored;
+      auth = { pushToken: stored };
+    }
   } catch {
   }
+  let expectLogin;
   if (!auth) {
+    try {
+      expectLogin = await localLoginForPaidBrowserClaim();
+    } catch (err) {
+      refuse(
+        `could not verify which GitHub account this machine is signed in as: ${err instanceof Error ? err.message : String(err)}.
+  Run \`terminalhire login\`, then retry this claim. Browser verification was
+  not opened and no claim was sent.`
+      );
+    }
+    console.log(
+      `
+  Sign in to the browser as @${expectLogin}, the account this machine is
+  signed in as. A browser signed into a different GitHub account would bind
+  this claim, and any payment for it, to that other account.`
+    );
     const proofToken = await mintRegistrationProof();
     if (!proofToken) {
       refuse("could not verify your GitHub identity with terminalhire (see above).");
     }
+    const verifiedLogin = proofTokenLogin(proofToken);
+    if (!verifiedLogin) {
+      refuse(
+        "the browser verification response did not name a GitHub account, so it could not be compared with this machine\u2019s sign-in. Nothing was sent; retry the claim."
+      );
+    }
+    if (verifiedLogin.toLowerCase() !== expectLogin.toLowerCase()) {
+      refuse(
+        `you verified in the browser as @${verifiedLogin}, but this machine is signed in as @${expectLogin}.
+  Nothing was sent. Sign the browser into @${expectLogin} and run this again, or
+  run \`terminalhire login\` if you meant to work as @${verifiedLogin}.`
+      );
+    }
     auth = { proofToken };
   }
   console.log("\n  Registering this claim with terminalhire (founder posting)...");
+  const sendRegistration = async (includeExpectation) => fetch(`${CLAIM_SYNC_BASE2}/api/claim/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      bountyId: postingId,
+      ...auth,
+      ...includeExpectation && expectLogin ? { expectLogin } : {}
+    }),
+    signal: AbortSignal.timeout(1e4)
+  });
   let res;
   try {
-    res = await fetch(`${CLAIM_SYNC_BASE}/api/claim/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bountyId: postingId, ...auth }),
-      signal: AbortSignal.timeout(1e4)
-    });
+    res = await sendRegistration(true);
   } catch (err) {
     refuse(
       `terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}), so the posting could not be revalidated.`
     );
   }
+  let refusalBody = null;
   if (!res.ok) {
-    let body2 = null;
     try {
-      body2 = await res.json();
+      refusalBody = await res.json();
     } catch {
     }
-    const detail = body2?.message || body2?.error || "";
+  }
+  if (expectLogin && res.status === 422 && refusalBody?.error === "unknown field(s): expectLogin") {
+    try {
+      res = await sendRegistration(false);
+      refusalBody = null;
+      if (!res.ok) {
+        try {
+          refusalBody = await res.json();
+        } catch {
+        }
+      }
+    } catch (err) {
+      refuse(
+        `terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}), so the posting could not be revalidated.`
+      );
+    }
+  }
+  if (!res.ok) {
+    const detail = refusalBody?.message || refusalBody?.error || "";
     refuse(
       detail ? `the server refused this claim (${res.status}): ${detail}` : `the server refused this claim (${res.status}).`
     );
@@ -27173,7 +27388,43 @@ terminalhire claim: refusing to record \u2014 ${reason}
   if (!body || body.ok !== true) {
     refuse("malformed registration response from the server.");
   }
-  return { claimId: typeof body.claimId === "string" ? body.claimId : null };
+  return {
+    claimId: typeof body.claimId === "string" ? body.claimId : null,
+    claimantLogin: typeof body.claimantLogin === "string" ? body.claimantLogin : null,
+    // Existing-token auth deliberately gets no replacement from the server. Reuse
+    // the encrypted value we just authenticated with; proof auth receives a newly
+    // minted token exactly once in this private/no-store response.
+    pushToken: storedPushToken ?? (typeof body.pushToken === "string" && body.pushToken.length > 0 ? body.pushToken : null)
+  };
+}
+async function bootstrapFounderClaimEnrollment(claim, registration) {
+  if (!(claim.amountUSD > 0)) return { enrolled: false, reason: "free" };
+  if (!registration.pushToken || !registration.claimantLogin) {
+    return { enrolled: false, reason: "token-unavailable" };
+  }
+  try {
+    await writePushTokenEnc(registration.pushToken);
+    const prior = readAutoMarker();
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    writeAutoMarker({
+      ...prior ?? {},
+      autoConsentedAt: prior?.autoConsentedAt ?? now,
+      version: AUTO_CONSENT_VERSION,
+      login: registration.claimantLogin
+      // Do not invent lastPushedAt/lastSnapshotHash here. If this is a fresh
+      // marker the immediate existing background path must push the newly
+      // recorded local claim; if it is an existing marker those fields remain
+      // truthful and the changed snapshot makes the normal gate fire.
+    });
+  } catch (err) {
+    return {
+      enrolled: false,
+      reason: "local-write-failed",
+      detail: err instanceof Error ? err.message : String(err)
+    };
+  }
+  const pushed = await runBackgroundClaimPush();
+  return pushed?.pushed ? { enrolled: true, reason: "ok" } : { enrolled: true, reason: pushed?.reason ?? "sync-failed" };
 }
 async function cmdRecord(arg, flags = {}) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -27308,6 +27559,7 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
     console.log("  (default AI-assistance disclosure still applies at submit)");
   }
   let approval;
+  let founderRegistration = null;
   if (b.founderPosting) {
     if (claims.findClaim(b.bountyId)) {
       console.error(
@@ -27316,12 +27568,15 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
       process.exit(1);
     }
     const registration = await registerFounderClaim(b);
+    founderRegistration = registration;
     approval = {
       mode: b.claimMode,
       // 'pending' = the founder reviews claimants before access exists; `claim
       // start` renders the wait. An open posting has no approval step — 'granted'.
       state: b.claimMode === "approval-only" ? "pending" : "granted",
       claimId: registration.claimId,
+      // TERM-326. The server's answer about whose claim this is, not our assumption.
+      claimantLogin: registration.claimantLogin,
       registeredAt: (/* @__PURE__ */ new Date()).toISOString()
     };
   }
@@ -27369,6 +27624,7 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
     markStatus2(b.indexNativeId, "claimed");
   } catch {
   }
+  const enrollment = claim.approval && founderRegistration ? await bootstrapFounderClaimEnrollment(claim, founderRegistration) : null;
   if (claim.approval) {
     console.log(`
 \u2713 Claimed: ${claim.title}`);
@@ -27378,6 +27634,24 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
     console.log(
       `  registered with terminalhire${claim.approval.claimId ? ` (server claim ${claim.approval.claimId})` : ""}`
     );
+    if (claim.amountUSD > 0) {
+      if (enrollment?.enrolled && enrollment.reason === "ok") {
+        console.log("  \u2713 claim updates enabled; push-only token stored encrypted on this machine");
+        console.log("  \u2713 score-free claim ledger synced for your founder-facing work record");
+        console.log("  Revoke any time: terminalhire claim --push --revoke");
+      } else if (enrollment?.enrolled) {
+        console.log("  \u2713 claim updates enabled; push-only token stored encrypted on this machine");
+        console.log(`  \u26A0 initial claim-ledger sync did not finish (${enrollment.reason}).`);
+        console.log("  Retry: terminalhire claim --push --keep-updated");
+        console.log("  Revoke any time: terminalhire claim --push --revoke");
+      } else {
+        console.log("  \u26A0 Claim recorded, but automatic claim updates were not fully enrolled.");
+        if (enrollment?.detail) {
+          for (const line of String(enrollment.detail).split("\n")) console.log(`    ${line}`);
+        }
+        console.log("  Finish setup: terminalhire claim --push --keep-updated");
+      }
+    }
     if (claim.approval.state === "pending") {
       console.log("\n  This posting is approval-only: the founder reviews claimants before any");
       console.log("  access exists. Access is pending \u2014 founder postings are never forked or");
@@ -27566,12 +27840,93 @@ async function resolveIssueOutcome(c, res, claims) {
     } : { state: "closed-unmerged", checkedAt: (/* @__PURE__ */ new Date()).toISOString() }
   });
 }
+async function fetchFounderApprovals(pushToken, fetchImpl = fetch) {
+  if (typeof pushToken !== "string" || pushToken.length === 0) return null;
+  try {
+    const res = await fetchImpl(`${CLAIM_SYNC_BASE2}/api/claim/approvals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pushToken }),
+      signal: AbortSignal.timeout(15e3)
+    });
+    if (!res?.ok) return null;
+    const body = await res.json();
+    if (!body || !Array.isArray(body.claimIds)) return null;
+    return {
+      claimIds: body.claimIds.filter((v) => typeof v === "string"),
+      latestAt: typeof body.latestAt === "string" ? body.latestAt : null
+    };
+  } catch {
+    return null;
+  }
+}
+function founderClaimStanding(claim, approvalsChecked) {
+  switch (claim.state) {
+    case "merged":
+      return "accepted";
+    case "abandoned":
+      return "rejected or closed locally";
+    case "submitted":
+      return `submitted \u2014 CI and founder verdict: terminalhire claim runs ${claim.id}`;
+    case "working":
+    case "in-review":
+    case "ready":
+      return `approved, slice received \u2014 ${claim.state}`;
+    default:
+      break;
+  }
+  if (claim.approval?.mode === "open") return "registered \u2014 slice ready (no approval required)";
+  if (claim.approval?.state === "granted") return "approved, slice ready";
+  return approvalsChecked ? "registered \u2014 awaiting founder approval" : "registered locally";
+}
 async function cmdStatus(id) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
-  const targets = id ? [claims.findClaim(id)].filter(Boolean) : claims.listClaims();
+  let targets = id ? [claims.findClaim(id)].filter(Boolean) : claims.listClaims();
   if (targets.length === 0) {
     console.log(id ? `No claim with id '${id}'.` : "No claims to poll.");
     return;
+  }
+  const founderTargets = targets.filter((c) => Boolean(c.approval));
+  let approvalsChecked = false;
+  let approvalsUnavailable = false;
+  if (founderTargets.length > 0) {
+    let pushToken = null;
+    try {
+      pushToken = await readPushTokenEnc();
+    } catch {
+      pushToken = null;
+    }
+    if (pushToken) {
+      const approvals = await fetchFounderApprovals(pushToken);
+      if (approvals) {
+        approvalsChecked = true;
+        const approved = new Set(approvals.claimIds);
+        for (const c of founderTargets) {
+          if (c.approval?.claimId && approved.has(c.approval.claimId)) {
+            claims.updateClaim(c.id, {
+              approval: { ...c.approval, state: "granted" }
+            });
+          }
+        }
+        targets = id ? [claims.findClaim(id)].filter(Boolean) : claims.listClaims();
+      } else {
+        approvalsUnavailable = true;
+      }
+    }
+    console.log("\n  Founder claims:");
+    for (const c of targets.filter((claim) => Boolean(claim.approval))) {
+      console.log(`  ${founderClaimStanding(c, approvalsChecked)} \u2014 ${c.title}`);
+      console.log(`    id: ${c.id}`);
+    }
+    if (!pushToken) {
+      console.log(
+        "\n  Approval check not enrolled on this machine; local state shown above.\n  Enrol and check again: terminalhire claim --push --keep-updated"
+      );
+    } else if (approvalsUnavailable) {
+      console.log(
+        "\n  Terminalhire could not check approvals right now; local state was preserved.\n  Retry: terminalhire claim status"
+      );
+    }
   }
   const ACTIVE_PRE_SUBMIT = /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"]);
   const renderContention = (c, result, { excludeNumber } = {}) => {
@@ -27593,6 +27948,7 @@ async function cmdStatus(id) {
   };
   let polled = 0;
   for (const c of targets) {
+    if (c.approval) continue;
     if (!c.prUrl) {
       if (ACTIVE_PRE_SUBMIT.has(c.state)) {
         const num = (parseGitHubUrl(c.issueUrl) || {}).number;
@@ -27654,7 +28010,7 @@ async function cmdStatus(id) {
       if (result) renderContention(c, result, { excludeNumber: ourNum });
     }
   }
-  if (polled === 0)
+  if (polled === 0 && targets.some((c) => !c.approval))
     console.log(
       "  No submitted claims with a PR URL yet. Set one via `claim update <id> submitted` after `submit`."
     );
@@ -27669,14 +28025,18 @@ async function cmdUpdate(id, state, prUrl) {
     console.error("  prUrl: attach the source PR URL (so `claim status` can poll its merge state)");
     process.exit(1);
   }
-  const patch = { state };
   if (prUrl) {
     if (!parseGitHubUrl(prUrl)) {
       console.error(`terminalhire claim: '${prUrl}' is not a GitHub PR URL.`);
       process.exit(1);
     }
-    patch.prUrl = prUrl;
   }
+  const claim = claims.findClaim(id);
+  if (!claim) {
+    console.error(`terminalhire claim: no claim with id '${id}'.`);
+    process.exit(1);
+  }
+  const patch = claimUpdatePatch(claim, state, prUrl);
   if (patch.prUrl) {
     try {
       const core = await Promise.resolve().then(() => (init_src(), src_exports));
@@ -27688,7 +28048,6 @@ async function cmdUpdate(id, state, prUrl) {
           console.log(
             "  \u24D8 heads-up: that PR was merged by its own author \u2014 self-merges are not external acceptance."
           );
-        const claim = claims.findClaim(id);
         const claimedIssueRef = claim && claim.issueUrl ? parseGitHubUrl(claim.issueUrl) : null;
         const claimedIssue = claimedIssueRef ? claimedIssueRef.number : null;
         if (claimedIssue != null && facts.closesIssues.length && !facts.closesIssues.includes(claimedIssue))
@@ -28257,7 +28616,7 @@ async function cmdSlice(id, flags = {}) {
   const pushToken = await requireReadPushToken("fetching your granted slice");
   let res;
   try {
-    res = await fetch(`${CLAIM_SYNC_BASE}/api/claim/slice`, {
+    res = await fetch(`${CLAIM_SYNC_BASE2}/api/claim/slice`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -28363,7 +28722,7 @@ async function cmdRuns(id, flags = {}) {
   const fetchOnce = async () => {
     let res;
     try {
-      res = await fetch(`${CLAIM_SYNC_BASE}/api/patch/runs`, {
+      res = await fetch(`${CLAIM_SYNC_BASE2}/api/patch/runs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -28509,7 +28868,7 @@ async function submitFounderPatch({ claims, claim, id, wt, flags }) {
   console.log("\n  Submitting the patch through terminalhire...");
   let res;
   try {
-    res = await fetch(`${CLAIM_SYNC_BASE}/api/patch`, {
+    res = await fetch(`${CLAIM_SYNC_BASE2}/api/patch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(submission),
@@ -28559,17 +28918,9 @@ async function cmdSubmit(id, flags = {}) {
     console.error(`terminalhire claim: no claim with id '${id}'.`);
     process.exit(1);
   }
-  if (!SUBMIT_ACCEPTS.includes(claim.state)) {
-    console.error(
-      `terminalhire claim: ${id} is '${claim.state}'. Submit runs once work has started ('working', via 'claim start') or the review gate cleared it ('ready'). Start it first:
-  terminalhire claim start ${id}`
-    );
-    process.exit(1);
-  }
-  if (claim.review && claim.review.verdict === "revise") {
-    console.error(
-      `terminalhire claim: ${id} review verdict is 'revise' \u2014 the gate said do not submit. Resolve blockers and re-review first.`
-    );
+  const submitRefusal = submitRefusalFor(claim);
+  if (submitRefusal) {
+    console.error(submitRefusal);
     process.exit(1);
   }
   if (!claim.worktreePath || !claim.branch) {
@@ -29090,7 +29441,7 @@ async function cmdPush({ keepUpdated = false } = {}) {
   console.log("\n  Starting browser verification...");
   let begin;
   try {
-    const r = await fetch(`${CLAIM_SYNC_BASE}/api/claim-sync/begin`, {
+    const r = await fetch(`${CLAIM_SYNC_BASE2}/api/claim-sync/begin`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ hostname: osHostname() }),
@@ -29133,7 +29484,7 @@ async function cmdPush({ keepUpdated = false } = {}) {
     let statusRes;
     try {
       statusRes = await fetch(
-        `${CLAIM_SYNC_BASE}/api/claim-sync/status?challenge=${encodeURIComponent(challenge)}`,
+        `${CLAIM_SYNC_BASE2}/api/claim-sync/status?challenge=${encodeURIComponent(challenge)}`,
         { signal: AbortSignal.timeout(1e4) }
       );
     } catch {
@@ -29164,7 +29515,7 @@ async function cmdPush({ keepUpdated = false } = {}) {
   console.log("\n  Verified. Sharing your claims...");
   let res;
   try {
-    res = await fetch(`${CLAIM_SYNC_BASE}/api/claim-sync`, {
+    res = await fetch(`${CLAIM_SYNC_BASE2}/api/claim-sync`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // autoConsent is included ONLY when the dev opted into background updates —
@@ -29258,7 +29609,7 @@ async function cmdRevoke() {
   console.log("\n  Requesting deletion...");
   let res;
   try {
-    res = await fetch(`${CLAIM_SYNC_BASE}/api/claim-sync`, {
+    res = await fetch(`${CLAIM_SYNC_BASE2}/api/claim-sync`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ login, deleteToken }),
@@ -29508,7 +29859,7 @@ async function run() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR11, INDEX_CACHE_FILE2, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL, CLAIM_SYNC_BASE, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, GH_API2, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS;
+var TERMINALHIRE_DIR11, INDEX_CACHE_FILE2, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL, CLAIM_SYNC_BASE2, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, GH_API2, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
@@ -29523,7 +29874,7 @@ var init_jpi_claim = __esm({
     CLAIM_PUSH_MARKER = join18(TERMINALHIRE_DIR11, "claim-push.json");
     REPO_CONTINUITY_NUDGE_MARKER = join18(TERMINALHIRE_DIR11, "repo-continuity-nudged.json");
     API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
-    CLAIM_SYNC_BASE = "https://terminalhire.com";
+    CLAIM_SYNC_BASE2 = "https://terminalhire.com";
     CLAIM_CONSENT_VERSION = 1;
     CLAIM_POLL_INTERVAL_MS = 2e3;
     CLAIM_POLL_TIMEOUT_MS = 10 * 60 * 1e3;
@@ -29541,6 +29892,7 @@ var init_jpi_claim = __esm({
     STAKE_POSTING_GRACE_MS = STAKE_POST_TIMEOUT_MS + 15e3;
     TAKE_BOT_REPOS = /* @__PURE__ */ new Set(["paradedb/paradedb"]);
     SUBMIT_ACCEPTS = Object.freeze(["working", "ready"]);
+    REVISE_RECOVERY_STATES = Object.freeze(["working", "in-review", "ready"]);
     ISSUE_OUTCOME_TERMINAL = /* @__PURE__ */ new Set(["own-merge", "other-merge", "closed-unmerged"]);
     RUNS_POLL_INTERVAL_MS = 15e3;
     RUNS_POLL_ATTEMPTS = 20;
@@ -29560,7 +29912,7 @@ var init_jpi_claim = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/core/core.js
+// ../../../term-333/node_modules/zod/v4/core/core.js
 // @__NO_SIDE_EFFECTS__
 function $constructor(name, initializer3, params) {
   function init(inst, def) {
@@ -29620,7 +29972,7 @@ function config(newConfig) {
 }
 var _a2, $ZodAsyncError, $ZodEncodeError, globalConfig;
 var init_core = __esm({
-  "../../node_modules/zod/v4/core/core.js"() {
+  "../../../term-333/node_modules/zod/v4/core/core.js"() {
     "use strict";
     $ZodAsyncError = class extends Error {
       constructor() {
@@ -29638,7 +29990,7 @@ var init_core = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/core/util.js
+// ../../../term-333/node_modules/zod/v4/core/util.js
 var util_exports = {};
 __export(util_exports, {
   BIGINT_FORMAT_RANGES: () => BIGINT_FORMAT_RANGES,
@@ -30249,7 +30601,7 @@ function uint8ArrayToHex(bytes) {
 }
 var EVALUATING, captureStackTrace, allowsEval, getParsedType, propertyKeyTypes, primitiveTypes, NUMBER_FORMAT_RANGES, BIGINT_FORMAT_RANGES, Class;
 var init_util = __esm({
-  "../../node_modules/zod/v4/core/util.js"() {
+  "../../../term-333/node_modules/zod/v4/core/util.js"() {
     "use strict";
     init_core();
     EVALUATING = /* @__PURE__ */ Symbol("evaluating");
@@ -30341,7 +30693,7 @@ var init_util = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/core/errors.js
+// ../../../term-333/node_modules/zod/v4/core/errors.js
 function flattenError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = {};
   const formErrors = [];
@@ -30393,7 +30745,7 @@ function formatError(error2, mapper = (issue2) => issue2.message) {
 }
 var initializer, $ZodError, $ZodRealError;
 var init_errors2 = __esm({
-  "../../node_modules/zod/v4/core/errors.js"() {
+  "../../../term-333/node_modules/zod/v4/core/errors.js"() {
     "use strict";
     init_core();
     init_util();
@@ -30418,10 +30770,10 @@ var init_errors2 = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/core/parse.js
+// ../../../term-333/node_modules/zod/v4/core/parse.js
 var _parse, _parseAsync, _safeParse, safeParse, _safeParseAsync, safeParseAsync, _encode, _decode, _encodeAsync, _decodeAsync, _safeEncode, _safeDecode, _safeEncodeAsync, _safeDecodeAsync;
 var init_parse2 = __esm({
-  "../../node_modules/zod/v4/core/parse.js"() {
+  "../../../term-333/node_modules/zod/v4/core/parse.js"() {
     "use strict";
     init_core();
     init_errors2();
@@ -30505,7 +30857,7 @@ var init_parse2 = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/core/regexes.js
+// ../../../term-333/node_modules/zod/v4/core/regexes.js
 function emoji() {
   return new RegExp(_emoji, "u");
 }
@@ -30529,7 +30881,7 @@ function datetime(args) {
 }
 var cuid, cuid2, ulid, xid, ksuid, nanoid, duration, guid, uuid, email, _emoji, ipv4, ipv6, cidrv4, cidrv6, base64, base64url, httpProtocol, e164, dateSource, date, string, integer, number, boolean, _null, lowercase, uppercase;
 var init_regexes = __esm({
-  "../../node_modules/zod/v4/core/regexes.js"() {
+  "../../../term-333/node_modules/zod/v4/core/regexes.js"() {
     "use strict";
     cuid = /^[cC][0-9a-z]{6,}$/;
     cuid2 = /^[0-9a-z]+$/;
@@ -30569,10 +30921,10 @@ var init_regexes = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/core/checks.js
+// ../../../term-333/node_modules/zod/v4/core/checks.js
 var $ZodCheck, numericOriginMap, $ZodCheckLessThan, $ZodCheckGreaterThan, $ZodCheckMultipleOf, $ZodCheckNumberFormat, $ZodCheckMaxLength, $ZodCheckMinLength, $ZodCheckLengthEquals, $ZodCheckStringFormat, $ZodCheckRegex, $ZodCheckLowerCase, $ZodCheckUpperCase, $ZodCheckIncludes, $ZodCheckStartsWith, $ZodCheckEndsWith, $ZodCheckOverwrite;
 var init_checks = __esm({
-  "../../node_modules/zod/v4/core/checks.js"() {
+  "../../../term-333/node_modules/zod/v4/core/checks.js"() {
     "use strict";
     init_core();
     init_regexes();
@@ -30968,10 +31320,10 @@ var init_checks = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/core/doc.js
+// ../../../term-333/node_modules/zod/v4/core/doc.js
 var Doc;
 var init_doc = __esm({
-  "../../node_modules/zod/v4/core/doc.js"() {
+  "../../../term-333/node_modules/zod/v4/core/doc.js"() {
     "use strict";
     Doc = class {
       constructor(args = []) {
@@ -31010,10 +31362,10 @@ var init_doc = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/core/versions.js
+// ../../../term-333/node_modules/zod/v4/core/versions.js
 var version;
 var init_versions3 = __esm({
-  "../../node_modules/zod/v4/core/versions.js"() {
+  "../../../term-333/node_modules/zod/v4/core/versions.js"() {
     "use strict";
     version = {
       major: 4,
@@ -31023,7 +31375,7 @@ var init_versions3 = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/core/schemas.js
+// ../../../term-333/node_modules/zod/v4/core/schemas.js
 function isValidBase64(data) {
   if (data === "")
     return true;
@@ -31307,7 +31659,7 @@ function handleRefineResult(result, payload, input, inst) {
 }
 var $ZodType, $ZodString, $ZodStringFormat, $ZodGUID, $ZodUUID, $ZodEmail, $ZodURL, $ZodEmoji, $ZodNanoID, $ZodCUID, $ZodCUID2, $ZodULID, $ZodXID, $ZodKSUID, $ZodISODateTime, $ZodISODate, $ZodISOTime, $ZodISODuration, $ZodIPv4, $ZodIPv6, $ZodCIDRv4, $ZodCIDRv6, $ZodBase64, $ZodBase64URL, $ZodE164, $ZodJWT, $ZodNumber, $ZodNumberFormat, $ZodBoolean, $ZodNull, $ZodUnknown, $ZodNever, $ZodArray, $ZodObject, $ZodObjectJIT, $ZodUnion, $ZodDiscriminatedUnion, $ZodIntersection, $ZodRecord, $ZodEnum, $ZodLiteral, $ZodTransform, $ZodOptional, $ZodExactOptional, $ZodNullable, $ZodDefault, $ZodPrefault, $ZodNonOptional, $ZodCatch, $ZodPipe, $ZodPreprocess, $ZodReadonly, $ZodCustom;
 var init_schemas = __esm({
-  "../../node_modules/zod/v4/core/schemas.js"() {
+  "../../../term-333/node_modules/zod/v4/core/schemas.js"() {
     "use strict";
     init_checks();
     init_core();
@@ -32517,7 +32869,7 @@ var init_schemas = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/locales/en.js
+// ../../../term-333/node_modules/zod/v4/locales/en.js
 function en_default() {
   return {
     localeError: error()
@@ -32525,7 +32877,7 @@ function en_default() {
 }
 var error;
 var init_en = __esm({
-  "../../node_modules/zod/v4/locales/en.js"() {
+  "../../../term-333/node_modules/zod/v4/locales/en.js"() {
     "use strict";
     init_util();
     error = () => {
@@ -32637,20 +32989,20 @@ var init_en = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/locales/index.js
+// ../../../term-333/node_modules/zod/v4/locales/index.js
 var init_locales = __esm({
-  "../../node_modules/zod/v4/locales/index.js"() {
+  "../../../term-333/node_modules/zod/v4/locales/index.js"() {
     "use strict";
   }
 });
 
-// ../../node_modules/zod/v4/core/registries.js
+// ../../../term-333/node_modules/zod/v4/core/registries.js
 function registry() {
   return new $ZodRegistry();
 }
 var _a3, $ZodRegistry, globalRegistry;
 var init_registries = __esm({
-  "../../node_modules/zod/v4/core/registries.js"() {
+  "../../../term-333/node_modules/zod/v4/core/registries.js"() {
     "use strict";
     $ZodRegistry = class {
       constructor() {
@@ -32697,7 +33049,7 @@ var init_registries = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/core/api.js
+// ../../../term-333/node_modules/zod/v4/core/api.js
 // @__NO_SIDE_EFFECTS__
 function _string(Class2, params) {
   return new Class2({
@@ -33225,14 +33577,14 @@ function _check(fn, params) {
   return ch;
 }
 var init_api = __esm({
-  "../../node_modules/zod/v4/core/api.js"() {
+  "../../../term-333/node_modules/zod/v4/core/api.js"() {
     "use strict";
     init_checks();
     init_util();
   }
 });
 
-// ../../node_modules/zod/v4/core/to-json-schema.js
+// ../../../term-333/node_modules/zod/v4/core/to-json-schema.js
 function initializeContext(params) {
   let target = params?.target ?? "draft-2020-12";
   if (target === "draft-4")
@@ -33579,7 +33931,7 @@ function isTransforming(_schema, _ctx) {
 }
 var createToJSONSchemaMethod, createStandardJSONSchemaMethod;
 var init_to_json_schema = __esm({
-  "../../node_modules/zod/v4/core/to-json-schema.js"() {
+  "../../../term-333/node_modules/zod/v4/core/to-json-schema.js"() {
     "use strict";
     init_registries();
     createToJSONSchemaMethod = (schema, processors = {}) => (params) => {
@@ -33598,10 +33950,10 @@ var init_to_json_schema = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/core/json-schema-processors.js
+// ../../../term-333/node_modules/zod/v4/core/json-schema-processors.js
 var formatMap, stringProcessor, numberProcessor, booleanProcessor, nullProcessor, neverProcessor, unknownProcessor, enumProcessor, literalProcessor, customProcessor, transformProcessor, arrayProcessor, objectProcessor, unionProcessor, intersectionProcessor, recordProcessor, nullableProcessor, nonoptionalProcessor, defaultProcessor, prefaultProcessor, catchProcessor, pipeProcessor, readonlyProcessor, optionalProcessor;
 var init_json_schema_processors = __esm({
-  "../../node_modules/zod/v4/core/json-schema-processors.js"() {
+  "../../../term-333/node_modules/zod/v4/core/json-schema-processors.js"() {
     "use strict";
     init_to_json_schema();
     init_util();
@@ -33939,16 +34291,16 @@ var init_json_schema_processors = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/core/json-schema.js
+// ../../../term-333/node_modules/zod/v4/core/json-schema.js
 var init_json_schema2 = __esm({
-  "../../node_modules/zod/v4/core/json-schema.js"() {
+  "../../../term-333/node_modules/zod/v4/core/json-schema.js"() {
     "use strict";
   }
 });
 
-// ../../node_modules/zod/v4/core/index.js
+// ../../../term-333/node_modules/zod/v4/core/index.js
 var init_core2 = __esm({
-  "../../node_modules/zod/v4/core/index.js"() {
+  "../../../term-333/node_modules/zod/v4/core/index.js"() {
     "use strict";
     init_core();
     init_parse2();
@@ -33967,45 +34319,45 @@ var init_core2 = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/mini/parse.js
+// ../../../term-333/node_modules/zod/v4/mini/parse.js
 var init_parse3 = __esm({
-  "../../node_modules/zod/v4/mini/parse.js"() {
+  "../../../term-333/node_modules/zod/v4/mini/parse.js"() {
     "use strict";
     init_core2();
   }
 });
 
-// ../../node_modules/zod/v4/mini/schemas.js
+// ../../../term-333/node_modules/zod/v4/mini/schemas.js
 var init_schemas2 = __esm({
-  "../../node_modules/zod/v4/mini/schemas.js"() {
+  "../../../term-333/node_modules/zod/v4/mini/schemas.js"() {
     "use strict";
   }
 });
 
-// ../../node_modules/zod/v4/mini/checks.js
+// ../../../term-333/node_modules/zod/v4/mini/checks.js
 var init_checks2 = __esm({
-  "../../node_modules/zod/v4/mini/checks.js"() {
+  "../../../term-333/node_modules/zod/v4/mini/checks.js"() {
     "use strict";
   }
 });
 
-// ../../node_modules/zod/v4/mini/iso.js
+// ../../../term-333/node_modules/zod/v4/mini/iso.js
 var init_iso = __esm({
-  "../../node_modules/zod/v4/mini/iso.js"() {
+  "../../../term-333/node_modules/zod/v4/mini/iso.js"() {
     "use strict";
   }
 });
 
-// ../../node_modules/zod/v4/mini/coerce.js
+// ../../../term-333/node_modules/zod/v4/mini/coerce.js
 var init_coerce = __esm({
-  "../../node_modules/zod/v4/mini/coerce.js"() {
+  "../../../term-333/node_modules/zod/v4/mini/coerce.js"() {
     "use strict";
   }
 });
 
-// ../../node_modules/zod/v4/mini/external.js
+// ../../../term-333/node_modules/zod/v4/mini/external.js
 var init_external = __esm({
-  "../../node_modules/zod/v4/mini/external.js"() {
+  "../../../term-333/node_modules/zod/v4/mini/external.js"() {
     "use strict";
     init_core2();
     init_parse3();
@@ -34017,15 +34369,15 @@ var init_external = __esm({
   }
 });
 
-// ../../node_modules/zod/v4-mini/index.js
+// ../../../term-333/node_modules/zod/v4-mini/index.js
 var init_v4_mini = __esm({
-  "../../node_modules/zod/v4-mini/index.js"() {
+  "../../../term-333/node_modules/zod/v4-mini/index.js"() {
     "use strict";
     init_external();
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
 function isZ4Schema(s) {
   const schema = s;
   return !!schema._zod;
@@ -34088,21 +34440,21 @@ function getLiteralValue(schema) {
   return void 0;
 }
 var init_zod_compat = __esm({
-  "../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js"() {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js"() {
     "use strict";
     init_v4_mini();
   }
 });
 
-// ../../node_modules/zod/v4/classic/checks.js
+// ../../../term-333/node_modules/zod/v4/classic/checks.js
 var init_checks3 = __esm({
-  "../../node_modules/zod/v4/classic/checks.js"() {
+  "../../../term-333/node_modules/zod/v4/classic/checks.js"() {
     "use strict";
     init_core2();
   }
 });
 
-// ../../node_modules/zod/v4/classic/iso.js
+// ../../../term-333/node_modules/zod/v4/classic/iso.js
 var iso_exports2 = {};
 __export(iso_exports2, {
   ZodISODate: () => ZodISODate,
@@ -34128,7 +34480,7 @@ function duration2(params) {
 }
 var ZodISODateTime, ZodISODate, ZodISOTime, ZodISODuration;
 var init_iso2 = __esm({
-  "../../node_modules/zod/v4/classic/iso.js"() {
+  "../../../term-333/node_modules/zod/v4/classic/iso.js"() {
     "use strict";
     init_core2();
     init_schemas3();
@@ -34151,10 +34503,10 @@ var init_iso2 = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/classic/errors.js
+// ../../../term-333/node_modules/zod/v4/classic/errors.js
 var initializer2, ZodRealError;
 var init_errors3 = __esm({
-  "../../node_modules/zod/v4/classic/errors.js"() {
+  "../../../term-333/node_modules/zod/v4/classic/errors.js"() {
     "use strict";
     init_core2();
     init_core2();
@@ -34199,10 +34551,10 @@ var init_errors3 = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/classic/parse.js
+// ../../../term-333/node_modules/zod/v4/classic/parse.js
 var parse3, parseAsync2, safeParse3, safeParseAsync2, encode3, decode2, encodeAsync2, decodeAsync2, safeEncode2, safeDecode2, safeEncodeAsync2, safeDecodeAsync2;
 var init_parse4 = __esm({
-  "../../node_modules/zod/v4/classic/parse.js"() {
+  "../../../term-333/node_modules/zod/v4/classic/parse.js"() {
     "use strict";
     init_core2();
     init_errors3();
@@ -34221,7 +34573,7 @@ var init_parse4 = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/classic/schemas.js
+// ../../../term-333/node_modules/zod/v4/classic/schemas.js
 function _installLazyMethods(inst, group, methods) {
   const proto = Object.getPrototypeOf(inst);
   let installed = _installedGroups.get(proto);
@@ -34439,7 +34791,7 @@ function preprocess(fn, schema) {
 }
 var _installedGroups, ZodType, _ZodString, ZodString, ZodStringFormat, ZodEmail, ZodGUID, ZodUUID, ZodURL, ZodEmoji, ZodNanoID, ZodCUID, ZodCUID2, ZodULID, ZodXID, ZodKSUID, ZodIPv4, ZodIPv6, ZodCIDRv4, ZodCIDRv6, ZodBase64, ZodBase64URL, ZodE164, ZodJWT, ZodNumber, ZodNumberFormat, ZodBoolean, ZodNull, ZodUnknown, ZodNever, ZodArray, ZodObject, ZodUnion, ZodDiscriminatedUnion, ZodIntersection, ZodRecord, ZodEnum, ZodLiteral, ZodTransform, ZodOptional, ZodExactOptional, ZodNullable, ZodDefault, ZodPrefault, ZodNonOptional, ZodCatch, ZodPipe, ZodPreprocess, ZodReadonly, ZodCustom;
 var init_schemas3 = __esm({
-  "../../node_modules/zod/v4/classic/schemas.js"() {
+  "../../../term-333/node_modules/zod/v4/classic/schemas.js"() {
     "use strict";
     init_core2();
     init_core2();
@@ -35076,26 +35428,26 @@ var init_schemas3 = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/classic/compat.js
+// ../../../term-333/node_modules/zod/v4/classic/compat.js
 var ZodFirstPartyTypeKind;
 var init_compat = __esm({
-  "../../node_modules/zod/v4/classic/compat.js"() {
+  "../../../term-333/node_modules/zod/v4/classic/compat.js"() {
     "use strict";
     /* @__PURE__ */ (function(ZodFirstPartyTypeKind2) {
     })(ZodFirstPartyTypeKind || (ZodFirstPartyTypeKind = {}));
   }
 });
 
-// ../../node_modules/zod/v4/classic/coerce.js
+// ../../../term-333/node_modules/zod/v4/classic/coerce.js
 var init_coerce2 = __esm({
-  "../../node_modules/zod/v4/classic/coerce.js"() {
+  "../../../term-333/node_modules/zod/v4/classic/coerce.js"() {
     "use strict";
   }
 });
 
-// ../../node_modules/zod/v4/classic/external.js
+// ../../../term-333/node_modules/zod/v4/classic/external.js
 var init_external2 = __esm({
-  "../../node_modules/zod/v4/classic/external.js"() {
+  "../../../term-333/node_modules/zod/v4/classic/external.js"() {
     "use strict";
     init_core2();
     init_schemas3();
@@ -35112,23 +35464,23 @@ var init_external2 = __esm({
   }
 });
 
-// ../../node_modules/zod/v4/classic/index.js
+// ../../../term-333/node_modules/zod/v4/classic/index.js
 var init_classic = __esm({
-  "../../node_modules/zod/v4/classic/index.js"() {
+  "../../../term-333/node_modules/zod/v4/classic/index.js"() {
     "use strict";
     init_external2();
   }
 });
 
-// ../../node_modules/zod/v4/index.js
+// ../../../term-333/node_modules/zod/v4/index.js
 var init_v4 = __esm({
-  "../../node_modules/zod/v4/index.js"() {
+  "../../../term-333/node_modules/zod/v4/index.js"() {
     "use strict";
     init_classic();
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
 var types_exports = {};
 __export(types_exports, {
   AnnotationsSchema: () => AnnotationsSchema,
@@ -35317,7 +35669,7 @@ function assertCompleteRequestResourceTemplate(request) {
 }
 var LATEST_PROTOCOL_VERSION, DEFAULT_NEGOTIATED_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS, RELATED_TASK_META_KEY, JSONRPC_VERSION, AssertObjectSchema, ProgressTokenSchema, CursorSchema, TaskCreationParamsSchema, TaskMetadataSchema, RelatedTaskMetadataSchema, RequestMetaSchema, BaseRequestParamsSchema, TaskAugmentedRequestParamsSchema, isTaskAugmentedRequestParams, RequestSchema, NotificationsParamsSchema, NotificationSchema, ResultSchema, RequestIdSchema, JSONRPCRequestSchema, isJSONRPCRequest, JSONRPCNotificationSchema, isJSONRPCNotification, JSONRPCResultResponseSchema, isJSONRPCResultResponse, isJSONRPCResponse, ErrorCode, JSONRPCErrorResponseSchema, JSONRPCErrorSchema, isJSONRPCErrorResponse, isJSONRPCError, JSONRPCMessageSchema, JSONRPCResponseSchema, EmptyResultSchema, CancelledNotificationParamsSchema, CancelledNotificationSchema, IconSchema, IconsSchema, BaseMetadataSchema, ImplementationSchema, FormElicitationCapabilitySchema, ElicitationCapabilitySchema, ClientTasksCapabilitySchema, ServerTasksCapabilitySchema, ClientCapabilitiesSchema, InitializeRequestParamsSchema, InitializeRequestSchema, isInitializeRequest, ServerCapabilitiesSchema, InitializeResultSchema, InitializedNotificationSchema, isInitializedNotification, PingRequestSchema, ProgressSchema, ProgressNotificationParamsSchema, ProgressNotificationSchema, PaginatedRequestParamsSchema, PaginatedRequestSchema, PaginatedResultSchema, TaskStatusSchema, TaskSchema, CreateTaskResultSchema, TaskStatusNotificationParamsSchema, TaskStatusNotificationSchema, GetTaskRequestSchema, GetTaskResultSchema, GetTaskPayloadRequestSchema, GetTaskPayloadResultSchema, ListTasksRequestSchema, ListTasksResultSchema, CancelTaskRequestSchema, CancelTaskResultSchema, ResourceContentsSchema, TextResourceContentsSchema, Base64Schema, BlobResourceContentsSchema, RoleSchema, AnnotationsSchema, ResourceSchema, ResourceTemplateSchema, ListResourcesRequestSchema, ListResourcesResultSchema, ListResourceTemplatesRequestSchema, ListResourceTemplatesResultSchema, ResourceRequestParamsSchema, ReadResourceRequestParamsSchema, ReadResourceRequestSchema, ReadResourceResultSchema, ResourceListChangedNotificationSchema, SubscribeRequestParamsSchema, SubscribeRequestSchema, UnsubscribeRequestParamsSchema, UnsubscribeRequestSchema, ResourceUpdatedNotificationParamsSchema, ResourceUpdatedNotificationSchema, PromptArgumentSchema, PromptSchema, ListPromptsRequestSchema, ListPromptsResultSchema, GetPromptRequestParamsSchema, GetPromptRequestSchema, TextContentSchema, ImageContentSchema, AudioContentSchema, ToolUseContentSchema, EmbeddedResourceSchema, ResourceLinkSchema, ContentBlockSchema, PromptMessageSchema, GetPromptResultSchema, PromptListChangedNotificationSchema, ToolAnnotationsSchema, ToolExecutionSchema, ToolSchema, ListToolsRequestSchema, ListToolsResultSchema, CallToolResultSchema, CompatibilityCallToolResultSchema, CallToolRequestParamsSchema, CallToolRequestSchema, ToolListChangedNotificationSchema, ListChangedOptionsBaseSchema, LoggingLevelSchema, SetLevelRequestParamsSchema, SetLevelRequestSchema, LoggingMessageNotificationParamsSchema, LoggingMessageNotificationSchema, ModelHintSchema, ModelPreferencesSchema, ToolChoiceSchema, ToolResultContentSchema, SamplingContentSchema, SamplingMessageContentBlockSchema, SamplingMessageSchema, CreateMessageRequestParamsSchema, CreateMessageRequestSchema, CreateMessageResultSchema, CreateMessageResultWithToolsSchema, BooleanSchemaSchema, StringSchemaSchema, NumberSchemaSchema, UntitledSingleSelectEnumSchemaSchema, TitledSingleSelectEnumSchemaSchema, LegacyTitledEnumSchemaSchema, SingleSelectEnumSchemaSchema, UntitledMultiSelectEnumSchemaSchema, TitledMultiSelectEnumSchemaSchema, MultiSelectEnumSchemaSchema, EnumSchemaSchema, PrimitiveSchemaDefinitionSchema, ElicitRequestFormParamsSchema, ElicitRequestURLParamsSchema, ElicitRequestParamsSchema, ElicitRequestSchema, ElicitationCompleteNotificationParamsSchema, ElicitationCompleteNotificationSchema, ElicitResultSchema, ResourceTemplateReferenceSchema, ResourceReferenceSchema, PromptReferenceSchema, CompleteRequestParamsSchema, CompleteRequestSchema, CompleteResultSchema, RootSchema, ListRootsRequestSchema, ListRootsResultSchema, RootsListChangedNotificationSchema, ClientRequestSchema, ClientNotificationSchema, ClientResultSchema, ServerRequestSchema, ServerNotificationSchema, ServerResultSchema, McpError, UrlElicitationRequiredError;
 var init_types4 = __esm({
-  "../../node_modules/@modelcontextprotocol/sdk/dist/esm/types.js"() {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/types.js"() {
     "use strict";
     init_v4();
     LATEST_PROTOCOL_VERSION = "2025-11-25";
@@ -36846,153 +37198,153 @@ var init_types4 = __esm({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/interfaces.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/interfaces.js
 function isTerminal(status) {
   return status === "completed" || status === "failed" || status === "cancelled";
 }
 var init_interfaces = __esm({
-  "../../node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/interfaces.js"() {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/interfaces.js"() {
     "use strict";
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/Options.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/Options.js
 var init_Options = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/Options.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/Options.js"() {
     "use strict";
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/Refs.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/Refs.js
 var init_Refs = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/Refs.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/Refs.js"() {
     "use strict";
     init_Options();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/errorMessages.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/errorMessages.js
 var init_errorMessages = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/errorMessages.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/errorMessages.js"() {
     "use strict";
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/getRelativePath.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/getRelativePath.js
 var init_getRelativePath = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/getRelativePath.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/getRelativePath.js"() {
     "use strict";
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/any.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/any.js
 var init_any = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/any.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/any.js"() {
     "use strict";
     init_getRelativePath();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/array.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/array.js
 var init_array = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/array.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/array.js"() {
     "use strict";
     init_errorMessages();
     init_parseDef();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/bigint.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/bigint.js
 var init_bigint = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/bigint.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/bigint.js"() {
     "use strict";
     init_errorMessages();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/boolean.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/boolean.js
 var init_boolean = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/boolean.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/boolean.js"() {
     "use strict";
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/branded.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/branded.js
 var init_branded = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/branded.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/branded.js"() {
     "use strict";
     init_parseDef();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/catch.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/catch.js
 var init_catch = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/catch.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/catch.js"() {
     "use strict";
     init_parseDef();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/date.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/date.js
 var init_date = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/date.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/date.js"() {
     "use strict";
     init_errorMessages();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/default.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/default.js
 var init_default = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/default.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/default.js"() {
     "use strict";
     init_parseDef();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/effects.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/effects.js
 var init_effects = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/effects.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/effects.js"() {
     "use strict";
     init_parseDef();
     init_any();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/enum.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/enum.js
 var init_enum = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/enum.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/enum.js"() {
     "use strict";
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/intersection.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/intersection.js
 var init_intersection = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/intersection.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/intersection.js"() {
     "use strict";
     init_parseDef();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/literal.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/literal.js
 var init_literal = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/literal.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/literal.js"() {
     "use strict";
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/string.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/string.js
 var ALPHA_NUMERIC;
 var init_string = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/string.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/string.js"() {
     "use strict";
     init_errorMessages();
     ALPHA_NUMERIC = new Set("ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvxyz0123456789");
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/record.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/record.js
 var init_record = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/record.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/record.js"() {
     "use strict";
     init_parseDef();
     init_string();
@@ -37001,9 +37353,9 @@ var init_record = __esm({
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/map.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/map.js
 var init_map = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/map.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/map.js"() {
     "use strict";
     init_parseDef();
     init_record();
@@ -37011,130 +37363,130 @@ var init_map = __esm({
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/nativeEnum.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/nativeEnum.js
 var init_nativeEnum = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/nativeEnum.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/nativeEnum.js"() {
     "use strict";
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/never.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/never.js
 var init_never = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/never.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/never.js"() {
     "use strict";
     init_any();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/null.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/null.js
 var init_null = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/null.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/null.js"() {
     "use strict";
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/union.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/union.js
 var init_union = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/union.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/union.js"() {
     "use strict";
     init_parseDef();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/nullable.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/nullable.js
 var init_nullable = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/nullable.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/nullable.js"() {
     "use strict";
     init_parseDef();
     init_union();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/number.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/number.js
 var init_number = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/number.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/number.js"() {
     "use strict";
     init_errorMessages();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/object.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/object.js
 var init_object = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/object.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/object.js"() {
     "use strict";
     init_parseDef();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/optional.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/optional.js
 var init_optional = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/optional.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/optional.js"() {
     "use strict";
     init_parseDef();
     init_any();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/pipeline.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/pipeline.js
 var init_pipeline = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/pipeline.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/pipeline.js"() {
     "use strict";
     init_parseDef();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/promise.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/promise.js
 var init_promise2 = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/promise.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/promise.js"() {
     "use strict";
     init_parseDef();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/set.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/set.js
 var init_set = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/set.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/set.js"() {
     "use strict";
     init_errorMessages();
     init_parseDef();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/tuple.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/tuple.js
 var init_tuple = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/tuple.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/tuple.js"() {
     "use strict";
     init_parseDef();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/undefined.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/undefined.js
 var init_undefined = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/undefined.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/undefined.js"() {
     "use strict";
     init_any();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/unknown.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/unknown.js
 var init_unknown = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/unknown.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/unknown.js"() {
     "use strict";
     init_any();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/readonly.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/readonly.js
 var init_readonly = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parsers/readonly.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parsers/readonly.js"() {
     "use strict";
     init_parseDef();
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/selectParser.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/selectParser.js
 var init_selectParser = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/selectParser.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/selectParser.js"() {
     "use strict";
     init_any();
     init_array();
@@ -37169,9 +37521,9 @@ var init_selectParser = __esm({
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parseDef.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parseDef.js
 var init_parseDef = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parseDef.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parseDef.js"() {
     "use strict";
     init_Options();
     init_selectParser();
@@ -37180,16 +37532,16 @@ var init_parseDef = __esm({
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/parseTypes.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/parseTypes.js
 var init_parseTypes = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/parseTypes.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/parseTypes.js"() {
     "use strict";
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/zodToJsonSchema.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/zodToJsonSchema.js
 var init_zodToJsonSchema = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/zodToJsonSchema.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/zodToJsonSchema.js"() {
     "use strict";
     init_parseDef();
     init_Refs();
@@ -37197,9 +37549,9 @@ var init_zodToJsonSchema = __esm({
   }
 });
 
-// ../../node_modules/zod-to-json-schema/dist/esm/index.js
+// ../../../term-333/node_modules/zod-to-json-schema/dist/esm/index.js
 var init_esm = __esm({
-  "../../node_modules/zod-to-json-schema/dist/esm/index.js"() {
+  "../../../term-333/node_modules/zod-to-json-schema/dist/esm/index.js"() {
     "use strict";
     init_Options();
     init_Refs();
@@ -37243,7 +37595,7 @@ var init_esm = __esm({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js
 function getMethodLiteral(schema) {
   const shape = getObjectShape(schema);
   const methodSchema = shape?.method;
@@ -37264,14 +37616,14 @@ function parseWithCompat(schema, data) {
   return result.data;
 }
 var init_zod_json_schema_compat = __esm({
-  "../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js"() {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js"() {
     "use strict";
     init_zod_compat();
     init_esm();
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
 function isPlainObject2(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -37293,7 +37645,7 @@ function mergeCapabilities(base, additional) {
 }
 var DEFAULT_REQUEST_TIMEOUT_MSEC, Protocol;
 var init_protocol = __esm({
-  "../../node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js"() {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js"() {
     "use strict";
     init_zod_compat();
     init_types4();
@@ -38235,9 +38587,9 @@ var init_protocol = __esm({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/codegen/code.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/codegen/code.js
 var require_code = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/codegen/code.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/codegen/code.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.regexpCode = exports.getEsmExportName = exports.getProperty = exports.safeStringify = exports.stringify = exports.strConcat = exports.addCodeArg = exports.str = exports._ = exports.nil = exports._Code = exports.Name = exports.IDENTIFIER = exports._CodeOrName = void 0;
@@ -38389,9 +38741,9 @@ var require_code = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/codegen/scope.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/codegen/scope.js
 var require_scope = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/codegen/scope.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/codegen/scope.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.ValueScope = exports.ValueScopeName = exports.Scope = exports.varKinds = exports.UsedValueState = void 0;
@@ -38534,9 +38886,9 @@ var require_scope = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/codegen/index.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/codegen/index.js
 var require_codegen = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/codegen/index.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/codegen/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.or = exports.and = exports.not = exports.CodeGen = exports.operators = exports.varKinds = exports.ValueScopeName = exports.ValueScope = exports.Scope = exports.Name = exports.regexpCode = exports.stringify = exports.getProperty = exports.nil = exports.strConcat = exports.str = exports._ = void 0;
@@ -39254,9 +39606,9 @@ var require_codegen = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/util.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/util.js
 var require_util = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/util.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/util.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.checkStrictMode = exports.getErrorPath = exports.Type = exports.useFunc = exports.setEvaluated = exports.evaluatedPropsToName = exports.mergeEvaluated = exports.eachItem = exports.unescapeJsonPointer = exports.escapeJsonPointer = exports.escapeFragment = exports.unescapeFragment = exports.schemaRefOrVal = exports.schemaHasRulesButRef = exports.schemaHasRules = exports.checkUnknownRules = exports.alwaysValidSchema = exports.toHash = void 0;
@@ -39421,9 +39773,9 @@ var require_util = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/names.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/names.js
 var require_names = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/names.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/names.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -39460,9 +39812,9 @@ var require_names = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/errors.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/errors.js
 var require_errors = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/errors.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/errors.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.extendErrors = exports.resetErrorsCount = exports.reportExtraError = exports.reportError = exports.keyword$DataError = exports.keywordError = void 0;
@@ -39582,9 +39934,9 @@ var require_errors = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/boolSchema.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/boolSchema.js
 var require_boolSchema = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/boolSchema.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/boolSchema.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.boolOrEmptySchema = exports.topBoolOrEmptySchema = void 0;
@@ -39633,9 +39985,9 @@ var require_boolSchema = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/rules.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/rules.js
 var require_rules = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/rules.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/rules.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.getRules = exports.isJSONType = void 0;
@@ -39664,9 +40016,9 @@ var require_rules = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/applicability.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/applicability.js
 var require_applicability = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/applicability.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/applicability.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.shouldUseRule = exports.shouldUseGroup = exports.schemaHasRulesForType = void 0;
@@ -39687,9 +40039,9 @@ var require_applicability = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/dataType.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/dataType.js
 var require_dataType = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/dataType.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/dataType.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.reportTypeError = exports.checkDataTypes = exports.checkDataType = exports.coerceAndCheckDataType = exports.getJSONTypes = exports.getSchemaTypes = exports.DataType = void 0;
@@ -39871,9 +40223,9 @@ var require_dataType = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/defaults.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/defaults.js
 var require_defaults = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/defaults.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/defaults.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.assignDefaults = void 0;
@@ -39908,9 +40260,9 @@ var require_defaults = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/code.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/code.js
 var require_code2 = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/code.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/code.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateUnion = exports.validateArray = exports.usePattern = exports.callValidateCode = exports.schemaProperties = exports.allSchemaProperties = exports.noPropertyInData = exports.propertyInData = exports.isOwnProperty = exports.hasPropFunc = exports.reportMissingProp = exports.checkMissingProp = exports.checkReportMissingProp = void 0;
@@ -40041,9 +40393,9 @@ var require_code2 = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/keyword.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/keyword.js
 var require_keyword = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/keyword.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/keyword.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateKeywordUsage = exports.validSchemaType = exports.funcKeywordCode = exports.macroKeywordCode = void 0;
@@ -40159,9 +40511,9 @@ var require_keyword = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/subschema.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/subschema.js
 var require_subschema = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/subschema.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/subschema.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.extendSubschemaMode = exports.extendSubschemaData = exports.getSubschema = void 0;
@@ -40242,9 +40594,9 @@ var require_subschema = __commonJS({
   }
 });
 
-// ../../node_modules/fast-deep-equal/index.js
+// ../../../term-333/node_modules/fast-deep-equal/index.js
 var require_fast_deep_equal = __commonJS({
-  "../../node_modules/fast-deep-equal/index.js"(exports, module) {
+  "../../../term-333/node_modules/fast-deep-equal/index.js"(exports, module) {
     "use strict";
     module.exports = function equal(a, b) {
       if (a === b) return true;
@@ -40277,9 +40629,9 @@ var require_fast_deep_equal = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/json-schema-traverse/index.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/json-schema-traverse/index.js
 var require_json_schema_traverse = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/json-schema-traverse/index.js"(exports, module) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/json-schema-traverse/index.js"(exports, module) {
     "use strict";
     var traverse = module.exports = function(schema, opts, cb) {
       if (typeof opts == "function") {
@@ -40365,9 +40717,9 @@ var require_json_schema_traverse = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/resolve.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/resolve.js
 var require_resolve = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/resolve.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/resolve.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.getSchemaRefs = exports.resolveUrl = exports.normalizeId = exports._getFullPath = exports.getFullPath = exports.inlineRef = void 0;
@@ -40521,9 +40873,9 @@ var require_resolve = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/index.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/index.js
 var require_validate = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/index.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/validate/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.getData = exports.KeywordCxt = exports.validateFunctionCode = void 0;
@@ -41029,9 +41381,9 @@ var require_validate = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/validation_error.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/validation_error.js
 var require_validation_error = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/validation_error.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/validation_error.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var ValidationError = class extends Error {
@@ -41045,9 +41397,9 @@ var require_validation_error = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/ref_error.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/ref_error.js
 var require_ref_error = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/ref_error.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/ref_error.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var resolve_1 = require_resolve();
@@ -41062,9 +41414,9 @@ var require_ref_error = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/index.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/index.js
 var require_compile = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/index.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/compile/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.resolveSchema = exports.getCompilingSchema = exports.resolveRef = exports.compileSchema = exports.SchemaEnv = void 0;
@@ -41286,9 +41638,9 @@ var require_compile = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/refs/data.json
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/refs/data.json
 var require_data = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/refs/data.json"(exports, module) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/refs/data.json"(exports, module) {
     module.exports = {
       $id: "https://raw.githubusercontent.com/ajv-validator/ajv/master/lib/refs/data.json#",
       description: "Meta-schema for $data reference (JSON AnySchema extension proposal)",
@@ -41305,9 +41657,9 @@ var require_data = __commonJS({
   }
 });
 
-// ../../node_modules/fast-uri/lib/utils.js
+// ../../../term-333/node_modules/fast-uri/lib/utils.js
 var require_utils = __commonJS({
-  "../../node_modules/fast-uri/lib/utils.js"(exports, module) {
+  "../../../term-333/node_modules/fast-uri/lib/utils.js"(exports, module) {
     "use strict";
     var isUUID = RegExp.prototype.test.bind(/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/iu);
     var isIPv4 = RegExp.prototype.test.bind(/^(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)$/u);
@@ -41618,9 +41970,9 @@ var require_utils = __commonJS({
   }
 });
 
-// ../../node_modules/fast-uri/lib/schemes.js
+// ../../../term-333/node_modules/fast-uri/lib/schemes.js
 var require_schemes = __commonJS({
-  "../../node_modules/fast-uri/lib/schemes.js"(exports, module) {
+  "../../../term-333/node_modules/fast-uri/lib/schemes.js"(exports, module) {
     "use strict";
     var { isUUID } = require_utils();
     var URN_REG = /([\da-z][\d\-a-z]{0,31}):((?:[\w!$'()*+,\-.:;=@]|%[\da-f]{2})+)/iu;
@@ -41828,9 +42180,9 @@ var require_schemes = __commonJS({
   }
 });
 
-// ../../node_modules/fast-uri/index.js
+// ../../../term-333/node_modules/fast-uri/index.js
 var require_fast_uri = __commonJS({
-  "../../node_modules/fast-uri/index.js"(exports, module) {
+  "../../../term-333/node_modules/fast-uri/index.js"(exports, module) {
     "use strict";
     var { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizePercentEncoding, normalizePathEncoding, escapePreservingEscapes, reescapeHostDelimiters, isIPv4, nonSimpleDomain } = require_utils();
     var { SCHEMES, getSchemeHandler } = require_schemes();
@@ -42114,9 +42466,9 @@ var require_fast_uri = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/uri.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/uri.js
 var require_uri = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/uri.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/uri.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var uri = require_fast_uri();
@@ -42125,9 +42477,9 @@ var require_uri = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/core.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/core.js
 var require_core = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/core.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/core.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.CodeGen = exports.Name = exports.nil = exports.stringify = exports.str = exports._ = exports.KeywordCxt = void 0;
@@ -42736,9 +43088,9 @@ var require_core = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/core/id.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/core/id.js
 var require_id = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/core/id.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/core/id.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var def = {
@@ -42751,9 +43103,9 @@ var require_id = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/core/ref.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/core/ref.js
 var require_ref = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/core/ref.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/core/ref.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.callRef = exports.getValidate = void 0;
@@ -42873,9 +43225,9 @@ var require_ref = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/core/index.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/core/index.js
 var require_core2 = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/core/index.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/core/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var id_1 = require_id();
@@ -42894,9 +43246,9 @@ var require_core2 = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitNumber.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitNumber.js
 var require_limitNumber = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitNumber.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitNumber.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -42926,9 +43278,9 @@ var require_limitNumber = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/multipleOf.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/multipleOf.js
 var require_multipleOf = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/multipleOf.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/multipleOf.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -42954,9 +43306,9 @@ var require_multipleOf = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/ucs2length.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/ucs2length.js
 var require_ucs2length = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/ucs2length.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/ucs2length.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     function ucs2length(str) {
@@ -42980,9 +43332,9 @@ var require_ucs2length = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitLength.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitLength.js
 var require_limitLength = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitLength.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitLength.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -43012,9 +43364,9 @@ var require_limitLength = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/pattern.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/pattern.js
 var require_pattern = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/pattern.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/pattern.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -43049,9 +43401,9 @@ var require_pattern = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitProperties.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitProperties.js
 var require_limitProperties = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitProperties.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitProperties.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -43078,9 +43430,9 @@ var require_limitProperties = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/required.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/required.js
 var require_required = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/required.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/required.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -43160,9 +43512,9 @@ var require_required = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitItems.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitItems.js
 var require_limitItems = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitItems.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/limitItems.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -43189,9 +43541,9 @@ var require_limitItems = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/equal.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/equal.js
 var require_equal = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/equal.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/runtime/equal.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var equal = require_fast_deep_equal();
@@ -43200,9 +43552,9 @@ var require_equal = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/uniqueItems.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/uniqueItems.js
 var require_uniqueItems = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/uniqueItems.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/uniqueItems.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var dataType_1 = require_dataType();
@@ -43267,9 +43619,9 @@ var require_uniqueItems = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/const.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/const.js
 var require_const = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/const.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/const.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -43296,9 +43648,9 @@ var require_const = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/enum.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/enum.js
 var require_enum = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/enum.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/enum.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -43345,9 +43697,9 @@ var require_enum = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/index.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/index.js
 var require_validation = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/index.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/validation/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var limitNumber_1 = require_limitNumber();
@@ -43383,9 +43735,9 @@ var require_validation = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/additionalItems.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/additionalItems.js
 var require_additionalItems = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/additionalItems.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/additionalItems.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateAdditionalItems = void 0;
@@ -43436,9 +43788,9 @@ var require_additionalItems = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/items.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/items.js
 var require_items = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/items.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/items.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateTuple = void 0;
@@ -43493,9 +43845,9 @@ var require_items = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/prefixItems.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/prefixItems.js
 var require_prefixItems = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/prefixItems.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/prefixItems.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var items_1 = require_items();
@@ -43510,9 +43862,9 @@ var require_prefixItems = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/items2020.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/items2020.js
 var require_items2020 = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/items2020.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/items2020.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -43545,9 +43897,9 @@ var require_items2020 = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/contains.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/contains.js
 var require_contains = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/contains.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/contains.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -43639,9 +43991,9 @@ var require_contains = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/dependencies.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/dependencies.js
 var require_dependencies = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/dependencies.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/dependencies.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateSchemaDeps = exports.validatePropertyDeps = exports.error = void 0;
@@ -43733,9 +44085,9 @@ var require_dependencies = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/propertyNames.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/propertyNames.js
 var require_propertyNames = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/propertyNames.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/propertyNames.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -43776,9 +44128,9 @@ var require_propertyNames = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js
 var require_additionalProperties = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -43882,9 +44234,9 @@ var require_additionalProperties = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/properties.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/properties.js
 var require_properties = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/properties.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/properties.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var validate_1 = require_validate();
@@ -43940,9 +44292,9 @@ var require_properties = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/patternProperties.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/patternProperties.js
 var require_patternProperties = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/patternProperties.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/patternProperties.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -44014,9 +44366,9 @@ var require_patternProperties = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/not.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/not.js
 var require_not = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/not.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/not.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var util_1 = require_util();
@@ -44045,9 +44397,9 @@ var require_not = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/anyOf.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/anyOf.js
 var require_anyOf = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/anyOf.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/anyOf.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -44062,9 +44414,9 @@ var require_anyOf = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/oneOf.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/oneOf.js
 var require_oneOf = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/oneOf.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/oneOf.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -44120,9 +44472,9 @@ var require_oneOf = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/allOf.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/allOf.js
 var require_allOf = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/allOf.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/allOf.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var util_1 = require_util();
@@ -44147,9 +44499,9 @@ var require_allOf = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/if.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/if.js
 var require_if = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/if.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/if.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -44216,9 +44568,9 @@ var require_if = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/thenElse.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/thenElse.js
 var require_thenElse = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/thenElse.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/thenElse.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var util_1 = require_util();
@@ -44234,9 +44586,9 @@ var require_thenElse = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/index.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/index.js
 var require_applicator = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/index.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/applicator/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var additionalItems_1 = require_additionalItems();
@@ -44282,9 +44634,9 @@ var require_applicator = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/format/format.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/format/format.js
 var require_format = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/format/format.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/format/format.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -44372,9 +44724,9 @@ var require_format = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/format/index.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/format/index.js
 var require_format2 = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/format/index.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/format/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var format_1 = require_format();
@@ -44383,9 +44735,9 @@ var require_format2 = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/metadata.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/metadata.js
 var require_metadata = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/metadata.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/metadata.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.contentVocabulary = exports.metadataVocabulary = void 0;
@@ -44406,9 +44758,9 @@ var require_metadata = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/draft7.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/draft7.js
 var require_draft7 = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/draft7.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/draft7.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var core_1 = require_core2();
@@ -44428,9 +44780,9 @@ var require_draft7 = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/discriminator/types.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/discriminator/types.js
 var require_types = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/discriminator/types.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/discriminator/types.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.DiscrError = void 0;
@@ -44442,9 +44794,9 @@ var require_types = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/discriminator/index.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/discriminator/index.js
 var require_discriminator = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/discriminator/index.js"(exports) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/vocabularies/discriminator/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -44547,9 +44899,9 @@ var require_discriminator = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/refs/json-schema-draft-07.json
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/refs/json-schema-draft-07.json
 var require_json_schema_draft_07 = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/refs/json-schema-draft-07.json"(exports, module) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/refs/json-schema-draft-07.json"(exports, module) {
     module.exports = {
       $schema: "http://json-schema.org/draft-07/schema#",
       $id: "http://json-schema.org/draft-07/schema#",
@@ -44704,9 +45056,9 @@ var require_json_schema_draft_07 = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/ajv.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/ajv.js
 var require_ajv = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/ajv.js"(exports, module) {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/node_modules/ajv/dist/ajv.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.MissingRefError = exports.ValidationError = exports.CodeGen = exports.Name = exports.nil = exports.stringify = exports.str = exports._ = exports.KeywordCxt = exports.Ajv = void 0;
@@ -44774,9 +45126,9 @@ var require_ajv = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/dist/formats.js
+// ../../../term-333/node_modules/ajv-formats/dist/formats.js
 var require_formats = __commonJS({
-  "../../node_modules/ajv-formats/dist/formats.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/dist/formats.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.formatNames = exports.fastFormats = exports.fullFormats = void 0;
@@ -44977,9 +45329,9 @@ var require_formats = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/codegen/code.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/codegen/code.js
 var require_code3 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/codegen/code.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/codegen/code.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.regexpCode = exports.getEsmExportName = exports.getProperty = exports.safeStringify = exports.stringify = exports.strConcat = exports.addCodeArg = exports.str = exports._ = exports.nil = exports._Code = exports.Name = exports.IDENTIFIER = exports._CodeOrName = void 0;
@@ -45131,9 +45483,9 @@ var require_code3 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/codegen/scope.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/codegen/scope.js
 var require_scope2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/codegen/scope.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/codegen/scope.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.ValueScope = exports.ValueScopeName = exports.Scope = exports.varKinds = exports.UsedValueState = void 0;
@@ -45276,9 +45628,9 @@ var require_scope2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/codegen/index.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/codegen/index.js
 var require_codegen2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/codegen/index.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/codegen/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.or = exports.and = exports.not = exports.CodeGen = exports.operators = exports.varKinds = exports.ValueScopeName = exports.ValueScope = exports.Scope = exports.Name = exports.regexpCode = exports.stringify = exports.getProperty = exports.nil = exports.strConcat = exports.str = exports._ = void 0;
@@ -45996,9 +46348,9 @@ var require_codegen2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/util.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/util.js
 var require_util2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/util.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/util.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.checkStrictMode = exports.getErrorPath = exports.Type = exports.useFunc = exports.setEvaluated = exports.evaluatedPropsToName = exports.mergeEvaluated = exports.eachItem = exports.unescapeJsonPointer = exports.escapeJsonPointer = exports.escapeFragment = exports.unescapeFragment = exports.schemaRefOrVal = exports.schemaHasRulesButRef = exports.schemaHasRules = exports.checkUnknownRules = exports.alwaysValidSchema = exports.toHash = void 0;
@@ -46163,9 +46515,9 @@ var require_util2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/names.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/names.js
 var require_names2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/names.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/names.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen2();
@@ -46202,9 +46554,9 @@ var require_names2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/errors.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/errors.js
 var require_errors2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/errors.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/errors.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.extendErrors = exports.resetErrorsCount = exports.reportExtraError = exports.reportError = exports.keyword$DataError = exports.keywordError = void 0;
@@ -46324,9 +46676,9 @@ var require_errors2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/boolSchema.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/boolSchema.js
 var require_boolSchema2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/boolSchema.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/boolSchema.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.boolOrEmptySchema = exports.topBoolOrEmptySchema = void 0;
@@ -46375,9 +46727,9 @@ var require_boolSchema2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/rules.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/rules.js
 var require_rules2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/rules.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/rules.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.getRules = exports.isJSONType = void 0;
@@ -46406,9 +46758,9 @@ var require_rules2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/applicability.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/applicability.js
 var require_applicability2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/applicability.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/applicability.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.shouldUseRule = exports.shouldUseGroup = exports.schemaHasRulesForType = void 0;
@@ -46429,9 +46781,9 @@ var require_applicability2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/dataType.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/dataType.js
 var require_dataType2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/dataType.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/dataType.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.reportTypeError = exports.checkDataTypes = exports.checkDataType = exports.coerceAndCheckDataType = exports.getJSONTypes = exports.getSchemaTypes = exports.DataType = void 0;
@@ -46613,9 +46965,9 @@ var require_dataType2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/defaults.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/defaults.js
 var require_defaults2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/defaults.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/defaults.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.assignDefaults = void 0;
@@ -46650,9 +47002,9 @@ var require_defaults2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/code.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/code.js
 var require_code4 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/code.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/code.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateUnion = exports.validateArray = exports.usePattern = exports.callValidateCode = exports.schemaProperties = exports.allSchemaProperties = exports.noPropertyInData = exports.propertyInData = exports.isOwnProperty = exports.hasPropFunc = exports.reportMissingProp = exports.checkMissingProp = exports.checkReportMissingProp = void 0;
@@ -46783,9 +47135,9 @@ var require_code4 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/keyword.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/keyword.js
 var require_keyword2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/keyword.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/keyword.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateKeywordUsage = exports.validSchemaType = exports.funcKeywordCode = exports.macroKeywordCode = void 0;
@@ -46901,9 +47253,9 @@ var require_keyword2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/subschema.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/subschema.js
 var require_subschema2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/subschema.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/subschema.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.extendSubschemaMode = exports.extendSubschemaData = exports.getSubschema = void 0;
@@ -46984,9 +47336,9 @@ var require_subschema2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/json-schema-traverse/index.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/json-schema-traverse/index.js
 var require_json_schema_traverse2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/json-schema-traverse/index.js"(exports, module) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/json-schema-traverse/index.js"(exports, module) {
     "use strict";
     var traverse = module.exports = function(schema, opts, cb) {
       if (typeof opts == "function") {
@@ -47072,9 +47424,9 @@ var require_json_schema_traverse2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/resolve.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/resolve.js
 var require_resolve2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/resolve.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/resolve.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.getSchemaRefs = exports.resolveUrl = exports.normalizeId = exports._getFullPath = exports.getFullPath = exports.inlineRef = void 0;
@@ -47228,9 +47580,9 @@ var require_resolve2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/index.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/index.js
 var require_validate2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/index.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/validate/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.getData = exports.KeywordCxt = exports.validateFunctionCode = void 0;
@@ -47736,9 +48088,9 @@ var require_validate2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/runtime/validation_error.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/runtime/validation_error.js
 var require_validation_error2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/runtime/validation_error.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/runtime/validation_error.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var ValidationError = class extends Error {
@@ -47752,9 +48104,9 @@ var require_validation_error2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/ref_error.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/ref_error.js
 var require_ref_error2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/ref_error.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/ref_error.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var resolve_1 = require_resolve2();
@@ -47769,9 +48121,9 @@ var require_ref_error2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/compile/index.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/index.js
 var require_compile2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/compile/index.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/compile/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.resolveSchema = exports.getCompilingSchema = exports.resolveRef = exports.compileSchema = exports.SchemaEnv = void 0;
@@ -47993,9 +48345,9 @@ var require_compile2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/refs/data.json
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/refs/data.json
 var require_data2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/refs/data.json"(exports, module) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/refs/data.json"(exports, module) {
     module.exports = {
       $id: "https://raw.githubusercontent.com/ajv-validator/ajv/master/lib/refs/data.json#",
       description: "Meta-schema for $data reference (JSON AnySchema extension proposal)",
@@ -48012,9 +48364,9 @@ var require_data2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/runtime/uri.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/runtime/uri.js
 var require_uri2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/runtime/uri.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/runtime/uri.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var uri = require_fast_uri();
@@ -48023,9 +48375,9 @@ var require_uri2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/core.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/core.js
 var require_core3 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/core.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/core.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.CodeGen = exports.Name = exports.nil = exports.stringify = exports.str = exports._ = exports.KeywordCxt = void 0;
@@ -48634,9 +48986,9 @@ var require_core3 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/core/id.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/core/id.js
 var require_id2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/core/id.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/core/id.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var def = {
@@ -48649,9 +49001,9 @@ var require_id2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/core/ref.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/core/ref.js
 var require_ref2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/core/ref.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/core/ref.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.callRef = exports.getValidate = void 0;
@@ -48771,9 +49123,9 @@ var require_ref2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/core/index.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/core/index.js
 var require_core4 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/core/index.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/core/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var id_1 = require_id2();
@@ -48792,9 +49144,9 @@ var require_core4 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitNumber.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitNumber.js
 var require_limitNumber2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitNumber.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitNumber.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen2();
@@ -48824,9 +49176,9 @@ var require_limitNumber2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/multipleOf.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/multipleOf.js
 var require_multipleOf2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/multipleOf.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/multipleOf.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen2();
@@ -48852,9 +49204,9 @@ var require_multipleOf2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/runtime/ucs2length.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/runtime/ucs2length.js
 var require_ucs2length2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/runtime/ucs2length.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/runtime/ucs2length.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     function ucs2length(str) {
@@ -48878,9 +49230,9 @@ var require_ucs2length2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitLength.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitLength.js
 var require_limitLength2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitLength.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitLength.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen2();
@@ -48910,9 +49262,9 @@ var require_limitLength2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/pattern.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/pattern.js
 var require_pattern2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/pattern.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/pattern.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code4();
@@ -48947,9 +49299,9 @@ var require_pattern2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitProperties.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitProperties.js
 var require_limitProperties2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitProperties.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitProperties.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen2();
@@ -48976,9 +49328,9 @@ var require_limitProperties2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/required.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/required.js
 var require_required2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/required.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/required.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code4();
@@ -49058,9 +49410,9 @@ var require_required2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitItems.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitItems.js
 var require_limitItems2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitItems.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/limitItems.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen2();
@@ -49087,9 +49439,9 @@ var require_limitItems2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/runtime/equal.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/runtime/equal.js
 var require_equal2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/runtime/equal.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/runtime/equal.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var equal = require_fast_deep_equal();
@@ -49098,9 +49450,9 @@ var require_equal2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/uniqueItems.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/uniqueItems.js
 var require_uniqueItems2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/uniqueItems.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/uniqueItems.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var dataType_1 = require_dataType2();
@@ -49165,9 +49517,9 @@ var require_uniqueItems2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/const.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/const.js
 var require_const2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/const.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/const.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen2();
@@ -49194,9 +49546,9 @@ var require_const2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/enum.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/enum.js
 var require_enum2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/enum.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/enum.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen2();
@@ -49243,9 +49595,9 @@ var require_enum2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/index.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/index.js
 var require_validation2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/index.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/validation/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var limitNumber_1 = require_limitNumber2();
@@ -49281,9 +49633,9 @@ var require_validation2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/additionalItems.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/additionalItems.js
 var require_additionalItems2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/additionalItems.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/additionalItems.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateAdditionalItems = void 0;
@@ -49334,9 +49686,9 @@ var require_additionalItems2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/items.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/items.js
 var require_items2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/items.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/items.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateTuple = void 0;
@@ -49391,9 +49743,9 @@ var require_items2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/prefixItems.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/prefixItems.js
 var require_prefixItems2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/prefixItems.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/prefixItems.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var items_1 = require_items2();
@@ -49408,9 +49760,9 @@ var require_prefixItems2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/items2020.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/items2020.js
 var require_items20202 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/items2020.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/items2020.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen2();
@@ -49443,9 +49795,9 @@ var require_items20202 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/contains.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/contains.js
 var require_contains2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/contains.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/contains.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen2();
@@ -49537,9 +49889,9 @@ var require_contains2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/dependencies.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/dependencies.js
 var require_dependencies2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/dependencies.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/dependencies.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateSchemaDeps = exports.validatePropertyDeps = exports.error = void 0;
@@ -49631,9 +49983,9 @@ var require_dependencies2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/propertyNames.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/propertyNames.js
 var require_propertyNames2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/propertyNames.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/propertyNames.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen2();
@@ -49674,9 +50026,9 @@ var require_propertyNames2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js
 var require_additionalProperties2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code4();
@@ -49780,9 +50132,9 @@ var require_additionalProperties2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/properties.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/properties.js
 var require_properties2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/properties.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/properties.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var validate_1 = require_validate2();
@@ -49838,9 +50190,9 @@ var require_properties2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/patternProperties.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/patternProperties.js
 var require_patternProperties2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/patternProperties.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/patternProperties.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code4();
@@ -49912,9 +50264,9 @@ var require_patternProperties2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/not.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/not.js
 var require_not2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/not.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/not.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var util_1 = require_util2();
@@ -49943,9 +50295,9 @@ var require_not2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/anyOf.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/anyOf.js
 var require_anyOf2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/anyOf.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/anyOf.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code4();
@@ -49960,9 +50312,9 @@ var require_anyOf2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/oneOf.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/oneOf.js
 var require_oneOf2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/oneOf.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/oneOf.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen2();
@@ -50018,9 +50370,9 @@ var require_oneOf2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/allOf.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/allOf.js
 var require_allOf2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/allOf.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/allOf.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var util_1 = require_util2();
@@ -50045,9 +50397,9 @@ var require_allOf2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/if.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/if.js
 var require_if2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/if.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/if.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen2();
@@ -50114,9 +50466,9 @@ var require_if2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/thenElse.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/thenElse.js
 var require_thenElse2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/thenElse.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/thenElse.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var util_1 = require_util2();
@@ -50132,9 +50484,9 @@ var require_thenElse2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/index.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/index.js
 var require_applicator2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/index.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/applicator/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var additionalItems_1 = require_additionalItems2();
@@ -50180,9 +50532,9 @@ var require_applicator2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/format/format.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/format/format.js
 var require_format3 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/format/format.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/format/format.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen2();
@@ -50270,9 +50622,9 @@ var require_format3 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/format/index.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/format/index.js
 var require_format4 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/format/index.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/format/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var format_1 = require_format3();
@@ -50281,9 +50633,9 @@ var require_format4 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/metadata.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/metadata.js
 var require_metadata2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/metadata.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/metadata.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.contentVocabulary = exports.metadataVocabulary = void 0;
@@ -50304,9 +50656,9 @@ var require_metadata2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/draft7.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/draft7.js
 var require_draft72 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/draft7.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/draft7.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var core_1 = require_core4();
@@ -50326,9 +50678,9 @@ var require_draft72 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/discriminator/types.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/discriminator/types.js
 var require_types2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/discriminator/types.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/discriminator/types.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.DiscrError = void 0;
@@ -50340,9 +50692,9 @@ var require_types2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/discriminator/index.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/discriminator/index.js
 var require_discriminator2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/discriminator/index.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/vocabularies/discriminator/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen2();
@@ -50445,9 +50797,9 @@ var require_discriminator2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/refs/json-schema-draft-07.json
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/refs/json-schema-draft-07.json
 var require_json_schema_draft_072 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/refs/json-schema-draft-07.json"(exports, module) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/refs/json-schema-draft-07.json"(exports, module) {
     module.exports = {
       $schema: "http://json-schema.org/draft-07/schema#",
       $id: "http://json-schema.org/draft-07/schema#",
@@ -50602,9 +50954,9 @@ var require_json_schema_draft_072 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/node_modules/ajv/dist/ajv.js
+// ../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/ajv.js
 var require_ajv2 = __commonJS({
-  "../../node_modules/ajv-formats/node_modules/ajv/dist/ajv.js"(exports, module) {
+  "../../../term-333/node_modules/ajv-formats/node_modules/ajv/dist/ajv.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.MissingRefError = exports.ValidationError = exports.CodeGen = exports.Name = exports.nil = exports.stringify = exports.str = exports._ = exports.KeywordCxt = exports.Ajv = void 0;
@@ -50672,9 +51024,9 @@ var require_ajv2 = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/dist/limit.js
+// ../../../term-333/node_modules/ajv-formats/dist/limit.js
 var require_limit = __commonJS({
-  "../../node_modules/ajv-formats/dist/limit.js"(exports) {
+  "../../../term-333/node_modules/ajv-formats/dist/limit.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.formatLimitDefinition = void 0;
@@ -50744,9 +51096,9 @@ var require_limit = __commonJS({
   }
 });
 
-// ../../node_modules/ajv-formats/dist/index.js
+// ../../../term-333/node_modules/ajv-formats/dist/index.js
 var require_dist2 = __commonJS({
-  "../../node_modules/ajv-formats/dist/index.js"(exports, module) {
+  "../../../term-333/node_modules/ajv-formats/dist/index.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var formats_1 = require_formats();
@@ -50786,7 +51138,7 @@ var require_dist2 = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js
 function createDefaultAjvInstance() {
   const ajv = new import_ajv.default({
     strict: false,
@@ -50800,7 +51152,7 @@ function createDefaultAjvInstance() {
 }
 var import_ajv, import_ajv_formats, AjvJsonSchemaValidator;
 var init_ajv_provider = __esm({
-  "../../node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js"() {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js"() {
     "use strict";
     import_ajv = __toESM(require_ajv(), 1);
     import_ajv_formats = __toESM(require_dist2(), 1);
@@ -50860,10 +51212,10 @@ var init_ajv_provider = __esm({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/server.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/server.js
 var ExperimentalServerTasks;
 var init_server = __esm({
-  "../../node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/server.js"() {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/server.js"() {
     "use strict";
     init_types4();
     ExperimentalServerTasks = class {
@@ -51080,7 +51432,7 @@ var init_server = __esm({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js
 function assertToolsCallTaskCapability(requests, method, entityName) {
   if (!requests) {
     throw new Error(`${entityName} does not support task creation (required for ${method})`);
@@ -51115,19 +51467,19 @@ function assertClientRequestTaskCapability(requests, method, entityName) {
   }
 }
 var init_helpers = __esm({
-  "../../node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js"() {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js"() {
     "use strict";
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js
 var server_exports = {};
 __export(server_exports, {
   Server: () => Server
 });
 var Server;
 var init_server2 = __esm({
-  "../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js"() {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js"() {
     "use strict";
     init_protocol();
     init_types4();
@@ -51516,7 +51868,7 @@ var init_server2 = __esm({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js
 function deserializeMessage(line) {
   return JSONRPCMessageSchema.parse(JSON.parse(line));
 }
@@ -51525,7 +51877,7 @@ function serializeMessage(message) {
 }
 var ReadBuffer;
 var init_stdio = __esm({
-  "../../node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js"() {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js"() {
     "use strict";
     init_types4();
     ReadBuffer = class {
@@ -51551,7 +51903,7 @@ var init_stdio = __esm({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
+// ../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 var stdio_exports = {};
 __export(stdio_exports, {
   StdioServerTransport: () => StdioServerTransport
@@ -51559,7 +51911,7 @@ __export(stdio_exports, {
 import process3 from "process";
 var StdioServerTransport;
 var init_stdio2 = __esm({
-  "../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js"() {
+  "../../../term-333/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js"() {
     "use strict";
     init_stdio();
     StdioServerTransport = class {
@@ -51963,12 +52315,12 @@ async function resolveClaimPreview(opportunity, { semantic = false } = {}) {
       hint: "The opportunity is not in the local claimable index and is not a GitHub issue URL."
     };
   }
-  const { checkRepoPolicy: checkRepoPolicy2 } = await Promise.resolve().then(() => (init_repo_policy(), repo_policy_exports));
-  const keywordPolicy = await checkRepoPolicy2(bounty.repoFullName, {
+  const { checkRepoPolicy: checkRepoPolicy2, auditDeclaredPolicy: auditDeclaredPolicy2 } = await Promise.resolve().then(() => (init_repo_policy(), repo_policy_exports));
+  const keywordPolicy = bounty.founderPosting ? auditDeclaredPolicy2(bounty.aiDeclaration) : await checkRepoPolicy2(bounty.repoFullName, {
     token: await readPolicyToken()
   });
   let policy = keywordPolicy;
-  if (semantic) {
+  if (semantic && !bounty.founderPosting) {
     const { applySemanticPolicyGate: applySemanticPolicyGate2 } = await Promise.resolve().then(() => (init_repo_policy_semantic(), repo_policy_semantic_exports));
     policy = await applySemanticPolicyGate2(bounty.repoFullName, keywordPolicy);
   }
@@ -51987,11 +52339,15 @@ async function resolveClaimPreview(opportunity, { semantic = false } = {}) {
     assignees: bounty.assignees,
     contested: isContested2(bounty),
     policy: publicPolicy(policy),
-    _policy: policy
+    _policy: policy,
+    // Internal routing bit from the CLI's shared resolver. Founder postings are
+    // not ordinary local-only claims: the interactive CLI must register them
+    // server-side before writing claims.json.
+    _founderPosting: bounty.founderPosting === true
   };
 }
 function withoutInternalPolicy(preview) {
-  const { _policy, indexNativeId, ...result } = preview;
+  const { _policy, _founderPosting, indexNativeId, ...result } = preview;
   return result;
 }
 async function claimPreviewResult(args = {}) {
@@ -52014,6 +52370,14 @@ async function claimRecordResult(args = {}) {
       return {
         status: "not_claimable",
         hint: "The GitHub issue is closed.",
+        preview: visible
+      };
+    }
+    if (preview._founderPosting) {
+      return {
+        status: "human_action_required",
+        reason: "founder_registration_required",
+        hint: `This first-party founder bounty must be registered with terminalhire before it can be recorded locally. MCP cannot complete the required identity verification; run \`terminalhire claim record ${preview.bountyId}\` yourself. No claim was recorded.`,
         preview: visible
       };
     }
@@ -52194,7 +52558,7 @@ var TOOL_DEFS = [
   },
   {
     name: "claim_record",
-    description: "Record a claim in the local Terminalhire ledger after policy/contention checks. Never starts work, forks, pushes, submits, or opens a PR.",
+    description: "Record an OSS claim in the local Terminalhire ledger after policy/contention checks. First-party founder bounties require the human CLI for verified server registration. Never starts work, forks, pushes, submits, or opens a PR.",
     inputSchema: CLAIM_RECORD_SCHEMA
   }
 ];

@@ -601,9 +601,11 @@ async function shouldNudgeUnpushed() {
 }
 async function runBackgroundClaimPush({ now = Date.now() } = {}) {
   try {
-    if (!existsSync5(CLAIM_PUSH_AUTO_MARKER) || !existsSync5(CLAIM_PUSH_TOKEN_FILE)) return;
+    if (!existsSync5(CLAIM_PUSH_AUTO_MARKER) || !existsSync5(CLAIM_PUSH_TOKEN_FILE)) {
+      return { pushed: false, reason: "not-opted-in" };
+    }
     const marker = readAutoMarker();
-    if (!marker || !marker.autoConsentedAt) return;
+    if (!marker || !marker.autoConsentedAt) return { pushed: false, reason: "not-opted-in" };
     const { listClaims: listClaims2, toPushedClaim: toPushedClaim2, PUSHED_CLAIM_FIELDS: PUSHED_CLAIM_FIELDS2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
     const pushed = listClaims2().map((c) => toPushedClaim2(c));
     const currentHash = computeSnapshotHash(pushed);
@@ -616,9 +618,9 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
       currentHash,
       lastSnapshotHash: marker.lastSnapshotHash ?? null
     });
-    if (!gate.push) return;
+    if (!gate.push) return { pushed: false, reason: gate.reason };
     const token = await readPushTokenEnc();
-    if (!token) return;
+    if (!token) return { pushed: false, reason: "unreadable-token" };
     const consentReceipt = {
       consentedAt: marker.autoConsentedAt,
       version: AUTO_CONSENT_VERSION,
@@ -630,13 +632,17 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
       body: JSON.stringify({ consentToken: consentReceipt, claims: pushed, pushToken: token }),
       signal: AbortSignal.timeout(1e4)
     });
-    if (!res.ok) return;
+    if (!res.ok) {
+      return { pushed: false, reason: `server-${res.status}` };
+    }
     writeAutoMarker({
       ...marker,
       lastPushedAt: new Date(now).toISOString(),
       lastSnapshotHash: currentHash
     });
+    return { pushed: true, reason: "ok" };
   } catch {
+    return { pushed: false, reason: "failed" };
   }
 }
 export {

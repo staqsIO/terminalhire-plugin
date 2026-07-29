@@ -104,6 +104,12 @@ node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim release <id>
 
 States: `claimed` → `working` → `in-review` → `ready` → `submitted` → `merged` (or `abandoned`). Mark `ready` only after the diff has passed the review gate. `claim status` polls the source PR's merge state and rolls it into the **accepted-PR rate** (merged ÷ claimed), the one metric that matters.
 
+When the review verdict is `revise`, resolve every blocker and rerun the review
+gate first. Only after it passes, run `claim update <id> ready`; that real
+transition is the explicit post-review attestation. It clears the stale revise
+verdict so `claim submit <id>` can proceed.
+Do not invent or suggest a `claim review`/`claim re-review` verb — neither exists.
+
 **`release` can REFUSE, and you must not force past it.** If `start` left a public claim-stake comment (branch 2 above), `release` first offers to post a short "standing down" retraction — but only at an interactive terminal. Invoked the way you invoke it (non-TTY, via the Bash tool) there is no prompt, so nothing retracts the stake, and `release` **keeps the claim instead of deleting it** and exits without releasing. That is correct: dropping the record would strand a public "Working on this" on someone's issue with nothing left that knows it exists. When you hit this, do NOT reach for the override flag the CLI names in its refusal message — tell the dev the stake is still standing, show them the issue URL, and let them either run `claim release <id>` themselves at a terminal or decide to override it. That override is a human's call, the same class as the publish-consent and prohibited-policy acknowledgements: never yours to pass.
 
 ### Submit a `ready` claim (the only step that pushes)

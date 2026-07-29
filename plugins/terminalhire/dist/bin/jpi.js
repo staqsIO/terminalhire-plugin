@@ -72,6 +72,19 @@ function envMs(name, fallback) {
   const n = Number(raw);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
+var STDIN_TRACE_PREFIX = "[terminalhire stdin trace] ";
+function traceStdin(event, details = {}) {
+  if (process.env.TERMINALHIRE_STDIN_TEST !== "1" || process.env.TERMINALHIRE_STDIN_TRACE !== "1") {
+    return;
+  }
+  try {
+    process.stderr.write(
+      `${STDIN_TRACE_PREFIX}${JSON.stringify({ event, atMs: Date.now(), ...details })}
+`
+    );
+  } catch {
+  }
+}
 function readStdinSync() {
   if (isatty(0)) return {};
   try {
@@ -85,9 +98,12 @@ function readStdinSync() {
   const MAX_TOTAL_MS = envMs("TERMINALHIRE_STDIN_MAX_TOTAL_MS", 1500);
   const start = Date.now();
   let lastProgress = start;
+  let finishReason = "eof";
+  let totalBytes = 0;
   const idle = new Int32Array(new SharedArrayBuffer(4));
   const chunks = [];
   const buf = Buffer.alloc(1 << 16);
+  traceStdin("start", { platform: "posix" });
   try {
     for (; ; ) {
       let n;
@@ -96,26 +112,73 @@ function readStdinSync() {
       } catch (e) {
         if (e && e.code === "EAGAIN") {
           const idleBudget = chunks.length > 0 ? STREAM_IDLE_MS : IDLE_MS;
-          if (Date.now() - lastProgress > idleBudget) break;
-          if (Date.now() - start > MAX_TOTAL_MS) break;
+          if (Date.now() - lastProgress > idleBudget) {
+            finishReason = "idle-timeout";
+            break;
+          }
+          if (Date.now() - start > MAX_TOTAL_MS) {
+            finishReason = "max-total";
+            break;
+          }
           Atomics.wait(idle, 0, 0, 5);
           continue;
         }
+        finishReason = `read-error:${e?.code ?? "unknown"}`;
         break;
       }
       if (n === 0) break;
       chunks.push(Buffer.from(buf.subarray(0, n)));
+      totalBytes += n;
       lastProgress = Date.now();
-      if (Date.now() - start > MAX_TOTAL_MS) break;
+      traceStdin("data", { platform: "posix", bytes: n, totalBytes });
+      if (Date.now() - start > MAX_TOTAL_MS) {
+        finishReason = "max-total";
+        break;
+      }
     }
   } catch {
+    traceStdin("finish", {
+      platform: "posix",
+      reason: "reader-exception",
+      elapsedMs: Date.now() - start,
+      chunkCount: chunks.length,
+      totalBytes,
+      parseOk: false
+    });
     return {};
   }
   const raw = Buffer.concat(chunks).toString("utf8").trim();
-  if (!raw) return {};
+  if (!raw) {
+    traceStdin("finish", {
+      platform: "posix",
+      reason: finishReason,
+      elapsedMs: Date.now() - start,
+      chunkCount: chunks.length,
+      totalBytes,
+      parseOk: false
+    });
+    return {};
+  }
   try {
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    traceStdin("finish", {
+      platform: "posix",
+      reason: finishReason,
+      elapsedMs: Date.now() - start,
+      chunkCount: chunks.length,
+      totalBytes,
+      parseOk: true
+    });
+    return parsed;
   } catch {
+    traceStdin("finish", {
+      platform: "posix",
+      reason: `${finishReason}:parse-error`,
+      elapsedMs: Date.now() - start,
+      chunkCount: chunks.length,
+      totalBytes,
+      parseOk: false
+    });
     return {};
   }
 }
@@ -123,10 +186,12 @@ function readStdinWin32() {
   if (isatty(0)) return Promise.resolve({});
   return new Promise((resolve) => {
     const chunks = [];
+    let totalBytes = 0;
     let settled = false;
     let timer;
     let hardStop;
-    const finish = () => {
+    const started = Date.now();
+    const finish = (reason) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -136,31 +201,60 @@ function readStdinWin32() {
       } catch {
       }
       const raw = Buffer.concat(chunks).toString("utf8").trim();
-      if (!raw) return resolve({});
+      if (!raw) {
+        traceStdin("finish", {
+          platform: "win32",
+          reason,
+          elapsedMs: Date.now() - started,
+          chunkCount: chunks.length,
+          totalBytes,
+          parseOk: false
+        });
+        return resolve({});
+      }
       try {
-        resolve(JSON.parse(raw));
+        const parsed = JSON.parse(raw);
+        traceStdin("finish", {
+          platform: "win32",
+          reason,
+          elapsedMs: Date.now() - started,
+          chunkCount: chunks.length,
+          totalBytes,
+          parseOk: true
+        });
+        resolve(parsed);
       } catch {
+        traceStdin("finish", {
+          platform: "win32",
+          reason: `${reason}:parse-error`,
+          elapsedMs: Date.now() - started,
+          chunkCount: chunks.length,
+          totalBytes,
+          parseOk: false
+        });
         resolve({});
       }
     };
     const IDLE_MS = envMs("TERMINALHIRE_STDIN_IDLE_MS", 200);
     const STREAM_IDLE_MS = envMs("TERMINALHIRE_STDIN_STREAM_IDLE_MS", 500);
     const MAX_TOTAL_MS = envMs("TERMINALHIRE_STDIN_MAX_TOTAL_MS", 1500);
-    const started = Date.now();
+    traceStdin("start", { platform: "win32" });
     const arm = (ms) => {
       clearTimeout(timer);
-      timer = setTimeout(finish, ms);
+      timer = setTimeout(() => finish("idle-timeout"), ms);
       if (typeof timer.unref === "function") timer.unref();
     };
     arm(IDLE_MS);
-    hardStop = setTimeout(finish, MAX_TOTAL_MS);
+    hardStop = setTimeout(() => finish("max-total"), MAX_TOTAL_MS);
     if (typeof hardStop.unref === "function") hardStop.unref();
     process.stdin.on("data", (c) => {
       chunks.push(c);
+      totalBytes += c.length;
+      traceStdin("data", { platform: "win32", bytes: c.length, totalBytes });
       arm(Math.min(STREAM_IDLE_MS, Math.max(0, MAX_TOTAL_MS - (Date.now() - started))));
     });
-    process.stdin.on("end", finish);
-    process.stdin.on("error", finish);
+    process.stdin.on("end", () => finish("end"));
+    process.stdin.on("error", () => finish("stream-error"));
   });
 }
 function readStdin() {

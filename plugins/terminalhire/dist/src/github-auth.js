@@ -364,6 +364,22 @@ async function resolveStoredLogin() {
     return void 0;
   }
 }
+async function requireStoredLogin() {
+  if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
+    return MOCK_LOGIN;
+  }
+  const token = await readGitHubToken();
+  if (!token) {
+    throw new Error("no readable GitHub sign-in is stored on this machine");
+  }
+  try {
+    return await fetchAuthedLogin(token);
+  } catch (err) {
+    throw new Error(
+      `the stored GitHub sign-in could not be verified (${err instanceof Error ? err.message : String(err)})`
+    );
+  }
+}
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -376,6 +392,7 @@ export {
   hasGitHubToken,
   loadKey,
   readGitHubToken,
+  requireStoredLogin,
   resolveStoredLogin,
   runDeviceFlow,
   writeGitHubToken
