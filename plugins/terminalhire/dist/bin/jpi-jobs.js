@@ -10332,6 +10332,7 @@ __export(src_exports, {
   fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
   fetchPRLifecycle: () => fetchPRLifecycle,
   fetchPRScoringFacts: () => fetchPRScoringFacts,
+  fetchPublicOrgs: () => fetchPublicOrgs,
   fetchRepoRecency: () => fetchRepoRecency,
   fetchRepoReceptivity: () => fetchRepoReceptivity,
   fetchRepoStatus: () => fetchRepoStatus,
@@ -10532,6 +10533,48 @@ var init_state_dir = __esm({
     STATE_DIR_UNVERIFIED = "unverified";
     warnedDirs = /* @__PURE__ */ new Set();
     warnedUnverifiedSecretWriteThisProcess = false;
+  }
+});
+
+// bin/cache-store.js
+var cache_store_exports = {};
+__export(cache_store_exports, {
+  readCacheEntry: () => readCacheEntry,
+  updateIndexCache: () => updateIndexCache
+});
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, renameSync as renameSync2 } from "fs";
+import { join as join3 } from "path";
+import { homedir as homedir2 } from "os";
+function readCacheEntry() {
+  try {
+    return JSON.parse(readFileSync3(INDEX_CACHE_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function updateIndexCache(patch) {
+  ensureStateDir(TERMINALHIRE_DIR2);
+  const existing = readCacheEntry() ?? {};
+  const entry = {
+    ...existing,
+    ...patch,
+    schemaVersion: SCHEMA_VERSION2,
+    ts: Date.now()
+  };
+  const tmp = `${INDEX_CACHE_FILE}.${process.pid}.${tmpCounter++}.tmp`;
+  writeFileSync2(tmp, JSON.stringify(entry), "utf8");
+  renameSync2(tmp, INDEX_CACHE_FILE);
+  return entry;
+}
+var TERMINALHIRE_DIR2, INDEX_CACHE_FILE, SCHEMA_VERSION2, tmpCounter;
+var init_cache_store = __esm({
+  "bin/cache-store.js"() {
+    "use strict";
+    init_state_dir();
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
+    INDEX_CACHE_FILE = join3(TERMINALHIRE_DIR2, "index-cache.json");
+    SCHEMA_VERSION2 = 1;
+    tmpCounter = 0;
   }
 });
 
@@ -11808,47 +11851,29 @@ var init_profile = __esm({
   }
 });
 
-// src/web-session.ts
-import { chmodSync, existsSync as existsSync6, readFileSync as readFileSync8, rmSync as rmSync2, writeFileSync as writeFileSync7 } from "fs";
-import { homedir as homedir7 } from "os";
-import { join as join11 } from "path";
-function terminalhireDir() {
-  return process.env.TERMINALHIRE_DIR || join11(homedir7(), ".terminalhire");
-}
-function webSessionFilePath() {
-  return join11(terminalhireDir(), "web-session");
-}
-function readWebSessionFile() {
-  try {
-    const path = webSessionFilePath();
-    if (!existsSync6(path)) return null;
-    const v = readFileSync8(path, "utf8").trim();
-    return v.length > 0 ? v : null;
-  } catch {
-    return null;
-  }
-}
-function readWebSessionCookie() {
-  const fromFile = readWebSessionFile();
-  if (fromFile) return fromFile;
-  const env = process.env["TERMINALHIRE_WEB_SESSION"];
-  return typeof env === "string" && env.length > 0 ? env : null;
-}
-var init_web_session = __esm({
-  "src/web-session.ts"() {
-    "use strict";
-    init_state_dir();
-  }
-});
-
 // src/config.ts
-import { readFileSync as readFileSync9, writeFileSync as writeFileSync8, existsSync as existsSync7 } from "fs";
-import { join as join12 } from "path";
-import { homedir as homedir8 } from "os";
+var config_exports = {};
+__export(config_exports, {
+  getNudgeMode: () => getNudgeMode,
+  getSurfaceLeadOverride: () => getSurfaceLeadOverride,
+  getSurfaceMix: () => getSurfaceMix,
+  isBetaOptIn: () => isBetaOptIn,
+  isContributeEnabled: () => isContributeEnabled,
+  isInboundNudgeMuted: () => isInboundNudgeMuted,
+  isPeerConnectEnabled: () => isPeerConnectEnabled,
+  parseNudgeMode: () => parseNudgeMode,
+  parseSurfaceLead: () => parseSurfaceLead,
+  parseSurfaceMix: () => parseSurfaceMix,
+  readConfig: () => readConfig,
+  writeConfig: () => writeConfig
+});
+import { readFileSync as readFileSync8, writeFileSync as writeFileSync7, existsSync as existsSync6 } from "fs";
+import { join as join11 } from "path";
+import { homedir as homedir7 } from "os";
 function readConfig() {
   try {
-    if (!existsSync7(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
-    const raw = readFileSync9(CONFIG_FILE, "utf8");
+    if (!existsSync6(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
+    const raw = readFileSync8(CONFIG_FILE, "utf8");
     const parsed = JSON.parse(raw);
     return { ...DEFAULT_CONFIG, ...parsed };
   } catch {
@@ -11865,15 +11890,66 @@ function writeConfig(config) {
     }
     delete merged.contributePrompted;
   }
-  writeFileSync8(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  writeFileSync7(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
+}
+function parseNudgeMode(raw) {
+  if (raw === "session" || raw === "always") return raw;
+  const m = /^every:(\d+)$/.exec(raw);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    if (n >= 1) return `every:${n}`;
+  }
+  return null;
+}
+function parseSurfaceMix(raw) {
+  if (raw === "jobs" || raw === "balanced" || raw === "credential") return raw;
+  return null;
+}
+function parseSurfaceLead(raw) {
+  return raw === "dev" || raw === "founder" ? raw : null;
+}
+function getSurfaceLeadOverride() {
+  const value = readConfig().surfaceLead;
+  return value === "dev" || value === "founder" ? value : void 0;
+}
+function getSurfaceMix() {
+  const envVal = process.env["TH_MIX"];
+  if (envVal) {
+    const parsed = parseSurfaceMix(envVal);
+    if (parsed) return parsed;
+  }
+  const config = readConfig();
+  return parseSurfaceMix(config.mix) ?? "balanced";
+}
+function getNudgeMode() {
+  const envVal = process.env["TERMINALHIRE_NUDGE"];
+  if (envVal) {
+    const parsed = parseNudgeMode(envVal);
+    if (parsed) return parsed;
+  }
+  const config = readConfig();
+  return config.nudge ?? "session";
+}
+function isPeerConnectEnabled() {
+  return readConfig().peerConnect === true;
+}
+function isInboundNudgeMuted() {
+  return readConfig().inboundNudgeMuted === true;
+}
+function isContributeEnabled() {
+  const cfg = readConfig();
+  return !(cfg.contributeEnabled === false && !("contributePrompted" in cfg));
+}
+function isBetaOptIn() {
+  return readConfig().betaOptIn === true;
 }
 var TERMINALHIRE_DIR5, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join12(homedir8(), ".terminalhire");
-    CONFIG_FILE = join12(TERMINALHIRE_DIR5, "config.json");
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join11(homedir7(), ".terminalhire");
+    CONFIG_FILE = join11(TERMINALHIRE_DIR5, "config.json");
     DEFAULT_CONFIG = {
       nudge: "session",
       peerConnect: false,
@@ -11890,6 +11966,93 @@ var init_config = __esm({
       pulseDisclosed: false,
       mix: "balanced"
     };
+  }
+});
+
+// bin/founder-surface.js
+var founder_surface_exports = {};
+__export(founder_surface_exports, {
+  founderRows: () => founderRows,
+  projectFounderSurface: () => projectFounderSurface,
+  resolveSurfaceLead: () => resolveSurfaceLead
+});
+function projectFounderSurface(body) {
+  if (!body || body.ok !== true || !Array.isArray(body.postings)) return null;
+  const statusline = body.statusline;
+  if (!statusline || typeof statusline.needsYouCount !== "number" || typeof statusline.openPostingCount !== "number" || typeof statusline.refreshedAt !== "string") {
+    return null;
+  }
+  const postings = [];
+  for (const raw of body.postings) {
+    if (!raw || typeof raw.id !== "string" || typeof raw.title !== "string" || typeof raw.status !== "string" || typeof raw.needsYou !== "boolean" || typeof raw.claimantCount !== "number" || typeof raw.postedAt !== "string") {
+      continue;
+    }
+    postings.push({
+      id: raw.id,
+      title: raw.title,
+      status: raw.status,
+      needsYou: raw.needsYou,
+      claimantCount: raw.claimantCount,
+      postedAt: raw.postedAt
+    });
+  }
+  return {
+    postings,
+    needsYouCount: Math.max(0, statusline.needsYouCount),
+    openPostingCount: Math.max(0, statusline.openPostingCount),
+    refreshedAt: statusline.refreshedAt
+  };
+}
+function resolveSurfaceLead(override, founderSurface) {
+  if (override === "dev" || override === "founder") return override;
+  if (founderSurface && (founderSurface.openPostingCount > 0 || founderSurface.needsYouCount > 0)) {
+    return "founder";
+  }
+  return "dev";
+}
+function founderRows(surface, kind) {
+  if (!surface || !Array.isArray(surface.postings)) return [];
+  if (kind === "jobs") {
+    return surface.postings.filter((posting) => posting.status === "open" || posting.needsYou);
+  }
+  return surface.postings;
+}
+var init_founder_surface = __esm({
+  "bin/founder-surface.js"() {
+    "use strict";
+  }
+});
+
+// src/web-session.ts
+import { chmodSync, existsSync as existsSync7, readFileSync as readFileSync9, rmSync as rmSync2, writeFileSync as writeFileSync8 } from "fs";
+import { homedir as homedir8 } from "os";
+import { join as join12 } from "path";
+function terminalhireDir() {
+  return process.env.TERMINALHIRE_DIR || join12(homedir8(), ".terminalhire");
+}
+function webSessionFilePath() {
+  return join12(terminalhireDir(), "web-session");
+}
+function readWebSessionFile() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync7(path)) return null;
+    const v = readFileSync9(path, "utf8").trim();
+    return v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+function readWebSessionCookie() {
+  const fromFile = readWebSessionFile();
+  if (fromFile) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return typeof env === "string" && env.length > 0 ? env : null;
+}
+var init_web_session = __esm({
+  "src/web-session.ts"() {
+    "use strict";
+    init_state_dir();
   }
 });
 
@@ -12132,36 +12295,8 @@ function markClicked(id) {
   });
 }
 
-// bin/cache-store.js
-init_state_dir();
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, renameSync as renameSync2 } from "fs";
-import { join as join3 } from "path";
-import { homedir as homedir2 } from "os";
-var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
-var INDEX_CACHE_FILE = join3(TERMINALHIRE_DIR2, "index-cache.json");
-var SCHEMA_VERSION2 = 1;
-var tmpCounter = 0;
-function readCacheEntry() {
-  try {
-    return JSON.parse(readFileSync3(INDEX_CACHE_FILE, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function updateIndexCache(patch) {
-  ensureStateDir(TERMINALHIRE_DIR2);
-  const existing = readCacheEntry() ?? {};
-  const entry = {
-    ...existing,
-    ...patch,
-    schemaVersion: SCHEMA_VERSION2,
-    ts: Date.now()
-  };
-  const tmp = `${INDEX_CACHE_FILE}.${process.pid}.${tmpCounter++}.tmp`;
-  writeFileSync2(tmp, JSON.stringify(entry), "utf8");
-  renameSync2(tmp, INDEX_CACHE_FILE);
-  return entry;
-}
+// bin/jpi-jobs.js
+init_cache_store();
 
 // bin/sanitize.js
 var CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
@@ -12478,6 +12613,32 @@ async function run() {
     if (args[0] === "mark") {
       handleMark();
       return;
+    }
+    if (args.length === 0) {
+      try {
+        const { readCacheEntry: readCacheEntry2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
+        const { getSurfaceLeadOverride: getSurfaceLeadOverride2 } = await Promise.resolve().then(() => (init_config(), config_exports));
+        const { founderRows: founderRows2, resolveSurfaceLead: resolveSurfaceLead2 } = await Promise.resolve().then(() => (init_founder_surface(), founder_surface_exports));
+        const surface = (readCacheEntry2() ?? {}).founderSurface;
+        if (resolveSurfaceLead2(getSurfaceLeadOverride2(), surface) === "founder") {
+          const rows = founderRows2(surface, "jobs");
+          console.log("\n\u2726 Your open TerminalHire postings\n");
+          if (!rows.length) {
+            console.log("  No current posting data. Run `terminalhire refresh`, or lead with roles:");
+            console.log("  terminalhire config set lead dev\n");
+          } else {
+            rows.forEach((row, index) => {
+              console.log(
+                `  ${index + 1}. ${sanitizeText(row.title)}  \xB7  ${row.status}${row.needsYou ? "  \xB7  waiting on you" : ""}`
+              );
+            });
+            console.log("\n  Review and act: https://terminalhire.com/dashboard?tab=postings");
+            console.log("  Lead with roles instead: terminalhire config set lead dev\n");
+          }
+          return;
+        }
+      } catch {
+      }
     }
     if (STATUS_FILTER !== null && !VALID_STATUS_FILTERS.includes(STATUS_FILTER)) {
       console.error(

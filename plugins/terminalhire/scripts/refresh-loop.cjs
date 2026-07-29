@@ -53,7 +53,7 @@ const DISPATCH = join(PLUGIN_ROOT, 'dist', 'bin', 'jpi-dispatch.js');
 
 // Seconds between ticks.
 //
-// 600 → 120 (TERM-281). The old value was set when every tick downloaded the whole
+// 600 → 120 (TERM-281) -> 60 (TERM-279). The old value was set when every tick downloaded the whole
 // ~378KB index, so polling five times as often would have cost five times the
 // bandwidth to learn nothing had changed. The engine now sends `If-None-Match`, and an
 // unchanged tick is a 304 with no body — so the interval is no longer paying for the
@@ -63,7 +63,7 @@ const DISPATCH = join(PLUGIN_ROOT, 'dist', 'bin', 'jpi-dispatch.js');
 // The floor is not here. `/api/index` is edge-cached for 300s, so that window bounds
 // pickup no matter how often this loop runs; going below ~120 buys little until the
 // beacon work in TERM-279 lands.
-const SLEEP_SECONDS = Number(process.env.TERMINALHIRE_REFRESH_INTERVAL) || 120;
+const SLEEP_SECONDS = Number(process.env.TERMINALHIRE_REFRESH_INTERVAL) || 60;
 
 // TERMINALHIRE_DIR override mirrors the CLI (spinner.js / jpi-refresh.js) so the
 // lock lives alongside the shared cache — and so tests can isolate it.

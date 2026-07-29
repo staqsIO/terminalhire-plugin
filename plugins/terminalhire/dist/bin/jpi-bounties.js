@@ -10332,6 +10332,7 @@ __export(src_exports, {
   fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
   fetchPRLifecycle: () => fetchPRLifecycle,
   fetchPRScoringFacts: () => fetchPRScoringFacts,
+  fetchPublicOrgs: () => fetchPublicOrgs,
   fetchRepoRecency: () => fetchRepoRecency,
   fetchRepoReceptivity: () => fetchRepoReceptivity,
   fetchRepoStatus: () => fetchRepoStatus,
@@ -11519,6 +11520,178 @@ var init_claims = __esm({
   }
 });
 
+// src/config.ts
+var config_exports = {};
+__export(config_exports, {
+  getNudgeMode: () => getNudgeMode,
+  getSurfaceLeadOverride: () => getSurfaceLeadOverride,
+  getSurfaceMix: () => getSurfaceMix,
+  isBetaOptIn: () => isBetaOptIn,
+  isContributeEnabled: () => isContributeEnabled,
+  isInboundNudgeMuted: () => isInboundNudgeMuted,
+  isPeerConnectEnabled: () => isPeerConnectEnabled,
+  parseNudgeMode: () => parseNudgeMode,
+  parseSurfaceLead: () => parseSurfaceLead,
+  parseSurfaceMix: () => parseSurfaceMix,
+  readConfig: () => readConfig,
+  writeConfig: () => writeConfig
+});
+import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, existsSync as existsSync5 } from "fs";
+import { join as join9 } from "path";
+import { homedir as homedir6 } from "os";
+function readConfig() {
+  try {
+    if (!existsSync5(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
+    const raw = readFileSync6(CONFIG_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_CONFIG, ...parsed };
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+}
+function writeConfig(config) {
+  ensureStateDir(TERMINALHIRE_DIR6);
+  const current = readConfig();
+  const merged = { ...current, ...config };
+  if ("contributePrompted" in merged) {
+    if (merged.contributeEnabled === false && !("contributeEnabled" in config)) {
+      delete merged.contributeEnabled;
+    }
+    delete merged.contributePrompted;
+  }
+  writeFileSync5(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
+}
+function parseNudgeMode(raw) {
+  if (raw === "session" || raw === "always") return raw;
+  const m = /^every:(\d+)$/.exec(raw);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    if (n >= 1) return `every:${n}`;
+  }
+  return null;
+}
+function parseSurfaceMix(raw) {
+  if (raw === "jobs" || raw === "balanced" || raw === "credential") return raw;
+  return null;
+}
+function parseSurfaceLead(raw) {
+  return raw === "dev" || raw === "founder" ? raw : null;
+}
+function getSurfaceLeadOverride() {
+  const value = readConfig().surfaceLead;
+  return value === "dev" || value === "founder" ? value : void 0;
+}
+function getSurfaceMix() {
+  const envVal = process.env["TH_MIX"];
+  if (envVal) {
+    const parsed = parseSurfaceMix(envVal);
+    if (parsed) return parsed;
+  }
+  const config = readConfig();
+  return parseSurfaceMix(config.mix) ?? "balanced";
+}
+function getNudgeMode() {
+  const envVal = process.env["TERMINALHIRE_NUDGE"];
+  if (envVal) {
+    const parsed = parseNudgeMode(envVal);
+    if (parsed) return parsed;
+  }
+  const config = readConfig();
+  return config.nudge ?? "session";
+}
+function isPeerConnectEnabled() {
+  return readConfig().peerConnect === true;
+}
+function isInboundNudgeMuted() {
+  return readConfig().inboundNudgeMuted === true;
+}
+function isContributeEnabled() {
+  const cfg = readConfig();
+  return !(cfg.contributeEnabled === false && !("contributePrompted" in cfg));
+}
+function isBetaOptIn() {
+  return readConfig().betaOptIn === true;
+}
+var TERMINALHIRE_DIR6, CONFIG_FILE, DEFAULT_CONFIG;
+var init_config = __esm({
+  "src/config.ts"() {
+    "use strict";
+    init_state_dir();
+    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join9(homedir6(), ".terminalhire");
+    CONFIG_FILE = join9(TERMINALHIRE_DIR6, "config.json");
+    DEFAULT_CONFIG = {
+      nudge: "session",
+      peerConnect: false,
+      peerConnectPrompted: false,
+      resumePublishPrompted: false,
+      chatDisclosureAck: false,
+      chatShareActivity: false,
+      inboundNudgeMuted: false,
+      inboundNudgeDisclosed: false,
+      contributeEnabled: true,
+      betaOptIn: false,
+      lastFullFeedbackAt: null,
+      lastPulseAskAt: null,
+      pulseDisclosed: false,
+      mix: "balanced"
+    };
+  }
+});
+
+// bin/founder-surface.js
+var founder_surface_exports = {};
+__export(founder_surface_exports, {
+  founderRows: () => founderRows,
+  projectFounderSurface: () => projectFounderSurface,
+  resolveSurfaceLead: () => resolveSurfaceLead
+});
+function projectFounderSurface(body) {
+  if (!body || body.ok !== true || !Array.isArray(body.postings)) return null;
+  const statusline = body.statusline;
+  if (!statusline || typeof statusline.needsYouCount !== "number" || typeof statusline.openPostingCount !== "number" || typeof statusline.refreshedAt !== "string") {
+    return null;
+  }
+  const postings = [];
+  for (const raw of body.postings) {
+    if (!raw || typeof raw.id !== "string" || typeof raw.title !== "string" || typeof raw.status !== "string" || typeof raw.needsYou !== "boolean" || typeof raw.claimantCount !== "number" || typeof raw.postedAt !== "string") {
+      continue;
+    }
+    postings.push({
+      id: raw.id,
+      title: raw.title,
+      status: raw.status,
+      needsYou: raw.needsYou,
+      claimantCount: raw.claimantCount,
+      postedAt: raw.postedAt
+    });
+  }
+  return {
+    postings,
+    needsYouCount: Math.max(0, statusline.needsYouCount),
+    openPostingCount: Math.max(0, statusline.openPostingCount),
+    refreshedAt: statusline.refreshedAt
+  };
+}
+function resolveSurfaceLead(override, founderSurface) {
+  if (override === "dev" || override === "founder") return override;
+  if (founderSurface && (founderSurface.openPostingCount > 0 || founderSurface.needsYouCount > 0)) {
+    return "founder";
+  }
+  return "dev";
+}
+function founderRows(surface, kind) {
+  if (!surface || !Array.isArray(surface.postings)) return [];
+  if (kind === "jobs") {
+    return surface.postings.filter((posting) => posting.status === "open" || posting.needsYou);
+  }
+  return surface.postings;
+}
+var init_founder_surface = __esm({
+  "bin/founder-surface.js"() {
+    "use strict";
+  }
+});
+
 // bin/founder-paid-badge.js
 var founder_paid_badge_exports = {};
 __export(founder_paid_badge_exports, {
@@ -11559,9 +11732,9 @@ var init_founder_paid_badge = __esm({
 // bin/jpi-bounties.js
 init_src();
 init_cache_store();
-import { readFileSync as readFileSync6 } from "fs";
-import { join as join9 } from "path";
-import { homedir as homedir6 } from "os";
+import { readFileSync as readFileSync7 } from "fs";
+import { join as join10 } from "path";
+import { homedir as homedir7 } from "os";
 import { createInterface } from "readline";
 
 // bin/sanitize.js
@@ -11597,8 +11770,8 @@ function linkTitle(title, url) {
 
 // bin/jpi-bounties.js
 init_founder_pin();
-var TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join9(homedir6(), ".terminalhire");
-var INDEX_CACHE_FILE2 = join9(TERMINALHIRE_DIR6, "index-cache.json");
+var TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join10(homedir7(), ".terminalhire");
+var INDEX_CACHE_FILE2 = join10(TERMINALHIRE_DIR7, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
 var RANK_MODE = process.env["TERMINALHIRE_BOUNTY_RANK"] ?? "winnability";
@@ -11612,7 +11785,7 @@ var SHOW_ALL = args.includes("--all");
 var WINNABLE_ONLY = args.includes("--winnable");
 function readIndexCache() {
   try {
-    const entry = JSON.parse(readFileSync6(INDEX_CACHE_FILE2, "utf8"));
+    const entry = JSON.parse(readFileSync7(INDEX_CACHE_FILE2, "utf8"));
     if (Date.now() - entry.ts < INDEX_TTL_MS) return entry.index;
     return null;
   } catch {
@@ -11665,6 +11838,11 @@ ${i + 1}. ${linkTitle(job.title, job.url)} [${ref}]`);
   );
   if (reason) console.log(`   ${reason}`);
   if (continuityNote) console.log(`   ${continuityNote}`);
+  if (b.bountySource === "founder" && b.specProvenance) {
+    console.log(
+      `   Spec: ${b.specProvenance === "agent_drafted_human_confirmed" ? "agent drafted \xB7 founder confirmed" : "founder authored"}`
+    );
+  }
   if (matchedTags && matchedTags.length)
     console.log(`   Tags matched: ${matchedTags.slice(0, 5).join(", ")}`);
   console.log(`   id: ${job.id}`);
@@ -11775,6 +11953,32 @@ async function getBounties({ quiet = false, offline = false, priced = PRICED_ONL
 }
 async function run() {
   try {
+    if (args.length === 0) {
+      try {
+        const { readCacheEntry: readCacheEntry2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
+        const { getSurfaceLeadOverride: getSurfaceLeadOverride2 } = await Promise.resolve().then(() => (init_config(), config_exports));
+        const { founderRows: founderRows2, resolveSurfaceLead: resolveSurfaceLead2 } = await Promise.resolve().then(() => (init_founder_surface(), founder_surface_exports));
+        const surface = (readCacheEntry2() ?? {}).founderSurface;
+        if (resolveSurfaceLead2(getSurfaceLeadOverride2(), surface) === "founder") {
+          const rows = founderRows2(surface, "bounties");
+          console.log("\n\u26A1 Your TerminalHire postings\n");
+          if (!rows.length) {
+            console.log("  No current posting data. Run `terminalhire refresh`, or lead with work:");
+            console.log("  terminalhire config set lead dev\n");
+          } else {
+            rows.forEach((row, index) => {
+              console.log(
+                `  ${index + 1}. ${sanitizeText(row.title)}  \xB7  ${row.status}  \xB7  ${row.claimantCount} claimant${row.claimantCount === 1 ? "" : "s"}${row.needsYou ? "  \xB7  waiting on you" : ""}`
+              );
+            });
+            console.log("\n  Review and act: https://terminalhire.com/dashboard?tab=postings");
+            console.log("  Lead with developer bounties instead: terminalhire config set lead dev\n");
+          }
+          return;
+        }
+      } catch {
+      }
+    }
     const result = await getBounties();
     if (result.status === "empty") {
       console.log(

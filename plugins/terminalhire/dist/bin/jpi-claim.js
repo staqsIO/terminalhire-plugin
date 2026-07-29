@@ -10355,6 +10355,7 @@ __export(src_exports, {
   fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
   fetchPRLifecycle: () => fetchPRLifecycle,
   fetchPRScoringFacts: () => fetchPRScoringFacts,
+  fetchPublicOrgs: () => fetchPublicOrgs,
   fetchRepoRecency: () => fetchRepoRecency,
   fetchRepoReceptivity: () => fetchRepoReceptivity,
   fetchRepoStatus: () => fetchRepoStatus,

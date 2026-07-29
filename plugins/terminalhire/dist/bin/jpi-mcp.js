@@ -10823,6 +10823,7 @@ __export(src_exports, {
   fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
   fetchPRLifecycle: () => fetchPRLifecycle,
   fetchPRScoringFacts: () => fetchPRScoringFacts,
+  fetchPublicOrgs: () => fetchPublicOrgs,
   fetchRepoRecency: () => fetchRepoRecency,
   fetchRepoReceptivity: () => fetchRepoReceptivity,
   fetchRepoStatus: () => fetchRepoStatus,
@@ -51980,12 +51981,14 @@ var init_stdio2 = __esm({
 var config_exports = {};
 __export(config_exports, {
   getNudgeMode: () => getNudgeMode,
+  getSurfaceLeadOverride: () => getSurfaceLeadOverride,
   getSurfaceMix: () => getSurfaceMix,
   isBetaOptIn: () => isBetaOptIn,
   isContributeEnabled: () => isContributeEnabled,
   isInboundNudgeMuted: () => isInboundNudgeMuted,
   isPeerConnectEnabled: () => isPeerConnectEnabled,
   parseNudgeMode: () => parseNudgeMode,
+  parseSurfaceLead: () => parseSurfaceLead,
   parseSurfaceMix: () => parseSurfaceMix,
   readConfig: () => readConfig,
   writeConfig: () => writeConfig
@@ -52027,6 +52030,13 @@ function parseNudgeMode(raw) {
 function parseSurfaceMix(raw) {
   if (raw === "jobs" || raw === "balanced" || raw === "credential") return raw;
   return null;
+}
+function parseSurfaceLead(raw) {
+  return raw === "dev" || raw === "founder" ? raw : null;
+}
+function getSurfaceLeadOverride() {
+  const value = readConfig().surfaceLead;
+  return value === "dev" || value === "founder" ? value : void 0;
 }
 function getSurfaceMix() {
   const envVal = process.env["TH_MIX"];

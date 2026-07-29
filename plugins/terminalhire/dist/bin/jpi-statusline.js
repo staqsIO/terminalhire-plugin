@@ -38,6 +38,16 @@ function approvedClaimsCount(entry) {
   const n = entry && entry.approvedClaims && entry.approvedClaims.count;
   return typeof n === "number" && n > 0 ? n : 0;
 }
+function founderNeedsYouCount(entry) {
+  if (!entry || entry.surfaceLead !== "founder") return 0;
+  const n = entry.founderSurface && entry.founderSurface.needsYouCount;
+  return typeof n === "number" && n > 0 ? n : 0;
+}
+function founderOpenCount(entry) {
+  if (!entry || entry.surfaceLead !== "founder") return 0;
+  const n = entry.founderSurface && entry.founderSurface.openPostingCount;
+  return typeof n === "number" && n > 0 ? n : 0;
+}
 var SEMVER_HEAD = /^(\d+)\.(\d+)\.(\d+)/;
 function parsePatchTriple(v) {
   if (typeof v !== "string") return null;
@@ -78,9 +88,20 @@ function render() {
     const incoming = incomingCount(entry);
     const paid = founderPaidCount(entry);
     const approved = approvedClaimsCount(entry);
+    const founderNeedsYou = founderNeedsYouCount(entry);
+    const founderOpen = founderOpenCount(entry);
     const stale = sessionStale(entry) && unread === 0 && incoming === 0;
     const segments = [];
     if (approved > 0) segments.push(`\u2705 ${approved} approved \u2014 run: th claim list`);
+    if (founderNeedsYou > 0) {
+      segments.push(
+        `\u{1F9ED} ${founderNeedsYou} claim${founderNeedsYou === 1 ? "" : "s"} await your decision \u2014 run: th bounties`
+      );
+    } else if (founderOpen > 0) {
+      segments.push(
+        `\u{1F9ED} ${founderOpen} posting${founderOpen === 1 ? "" : "s"} open \u2014 run: th bounties`
+      );
+    }
     if (paid > 0) segments.push(`\u{1F48E} ${paid} paid \u2014 run: th bounties`);
     const conn = [];
     if (unread > 0) conn.push(`\u{1F4AC} ${unread} unread`);

@@ -134,12 +134,14 @@ var init_cache_store = __esm({
 var config_exports = {};
 __export(config_exports, {
   getNudgeMode: () => getNudgeMode,
+  getSurfaceLeadOverride: () => getSurfaceLeadOverride,
   getSurfaceMix: () => getSurfaceMix,
   isBetaOptIn: () => isBetaOptIn,
   isContributeEnabled: () => isContributeEnabled,
   isInboundNudgeMuted: () => isInboundNudgeMuted,
   isPeerConnectEnabled: () => isPeerConnectEnabled,
   parseNudgeMode: () => parseNudgeMode,
+  parseSurfaceLead: () => parseSurfaceLead,
   parseSurfaceMix: () => parseSurfaceMix,
   readConfig: () => readConfig,
   writeConfig: () => writeConfig
@@ -181,6 +183,13 @@ function parseNudgeMode(raw) {
 function parseSurfaceMix(raw) {
   if (raw === "jobs" || raw === "balanced" || raw === "credential") return raw;
   return null;
+}
+function parseSurfaceLead(raw) {
+  return raw === "dev" || raw === "founder" ? raw : null;
+}
+function getSurfaceLeadOverride() {
+  const value = readConfig().surfaceLead;
+  return value === "dev" || value === "founder" ? value : void 0;
 }
 function getSurfaceMix() {
   const envVal = process.env["TH_MIX"];
@@ -10562,6 +10571,7 @@ __export(src_exports, {
   fetchOwnedRepoTraction: () => fetchOwnedRepoTraction,
   fetchPRLifecycle: () => fetchPRLifecycle,
   fetchPRScoringFacts: () => fetchPRScoringFacts,
+  fetchPublicOrgs: () => fetchPublicOrgs,
   fetchRepoRecency: () => fetchRepoRecency,
   fetchRepoReceptivity: () => fetchRepoReceptivity,
   fetchRepoStatus: () => fetchRepoStatus,
@@ -11654,6 +11664,60 @@ var init_spinner_seen = __esm({
     SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
     SEEN_MAX_ENTRIES = 1500;
     SEEN_MAX_WIDTHS = 200;
+  }
+});
+
+// bin/founder-surface.js
+var founder_surface_exports = {};
+__export(founder_surface_exports, {
+  founderRows: () => founderRows,
+  projectFounderSurface: () => projectFounderSurface,
+  resolveSurfaceLead: () => resolveSurfaceLead
+});
+function projectFounderSurface(body) {
+  if (!body || body.ok !== true || !Array.isArray(body.postings)) return null;
+  const statusline = body.statusline;
+  if (!statusline || typeof statusline.needsYouCount !== "number" || typeof statusline.openPostingCount !== "number" || typeof statusline.refreshedAt !== "string") {
+    return null;
+  }
+  const postings = [];
+  for (const raw of body.postings) {
+    if (!raw || typeof raw.id !== "string" || typeof raw.title !== "string" || typeof raw.status !== "string" || typeof raw.needsYou !== "boolean" || typeof raw.claimantCount !== "number" || typeof raw.postedAt !== "string") {
+      continue;
+    }
+    postings.push({
+      id: raw.id,
+      title: raw.title,
+      status: raw.status,
+      needsYou: raw.needsYou,
+      claimantCount: raw.claimantCount,
+      postedAt: raw.postedAt
+    });
+  }
+  return {
+    postings,
+    needsYouCount: Math.max(0, statusline.needsYouCount),
+    openPostingCount: Math.max(0, statusline.openPostingCount),
+    refreshedAt: statusline.refreshedAt
+  };
+}
+function resolveSurfaceLead(override, founderSurface) {
+  if (override === "dev" || override === "founder") return override;
+  if (founderSurface && (founderSurface.openPostingCount > 0 || founderSurface.needsYouCount > 0)) {
+    return "founder";
+  }
+  return "dev";
+}
+function founderRows(surface, kind) {
+  if (!surface || !Array.isArray(surface.postings)) return [];
+  if (kind === "jobs") {
+    return surface.postings.filter((posting) => posting.status === "open" || posting.needsYou);
+  }
+  return surface.postings;
+}
+var init_founder_surface = __esm({
+  "bin/founder-surface.js"() {
+    "use strict";
   }
 });
 
@@ -13473,12 +13537,27 @@ async function run() {
     let index;
     let indexETag;
     const cachedForRevalidation = readCacheEntry() ?? {};
+    let bustCache = false;
+    let pulseLatestPostedAt = null;
+    try {
+      const pulseRes = await fetch(`${API_URL2}/api/pulse`, { signal: AbortSignal.timeout(5e3) });
+      if (pulseRes.ok) {
+        const pulse = await pulseRes.json();
+        pulseLatestPostedAt = pulse.latestPostedAt;
+        if (pulseLatestPostedAt && cachedForRevalidation.latestPostedAt && pulseLatestPostedAt !== cachedForRevalidation.latestPostedAt) {
+          bustCache = true;
+        }
+      }
+    } catch {
+    }
     let sendValidator = typeof cachedForRevalidation.indexETag === "string" && cachedForRevalidation.indexETag !== "";
     for (let attempt = 1; ; attempt++) {
       try {
+        const headers = sendValidator ? { Accept: "application/json", "If-None-Match": cachedForRevalidation.indexETag } : { Accept: "application/json" };
+        if (bustCache) headers["Cache-Control"] = "no-cache";
         const res = await fetch(`${API_URL2}/api/index`, {
           signal: AbortSignal.timeout(15e3),
-          headers: sendValidator ? { Accept: "application/json", "If-None-Match": cachedForRevalidation.indexETag } : { Accept: "application/json" }
+          headers
         });
         if (res.status === 304) {
           const cached = cachedForRevalidation.index;
@@ -13735,6 +13814,22 @@ async function run() {
         }
       } catch {
       }
+    let founderSurface;
+    if (sessionCookie && !isInboundNudgeMuted())
+      try {
+        const res = await fetch(`${API_URL2}/api/founder/postings`, {
+          method: "GET",
+          headers: { Cookie: `${GH_SESSION_COOKIE}=${sessionCookie}` },
+          signal: AbortSignal.timeout(1e4)
+        });
+        if (res.ok) {
+          const { projectFounderSurface: projectFounderSurface2 } = await Promise.resolve().then(() => (init_founder_surface(), founder_surface_exports));
+          founderSurface = projectFounderSurface2(await res.json()) ?? void 0;
+        } else if (sessionExpired(res)) {
+          sessionStale = true;
+        }
+      } catch {
+      }
     try {
       const { filterFreshMatches: filterFreshMatches2 } = await Promise.resolve().then(() => (init_spinner(), spinner_exports));
       if (!seenHistory) {
@@ -13771,6 +13866,14 @@ async function run() {
       });
     } catch {
     }
+    const previousCache = readCacheEntry() ?? {};
+    const effectiveFounderSurface = founderSurface ?? previousCache.founderSurface;
+    let surfaceLead = "dev";
+    try {
+      const { resolveSurfaceLead: resolveSurfaceLead2 } = await Promise.resolve().then(() => (init_founder_surface(), founder_surface_exports));
+      surfaceLead = resolveSurfaceLead2(getSurfaceLeadOverride(), effectiveFounderSurface);
+    } catch {
+    }
     const cacheEntry = {
       index,
       matchCount,
@@ -13779,11 +13882,16 @@ async function run() {
       incomingPending,
       unreadChat,
       sessionStale,
-      unpushedClaims
+      unpushedClaims,
+      surfaceLead
     };
     if (founderPaid) cacheEntry.founderPaid = founderPaid;
     if (approvedClaims) cacheEntry.approvedClaims = approvedClaims;
+    if (founderSurface) cacheEntry.founderSurface = founderSurface;
     cacheEntry.indexETag = indexETag ?? "";
+    if (pulseLatestPostedAt) {
+      cacheEntry.latestPostedAt = pulseLatestPostedAt;
+    }
     updateIndexCache(cacheEntry);
     try {
       const { readSpinnerConfig: readSpinnerConfig2, renderRefreshSurface: renderRefreshSurface2 } = await Promise.resolve().then(() => (init_spinner(), spinner_exports));

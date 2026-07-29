@@ -102,6 +102,9 @@ function parseSurfaceMix(raw) {
   if (raw === "jobs" || raw === "balanced" || raw === "credential") return raw;
   return null;
 }
+function parseSurfaceLead(raw) {
+  return raw === "dev" || raw === "founder" ? raw : null;
+}
 
 // bin/jpi-config.js
 var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
@@ -150,6 +153,29 @@ async function run() {
     console.log(`  (saved to ${CONFIG_FILE2})`);
     return;
   }
+  if (filtered[0] === "get" && filtered[1] === "lead") {
+    const cfg = readConfig();
+    console.log(`
+  lead: ${cfg.surfaceLead ?? "auto"}
+`);
+    return;
+  }
+  if (filtered[0] === "set" && filtered[1] === "lead") {
+    const value = filtered[2];
+    if (value === "auto") {
+      writeConfig({ surfaceLead: void 0 });
+      console.log("  lead set to: auto");
+      return;
+    }
+    const parsed = value ? parseSurfaceLead(value) : null;
+    if (!parsed) {
+      console.error("Error: config set lead requires: auto | dev | founder");
+      process.exit(1);
+    }
+    writeConfig({ surfaceLead: parsed });
+    console.log(`  lead set to: ${parsed}`);
+    return;
+  }
   if (filtered.includes("--show") || filtered.length === 0) {
     const cfg = readConfig();
     const envOverride = process.env["TERMINALHIRE_NUDGE"];
@@ -166,6 +192,7 @@ async function run() {
     if (mixEnv) {
       console.log(`  (mix overridden by TH_MIX=${mixEnv} at runtime)`);
     }
+    console.log(`  lead: ${cfg.surfaceLead ?? "auto"}  (auto derives from your open postings)`);
     console.log(`  config file: ${CONFIG_FILE2}`);
     console.log("");
     console.log("  Valid nudge values:");
@@ -215,6 +242,8 @@ async function run() {
   console.error("       terminalhire config --connect <on|off>");
   console.error("       terminalhire config set mix <jobs|balanced|credential>");
   console.error("       terminalhire config get mix");
+  console.error("       terminalhire config set lead <auto|dev|founder>");
+  console.error("       terminalhire config get lead");
   console.error("       terminalhire config --show");
   process.exit(1);
 }

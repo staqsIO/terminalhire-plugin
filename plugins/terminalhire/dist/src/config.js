@@ -105,6 +105,13 @@ function parseSurfaceMix(raw) {
   if (raw === "jobs" || raw === "balanced" || raw === "credential") return raw;
   return null;
 }
+function parseSurfaceLead(raw) {
+  return raw === "dev" || raw === "founder" ? raw : null;
+}
+function getSurfaceLeadOverride() {
+  const value = readConfig().surfaceLead;
+  return value === "dev" || value === "founder" ? value : void 0;
+}
 function getSurfaceMix() {
   const envVal = process.env["TH_MIX"];
   if (envVal) {
@@ -138,12 +145,14 @@ function isBetaOptIn() {
 }
 export {
   getNudgeMode,
+  getSurfaceLeadOverride,
   getSurfaceMix,
   isBetaOptIn,
   isContributeEnabled,
   isInboundNudgeMuted,
   isPeerConnectEnabled,
   parseNudgeMode,
+  parseSurfaceLead,
   parseSurfaceMix,
   readConfig,
   writeConfig
