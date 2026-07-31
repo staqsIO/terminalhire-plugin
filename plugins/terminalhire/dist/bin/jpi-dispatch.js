@@ -1276,7 +1276,7 @@ async function requireStoredLogin() {
   }
 }
 function sleep(ms) {
-  return new Promise((resolve6) => setTimeout(resolve6, ms));
+  return new Promise((resolve7) => setTimeout(resolve7, ms));
 }
 var TERMINALHIRE_DIR3, TOKEN_FILE, ALGO, IV_BYTES, GITHUB_SCOPE, DEVICE_CODE_URL, ACCESS_TOKEN_URL, BAKED_IN_CLIENT_ID, MOCK_TOKEN, MOCK_LOGIN;
 var init_github_auth = __esm({
@@ -2343,8 +2343,8 @@ function makeGitHubGovernor(fetchImpl, cfg) {
     try {
       const res = bound == null ? await fetchP : await Promise.race([
         fetchP,
-        new Promise((resolve6) => {
-          timer = setTimeout(() => resolve6(null), bound);
+        new Promise((resolve7) => {
+          timer = setTimeout(() => resolve7(null), bound);
         })
       ]);
       if (!res || !res.ok) return null;
@@ -4391,14 +4391,14 @@ async function mapWithConcurrency(items, limit2, fn) {
   if (items.length === 0) return results;
   const workers = Math.max(1, Math.min(Math.floor(limit2) || 1, items.length));
   let next = 0;
-  async function run31() {
+  async function run32() {
     for (; ; ) {
       const i = next++;
       if (i >= items.length) return;
       results[i] = await fn(items[i], i);
     }
   }
-  await Promise.all(Array.from({ length: workers }, run31));
+  await Promise.all(Array.from({ length: workers }, run32));
   return results;
 }
 var init_concurrency = __esm({
@@ -6402,8 +6402,8 @@ async function getWithTimeout(governor, url, token, timeoutMs) {
   try {
     const res = await Promise.race([
       getP,
-      new Promise((resolve6) => {
-        timer = setTimeout(() => resolve6(null), timeoutMs);
+      new Promise((resolve7) => {
+        timer = setTimeout(() => resolve7(null), timeoutMs);
       })
     ]);
     if (res === null) controller.abort();
@@ -12383,10 +12383,10 @@ async function maybePromptPeerConnect({
 } = {}) {
   const promptOnce = ask5 ? async (q) => String(await ask5(q) ?? "").trim().toLowerCase() : async (q) => {
     const rl = createInterface({ input, output });
-    const a = await new Promise((resolve6) => {
+    const a = await new Promise((resolve7) => {
       rl.question(q, (x) => {
         rl.close();
-        resolve6(x);
+        resolve7(x);
       });
     });
     return String(a).trim().toLowerCase();
@@ -12500,11 +12500,11 @@ async function runLogin() {
     let ghProfile;
     if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
       const { fileURLToPath: fileURLToPath12 } = await import("url");
-      const { join: join47 } = await import("path");
+      const { join: join48 } = await import("path");
       const __dirname9 = fileURLToPath12(new URL(".", import.meta.url));
-      const fixturePath = join47(__dirname9, "../../fixtures/github-sample.json");
-      const { readFileSync: readFileSync38 } = await import("fs");
-      ghProfile = JSON.parse(readFileSync38(fixturePath, "utf8"));
+      const fixturePath = join48(__dirname9, "../../fixtures/github-sample.json");
+      const { readFileSync: readFileSync39 } = await import("fs");
+      ghProfile = JSON.parse(readFileSync39(fixturePath, "utf8"));
     } else {
       ghProfile = await fetchGitHubProfile2(login, token);
     }
@@ -13799,12 +13799,12 @@ async function maybeAskPulse() {
   }
   writeConfig({ lastPulseAskAt: (/* @__PURE__ */ new Date()).toISOString() });
   const rl = createInterface2({ input: process.stdin, output: process.stdout });
-  const ask5 = (question) => new Promise((resolve6) => {
-    const onClose = () => resolve6(null);
+  const ask5 = (question) => new Promise((resolve7) => {
+    const onClose = () => resolve7(null);
     rl.once("close", onClose);
     rl.question(question, (answer2) => {
       rl.removeListener("close", onClose);
-      resolve6((answer2 || "").trim());
+      resolve7((answer2 || "").trim());
     });
   });
   const answer = await ask5(
@@ -13945,10 +13945,10 @@ async function fetchIndex() {
 }
 function prompt(question) {
   const rl = createInterface3({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve6) => {
+  return new Promise((resolve7) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve6(answer.trim().toLowerCase());
+      resolve7(answer.trim().toLowerCase());
     });
   });
 }
@@ -14575,10 +14575,10 @@ __export(jpi_devs_exports, {
 import { createInterface as createInterface4 } from "readline";
 function prompt2(question) {
   const rl = createInterface4({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve6) => {
+  return new Promise((resolve7) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve6(answer.trim().toLowerCase());
+      resolve7(answer.trim().toLowerCase());
     });
   });
 }
@@ -14721,10 +14721,10 @@ function readProject2() {
 }
 function promptRaw(question) {
   const rl = createInterface5({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve6) => {
+  return new Promise((resolve7) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve6(answer.trim());
+      resolve7(answer.trim());
     });
   });
 }
@@ -15440,10 +15440,10 @@ async function fetchIndex2() {
 }
 function prompt3(question) {
   const rl = createInterface6({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve6) => {
+  return new Promise((resolve7) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve6(answer.trim().toLowerCase());
+      resolve7(answer.trim().toLowerCase());
     });
   });
 }
@@ -16977,16 +16977,16 @@ var sleep2;
 var init_sleep = __esm({
   "../../node_modules/@anthropic-ai/sdk/internal/utils/sleep.mjs"() {
     "use strict";
-    sleep2 = (ms, signal) => new Promise((resolve6) => {
+    sleep2 = (ms, signal) => new Promise((resolve7) => {
       if (signal?.aborted)
-        return resolve6();
+        return resolve7();
       const onAbort = () => {
         clearTimeout(timer);
-        resolve6();
+        resolve7();
       };
       const timer = setTimeout(() => {
         signal?.removeEventListener("abort", onAbort);
-        resolve6();
+        resolve7();
       }, ms);
       signal?.addEventListener("abort", onAbort, { once: true });
     });
@@ -19115,8 +19115,8 @@ var init_api_promise = __esm({
     init_parse();
     APIPromise = class _APIPromise extends Promise {
       constructor(client, responsePromise, parseResponse = defaultParseResponse) {
-        super((resolve6) => {
-          resolve6(null);
+        super((resolve7) => {
+          resolve7(null);
         });
         this.responsePromise = responsePromise;
         this.parseResponse = parseResponse;
@@ -21636,16 +21636,16 @@ var init_async_queue = __esm({
         if (__classPrivateFieldGet(this, _AsyncQueue_closed, "f") || signal?.aborted) {
           return Promise.resolve({ done: true, value: void 0 });
         }
-        return new Promise((resolve6) => {
+        return new Promise((resolve7) => {
           const waiter = (r) => {
             signal?.removeEventListener("abort", onAbort);
-            resolve6(r);
+            resolve7(r);
           };
           const onAbort = () => {
             const idx = __classPrivateFieldGet(this, _AsyncQueue_waiters, "f").indexOf(waiter);
             if (idx >= 0)
               __classPrivateFieldGet(this, _AsyncQueue_waiters, "f").splice(idx, 1);
-            resolve6({ done: true, value: void 0 });
+            resolve7({ done: true, value: void 0 });
           };
           __classPrivateFieldGet(this, _AsyncQueue_waiters, "f").push(waiter);
           signal?.addEventListener("abort", onAbort, { once: true });
@@ -22245,13 +22245,13 @@ var init_json_schema = __esm({
 
 // ../../node_modules/@anthropic-ai/sdk/internal/utils/promise.mjs
 function promiseWithResolvers() {
-  let resolve6;
+  let resolve7;
   let reject;
   const promise = new Promise((res, rej) => {
-    resolve6 = res;
+    resolve7 = res;
     reject = rej;
   });
-  return { promise, resolve: resolve6, reject };
+  return { promise, resolve: resolve7, reject };
 }
 var init_promise = __esm({
   "../../node_modules/@anthropic-ai/sdk/internal/utils/promise.mjs"() {
@@ -22853,7 +22853,7 @@ function betaGrepTool(ctx) {
   });
 }
 function runRipgrep(rg, pattern, searchPath, signal) {
-  return new Promise((resolve6, reject) => {
+  return new Promise((resolve7, reject) => {
     const proc = cp.spawn(rg, ["-n", "--no-heading", "-e", pattern, "--", searchPath], {
       ...signal ? { signal } : {}
     });
@@ -22875,12 +22875,12 @@ function runRipgrep(rg, pattern, searchPath, signal) {
       if (signal?.aborted)
         return reject(new ToolError("grep: aborted"));
       if (truncated)
-        return resolve6(out + `
+        return resolve7(out + `
 [output truncated at ${GREP_OUTPUT_LIMIT} bytes]`);
       if (code === 0)
-        return resolve6(out);
+        return resolve7(out);
       if (code === 1)
-        return resolve6("no matches");
+        return resolve7("no matches");
       reject(new ToolError(`grep: rg failed: ${errOut || `exit ${code}`}`));
     });
     proc.on("error", (e) => {
@@ -23058,8 +23058,8 @@ var init_node = __esm({
 `;
         __classPrivateFieldGet(this, _BashSession_proc, "f").stdin.write(wrapped);
         if (__classPrivateFieldGet(this, _BashSession_buf, "f").indexOf(sentinel2) < 0) {
-          const { promise: sentinelSeen, resolve: resolve6 } = promiseWithResolvers();
-          __classPrivateFieldSet(this, _BashSession_waiting, { sentinel: sentinel2, resolve: resolve6 }, "f");
+          const { promise: sentinelSeen, resolve: resolve7 } = promiseWithResolvers();
+          __classPrivateFieldSet(this, _BashSession_waiting, { sentinel: sentinel2, resolve: resolve7 }, "f");
           let timer;
           let onAbort;
           try {
@@ -24814,12 +24814,12 @@ var init_BetaMessageStream = __esm({
           }
           return this._emit("error", new AnthropicError(String(error2)));
         });
-        __classPrivateFieldSet(this, _BetaMessageStream_connectedPromise, new Promise((resolve6, reject) => {
-          __classPrivateFieldSet(this, _BetaMessageStream_resolveConnectedPromise, resolve6, "f");
+        __classPrivateFieldSet(this, _BetaMessageStream_connectedPromise, new Promise((resolve7, reject) => {
+          __classPrivateFieldSet(this, _BetaMessageStream_resolveConnectedPromise, resolve7, "f");
           __classPrivateFieldSet(this, _BetaMessageStream_rejectConnectedPromise, reject, "f");
         }), "f");
-        __classPrivateFieldSet(this, _BetaMessageStream_endPromise, new Promise((resolve6, reject) => {
-          __classPrivateFieldSet(this, _BetaMessageStream_resolveEndPromise, resolve6, "f");
+        __classPrivateFieldSet(this, _BetaMessageStream_endPromise, new Promise((resolve7, reject) => {
+          __classPrivateFieldSet(this, _BetaMessageStream_resolveEndPromise, resolve7, "f");
           __classPrivateFieldSet(this, _BetaMessageStream_rejectEndPromise, reject, "f");
         }), "f");
         __classPrivateFieldGet(this, _BetaMessageStream_connectedPromise, "f").catch(() => {
@@ -24989,11 +24989,11 @@ var init_BetaMessageStream = __esm({
        *   const message = await stream.emitted('message') // rejects if the stream errors
        */
       emitted(event) {
-        return new Promise((resolve6, reject) => {
+        return new Promise((resolve7, reject) => {
           __classPrivateFieldSet(this, _BetaMessageStream_catchingPromiseCreated, true, "f");
           if (event !== "error")
             this.once("error", reject);
-          this.once(event, resolve6);
+          this.once(event, resolve7);
         });
       }
       async done() {
@@ -25355,7 +25355,7 @@ var init_BetaMessageStream = __esm({
               if (done) {
                 return { value: void 0, done: true };
               }
-              return new Promise((resolve6, reject) => readQueue.push({ resolve: resolve6, reject })).then((chunk2) => chunk2 ? { value: chunk2, done: false } : { value: void 0, done: true });
+              return new Promise((resolve7, reject) => readQueue.push({ resolve: resolve7, reject })).then((chunk2) => chunk2 ? { value: chunk2, done: false } : { value: void 0, done: true });
             }
             const chunk = pushQueue.shift();
             return { value: chunk, done: false };
@@ -27593,12 +27593,12 @@ var init_MessageStream = __esm({
           }
           return this._emit("error", new AnthropicError(String(error2)));
         });
-        __classPrivateFieldSet(this, _MessageStream_connectedPromise, new Promise((resolve6, reject) => {
-          __classPrivateFieldSet(this, _MessageStream_resolveConnectedPromise, resolve6, "f");
+        __classPrivateFieldSet(this, _MessageStream_connectedPromise, new Promise((resolve7, reject) => {
+          __classPrivateFieldSet(this, _MessageStream_resolveConnectedPromise, resolve7, "f");
           __classPrivateFieldSet(this, _MessageStream_rejectConnectedPromise, reject, "f");
         }), "f");
-        __classPrivateFieldSet(this, _MessageStream_endPromise, new Promise((resolve6, reject) => {
-          __classPrivateFieldSet(this, _MessageStream_resolveEndPromise, resolve6, "f");
+        __classPrivateFieldSet(this, _MessageStream_endPromise, new Promise((resolve7, reject) => {
+          __classPrivateFieldSet(this, _MessageStream_resolveEndPromise, resolve7, "f");
           __classPrivateFieldSet(this, _MessageStream_rejectEndPromise, reject, "f");
         }), "f");
         __classPrivateFieldGet(this, _MessageStream_connectedPromise, "f").catch(() => {
@@ -27768,11 +27768,11 @@ var init_MessageStream = __esm({
        *   const message = await stream.emitted('message') // rejects if the stream errors
        */
       emitted(event) {
-        return new Promise((resolve6, reject) => {
+        return new Promise((resolve7, reject) => {
           __classPrivateFieldSet(this, _MessageStream_catchingPromiseCreated, true, "f");
           if (event !== "error")
             this.once("error", reject);
-          this.once(event, resolve6);
+          this.once(event, resolve7);
         });
       }
       async done() {
@@ -28093,7 +28093,7 @@ var init_MessageStream = __esm({
               if (done) {
                 return { value: void 0, done: true };
               }
-              return new Promise((resolve6, reject) => readQueue.push({ resolve: resolve6, reject })).then((chunk2) => chunk2 ? { value: chunk2, done: false } : { value: void 0, done: true });
+              return new Promise((resolve7, reject) => readQueue.push({ resolve: resolve7, reject })).then((chunk2) => chunk2 ? { value: chunk2, done: false } : { value: void 0, done: true });
             }
             const chunk = pushQueue.shift();
             return { value: chunk, done: false };
@@ -30491,7 +30491,7 @@ function splitProgressChunk(chunk) {
 }
 function shStream(cmd, args5, opts = {}) {
   const cap = opts.maxStderrBytes ?? 64 * 1024;
-  return new Promise((resolve6, reject) => {
+  return new Promise((resolve7, reject) => {
     void (async () => {
       const spawn4 = opts.spawnFn ?? (await import("child_process")).spawn;
       const child = spawn4(cmd, args5, { shell: false, stdio: ["ignore", "pipe", "pipe"] });
@@ -30509,7 +30509,7 @@ function shStream(cmd, args5, opts = {}) {
       child.on("error", (err) => reject(err));
       child.on("close", (code, signal) => {
         if (code === 0) {
-          resolve6({ stdout: stdout.trim(), stderr });
+          resolve7({ stdout: stdout.trim(), stderr });
           return;
         }
         const err = new Error(
@@ -30945,7 +30945,7 @@ async function sh(cmd, args5, opts = {}) {
 async function confirm(question) {
   const rl = createInterface8({ input: process.stdin, output: process.stdout });
   try {
-    const ans = await new Promise((resolve6) => rl.question(question, resolve6));
+    const ans = await new Promise((resolve7) => rl.question(question, resolve7));
     return /^y(es)?$/i.test(String(ans).trim());
   } finally {
     rl.close();
@@ -30954,7 +30954,7 @@ async function confirm(question) {
 async function ask(question) {
   const rl = createInterface8({ input: process.stdin, output: process.stdout });
   try {
-    const ans = await new Promise((resolve6) => rl.question(question, resolve6));
+    const ans = await new Promise((resolve7) => rl.question(question, resolve7));
     return String(ans).trim();
   } finally {
     rl.close();
@@ -32980,21 +32980,21 @@ function buildPatchSubmission({ bountyId, claimId, patch, authorName, authorEmai
   }
   return { bountyId, claimId, patch, authorName, authorEmail, proofToken: auth.proofToken };
 }
-function renderRunView(run31, message) {
+function renderRunView(run32, message) {
   const lines = [];
-  const sha = run31.commitSha ? String(run31.commitSha).slice(0, 10) : null;
-  lines.push(`  run:        ${run31.branch ?? "(no branch)"}${sha ? ` @ ${sha}` : ""}`);
+  const sha = run32.commitSha ? String(run32.commitSha).slice(0, 10) : null;
+  lines.push(`  run:        ${run32.branch ?? "(no branch)"}${sha ? ` @ ${sha}` : ""}`);
   lines.push(
-    `  status:     ${terminalSafeInline(run31.status)}${run31.conclusion ? ` \xB7 conclusion: ${terminalSafeInline(run31.conclusion)}` : ""}`
+    `  status:     ${terminalSafeInline(run32.status)}${run32.conclusion ? ` \xB7 conclusion: ${terminalSafeInline(run32.conclusion)}` : ""}`
   );
-  if (Array.isArray(run31.failingJobs) && run31.failingJobs.length > 0) {
-    lines.push(`  failing:    ${run31.failingJobs.map(terminalSafeInline).join(", ")}`);
+  if (Array.isArray(run32.failingJobs) && run32.failingJobs.length > 0) {
+    lines.push(`  failing:    ${run32.failingJobs.map(terminalSafeInline).join(", ")}`);
   }
-  if (run31.previewUrl) lines.push(`  preview:    ${terminalSafeInline(run31.previewUrl)}`);
-  if (run31.roundTrips != null) lines.push(`  round trips: ${run31.roundTrips}`);
-  if (run31.logTail) {
+  if (run32.previewUrl) lines.push(`  preview:    ${terminalSafeInline(run32.previewUrl)}`);
+  if (run32.roundTrips != null) lines.push(`  round trips: ${run32.roundTrips}`);
+  if (run32.logTail) {
     lines.push("  \u2500\u2500 log tail \u2500\u2500");
-    for (const l of terminalSafeLines(run31.logTail)) lines.push(`  \u2502 ${l}`);
+    for (const l of terminalSafeLines(run32.logTail)) lines.push(`  \u2502 ${l}`);
   }
   if (message) lines.push(`  ${message}`);
   return lines.join("\n");
@@ -34718,7 +34718,7 @@ an interactive terminal and creates an unowned web draft; the browser publishes 
 async function ask2(question) {
   const rl = createInterface9({ input: process.stdin, output: process.stdout });
   try {
-    return await new Promise((resolve6) => rl.question(question, (answer) => resolve6(answer.trim())));
+    return await new Promise((resolve7) => rl.question(question, (answer) => resolve7(answer.trim())));
   } finally {
     rl.close();
   }
@@ -35036,12 +35036,241 @@ var init_jpi_repo = __esm({
   }
 });
 
+// bin/jpi-run.js
+var jpi_run_exports = {};
+__export(jpi_run_exports, {
+  run: () => run10
+});
+import { existsSync as existsSync17, readFileSync as readFileSync26 } from "fs";
+import { join as join33, resolve as resolve5 } from "path";
+import { tmpdir } from "os";
+import { mkdtempSync, rmSync as rmSync9 } from "fs";
+function parseArgs2(argv) {
+  const out = { flags: {}, bools: /* @__PURE__ */ new Set() };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (!arg.startsWith("--")) continue;
+    const name = arg.slice(2);
+    if (["watch", "json", "no-preview", "help", "verbose"].includes(name)) {
+      out.bools.add(name);
+      continue;
+    }
+    const next = argv[i + 1];
+    if (next === void 0 || next.startsWith("--")) {
+      throw new Error(`terminalhire: --${name} needs a value`);
+    }
+    out.flags[name] = next;
+    i += 1;
+  }
+  return out;
+}
+function runScratchRoot() {
+  const root = mkdtempSync(join33(tmpdir(), "th-run-"));
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    try {
+      rmSync9(root, { recursive: true, force: true });
+    } catch {
+    }
+  };
+  process.on("exit", cleanup);
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    process.on(sig, () => {
+      cleanup();
+      process.exit(130);
+    });
+  }
+  return { root, cleanup };
+}
+async function loadEngine() {
+  try {
+    return await import("@terminalhire/envrun");
+  } catch (err) {
+    throw new Error(
+      `terminalhire: \`run\` needs the @terminalhire/envrun engine, which is not installed here.
+It drives Docker and is not published, so this verb works from a monorepo checkout today. Run \`npm run -w @terminalhire/envrun build\` there first.
+(resolution error: ${err && err.message ? err.message : String(err)})`
+    );
+  }
+}
+function readConfig2(localDir) {
+  const file = join33(localDir, ".th-run.json");
+  if (!existsSync17(file)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync26(file, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (err) {
+    throw new Error(
+      `terminalhire: ${file} is not readable JSON (${err && err.message ? err.message : String(err)}). Fix or remove it \u2014 a config we cannot read is not a config we should guess at.`
+    );
+  }
+}
+function requireField(value, name, hint) {
+  if (typeof value === "string" && value.trim() !== "") return value.trim();
+  throw new Error(`terminalhire: run needs ${name}. ${hint}`);
+}
+async function once(engine, opts) {
+  const { root } = opts.scratch;
+  const started = Date.now();
+  const outcome = await engine.verifyWorkingDiff({
+    claimId: opts.claimId,
+    localRepoDir: opts.localDir,
+    sliceFiles: opts.slice,
+    targetRepo: opts.target,
+    targetSha: opts.sha,
+    scratchRoot: root,
+    preview: opts.preview,
+    ...opts.testCommand ? { testCommandOverride: opts.testCommand } : {},
+    onProgress: (stage, detail) => {
+      if (!opts.json) process.stderr.write(`  ${stage.padEnd(8)} ${detail}
+`);
+    }
+  });
+  const { result, preview } = outcome;
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}
+`);
+  } else {
+    process.stdout.write(`
+${engine.renderRunReport(result)}
+`);
+  }
+  if (preview) {
+    if (opts.keepSeconds !== null) {
+      await new Promise((r) => setTimeout(r, opts.keepSeconds * 1e3));
+      preview.teardown();
+    } else if (!opts.watch) {
+      process.stderr.write(
+        `
+Preview is live at ${preview.url} \u2014 press Ctrl-C to tear it down.
+Expiry and revocation are not built yet (TERM-350 phase 5); Ctrl-C is the only stop.
+`
+      );
+      await new Promise((resolve_) => {
+        process.on("SIGINT", () => {
+          preview.teardown();
+          resolve_();
+        });
+      });
+    } else {
+      preview.teardown();
+    }
+  }
+  if (!opts.json) {
+    process.stderr.write(`  total    ${String(Date.now() - started)}ms
+`);
+  }
+  if (result.status === "refused") return 2;
+  return result.outcome === "completed" ? 0 : 1;
+}
+async function run10() {
+  const argv = process.argv.slice(2);
+  const parsed = parseArgs2(argv);
+  if (parsed.bools.has("help") || argv.length === 0) {
+    process.stdout.write(`${USAGE}
+`);
+    return 0;
+  }
+  const localDir = resolve5(parsed.flags["local"] ?? process.cwd());
+  const config2 = readConfig2(localDir);
+  const pick2 = (name) => parsed.flags[name] ?? config2[name];
+  const sliceRaw = pick2("slice");
+  const slice = Array.isArray(sliceRaw) ? sliceRaw : typeof sliceRaw === "string" ? sliceRaw.split(",").map((s) => s.trim()).filter((s) => s.length > 0) : [];
+  if (slice.length === 0) {
+    throw new Error(
+      'terminalhire: run needs --slice (or a "slice" array in .th-run.json). An empty slice means nothing may be touched, so every diff would be refused \u2014 that is almost never what you meant, so it is an error rather than a silent refusal.'
+    );
+  }
+  const opts = {
+    claimId: requireField(pick2("claim"), "--claim", "It is the id the result is filed under."),
+    target: requireField(pick2("target"), "--target", "e.g. https://github.com/koajs/koa.git"),
+    sha: requireField(pick2("sha"), "--sha", "The full 40-character commit your diff applies to."),
+    slice,
+    localDir,
+    preview: !parsed.bools.has("no-preview"),
+    watch: parsed.bools.has("watch"),
+    json: parsed.bools.has("json"),
+    testCommand: pick2("test-command") ?? null,
+    keepSeconds: pick2("keep") === void 0 ? null : Number(pick2("keep")),
+    scratch: runScratchRoot()
+  };
+  if (!/^[0-9a-f]{40}$/.test(opts.sha)) {
+    throw new Error(
+      `terminalhire: --sha must be a full 40-character commit, got ${JSON.stringify(opts.sha)}. An abbreviated sha cannot be checked against what was actually fetched.`
+    );
+  }
+  const engine = await loadEngine();
+  if (!opts.watch) return once(engine, opts);
+  const { watch } = await import("fs");
+  let last = await once(engine, opts);
+  let timer = null;
+  let running = false;
+  process.stderr.write("\nwatching for changes \u2014 Ctrl-C to stop\n");
+  watch(opts.localDir, { recursive: true }, (_event, filename) => {
+    if (typeof filename === "string" && filename.includes(".git/")) return;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (running) return;
+      running = true;
+      once(engine, opts).then((code) => {
+        last = code;
+      }).catch((err) => {
+        process.stderr.write(`${err && err.message ? err.message : String(err)}
+`);
+      }).finally(() => {
+        running = false;
+      });
+    }, 500);
+  });
+  await new Promise(() => {
+  });
+  return last;
+}
+var USAGE;
+var init_jpi_run = __esm({
+  "bin/jpi-run.js"() {
+    "use strict";
+    USAGE = `terminalhire run \u2014 verify your working diff in a fresh container
+
+Usage:
+  th run [options]
+
+Options:
+  --claim <id>          The claim this work belongs to.
+  --target <git-url>    Repository the work is verified against.
+  --sha <40-hex>        The commit your diff applies on top of.
+  --slice <a,b,c>       Comma-separated files this claim shares. A diff touching
+                        anything else is refused locally, before any container.
+  --local <dir>         Checkout to read the working diff from (default: cwd).
+  --watch               Re-run when a file in the checkout changes.
+  --json                Print the run result as JSON instead of a report.
+  --no-preview          Skip the preview URL.
+  --keep <seconds>      Hold the preview open this long (default: until Ctrl-C).
+  --test-command <cmd>  Disclosed override of the derived test command.
+  --help
+
+Defaults are read from .th-run.json in the local checkout when present, so a
+claim you run repeatedly needs no flags. Every flag overrides the file.
+
+Needs Docker running. Needs network for the first clone of the target.`;
+    if (process.argv[1] && process.argv[1].endsWith("jpi-run.js")) {
+      run10().then((code) => process.exit(code ?? 0)).catch((err) => {
+        process.stderr.write(`${err && err.message ? err.message : String(err)}
+`);
+        process.exit(1);
+      });
+    }
+  }
+});
+
 // bin/jpi-update.js
 var jpi_update_exports = {};
 __export(jpi_update_exports, {
   decideUpdate: () => decideUpdate,
   pathIsInsidePluginRoot: () => pathIsInsidePluginRoot,
-  run: () => run10
+  run: () => run11
 });
 import { spawnSync as spawnSync3 } from "child_process";
 import { fileURLToPath as fileURLToPath6 } from "url";
@@ -35118,7 +35347,7 @@ function runNpmInstall() {
   console.log("\u2713 update complete \u2014 the new version is active on your next terminalhire run.");
   return 0;
 }
-async function run10(argv) {
+async function run11(argv) {
   try {
     const args5 = argv ?? [];
     const check = args5.includes("--check");
@@ -35320,7 +35549,7 @@ function finalize(build) {
   };
 }
 function reconstruct(files, opts = {}) {
-  const join47 = opts.joinSidechains !== false;
+  const join48 = opts.joinSidechains !== false;
   const mains = [];
   const sidechains = [];
   for (const file of files) {
@@ -35345,7 +35574,7 @@ function reconstruct(files, opts = {}) {
   }
   const orphanedSidechainPaths = [];
   const joinedPaths = /* @__PURE__ */ new Set();
-  if (join47) {
+  if (join48) {
     const sidechainsBySession = /* @__PURE__ */ new Map();
     for (const sc of sidechains) {
       const acc = sidechainsBySession.get(sc.sessionId) ?? [];
@@ -35615,12 +35844,12 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
       continue;
     }
     spansConsidered++;
-    let run31 = 0;
+    let run32 = 0;
     const closeChain = () => {
-      if (run31 > 0) {
+      if (run32 > 0) {
         recoveryChains++;
-        totalDepth += run31;
-        run31 = 0;
+        totalDepth += run32;
+        run32 = 0;
       }
     };
     for (const uuid2 of episode.mainNodeUuids) {
@@ -35629,9 +35858,9 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
         continue;
       }
       if (node.kind === "tool_result" /* ToolResult */ && node.isError) {
-        run31++;
-        if (run31 > maxConsecutiveErrors) {
-          maxConsecutiveErrors = run31;
+        run32++;
+        if (run32 > maxConsecutiveErrors) {
+          maxConsecutiveErrors = run32;
         }
       } else if (node.kind === "tool_result" /* ToolResult */ && !node.isError) {
         closeChain();
@@ -35681,9 +35910,9 @@ __export(trajectory_exports, {
   runTrajectory: () => runTrajectory,
   runTrajectoryPush: () => runTrajectoryPush
 });
-import { existsSync as existsSync17, readFileSync as readFileSync26, readdirSync as readdirSync3, writeFileSync as writeFileSync20 } from "fs";
+import { existsSync as existsSync18, readFileSync as readFileSync27, readdirSync as readdirSync3, writeFileSync as writeFileSync20 } from "fs";
 import { homedir as homedir24 } from "os";
-import { join as join33 } from "path";
+import { join as join34 } from "path";
 function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -35715,7 +35944,7 @@ function findJsonlFiles(dir) {
     return out;
   }
   for (const entry of entries) {
-    const full = join33(dir, entry.name);
+    const full = join34(dir, entry.name);
     if (entry.isDirectory()) {
       out.push(...findJsonlFiles(full));
     } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
@@ -35729,7 +35958,7 @@ function loadCorpus(paths) {
   for (const path6 of paths) {
     let text;
     try {
-      text = readFileSync26(path6, "utf8");
+      text = readFileSync27(path6, "utf8");
     } catch {
       continue;
     }
@@ -35836,10 +36065,10 @@ function renderMarkdown(view) {
   return lines.join("\n");
 }
 function writeExportArtifacts(score, markdown) {
-  const dir = process.env.TERMINALHIRE_DIR || join33(homedir24(), ".terminalhire");
+  const dir = process.env.TERMINALHIRE_DIR || join34(homedir24(), ".terminalhire");
   ensureStateDir(dir);
-  const jsonPath = join33(dir, "trajectory-export.json");
-  const mdPath = join33(dir, "trajectory-export.md");
+  const jsonPath = join34(dir, "trajectory-export.json");
+  const mdPath = join34(dir, "trajectory-export.md");
   writeFileSync20(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
   writeFileSync20(mdPath, markdown, "utf8");
   return { jsonPath, mdPath };
@@ -35860,8 +36089,8 @@ function renderInward(allNodes, view, files) {
   console.log("");
 }
 function buildTrajectory() {
-  const projectsDir = join33(homedir24(), ".claude", "projects");
-  if (!existsSync17(projectsDir)) return null;
+  const projectsDir = join34(homedir24(), ".claude", "projects");
+  if (!existsSync18(projectsDir)) return null;
   const paths = findJsonlFiles(projectsDir);
   if (paths.length === 0) return null;
   const files = loadCorpus(paths);
@@ -36136,9 +36365,9 @@ var init_trajectory = __esm({
 // bin/jpi-trajectory.js
 var jpi_trajectory_exports = {};
 __export(jpi_trajectory_exports, {
-  run: () => run11
+  run: () => run12
 });
-async function run11() {
+async function run12() {
   try {
     const args5 = process.argv.slice(2);
     if (args5.includes("--push")) {
@@ -36573,7 +36802,7 @@ var init_intro2 = __esm({
 // bin/jpi-intro.js
 var jpi_intro_exports = {};
 __export(jpi_intro_exports, {
-  run: () => run12
+  run: () => run13
 });
 function readOption(args5, name) {
   const i = args5.indexOf(name);
@@ -36581,7 +36810,7 @@ function readOption(args5, name) {
   const v = args5[i + 1];
   return typeof v === "string" && !v.startsWith("--") ? v : void 0;
 }
-async function run12() {
+async function run13() {
   try {
     const args5 = process.argv.slice(2);
     if (args5.includes("--list")) {
@@ -36621,13 +36850,13 @@ var init_jpi_intro = __esm({
 });
 
 // src/chat-keystore.ts
-import { existsSync as existsSync18, linkSync as linkSync2, readFileSync as readFileSync27, rmSync as rmSync9, unlinkSync as unlinkSync4, writeFileSync as writeFileSync21 } from "fs";
+import { existsSync as existsSync19, linkSync as linkSync2, readFileSync as readFileSync28, rmSync as rmSync10, unlinkSync as unlinkSync4, writeFileSync as writeFileSync21 } from "fs";
 import { randomBytes as randomBytes8 } from "crypto";
 import { homedir as homedir25 } from "os";
-import { join as join34 } from "path";
+import { join as join35 } from "path";
 async function loadOrCreateIdentity() {
   const key = await loadKey();
-  if (existsSync18(IDENTITY_FILE)) {
+  if (existsSync19(IDENTITY_FILE)) {
     return readIdentityFileOrThrow(key);
   }
   waitForTestRaceBarrier("identity");
@@ -36646,7 +36875,7 @@ function isValidChatKeypairShape(value) {
 }
 function readIdentityFileOrThrow(key) {
   try {
-    const raw = readFileSync27(IDENTITY_FILE, "utf8");
+    const raw = readFileSync28(IDENTITY_FILE, "utf8");
     const blob = JSON.parse(raw);
     const decrypted = decrypt(blob, key);
     const parsed = JSON.parse(decrypted);
@@ -36697,20 +36926,20 @@ var init_chat_keystore = __esm({
     init_src();
     init_github_auth();
     init_state_dir();
-    TERMINALHIRE_DIR18 = process.env.TERMINALHIRE_DIR || join34(homedir25(), ".terminalhire");
-    IDENTITY_FILE = join34(TERMINALHIRE_DIR18, "chat-identity.enc");
+    TERMINALHIRE_DIR18 = process.env.TERMINALHIRE_DIR || join35(homedir25(), ".terminalhire");
+    IDENTITY_FILE = join35(TERMINALHIRE_DIR18, "chat-identity.enc");
     HEX64_RE = /^[0-9a-f]{64}$/;
   }
 });
 
 // src/chat-client.ts
-import { existsSync as existsSync19, readFileSync as readFileSync28, writeFileSync as writeFileSync22 } from "fs";
+import { existsSync as existsSync20, readFileSync as readFileSync29, writeFileSync as writeFileSync22 } from "fs";
 import { homedir as homedir26 } from "os";
-import { join as join35 } from "path";
+import { join as join36 } from "path";
 function defaultReadPeerPins() {
   try {
-    if (!existsSync19(PEERS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync28(PEERS_FILE, "utf8"));
+    if (!existsSync20(PEERS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync29(PEERS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, key] of Object.entries(parsed)) {
@@ -36910,8 +37139,8 @@ var init_chat_client = __esm({
     init_state_dir();
     CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE5 = "__jpi_gh_session";
-    TERMINALHIRE_DIR19 = process.env.TERMINALHIRE_DIR || join35(homedir26(), ".terminalhire");
-    PEERS_FILE = join35(TERMINALHIRE_DIR19, "chat-peers.json");
+    TERMINALHIRE_DIR19 = process.env.TERMINALHIRE_DIR || join36(homedir26(), ".terminalhire");
+    PEERS_FILE = join36(TERMINALHIRE_DIR19, "chat-peers.json");
     REQUEST_TIMEOUT_MS2 = 1e4;
     ChatNotLinkedError = class extends Error {
       constructor() {
@@ -37074,27 +37303,27 @@ function diff(prev, next, cols) {
   if (!Number.isInteger(cols) || cols <= 0) return [];
   const ops = [];
   const len = next.length;
-  let run31 = null;
+  let run32 = null;
   for (let i = 0; i < len; i++) {
     const col = i % cols;
     const row = (i - col) / cols;
-    if (col === 0 && run31) {
-      ops.push(run31);
-      run31 = null;
+    if (col === 0 && run32) {
+      ops.push(run32);
+      run32 = null;
     }
     if (cellNe(prev[i], next[i])) {
-      if (run31 && run31.row === row && run31.col + run31.run.length === col) {
-        run31.run.push(next[i]);
+      if (run32 && run32.row === row && run32.col + run32.run.length === col) {
+        run32.run.push(next[i]);
       } else {
-        if (run31) ops.push(run31);
-        run31 = { row, col, run: [next[i]] };
+        if (run32) ops.push(run32);
+        run32 = { row, col, run: [next[i]] };
       }
-    } else if (run31) {
-      ops.push(run31);
-      run31 = null;
+    } else if (run32) {
+      ops.push(run32);
+      run32 = null;
     }
   }
-  if (run31) ops.push(run31);
+  if (run32) ops.push(run32);
   return ops;
 }
 function styleOf(cell) {
@@ -37341,16 +37570,16 @@ __export(jpi_chat_read_exports, {
   syncUnreadBadge: () => syncUnreadBadge,
   writeReadCursor: () => writeReadCursor
 });
-import { existsSync as existsSync20, readFileSync as readFileSync29, writeFileSync as writeFileSync23 } from "fs";
+import { existsSync as existsSync21, readFileSync as readFileSync30, writeFileSync as writeFileSync23 } from "fs";
 import { homedir as homedir27 } from "os";
-import { join as join36 } from "path";
+import { join as join37 } from "path";
 async function syncUnreadBadge(deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   const cacheFile = deps.cacheFile ?? INDEX_CACHE_FILE6;
   try {
     const cookie = readCookie();
-    if (!cookie || !existsSync20(cacheFile)) return;
+    if (!cookie || !existsSync21(cacheFile)) return;
     const res = await fetchImpl(`${CHAT_BASE2}/api/chat/inbox`, {
       method: "GET",
       headers: { Cookie: `${GH_SESSION_COOKIE6}=${cookie}` },
@@ -37363,7 +37592,7 @@ async function syncUnreadBadge(deps = {}) {
       (sum, it) => sum + (it && typeof it.unreadCount === "number" && it.unreadCount > 0 ? it.unreadCount : 0),
       0
     );
-    const entry = JSON.parse(readFileSync29(cacheFile, "utf8"));
+    const entry = JSON.parse(readFileSync30(cacheFile, "utf8"));
     entry.unreadChat = { count: total };
     writeFileSync23(cacheFile, JSON.stringify(entry), "utf8");
   } catch {
@@ -37371,8 +37600,8 @@ async function syncUnreadBadge(deps = {}) {
 }
 function readReadCursors() {
   try {
-    if (!existsSync20(READS_FILE)) return {};
-    const parsed = JSON.parse(readFileSync29(READS_FILE, "utf8"));
+    if (!existsSync21(READS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync30(READS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
     for (const [login, iso] of Object.entries(parsed)) {
@@ -37749,9 +37978,9 @@ var init_jpi_chat_read = __esm({
     init_jpi_chat();
     CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
     GH_SESSION_COOKIE6 = "__jpi_gh_session";
-    TERMINALHIRE_DIR20 = process.env.TERMINALHIRE_DIR || join36(homedir27(), ".terminalhire");
-    READS_FILE = join36(TERMINALHIRE_DIR20, "chat-reads.json");
-    INDEX_CACHE_FILE6 = join36(TERMINALHIRE_DIR20, "index-cache.json");
+    TERMINALHIRE_DIR20 = process.env.TERMINALHIRE_DIR || join37(homedir27(), ".terminalhire");
+    READS_FILE = join37(TERMINALHIRE_DIR20, "chat-reads.json");
+    INDEX_CACHE_FILE6 = join37(TERMINALHIRE_DIR20, "index-cache.json");
     REACHABLE_DISPLAY = { shareActivity: false, optin: false, lastSeen: null };
   }
 });
@@ -37761,7 +37990,7 @@ var jpi_inbox_exports = {};
 __export(jpi_inbox_exports, {
   defaultDecideIntro: () => defaultDecideIntro,
   formatInbox: () => formatInbox,
-  run: () => run13,
+  run: () => run14,
   runInboxPane: () => runInboxPane,
   runInboxTui: () => runInboxTui,
   sortConversations: () => sortConversations
@@ -37886,7 +38115,7 @@ async function runInboxPane(opts = {}) {
     clearTimer = (t) => clearInterval(t),
     refreshMs = DEFAULT_REFRESH_MS
   } = opts;
-  return await new Promise((resolve6) => {
+  return await new Promise((resolve7) => {
     let rows = [];
     let inviteCount = 0;
     let selected = 0;
@@ -38154,7 +38383,7 @@ async function runInboxPane(opts = {}) {
     function finish(result) {
       if (cleaned) return;
       cleanup();
-      resolve6(result);
+      resolve7(result);
     }
     function onSignal() {
       finish({ action: "quit" });
@@ -38192,7 +38421,7 @@ async function runInboxPane(opts = {}) {
   Inbox error: ${err instanceof Error ? err.message : String(err)}
 
 `);
-      resolve6({ action: "quit" });
+      resolve7({ action: "quit" });
     }
   });
 }
@@ -38220,7 +38449,7 @@ async function runInboxTui(deps = {}) {
   }
   return { ok: true };
 }
-async function run13(opts = {}) {
+async function run14(opts = {}) {
   const {
     isTTY = process.stdout.isTTY,
     input = process.stdin,
@@ -38282,7 +38511,7 @@ __export(jpi_chat_exports, {
   formatThread: () => formatThread,
   readCachedSessionStale: () => readCachedSessionStale,
   relativeTime: () => relativeTime2,
-  run: () => run14,
+  run: () => run15,
   runBlockCommand: () => runBlockCommand,
   runChatPane: () => runChatPane,
   runNoticePane: () => runNoticePane,
@@ -38290,16 +38519,16 @@ __export(jpi_chat_exports, {
   sanitizeLine: () => sanitizeLine
 });
 import { createInterface as createInterface10 } from "readline";
-import { existsSync as existsSync21, readFileSync as readFileSync30 } from "fs";
+import { existsSync as existsSync22, readFileSync as readFileSync31 } from "fs";
 import { homedir as homedir28 } from "os";
-import { join as join37 } from "path";
+import { join as join38 } from "path";
 function defaultPromptAck({ input = process.stdin, output = process.stdout } = {}) {
   if (!input || input.isTTY !== true) return Promise.resolve(false);
   const rl = createInterface10({ input, output });
-  return new Promise((resolve6) => {
+  return new Promise((resolve7) => {
     rl.question("  Press Enter to acknowledge and continue (Ctrl-C to cancel): ", () => {
       rl.close();
-      resolve6(true);
+      resolve7(true);
     });
   });
 }
@@ -38458,9 +38687,9 @@ function mergeMessages(existing, incoming) {
 }
 function readCachedSessionStale() {
   try {
-    const p = join37(process.env.TERMINALHIRE_DIR || join37(homedir28(), ".terminalhire"), "index-cache.json");
-    if (!existsSync21(p)) return false;
-    const cache = JSON.parse(readFileSync30(p, "utf8"));
+    const p = join38(process.env.TERMINALHIRE_DIR || join38(homedir28(), ".terminalhire"), "index-cache.json");
+    if (!existsSync22(p)) return false;
+    const cache = JSON.parse(readFileSync31(p, "utf8"));
     return cache?.sessionStale === true;
   } catch {
     return false;
@@ -38482,7 +38711,7 @@ function runNoticePane(opts = {}) {
     output = process.stdout,
     signals = process
   } = opts;
-  return new Promise((resolve6) => {
+  return new Promise((resolve7) => {
     let cleaned = false;
     const body = String(message ?? "").replace(/^\n+/, "").replace(/\n+$/, "");
     function render() {
@@ -38521,7 +38750,7 @@ function runNoticePane(opts = {}) {
     function onDismiss() {
       if (cleaned) return;
       cleanup();
-      resolve6();
+      resolve7();
     }
     function onUncaught(err) {
       cleanup();
@@ -38560,7 +38789,7 @@ function runNoticePane(opts = {}) {
   ${err instanceof Error ? err.message : String(err)}
 
 `);
-      resolve6();
+      resolve7();
     }
   });
 }
@@ -38698,7 +38927,7 @@ async function runChatPane(opts = {}) {
     selfShareActivity = readConfig().chatShareActivity === true;
   } catch {
   }
-  return await new Promise((resolve6) => {
+  return await new Promise((resolve7) => {
     let messages = [];
     let inputBuffer = "";
     let presence = null;
@@ -38767,7 +38996,7 @@ async function runChatPane(opts = {}) {
       exitReason = reason;
       cleanup();
       output.write(DEPOSIT_CTA);
-      resolve6({ entered: true, reason });
+      resolve7({ entered: true, reason });
     }
     async function doPoll() {
       if (polling || cleaned) return;
@@ -38808,7 +39037,7 @@ async function runChatPane(opts = {}) {
   ${err.message}
 
 `);
-            resolve6({ entered: true, reason: "session-expired" });
+            resolve7({ entered: true, reason: "session-expired" });
           }
           return;
         }
@@ -38862,7 +39091,7 @@ async function runChatPane(opts = {}) {
   ${err.message}
 
 `);
-              resolve6({ entered: true, reason: "session-expired" });
+              resolve7({ entered: true, reason: "session-expired" });
             }
             return;
           }
@@ -38880,7 +39109,7 @@ async function runChatPane(opts = {}) {
 
 `
           );
-          resolve6({ entered: true, reason: "blocked" });
+          resolve7({ entered: true, reason: "blocked" });
         }
         return;
       }
@@ -38896,7 +39125,7 @@ async function runChatPane(opts = {}) {
   ${err.message}
 
 `);
-            resolve6({ entered: true, reason: "session-expired" });
+            resolve7({ entered: true, reason: "session-expired" });
           }
           return;
         }
@@ -38983,7 +39212,7 @@ async function runChatPane(opts = {}) {
   Chat pane error: ${err instanceof Error ? err.message : String(err)}
 
 `);
-      resolve6({ entered: true, reason: "error" });
+      resolve7({ entered: true, reason: "error" });
     }
   });
 }
@@ -39076,7 +39305,7 @@ async function runShareActivityCommand(opts = {}) {
   }
   return { ok: true, share };
 }
-async function run14() {
+async function run15() {
   const args5 = process.argv.slice(2);
   let login;
   let limit2 = 8;
@@ -39192,7 +39421,7 @@ var init_jpi_chat = __esm({
 // bin/jpi-hub.js
 var jpi_hub_exports = {};
 __export(jpi_hub_exports, {
-  run: () => run15,
+  run: () => run16,
   runHubTui: () => runHubTui
 });
 function stubRows(paneName) {
@@ -39241,7 +39470,7 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
     // tests override with a tiny value to exercise auto-dismiss without a real wait.
     splashMs: _splashMs = DEFAULT_SPLASH_MS
   } = deps;
-  return new Promise((resolve6) => {
+  return new Promise((resolve7) => {
     const level = detectColorLevel(
       typeof process !== "undefined" ? process.env : {},
       output && output.isTTY
@@ -40088,7 +40317,7 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
       } catch {
       }
       runtime.cleanup();
-      resolve6({ ok: true, lastVerb });
+      resolve7({ ok: true, lastVerb });
     }
     runtime.enter();
     splashTimer = setTimeout(() => {
@@ -40117,7 +40346,7 @@ function printStatic(output = process.stdout) {
   out("  Panes: " + PANES.map((p) => sanitizeLine(p)).join(" \xB7 ") + "\n\n");
   out("  Run `terminalhire hub` in an interactive terminal to launch the full-screen hub.\n\n");
 }
-async function run15(opts = {}) {
+async function run16(opts = {}) {
   const {
     isTTY = process.stdout.isTTY,
     input = process.stdin,
@@ -40198,15 +40427,15 @@ __export(mcp_config_exports, {
   writeServerToFile: () => writeServerToFile
 });
 import { homedir as homedir29 } from "os";
-import { join as join38 } from "path";
-import { existsSync as existsSync22, readFileSync as readFileSync31, copyFileSync as copyFileSync2, writeFileSync as writeFileSync24, mkdirSync as mkdirSync6 } from "fs";
+import { join as join39 } from "path";
+import { existsSync as existsSync23, readFileSync as readFileSync32, copyFileSync as copyFileSync2, writeFileSync as writeFileSync24, mkdirSync as mkdirSync6 } from "fs";
 import { dirname as dirname9 } from "path";
 function serverEntry() {
   return { command: SERVER_COMMAND, args: [...SERVER_ARGS] };
 }
 function hostConfigPath(host, home = homedir29()) {
   if (!host || !Array.isArray(host.relPath)) return null;
-  return join38(home, ...host.relPath);
+  return join39(home, ...host.relPath);
 }
 function jsonSnippet(host) {
   const entry = serverEntry();
@@ -40290,8 +40519,8 @@ function mergeServerIntoJson(existingText, serversKey, entry = serverEntry()) {
 `, added: !already };
 }
 function writeServerToFile(configPath, serversKey, entry = serverEntry()) {
-  const fileExists = existsSync22(configPath);
-  const existingText = fileExists ? readFileSync31(configPath, "utf8") : "";
+  const fileExists = existsSync23(configPath);
+  const existingText = fileExists ? readFileSync32(configPath, "utf8") : "";
   const merged = mergeServerIntoJson(existingText, serversKey, entry);
   if (!merged.ok) {
     return { status: "skipped", reason: merged.reason };
@@ -40335,7 +40564,7 @@ async function initMcpStep({
     return;
   }
   const writableHosts = HOSTS.filter((h) => h.writable);
-  const detected = writableHosts.filter((h) => existsSync22(hostConfigPath(h, home)));
+  const detected = writableHosts.filter((h) => existsSync23(hostConfigPath(h, home)));
   if (detected.length === 0) {
     out("");
     out("  No editor/CLI config detected (looked for ~/.cursor/mcp.json, ~/.gemini/settings.json).");
@@ -48665,7 +48894,7 @@ var init_protocol2 = __esm({
               return;
             }
             const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-            await new Promise((resolve6) => setTimeout(resolve6, pollInterval));
+            await new Promise((resolve7) => setTimeout(resolve7, pollInterval));
             options?.signal?.throwIfAborted();
           }
         } catch (error2) {
@@ -48682,7 +48911,7 @@ var init_protocol2 = __esm({
        */
       request(request, resultSchema, options) {
         const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-        return new Promise((resolve6, reject) => {
+        return new Promise((resolve7, reject) => {
           const earlyReject = (error2) => {
             reject(error2);
           };
@@ -48760,7 +48989,7 @@ var init_protocol2 = __esm({
               if (!parseResult.success) {
                 reject(parseResult.error);
               } else {
-                resolve6(parseResult.data);
+                resolve7(parseResult.data);
               }
             } catch (error2) {
               reject(error2);
@@ -49021,12 +49250,12 @@ var init_protocol2 = __esm({
           }
         } catch {
         }
-        return new Promise((resolve6, reject) => {
+        return new Promise((resolve7, reject) => {
           if (signal.aborted) {
             reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
             return;
           }
-          const timeoutId = setTimeout(resolve6, interval);
+          const timeoutId = setTimeout(resolve7, interval);
           signal.addEventListener("abort", () => {
             clearTimeout(timeoutId);
             reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -52053,7 +52282,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve6.call(this, root, ref);
+      let _sch = resolve7.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a4 = root.localRefs) === null || _a4 === void 0 ? void 0 : _a4[ref];
         const { schemaId } = this.opts;
@@ -52080,7 +52309,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve6(root, ref) {
+    function resolve7(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -52711,7 +52940,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve6(baseURI, relativeURI, options) {
+    function resolve7(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse4(baseURI, schemelessOptions), parse4(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -52969,7 +53198,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize: normalize3,
-      resolve: resolve6,
+      resolve: resolve7,
       resolveComponent,
       equal,
       serialize,
@@ -58760,7 +58989,7 @@ var require_compile2 = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve6.call(this, root, ref);
+      let _sch = resolve7.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a4 = root.localRefs) === null || _a4 === void 0 ? void 0 : _a4[ref];
         const { schemaId } = this.opts;
@@ -58787,7 +59016,7 @@ var require_compile2 = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve6(root, ref) {
+    function resolve7(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -62478,12 +62707,12 @@ var init_stdio2 = __esm({
         this.onclose?.();
       }
       send(message) {
-        return new Promise((resolve6) => {
+        return new Promise((resolve7) => {
           const json = serializeMessage(message);
           if (this._stdout.write(json)) {
-            resolve6();
+            resolve7();
           } else {
-            this._stdout.once("drain", resolve6);
+            this._stdout.once("drain", resolve7);
           }
         });
       }
@@ -62502,7 +62731,7 @@ __export(jpi_mcp_exports, {
   contributeResult: () => contributeResult,
   inboxResult: () => inboxResult,
   jobsResult: () => jobsResult,
-  run: () => run16
+  run: () => run17
 });
 function clampLimit(limit2) {
   const n = Number(limit2);
@@ -62812,19 +63041,19 @@ function buildToolResult(name, args5, entry, contributeEnabled, order = {}) {
       return { status: "error", hint: `Unknown tool: ${name}` };
   }
 }
-async function run16() {
+async function run17() {
   const { Server: Server2 } = await Promise.resolve().then(() => (init_server2(), server_exports));
   const { StdioServerTransport: StdioServerTransport2 } = await Promise.resolve().then(() => (init_stdio2(), stdio_exports));
   const { ListToolsRequestSchema: ListToolsRequestSchema2, CallToolRequestSchema: CallToolRequestSchema2 } = await Promise.resolve().then(() => (init_types4(), types_exports));
   let version2 = "0.0.0";
   try {
-    const { readFileSync: readFileSync38, existsSync: existsSync29 } = await import("fs");
-    const { join: join47 } = await import("path");
+    const { readFileSync: readFileSync39, existsSync: existsSync30 } = await import("fs");
+    const { join: join48 } = await import("path");
     const { fileURLToPath: fileURLToPath12 } = await import("url");
     const here = fileURLToPath12(new URL(".", import.meta.url));
-    for (const p of [join47(here, "..", "..", "package.json"), join47(here, "..", "package.json")]) {
-      if (existsSync29(p)) {
-        const pkg = JSON.parse(readFileSync38(p, "utf8"));
+    for (const p of [join48(here, "..", "..", "package.json"), join48(here, "..", "package.json")]) {
+      if (existsSync30(p)) {
+        const pkg = JSON.parse(readFileSync39(p, "utf8"));
         if (pkg.version) {
           version2 = pkg.version;
           break;
@@ -62977,7 +63206,7 @@ __export(jpi_mcp_chat_exports, {
   buildReplyPrompt: () => buildReplyPrompt,
   chargeIfAllowed: () => chargeIfAllowed,
   createRateState: () => createRateState,
-  run: () => run17,
+  run: () => run18,
   runReply: () => runReply
 });
 function createRateState() {
@@ -63089,19 +63318,19 @@ async function runReply(opts = {}) {
   if (sent && sent.ok) return { status: "sent", messagesShown: messages.length };
   return { status: "error", messagesShown: messages.length };
 }
-async function run17() {
+async function run18() {
   const { Server: Server2 } = await Promise.resolve().then(() => (init_server2(), server_exports));
   const { StdioServerTransport: StdioServerTransport2 } = await Promise.resolve().then(() => (init_stdio2(), stdio_exports));
   const { ListToolsRequestSchema: ListToolsRequestSchema2, CallToolRequestSchema: CallToolRequestSchema2 } = await Promise.resolve().then(() => (init_types4(), types_exports));
   let version2 = "0.0.0";
   try {
-    const { readFileSync: readFileSync38, existsSync: existsSync29 } = await import("fs");
-    const { join: join47 } = await import("path");
+    const { readFileSync: readFileSync39, existsSync: existsSync30 } = await import("fs");
+    const { join: join48 } = await import("path");
     const { fileURLToPath: fileURLToPath12 } = await import("url");
     const here = fileURLToPath12(new URL(".", import.meta.url));
-    for (const p of [join47(here, "..", "..", "package.json"), join47(here, "..", "package.json")]) {
-      if (existsSync29(p)) {
-        const pkg = JSON.parse(readFileSync38(p, "utf8"));
+    for (const p of [join48(here, "..", "..", "package.json"), join48(here, "..", "package.json")]) {
+      if (existsSync30(p)) {
+        const pkg = JSON.parse(readFileSync39(p, "utf8"));
         if (pkg.version) {
           version2 = pkg.version;
           break;
@@ -63171,9 +63400,9 @@ var init_jpi_mcp_chat = __esm({
 // bin/jpi-connect.js
 var jpi_connect_exports = {};
 __export(jpi_connect_exports, {
-  run: () => run18
+  run: () => run19
 });
-async function run18() {
+async function run19() {
   const args5 = process.argv.slice(2).filter((a) => a !== "connect");
   if (args5.includes("--mute")) {
     writeConfig({ inboundNudgeMuted: true });
@@ -63402,9 +63631,9 @@ var init_link = __esm({
 // bin/jpi-link.js
 var jpi_link_exports = {};
 __export(jpi_link_exports, {
-  run: () => run19
+  run: () => run20
 });
-async function run19() {
+async function run20() {
   try {
     const args5 = process.argv.slice(2);
     if (args5.includes("--logout")) {
@@ -63431,7 +63660,7 @@ var init_jpi_link = __esm({
 // bin/jpi-protocol.js
 var jpi_protocol_exports = {};
 __export(jpi_protocol_exports, {
-  run: () => run20
+  run: () => run21
 });
 function printUsage() {
   console.log("");
@@ -63442,7 +63671,7 @@ function printUsage() {
   console.log("  status       Show whether claim links are currently registered");
   console.log("");
 }
-async function run20() {
+async function run21() {
   const args5 = process.argv.slice(2);
   const verb = args5[0];
   if (verb === "--help" || verb === "-h") {
@@ -63490,19 +63719,19 @@ var init_jpi_protocol = __esm({
 // bin/jpi-profile.js
 var jpi_profile_exports = {};
 __export(jpi_profile_exports, {
-  run: () => run21
+  run: () => run22
 });
 import { createInterface as createInterface11 } from "readline";
 function prompt4(question) {
   const rl = createInterface11({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve6) => {
+  return new Promise((resolve7) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve6(answer.trim());
+      resolve7(answer.trim());
     });
   });
 }
-async function run21() {
+async function run22() {
   const { readProfile: readProfile2, writeProfile: writeProfile2, deleteProfile: deleteProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
   const args5 = process.argv.slice(2);
   if (args5.includes("--show")) {
@@ -63575,9 +63804,9 @@ var signal_exports = {};
 __export(signal_exports, {
   extractFingerprint: () => extractFingerprint
 });
-import { readFileSync as readFileSync32, readdirSync as readdirSync4 } from "fs";
+import { readFileSync as readFileSync33, readdirSync as readdirSync4 } from "fs";
 import { execFileSync } from "child_process";
-import { join as join39 } from "path";
+import { join as join40 } from "path";
 function safeGit(args5, cwd) {
   try {
     return execFileSync("git", ["-C", cwd, ...args5], {
@@ -63605,20 +63834,20 @@ function isEmployerContext(cwd) {
 }
 function readJsonSafe(path6) {
   try {
-    return JSON.parse(readFileSync32(path6, "utf8"));
+    return JSON.parse(readFileSync33(path6, "utf8"));
   } catch {
     return null;
   }
 }
 function readFileSafe(path6) {
   try {
-    return readFileSync32(path6, "utf8");
+    return readFileSync33(path6, "utf8");
   } catch {
     return "";
   }
 }
 function tokensFromPackageJson(cwd) {
-  const pkg = readJsonSafe(join39(cwd, "package.json"));
+  const pkg = readJsonSafe(join40(cwd, "package.json"));
   if (!pkg || typeof pkg !== "object") return [];
   const p = pkg;
   const deps = {
@@ -63632,9 +63861,9 @@ function workspaceMemberDirs(cwd) {
   const dirs = [cwd];
   for (const group of ["apps", "packages"]) {
     try {
-      const groupDir = join39(cwd, group);
+      const groupDir = join40(cwd, group);
       for (const e of readdirSync4(groupDir, { withFileTypes: true })) {
-        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join39(groupDir, e.name));
+        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join40(groupDir, e.name));
       }
     } catch {
     }
@@ -63642,18 +63871,18 @@ function workspaceMemberDirs(cwd) {
   return dirs;
 }
 function tokensFromRequirementsTxt(cwd) {
-  const content = readFileSafe(join39(cwd, "requirements.txt"));
+  const content = readFileSafe(join40(cwd, "requirements.txt"));
   if (!content) return [];
   return content.split("\n").map((l) => l.trim().split(/[>=<!\[;]/)[0].trim().toLowerCase()).filter(Boolean);
 }
 function tokensFromGoMod(cwd) {
-  const content = readFileSafe(join39(cwd, "go.mod"));
+  const content = readFileSafe(join40(cwd, "go.mod"));
   if (!content) return [];
   const requires = Array.from(content.matchAll(/^\s+([^\s]+)\s+v/gm)).map((m) => m[1].split("/").pop() ?? "").filter(Boolean);
   return ["go", ...requires];
 }
 function tokensFromCargoToml(cwd) {
-  const content = readFileSafe(join39(cwd, "Cargo.toml"));
+  const content = readFileSafe(join40(cwd, "Cargo.toml"));
   if (!content) return [];
   const deps = [];
   let inDeps = false;
@@ -63674,7 +63903,7 @@ function tokensFromFileExtensions(cwd) {
   const tokens = [];
   const scanDirs = [cwd];
   try {
-    const srcDir = join39(cwd, "src");
+    const srcDir = join40(cwd, "src");
     readdirSync4(srcDir);
     scanDirs.push(srcDir);
   } catch {
@@ -63835,9 +64064,9 @@ var init_signal = __esm({
 // bin/jpi-learn.js
 var jpi_learn_exports = {};
 __export(jpi_learn_exports, {
-  run: () => run22
+  run: () => run23
 });
-async function run22() {
+async function run23() {
   try {
     const args5 = process.argv.slice(2);
     const cwdIdx = args5.indexOf("--cwd");
@@ -63864,7 +64093,7 @@ var init_jpi_learn = __esm({
     "use strict";
     isMain = process.argv[1]?.endsWith("jpi-learn.js") || process.argv[1]?.endsWith("jpi-learn");
     if (isMain) {
-      run22();
+      run23();
     }
   }
 });
@@ -63872,9 +64101,9 @@ var init_jpi_learn = __esm({
 // bin/jpi-config.js
 var jpi_config_exports = {};
 __export(jpi_config_exports, {
-  run: () => run23
+  run: () => run24
 });
-import { join as join40 } from "path";
+import { join as join41 } from "path";
 import { homedir as homedir30 } from "os";
 function parseNudgeMode2(raw) {
   if (raw === "session" || raw === "always") return raw;
@@ -63888,7 +64117,7 @@ function printMixValues() {
   console.log("    balanced   \u2014 rebalanced default (contribute 8, roles ~12)");
   console.log("    credential \u2014 contribution-forward (contribute 12, roles ~8)");
 }
-async function run23() {
+async function run24() {
   const args5 = process.argv.slice(2);
   const filtered = args5[0] === "config" ? args5.slice(1) : args5;
   if (filtered[0] === "get" && filtered[1] === "mix") {
@@ -64019,34 +64248,34 @@ var init_jpi_config = __esm({
   "bin/jpi-config.js"() {
     "use strict";
     init_config();
-    TERMINALHIRE_DIR21 = process.env.TERMINALHIRE_DIR || join40(homedir30(), ".terminalhire");
-    CONFIG_FILE2 = join40(TERMINALHIRE_DIR21, "config.json");
+    TERMINALHIRE_DIR21 = process.env.TERMINALHIRE_DIR || join41(homedir30(), ".terminalhire");
+    CONFIG_FILE2 = join41(TERMINALHIRE_DIR21, "config.json");
   }
 });
 
 // bin/jpi-spinner.js
 var jpi_spinner_exports = {};
 __export(jpi_spinner_exports, {
-  run: () => run24
+  run: () => run25
 });
-import { readFileSync as readFileSync33, writeFileSync as writeFileSync25, copyFileSync as copyFileSync3, existsSync as existsSync23 } from "fs";
-import { join as join41 } from "path";
+import { readFileSync as readFileSync34, writeFileSync as writeFileSync25, copyFileSync as copyFileSync3, existsSync as existsSync24 } from "fs";
+import { join as join42 } from "path";
 import { homedir as homedir31 } from "os";
 import { createInterface as createInterface12 } from "readline";
-function readConfig2() {
+function readConfig3() {
   try {
-    return existsSync23(CONFIG_FILE3) ? JSON.parse(readFileSync33(CONFIG_FILE3, "utf8")) : {};
+    return existsSync24(CONFIG_FILE3) ? JSON.parse(readFileSync34(CONFIG_FILE3, "utf8")) : {};
   } catch {
     return {};
   }
 }
 function writeConfig2(patch) {
   ensureStateDir(TH_DIR);
-  const merged = { ...readConfig2(), ...patch };
+  const merged = { ...readConfig3(), ...patch };
   writeFileSync25(CONFIG_FILE3, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function backupSettings() {
-  if (!existsSync23(SETTINGS_PATH)) return null;
+  if (!existsSync24(SETTINGS_PATH)) return null;
   const ts = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
   const backupPath = `${SETTINGS_PATH}.terminalhire-backup-${ts}`;
   copyFileSync3(SETTINGS_PATH, backupPath);
@@ -64063,7 +64292,7 @@ function ask3(question) {
 }
 function readTopMatches() {
   try {
-    const c = JSON.parse(readFileSync33(CACHE_FILE2, "utf8"));
+    const c = JSON.parse(readFileSync34(CACHE_FILE2, "utf8"));
     return Array.isArray(c.topMatches) ? c.topMatches : [];
   } catch {
     return [];
@@ -64076,7 +64305,7 @@ function attempt(fn) {
     return { skipped: true, reason: err && err.code || "write-failed", keptUserVerbs: 0 };
   }
 }
-async function run24() {
+async function run25() {
   const args5 = process.argv.slice(2).filter((a) => a !== "spinner");
   const has2 = (f) => args5.includes(f);
   const val = (f) => {
@@ -64277,20 +64506,20 @@ var init_jpi_spinner = __esm({
     "use strict";
     init_spinner();
     init_state_dir();
-    TH_DIR = process.env["TERMINALHIRE_DIR"] || join41(homedir31(), ".terminalhire");
-    CONFIG_FILE3 = join41(TH_DIR, "config.json");
-    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join41(homedir31(), ".claude", "settings.json");
-    CACHE_FILE2 = join41(TH_DIR, "index-cache.json");
+    TH_DIR = process.env["TERMINALHIRE_DIR"] || join42(homedir31(), ".terminalhire");
+    CONFIG_FILE3 = join42(TH_DIR, "config.json");
+    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join42(homedir31(), ".claude", "settings.json");
+    CACHE_FILE2 = join42(TH_DIR, "index-cache.json");
   }
 });
 
 // bin/jpi-sync.js
 var jpi_sync_exports = {};
 __export(jpi_sync_exports, {
-  run: () => run25
+  run: () => run26
 });
-import { readFileSync as readFileSync34, writeFileSync as writeFileSync26, existsSync as existsSync24, rmSync as rmSync10 } from "fs";
-import { join as join42 } from "path";
+import { readFileSync as readFileSync35, writeFileSync as writeFileSync26, existsSync as existsSync25, rmSync as rmSync11 } from "fs";
+import { join as join43 } from "path";
 import { homedir as homedir32, hostname as osHostname2 } from "os";
 import { createInterface as createInterface13 } from "readline";
 function ask4(question) {
@@ -64304,7 +64533,7 @@ function ask4(question) {
 }
 function readMarker() {
   try {
-    return existsSync24(TIER1_MARKER) ? JSON.parse(readFileSync34(TIER1_MARKER, "utf8")) : null;
+    return existsSync25(TIER1_MARKER) ? JSON.parse(readFileSync35(TIER1_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
@@ -64315,7 +64544,7 @@ function writeMarker(marker) {
 }
 function clearMarker() {
   try {
-    rmSync10(TIER1_MARKER);
+    rmSync11(TIER1_MARKER);
   } catch {
   }
 }
@@ -64376,13 +64605,13 @@ async function runPush() {
   }
   const fields = buildConsentFields(profile);
   renderPreview(fields);
-  await new Promise((resolve6) => {
+  await new Promise((resolve7) => {
     const rl = createInterface13({ input: process.stdin, output: process.stdout });
     rl.question(
       "  Press Enter to open your browser to authorize + consent (or Ctrl-C to cancel)... ",
       () => {
         rl.close();
-        resolve6();
+        resolve7();
       }
     );
   });
@@ -64605,7 +64834,7 @@ async function runDelete() {
   clearMarker();
   console.log("\n  Synced profile deleted and local marker cleared.\n");
 }
-async function run25() {
+async function run26() {
   const args5 = process.argv.slice(2).filter((a) => a !== "sync");
   const has2 = (f) => args5.includes(f);
   if (has2("--push") || has2("--enable")) {
@@ -64639,8 +64868,8 @@ var init_jpi_sync = __esm({
     "use strict";
     init_open_url();
     init_state_dir();
-    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join42(homedir32(), ".terminalhire");
-    TIER1_MARKER = join42(TH_DIR2, "tier1.json");
+    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join43(homedir32(), ".terminalhire");
+    TIER1_MARKER = join43(TH_DIR2, "tier1.json");
     API_URL8 = process.env["TERMINALHIRE_API_URL"] || process.env["JPI_API_URL"] || "https://terminalhire.com";
     SYNC_BASE = "https://terminalhire.com";
     POLL_INTERVAL_MS = 2e3;
@@ -64652,50 +64881,50 @@ var init_jpi_sync = __esm({
 // bin/jpi-init.js
 var jpi_init_exports = {};
 __export(jpi_init_exports, {
-  run: () => run26
+  run: () => run27
 });
-import { existsSync as existsSync25 } from "fs";
-import { join as join43, resolve as resolve5 } from "path";
+import { existsSync as existsSync26 } from "fs";
+import { join as join44, resolve as resolve6 } from "path";
 import { fileURLToPath as fileURLToPath7, pathToFileURL } from "url";
 import { createInterface as createInterface14 } from "readline";
 import { spawnSync as spawnSync4 } from "child_process";
 function resolveScript(name) {
-  const distPath = resolve5(join43(__dirname4, "..", "..", "dist", "bin", `${name}.js`));
-  const legacyPath = resolve5(join43(__dirname4, `${name}.js`));
-  return existsSync25(distPath) ? distPath : legacyPath;
+  const distPath = resolve6(join44(__dirname4, "..", "..", "dist", "bin", `${name}.js`));
+  const legacyPath = resolve6(join44(__dirname4, `${name}.js`));
+  return existsSync26(distPath) ? distPath : legacyPath;
 }
 function resolveSrc(name) {
-  const distPath = resolve5(join43(__dirname4, "..", "..", "dist", "src", `${name}.js`));
-  const legacyPath = resolve5(join43(__dirname4, "..", "src", `${name}.js`));
-  return existsSync25(distPath) ? distPath : legacyPath;
+  const distPath = resolve6(join44(__dirname4, "..", "..", "dist", "src", `${name}.js`));
+  const legacyPath = resolve6(join44(__dirname4, "..", "src", `${name}.js`));
+  return existsSync26(distPath) ? distPath : legacyPath;
 }
 function resolveInstallJs() {
-  const fromDist = resolve5(join43(__dirname4, "..", "..", "install.js"));
-  const fromBin = resolve5(join43(__dirname4, "..", "install.js"));
-  if (existsSync25(fromDist)) return fromDist;
-  if (existsSync25(fromBin)) return fromBin;
+  const fromDist = resolve6(join44(__dirname4, "..", "..", "install.js"));
+  const fromBin = resolve6(join44(__dirname4, "..", "install.js"));
+  if (existsSync26(fromDist)) return fromDist;
+  if (existsSync26(fromBin)) return fromBin;
   return fromBin;
 }
 function resolveStatuslineInstallJs() {
-  const fromDist = resolve5(join43(__dirname4, "..", "..", "statusline-install.js"));
-  const fromBin = resolve5(join43(__dirname4, "..", "statusline-install.js"));
-  if (existsSync25(fromDist)) return fromDist;
-  if (existsSync25(fromBin)) return fromBin;
+  const fromDist = resolve6(join44(__dirname4, "..", "..", "statusline-install.js"));
+  const fromBin = resolve6(join44(__dirname4, "..", "statusline-install.js"));
+  if (existsSync26(fromDist)) return fromDist;
+  if (existsSync26(fromBin)) return fromBin;
   return fromBin;
 }
 function tokenizeInterest(raw) {
   return raw.split(/[,/]|\s+/).map((t) => t.trim()).filter(Boolean);
 }
-async function run26() {
+async function run27() {
   const rl = createInterface14({ input: process.stdin, output: process.stdout });
-  const ask5 = (question) => new Promise((resolve6) => {
+  const ask5 = (question) => new Promise((resolve7) => {
     let answered = false;
     rl.question(question, (answer) => {
       answered = true;
-      resolve6((answer || "").trim().toLowerCase());
+      resolve7((answer || "").trim().toLowerCase());
     });
     rl.once("close", () => {
-      if (!answered) resolve6(null);
+      if (!answered) resolve7(null);
     });
   });
   console.log("");
@@ -65051,11 +65280,11 @@ var init_beta_nudge = __esm({
 // bin/jpi-refresh.js
 var jpi_refresh_exports = {};
 __export(jpi_refresh_exports, {
-  run: () => run27
+  run: () => run28
 });
 import { fileURLToPath as fileURLToPath8 } from "url";
 import { hostname, homedir as osHomedir } from "os";
-async function run27() {
+async function run28() {
   try {
     let index;
     let indexETag;
@@ -65524,16 +65753,16 @@ var init_jpi_refresh = __esm({
 // bin/jpi-save.js
 var jpi_save_exports = {};
 __export(jpi_save_exports, {
-  run: () => run28
+  run: () => run29
 });
-import { readFileSync as readFileSync35, existsSync as existsSync26 } from "fs";
-import { join as join44 } from "path";
+import { readFileSync as readFileSync36, existsSync as existsSync27 } from "fs";
+import { join as join45 } from "path";
 import { homedir as homedir33 } from "os";
 import { fileURLToPath as fileURLToPath9 } from "url";
 function findJobInCache(jobId) {
   try {
-    if (!existsSync26(INDEX_CACHE_FILE7)) return null;
-    const raw = readFileSync35(INDEX_CACHE_FILE7, "utf8");
+    if (!existsSync27(INDEX_CACHE_FILE7)) return null;
+    const raw = readFileSync36(INDEX_CACHE_FILE7, "utf8");
     const entry = JSON.parse(raw);
     const jobs = entry?.index?.jobs ?? [];
     return jobs.find((j) => j.id === jobId) ?? null;
@@ -65602,7 +65831,7 @@ async function cmdUnsave(jobId) {
     process.exit(1);
   }
 }
-async function run28() {
+async function run29() {
   const verb = process.argv[2];
   const jobId = process.argv[3];
   try {
@@ -65626,25 +65855,25 @@ var init_jpi_save = __esm({
   "bin/jpi-save.js"() {
     "use strict";
     __dirname6 = fileURLToPath9(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR22 = process.env.TERMINALHIRE_DIR || join44(homedir33(), ".terminalhire");
-    INDEX_CACHE_FILE7 = join44(TERMINALHIRE_DIR22, "index-cache.json");
+    TERMINALHIRE_DIR22 = process.env.TERMINALHIRE_DIR || join45(homedir33(), ".terminalhire");
+    INDEX_CACHE_FILE7 = join45(TERMINALHIRE_DIR22, "index-cache.json");
   }
 });
 
 // bin/jpi-beta.js
 var jpi_beta_exports = {};
 __export(jpi_beta_exports, {
-  run: () => run29
+  run: () => run30
 });
 import { createInterface as createInterface15 } from "readline";
-async function run29() {
+async function run30() {
   const rl = createInterface15({ input: process.stdin, output: process.stdout });
-  const ask5 = (question) => new Promise((resolve6) => {
-    const onClose = () => resolve6(null);
+  const ask5 = (question) => new Promise((resolve7) => {
+    const onClose = () => resolve7(null);
     rl.once("close", onClose);
     rl.question(question, (answer) => {
       rl.removeListener("close", onClose);
-      resolve6((answer || "").trim());
+      resolve7((answer || "").trim());
     });
   });
   const alreadyActed = readConfig().betaOptIn === true;
@@ -65677,8 +65906,8 @@ async function run29() {
     console.log("      rough edges you find.");
     console.log("    \u2022 A spot on the founding-contributors wall.");
     console.log("");
-    const join47 = await ask5('  Type "yes" to join the beta as a Founding Contributor (anything else cancels): ');
-    if ((join47 || "").toLowerCase() !== "yes") {
+    const join48 = await ask5('  Type "yes" to join the beta as a Founding Contributor (anything else cancels): ');
+    if ((join48 || "").toLowerCase() !== "yes") {
       console.log("\n  No problem \u2014 nothing was sent. Run `terminalhire beta` any time.\n");
       rl.close();
       return;
@@ -65758,17 +65987,17 @@ var init_jpi_beta = __esm({
 // bin/jpi-feedback.js
 var jpi_feedback_exports = {};
 __export(jpi_feedback_exports, {
-  run: () => run30
+  run: () => run31
 });
 import { createInterface as createInterface16 } from "readline";
-import { readFileSync as readFileSync36, existsSync as existsSync27 } from "fs";
-import { join as join45 } from "path";
+import { readFileSync as readFileSync37, existsSync as existsSync28 } from "fs";
+import { join as join46 } from "path";
 import { fileURLToPath as fileURLToPath10 } from "url";
 function readLocalVersion3() {
   try {
-    for (const p of [join45(__dirname7, "..", "..", "package.json"), join45(__dirname7, "..", "package.json")]) {
-      if (existsSync27(p)) {
-        const pkg = JSON.parse(readFileSync36(p, "utf8"));
+    for (const p of [join46(__dirname7, "..", "..", "package.json"), join46(__dirname7, "..", "package.json")]) {
+      if (existsSync28(p)) {
+        const pkg = JSON.parse(readFileSync37(p, "utf8"));
         if (pkg.version) return pkg.version;
       }
     }
@@ -65776,14 +66005,14 @@ function readLocalVersion3() {
   }
   return null;
 }
-async function run30() {
+async function run31() {
   const rl = createInterface16({ input: process.stdin, output: process.stdout });
-  const ask5 = (question) => new Promise((resolve6) => {
-    const onClose = () => resolve6(null);
+  const ask5 = (question) => new Promise((resolve7) => {
+    const onClose = () => resolve7(null);
     rl.once("close", onClose);
     rl.question(question, (answer) => {
       rl.removeListener("close", onClose);
-      resolve6((answer || "").trim());
+      resolve7((answer || "").trim());
     });
   });
   const lastFull = readConfig().lastFullFeedbackAt;
@@ -65903,8 +66132,8 @@ var init_jpi_feedback = __esm({
 
 // bin/jpi-dispatch.js
 import { fileURLToPath as fileURLToPath11 } from "url";
-import { join as join46 } from "path";
-import { existsSync as existsSync28, readFileSync as readFileSync37 } from "fs";
+import { join as join47 } from "path";
+import { existsSync as existsSync29, readFileSync as readFileSync38 } from "fs";
 var __dirname8 = fileURLToPath11(new URL(".", import.meta.url));
 function isVerbose() {
   return Boolean(
@@ -65937,12 +66166,12 @@ process.on("unhandledRejection", reportFatal);
 function readPackageVersion() {
   try {
     const candidates = [
-      join46(__dirname8, "..", "..", "package.json"),
-      join46(__dirname8, "..", "package.json")
+      join47(__dirname8, "..", "..", "package.json"),
+      join47(__dirname8, "..", "package.json")
     ];
     for (const p of candidates) {
-      if (existsSync28(p)) {
-        const pkg = JSON.parse(readFileSync37(p, "utf8"));
+      if (existsSync29(p)) {
+        const pkg = JSON.parse(readFileSync38(p, "utf8"));
         if (pkg.version) return pkg.version;
       }
     }
@@ -65987,6 +66216,8 @@ var SUBCOMMANDS = [
   "upgrade",
   "beta",
   "feedback",
+  // TERM-350 phase 4 — verify the working diff in a fresh ephemeral container.
+  "run",
   "help",
   "--help",
   "-h",
@@ -65996,7 +66227,7 @@ var SUBCOMMANDS = [
 var firstArg = process.argv[2];
 if (!firstArg && !process.stdin.isTTY) {
   const { default: childProcess } = await import("child_process");
-  const nudgeScript = join46(__dirname8, "jpi.js");
+  const nudgeScript = join47(__dirname8, "jpi.js");
   const child = childProcess.spawnSync(process.execPath, [nudgeScript], {
     stdio: ["inherit", "inherit", "inherit"]
   });
@@ -66006,8 +66237,8 @@ if (firstArg && SUBCOMMANDS.includes(firstArg) && process.stdin.isTTY) {
   try {
     const { readWebSessionFile: readWebSessionFile2 } = await Promise.resolve().then(() => (init_web_session(), web_session_exports));
     if (readWebSessionFile2()) {
-      const { readConfig: readConfig3, writeConfig: writeConfig3, isInboundNudgeMuted: isInboundNudgeMuted2 } = await Promise.resolve().then(() => (init_config(), config_exports));
-      if (!readConfig3().inboundNudgeDisclosed && !isInboundNudgeMuted2()) {
+      const { readConfig: readConfig4, writeConfig: writeConfig3, isInboundNudgeMuted: isInboundNudgeMuted2 } = await Promise.resolve().then(() => (init_config(), config_exports));
+      if (!readConfig4().inboundNudgeDisclosed && !isInboundNudgeMuted2()) {
         process.stderr.write(
           "\n  Heads up: terminalhire now surfaces incoming connection requests in your spinner.\n  Turn it off any time with `terminalhire connect --mute`.\n\n"
         );
@@ -66317,6 +66548,11 @@ if (firstArg === "repo") {
   await mod2.run();
   process.exit(0);
 }
+if (firstArg === "run") {
+  const mod2 = await Promise.resolve().then(() => (init_jpi_run(), jpi_run_exports));
+  const code = await mod2.run();
+  process.exit(code ?? 0);
+}
 if (firstArg === "update" || firstArg === "upgrade") {
   const mod2 = await Promise.resolve().then(() => (init_jpi_update(), jpi_update_exports));
   const code = await mod2.run(process.argv.slice(3));
@@ -66496,9 +66732,9 @@ if (firstArg === "statusline") {
     console.error("Usage: terminalhire statusline --on | --off");
     process.exit(1);
   }
-  const fromDist = join46(__dirname8, "..", "..", "statusline-install.js");
-  const fromBin = join46(__dirname8, "..", "statusline-install.js");
-  const installer = existsSync28(fromDist) ? fromDist : fromBin;
+  const fromDist = join47(__dirname8, "..", "..", "statusline-install.js");
+  const fromBin = join47(__dirname8, "..", "statusline-install.js");
+  const installer = existsSync29(fromDist) ? fromDist : fromBin;
   const { spawnSync: spawnSync5 } = await import("child_process");
   const child = spawnSync5(process.execPath, uninstall ? [installer, "--uninstall"] : [installer], {
     stdio: ["inherit", "inherit", "inherit"],
