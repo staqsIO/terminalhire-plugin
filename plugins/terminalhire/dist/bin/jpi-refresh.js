@@ -12236,19 +12236,6 @@ var init_spinner_verbs = __esm({
   }
 });
 
-// bin/sanitize.js
-function formatUsd(a) {
-  if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
-  if (typeof a !== "string" || a.trim() === "") return "$\u2014";
-  const n = Number(a);
-  return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
-}
-var init_sanitize = __esm({
-  "bin/sanitize.js"() {
-    "use strict";
-  }
-});
-
 // bin/spinner-render.js
 function interleaveBySource(topMatches) {
   if (!Array.isArray(topMatches) || topMatches.length === 0) return topMatches;
@@ -12330,7 +12317,7 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
       const token = jobShortToken(String(m.id));
       const url = `${base}/j/${token}`;
       if (source === "bounty") {
-        const money = formatUsd(m.amountUSD);
+        const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
         const repo = m.repo || companyRaw;
         out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct}% \u2014 ${url}`);
       } else if (source === "contribute") {
@@ -12400,7 +12387,6 @@ var init_spinner_render = __esm({
     init_spinner_verbs();
     init_spinner_seen();
     init_spinner_io();
-    init_sanitize();
     init_src();
   }
 });
@@ -12577,7 +12563,7 @@ function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function defangText(s) {
-  return typeof s === "string" ? s.replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "") : s;
+  return typeof s === "string" ? s.replace(CONTROL_CHARS, "") : s;
 }
 function finiteAmount(a) {
   if (typeof a === "number") return Number.isFinite(a) ? a : null;
@@ -12715,7 +12701,7 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR8, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS2, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, WHITESPACE_CONTROLS, CONTROL_CHARS;
+var TERMINALHIRE_DIR8, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS2, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, CONTROL_CHARS;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
@@ -12771,7 +12757,6 @@ var init_claims = __esm({
       ]),
       submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
     };
-    WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
     CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
   }
 });
@@ -13101,6 +13086,83 @@ function acknowledgeApprovedClaim(claimId, previous) {
 var init_approved_claims_badge = __esm({
   "bin/approved-claims-badge.js"() {
     "use strict";
+  }
+});
+
+// bin/founder-note-sync.js
+var founder_note_sync_exports = {};
+__export(founder_note_sync_exports, {
+  acknowledgeFounderNotes: () => acknowledgeFounderNotes,
+  computeFounderNotes: () => computeFounderNotes,
+  fetchFounderNotes: () => fetchFounderNotes,
+  formatNote: () => formatNote,
+  noteKey: () => noteKey,
+  syncFounderNotes: () => syncFounderNotes
+});
+async function fetchFounderNotes(pushToken, fetchImpl = fetch) {
+  if (typeof pushToken !== "string" || pushToken.length === 0) return null;
+  try {
+    const res = await fetchImpl(`${CLAIM_SYNC_BASE3}/api/claim/notes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pushToken }),
+      signal: AbortSignal.timeout(15e3)
+    });
+    if (!res?.ok) return null;
+    const body = await res.json();
+    if (!body || !Array.isArray(body.notes)) return null;
+    const notes = body.notes.filter(
+      (n) => n && typeof n.claimId === "string" && n.claimId !== "" && typeof n.note === "string" && n.note !== "" && typeof n.at === "string" && (n.kind === "founder_note" || n.kind === "feedback")
+    );
+    return { notes, latestAt: typeof body.latestAt === "string" ? body.latestAt : null };
+  } catch {
+    return null;
+  }
+}
+function noteKey(note) {
+  return `${note.claimId}@${note.at}`;
+}
+function computeFounderNotes(notes, previous) {
+  const keys = Array.isArray(notes) ? notes.map(noteKey) : [];
+  const prior = previous && Array.isArray(previous.seen) ? new Set(previous.seen) : /* @__PURE__ */ new Set();
+  const seen = keys.filter((k) => prior.has(k));
+  return { count: keys.length - seen.length, seen };
+}
+function acknowledgeFounderNotes(notes) {
+  const keys = Array.isArray(notes) ? notes.map(noteKey) : [];
+  return { count: 0, seen: keys };
+}
+async function syncFounderNotes({
+  readAutoMarker: readAutoMarker2,
+  readPushTokenEnc: readPushTokenEnc2,
+  readPrevious,
+  fetchImpl = fetch,
+  timeoutMs = 15e3
+} = {}) {
+  try {
+    const marker = readAutoMarker2();
+    const token = await readPushTokenEnc2();
+    if (!marker || !token) return null;
+    const answer = await fetchFounderNotes(
+      token,
+      (url, init) => fetchImpl(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+    );
+    if (!answer) return null;
+    return computeFounderNotes(answer.notes, readPrevious());
+  } catch {
+    return null;
+  }
+}
+function formatNote(note) {
+  const label = note.kind === "feedback" ? "changes requested" : "note";
+  return `  ${note.at.slice(0, 16).replace("T", " ")}  [${label}]  ${note.claimId}
+    ${note.note.split("\n").join("\n    ")}`;
+}
+var CLAIM_SYNC_BASE3;
+var init_founder_note_sync = __esm({
+  "bin/founder-note-sync.js"() {
+    "use strict";
+    CLAIM_SYNC_BASE3 = "https://terminalhire.com";
   }
 });
 
@@ -13898,6 +13960,18 @@ async function run() {
       });
     } catch {
     }
+    let founderNotes;
+    try {
+      const { syncFounderNotes: syncFounderNotes2 } = await Promise.resolve().then(() => (init_founder_note_sync(), founder_note_sync_exports));
+      const { readAutoMarker: readAutoMarker2, readPushTokenEnc: readPushTokenEnc2 } = await Promise.resolve().then(() => (init_claim_push_bg(), claim_push_bg_exports));
+      const { readCacheEntry: readCacheEntry2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
+      founderNotes = await syncFounderNotes2({
+        readAutoMarker: readAutoMarker2,
+        readPushTokenEnc: readPushTokenEnc2,
+        readPrevious: () => (readCacheEntry2() ?? {}).founderNotes
+      });
+    } catch {
+    }
     const previousCache = readCacheEntry() ?? {};
     const effectiveFounderSurface = founderSurface ?? previousCache.founderSurface;
     let surfaceLead = "dev";
@@ -13919,6 +13993,7 @@ async function run() {
     };
     if (founderPaid) cacheEntry.founderPaid = founderPaid;
     if (approvedClaims) cacheEntry.approvedClaims = approvedClaims;
+    if (founderNotes) cacheEntry.founderNotes = founderNotes;
     if (founderSurface) cacheEntry.founderSurface = founderSurface;
     cacheEntry.indexETag = indexETag ?? "";
     if (pulseLatestPostedAt) {

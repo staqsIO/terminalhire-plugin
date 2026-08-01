@@ -1,15 +1,8 @@
 // bin/sanitize.js
-var WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
 var CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
 function sanitizeText(s) {
   if (s == null) return "";
-  return String(s).replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "");
-}
-function formatUsd(a) {
-  if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
-  if (typeof a !== "string" || a.trim() === "") return "$\u2014";
-  const n = Number(a);
-  return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
+  return String(s).replace(CONTROL_CHARS, "");
 }
 function safeHttpUrl(url) {
   if (url == null) return null;
@@ -36,7 +29,6 @@ function linkTitle(title, url) {
   return href ? `${safeTitle} (${href})` : safeTitle;
 }
 export {
-  formatUsd,
   linkTitle,
   safeHttpUrl,
   sanitizeText

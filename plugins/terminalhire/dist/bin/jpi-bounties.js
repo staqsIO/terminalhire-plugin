@@ -11339,7 +11339,7 @@ function nowISO2() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function defangText(s) {
-  return typeof s === "string" ? s.replace(WHITESPACE_CONTROLS2, " ").replace(CONTROL_CHARS2, "") : s;
+  return typeof s === "string" ? s.replace(CONTROL_CHARS2, "") : s;
 }
 function finiteAmount(a) {
   if (typeof a === "number") return Number.isFinite(a) ? a : null;
@@ -11477,7 +11477,7 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR5, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, WHITESPACE_CONTROLS2, CONTROL_CHARS2;
+var TERMINALHIRE_DIR5, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, CONTROL_CHARS2;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
@@ -11533,7 +11533,6 @@ var init_claims = __esm({
       ]),
       submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
     };
-    WHITESPACE_CONTROLS2 = /[\t\n\v\f\r]+/g;
     CONTROL_CHARS2 = /[\x00-\x1f\x7f-\x9f]/g;
   }
 });
@@ -11756,17 +11755,10 @@ import { homedir as homedir7 } from "os";
 import { createInterface } from "readline";
 
 // bin/sanitize.js
-var WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
 var CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
 function sanitizeText(s) {
   if (s == null) return "";
-  return String(s).replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "");
-}
-function formatUsd(a) {
-  if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
-  if (typeof a !== "string" || a.trim() === "") return "$\u2014";
-  const n = Number(a);
-  return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
+  return String(s).replace(CONTROL_CHARS, "");
 }
 function safeHttpUrl(url) {
   if (url == null) return null;
@@ -11839,7 +11831,7 @@ function prompt(question) {
   });
 }
 function formatAmount(b) {
-  return formatUsd(b.amountUSD);
+  return b.amountUSD != null ? "$" + b.amountUSD.toLocaleString() : "$\u2014";
 }
 var EFFORT_LABEL = {
   small: "small (~\xBD day)",
@@ -11988,9 +11980,7 @@ async function run() {
           const rows = founderRows2(surface, "bounties");
           console.log("\n\u26A1 Your TerminalHire postings\n");
           if (!rows.length) {
-            console.log(
-              "  No current posting data. Run `terminalhire refresh`, or lead with work:"
-            );
+            console.log("  No current posting data. Run `terminalhire refresh`, or lead with work:");
             console.log("  terminalhire config set lead dev\n");
           } else {
             rows.forEach((row, index) => {
@@ -11999,9 +11989,7 @@ async function run() {
               );
             });
             console.log("\n  Review and act: https://terminalhire.com/dashboard?tab=postings");
-            console.log(
-              "  Lead with developer bounties instead: terminalhire config set lead dev\n"
-            );
+            console.log("  Lead with developer bounties instead: terminalhire config set lead dev\n");
           }
           return;
         }

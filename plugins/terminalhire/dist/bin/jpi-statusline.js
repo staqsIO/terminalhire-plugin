@@ -38,6 +38,10 @@ function approvedClaimsCount(entry) {
   const n = entry && entry.approvedClaims && entry.approvedClaims.count;
   return typeof n === "number" && n > 0 ? n : 0;
 }
+function founderNoteCount(entry) {
+  const n = entry && entry.founderNotes && entry.founderNotes.count;
+  return typeof n === "number" && n > 0 ? n : 0;
+}
 function founderNeedsYouCount(entry) {
   if (!entry || entry.surfaceLead !== "founder") return 0;
   const n = entry.founderSurface && entry.founderSurface.needsYouCount;
@@ -88,11 +92,15 @@ function render() {
     const incoming = incomingCount(entry);
     const paid = founderPaidCount(entry);
     const approved = approvedClaimsCount(entry);
+    const founderNotes = founderNoteCount(entry);
     const founderNeedsYou = founderNeedsYouCount(entry);
     const founderOpen = founderOpenCount(entry);
     const stale = sessionStale(entry) && unread === 0 && incoming === 0;
     const segments = [];
     if (approved > 0) segments.push(`\u2705 ${approved} approved \u2014 run: th claim start`);
+    if (founderNotes > 0) {
+      segments.push(`\u{1F4DD} ${founderNotes} from your founder \u2014 run: th claim notes`);
+    }
     if (founderNeedsYou > 0) {
       segments.push(
         `\u{1F9ED} ${founderNeedsYou} claim${founderNeedsYou === 1 ? "" : "s"} await your decision \u2014 run: th bounties`

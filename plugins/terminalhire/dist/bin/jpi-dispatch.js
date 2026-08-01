@@ -12831,13 +12831,7 @@ var init_cache_store = __esm({
 // bin/sanitize.js
 function sanitizeText(s) {
   if (s == null) return "";
-  return String(s).replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "");
-}
-function formatUsd(a) {
-  if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
-  if (typeof a !== "string" || a.trim() === "") return "$\u2014";
-  const n = Number(a);
-  return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
+  return String(s).replace(CONTROL_CHARS, "");
 }
 function safeHttpUrl(url) {
   if (url == null) return null;
@@ -12863,11 +12857,10 @@ function linkTitle(title, url) {
   }
   return href ? `${safeTitle} (${href})` : safeTitle;
 }
-var WHITESPACE_CONTROLS, CONTROL_CHARS;
+var CONTROL_CHARS;
 var init_sanitize = __esm({
   "bin/sanitize.js"() {
     "use strict";
-    WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
     CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
   }
 });
@@ -13585,7 +13578,7 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
       const token = jobShortToken(String(m.id));
       const url = `${base}/j/${token}`;
       if (source === "bounty") {
-        const money = formatUsd(m.amountUSD);
+        const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
         const repo = m.repo || companyRaw;
         out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct2}% \u2014 ${url}`);
       } else if (source === "contribute") {
@@ -13655,7 +13648,6 @@ var init_spinner_render = __esm({
     init_spinner_verbs();
     init_spinner_seen();
     init_spinner_io();
-    init_sanitize();
     init_src();
   }
 });
@@ -15190,7 +15182,7 @@ function nowISO2() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function defangText(s) {
-  return typeof s === "string" ? s.replace(WHITESPACE_CONTROLS2, " ").replace(CONTROL_CHARS2, "") : s;
+  return typeof s === "string" ? s.replace(CONTROL_CHARS2, "") : s;
 }
 function finiteAmount(a) {
   if (typeof a === "number") return Number.isFinite(a) ? a : null;
@@ -15328,7 +15320,7 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR11, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS2, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, WHITESPACE_CONTROLS2, CONTROL_CHARS2;
+var TERMINALHIRE_DIR11, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS2, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, CONTROL_CHARS2;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
@@ -15384,7 +15376,6 @@ var init_claims = __esm({
       ]),
       submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
     };
-    WHITESPACE_CONTROLS2 = /[\t\n\v\f\r]+/g;
     CONTROL_CHARS2 = /[\x00-\x1f\x7f-\x9f]/g;
   }
 });
@@ -15474,7 +15465,7 @@ function prompt3(question) {
   });
 }
 function formatAmount(b) {
-  return formatUsd(b.amountUSD);
+  return b.amountUSD != null ? "$" + b.amountUSD.toLocaleString() : "$\u2014";
 }
 function printBounty(i, job, score, reason, matchedTags, claimedIds = /* @__PURE__ */ new Set(), continuityNote = null) {
   const b = job.bounty ?? {};
@@ -15618,9 +15609,7 @@ async function run5() {
           const rows = founderRows2(surface, "bounties");
           console.log("\n\u26A1 Your TerminalHire postings\n");
           if (!rows.length) {
-            console.log(
-              "  No current posting data. Run `terminalhire refresh`, or lead with work:"
-            );
+            console.log("  No current posting data. Run `terminalhire refresh`, or lead with work:");
             console.log("  terminalhire config set lead dev\n");
           } else {
             rows.forEach((row, index) => {
@@ -15629,9 +15618,7 @@ async function run5() {
               );
             });
             console.log("\n  Review and act: https://terminalhire.com/dashboard?tab=postings");
-            console.log(
-              "  Lead with developer bounties instead: terminalhire config set lead dev\n"
-            );
+            console.log("  Lead with developer bounties instead: terminalhire config set lead dev\n");
           }
           return;
         }
@@ -16796,6 +16783,83 @@ var init_founder_verdict_sync = __esm({
     "use strict";
     CLAIM_SYNC_BASE2 = "https://terminalhire.com";
     TERMINAL = /* @__PURE__ */ new Set(["merged", "abandoned"]);
+  }
+});
+
+// bin/founder-note-sync.js
+var founder_note_sync_exports = {};
+__export(founder_note_sync_exports, {
+  acknowledgeFounderNotes: () => acknowledgeFounderNotes,
+  computeFounderNotes: () => computeFounderNotes,
+  fetchFounderNotes: () => fetchFounderNotes,
+  formatNote: () => formatNote,
+  noteKey: () => noteKey,
+  syncFounderNotes: () => syncFounderNotes
+});
+async function fetchFounderNotes(pushToken, fetchImpl = fetch) {
+  if (typeof pushToken !== "string" || pushToken.length === 0) return null;
+  try {
+    const res = await fetchImpl(`${CLAIM_SYNC_BASE3}/api/claim/notes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pushToken }),
+      signal: AbortSignal.timeout(15e3)
+    });
+    if (!res?.ok) return null;
+    const body = await res.json();
+    if (!body || !Array.isArray(body.notes)) return null;
+    const notes = body.notes.filter(
+      (n) => n && typeof n.claimId === "string" && n.claimId !== "" && typeof n.note === "string" && n.note !== "" && typeof n.at === "string" && (n.kind === "founder_note" || n.kind === "feedback")
+    );
+    return { notes, latestAt: typeof body.latestAt === "string" ? body.latestAt : null };
+  } catch {
+    return null;
+  }
+}
+function noteKey(note) {
+  return `${note.claimId}@${note.at}`;
+}
+function computeFounderNotes(notes, previous) {
+  const keys = Array.isArray(notes) ? notes.map(noteKey) : [];
+  const prior = previous && Array.isArray(previous.seen) ? new Set(previous.seen) : /* @__PURE__ */ new Set();
+  const seen = keys.filter((k) => prior.has(k));
+  return { count: keys.length - seen.length, seen };
+}
+function acknowledgeFounderNotes(notes) {
+  const keys = Array.isArray(notes) ? notes.map(noteKey) : [];
+  return { count: 0, seen: keys };
+}
+async function syncFounderNotes({
+  readAutoMarker: readAutoMarker2,
+  readPushTokenEnc: readPushTokenEnc2,
+  readPrevious,
+  fetchImpl = fetch,
+  timeoutMs = 15e3
+} = {}) {
+  try {
+    const marker = readAutoMarker2();
+    const token = await readPushTokenEnc2();
+    if (!marker || !token) return null;
+    const answer = await fetchFounderNotes(
+      token,
+      (url, init) => fetchImpl(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+    );
+    if (!answer) return null;
+    return computeFounderNotes(answer.notes, readPrevious());
+  } catch {
+    return null;
+  }
+}
+function formatNote(note) {
+  const label = note.kind === "feedback" ? "changes requested" : "note";
+  return `  ${note.at.slice(0, 16).replace("T", " ")}  [${label}]  ${note.claimId}
+    ${note.note.split("\n").join("\n    ")}`;
+}
+var CLAIM_SYNC_BASE3;
+var init_founder_note_sync = __esm({
+  "bin/founder-note-sync.js"() {
+    "use strict";
+    CLAIM_SYNC_BASE3 = "https://terminalhire.com";
   }
 });
 
@@ -31615,7 +31679,10 @@ async function pollPR(prUrl) {
   }
 }
 function fmtAmount(a) {
-  return formatUsd(a);
+  if (a == null) return "$\u2014";
+  if (typeof a === "string" && a.trim() === "") return "$\u2014";
+  const n = typeof a === "number" ? a : Number(a);
+  return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
 }
 function fmtClaimAmount(c) {
   return c.kind === "contribution" ? "contribution" : fmtAmount(c.amountUSD);
@@ -31754,15 +31821,8 @@ async function resolveBounty(arg) {
   return {
     bountyId,
     indexNativeId,
-    // DEFANGED HERE, at the one place every tier of this resolver converges.
-    // `claims.ts` cleans what comes OUT of the local store, which covers every later
-    // read — but this object is printed (the preview card, the record card) and
-    // handed to `recordClaim` BEFORE any store exists for it, so on a claim's first
-    // use the store boundary has not run yet. `repoFullName` also goes on to be
-    // interpolated into GitHub API URLs from here. Found by a cross-model review of
-    // TERM-380; the store fix alone left this path open.
-    title: sanitizeText(title),
-    repoFullName: repoFullName == null ? repoFullName : sanitizeText(repoFullName),
+    title,
+    repoFullName,
     issueUrl,
     amountUSD,
     source,
@@ -31813,7 +31873,7 @@ async function mintRegistrationProof() {
   console.log("  GitHub identity has to be verified once in the browser.");
   let begin;
   try {
-    const r = await fetch(`${CLAIM_SYNC_BASE3}/api/claim-sync/begin`, {
+    const r = await fetch(`${CLAIM_SYNC_BASE4}/api/claim-sync/begin`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ hostname: osHostname() }),
@@ -31846,7 +31906,7 @@ async function mintRegistrationProof() {
     let statusRes;
     try {
       statusRes = await fetch(
-        `${CLAIM_SYNC_BASE3}/api/claim-sync/status?challenge=${encodeURIComponent(challenge)}`,
+        `${CLAIM_SYNC_BASE4}/api/claim-sync/status?challenge=${encodeURIComponent(challenge)}`,
         { signal: AbortSignal.timeout(1e4) }
       );
     } catch {
@@ -31955,7 +32015,7 @@ terminalhire claim: refusing to record \u2014 ${reason}
   };
   if (!auth) await acquireProofAuth();
   console.log("\n  Registering this claim with terminalhire (founder posting)...");
-  const sendRegistration = async (includeExpectation) => fetch(`${CLAIM_SYNC_BASE3}/api/claim/register`, {
+  const sendRegistration = async (includeExpectation) => fetch(`${CLAIM_SYNC_BASE4}/api/claim/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -32534,7 +32594,7 @@ async function resolveIssueOutcome(c, res, claims) {
 async function fetchFounderApprovals(pushToken, fetchImpl = fetch) {
   if (typeof pushToken !== "string" || pushToken.length === 0) return null;
   try {
-    const res = await fetchImpl(`${CLAIM_SYNC_BASE3}/api/claim/approvals`, {
+    const res = await fetchImpl(`${CLAIM_SYNC_BASE4}/api/claim/approvals`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pushToken }),
@@ -32983,7 +33043,7 @@ async function cmdStart(id, flags = {}) {
     console.error(`terminalhire claim: no claim with id '${id}'.`);
     process.exit(1);
   }
-  if (claim.approval?.state === "pending") {
+  if (claim.approval?.state === "pending" && !approvalsChecked) {
     ({ approvalsChecked, approvalsUnavailable } = await syncFounderApprovals(claims, [claim]));
     claim = claims.findClaim(id);
   }
@@ -33378,7 +33438,7 @@ async function cmdSlice(id, flags = {}) {
   const pushToken = await requireReadPushToken("fetching your granted slice");
   let res;
   try {
-    res = await fetch(`${CLAIM_SYNC_BASE3}/api/claim/slice`, {
+    res = await fetch(`${CLAIM_SYNC_BASE4}/api/claim/slice`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -33486,7 +33546,7 @@ async function cmdRuns(id, flags = {}) {
   const fetchOnce = async () => {
     let res;
     try {
-      res = await fetch(`${CLAIM_SYNC_BASE3}/api/patch/runs`, {
+      res = await fetch(`${CLAIM_SYNC_BASE4}/api/patch/runs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -33634,7 +33694,7 @@ async function submitFounderPatch({ claims, claim, id, wt, flags }) {
   console.log("\n  Submitting the patch through terminalhire...");
   let res;
   try {
-    res = await fetch(`${CLAIM_SYNC_BASE3}/api/patch`, {
+    res = await fetch(`${CLAIM_SYNC_BASE4}/api/patch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(submission),
@@ -34207,7 +34267,7 @@ async function cmdPush({ keepUpdated = false } = {}) {
   console.log("\n  Starting browser verification...");
   let begin;
   try {
-    const r = await fetch(`${CLAIM_SYNC_BASE3}/api/claim-sync/begin`, {
+    const r = await fetch(`${CLAIM_SYNC_BASE4}/api/claim-sync/begin`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ hostname: osHostname() }),
@@ -34250,7 +34310,7 @@ async function cmdPush({ keepUpdated = false } = {}) {
     let statusRes;
     try {
       statusRes = await fetch(
-        `${CLAIM_SYNC_BASE3}/api/claim-sync/status?challenge=${encodeURIComponent(challenge)}`,
+        `${CLAIM_SYNC_BASE4}/api/claim-sync/status?challenge=${encodeURIComponent(challenge)}`,
         { signal: AbortSignal.timeout(1e4) }
       );
     } catch {
@@ -34281,7 +34341,7 @@ async function cmdPush({ keepUpdated = false } = {}) {
   console.log("\n  Verified. Sharing your claims...");
   let res;
   try {
-    res = await fetch(`${CLAIM_SYNC_BASE3}/api/claim-sync`, {
+    res = await fetch(`${CLAIM_SYNC_BASE4}/api/claim-sync`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // autoConsent is included ONLY when the dev opted into background updates —
@@ -34408,7 +34468,7 @@ async function cmdRevoke() {
   console.log("\n  Requesting deletion...");
   let res;
   try {
-    res = await fetch(`${CLAIM_SYNC_BASE3}/api/claim-sync`, {
+    res = await fetch(`${CLAIM_SYNC_BASE4}/api/claim-sync`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ login, deleteToken }),
@@ -34585,6 +34645,50 @@ async function cmdAudit(id, flags = {}) {
   }
   renderAudit(view);
 }
+async function cmdNotes(flags) {
+  let pushToken = null;
+  try {
+    pushToken = await readPushTokenEnc();
+  } catch {
+  }
+  if (!pushToken) {
+    console.error("terminalhire claim notes: needs background push enrolment.");
+    console.error("  Enrol once:  terminalhire claim --push --keep-updated");
+    process.exit(1);
+  }
+  const answer = await fetchFounderNotes(pushToken);
+  if (answer === null) {
+    console.error("terminalhire claim notes: could not reach terminalhire just now.");
+    console.error('  This is NOT "no notes" \u2014 try again shortly.');
+    process.exit(1);
+  }
+  if (flags.json) {
+    console.log(JSON.stringify(answer, null, 2));
+    await acknowledgeNotesQuietly(answer.notes);
+    return;
+  }
+  if (answer.notes.length === 0) {
+    console.log("\n  No notes from founders on your claims.\n");
+    await acknowledgeNotesQuietly(answer.notes);
+    return;
+  }
+  console.log(
+    `
+  ${answer.notes.length} note${answer.notes.length === 1 ? "" : "s"} from founders:
+`
+  );
+  for (const note of answer.notes) console.log(formatNote(note));
+  console.log("");
+  await acknowledgeNotesQuietly(answer.notes);
+}
+async function acknowledgeNotesQuietly(notes) {
+  try {
+    const { acknowledgeFounderNotes: acknowledgeFounderNotes2 } = await Promise.resolve().then(() => (init_founder_note_sync(), founder_note_sync_exports));
+    const { updateIndexCache: updateIndexCache2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
+    updateIndexCache2({ founderNotes: acknowledgeFounderNotes2(notes) });
+  } catch {
+  }
+}
 async function run7() {
   const verb = process.argv[2];
   const rawArgs = process.argv.slice(3).map((a) => a === "-y" ? "--yes" : a);
@@ -34647,9 +34751,12 @@ async function run7() {
       case "audit":
         await cmdAudit(positional[0], flags);
         break;
+      case "notes":
+        await cmdNotes(flags);
+        break;
       default:
         console.error(
-          `terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | slice | list | status | update | submit | runs | audit | release`
+          `terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | slice | list | status | update | submit | runs | notes | audit | release`
         );
         process.exit(1);
     }
@@ -34658,7 +34765,7 @@ async function run7() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR17, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL6, CLAIM_SYNC_BASE3, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, GH_API3, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3;
+var TERMINALHIRE_DIR17, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL6, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, GH_API3, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
@@ -34670,12 +34777,13 @@ var init_jpi_claim = __esm({
     init_state_dir();
     init_claim_push_bg();
     init_founder_verdict_sync();
+    init_founder_note_sync();
     TERMINALHIRE_DIR17 = process.env.TERMINALHIRE_DIR || join30(homedir22(), ".terminalhire");
     INDEX_CACHE_FILE5 = join30(TERMINALHIRE_DIR17, "index-cache.json");
     CLAIM_PUSH_MARKER = join30(TERMINALHIRE_DIR17, "claim-push.json");
     REPO_CONTINUITY_NUDGE_MARKER = join30(TERMINALHIRE_DIR17, "repo-continuity-nudged.json");
     API_URL6 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
-    CLAIM_SYNC_BASE3 = "https://terminalhire.com";
+    CLAIM_SYNC_BASE4 = "https://terminalhire.com";
     CLAIM_CONSENT_VERSION = 1;
     CLAIM_POLL_INTERVAL_MS = 2e3;
     CLAIM_POLL_TIMEOUT_MS = 10 * 60 * 1e3;
@@ -39783,12 +39891,7 @@ function substrMatch(query, candidate) {
   if (query === "") return true;
   return candidate.toLowerCase().includes(query.toLowerCase());
 }
-function runHubTui({
-  input = process.stdin,
-  output = process.stdout,
-  signals,
-  deps = {}
-} = {}) {
+function runHubTui({ input = process.stdin, output = process.stdout, signals, deps = {} } = {}) {
   const {
     listClaims: _listClaims = listClaims,
     acceptedPRRate: _acceptedPRRate = acceptedPRRate,
@@ -39951,50 +40054,20 @@ function runHubTui({
           acked = false;
         }
         if (!acked) {
-          inboxState = {
-            loaded: true,
-            loading: false,
-            status: "disclosure",
-            items: null,
-            message: null
-          };
+          inboxState = { loaded: true, loading: false, status: "disclosure", items: null, message: null };
           return;
         }
         inboxState = { ...inboxState, loading: true };
         _buildInboxItems().then((built) => {
           if (built.status === "ok") {
-            inboxState = {
-              loaded: true,
-              loading: false,
-              status: "ok",
-              items: built.items,
-              message: null
-            };
+            inboxState = { loaded: true, loading: false, status: "ok", items: built.items, message: null };
           } else if (built.status === "error") {
-            inboxState = {
-              loaded: true,
-              loading: false,
-              status: "error",
-              items: null,
-              message: built.message || "could not load inbox"
-            };
+            inboxState = { loaded: true, loading: false, status: "error", items: null, message: built.message || "could not load inbox" };
           } else {
-            inboxState = {
-              loaded: true,
-              loading: false,
-              status: built.status,
-              items: null,
-              message: null
-            };
+            inboxState = { loaded: true, loading: false, status: built.status, items: null, message: null };
           }
         }).catch((e) => {
-          inboxState = {
-            loaded: true,
-            loading: false,
-            status: "error",
-            items: null,
-            message: errMsg(e)
-          };
+          inboxState = { loaded: true, loading: false, status: "error", items: null, message: errMsg(e) };
         }).finally(() => repaint());
         return;
       }
@@ -40028,9 +40101,7 @@ function runHubTui({
     function inboxRows(st) {
       switch (st.status) {
         case "disclosure":
-          return [
-            "Messaging disclosure not yet acknowledged \u2014 run `terminalhire inbox` once to review it and enable messages."
-          ];
+          return ["Messaging disclosure not yet acknowledged \u2014 run `terminalhire inbox` once to review it and enable messages."];
         case "not-linked":
           return ["Not linked \u2014 run `terminalhire link` to connect your web session."];
         case "expired":
@@ -40073,13 +40144,11 @@ function runHubTui({
         case "empty":
           return ["No bounties available right now. Check back through the day."];
         case "demoted":
-          return [
-            "Paid bounties paused \u2014 run `bounties --priced` to view them. Try Contribute or Jobs."
-          ];
+          return ["Paid bounties paused \u2014 run `bounties --priced` to view them. Try Contribute or Jobs."];
         case "ok":
           return result.bounties.map((job) => {
             const b = job.bounty || {};
-            const amt = formatUsd(b.amountUSD);
+            const amt = b.amountUSD != null ? "$" + b.amountUSD.toLocaleString() : "$\u2014";
             const repo = sanitizeLine(b.repoFullName || job.company);
             const prs = b.competingOpenPRs;
             const contend = prs != null && prs > 0 ? ` \xB7 \u26A0 ${prs} in flight` : "";
@@ -40134,9 +40203,7 @@ function runHubTui({
             if (it.note) rows.push(`    note: ${sanitizeLine(it.note)}`);
             if (it.contact) rows.push(`    contact: ${sanitizeLine(it.contact)}`);
             else if (it.role === "incoming" && it.status === "pending") {
-              rows.push(
-                `    \u2192 accept: terminalhire intro --accept @${sanitizeLine(it.counterpartyLogin)}`
-              );
+              rows.push(`    \u2192 accept: terminalhire intro --accept @${sanitizeLine(it.counterpartyLogin)}`);
             }
           }
           return rows;
@@ -40223,8 +40290,7 @@ function runHubTui({
       if (name === "Claims") {
         if (!claimsState.loaded) return ["Loading\u2026"];
         if (claimsState.error) return ["Could not read claims \u2014 " + claimsState.error];
-        if (!claimsState.rows.length)
-          return ["No claims yet \u2014 run `terminalhire claim <url>` to start one."];
+        if (!claimsState.rows.length) return ["No claims yet \u2014 run `terminalhire claim <url>` to start one."];
         return claimsState.rows.map(formatClaimRow);
       }
       if (name === "Profile") {
@@ -40254,10 +40320,8 @@ function runHubTui({
         const st = listState[name];
         if (st.loaded && !st.error && st.result && st.result.status === "ok") {
           if (name === "Jobs") return `${st.result.ranked.length} roles matching your profile`;
-          if (name === "Bounties")
-            return `${st.result.bounties.length} bounties you could knock out`;
-          if (name === "Devs")
-            return `${st.result.results.length} matches in the builder directory`;
+          if (name === "Bounties") return `${st.result.bounties.length} bounties you could knock out`;
+          if (name === "Devs") return `${st.result.results.length} matches in the builder directory`;
         }
         return name;
       }
@@ -40287,9 +40351,7 @@ function runHubTui({
         const row = startRow + i;
         if (row < 0 || row >= rows) continue;
         const t = TH_GLYPH.length <= 1 ? 0 : i / (TH_GLYPH.length - 1);
-        drawText(buf, cols, row, startCol, TH_GLYPH[i], {
-          fg: gradientFg(BRAND_GRADIENT, t, level)
-        });
+        drawText(buf, cols, row, startCol, TH_GLYPH[i], { fg: gradientFg(BRAND_GRADIENT, t, level) });
       }
       const hint = "press any key to continue";
       const hintRow = Math.min(rows - 1, startRow + TH_GLYPH.length + 1);
@@ -40743,7 +40805,6 @@ var init_jpi_hub = __esm({
   "bin/jpi-hub.js"() {
     "use strict";
     init_tui_core();
-    init_sanitize();
     init_claims();
     init_profile();
     init_config();
@@ -40781,15 +40842,7 @@ var init_jpi_hub = __esm({
     ];
     BRAND_GRADIENT = ["#9d8fff", "#7c6af7", "#5b4fcf"];
     DEFAULT_SPLASH_MS = 900;
-    STATE_LEVEL = {
-      abandoned: 0,
-      claimed: 2,
-      working: 3,
-      "in-review": 4,
-      ready: 5,
-      submitted: 6,
-      merged: 7
-    };
+    STATE_LEVEL = { abandoned: 0, claimed: 2, working: 3, "in-review": 4, ready: 5, submitted: 6, merged: 7 };
     SPARK_LEVELS = ["\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586", "\u2587", "\u2588"];
   }
 });
@@ -65623,7 +65676,7 @@ async function syncApprovedClaims({
     if (!approvalsSyncGate({ autoMarkerExists: !!marker, tokenFileExists: !!token }).sync) {
       return null;
     }
-    const res = await fetchImpl(`${CLAIM_SYNC_BASE4}/api/claim/approvals`, {
+    const res = await fetchImpl(`${CLAIM_SYNC_BASE5}/api/claim/approvals`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pushToken: token }),
@@ -65638,11 +65691,11 @@ async function syncApprovedClaims({
     return null;
   }
 }
-var CLAIM_SYNC_BASE4;
+var CLAIM_SYNC_BASE5;
 var init_approved_claims_sync = __esm({
   "bin/approved-claims-sync.js"() {
     "use strict";
-    CLAIM_SYNC_BASE4 = "https://terminalhire.com";
+    CLAIM_SYNC_BASE5 = "https://terminalhire.com";
   }
 });
 
@@ -66003,6 +66056,18 @@ async function run28() {
       });
     } catch {
     }
+    let founderNotes;
+    try {
+      const { syncFounderNotes: syncFounderNotes2 } = await Promise.resolve().then(() => (init_founder_note_sync(), founder_note_sync_exports));
+      const { readAutoMarker: readAutoMarker2, readPushTokenEnc: readPushTokenEnc2 } = await Promise.resolve().then(() => (init_claim_push_bg(), claim_push_bg_exports));
+      const { readCacheEntry: readCacheEntry2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
+      founderNotes = await syncFounderNotes2({
+        readAutoMarker: readAutoMarker2,
+        readPushTokenEnc: readPushTokenEnc2,
+        readPrevious: () => (readCacheEntry2() ?? {}).founderNotes
+      });
+    } catch {
+    }
     const previousCache = readCacheEntry() ?? {};
     const effectiveFounderSurface = founderSurface ?? previousCache.founderSurface;
     let surfaceLead = "dev";
@@ -66024,6 +66089,7 @@ async function run28() {
     };
     if (founderPaid) cacheEntry.founderPaid = founderPaid;
     if (approvedClaims) cacheEntry.approvedClaims = approvedClaims;
+    if (founderNotes) cacheEntry.founderNotes = founderNotes;
     if (founderSurface) cacheEntry.founderSurface = founderSurface;
     cacheEntry.indexETag = indexETag ?? "";
     if (pulseLatestPostedAt) {

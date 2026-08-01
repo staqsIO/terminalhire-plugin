@@ -10578,50 +10578,6 @@ var init_cache_store = __esm({
   }
 });
 
-// bin/sanitize.js
-function sanitizeText(s) {
-  if (s == null) return "";
-  return String(s).replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "");
-}
-function formatUsd(a) {
-  if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
-  if (typeof a !== "string" || a.trim() === "") return "$\u2014";
-  const n = Number(a);
-  return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
-}
-function safeHttpUrl(url) {
-  if (url == null) return null;
-  const raw = String(url);
-  CONTROL_CHARS.lastIndex = 0;
-  if (CONTROL_CHARS.test(raw)) return null;
-  let parsed;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    return null;
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-  return parsed.href;
-}
-function linkTitle(title, url) {
-  const safeTitle = sanitizeText(title);
-  const href = safeHttpUrl(url);
-  const isTTY = process.stdout.isTTY;
-  const noColor = process.env["NO_COLOR"] !== void 0;
-  if (isTTY && !noColor && href) {
-    return `\x1B]8;;${href}\x1B\\${safeTitle}\x1B]8;;\x1B\\`;
-  }
-  return href ? `${safeTitle} (${href})` : safeTitle;
-}
-var WHITESPACE_CONTROLS, CONTROL_CHARS;
-var init_sanitize = __esm({
-  "bin/sanitize.js"() {
-    "use strict";
-    WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
-    CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
-  }
-});
-
 // bin/spinner-io.js
 import {
   readFileSync as readFileSync4,
@@ -11335,7 +11291,7 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
       const token = jobShortToken(String(m.id));
       const url = `${base}/j/${token}`;
       if (source === "bounty") {
-        const money = formatUsd(m.amountUSD);
+        const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
         const repo = m.repo || companyRaw;
         out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct}% \u2014 ${url}`);
       } else if (source === "contribute") {
@@ -11405,7 +11361,6 @@ var init_spinner_render = __esm({
     init_spinner_verbs();
     init_spinner_seen();
     init_spinner_io();
-    init_sanitize();
     init_src();
   }
 });
@@ -12342,7 +12297,39 @@ function markClicked(id) {
 
 // bin/jpi-jobs.js
 init_cache_store();
-init_sanitize();
+
+// bin/sanitize.js
+var CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
+function sanitizeText(s) {
+  if (s == null) return "";
+  return String(s).replace(CONTROL_CHARS, "");
+}
+function safeHttpUrl(url) {
+  if (url == null) return null;
+  const raw = String(url);
+  CONTROL_CHARS.lastIndex = 0;
+  if (CONTROL_CHARS.test(raw)) return null;
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  return parsed.href;
+}
+function linkTitle(title, url) {
+  const safeTitle = sanitizeText(title);
+  const href = safeHttpUrl(url);
+  const isTTY = process.stdout.isTTY;
+  const noColor = process.env["NO_COLOR"] !== void 0;
+  if (isTTY && !noColor && href) {
+    return `\x1B]8;;${href}\x1B\\${safeTitle}\x1B]8;;\x1B\\`;
+  }
+  return href ? `${safeTitle} (${href})` : safeTitle;
+}
+
+// bin/jpi-jobs.js
 var __dirname2 = fileURLToPath3(new URL(".", import.meta.url));
 var TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join14(homedir9(), ".terminalhire");
 var INDEX_CACHE_FILE2 = join14(TERMINALHIRE_DIR6, "index-cache.json");

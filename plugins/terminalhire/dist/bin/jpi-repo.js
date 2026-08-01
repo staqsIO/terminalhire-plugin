@@ -1910,7 +1910,7 @@ function nowISO2() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function defangText(s) {
-  return typeof s === "string" ? s.replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "") : s;
+  return typeof s === "string" ? s.replace(CONTROL_CHARS, "") : s;
 }
 function finiteAmount(a) {
   if (typeof a === "number") return Number.isFinite(a) ? a : null;
@@ -2048,7 +2048,7 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR4, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, WHITESPACE_CONTROLS, CONTROL_CHARS;
+var TERMINALHIRE_DIR4, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, CONTROL_CHARS;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
@@ -2104,7 +2104,6 @@ var init_claims = __esm({
       ]),
       submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
     };
-    WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
     CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
   }
 });

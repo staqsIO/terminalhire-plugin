@@ -10639,7 +10639,7 @@ function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function defangText(s) {
-  return typeof s === "string" ? s.replace(WHITESPACE_CONTROLS2, " ").replace(CONTROL_CHARS2, "") : s;
+  return typeof s === "string" ? s.replace(CONTROL_CHARS2, "") : s;
 }
 function finiteAmount(a) {
   if (typeof a === "number") return Number.isFinite(a) ? a : null;
@@ -10777,7 +10777,7 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR2, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, WHITESPACE_CONTROLS2, CONTROL_CHARS2;
+var TERMINALHIRE_DIR2, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, CONTROL_CHARS2;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
@@ -10833,7 +10833,6 @@ var init_claims = __esm({
       ]),
       submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
     };
-    WHITESPACE_CONTROLS2 = /[\t\n\v\f\r]+/g;
     CONTROL_CHARS2 = /[\x00-\x1f\x7f-\x9f]/g;
   }
 });
@@ -11182,6 +11181,83 @@ var init_github_auth = __esm({
     BAKED_IN_CLIENT_ID = "Ov23lignE2ZSBe0J3a6B";
     MOCK_TOKEN = "mock-github-token-jpi-dev";
     MOCK_LOGIN = "janedev";
+  }
+});
+
+// bin/founder-note-sync.js
+var founder_note_sync_exports = {};
+__export(founder_note_sync_exports, {
+  acknowledgeFounderNotes: () => acknowledgeFounderNotes,
+  computeFounderNotes: () => computeFounderNotes,
+  fetchFounderNotes: () => fetchFounderNotes,
+  formatNote: () => formatNote,
+  noteKey: () => noteKey,
+  syncFounderNotes: () => syncFounderNotes
+});
+async function fetchFounderNotes(pushToken, fetchImpl = fetch) {
+  if (typeof pushToken !== "string" || pushToken.length === 0) return null;
+  try {
+    const res = await fetchImpl(`${CLAIM_SYNC_BASE2}/api/claim/notes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pushToken }),
+      signal: AbortSignal.timeout(15e3)
+    });
+    if (!res?.ok) return null;
+    const body = await res.json();
+    if (!body || !Array.isArray(body.notes)) return null;
+    const notes = body.notes.filter(
+      (n) => n && typeof n.claimId === "string" && n.claimId !== "" && typeof n.note === "string" && n.note !== "" && typeof n.at === "string" && (n.kind === "founder_note" || n.kind === "feedback")
+    );
+    return { notes, latestAt: typeof body.latestAt === "string" ? body.latestAt : null };
+  } catch {
+    return null;
+  }
+}
+function noteKey(note) {
+  return `${note.claimId}@${note.at}`;
+}
+function computeFounderNotes(notes, previous) {
+  const keys = Array.isArray(notes) ? notes.map(noteKey) : [];
+  const prior = previous && Array.isArray(previous.seen) ? new Set(previous.seen) : /* @__PURE__ */ new Set();
+  const seen = keys.filter((k) => prior.has(k));
+  return { count: keys.length - seen.length, seen };
+}
+function acknowledgeFounderNotes(notes) {
+  const keys = Array.isArray(notes) ? notes.map(noteKey) : [];
+  return { count: 0, seen: keys };
+}
+async function syncFounderNotes({
+  readAutoMarker: readAutoMarker2,
+  readPushTokenEnc: readPushTokenEnc2,
+  readPrevious,
+  fetchImpl = fetch,
+  timeoutMs = 15e3
+} = {}) {
+  try {
+    const marker = readAutoMarker2();
+    const token = await readPushTokenEnc2();
+    if (!marker || !token) return null;
+    const answer = await fetchFounderNotes(
+      token,
+      (url, init) => fetchImpl(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+    );
+    if (!answer) return null;
+    return computeFounderNotes(answer.notes, readPrevious());
+  } catch {
+    return null;
+  }
+}
+function formatNote(note) {
+  const label = note.kind === "feedback" ? "changes requested" : "note";
+  return `  ${note.at.slice(0, 16).replace("T", " ")}  [${label}]  ${note.claimId}
+    ${note.note.split("\n").join("\n    ")}`;
+}
+var CLAIM_SYNC_BASE2;
+var init_founder_note_sync = __esm({
+  "bin/founder-note-sync.js"() {
+    "use strict";
+    CLAIM_SYNC_BASE2 = "https://terminalhire.com";
   }
 });
 
@@ -26075,17 +26151,10 @@ function openInBrowser(url) {
 }
 
 // bin/sanitize.js
-var WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
 var CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
 function sanitizeText(s) {
   if (s == null) return "";
-  return String(s).replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "");
-}
-function formatUsd(a) {
-  if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
-  if (typeof a !== "string" || a.trim() === "") return "$\u2014";
-  const n = Number(a);
-  return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
+  return String(s).replace(CONTROL_CHARS, "");
 }
 
 // src/policy-acks.ts
@@ -26347,6 +26416,7 @@ async function syncFounderVerdicts({
 }
 
 // bin/jpi-claim.js
+init_founder_note_sync();
 var TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join17(homedir11(), ".terminalhire");
 var INDEX_CACHE_FILE2 = join17(TERMINALHIRE_DIR11, "index-cache.json");
 var CLAIM_PUSH_MARKER = join17(TERMINALHIRE_DIR11, "claim-push.json");
@@ -26369,7 +26439,7 @@ function markClaimNudged(id) {
   }
 }
 var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
-var CLAIM_SYNC_BASE2 = "https://terminalhire.com";
+var CLAIM_SYNC_BASE3 = "https://terminalhire.com";
 var CLAIM_CONSENT_VERSION = 1;
 var CLAIM_POLL_INTERVAL_MS = 2e3;
 var CLAIM_POLL_TIMEOUT_MS = 10 * 60 * 1e3;
@@ -27011,7 +27081,10 @@ async function pollPR(prUrl) {
   }
 }
 function fmtAmount(a) {
-  return formatUsd(a);
+  if (a == null) return "$\u2014";
+  if (typeof a === "string" && a.trim() === "") return "$\u2014";
+  const n = typeof a === "number" ? a : Number(a);
+  return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
 }
 function fmtClaimAmount(c) {
   return c.kind === "contribution" ? "contribution" : fmtAmount(c.amountUSD);
@@ -27152,15 +27225,8 @@ async function resolveBounty(arg) {
   return {
     bountyId,
     indexNativeId,
-    // DEFANGED HERE, at the one place every tier of this resolver converges.
-    // `claims.ts` cleans what comes OUT of the local store, which covers every later
-    // read — but this object is printed (the preview card, the record card) and
-    // handed to `recordClaim` BEFORE any store exists for it, so on a claim's first
-    // use the store boundary has not run yet. `repoFullName` also goes on to be
-    // interpolated into GitHub API URLs from here. Found by a cross-model review of
-    // TERM-380; the store fix alone left this path open.
-    title: sanitizeText(title),
-    repoFullName: repoFullName == null ? repoFullName : sanitizeText(repoFullName),
+    title,
+    repoFullName,
     issueUrl,
     amountUSD,
     source,
@@ -27211,7 +27277,7 @@ async function mintRegistrationProof() {
   console.log("  GitHub identity has to be verified once in the browser.");
   let begin;
   try {
-    const r = await fetch(`${CLAIM_SYNC_BASE2}/api/claim-sync/begin`, {
+    const r = await fetch(`${CLAIM_SYNC_BASE3}/api/claim-sync/begin`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ hostname: osHostname() }),
@@ -27244,7 +27310,7 @@ async function mintRegistrationProof() {
     let statusRes;
     try {
       statusRes = await fetch(
-        `${CLAIM_SYNC_BASE2}/api/claim-sync/status?challenge=${encodeURIComponent(challenge)}`,
+        `${CLAIM_SYNC_BASE3}/api/claim-sync/status?challenge=${encodeURIComponent(challenge)}`,
         { signal: AbortSignal.timeout(1e4) }
       );
     } catch {
@@ -27371,7 +27437,7 @@ terminalhire claim: refusing to record \u2014 ${reason}
   };
   if (!auth) await acquireProofAuth();
   console.log("\n  Registering this claim with terminalhire (founder posting)...");
-  const sendRegistration = async (includeExpectation) => fetch(`${CLAIM_SYNC_BASE2}/api/claim/register`, {
+  const sendRegistration = async (includeExpectation) => fetch(`${CLAIM_SYNC_BASE3}/api/claim/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -27951,7 +28017,7 @@ async function resolveIssueOutcome(c, res, claims) {
 async function fetchFounderApprovals(pushToken, fetchImpl = fetch) {
   if (typeof pushToken !== "string" || pushToken.length === 0) return null;
   try {
-    const res = await fetchImpl(`${CLAIM_SYNC_BASE2}/api/claim/approvals`, {
+    const res = await fetchImpl(`${CLAIM_SYNC_BASE3}/api/claim/approvals`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pushToken }),
@@ -28400,7 +28466,7 @@ async function cmdStart(id, flags = {}) {
     console.error(`terminalhire claim: no claim with id '${id}'.`);
     process.exit(1);
   }
-  if (claim.approval?.state === "pending") {
+  if (claim.approval?.state === "pending" && !approvalsChecked) {
     ({ approvalsChecked, approvalsUnavailable } = await syncFounderApprovals(claims, [claim]));
     claim = claims.findClaim(id);
   }
@@ -28810,7 +28876,7 @@ async function cmdSlice(id, flags = {}) {
   const pushToken = await requireReadPushToken("fetching your granted slice");
   let res;
   try {
-    res = await fetch(`${CLAIM_SYNC_BASE2}/api/claim/slice`, {
+    res = await fetch(`${CLAIM_SYNC_BASE3}/api/claim/slice`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -28918,7 +28984,7 @@ async function cmdRuns(id, flags = {}) {
   const fetchOnce = async () => {
     let res;
     try {
-      res = await fetch(`${CLAIM_SYNC_BASE2}/api/patch/runs`, {
+      res = await fetch(`${CLAIM_SYNC_BASE3}/api/patch/runs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -29066,7 +29132,7 @@ async function submitFounderPatch({ claims, claim, id, wt, flags }) {
   console.log("\n  Submitting the patch through terminalhire...");
   let res;
   try {
-    res = await fetch(`${CLAIM_SYNC_BASE2}/api/patch`, {
+    res = await fetch(`${CLAIM_SYNC_BASE3}/api/patch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(submission),
@@ -29639,7 +29705,7 @@ async function cmdPush({ keepUpdated = false } = {}) {
   console.log("\n  Starting browser verification...");
   let begin;
   try {
-    const r = await fetch(`${CLAIM_SYNC_BASE2}/api/claim-sync/begin`, {
+    const r = await fetch(`${CLAIM_SYNC_BASE3}/api/claim-sync/begin`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ hostname: osHostname() }),
@@ -29682,7 +29748,7 @@ async function cmdPush({ keepUpdated = false } = {}) {
     let statusRes;
     try {
       statusRes = await fetch(
-        `${CLAIM_SYNC_BASE2}/api/claim-sync/status?challenge=${encodeURIComponent(challenge)}`,
+        `${CLAIM_SYNC_BASE3}/api/claim-sync/status?challenge=${encodeURIComponent(challenge)}`,
         { signal: AbortSignal.timeout(1e4) }
       );
     } catch {
@@ -29713,7 +29779,7 @@ async function cmdPush({ keepUpdated = false } = {}) {
   console.log("\n  Verified. Sharing your claims...");
   let res;
   try {
-    res = await fetch(`${CLAIM_SYNC_BASE2}/api/claim-sync`, {
+    res = await fetch(`${CLAIM_SYNC_BASE3}/api/claim-sync`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // autoConsent is included ONLY when the dev opted into background updates —
@@ -29840,7 +29906,7 @@ async function cmdRevoke() {
   console.log("\n  Requesting deletion...");
   let res;
   try {
-    res = await fetch(`${CLAIM_SYNC_BASE2}/api/claim-sync`, {
+    res = await fetch(`${CLAIM_SYNC_BASE3}/api/claim-sync`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ login, deleteToken }),
@@ -30017,6 +30083,50 @@ async function cmdAudit(id, flags = {}) {
   }
   renderAudit(view);
 }
+async function cmdNotes(flags) {
+  let pushToken = null;
+  try {
+    pushToken = await readPushTokenEnc();
+  } catch {
+  }
+  if (!pushToken) {
+    console.error("terminalhire claim notes: needs background push enrolment.");
+    console.error("  Enrol once:  terminalhire claim --push --keep-updated");
+    process.exit(1);
+  }
+  const answer = await fetchFounderNotes(pushToken);
+  if (answer === null) {
+    console.error("terminalhire claim notes: could not reach terminalhire just now.");
+    console.error('  This is NOT "no notes" \u2014 try again shortly.');
+    process.exit(1);
+  }
+  if (flags.json) {
+    console.log(JSON.stringify(answer, null, 2));
+    await acknowledgeNotesQuietly(answer.notes);
+    return;
+  }
+  if (answer.notes.length === 0) {
+    console.log("\n  No notes from founders on your claims.\n");
+    await acknowledgeNotesQuietly(answer.notes);
+    return;
+  }
+  console.log(
+    `
+  ${answer.notes.length} note${answer.notes.length === 1 ? "" : "s"} from founders:
+`
+  );
+  for (const note of answer.notes) console.log(formatNote(note));
+  console.log("");
+  await acknowledgeNotesQuietly(answer.notes);
+}
+async function acknowledgeNotesQuietly(notes) {
+  try {
+    const { acknowledgeFounderNotes: acknowledgeFounderNotes2 } = await Promise.resolve().then(() => (init_founder_note_sync(), founder_note_sync_exports));
+    const { updateIndexCache: updateIndexCache2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
+    updateIndexCache2({ founderNotes: acknowledgeFounderNotes2(notes) });
+  } catch {
+  }
+}
 async function run() {
   const verb = process.argv[2];
   const rawArgs = process.argv.slice(3).map((a) => a === "-y" ? "--yes" : a);
@@ -30079,9 +30189,12 @@ async function run() {
       case "audit":
         await cmdAudit(positional[0], flags);
         break;
+      case "notes":
+        await cmdNotes(flags);
+        break;
       default:
         console.error(
-          `terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | slice | list | status | update | submit | runs | audit | release`
+          `terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | slice | list | status | update | submit | runs | notes | audit | release`
         );
         process.exit(1);
     }

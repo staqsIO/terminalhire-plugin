@@ -161,10 +161,9 @@ function nextPolledState(from, observed) {
 function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
-var WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
 var CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
 function defangText(s) {
-  return typeof s === "string" ? s.replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "") : s;
+  return typeof s === "string" ? s.replace(CONTROL_CHARS, "") : s;
 }
 function finiteAmount(a) {
   if (typeof a === "number") return Number.isFinite(a) ? a : null;
