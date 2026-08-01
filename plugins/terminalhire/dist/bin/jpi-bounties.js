@@ -11339,7 +11339,7 @@ function nowISO2() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function defangText(s) {
-  return typeof s === "string" ? s.replace(CONTROL_CHARS2, "") : s;
+  return typeof s === "string" ? s.replace(WHITESPACE_CONTROLS2, " ").replace(CONTROL_CHARS2, "") : s;
 }
 function finiteAmount(a) {
   if (typeof a === "number") return Number.isFinite(a) ? a : null;
@@ -11477,7 +11477,7 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR5, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, CONTROL_CHARS2;
+var TERMINALHIRE_DIR5, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, WHITESPACE_CONTROLS2, CONTROL_CHARS2;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
@@ -11533,6 +11533,7 @@ var init_claims = __esm({
       ]),
       submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
     };
+    WHITESPACE_CONTROLS2 = /[\t\n\v\f\r]+/g;
     CONTROL_CHARS2 = /[\x00-\x1f\x7f-\x9f]/g;
   }
 });
@@ -11748,17 +11749,38 @@ var init_founder_paid_badge = __esm({
 
 // bin/jpi-bounties.js
 init_src();
-init_cache_store();
 import { readFileSync as readFileSync7 } from "fs";
 import { join as join10 } from "path";
 import { homedir as homedir7 } from "os";
 import { createInterface } from "readline";
 
+// ../../packages/core/src/payout-split.ts
+var PLATFORM_TAKE_BPS = 1e3;
+function platformFeeCents(totalCents) {
+  return Math.ceil(totalCents * PLATFORM_TAKE_BPS / 1e4);
+}
+function developerShareCents(totalCents) {
+  return totalCents - platformFeeCents(totalCents);
+}
+function formatCents(cents) {
+  return cents % 100 === 0 ? `$${cents / 100}` : `$${(cents / 100).toFixed(2)}`;
+}
+
+// bin/jpi-bounties.js
+init_cache_store();
+
 // bin/sanitize.js
+var WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
 var CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
 function sanitizeText(s) {
   if (s == null) return "";
-  return String(s).replace(CONTROL_CHARS, "");
+  return String(s).replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "");
+}
+function formatUsd(a) {
+  if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
+  if (typeof a !== "string" || a.trim() === "") return "$\u2014";
+  const n = Number(a);
+  return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
 }
 function safeHttpUrl(url) {
   if (url == null) return null;
@@ -11831,13 +11853,33 @@ function prompt(question) {
   });
 }
 function formatAmount(b) {
-  return b.amountUSD != null ? "$" + b.amountUSD.toLocaleString() : "$\u2014";
+  return formatUsd(b.amountUSD);
 }
 var EFFORT_LABEL = {
   small: "small (~\xBD day)",
   medium: "medium (~1 day)",
   large: "large (multi-day)"
 };
+function founderClaimBlurb(amountUSD, paidWork) {
+  if (paidWork === false) {
+    return "Claim it from here \u2014 this posting records a credential for the work, not a payment. Take it for the credential, not the money.";
+  }
+  if (paidWork !== true) {
+    return "Claim it from here \u2014 this listing is missing its payment status, so it is not safe to say whether the work pays. Try `terminalhire refresh`; if it is still missing, do not count on being paid for this one.";
+  }
+  let share = "";
+  if (typeof amountUSD === "number" && Number.isFinite(amountUSD) && amountUSD > 0) {
+    share = ` You'd receive ${formatCents(developerShareCents(Math.round(amountUSD * 100)))} of the ${formatCents(Math.round(amountUSD * 100))} posted; terminalhire keeps 10%.`;
+  }
+  return `Claim it from here \u2014 the founder pays through terminalhire rather than off-platform, and their acceptance is what triggers your payout.${share}`;
+}
+function founderClaimBlock(job) {
+  const ref = opportunityShortToken(job.id);
+  return `
+${founderClaimBlurb(job.bounty?.amountUSD, job.bounty?.paidWork)}
+  terminalhire claim ${ref}
+  ${sanitizeText(job.bounty?.claimUrl ?? job.url)}`;
+}
 function printBounty(i, job, score, reason, matchedTags, claimedIds = /* @__PURE__ */ new Set(), continuityNote = null) {
   const b = job.bounty ?? {};
   const stars = b.repoStars != null ? ` \xB7 ${b.repoStars}\u2605` : "";
@@ -11980,7 +12022,9 @@ async function run() {
           const rows = founderRows2(surface, "bounties");
           console.log("\n\u26A1 Your TerminalHire postings\n");
           if (!rows.length) {
-            console.log("  No current posting data. Run `terminalhire refresh`, or lead with work:");
+            console.log(
+              "  No current posting data. Run `terminalhire refresh`, or lead with work:"
+            );
             console.log("  terminalhire config set lead dev\n");
           } else {
             rows.forEach((row, index) => {
@@ -11989,7 +12033,9 @@ async function run() {
               );
             });
             console.log("\n  Review and act: https://terminalhire.com/dashboard?tab=postings");
-            console.log("  Lead with developer bounties instead: terminalhire config set lead dev\n");
+            console.log(
+              "  Lead with developer bounties instead: terminalhire config set lead dev\n"
+            );
           }
           return;
         }
@@ -12064,6 +12110,10 @@ Enter a number to open a bounty's claim page, or press Enter to exit: `
     const idx = parseInt(pick, 10) - 1;
     if (Number.isNaN(idx) || idx < 0 || idx >= shown.length) return;
     const chosen = shown[idx];
+    if (chosen.bounty?.bountySource === "founder") {
+      console.log(founderClaimBlock(chosen));
+      return;
+    }
     console.log(
       `
 Open this to claim/work the bounty (you go straight to the source \u2014 we never touch payment):
@@ -12079,6 +12129,8 @@ export {
   classifyEmptyStatus,
   continuityNoteForRow,
   filterPaidVisibility,
+  founderClaimBlock,
+  founderClaimBlurb,
   getBounties,
   isPinnedFounderBounty,
   printBounty,

@@ -12236,6 +12236,19 @@ var init_spinner_verbs = __esm({
   }
 });
 
+// bin/sanitize.js
+function formatUsd(a) {
+  if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
+  if (typeof a !== "string" || a.trim() === "") return "$\u2014";
+  const n = Number(a);
+  return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
+}
+var init_sanitize = __esm({
+  "bin/sanitize.js"() {
+    "use strict";
+  }
+});
+
 // bin/spinner-render.js
 function interleaveBySource(topMatches) {
   if (!Array.isArray(topMatches) || topMatches.length === 0) return topMatches;
@@ -12317,7 +12330,7 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
       const token = jobShortToken(String(m.id));
       const url = `${base}/j/${token}`;
       if (source === "bounty") {
-        const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
+        const money = formatUsd(m.amountUSD);
         const repo = m.repo || companyRaw;
         out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct}% \u2014 ${url}`);
       } else if (source === "contribute") {
@@ -12387,6 +12400,7 @@ var init_spinner_render = __esm({
     init_spinner_verbs();
     init_spinner_seen();
     init_spinner_io();
+    init_sanitize();
     init_src();
   }
 });
@@ -12563,7 +12577,7 @@ function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function defangText(s) {
-  return typeof s === "string" ? s.replace(CONTROL_CHARS, "") : s;
+  return typeof s === "string" ? s.replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "") : s;
 }
 function finiteAmount(a) {
   if (typeof a === "number") return Number.isFinite(a) ? a : null;
@@ -12701,7 +12715,7 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR8, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS2, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, CONTROL_CHARS;
+var TERMINALHIRE_DIR8, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS2, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, WHITESPACE_CONTROLS, CONTROL_CHARS;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
@@ -12757,6 +12771,7 @@ var init_claims = __esm({
       ]),
       submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
     };
+    WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
     CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
   }
 });

@@ -10980,12 +10980,19 @@ var init_open_url = __esm({
 // bin/sanitize.js
 function sanitizeText(s) {
   if (s == null) return "";
-  return String(s).replace(CONTROL_CHARS, "");
+  return String(s).replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "");
 }
-var CONTROL_CHARS;
+function formatUsd(a) {
+  if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
+  if (typeof a !== "string" || a.trim() === "") return "$\u2014";
+  const n = Number(a);
+  return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
+}
+var WHITESPACE_CONTROLS, CONTROL_CHARS;
 var init_sanitize = __esm({
   "bin/sanitize.js"() {
     "use strict";
+    WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
     CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
   }
 });
@@ -11141,7 +11148,7 @@ function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function defangText(s) {
-  return typeof s === "string" ? s.replace(CONTROL_CHARS2, "") : s;
+  return typeof s === "string" ? s.replace(WHITESPACE_CONTROLS2, " ").replace(CONTROL_CHARS2, "") : s;
 }
 function finiteAmount(a) {
   if (typeof a === "number") return Number.isFinite(a) ? a : null;
@@ -11279,7 +11286,7 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR5, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, CONTROL_CHARS2;
+var TERMINALHIRE_DIR5, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, WHITESPACE_CONTROLS2, CONTROL_CHARS2;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
@@ -11335,6 +11342,7 @@ var init_claims = __esm({
       ]),
       submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
     };
+    WHITESPACE_CONTROLS2 = /[\t\n\v\f\r]+/g;
     CONTROL_CHARS2 = /[\x00-\x1f\x7f-\x9f]/g;
   }
 });
@@ -27157,10 +27165,7 @@ async function pollPR(prUrl) {
   }
 }
 function fmtAmount(a) {
-  if (a == null) return "$\u2014";
-  if (typeof a === "string" && a.trim() === "") return "$\u2014";
-  const n = typeof a === "number" ? a : Number(a);
-  return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
+  return formatUsd(a);
 }
 function fmtClaimAmount(c) {
   return c.kind === "contribution" ? "contribution" : fmtAmount(c.amountUSD);
@@ -27299,8 +27304,15 @@ async function resolveBounty(arg) {
   return {
     bountyId,
     indexNativeId,
-    title,
-    repoFullName,
+    // DEFANGED HERE, at the one place every tier of this resolver converges.
+    // `claims.ts` cleans what comes OUT of the local store, which covers every later
+    // read — but this object is printed (the preview card, the record card) and
+    // handed to `recordClaim` BEFORE any store exists for it, so on a claim's first
+    // use the store boundary has not run yet. `repoFullName` also goes on to be
+    // interpolated into GitHub API URLs from here. Found by a cross-model review of
+    // TERM-380; the store fix alone left this path open.
+    title: sanitizeText(title),
+    repoFullName: repoFullName == null ? repoFullName : sanitizeText(repoFullName),
     issueUrl,
     amountUSD,
     source,
@@ -28521,7 +28533,7 @@ async function cmdStart(id, flags = {}) {
     console.error(`terminalhire claim: no claim with id '${id}'.`);
     process.exit(1);
   }
-  if (claim.approval?.state === "pending" && !approvalsChecked) {
+  if (claim.approval?.state === "pending") {
     ({ approvalsChecked, approvalsUnavailable } = await syncFounderApprovals(claims, [claim]));
     claim = claims.findClaim(id);
   }

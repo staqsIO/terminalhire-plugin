@@ -12831,7 +12831,13 @@ var init_cache_store = __esm({
 // bin/sanitize.js
 function sanitizeText(s) {
   if (s == null) return "";
-  return String(s).replace(CONTROL_CHARS, "");
+  return String(s).replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "");
+}
+function formatUsd(a) {
+  if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
+  if (typeof a !== "string" || a.trim() === "") return "$\u2014";
+  const n = Number(a);
+  return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
 }
 function safeHttpUrl(url) {
   if (url == null) return null;
@@ -12857,10 +12863,11 @@ function linkTitle(title, url) {
   }
   return href ? `${safeTitle} (${href})` : safeTitle;
 }
-var CONTROL_CHARS;
+var WHITESPACE_CONTROLS, CONTROL_CHARS;
 var init_sanitize = __esm({
   "bin/sanitize.js"() {
     "use strict";
+    WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
     CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
   }
 });
@@ -13578,7 +13585,7 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
       const token = jobShortToken(String(m.id));
       const url = `${base}/j/${token}`;
       if (source === "bounty") {
-        const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
+        const money = formatUsd(m.amountUSD);
         const repo = m.repo || companyRaw;
         out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct2}% \u2014 ${url}`);
       } else if (source === "contribute") {
@@ -13648,6 +13655,7 @@ var init_spinner_render = __esm({
     init_spinner_verbs();
     init_spinner_seen();
     init_spinner_io();
+    init_sanitize();
     init_src();
   }
 });
@@ -14853,6 +14861,24 @@ var init_jpi_project = __esm({
   }
 });
 
+// ../../packages/core/src/payout-split.ts
+function platformFeeCents(totalCents) {
+  return Math.ceil(totalCents * PLATFORM_TAKE_BPS / 1e4);
+}
+function developerShareCents(totalCents) {
+  return totalCents - platformFeeCents(totalCents);
+}
+function formatCents(cents) {
+  return cents % 100 === 0 ? `$${cents / 100}` : `$${(cents / 100).toFixed(2)}`;
+}
+var PLATFORM_TAKE_BPS;
+var init_payout_split = __esm({
+  "../../packages/core/src/payout-split.ts"() {
+    "use strict";
+    PLATFORM_TAKE_BPS = 1e3;
+  }
+});
+
 // bin/founder-pin.js
 function isPinnedFounderBounty(j) {
   return j?.bounty?.bountySource === "founder" && j?.bounty?.claimable === true;
@@ -15182,7 +15208,7 @@ function nowISO2() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function defangText(s) {
-  return typeof s === "string" ? s.replace(CONTROL_CHARS2, "") : s;
+  return typeof s === "string" ? s.replace(WHITESPACE_CONTROLS2, " ").replace(CONTROL_CHARS2, "") : s;
 }
 function finiteAmount(a) {
   if (typeof a === "number") return Number.isFinite(a) ? a : null;
@@ -15320,7 +15346,7 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR11, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS2, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, CONTROL_CHARS2;
+var TERMINALHIRE_DIR11, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS2, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, WHITESPACE_CONTROLS2, CONTROL_CHARS2;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
@@ -15376,6 +15402,7 @@ var init_claims = __esm({
       ]),
       submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
     };
+    WHITESPACE_CONTROLS2 = /[\t\n\v\f\r]+/g;
     CONTROL_CHARS2 = /[\x00-\x1f\x7f-\x9f]/g;
   }
 });
@@ -15424,6 +15451,8 @@ __export(jpi_bounties_exports, {
   classifyEmptyStatus: () => classifyEmptyStatus,
   continuityNoteForRow: () => continuityNoteForRow,
   filterPaidVisibility: () => filterPaidVisibility,
+  founderClaimBlock: () => founderClaimBlock,
+  founderClaimBlurb: () => founderClaimBlurb,
   getBounties: () => getBounties,
   isPinnedFounderBounty: () => isPinnedFounderBounty,
   printBounty: () => printBounty,
@@ -15465,7 +15494,27 @@ function prompt3(question) {
   });
 }
 function formatAmount(b) {
-  return b.amountUSD != null ? "$" + b.amountUSD.toLocaleString() : "$\u2014";
+  return formatUsd(b.amountUSD);
+}
+function founderClaimBlurb(amountUSD, paidWork) {
+  if (paidWork === false) {
+    return "Claim it from here \u2014 this posting records a credential for the work, not a payment. Take it for the credential, not the money.";
+  }
+  if (paidWork !== true) {
+    return "Claim it from here \u2014 this listing is missing its payment status, so it is not safe to say whether the work pays. Try `terminalhire refresh`; if it is still missing, do not count on being paid for this one.";
+  }
+  let share = "";
+  if (typeof amountUSD === "number" && Number.isFinite(amountUSD) && amountUSD > 0) {
+    share = ` You'd receive ${formatCents(developerShareCents(Math.round(amountUSD * 100)))} of the ${formatCents(Math.round(amountUSD * 100))} posted; terminalhire keeps 10%.`;
+  }
+  return `Claim it from here \u2014 the founder pays through terminalhire rather than off-platform, and their acceptance is what triggers your payout.${share}`;
+}
+function founderClaimBlock(job) {
+  const ref = opportunityShortToken(job.id);
+  return `
+${founderClaimBlurb(job.bounty?.amountUSD, job.bounty?.paidWork)}
+  terminalhire claim ${ref}
+  ${sanitizeText(job.bounty?.claimUrl ?? job.url)}`;
 }
 function printBounty(i, job, score, reason, matchedTags, claimedIds = /* @__PURE__ */ new Set(), continuityNote = null) {
   const b = job.bounty ?? {};
@@ -15609,7 +15658,9 @@ async function run5() {
           const rows = founderRows2(surface, "bounties");
           console.log("\n\u26A1 Your TerminalHire postings\n");
           if (!rows.length) {
-            console.log("  No current posting data. Run `terminalhire refresh`, or lead with work:");
+            console.log(
+              "  No current posting data. Run `terminalhire refresh`, or lead with work:"
+            );
             console.log("  terminalhire config set lead dev\n");
           } else {
             rows.forEach((row, index) => {
@@ -15618,7 +15669,9 @@ async function run5() {
               );
             });
             console.log("\n  Review and act: https://terminalhire.com/dashboard?tab=postings");
-            console.log("  Lead with developer bounties instead: terminalhire config set lead dev\n");
+            console.log(
+              "  Lead with developer bounties instead: terminalhire config set lead dev\n"
+            );
           }
           return;
         }
@@ -15693,6 +15746,10 @@ Enter a number to open a bounty's claim page, or press Enter to exit: `
     const idx = parseInt(pick2, 10) - 1;
     if (Number.isNaN(idx) || idx < 0 || idx >= shown.length) return;
     const chosen = shown[idx];
+    if (chosen.bounty?.bountySource === "founder") {
+      console.log(founderClaimBlock(chosen));
+      return;
+    }
     console.log(
       `
 Open this to claim/work the bounty (you go straight to the source \u2014 we never touch payment):
@@ -15708,6 +15765,7 @@ var init_jpi_bounties = __esm({
   "bin/jpi-bounties.js"() {
     "use strict";
     init_src();
+    init_payout_split();
     init_cache_store();
     init_sanitize();
     init_founder_pin();
@@ -31679,10 +31737,7 @@ async function pollPR(prUrl) {
   }
 }
 function fmtAmount(a) {
-  if (a == null) return "$\u2014";
-  if (typeof a === "string" && a.trim() === "") return "$\u2014";
-  const n = typeof a === "number" ? a : Number(a);
-  return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
+  return formatUsd(a);
 }
 function fmtClaimAmount(c) {
   return c.kind === "contribution" ? "contribution" : fmtAmount(c.amountUSD);
@@ -31821,8 +31876,15 @@ async function resolveBounty(arg) {
   return {
     bountyId,
     indexNativeId,
-    title,
-    repoFullName,
+    // DEFANGED HERE, at the one place every tier of this resolver converges.
+    // `claims.ts` cleans what comes OUT of the local store, which covers every later
+    // read — but this object is printed (the preview card, the record card) and
+    // handed to `recordClaim` BEFORE any store exists for it, so on a claim's first
+    // use the store boundary has not run yet. `repoFullName` also goes on to be
+    // interpolated into GitHub API URLs from here. Found by a cross-model review of
+    // TERM-380; the store fix alone left this path open.
+    title: sanitizeText(title),
+    repoFullName: repoFullName == null ? repoFullName : sanitizeText(repoFullName),
     issueUrl,
     amountUSD,
     source,
@@ -33043,7 +33105,7 @@ async function cmdStart(id, flags = {}) {
     console.error(`terminalhire claim: no claim with id '${id}'.`);
     process.exit(1);
   }
-  if (claim.approval?.state === "pending" && !approvalsChecked) {
+  if (claim.approval?.state === "pending") {
     ({ approvalsChecked, approvalsUnavailable } = await syncFounderApprovals(claims, [claim]));
     claim = claims.findClaim(id);
   }
@@ -39891,7 +39953,12 @@ function substrMatch(query, candidate) {
   if (query === "") return true;
   return candidate.toLowerCase().includes(query.toLowerCase());
 }
-function runHubTui({ input = process.stdin, output = process.stdout, signals, deps = {} } = {}) {
+function runHubTui({
+  input = process.stdin,
+  output = process.stdout,
+  signals,
+  deps = {}
+} = {}) {
   const {
     listClaims: _listClaims = listClaims,
     acceptedPRRate: _acceptedPRRate = acceptedPRRate,
@@ -40054,20 +40121,50 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
           acked = false;
         }
         if (!acked) {
-          inboxState = { loaded: true, loading: false, status: "disclosure", items: null, message: null };
+          inboxState = {
+            loaded: true,
+            loading: false,
+            status: "disclosure",
+            items: null,
+            message: null
+          };
           return;
         }
         inboxState = { ...inboxState, loading: true };
         _buildInboxItems().then((built) => {
           if (built.status === "ok") {
-            inboxState = { loaded: true, loading: false, status: "ok", items: built.items, message: null };
+            inboxState = {
+              loaded: true,
+              loading: false,
+              status: "ok",
+              items: built.items,
+              message: null
+            };
           } else if (built.status === "error") {
-            inboxState = { loaded: true, loading: false, status: "error", items: null, message: built.message || "could not load inbox" };
+            inboxState = {
+              loaded: true,
+              loading: false,
+              status: "error",
+              items: null,
+              message: built.message || "could not load inbox"
+            };
           } else {
-            inboxState = { loaded: true, loading: false, status: built.status, items: null, message: null };
+            inboxState = {
+              loaded: true,
+              loading: false,
+              status: built.status,
+              items: null,
+              message: null
+            };
           }
         }).catch((e) => {
-          inboxState = { loaded: true, loading: false, status: "error", items: null, message: errMsg(e) };
+          inboxState = {
+            loaded: true,
+            loading: false,
+            status: "error",
+            items: null,
+            message: errMsg(e)
+          };
         }).finally(() => repaint());
         return;
       }
@@ -40101,7 +40198,9 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
     function inboxRows(st) {
       switch (st.status) {
         case "disclosure":
-          return ["Messaging disclosure not yet acknowledged \u2014 run `terminalhire inbox` once to review it and enable messages."];
+          return [
+            "Messaging disclosure not yet acknowledged \u2014 run `terminalhire inbox` once to review it and enable messages."
+          ];
         case "not-linked":
           return ["Not linked \u2014 run `terminalhire link` to connect your web session."];
         case "expired":
@@ -40144,11 +40243,13 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
         case "empty":
           return ["No bounties available right now. Check back through the day."];
         case "demoted":
-          return ["Paid bounties paused \u2014 run `bounties --priced` to view them. Try Contribute or Jobs."];
+          return [
+            "Paid bounties paused \u2014 run `bounties --priced` to view them. Try Contribute or Jobs."
+          ];
         case "ok":
           return result.bounties.map((job) => {
             const b = job.bounty || {};
-            const amt = b.amountUSD != null ? "$" + b.amountUSD.toLocaleString() : "$\u2014";
+            const amt = formatUsd(b.amountUSD);
             const repo = sanitizeLine(b.repoFullName || job.company);
             const prs = b.competingOpenPRs;
             const contend = prs != null && prs > 0 ? ` \xB7 \u26A0 ${prs} in flight` : "";
@@ -40203,7 +40304,9 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
             if (it.note) rows.push(`    note: ${sanitizeLine(it.note)}`);
             if (it.contact) rows.push(`    contact: ${sanitizeLine(it.contact)}`);
             else if (it.role === "incoming" && it.status === "pending") {
-              rows.push(`    \u2192 accept: terminalhire intro --accept @${sanitizeLine(it.counterpartyLogin)}`);
+              rows.push(
+                `    \u2192 accept: terminalhire intro --accept @${sanitizeLine(it.counterpartyLogin)}`
+              );
             }
           }
           return rows;
@@ -40290,7 +40393,8 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
       if (name === "Claims") {
         if (!claimsState.loaded) return ["Loading\u2026"];
         if (claimsState.error) return ["Could not read claims \u2014 " + claimsState.error];
-        if (!claimsState.rows.length) return ["No claims yet \u2014 run `terminalhire claim <url>` to start one."];
+        if (!claimsState.rows.length)
+          return ["No claims yet \u2014 run `terminalhire claim <url>` to start one."];
         return claimsState.rows.map(formatClaimRow);
       }
       if (name === "Profile") {
@@ -40320,8 +40424,10 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
         const st = listState[name];
         if (st.loaded && !st.error && st.result && st.result.status === "ok") {
           if (name === "Jobs") return `${st.result.ranked.length} roles matching your profile`;
-          if (name === "Bounties") return `${st.result.bounties.length} bounties you could knock out`;
-          if (name === "Devs") return `${st.result.results.length} matches in the builder directory`;
+          if (name === "Bounties")
+            return `${st.result.bounties.length} bounties you could knock out`;
+          if (name === "Devs")
+            return `${st.result.results.length} matches in the builder directory`;
         }
         return name;
       }
@@ -40351,7 +40457,9 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
         const row = startRow + i;
         if (row < 0 || row >= rows) continue;
         const t = TH_GLYPH.length <= 1 ? 0 : i / (TH_GLYPH.length - 1);
-        drawText(buf, cols, row, startCol, TH_GLYPH[i], { fg: gradientFg(BRAND_GRADIENT, t, level) });
+        drawText(buf, cols, row, startCol, TH_GLYPH[i], {
+          fg: gradientFg(BRAND_GRADIENT, t, level)
+        });
       }
       const hint = "press any key to continue";
       const hintRow = Math.min(rows - 1, startRow + TH_GLYPH.length + 1);
@@ -40805,6 +40913,7 @@ var init_jpi_hub = __esm({
   "bin/jpi-hub.js"() {
     "use strict";
     init_tui_core();
+    init_sanitize();
     init_claims();
     init_profile();
     init_config();
@@ -40842,7 +40951,15 @@ var init_jpi_hub = __esm({
     ];
     BRAND_GRADIENT = ["#9d8fff", "#7c6af7", "#5b4fcf"];
     DEFAULT_SPLASH_MS = 900;
-    STATE_LEVEL = { abandoned: 0, claimed: 2, working: 3, "in-review": 4, ready: 5, submitted: 6, merged: 7 };
+    STATE_LEVEL = {
+      abandoned: 0,
+      claimed: 2,
+      working: 3,
+      "in-review": 4,
+      ready: 5,
+      submitted: 6,
+      merged: 7
+    };
     SPARK_LEVELS = ["\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586", "\u2587", "\u2588"];
   }
 });

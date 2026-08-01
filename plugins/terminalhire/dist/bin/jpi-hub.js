@@ -380,6 +380,19 @@ var init_tui_core = __esm({
   }
 });
 
+// bin/sanitize.js
+function formatUsd(a) {
+  if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
+  if (typeof a !== "string" || a.trim() === "") return "$\u2014";
+  const n = Number(a);
+  return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
+}
+var init_sanitize = __esm({
+  "bin/sanitize.js"() {
+    "use strict";
+  }
+});
+
 // src/state-dir.ts
 import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
 function warnStateDirOnce(dir, message) {
@@ -539,7 +552,7 @@ function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function defangText(s) {
-  return typeof s === "string" ? s.replace(CONTROL_CHARS, "") : s;
+  return typeof s === "string" ? s.replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "") : s;
 }
 function finiteAmount(a) {
   if (typeof a === "number") return Number.isFinite(a) ? a : null;
@@ -677,7 +690,7 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, CONTROL_CHARS;
+var TERMINALHIRE_DIR, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, WHITESPACE_CONTROLS, CONTROL_CHARS;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
@@ -733,6 +746,7 @@ var init_claims = __esm({
       ]),
       submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
     };
+    WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
     CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
   }
 });
@@ -12649,6 +12663,7 @@ var init_intro2 = __esm({
 
 // bin/jpi-hub.js
 init_tui_core();
+init_sanitize();
 init_claims();
 init_profile();
 init_config();
@@ -12685,6 +12700,7 @@ var BAK_FILE = `${STATUS_FILE}.bak`;
 
 // bin/jpi-jobs.js
 init_cache_store();
+init_sanitize();
 var __dirname = fileURLToPath2(new URL(".", import.meta.url));
 var TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join16(homedir13(), ".terminalhire");
 var INDEX_CACHE_FILE3 = join16(TERMINALHIRE_DIR11, "index-cache.json");
@@ -12771,11 +12787,12 @@ async function getJobMatches({ quiet = false, offline = false } = {}) {
 
 // bin/jpi-bounties.js
 init_src();
-init_cache_store();
 import { readFileSync as readFileSync15 } from "fs";
 import { join as join18 } from "path";
 import { homedir as homedir15 } from "os";
 import { createInterface as createInterface3 } from "readline";
+init_cache_store();
+init_sanitize();
 init_founder_pin();
 var TERMINALHIRE_DIR13 = process.env.TERMINALHIRE_DIR || join18(homedir15(), ".terminalhire");
 var INDEX_CACHE_FILE4 = join18(TERMINALHIRE_DIR13, "index-cache.json");
@@ -12970,6 +12987,9 @@ function excludeOwnCard(results, ownLogin) {
   });
 }
 
+// bin/jpi-devs.js
+init_sanitize();
+
 // bin/match-slots.js
 var ROTATE_WINDOW_MS = 5 * 60 * 1e3;
 var ROLE_HEAD_ROTATE_MS = 60 * 60 * 1e3;
@@ -13081,7 +13101,15 @@ var TH_GLYPH = [
 ];
 var BRAND_GRADIENT = ["#9d8fff", "#7c6af7", "#5b4fcf"];
 var DEFAULT_SPLASH_MS = 900;
-var STATE_LEVEL = { abandoned: 0, claimed: 2, working: 3, "in-review": 4, ready: 5, submitted: 6, merged: 7 };
+var STATE_LEVEL = {
+  abandoned: 0,
+  claimed: 2,
+  working: 3,
+  "in-review": 4,
+  ready: 5,
+  submitted: 6,
+  merged: 7
+};
 var SPARK_LEVELS = ["\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586", "\u2587", "\u2588"];
 function sparkline(rows) {
   if (!rows || !rows.length) return "";
@@ -13103,7 +13131,12 @@ function substrMatch(query, candidate) {
   if (query === "") return true;
   return candidate.toLowerCase().includes(query.toLowerCase());
 }
-function runHubTui({ input = process.stdin, output = process.stdout, signals, deps = {} } = {}) {
+function runHubTui({
+  input = process.stdin,
+  output = process.stdout,
+  signals,
+  deps = {}
+} = {}) {
   const {
     listClaims: _listClaims = listClaims,
     acceptedPRRate: _acceptedPRRate = acceptedPRRate,
@@ -13266,20 +13299,50 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
           acked = false;
         }
         if (!acked) {
-          inboxState = { loaded: true, loading: false, status: "disclosure", items: null, message: null };
+          inboxState = {
+            loaded: true,
+            loading: false,
+            status: "disclosure",
+            items: null,
+            message: null
+          };
           return;
         }
         inboxState = { ...inboxState, loading: true };
         _buildInboxItems().then((built) => {
           if (built.status === "ok") {
-            inboxState = { loaded: true, loading: false, status: "ok", items: built.items, message: null };
+            inboxState = {
+              loaded: true,
+              loading: false,
+              status: "ok",
+              items: built.items,
+              message: null
+            };
           } else if (built.status === "error") {
-            inboxState = { loaded: true, loading: false, status: "error", items: null, message: built.message || "could not load inbox" };
+            inboxState = {
+              loaded: true,
+              loading: false,
+              status: "error",
+              items: null,
+              message: built.message || "could not load inbox"
+            };
           } else {
-            inboxState = { loaded: true, loading: false, status: built.status, items: null, message: null };
+            inboxState = {
+              loaded: true,
+              loading: false,
+              status: built.status,
+              items: null,
+              message: null
+            };
           }
         }).catch((e) => {
-          inboxState = { loaded: true, loading: false, status: "error", items: null, message: errMsg(e) };
+          inboxState = {
+            loaded: true,
+            loading: false,
+            status: "error",
+            items: null,
+            message: errMsg(e)
+          };
         }).finally(() => repaint());
         return;
       }
@@ -13313,7 +13376,9 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
     function inboxRows(st) {
       switch (st.status) {
         case "disclosure":
-          return ["Messaging disclosure not yet acknowledged \u2014 run `terminalhire inbox` once to review it and enable messages."];
+          return [
+            "Messaging disclosure not yet acknowledged \u2014 run `terminalhire inbox` once to review it and enable messages."
+          ];
         case "not-linked":
           return ["Not linked \u2014 run `terminalhire link` to connect your web session."];
         case "expired":
@@ -13356,11 +13421,13 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
         case "empty":
           return ["No bounties available right now. Check back through the day."];
         case "demoted":
-          return ["Paid bounties paused \u2014 run `bounties --priced` to view them. Try Contribute or Jobs."];
+          return [
+            "Paid bounties paused \u2014 run `bounties --priced` to view them. Try Contribute or Jobs."
+          ];
         case "ok":
           return result.bounties.map((job) => {
             const b = job.bounty || {};
-            const amt = b.amountUSD != null ? "$" + b.amountUSD.toLocaleString() : "$\u2014";
+            const amt = formatUsd(b.amountUSD);
             const repo = sanitizeLine(b.repoFullName || job.company);
             const prs = b.competingOpenPRs;
             const contend = prs != null && prs > 0 ? ` \xB7 \u26A0 ${prs} in flight` : "";
@@ -13415,7 +13482,9 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
             if (it.note) rows.push(`    note: ${sanitizeLine(it.note)}`);
             if (it.contact) rows.push(`    contact: ${sanitizeLine(it.contact)}`);
             else if (it.role === "incoming" && it.status === "pending") {
-              rows.push(`    \u2192 accept: terminalhire intro --accept @${sanitizeLine(it.counterpartyLogin)}`);
+              rows.push(
+                `    \u2192 accept: terminalhire intro --accept @${sanitizeLine(it.counterpartyLogin)}`
+              );
             }
           }
           return rows;
@@ -13502,7 +13571,8 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
       if (name === "Claims") {
         if (!claimsState.loaded) return ["Loading\u2026"];
         if (claimsState.error) return ["Could not read claims \u2014 " + claimsState.error];
-        if (!claimsState.rows.length) return ["No claims yet \u2014 run `terminalhire claim <url>` to start one."];
+        if (!claimsState.rows.length)
+          return ["No claims yet \u2014 run `terminalhire claim <url>` to start one."];
         return claimsState.rows.map(formatClaimRow);
       }
       if (name === "Profile") {
@@ -13532,8 +13602,10 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
         const st = listState[name];
         if (st.loaded && !st.error && st.result && st.result.status === "ok") {
           if (name === "Jobs") return `${st.result.ranked.length} roles matching your profile`;
-          if (name === "Bounties") return `${st.result.bounties.length} bounties you could knock out`;
-          if (name === "Devs") return `${st.result.results.length} matches in the builder directory`;
+          if (name === "Bounties")
+            return `${st.result.bounties.length} bounties you could knock out`;
+          if (name === "Devs")
+            return `${st.result.results.length} matches in the builder directory`;
         }
         return name;
       }
@@ -13563,7 +13635,9 @@ function runHubTui({ input = process.stdin, output = process.stdout, signals, de
         const row = startRow + i;
         if (row < 0 || row >= rows) continue;
         const t = TH_GLYPH.length <= 1 ? 0 : i / (TH_GLYPH.length - 1);
-        drawText(buf, cols, row, startCol, TH_GLYPH[i], { fg: gradientFg(BRAND_GRADIENT, t, level) });
+        drawText(buf, cols, row, startCol, TH_GLYPH[i], {
+          fg: gradientFg(BRAND_GRADIENT, t, level)
+        });
       }
       const hint = "press any key to continue";
       const hintRow = Math.min(rows - 1, startRow + TH_GLYPH.length + 1);
