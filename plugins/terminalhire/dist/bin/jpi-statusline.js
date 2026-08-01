@@ -92,7 +92,7 @@ function render() {
     const founderOpen = founderOpenCount(entry);
     const stale = sessionStale(entry) && unread === 0 && incoming === 0;
     const segments = [];
-    if (approved > 0) segments.push(`\u2705 ${approved} approved \u2014 run: th claim list`);
+    if (approved > 0) segments.push(`\u2705 ${approved} approved \u2014 run: th claim start`);
     if (founderNeedsYou > 0) {
       segments.push(
         `\u{1F9ED} ${founderNeedsYou} claim${founderNeedsYou === 1 ? "" : "s"} await your decision \u2014 run: th bounties`

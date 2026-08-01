@@ -10638,8 +10638,24 @@ function nextPolledState(from, observed) {
 function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
+function defangText(s) {
+  return typeof s === "string" ? s.replace(CONTROL_CHARS2, "") : s;
+}
+function finiteAmount(a) {
+  if (typeof a === "number") return Number.isFinite(a) ? a : null;
+  if (typeof a !== "string" || a.trim() === "") return null;
+  const n = Number(a);
+  return Number.isFinite(n) ? n : null;
+}
 function normalizeClaim(c) {
-  return { ...c, kind: c.kind ?? "bounty", policy: c.policy ?? null };
+  return {
+    ...c,
+    kind: c.kind ?? "bounty",
+    policy: c.policy ?? null,
+    title: defangText(c.title),
+    repoFullName: defangText(c.repoFullName),
+    amountUSD: finiteAmount(c.amountUSD)
+  };
 }
 function readClaims() {
   try {
@@ -10761,7 +10777,7 @@ function acceptedPRRate(claims = readClaims()) {
   const merged = claims.filter((c) => c.state === "merged").length;
   return { merged, total, rate: total === 0 ? 0 : merged / total };
 }
-var TERMINALHIRE_DIR2, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS;
+var TERMINALHIRE_DIR2, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, CONTROL_CHARS2;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
@@ -10817,6 +10833,7 @@ var init_claims = __esm({
       ]),
       submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
     };
+    CONTROL_CHARS2 = /[\x00-\x1f\x7f-\x9f]/g;
   }
 });
 
@@ -26056,6 +26073,13 @@ function openInBrowser(url) {
   }
 }
 
+// bin/sanitize.js
+var CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
+function sanitizeText(s) {
+  if (s == null) return "";
+  return String(s).replace(CONTROL_CHARS, "");
+}
+
 // src/policy-acks.ts
 init_state_dir();
 import { lstatSync, readFileSync as readFileSync2, writeFileSync } from "fs";
@@ -26979,7 +27003,10 @@ async function pollPR(prUrl) {
   }
 }
 function fmtAmount(a) {
-  return a != null ? "$" + a.toLocaleString() : "$\u2014";
+  if (a == null) return "$\u2014";
+  if (typeof a === "string" && a.trim() === "") return "$\u2014";
+  const n = typeof a === "number" ? a : Number(a);
+  return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
 }
 function fmtClaimAmount(c) {
   return c.kind === "contribution" ? "contribution" : fmtAmount(c.amountUSD);
@@ -28307,35 +28334,62 @@ async function ensureForkExists(repoFullName, ghUser) {
   if (!isFork) throw new Error(`fork ${forkFullName} created but could not be verified as a fork`);
   return forkFullName;
 }
+function shouldStatePending(claim, approvalsChecked) {
+  return Boolean(claim?.approval) && claim.approval.state === "pending" && Boolean(approvalsChecked);
+}
+function startableRow(c) {
+  const bits = [fmtClaimAmount(c), sanitizeText(c.title)];
+  if (c.repoFullName) bits.push(sanitizeText(c.repoFullName));
+  return bits.join(" \xB7 ");
+}
+async function pickStartableClaim(claims, { prompt = ask, isTTY = process.stdin.isTTY } = {}) {
+  const active = claims.listClaims({ active: true });
+  const { approvalsChecked, approvalsUnavailable } = await syncFounderApprovals(claims, active);
+  const startable = claims.listClaims({ active: true }).filter((c) => c.state === "claimed");
+  if (startable.length === 0) {
+    console.log("No claims ready to start. Claim one first:  terminalhire claim <ref>");
+    return null;
+  }
+  const interactive = Boolean(isTTY);
+  console.log(`
+${startable.length} claim${startable.length === 1 ? "" : "s"} ready to start:
+`);
+  const width = String(startable.length).length;
+  startable.forEach((c, i) => {
+    console.log(`  ${String(i + 1).padStart(width)}) ${startableRow(c)}`);
+    if (!interactive) console.log(`     terminalhire claim start ${c.id}`);
+  });
+  if (!interactive) {
+    console.log("\nRun the command under the one you want to start.");
+    return null;
+  }
+  const answer = await prompt(`
+Which one? (1-${startable.length}, or q to quit) `);
+  if (answer === "" || /^q(uit)?$/i.test(answer)) return null;
+  const n = Number.parseInt(answer, 10);
+  if (!/^\d+$/.test(answer) || !Number.isInteger(n) || n < 1 || n > startable.length) {
+    console.log(`
+Nothing started \u2014 '${answer}' is not one of 1-${startable.length}.`);
+    return null;
+  }
+  return { id: startable[n - 1].id, approvalsChecked, approvalsUnavailable };
+}
 async function cmdStart(id, flags = {}) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+  let approvalsChecked = false;
+  let approvalsUnavailable = false;
   if (!id) {
-    let list = claims.listClaims({ active: true });
-    await syncFounderApprovals(claims, list);
-    const startable = claims.listClaims({ active: true }).filter((c) => c.state === "claimed");
-    if (startable.length === 0) {
-      console.log("No claims ready to start. Claim one first:  terminalhire claim <ref>");
-      return;
-    }
-    console.log(
-      `
-${startable.length} claim${startable.length === 1 ? "" : "s"} ready to start:
-`
-    );
-    for (const c of startable) {
-      console.log(`  ${c.title}`);
-      console.log(`    terminalhire claim start ${c.id}`);
-    }
-    console.log("\nRun the command under the one you want to start.");
-    return;
+    const picked = await pickStartableClaim(claims);
+    if (!picked) return;
+    ({ id, approvalsChecked, approvalsUnavailable } = picked);
   }
   let claim = claims.findClaim(id);
   if (!claim) {
     console.error(`terminalhire claim: no claim with id '${id}'.`);
     process.exit(1);
   }
-  if (claim.approval?.state === "pending") {
-    await syncFounderApprovals(claims, [claim]);
+  if (claim.approval?.state === "pending" && !approvalsChecked) {
+    ({ approvalsChecked, approvalsUnavailable } = await syncFounderApprovals(claims, [claim]));
     claim = claims.findClaim(id);
   }
   if (claim.worktreePath) {
@@ -28356,19 +28410,18 @@ When it's done:  terminalhire claim submit ${id}`);
   }
   if (claim.approval) {
     console.log(`
-${claim.title}`);
-    if (claim.approval.state === "pending") {
+${sanitizeText(claim.title)}`);
+    console.log("\n  No fork was attempted \u2014 founder postings are never forked or cloned. Your");
+    console.log("  work slice is delivered through terminalhire, and your patch goes back the");
+    console.log("  same way.");
+    if (shouldStatePending(claim, approvalsChecked)) {
+      console.log("\n  Access is pending \u2014 the founder has not approved your claim yet.");
+    } else if (approvalsUnavailable) {
       console.log(
-        "\n  Access is pending \u2014 this approval-only posting needs the founder to approve"
+        "\n  Terminalhire could not check approvals right now; local state was preserved.\n  The next step below still works \u2014 it asks the server directly."
       );
-      console.log("  your claim before any work can be delivered. No fork was attempted: founder");
-      console.log("  postings are never forked or cloned; once approved, your work slice is");
-      console.log("  delivered through terminalhire.");
-    } else {
-      console.log("\n  No fork was attempted \u2014 founder postings are never forked or cloned. Your");
-      console.log("  work slice is delivered through terminalhire, and your patch goes back the");
-      console.log("  same way.");
     }
+    printNextSteps([claim]);
     return;
   }
   if (flags.here) {
@@ -28618,10 +28671,10 @@ var CLAIM_EVENT_LABEL = {
   rejected: "the founder rejected"
 };
 var LINE_BREAKS = /\r\n|[\r\n\v\f\u0085\u2028\u2029]/;
-var CONTROL_CHARS = /[\u0000-\u001F\u007F-\u009F]/g;
+var CONTROL_CHARS3 = /[\u0000-\u001F\u007F-\u009F]/g;
 function terminalSafeLines(raw) {
   if (typeof raw !== "string" || raw === "") return [];
-  return raw.split(LINE_BREAKS).map((l) => l.replace(CONTROL_CHARS, ""));
+  return raw.split(LINE_BREAKS).map((l) => l.replace(CONTROL_CHARS3, ""));
 }
 function terminalSafeInline(raw) {
   return terminalSafeLines(raw).join(" ");
@@ -30066,6 +30119,7 @@ export {
   normalizeIntent,
   pickBodySource,
   pickExistingPr,
+  pickStartableClaim,
   printNextSteps,
   readCredentialDisposition,
   renderClaimHistory,
@@ -30081,6 +30135,7 @@ export {
   selectCompetingPrs,
   selectPushRemote,
   shouldRequestAssignment,
+  shouldStatePending,
   sliceWorkDirFor,
   stakeDecision,
   startBranchFor,

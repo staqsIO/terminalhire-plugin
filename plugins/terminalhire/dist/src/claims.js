@@ -161,8 +161,25 @@ function nextPolledState(from, observed) {
 function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
+var CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
+function defangText(s) {
+  return typeof s === "string" ? s.replace(CONTROL_CHARS, "") : s;
+}
+function finiteAmount(a) {
+  if (typeof a === "number") return Number.isFinite(a) ? a : null;
+  if (typeof a !== "string" || a.trim() === "") return null;
+  const n = Number(a);
+  return Number.isFinite(n) ? n : null;
+}
 function normalizeClaim(c) {
-  return { ...c, kind: c.kind ?? "bounty", policy: c.policy ?? null };
+  return {
+    ...c,
+    kind: c.kind ?? "bounty",
+    policy: c.policy ?? null,
+    title: defangText(c.title),
+    repoFullName: defangText(c.repoFullName),
+    amountUSD: finiteAmount(c.amountUSD)
+  };
 }
 function readClaims() {
   try {
