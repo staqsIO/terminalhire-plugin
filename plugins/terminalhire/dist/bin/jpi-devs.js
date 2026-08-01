@@ -11053,10 +11053,11 @@ function excludeOwnCard(results, ownLogin) {
 }
 
 // bin/sanitize.js
+var WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
 var CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
 function sanitizeText(s) {
   if (s == null) return "";
-  return String(s).replace(CONTROL_CHARS, "");
+  return String(s).replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "");
 }
 function safeHttpUrl(url) {
   if (url == null) return null;

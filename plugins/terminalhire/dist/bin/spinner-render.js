@@ -607,6 +607,14 @@ function clearSpinnerTips() {
   return { cleared: true };
 }
 
+// bin/sanitize.js
+function formatUsd(a) {
+  if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
+  if (typeof a !== "string" || a.trim() === "") return "$\u2014";
+  const n = Number(a);
+  return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
+}
+
 // ../../packages/core/src/vocab/graph.data.ts
 var VOCAB_NODES = [
   // ── Languages ─────────────────────────────────────────────────────────────
@@ -1404,7 +1412,7 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
       const token = jobShortToken(String(m.id));
       const url = `${base}/j/${token}`;
       if (source === "bounty") {
-        const money = m.amountUSD != null ? `$${Number(m.amountUSD).toLocaleString()}` : "$\u2014";
+        const money = formatUsd(m.amountUSD);
         const repo = m.repo || companyRaw;
         out.push(`\u{1F48E} ${money} \xB7 ${title} \xB7 ${repo} \xB7 ${pct}% \u2014 ${url}`);
       } else if (source === "contribute") {
