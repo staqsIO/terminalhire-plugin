@@ -294,10 +294,12 @@ __export(protocol_exports, {
   handleUrl: () => handleUrl,
   healStaleHandler: () => healStaleHandler,
   parseClaimUrl: () => parseClaimUrl,
+  preferredTerminalApp: () => preferredTerminalApp,
   printClaimCommand: () => printClaimCommand,
   registerScheme: () => registerScheme,
   schemeStatus: () => schemeStatus,
-  unregisterScheme: () => unregisterScheme
+  unregisterScheme: () => unregisterScheme,
+  writeClaimLauncher: () => writeClaimLauncher
 });
 import { spawn, spawnSync } from "child_process";
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync3, rmSync as rmSync2, writeFileSync as writeFileSync3, renameSync } from "fs";
@@ -329,8 +331,11 @@ function defaultProtocolDeps() {
     ensureStateDir: (path6) => {
       ensureStateDir(path6);
     },
-    writeFileSync: (path6, contents) => {
-      writeFileSync3(path6, contents, "utf8");
+    ensureStateDirForSecret: (path6) => {
+      ensureStateDirForSecret(path6);
+    },
+    writeFileSync: (path6, contents, mode) => {
+      writeFileSync3(path6, contents, mode === void 0 ? "utf8" : { encoding: "utf8", mode });
     },
     readFileSync: (path6) => readFileSync3(path6, "utf8"),
     rmSync: (path6) => {
@@ -370,30 +375,52 @@ function appleScriptStringLiteral(s) {
 function shellQuoteSingle(s) {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
-function buildAppleScriptHandler(execPath, dispatchPath) {
+function preferredTerminalApp(env) {
+  const raw = typeof env.TERM_PROGRAM === "string" ? env.TERM_PROGRAM.trim() : "";
+  if (!raw) return null;
+  const known = {
+    apple_terminal: "Terminal",
+    "iterm.app": "iTerm"
+  };
+  return known[raw.toLowerCase()] ?? null;
+}
+function buildAppleScriptHandler(execPath, dispatchPath, terminalApp) {
   const execLit = appleScriptStringLiteral(execPath);
   const dispatchLit = appleScriptStringLiteral(dispatchPath);
+  const fallback = (indent) => [
+    `${indent}display notification "Couldn't open your terminal. Run: " & launcher with title "Terminalhire"`,
+    `${indent}try`,
+    `${indent}	do shell script quoted form of ${execLit} & " " & quoted form of ${dispatchLit} & " handle-url " & quoted form of theURL & " > /dev/null 2>&1 &"`,
+    `${indent}end try`
+  ];
+  const launch = terminalApp ? [
+    "	try",
+    `		do shell script "open -a " & quoted form of ${appleScriptStringLiteral(terminalApp)} & " " & quoted form of launcher`,
+    "	on error",
+    "		try",
+    '			do shell script "open " & quoted form of launcher',
+    "		on error",
+    ...fallback("			"),
+    "		end try",
+    "	end try"
+  ] : [
+    "	try",
+    '		do shell script "open " & quoted form of launcher',
+    "	on error",
+    ...fallback("		"),
+    "	end try"
+  ];
   return [
     "on open location theURL",
-    '	set claimCmd to ""',
+    '	set launcher to ""',
     "	try",
-    `		set claimCmd to do shell script quoted form of ${execLit} & " " & quoted form of ${dispatchLit} & " print-claim-command " & quoted form of theURL`,
+    `		set launcher to do shell script quoted form of ${execLit} & " " & quoted form of ${dispatchLit} & " write-claim-launcher " & quoted form of theURL`,
     "	end try",
-    '	if claimCmd is "" then',
+    '	if launcher is "" then',
     `		display notification "That isn't a valid Terminalhire claim link." with title "Terminalhire"`,
     "		return",
     "	end if",
-    "	try",
-    '		tell application "Terminal"',
-    "			activate",
-    "			do script claimCmd",
-    "		end tell",
-    "	on error",
-    `		display notification "Couldn't open Terminal automatically. Run: " & claimCmd with title "Terminalhire"`,
-    "		try",
-    `			do shell script quoted form of ${execLit} & " " & quoted form of ${dispatchLit} & " handle-url " & quoted form of theURL & " > /dev/null 2>&1 &"`,
-    "		end try",
-    "	end try",
+    ...launch,
     "end open location",
     ""
   ].join("\n");
@@ -404,7 +431,12 @@ function buildPreviewShellCommand(token, deps) {
     shellQuoteSingle(deps.dispatchPath),
     "claim",
     "preview",
-    token
+    // Quoted like the paths beside it, though parseClaimUrl's `[A-Za-z0-9_-]{8}` already
+    // forbids every shell metacharacter. Leaving the ONE value that came from a URL bare
+    // while quoting the two that never did is backwards: it makes the safety depend on a
+    // regex two files away rather than on this line, and a future loosening of that regex
+    // would open an injection here silently.
+    shellQuoteSingle(token)
   ].join(" ");
 }
 function printClaimCommand(raw, deps = defaultProtocolDeps()) {
@@ -414,6 +446,28 @@ function printClaimCommand(raw, deps = defaultProtocolDeps()) {
     return;
   }
   deps.log(buildPreviewShellCommand(parsed.token, deps));
+  deps.exit(0);
+}
+function launcherPath(token, deps) {
+  return join3(stateDir(deps), `claim-${token}.command`);
+}
+function buildLauncherScript(token, deps) {
+  return ["#!/bin/sh", `exec ${buildPreviewShellCommand(token, deps)}`, ""].join("\n");
+}
+function writeLauncherFile(token, deps) {
+  deps.ensureStateDirForSecret(stateDir(deps));
+  const path6 = launcherPath(token, deps);
+  deps.rmSync(path6);
+  deps.writeFileSync(path6, buildLauncherScript(token, deps), 448);
+  return path6;
+}
+function writeClaimLauncher(raw, deps = defaultProtocolDeps()) {
+  const parsed = parseClaimUrl(raw);
+  if (!parsed) {
+    deps.exit(1);
+    return;
+  }
+  deps.log(writeLauncherFile(parsed.token, deps));
   deps.exit(0);
 }
 function darwinAppPaths(deps) {
@@ -428,7 +482,16 @@ function darwinRegister(deps) {
   const { appDir, appPath, plistPath } = darwinAppPaths(deps);
   deps.mkdirSync(appDir);
   const scriptPath = join3(dir, "handler.applescript");
-  deps.writeFileSync(scriptPath, buildAppleScriptHandler(deps.execPath, deps.dispatchPath));
+  deps.writeFileSync(
+    scriptPath,
+    buildAppleScriptHandler(
+      deps.execPath,
+      deps.dispatchPath,
+      // Resolved at REGISTER time, from the shell the user ran `protocol register` in.
+      // `open location` runs with no TERM_PROGRAM at all, so this cannot be deferred.
+      preferredTerminalApp(deps.env)
+    )
+  );
   deps.rmSync(appPath);
   const compile = deps.spawnSync("osacompile", ["-o", appPath, scriptPath]);
   if (compile.status !== 0) {
@@ -496,14 +559,10 @@ function darwinStatus(deps) {
   return { registered: exists && registered, appExists: exists };
 }
 function darwinOpenPreviewTerminal(token, deps) {
-  const doScript = `do script ${appleScriptStringLiteral(buildPreviewShellCommand(token, deps))}`;
-  const res = deps.spawnSync("osascript", [
-    "-e",
-    'tell application "Terminal" to activate',
-    "-e",
-    doScript
-  ]);
-  return res.status === 0;
+  const path6 = writeLauncherFile(token, deps);
+  const app = preferredTerminalApp(deps.env);
+  if (app && deps.spawnSync("open", ["-a", app, path6]).status === 0) return true;
+  return deps.spawnSync("open", [path6]).status === 0;
 }
 function win32Register(deps) {
   for (const scheme of WIN32_SCHEMES) {
@@ -792,7 +851,7 @@ var init_protocol = __esm({
       ["konsole", ["-e"]],
       ["xterm", ["-e"]]
     ];
-    HANDLER_TEMPLATE_VERSION = 2;
+    HANDLER_TEMPLATE_VERSION = 3;
     PENDING_CLAIMS_CAP = 20;
     PENDING_TOKEN_RE = /^[A-Za-z0-9_-]{8}$/;
   }
@@ -67271,6 +67330,10 @@ if (firstArg === "handle-url") {
 if (firstArg === "print-claim-command") {
   const { printClaimCommand: printClaimCommand2 } = await Promise.resolve().then(() => (init_protocol(), protocol_exports));
   printClaimCommand2(process.argv[3]);
+}
+if (firstArg === "write-claim-launcher") {
+  const { writeClaimLauncher: writeClaimLauncher2 } = await Promise.resolve().then(() => (init_protocol(), protocol_exports));
+  writeClaimLauncher2(process.argv[3]);
 }
 if (firstArg === "profile") {
   const mod2 = await Promise.resolve().then(() => (init_jpi_profile(), jpi_profile_exports));
