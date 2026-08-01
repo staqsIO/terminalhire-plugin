@@ -214,15 +214,68 @@ function resolveLauncherSource() {
   return null;
 }
 
+/**
+ * The generation of statusLine artifact this installer puts in place (TERM-368).
+ *
+ * Kept in lockstep with the marker in `bin/jpi-statusline-launch.js` — the installer
+ * copies that file verbatim, so the marker travels with it and an installed launcher can
+ * always answer which generation it is. Bump BOTH only when an installed artifact stops
+ * being able to render the current badge row.
+ */
+const STATUSLINE_GENERATION = 2;
+
+const GENERATION_MARKER = /terminalhire-statusline-generation:\s*(\d+)/;
+
+/**
+ * The generation recorded inside an installed statusLine artifact, or 0.
+ *
+ * 0 means "older than the marker" and NEVER "current" — the whole failure this closes is
+ * an unrecognizable artifact being treated as fine. Absent, unreadable, a directory, or
+ * no marker all collapse to 0 deliberately: every one of them is a thing we cannot prove
+ * renders the badge row, and the safe reading of "cannot prove" is "behind".
+ *
+ * Takes an explicit path rather than reading a module-level constant, so a test can point
+ * it at a scratch dir. The constants above bind to homedir() at import and cannot be
+ * redirected by the environment.
+ */
+function wrapperGeneration(path) {
+  let src = '';
+  try {
+    src = readFileSync(path, 'utf8');
+  } catch {
+    return 0; // missing, unreadable, or a directory — all "cannot prove", all behind
+  }
+  const m = GENERATION_MARKER.exec(src);
+  if (!m) return 0;
+  const n = Number(m[1]);
+  return Number.isInteger(n) && n > 0 ? n : 0;
+}
+
+/** True when an installed artifact predates the current badge row and cannot render it. */
+function isStaleGeneration(path) {
+  return wrapperGeneration(path) < STATUSLINE_GENERATION;
+}
+
 // Classify an existing statusLine command:
 //   'ours'    — already the self-updating launcher (idempotent)
 //   'legacy'  — an OLD terminalhire wrapper (npm-pinned .sh / dispatch) → offer re-point
 //   'foreign' — someone else's statusLine → chain-wrap + preserve
 //   'none'    — no command
-function classifyExisting(statusLine) {
+//
+// The marker decides FIRST, the filename heuristics only as fallback, and the order is the
+// point. Matching `statusline-launch.js` in the command string proves what the file is
+// NAMED, not what it can render — so a launcher-named artifact from before the badge row
+// classified as 'ours' and was left alone forever. Reading the generation out of the file
+// asks the question that actually matters. The heuristics stay because they are the only
+// thing that catches an artifact written before any marker existed.
+// `launcherPath` is a parameter with the real path as its default, so a test can point the
+// generation read at a scratch dir. The default keeps every existing caller unchanged.
+function classifyExisting(statusLine, launcherPath = STABLE_LAUNCHER) {
   const cmd = statusLine && typeof statusLine.command === 'string' ? statusLine.command : '';
   if (!cmd) return 'none';
-  if (cmd.includes('statusline-launch.js')) return 'ours';
+  if (cmd.includes('statusline-launch.js')) {
+    return isStaleGeneration(launcherPath) ? 'legacy' : 'ours';
+  }
   if (
     cmd.includes('statusline-wrapper.sh') ||
     (existsSync(LEGACY_WRAPPER) && cmd.includes('.terminalhire')) ||
@@ -476,4 +529,12 @@ if (isMain) {
     });
 }
 
-export { install as installStatusline, uninstall as uninstallStatusline, LAUNCHER_COMMAND };
+export {
+  install as installStatusline,
+  uninstall as uninstallStatusline,
+  LAUNCHER_COMMAND,
+  STATUSLINE_GENERATION,
+  wrapperGeneration,
+  isStaleGeneration,
+  classifyExisting,
+};

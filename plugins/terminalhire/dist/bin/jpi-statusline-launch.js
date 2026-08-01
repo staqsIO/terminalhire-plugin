@@ -15,6 +15,12 @@ function firstLine(buf) {
   const nl = s.indexOf("\n");
   return (nl === -1 ? s : s.slice(0, nl)).replace(/\s+$/u, "");
 }
+var STATUSLINE_GENERATION_TAG = "terminalhire-statusline-generation: 2";
+if (process.argv.includes("--generation")) {
+  process.stdout.write(`${STATUSLINE_GENERATION_TAG}
+`);
+  process.exit(0);
+}
 async function renderOurs(input) {
   let engine = "";
   try {

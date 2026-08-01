@@ -26129,7 +26129,6 @@ var TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join7(homedir5(), ".term
 var CLAIM_PUSH_AUTO_MARKER = join7(TERMINALHIRE_DIR5, "claim-push-auto.json");
 var CLAIM_PUSH_TOKEN_FILE = join7(TERMINALHIRE_DIR5, "claim-push-token.enc");
 var CLAIM_PUSH_MANUAL_MARKER = join7(TERMINALHIRE_DIR5, "claim-push.json");
-var CLAIM_SYNC_BASE = "https://terminalhire.com";
 var AUTO_CONSENT_VERSION = 2;
 var AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
 async function writePushTokenEnc(rawToken) {
@@ -26174,28 +26173,6 @@ function clearAutoMarker() {
 function computeSnapshotHash(pushed) {
   return createHash3("sha256").update(JSON.stringify(pushed)).digest("hex");
 }
-function backgroundPushGate(params) {
-  const {
-    autoMarkerExists,
-    tokenFileExists,
-    lastPushedAt,
-    now,
-    throttleMs,
-    currentHash,
-    lastSnapshotHash
-  } = params;
-  if (!autoMarkerExists || !tokenFileExists) {
-    return { push: false, reason: "not-opted-in" };
-  }
-  const last = lastPushedAt ? Date.parse(lastPushedAt) : NaN;
-  if (!Number.isNaN(last) && now - last < throttleMs) {
-    return { push: false, reason: "throttled" };
-  }
-  if (lastSnapshotHash && lastSnapshotHash === currentHash) {
-    return { push: false, reason: "unchanged" };
-  }
-  return { push: true, reason: "ok" };
-}
 function unpushedNudgeGate(params) {
   const {
     autoMarkerExists,
@@ -26233,50 +26210,107 @@ async function shouldNudgeUnpushed() {
     return false;
   }
 }
-async function runBackgroundClaimPush({ now = Date.now() } = {}) {
+
+// bin/founder-verdict-sync.js
+var CLAIM_SYNC_BASE = "https://terminalhire.com";
+var TERMINAL = /* @__PURE__ */ new Set(["merged", "abandoned"]);
+function verdictState(verdict) {
+  return verdict === "rejected" ? "abandoned" : "merged";
+}
+async function fetchFounderVerdicts(pushToken, fetchImpl = fetch) {
+  if (typeof pushToken !== "string" || pushToken.length === 0) return null;
   try {
-    if (!existsSync5(CLAIM_PUSH_AUTO_MARKER) || !existsSync5(CLAIM_PUSH_TOKEN_FILE)) {
-      return { pushed: false, reason: "not-opted-in" };
-    }
-    const marker = readAutoMarker();
-    if (!marker || !marker.autoConsentedAt) return { pushed: false, reason: "not-opted-in" };
-    const { listClaims: listClaims2, toPushedClaim: toPushedClaim2, PUSHED_CLAIM_FIELDS: PUSHED_CLAIM_FIELDS2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
-    const pushed = listClaims2().map((c) => toPushedClaim2(c));
-    const currentHash = computeSnapshotHash(pushed);
-    const gate = backgroundPushGate({
-      autoMarkerExists: true,
-      tokenFileExists: true,
-      lastPushedAt: marker.lastPushedAt ?? null,
-      now,
-      throttleMs: AUTO_PUSH_THROTTLE_MS,
-      currentHash,
-      lastSnapshotHash: marker.lastSnapshotHash ?? null
-    });
-    if (!gate.push) return { pushed: false, reason: gate.reason };
-    const token = await readPushTokenEnc();
-    if (!token) return { pushed: false, reason: "unreadable-token" };
-    const consentReceipt = {
-      consentedAt: marker.autoConsentedAt,
-      version: AUTO_CONSENT_VERSION,
-      fields: PUSHED_CLAIM_FIELDS2
-    };
-    const res = await fetch(`${CLAIM_SYNC_BASE}/api/claim-sync`, {
+    const res = await fetchImpl(`${CLAIM_SYNC_BASE}/api/claim/verdicts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ consentToken: consentReceipt, claims: pushed, pushToken: token }),
-      signal: AbortSignal.timeout(1e4)
+      body: JSON.stringify({ pushToken }),
+      signal: AbortSignal.timeout(15e3)
     });
-    if (!res.ok) {
-      return { pushed: false, reason: `server-${res.status}` };
-    }
-    writeAutoMarker({
-      ...marker,
-      lastPushedAt: new Date(now).toISOString(),
-      lastSnapshotHash: currentHash
-    });
-    return { pushed: true, reason: "ok" };
+    if (!res?.ok) return null;
+    const body = await res.json();
+    if (!body || !Array.isArray(body.verdicts)) return null;
+    const verdicts = body.verdicts.filter(
+      (v) => v && typeof v.claimId === "string" && v.claimId !== "" && (v.verdict === "accepted" || v.verdict === "rejected")
+    );
+    return { verdicts, latestAt: typeof body.latestAt === "string" ? body.latestAt : null };
   } catch {
-    return { pushed: false, reason: "failed" };
+    return null;
+  }
+}
+function planVerdictTransitions(claims, verdicts, nextPolledState2) {
+  if (!Array.isArray(claims) || !Array.isArray(verdicts)) return [];
+  const byClaimId = /* @__PURE__ */ new Map();
+  for (const v of verdicts) {
+    if (v && typeof v.claimId === "string" && v.claimId !== "") byClaimId.set(v.claimId, v);
+  }
+  const plan = [];
+  for (const c of claims) {
+    const claimId = c?.approval?.claimId;
+    if (!claimId) continue;
+    const v = byClaimId.get(claimId);
+    if (!v) continue;
+    if (TERMINAL.has(c.state)) continue;
+    const to = verdictState(v.verdict);
+    const next = nextPolledState2(c.state, to);
+    if (next === c.state) continue;
+    plan.push({
+      id: c.id,
+      claimId,
+      from: c.state,
+      to: next,
+      verdict: v.verdict,
+      settled: v.settled === true,
+      amountUSD: typeof c.amountUSD === "number" ? c.amountUSD : null,
+      title: typeof c.title === "string" ? c.title : ""
+    });
+  }
+  return plan;
+}
+function buildVerdictNotice(t) {
+  if (!t || typeof t.to !== "string") return null;
+  const amount = typeof t.amountUSD === "number" && t.amountUSD > 0 ? `$${t.amountUSD}` : null;
+  if (t.verdict === "rejected") {
+    return `  \u2717 founder rejected${amount ? ` \u2014 ${amount}` : ""} \xB7 claim moved to ${t.to}`;
+  }
+  const paid = t.settled ? " \xB7 paid" : "";
+  return `  \u2713 founder accepted${amount ? ` \u2014 ${amount}` : ""}${paid} \xB7 claim moved to ${t.to}`;
+}
+async function syncFounderVerdicts({
+  claimsModule,
+  targets,
+  readPushTokenEnc: readPushTokenEnc2,
+  fetchImpl = fetch,
+  log = console.log
+} = {}) {
+  const quiet = { checked: false, unavailable: false, applied: [] };
+  try {
+    const founderTargets = (targets ?? []).filter(
+      (c) => Boolean(c?.approval) && !TERMINAL.has(c.state)
+    );
+    if (founderTargets.length === 0) return quiet;
+    let pushToken = null;
+    try {
+      pushToken = await readPushTokenEnc2();
+    } catch {
+      pushToken = null;
+    }
+    if (!pushToken) return quiet;
+    const res = await fetchFounderVerdicts(pushToken, fetchImpl);
+    if (!res) return { checked: false, unavailable: true, applied: [] };
+    const plan = planVerdictTransitions(founderTargets, res.verdicts, claimsModule.nextPolledState);
+    const applied = [];
+    for (const t of plan) {
+      try {
+        claimsModule.updateClaim(t.id, { state: t.to });
+        applied.push(t);
+        const line = buildVerdictNotice(t);
+        if (line) log(line);
+      } catch {
+      }
+    }
+    return { checked: true, unavailable: false, applied };
+  } catch {
+    return quiet;
   }
 }
 
@@ -27218,15 +27252,35 @@ async function localLoginForPaidBrowserClaim() {
     if (timer) clearTimeout(timer);
   }
 }
+var PUSH_TOKEN_REFUSAL = Object.freeze({
+  /** The credential is unknown or revoked — dead. Clear it. */
+  INVALID: "invalid-push-token",
+  /** The credential is LIVE, just not a registration credential. NEVER clear it. */
+  INSUFFICIENT: "insufficient-push-token",
+  /**
+   * TERM-325. Minted before tokens were bound to a GitHub account id, so it can no
+   * longer prove who holds it. Unrevoked and real, and it fails closed at every scope
+   * — the slice route answers `invalid-push-token` for the same row — so the ACTION is
+   * the revoked one: clear it and verify in the browser.
+   *
+   * The WORDING is not. The server is explicit that nothing was revoked and the
+   * requirement changed on our side, so telling this developer they revoked something
+   * is false. Sharing a branch must not mean sharing a sentence.
+   */
+  LEGACY: "legacy-push-token"
+});
+var SYNC_BACKGROUND_PUSH_ACTIVE_FIELD = "backgroundPushActive";
 async function registerFounderClaim(b) {
   const postingId = b.bountyId.replace(/^bounty:founder:/, "");
+  let clearedLocalCredential = false;
+  let refusedForPurpose = false;
   const refuse = (reason) => {
     console.error(
       `
 terminalhire claim: refusing to record \u2014 ${reason}
-  Nothing was recorded: a founder-posting claim registers with terminalhire BEFORE
+  No CLAIM was recorded: a founder-posting claim registers with terminalhire BEFORE
   it is recorded locally (fail-closed), so a posting that is gone, taken, or
-  unverifiable is never claimed on stale cache data.`
+  unverifiable is never claimed on stale cache data.` + (clearedLocalCredential ? "\n  One local change was kept: the stored push token was deleted from this\n  machine (the server no longer accepts it, so keeping it would fail every\n  later claim)." : "")
     );
     process.exit(1);
   };
@@ -27241,7 +27295,7 @@ terminalhire claim: refusing to record \u2014 ${reason}
   } catch {
   }
   let expectLogin;
-  if (!auth) {
+  const acquireProofAuth = async () => {
     try {
       expectLogin = await localLoginForPaidBrowserClaim();
     } catch (err) {
@@ -27275,7 +27329,8 @@ terminalhire claim: refusing to record \u2014 ${reason}
       );
     }
     auth = { proofToken };
-  }
+  };
+  if (!auth) await acquireProofAuth();
   console.log("\n  Registering this claim with terminalhire (founder posting)...");
   const sendRegistration = async (includeExpectation) => fetch(`${CLAIM_SYNC_BASE2}/api/claim/register`, {
     method: "POST",
@@ -27287,6 +27342,14 @@ terminalhire claim: refusing to record \u2014 ${reason}
     }),
     signal: AbortSignal.timeout(1e4)
   });
+  const readRefusal = async (r) => {
+    if (r.ok) return null;
+    try {
+      return await r.json();
+    } catch {
+      return null;
+    }
+  };
   let res;
   try {
     res = await sendRegistration(true);
@@ -27295,23 +27358,54 @@ terminalhire claim: refusing to record \u2014 ${reason}
       `terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}), so the posting could not be revalidated.`
     );
   }
-  let refusalBody = null;
-  if (!res.ok) {
-    try {
-      refusalBody = await res.json();
-    } catch {
+  let refusalBody = await readRefusal(res);
+  const pushTokenRefusal = storedPushToken && res.status === 403 && (refusalBody?.error === PUSH_TOKEN_REFUSAL.INVALID || refusalBody?.error === PUSH_TOKEN_REFUSAL.LEGACY || refusalBody?.error === PUSH_TOKEN_REFUSAL.INSUFFICIENT) ? refusalBody.error : null;
+  if (pushTokenRefusal) {
+    if (pushTokenRefusal !== PUSH_TOKEN_REFUSAL.INSUFFICIENT) {
+      if (pushTokenRefusal === PUSH_TOKEN_REFUSAL.LEGACY) {
+        console.log("\n  The push token on this machine was issued before terminalhire tied");
+        console.log("  tokens to a GitHub account, so it can no longer prove who holds it.");
+        console.log("  Nothing was revoked \u2014 the requirement changed on our side.");
+        console.log("  Registering this claim needs only a ONE-TIME identity check, so");
+        console.log("  falling back to browser verification.");
+      } else {
+        console.log("\n  The push token stored on this machine is no longer valid.");
+        console.log("  Registering this claim needs only a ONE-TIME identity check, so");
+        console.log("  falling back to browser verification. (Re-enrolling background");
+        console.log("  push is a separate thing you need only for repeatable reads \u2014");
+        console.log("  fetching your granted slice and polling CI.)");
+      }
+      storedPushToken = null;
+      const hadAutoMarker = Boolean(readAutoMarker());
+      clearPushTokenEnc();
+      clearedLocalCredential = true;
+      if (hadAutoMarker) {
+        clearAutoMarker();
+        console.log("\n  Background dashboard updates are now OFF \u2014 that token was the");
+        console.log("  credential they ran on. Turn them back on any time:");
+        console.log("    terminalhire claim --push --keep-updated");
+      }
+    } else {
+      refusedForPurpose = true;
+      console.log("\n  Registering a claim takes a one-time browser check, which the");
+      console.log("  credential stored on this machine is not for. Falling back to it now.");
+      console.log("  It was not revoked or changed \u2014 this refusal was about which");
+      console.log("  action the credential is for, not whether it is still good.");
     }
+    await acquireProofAuth();
+    try {
+      res = await sendRegistration(true);
+    } catch (err) {
+      refuse(
+        `terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}), so the posting could not be revalidated.`
+      );
+    }
+    refusalBody = await readRefusal(res);
   }
   if (expectLogin && res.status === 422 && refusalBody?.error === "unknown field(s): expectLogin") {
     try {
       res = await sendRegistration(false);
-      refusalBody = null;
-      if (!res.ok) {
-        try {
-          refusalBody = await res.json();
-        } catch {
-        }
-      }
+      refusalBody = await readRefusal(res);
     } catch (err) {
       refuse(
         `terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}), so the posting could not be revalidated.`
@@ -27333,43 +27427,61 @@ terminalhire claim: refusing to record \u2014 ${reason}
   if (!body || body.ok !== true) {
     refuse("malformed registration response from the server.");
   }
+  const mintedToken = typeof body.pushToken === "string" && body.pushToken.length > 0 ? body.pushToken : null;
+  if (refusedForPurpose && mintedToken) {
+    try {
+      await writePushTokenEnc(mintedToken);
+      console.log("\n  Your stored credential was refreshed \u2014 registering this claim");
+      console.log("  rotated it, so the previous one is no longer valid.");
+    } catch (err) {
+      console.log("\n  \u26A0 Registered, but the refreshed credential could not be stored here.");
+      const reason = err instanceof Error ? err.message : String(err);
+      for (const line of reason.split("\n")) console.log(`    ${line}`);
+      console.log("    Re-enrol before fetching a slice: terminalhire claim --push");
+    }
+  }
   return {
     claimId: typeof body.claimId === "string" ? body.claimId : null,
     claimantLogin: typeof body.claimantLogin === "string" ? body.claimantLogin : null,
-    // Existing-token auth deliberately gets no replacement from the server. Reuse
-    // the encrypted value we just authenticated with; proof auth receives a newly
-    // minted token exactly once in this private/no-store response.
-    pushToken: storedPushToken ?? (typeof body.pushToken === "string" && body.pushToken.length > 0 ? body.pushToken : null)
+    // Existing-token auth deliberately gets no replacement from the server: reuse the
+    // encrypted value we just authenticated with. The one exception is the rotation
+    // above — there the stored value is the superseded one, so it must not win.
+    pushToken: refusedForPurpose && mintedToken ? mintedToken : storedPushToken ?? mintedToken
   };
 }
+function readCredentialDisposition({
+  markerExists,
+  enrolledTokenExists,
+  enrollmentRevoked = false
+}) {
+  if (!markerExists) return "store";
+  if (enrollmentRevoked) return "store-and-clear-stale-marker";
+  if (enrolledTokenExists) return "keep-enrolled";
+  return "store-and-clear-stale-marker";
+}
 async function bootstrapFounderClaimEnrollment(claim, registration) {
-  if (!(claim.amountUSD > 0)) return { enrolled: false, reason: "free" };
+  if (!(claim.amountUSD > 0)) return { stored: false, reason: "free" };
   if (!registration.pushToken || !registration.claimantLogin) {
-    return { enrolled: false, reason: "token-unavailable" };
+    return { stored: false, reason: "token-unavailable" };
+  }
+  const disposition = readCredentialDisposition({
+    markerExists: Boolean(readAutoMarker()),
+    enrolledTokenExists: Boolean(await readPushTokenEnc().catch(() => null))
+  });
+  if (disposition === "keep-enrolled") {
+    return { stored: false, reason: "kept-enrolled" };
   }
   try {
     await writePushTokenEnc(registration.pushToken);
-    const prior = readAutoMarker();
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    writeAutoMarker({
-      ...prior ?? {},
-      autoConsentedAt: prior?.autoConsentedAt ?? now,
-      version: AUTO_CONSENT_VERSION,
-      login: registration.claimantLogin
-      // Do not invent lastPushedAt/lastSnapshotHash here. If this is a fresh
-      // marker the immediate existing background path must push the newly
-      // recorded local claim; if it is an existing marker those fields remain
-      // truthful and the changed snapshot makes the normal gate fire.
-    });
+    if (disposition === "store-and-clear-stale-marker") clearAutoMarker();
   } catch (err) {
     return {
-      enrolled: false,
+      stored: false,
       reason: "local-write-failed",
       detail: err instanceof Error ? err.message : String(err)
     };
   }
-  const pushed = await runBackgroundClaimPush();
-  return pushed?.pushed ? { enrolled: true, reason: "ok" } : { enrolled: true, reason: pushed?.reason ?? "sync-failed" };
+  return { stored: true, reason: "ok" };
 }
 async function cmdRecord(arg, flags = {}) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -27580,21 +27692,19 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
       `  registered with terminalhire${claim.approval.claimId ? ` (server claim ${claim.approval.claimId})` : ""}`
     );
     if (claim.amountUSD > 0) {
-      if (enrollment?.enrolled && enrollment.reason === "ok") {
-        console.log("  \u2713 claim updates enabled; push-only token stored encrypted on this machine");
-        console.log("  \u2713 score-free claim ledger synced for your founder-facing work record");
-        console.log("  Revoke any time: terminalhire claim --push --revoke");
-      } else if (enrollment?.enrolled) {
-        console.log("  \u2713 claim updates enabled; push-only token stored encrypted on this machine");
-        console.log(`  \u26A0 initial claim-ledger sync did not finish (${enrollment.reason}).`);
-        console.log("  Retry: terminalhire claim --push --keep-updated");
-        console.log("  Revoke any time: terminalhire claim --push --revoke");
+      if (enrollment?.stored) {
+        console.log("  \u2713 credential for your granted slice + CI results stored encrypted here");
+        console.log("  Background dashboard updates are NOT on (claiming does not enable them).");
+        console.log("  Want them? terminalhire claim --push --keep-updated");
+        console.log("  Remove the stored credential any time: terminalhire claim --push --revoke");
+      } else if (enrollment?.reason === "kept-enrolled") {
+        console.log("  \u2713 your existing enrolled credential is kept and covers this claim");
       } else {
-        console.log("  \u26A0 Claim recorded, but automatic claim updates were not fully enrolled.");
+        console.log("  \u26A0 Claim recorded, but the credential could not be stored on this machine.");
         if (enrollment?.detail) {
           for (const line of String(enrollment.detail).split("\n")) console.log(`    ${line}`);
         }
-        console.log("  Finish setup: terminalhire claim --push --keep-updated");
+        console.log("  Store it before fetching your slice: terminalhire claim --push");
       }
     }
     if (claim.approval.state === "pending") {
@@ -27726,6 +27836,17 @@ async function cmdList(active) {
   }
   await syncFounderApprovals(claims, list);
   list = claims.listClaims({ active });
+  await syncFounderVerdicts({
+    claimsModule: claims,
+    targets: list,
+    readPushTokenEnc
+  });
+  list = claims.listClaims({ active });
+  if (list.length === 0) {
+    console.log(active ? "\nNo active claims." : "\nNo claims yet.");
+    printMetric(claims.acceptedPRRate());
+    return;
+  }
   console.log(`
 ${list.length} ${active ? "active " : ""}claim${list.length === 1 ? "" : "s"}:
 `);
@@ -27873,6 +27994,12 @@ async function cmdStatus(id) {
     pushToken = syncRes.pushToken;
     approvalsChecked = syncRes.approvalsChecked;
     approvalsUnavailable = syncRes.approvalsUnavailable;
+    targets = id ? [claims.findClaim(id)].filter(Boolean) : claims.listClaims();
+    await syncFounderVerdicts({
+      claimsModule: claims,
+      targets,
+      readPushTokenEnc
+    });
     targets = id ? [claims.findClaim(id)].filter(Boolean) : claims.listClaims();
     console.log("\n  Founder claims:");
     for (const c of targets.filter((claim) => Boolean(claim.approval))) {
@@ -28577,6 +28704,26 @@ function requireFounderLoopClaim(claims, id, verb) {
   }
   return claim;
 }
+function retireRevokedReadCredential(status, body, what) {
+  if (status !== 403 || body?.error !== PUSH_TOKEN_REFUSAL.INVALID) return false;
+  const hadMarker = Boolean(readAutoMarker());
+  clearPushTokenEnc();
+  if (hadMarker) clearAutoMarker();
+  console.error(
+    `
+terminalhire claim: ${what} needs the stored credential, and the server says it has been revoked.`
+  );
+  console.error("  It has been removed from this machine, so nothing keeps retrying a");
+  console.error("  credential that cannot work.");
+  if (hadMarker) {
+    console.error("  Background dashboard updates are now OFF \u2014 they ran on that credential.");
+  }
+  console.error("  Get a working one (browser verification): terminalhire claim --push");
+  if (hadMarker) {
+    console.error("  Add --keep-updated to that command to turn background updates back on.");
+  }
+  return true;
+}
 async function requireReadPushToken(what) {
   let stored = null;
   try {
@@ -28620,7 +28767,9 @@ async function cmdSlice(id, flags = {}) {
   } catch {
   }
   if (!res.ok) {
-    console.error(`terminalhire claim: ${renderServerRefusal(res.status, body)}`);
+    if (!retireRevokedReadCredential(res.status, body, "fetching your granted slice")) {
+      console.error(`terminalhire claim: ${renderServerRefusal(res.status, body)}`);
+    }
     process.exit(1);
   }
   if (!body || body.ok !== true || !Array.isArray(body.files)) {
@@ -28748,7 +28897,9 @@ async function cmdRuns(id, flags = {}) {
     process.exit(1);
   }
   if (r.kind === "refusal") {
-    console.error(`terminalhire claim: ${renderServerRefusal(r.status, r.body)}`);
+    if (!retireRevokedReadCredential(r.status, r.body, "reading CI results")) {
+      console.error(`terminalhire claim: ${renderServerRefusal(r.status, r.body)}`);
+    }
     process.exit(1);
   }
   console.log(`
@@ -29527,10 +29678,11 @@ async function cmdPush({ keepUpdated = false } = {}) {
   }
   let deleteToken = null;
   let pushToken = null;
+  let syncBody = null;
   try {
-    const body = await res.json();
-    deleteToken = body?.deleteToken || null;
-    pushToken = body?.pushToken || null;
+    syncBody = await res.json();
+    deleteToken = syncBody?.deleteToken || null;
+    pushToken = syncBody?.pushToken || null;
   } catch {
   }
   writeClaimPushMarker({
@@ -29540,23 +29692,55 @@ async function cmdPush({ keepUpdated = false } = {}) {
     lastPushedAt: consentedAt,
     lastSnapshotHash: computeSnapshotHash(pushed)
   });
-  if (autoConsent && pushToken) {
+  if (pushToken) {
     try {
-      await writePushTokenEnc(pushToken);
-      writeAutoMarker({
-        autoConsentedAt: consentedAt,
-        version: AUTO_CONSENT_VERSION,
-        login,
-        lastPushedAt: consentedAt,
-        lastSnapshotHash: computeSnapshotHash(pushed)
-      });
-      console.log("\n  \u2713 Background updates enabled \u2014 your dashboard will stay current");
-      console.log("    (at most once/day). Stop any time: terminalhire claim --push --revoke");
+      if (autoConsent) {
+        await writePushTokenEnc(pushToken);
+        writeAutoMarker({
+          autoConsentedAt: consentedAt,
+          version: AUTO_CONSENT_VERSION,
+          login,
+          lastPushedAt: consentedAt,
+          lastSnapshotHash: computeSnapshotHash(pushed)
+        });
+        console.log("\n  \u2713 Background updates enabled \u2014 your dashboard will stay current");
+        console.log("    (at most once/day). Stop any time: terminalhire claim --push --revoke");
+      } else {
+        const backgroundPushRevoked = syncBody?.[SYNC_BACKGROUND_PUSH_ACTIVE_FIELD] === false;
+        const disposition = readCredentialDisposition({
+          markerExists: Boolean(readAutoMarker()),
+          enrolledTokenExists: Boolean(await readPushTokenEnc()),
+          enrollmentRevoked: backgroundPushRevoked
+        });
+        if (disposition === "store") {
+          await writePushTokenEnc(pushToken);
+          console.log(
+            "\n  \u2713 Stored the credential for fetching your granted slice and CI results."
+          );
+        } else if (disposition === "keep-enrolled") {
+          console.log("\n  \u2713 Background updates are already active; keeping the credential");
+          console.log("    they run on. Nothing about them changed.");
+        } else {
+          await writePushTokenEnc(pushToken);
+          clearAutoMarker();
+          console.log(
+            "\n  \u2713 Stored the credential for fetching your granted slice and CI results."
+          );
+          console.log(
+            backgroundPushRevoked ? "    Background dashboard updates are OFF \u2014 that enrolment was stopped or revoked." : "    Background dashboard updates are OFF (their credential was gone)."
+          );
+          console.log("    Turn them back on any time: terminalhire claim --push --keep-updated");
+        }
+      }
     } catch (err) {
-      console.log("\n  \u2713 Pushed, but could not enable background updates on this machine.");
+      console.log(
+        autoConsent ? "\n  \u2713 Pushed, but could not enable background updates on this machine." : "\n  \u2713 Pushed, but could not store the credential for slice fetch / CI polling."
+      );
       const reason = err instanceof Error ? err.message : String(err);
       for (const line of reason.split("\n")) console.log(`    ${line}`);
-      console.log("    Re-run `terminalhire claim --push --keep-updated` to retry.");
+      console.log(
+        autoConsent ? "    Re-run `terminalhire claim --push --keep-updated` to retry." : "    Re-run `terminalhire claim --push` to retry."
+      );
     }
   } else if (backgroundEnableFailed(autoConsent, pushToken)) {
     console.log(
@@ -29844,8 +30028,10 @@ async function run() {
 export {
   AI_DISCLOSURE_NOTE,
   CLAIM_CONSENT_VERSION,
+  PUSH_TOKEN_REFUSAL,
   REVISE_RECOVERY_STATES,
   SUBMIT_ACCEPTS,
+  SYNC_BACKGROUND_PUSH_ACTIVE_FIELD,
   backgroundEnableFailed,
   buildAssignmentComment,
   buildPatchSubmission,
@@ -29853,6 +30039,7 @@ export {
   buildStandDownComment,
   buildSubmitBody,
   claimUpdatePatch,
+  cmdPush,
   cmdRecord,
   cmdRuns,
   cmdSlice,
@@ -29880,6 +30067,7 @@ export {
   pickBodySource,
   pickExistingPr,
   printNextSteps,
+  readCredentialDisposition,
   renderClaimHistory,
   renderRunView,
   renderServerRefusal,
