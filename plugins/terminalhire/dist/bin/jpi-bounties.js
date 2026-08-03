@@ -11885,6 +11885,23 @@ ${founderClaimBlurb(job.bounty?.amountUSD, job.bounty?.paidWork)}
   terminalhire claim ${ref}
   ${sanitizeText(job.bounty?.claimUrl ?? job.url)}`;
 }
+function wrapIndented(text, indent, width) {
+  const pad = " ".repeat(indent);
+  const words2 = String(text).split(/\s+/).filter(Boolean);
+  if (words2.length === 0) return [];
+  const lines = [];
+  let line = "";
+  for (const w of words2) {
+    if (line === "") line = w;
+    else if (line.length + 1 + w.length <= width) line += ` ${w}`;
+    else {
+      lines.push(pad + line);
+      line = w;
+    }
+  }
+  lines.push(pad + line);
+  return lines;
+}
 function printBounty(i, job, score, reason, matchedTags, claimedIds = /* @__PURE__ */ new Set(), continuityNote = null) {
   const b = job.bounty ?? {};
   const stars = b.repoStars != null ? ` \xB7 ${b.repoStars}\u2605` : "";
@@ -11902,6 +11919,9 @@ ${i + 1}. ${linkTitle(job.title, job.url)} [${ref}]`);
   );
   if (reason) console.log(`   ${reason}`);
   if (continuityNote) console.log(`   ${continuityNote}`);
+  if (b.publicSummary) {
+    for (const line of wrapIndented(sanitizeText(b.publicSummary), 3, 76)) console.log(line);
+  }
   if (b.bountySource === "founder" && b.specProvenance) {
     console.log(
       `   Spec: ${b.specProvenance === "agent_drafted_human_confirmed" ? "agent drafted \xB7 founder confirmed" : "founder authored"}`
@@ -12140,7 +12160,8 @@ export {
   isPinnedFounderBounty,
   printBounty,
   rankBounties,
-  run
+  run,
+  wrapIndented
 };
 /*! Bundled license information:
 
