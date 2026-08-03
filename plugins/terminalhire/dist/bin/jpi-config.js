@@ -118,7 +118,7 @@ function parseNudgeMode(raw) {
 function printMixValues() {
   console.log("  Valid mix values (roles vs. contribution items on the ambient surface):");
   console.log("    jobs       \u2014 more roles, fewer contributions (contribute 5, roles ~15)");
-  console.log("    balanced   \u2014 rebalanced default (contribute 8, roles ~12)");
+  console.log("    balanced   \u2014 contribution-first default (contribute 10, roles ~10)");
   console.log("    credential \u2014 contribution-forward (contribute 12, roles ~8)");
 }
 async function run() {

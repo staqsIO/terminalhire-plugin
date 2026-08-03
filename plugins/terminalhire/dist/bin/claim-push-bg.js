@@ -514,7 +514,7 @@ var CLAIM_PUSH_AUTO_MARKER = join5(TERMINALHIRE_DIR4, "claim-push-auto.json");
 var CLAIM_PUSH_TOKEN_FILE = join5(TERMINALHIRE_DIR4, "claim-push-token.enc");
 var CLAIM_PUSH_MANUAL_MARKER = join5(TERMINALHIRE_DIR4, "claim-push.json");
 var CLAIM_SYNC_BASE = "https://terminalhire.com";
-var AUTO_CONSENT_VERSION = 2;
+var AUTO_CONSENT_VERSION = 3;
 var AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
 async function writePushTokenEnc(rawToken) {
   ensureStateDirForSecret(TERMINALHIRE_DIR4);
@@ -617,6 +617,82 @@ async function shouldNudgeUnpushed() {
     return false;
   }
 }
+var CLAIM_HEARTBEAT_FILE = join5(TERMINALHIRE_DIR4, "claim-heartbeat.json");
+var HEARTBEAT_MIN_INTERVAL_MS = 3e4;
+var HEARTBEAT_MIN_CONSENT_VERSION = 3;
+function readHeartbeatState() {
+  try {
+    return existsSync5(CLAIM_HEARTBEAT_FILE) ? JSON.parse(readFileSync4(CLAIM_HEARTBEAT_FILE, "utf8")) : {};
+  } catch {
+    return {};
+  }
+}
+function recordHeartbeatBeat(claimId, at) {
+  try {
+    ensureStateDir(TERMINALHIRE_DIR4);
+    const state = readHeartbeatState();
+    state[claimId] = at;
+    writeFileSync4(CLAIM_HEARTBEAT_FILE, JSON.stringify(state, null, 2) + "\n", "utf8");
+  } catch {
+  }
+}
+function heartbeatGate(params) {
+  const {
+    autoMarkerExists,
+    tokenFileExists,
+    consentVersion,
+    bountyId,
+    claimId,
+    lastBeatAt,
+    now = Date.now(),
+    minIntervalMs = HEARTBEAT_MIN_INTERVAL_MS
+  } = params;
+  if (typeof bountyId !== "string" || bountyId.trim() === "") {
+    return { beat: false, reason: "no-server-ids" };
+  }
+  if (typeof claimId !== "string" || claimId.trim() === "") {
+    return { beat: false, reason: "no-server-ids" };
+  }
+  if (!autoMarkerExists || !tokenFileExists) {
+    return { beat: false, reason: "not-opted-in" };
+  }
+  if (!(Number.isInteger(consentVersion) && consentVersion >= HEARTBEAT_MIN_CONSENT_VERSION)) {
+    return { beat: false, reason: "consent-predates-presence" };
+  }
+  const last = lastBeatAt ? Date.parse(lastBeatAt) : NaN;
+  if (!Number.isNaN(last) && now - last < minIntervalMs) {
+    return { beat: false, reason: "throttled" };
+  }
+  return { beat: true, reason: "ok" };
+}
+async function postClaimHeartbeat({ bountyId, claimId, now = Date.now() } = {}) {
+  try {
+    const marker = readAutoMarker();
+    const gate = heartbeatGate({
+      autoMarkerExists: Boolean(marker && marker.autoConsentedAt),
+      tokenFileExists: existsSync5(CLAIM_PUSH_TOKEN_FILE),
+      consentVersion: marker?.version,
+      bountyId,
+      claimId,
+      lastBeatAt: readHeartbeatState()[claimId] ?? null,
+      now
+    });
+    if (!gate.beat) return { beat: false, reason: gate.reason };
+    const token = await readPushTokenEnc();
+    if (!token) return { beat: false, reason: "unreadable-token" };
+    const res = await fetch(`${CLAIM_SYNC_BASE}/api/claim/heartbeat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bountyId, claimId, pushToken: token }),
+      signal: AbortSignal.timeout(5e3)
+    });
+    if (!res.ok) return { beat: false, reason: `server-${res.status}` };
+    recordHeartbeatBeat(claimId, new Date(now).toISOString());
+    return { beat: true, reason: "ok" };
+  } catch {
+    return { beat: false, reason: "failed" };
+  }
+}
 async function runBackgroundClaimPush({ now = Date.now() } = {}) {
   try {
     if (!existsSync5(CLAIM_PUSH_AUTO_MARKER) || !existsSync5(CLAIM_PUSH_TOKEN_FILE)) {
@@ -666,15 +742,22 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
 export {
   AUTO_CONSENT_VERSION,
   AUTO_PUSH_THROTTLE_MS,
+  CLAIM_HEARTBEAT_FILE,
   CLAIM_PUSH_AUTO_MARKER,
   CLAIM_PUSH_MANUAL_MARKER,
   CLAIM_PUSH_TOKEN_FILE,
+  HEARTBEAT_MIN_CONSENT_VERSION,
+  HEARTBEAT_MIN_INTERVAL_MS,
   backgroundPushGate,
   clearAutoMarker,
   clearPushTokenEnc,
   computeSnapshotHash,
+  heartbeatGate,
+  postClaimHeartbeat,
   readAutoMarker,
+  readHeartbeatState,
   readPushTokenEnc,
+  recordHeartbeatBeat,
   runBackgroundClaimPush,
   shouldNudgeUnpushed,
   unpushedNudgeGate,

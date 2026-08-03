@@ -130,6 +130,16 @@ var init_cache_store = __esm({
   }
 });
 
+// bin/founder-pin.js
+function isPinnedFounderBounty(j) {
+  return j?.bounty?.bountySource === "founder" && j?.bounty?.claimable === true;
+}
+var init_founder_pin = __esm({
+  "bin/founder-pin.js"() {
+    "use strict";
+  }
+});
+
 // src/config.ts
 var config_exports = {};
 __export(config_exports, {
@@ -12277,6 +12287,31 @@ function interleaveBySource(topMatches) {
   }
   return out;
 }
+function orderForEmit(list) {
+  const values = Array.isArray(list) ? list : [];
+  const pinnedQ = values.filter(
+    (m) => m && m.source === "bounty" && m.founderClaimable === true
+  );
+  const bountyQ = values.filter(
+    (m) => m && m.source === "bounty" && m.founderClaimable !== true
+  );
+  const contributeQ = values.filter((m) => m && m.source === "contribute");
+  const roleQ = interleaveBySource(
+    values.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
+  );
+  const ordered = [...pinnedQ];
+  let bi = 0;
+  let ri = 0;
+  let ci = 0;
+  while (bi < bountyQ.length || ri < roleQ.length || ci < contributeQ.length) {
+    for (let n = 0; n < CONTRIBUTIONS_PER_ROLE && ci < contributeQ.length; n++) {
+      ordered.push(contributeQ[ci++]);
+    }
+    if (ri < roleQ.length) ordered.push(roleQ[ri++]);
+    if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
+  }
+  return ordered;
+}
 function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
   const base = String(baseUrl || "https://terminalhire.com").replace(/\/+$/, "");
   const out = [];
@@ -12288,24 +12323,18 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
     Array.isArray(topMatches) ? topMatches : [],
     opts.seenHistory
   );
-  const orderForEmit = (list) => {
-    const pinnedQ = list.filter((m) => m && m.source === "bounty" && m.founderClaimable === true);
-    const bountyQ = list.filter((m) => m && m.source === "bounty" && m.founderClaimable !== true);
-    const contributeQ = list.filter((m) => m && m.source === "contribute");
-    const roleQ = interleaveBySource(
-      list.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
-    );
-    const ordered = [...pinnedQ];
-    let bi = 0;
-    let ri = 0;
-    let ci = 0;
-    while (bi < bountyQ.length || ri < roleQ.length || ci < contributeQ.length) {
-      if (ri < roleQ.length) ordered.push(roleQ[ri++]);
-      if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
-      if (ci < contributeQ.length) ordered.push(contributeQ[ci++]);
-    }
-    return ordered;
-  };
+  const reserveContributions = opts.widen ? partitionFreshMatches(opts.widen.reserve, opts.seenHistory).eligible.filter(
+    (m) => m && m.source === "contribute"
+  ) : [];
+  const isPrioritySuppressed = (m) => !!m && (m.source === "bounty" && m.founderClaimable === true || m.source === "contribute");
+  const prioritySuppressed = suppressed.filter(isPrioritySuppressed);
+  const ordinarySuppressed = suppressed.filter((m) => !isPrioritySuppressed(m));
+  const candidateById = /* @__PURE__ */ new Map();
+  for (const m of [...eligible, ...reserveContributions, ...prioritySuppressed]) {
+    const key = m && m.id != null ? String(m.id) : `missing:${candidateById.size}`;
+    if (!candidateById.has(key)) candidateById.set(key, m);
+  }
+  const candidates = [...candidateById.values()];
   const emit = (list) => {
     for (const m of orderForEmit(list)) {
       if (out.length >= max) return;
@@ -12348,7 +12377,7 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
       surfacedIds.push(String(m.id));
     }
   };
-  emit(eligible);
+  emit(candidates);
   if (out.length < max && opts.widen) {
     const widened = widenFreshCandidates(
       Array.isArray(topMatches) ? topMatches : [],
@@ -12358,7 +12387,7 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
     );
     if (widened.length > 0) emit(widened);
   }
-  if (out.length < max) emit(suppressed);
+  if (out.length < max) emit(ordinarySuppressed);
   return { tips: out, surfacedIds };
 }
 function buildTips(topMatches, baseUrl, max = 8, opts = {}) {
@@ -12383,7 +12412,7 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
   });
   if (verbs.length > 0) applySpinnerVerbs(verbs, sc.mode);
   else clearSpinnerVerbs();
-  const { tips, surfacedIds } = buildTipsDetailed(ranked, opts.baseUrl, 8, {
+  const { tips, surfacedIds } = buildTipsDetailed(ranked, opts.baseUrl, SPINNER_TIP_MAX, {
     seenHistory,
     widen: opts.widen,
     clickCatcher: opts.clickCatcher
@@ -12393,6 +12422,7 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
   if (verbs.length > 0 || tips.length > 0) recordSurface(surfacedIds);
   return { verbs, tips, surfacedIds };
 }
+var CONTRIBUTIONS_PER_ROLE, SPINNER_TIP_MAX;
 var init_spinner_render = __esm({
   "bin/spinner-render.js"() {
     "use strict";
@@ -12402,13 +12432,17 @@ var init_spinner_render = __esm({
     init_spinner_io();
     init_sanitize();
     init_src();
+    CONTRIBUTIONS_PER_ROLE = 10;
+    SPINNER_TIP_MAX = CONTRIBUTIONS_PER_ROLE + 2;
   }
 });
 
 // bin/spinner.js
 var spinner_exports = {};
 __export(spinner_exports, {
+  CONTRIBUTIONS_PER_ROLE: () => CONTRIBUTIONS_PER_ROLE,
   SPINNER_DEFAULTS: () => SPINNER_DEFAULTS,
+  SPINNER_TIP_MAX: () => SPINNER_TIP_MAX,
   applySpinnerTips: () => applySpinnerTips,
   applySpinnerVerbs: () => applySpinnerVerbs,
   buildContextVerbs: () => buildContextVerbs,
@@ -12424,6 +12458,7 @@ __export(spinner_exports, {
   ctaVerb: () => ctaVerb,
   filterFreshMatches: () => filterFreshMatches,
   interleaveBySource: () => interleaveBySource,
+  orderForEmit: () => orderForEmit,
   partitionFreshMatches: () => partitionFreshMatches,
   rankBySessionTags: () => rankBySessionTags,
   readLastSkip: () => readLastSkip,
@@ -12452,6 +12487,9 @@ var init_spinner = __esm({
     init_spinner_io();
     init_spinner_io();
     init_spinner_io();
+    init_spinner_render();
+    init_spinner_render();
+    init_spinner_render();
     init_spinner_render();
     init_spinner_render();
     init_spinner_render();
@@ -12781,15 +12819,22 @@ var claim_push_bg_exports = {};
 __export(claim_push_bg_exports, {
   AUTO_CONSENT_VERSION: () => AUTO_CONSENT_VERSION,
   AUTO_PUSH_THROTTLE_MS: () => AUTO_PUSH_THROTTLE_MS,
+  CLAIM_HEARTBEAT_FILE: () => CLAIM_HEARTBEAT_FILE,
   CLAIM_PUSH_AUTO_MARKER: () => CLAIM_PUSH_AUTO_MARKER,
   CLAIM_PUSH_MANUAL_MARKER: () => CLAIM_PUSH_MANUAL_MARKER,
   CLAIM_PUSH_TOKEN_FILE: () => CLAIM_PUSH_TOKEN_FILE,
+  HEARTBEAT_MIN_CONSENT_VERSION: () => HEARTBEAT_MIN_CONSENT_VERSION,
+  HEARTBEAT_MIN_INTERVAL_MS: () => HEARTBEAT_MIN_INTERVAL_MS,
   backgroundPushGate: () => backgroundPushGate,
   clearAutoMarker: () => clearAutoMarker,
   clearPushTokenEnc: () => clearPushTokenEnc,
   computeSnapshotHash: () => computeSnapshotHash,
+  heartbeatGate: () => heartbeatGate,
+  postClaimHeartbeat: () => postClaimHeartbeat,
   readAutoMarker: () => readAutoMarker,
+  readHeartbeatState: () => readHeartbeatState,
   readPushTokenEnc: () => readPushTokenEnc,
+  recordHeartbeatBeat: () => recordHeartbeatBeat,
   runBackgroundClaimPush: () => runBackgroundClaimPush,
   shouldNudgeUnpushed: () => shouldNudgeUnpushed,
   unpushedNudgeGate: () => unpushedNudgeGate,
@@ -12901,6 +12946,79 @@ async function shouldNudgeUnpushed() {
     return false;
   }
 }
+function readHeartbeatState() {
+  try {
+    return existsSync10(CLAIM_HEARTBEAT_FILE) ? JSON.parse(readFileSync14(CLAIM_HEARTBEAT_FILE, "utf8")) : {};
+  } catch {
+    return {};
+  }
+}
+function recordHeartbeatBeat(claimId, at) {
+  try {
+    ensureStateDir(TERMINALHIRE_DIR9);
+    const state = readHeartbeatState();
+    state[claimId] = at;
+    writeFileSync12(CLAIM_HEARTBEAT_FILE, JSON.stringify(state, null, 2) + "\n", "utf8");
+  } catch {
+  }
+}
+function heartbeatGate(params) {
+  const {
+    autoMarkerExists,
+    tokenFileExists,
+    consentVersion,
+    bountyId,
+    claimId,
+    lastBeatAt,
+    now = Date.now(),
+    minIntervalMs = HEARTBEAT_MIN_INTERVAL_MS
+  } = params;
+  if (typeof bountyId !== "string" || bountyId.trim() === "") {
+    return { beat: false, reason: "no-server-ids" };
+  }
+  if (typeof claimId !== "string" || claimId.trim() === "") {
+    return { beat: false, reason: "no-server-ids" };
+  }
+  if (!autoMarkerExists || !tokenFileExists) {
+    return { beat: false, reason: "not-opted-in" };
+  }
+  if (!(Number.isInteger(consentVersion) && consentVersion >= HEARTBEAT_MIN_CONSENT_VERSION)) {
+    return { beat: false, reason: "consent-predates-presence" };
+  }
+  const last = lastBeatAt ? Date.parse(lastBeatAt) : NaN;
+  if (!Number.isNaN(last) && now - last < minIntervalMs) {
+    return { beat: false, reason: "throttled" };
+  }
+  return { beat: true, reason: "ok" };
+}
+async function postClaimHeartbeat({ bountyId, claimId, now = Date.now() } = {}) {
+  try {
+    const marker = readAutoMarker();
+    const gate2 = heartbeatGate({
+      autoMarkerExists: Boolean(marker && marker.autoConsentedAt),
+      tokenFileExists: existsSync10(CLAIM_PUSH_TOKEN_FILE),
+      consentVersion: marker?.version,
+      bountyId,
+      claimId,
+      lastBeatAt: readHeartbeatState()[claimId] ?? null,
+      now
+    });
+    if (!gate2.beat) return { beat: false, reason: gate2.reason };
+    const token = await readPushTokenEnc();
+    if (!token) return { beat: false, reason: "unreadable-token" };
+    const res = await fetch(`${CLAIM_SYNC_BASE}/api/claim/heartbeat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bountyId, claimId, pushToken: token }),
+      signal: AbortSignal.timeout(5e3)
+    });
+    if (!res.ok) return { beat: false, reason: `server-${res.status}` };
+    recordHeartbeatBeat(claimId, new Date(now).toISOString());
+    return { beat: true, reason: "ok" };
+  } catch {
+    return { beat: false, reason: "failed" };
+  }
+}
 async function runBackgroundClaimPush({ now = Date.now() } = {}) {
   try {
     if (!existsSync10(CLAIM_PUSH_AUTO_MARKER) || !existsSync10(CLAIM_PUSH_TOKEN_FILE)) {
@@ -12947,7 +13065,7 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
     return { pushed: false, reason: "failed" };
   }
 }
-var TERMINALHIRE_DIR9, CLAIM_PUSH_AUTO_MARKER, CLAIM_PUSH_TOKEN_FILE, CLAIM_PUSH_MANUAL_MARKER, CLAIM_SYNC_BASE, AUTO_CONSENT_VERSION, AUTO_PUSH_THROTTLE_MS;
+var TERMINALHIRE_DIR9, CLAIM_PUSH_AUTO_MARKER, CLAIM_PUSH_TOKEN_FILE, CLAIM_PUSH_MANUAL_MARKER, CLAIM_SYNC_BASE, AUTO_CONSENT_VERSION, AUTO_PUSH_THROTTLE_MS, CLAIM_HEARTBEAT_FILE, HEARTBEAT_MIN_INTERVAL_MS, HEARTBEAT_MIN_CONSENT_VERSION;
 var init_claim_push_bg = __esm({
   "bin/claim-push-bg.js"() {
     "use strict";
@@ -12958,18 +13076,11 @@ var init_claim_push_bg = __esm({
     CLAIM_PUSH_TOKEN_FILE = join17(TERMINALHIRE_DIR9, "claim-push-token.enc");
     CLAIM_PUSH_MANUAL_MARKER = join17(TERMINALHIRE_DIR9, "claim-push.json");
     CLAIM_SYNC_BASE = "https://terminalhire.com";
-    AUTO_CONSENT_VERSION = 2;
+    AUTO_CONSENT_VERSION = 3;
     AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
-  }
-});
-
-// bin/founder-pin.js
-function isPinnedFounderBounty(j) {
-  return j?.bounty?.bountySource === "founder" && j?.bounty?.claimable === true;
-}
-var init_founder_pin = __esm({
-  "bin/founder-pin.js"() {
-    "use strict";
+    CLAIM_HEARTBEAT_FILE = join17(TERMINALHIRE_DIR9, "claim-heartbeat.json");
+    HEARTBEAT_MIN_INTERVAL_MS = 3e4;
+    HEARTBEAT_MIN_CONSENT_VERSION = 3;
   }
 });
 
@@ -13405,20 +13516,19 @@ function excludeOwnCard(results, ownLogin) {
 init_cache_store();
 
 // bin/match-slots.js
+init_founder_pin();
 var TOTAL_SLOTS = 25;
 var BOUNTY_SLOTS = 3;
-var BOUNTY_MIN_MATCH = 0.5;
+var BOUNTY_MIN_MATCH = 0.35;
 function selectFounderBountyPicks(jobs) {
-  return (Array.isArray(jobs) ? jobs : []).filter(
-    (job) => job && job.source === "bounty" && job.bounty && job.bounty.bountySource === "founder"
-  ).map((job) => ({ job, score: 0, matchedTags: [] }));
+  return (Array.isArray(jobs) ? jobs : []).filter((job) => job && job.source === "bounty" && isPinnedFounderBounty(job)).map((job) => ({ job, score: 0, matchedTags: [] }));
 }
 var INTEREST_CONTRIBUTE_SLOTS = 1;
 var INTEREST_JOB_SLOTS = 1;
 var INTEREST_SLOT_LABEL = "Stretch";
 var CONTRIBUTE_SLOTS = 5;
 var CONTRIBUTE_SLOTS_THIN = 8;
-var MIX_PRESETS = { jobs: CONTRIBUTE_SLOTS, balanced: 8, credential: 12 };
+var MIX_PRESETS = { jobs: CONTRIBUTE_SLOTS, balanced: 10, credential: 12 };
 var DEFAULT_MIX = "balanced";
 var ROLE_STABLE_MAX = 8;
 var MIN_TAIL_SLOTS = 2;

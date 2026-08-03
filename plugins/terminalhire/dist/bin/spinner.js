@@ -1360,6 +1360,8 @@ function jobShortToken(id) {
 }
 
 // bin/spinner-render.js
+var CONTRIBUTIONS_PER_ROLE = 10;
+var SPINNER_TIP_MAX = CONTRIBUTIONS_PER_ROLE + 2;
 function interleaveBySource(topMatches) {
   if (!Array.isArray(topMatches) || topMatches.length === 0) return topMatches;
   const buckets = /* @__PURE__ */ new Map();
@@ -1387,6 +1389,31 @@ function interleaveBySource(topMatches) {
   }
   return out;
 }
+function orderForEmit(list) {
+  const values = Array.isArray(list) ? list : [];
+  const pinnedQ = values.filter(
+    (m) => m && m.source === "bounty" && m.founderClaimable === true
+  );
+  const bountyQ = values.filter(
+    (m) => m && m.source === "bounty" && m.founderClaimable !== true
+  );
+  const contributeQ = values.filter((m) => m && m.source === "contribute");
+  const roleQ = interleaveBySource(
+    values.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
+  );
+  const ordered = [...pinnedQ];
+  let bi = 0;
+  let ri = 0;
+  let ci = 0;
+  while (bi < bountyQ.length || ri < roleQ.length || ci < contributeQ.length) {
+    for (let n = 0; n < CONTRIBUTIONS_PER_ROLE && ci < contributeQ.length; n++) {
+      ordered.push(contributeQ[ci++]);
+    }
+    if (ri < roleQ.length) ordered.push(roleQ[ri++]);
+    if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
+  }
+  return ordered;
+}
 function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
   const base = String(baseUrl || "https://terminalhire.com").replace(/\/+$/, "");
   const out = [];
@@ -1398,24 +1425,18 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
     Array.isArray(topMatches) ? topMatches : [],
     opts.seenHistory
   );
-  const orderForEmit = (list) => {
-    const pinnedQ = list.filter((m) => m && m.source === "bounty" && m.founderClaimable === true);
-    const bountyQ = list.filter((m) => m && m.source === "bounty" && m.founderClaimable !== true);
-    const contributeQ = list.filter((m) => m && m.source === "contribute");
-    const roleQ = interleaveBySource(
-      list.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
-    );
-    const ordered = [...pinnedQ];
-    let bi = 0;
-    let ri = 0;
-    let ci = 0;
-    while (bi < bountyQ.length || ri < roleQ.length || ci < contributeQ.length) {
-      if (ri < roleQ.length) ordered.push(roleQ[ri++]);
-      if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
-      if (ci < contributeQ.length) ordered.push(contributeQ[ci++]);
-    }
-    return ordered;
-  };
+  const reserveContributions = opts.widen ? partitionFreshMatches(opts.widen.reserve, opts.seenHistory).eligible.filter(
+    (m) => m && m.source === "contribute"
+  ) : [];
+  const isPrioritySuppressed = (m) => !!m && (m.source === "bounty" && m.founderClaimable === true || m.source === "contribute");
+  const prioritySuppressed = suppressed.filter(isPrioritySuppressed);
+  const ordinarySuppressed = suppressed.filter((m) => !isPrioritySuppressed(m));
+  const candidateById = /* @__PURE__ */ new Map();
+  for (const m of [...eligible, ...reserveContributions, ...prioritySuppressed]) {
+    const key = m && m.id != null ? String(m.id) : `missing:${candidateById.size}`;
+    if (!candidateById.has(key)) candidateById.set(key, m);
+  }
+  const candidates = [...candidateById.values()];
   const emit = (list) => {
     for (const m of orderForEmit(list)) {
       if (out.length >= max) return;
@@ -1458,7 +1479,7 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
       surfacedIds.push(String(m.id));
     }
   };
-  emit(eligible);
+  emit(candidates);
   if (out.length < max && opts.widen) {
     const widened = widenFreshCandidates(
       Array.isArray(topMatches) ? topMatches : [],
@@ -1468,7 +1489,7 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
     );
     if (widened.length > 0) emit(widened);
   }
-  if (out.length < max) emit(suppressed);
+  if (out.length < max) emit(ordinarySuppressed);
   return { tips: out, surfacedIds };
 }
 function buildTips(topMatches, baseUrl, max = 8, opts = {}) {
@@ -1493,7 +1514,7 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
   });
   if (verbs.length > 0) applySpinnerVerbs(verbs, sc.mode);
   else clearSpinnerVerbs();
-  const { tips, surfacedIds } = buildTipsDetailed(ranked, opts.baseUrl, 8, {
+  const { tips, surfacedIds } = buildTipsDetailed(ranked, opts.baseUrl, SPINNER_TIP_MAX, {
     seenHistory,
     widen: opts.widen,
     clickCatcher: opts.clickCatcher
@@ -1504,7 +1525,9 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
   return { verbs, tips, surfacedIds };
 }
 export {
+  CONTRIBUTIONS_PER_ROLE,
   SPINNER_DEFAULTS,
+  SPINNER_TIP_MAX,
   applySpinnerTips,
   applySpinnerVerbs,
   buildContextVerbs,
@@ -1520,6 +1543,7 @@ export {
   ctaVerb,
   filterFreshMatches,
   interleaveBySource,
+  orderForEmit,
   partitionFreshMatches,
   rankBySessionTags,
   readLastSkip,

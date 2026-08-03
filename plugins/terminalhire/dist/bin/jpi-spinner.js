@@ -1196,6 +1196,10 @@ var STAGE4_CONTRACT = [
 // ../../packages/core/src/short-token.ts
 import { createHash as createHash2 } from "crypto";
 
+// bin/spinner-render.js
+var CONTRIBUTIONS_PER_ROLE = 10;
+var SPINNER_TIP_MAX = CONTRIBUTIONS_PER_ROLE + 2;
+
 // bin/jpi-spinner.js
 var TH_DIR = process.env["TERMINALHIRE_DIR"] || join5(homedir3(), ".terminalhire");
 var CONFIG_FILE = join5(TH_DIR, "config.json");

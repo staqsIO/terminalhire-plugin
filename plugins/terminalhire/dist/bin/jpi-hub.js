@@ -12991,6 +12991,7 @@ function excludeOwnCard(results, ownLogin) {
 init_sanitize();
 
 // bin/match-slots.js
+init_founder_pin();
 var ROTATE_WINDOW_MS = 5 * 60 * 1e3;
 var ROLE_HEAD_ROTATE_MS = 60 * 60 * 1e3;
 var LEAD_ROTATE_MS = 25 * 60 * 1e3;

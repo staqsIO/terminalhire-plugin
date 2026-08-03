@@ -13591,6 +13591,31 @@ function interleaveBySource(topMatches) {
   }
   return out;
 }
+function orderForEmit(list) {
+  const values = Array.isArray(list) ? list : [];
+  const pinnedQ = values.filter(
+    (m) => m && m.source === "bounty" && m.founderClaimable === true
+  );
+  const bountyQ = values.filter(
+    (m) => m && m.source === "bounty" && m.founderClaimable !== true
+  );
+  const contributeQ = values.filter((m) => m && m.source === "contribute");
+  const roleQ = interleaveBySource(
+    values.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
+  );
+  const ordered = [...pinnedQ];
+  let bi = 0;
+  let ri = 0;
+  let ci = 0;
+  while (bi < bountyQ.length || ri < roleQ.length || ci < contributeQ.length) {
+    for (let n = 0; n < CONTRIBUTIONS_PER_ROLE && ci < contributeQ.length; n++) {
+      ordered.push(contributeQ[ci++]);
+    }
+    if (ri < roleQ.length) ordered.push(roleQ[ri++]);
+    if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
+  }
+  return ordered;
+}
 function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
   const base = String(baseUrl || "https://terminalhire.com").replace(/\/+$/, "");
   const out = [];
@@ -13602,24 +13627,18 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
     Array.isArray(topMatches) ? topMatches : [],
     opts.seenHistory
   );
-  const orderForEmit = (list) => {
-    const pinnedQ = list.filter((m) => m && m.source === "bounty" && m.founderClaimable === true);
-    const bountyQ = list.filter((m) => m && m.source === "bounty" && m.founderClaimable !== true);
-    const contributeQ = list.filter((m) => m && m.source === "contribute");
-    const roleQ = interleaveBySource(
-      list.filter((m) => m && m.source !== "bounty" && m.source !== "contribute")
-    );
-    const ordered = [...pinnedQ];
-    let bi = 0;
-    let ri = 0;
-    let ci = 0;
-    while (bi < bountyQ.length || ri < roleQ.length || ci < contributeQ.length) {
-      if (ri < roleQ.length) ordered.push(roleQ[ri++]);
-      if (bi < bountyQ.length) ordered.push(bountyQ[bi++]);
-      if (ci < contributeQ.length) ordered.push(contributeQ[ci++]);
-    }
-    return ordered;
-  };
+  const reserveContributions = opts.widen ? partitionFreshMatches(opts.widen.reserve, opts.seenHistory).eligible.filter(
+    (m) => m && m.source === "contribute"
+  ) : [];
+  const isPrioritySuppressed = (m) => !!m && (m.source === "bounty" && m.founderClaimable === true || m.source === "contribute");
+  const prioritySuppressed = suppressed.filter(isPrioritySuppressed);
+  const ordinarySuppressed = suppressed.filter((m) => !isPrioritySuppressed(m));
+  const candidateById = /* @__PURE__ */ new Map();
+  for (const m of [...eligible, ...reserveContributions, ...prioritySuppressed]) {
+    const key = m && m.id != null ? String(m.id) : `missing:${candidateById.size}`;
+    if (!candidateById.has(key)) candidateById.set(key, m);
+  }
+  const candidates = [...candidateById.values()];
   const emit2 = (list) => {
     for (const m of orderForEmit(list)) {
       if (out.length >= max) return;
@@ -13662,7 +13681,7 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
       surfacedIds.push(String(m.id));
     }
   };
-  emit2(eligible);
+  emit2(candidates);
   if (out.length < max && opts.widen) {
     const widened = widenFreshCandidates(
       Array.isArray(topMatches) ? topMatches : [],
@@ -13672,7 +13691,7 @@ function buildTipsDetailed(topMatches, baseUrl, max = 8, opts = {}) {
     );
     if (widened.length > 0) emit2(widened);
   }
-  if (out.length < max) emit2(suppressed);
+  if (out.length < max) emit2(ordinarySuppressed);
   return { tips: out, surfacedIds };
 }
 function buildTips(topMatches, baseUrl, max = 8, opts = {}) {
@@ -13697,7 +13716,7 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
   });
   if (verbs.length > 0) applySpinnerVerbs(verbs, sc.mode);
   else clearSpinnerVerbs();
-  const { tips, surfacedIds } = buildTipsDetailed(ranked, opts.baseUrl, 8, {
+  const { tips, surfacedIds } = buildTipsDetailed(ranked, opts.baseUrl, SPINNER_TIP_MAX, {
     seenHistory,
     widen: opts.widen,
     clickCatcher: opts.clickCatcher
@@ -13707,6 +13726,7 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
   if (verbs.length > 0 || tips.length > 0) recordSurface(surfacedIds);
   return { verbs, tips, surfacedIds };
 }
+var CONTRIBUTIONS_PER_ROLE, SPINNER_TIP_MAX;
 var init_spinner_render = __esm({
   "bin/spinner-render.js"() {
     "use strict";
@@ -13716,13 +13736,17 @@ var init_spinner_render = __esm({
     init_spinner_io();
     init_sanitize();
     init_src();
+    CONTRIBUTIONS_PER_ROLE = 10;
+    SPINNER_TIP_MAX = CONTRIBUTIONS_PER_ROLE + 2;
   }
 });
 
 // bin/spinner.js
 var spinner_exports = {};
 __export(spinner_exports, {
+  CONTRIBUTIONS_PER_ROLE: () => CONTRIBUTIONS_PER_ROLE,
   SPINNER_DEFAULTS: () => SPINNER_DEFAULTS,
+  SPINNER_TIP_MAX: () => SPINNER_TIP_MAX,
   applySpinnerTips: () => applySpinnerTips,
   applySpinnerVerbs: () => applySpinnerVerbs,
   buildContextVerbs: () => buildContextVerbs,
@@ -13738,6 +13762,7 @@ __export(spinner_exports, {
   ctaVerb: () => ctaVerb,
   filterFreshMatches: () => filterFreshMatches,
   interleaveBySource: () => interleaveBySource,
+  orderForEmit: () => orderForEmit,
   partitionFreshMatches: () => partitionFreshMatches,
   rankBySessionTags: () => rankBySessionTags,
   readLastSkip: () => readLastSkip,
@@ -13766,6 +13791,9 @@ var init_spinner = __esm({
     init_spinner_io();
     init_spinner_io();
     init_spinner_io();
+    init_spinner_render();
+    init_spinner_render();
+    init_spinner_render();
     init_spinner_render();
     init_spinner_render();
     init_spinner_render();
@@ -14454,11 +14482,19 @@ var init_directory2 = __esm({
   }
 });
 
+// bin/founder-pin.js
+function isPinnedFounderBounty(j) {
+  return j?.bounty?.bountySource === "founder" && j?.bounty?.claimable === true;
+}
+var init_founder_pin = __esm({
+  "bin/founder-pin.js"() {
+    "use strict";
+  }
+});
+
 // bin/match-slots.js
 function selectFounderBountyPicks(jobs) {
-  return (Array.isArray(jobs) ? jobs : []).filter(
-    (job) => job && job.source === "bounty" && job.bounty && job.bounty.bountySource === "founder"
-  ).map((job) => ({ job, score: 0, matchedTags: [] }));
+  return (Array.isArray(jobs) ? jobs : []).filter((job) => job && job.source === "bounty" && isPinnedFounderBounty(job)).map((job) => ({ job, score: 0, matchedTags: [] }));
 }
 function roleBandSize(tailLength) {
   return Math.min(
@@ -14584,15 +14620,16 @@ var TOTAL_SLOTS, BOUNTY_SLOTS, BOUNTY_MIN_MATCH, INTEREST_CONTRIBUTE_SLOTS, INTE
 var init_match_slots = __esm({
   "bin/match-slots.js"() {
     "use strict";
+    init_founder_pin();
     TOTAL_SLOTS = 25;
     BOUNTY_SLOTS = 3;
-    BOUNTY_MIN_MATCH = 0.5;
+    BOUNTY_MIN_MATCH = 0.35;
     INTEREST_CONTRIBUTE_SLOTS = 1;
     INTEREST_JOB_SLOTS = 1;
     INTEREST_SLOT_LABEL = "Stretch";
     CONTRIBUTE_SLOTS = 5;
     CONTRIBUTE_SLOTS_THIN = 8;
-    MIX_PRESETS = { jobs: CONTRIBUTE_SLOTS, balanced: 8, credential: 12 };
+    MIX_PRESETS = { jobs: CONTRIBUTE_SLOTS, balanced: 10, credential: 12 };
     DEFAULT_MIX = "balanced";
     ROLE_STABLE_MAX = 8;
     MIN_TAIL_SLOTS = 2;
@@ -14935,16 +14972,6 @@ var init_payout_split = __esm({
   "../../packages/core/src/payout-split.ts"() {
     "use strict";
     PLATFORM_TAKE_BPS = 1e3;
-  }
-});
-
-// bin/founder-pin.js
-function isPinnedFounderBounty(j) {
-  return j?.bounty?.bountySource === "founder" && j?.bounty?.claimable === true;
-}
-var init_founder_pin = __esm({
-  "bin/founder-pin.js"() {
-    "use strict";
   }
 });
 
@@ -16612,15 +16639,22 @@ var claim_push_bg_exports = {};
 __export(claim_push_bg_exports, {
   AUTO_CONSENT_VERSION: () => AUTO_CONSENT_VERSION,
   AUTO_PUSH_THROTTLE_MS: () => AUTO_PUSH_THROTTLE_MS,
+  CLAIM_HEARTBEAT_FILE: () => CLAIM_HEARTBEAT_FILE,
   CLAIM_PUSH_AUTO_MARKER: () => CLAIM_PUSH_AUTO_MARKER,
   CLAIM_PUSH_MANUAL_MARKER: () => CLAIM_PUSH_MANUAL_MARKER,
   CLAIM_PUSH_TOKEN_FILE: () => CLAIM_PUSH_TOKEN_FILE,
+  HEARTBEAT_MIN_CONSENT_VERSION: () => HEARTBEAT_MIN_CONSENT_VERSION,
+  HEARTBEAT_MIN_INTERVAL_MS: () => HEARTBEAT_MIN_INTERVAL_MS,
   backgroundPushGate: () => backgroundPushGate,
   clearAutoMarker: () => clearAutoMarker,
   clearPushTokenEnc: () => clearPushTokenEnc,
   computeSnapshotHash: () => computeSnapshotHash,
+  heartbeatGate: () => heartbeatGate,
+  postClaimHeartbeat: () => postClaimHeartbeat,
   readAutoMarker: () => readAutoMarker,
+  readHeartbeatState: () => readHeartbeatState,
   readPushTokenEnc: () => readPushTokenEnc,
+  recordHeartbeatBeat: () => recordHeartbeatBeat,
   runBackgroundClaimPush: () => runBackgroundClaimPush,
   shouldNudgeUnpushed: () => shouldNudgeUnpushed,
   unpushedNudgeGate: () => unpushedNudgeGate,
@@ -16732,6 +16766,79 @@ async function shouldNudgeUnpushed() {
     return false;
   }
 }
+function readHeartbeatState() {
+  try {
+    return existsSync13(CLAIM_HEARTBEAT_FILE) ? JSON.parse(readFileSync21(CLAIM_HEARTBEAT_FILE, "utf8")) : {};
+  } catch {
+    return {};
+  }
+}
+function recordHeartbeatBeat(claimId, at) {
+  try {
+    ensureStateDir(TERMINALHIRE_DIR15);
+    const state = readHeartbeatState();
+    state[claimId] = at;
+    writeFileSync16(CLAIM_HEARTBEAT_FILE, JSON.stringify(state, null, 2) + "\n", "utf8");
+  } catch {
+  }
+}
+function heartbeatGate(params) {
+  const {
+    autoMarkerExists,
+    tokenFileExists,
+    consentVersion,
+    bountyId,
+    claimId,
+    lastBeatAt,
+    now = Date.now(),
+    minIntervalMs = HEARTBEAT_MIN_INTERVAL_MS
+  } = params;
+  if (typeof bountyId !== "string" || bountyId.trim() === "") {
+    return { beat: false, reason: "no-server-ids" };
+  }
+  if (typeof claimId !== "string" || claimId.trim() === "") {
+    return { beat: false, reason: "no-server-ids" };
+  }
+  if (!autoMarkerExists || !tokenFileExists) {
+    return { beat: false, reason: "not-opted-in" };
+  }
+  if (!(Number.isInteger(consentVersion) && consentVersion >= HEARTBEAT_MIN_CONSENT_VERSION)) {
+    return { beat: false, reason: "consent-predates-presence" };
+  }
+  const last = lastBeatAt ? Date.parse(lastBeatAt) : NaN;
+  if (!Number.isNaN(last) && now - last < minIntervalMs) {
+    return { beat: false, reason: "throttled" };
+  }
+  return { beat: true, reason: "ok" };
+}
+async function postClaimHeartbeat({ bountyId, claimId, now = Date.now() } = {}) {
+  try {
+    const marker = readAutoMarker();
+    const gate2 = heartbeatGate({
+      autoMarkerExists: Boolean(marker && marker.autoConsentedAt),
+      tokenFileExists: existsSync13(CLAIM_PUSH_TOKEN_FILE),
+      consentVersion: marker?.version,
+      bountyId,
+      claimId,
+      lastBeatAt: readHeartbeatState()[claimId] ?? null,
+      now
+    });
+    if (!gate2.beat) return { beat: false, reason: gate2.reason };
+    const token = await readPushTokenEnc();
+    if (!token) return { beat: false, reason: "unreadable-token" };
+    const res = await fetch(`${CLAIM_SYNC_BASE}/api/claim/heartbeat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bountyId, claimId, pushToken: token }),
+      signal: AbortSignal.timeout(5e3)
+    });
+    if (!res.ok) return { beat: false, reason: `server-${res.status}` };
+    recordHeartbeatBeat(claimId, new Date(now).toISOString());
+    return { beat: true, reason: "ok" };
+  } catch {
+    return { beat: false, reason: "failed" };
+  }
+}
 async function runBackgroundClaimPush({ now = Date.now() } = {}) {
   try {
     if (!existsSync13(CLAIM_PUSH_AUTO_MARKER) || !existsSync13(CLAIM_PUSH_TOKEN_FILE)) {
@@ -16778,7 +16885,7 @@ async function runBackgroundClaimPush({ now = Date.now() } = {}) {
     return { pushed: false, reason: "failed" };
   }
 }
-var TERMINALHIRE_DIR15, CLAIM_PUSH_AUTO_MARKER, CLAIM_PUSH_TOKEN_FILE, CLAIM_PUSH_MANUAL_MARKER, CLAIM_SYNC_BASE, AUTO_CONSENT_VERSION, AUTO_PUSH_THROTTLE_MS;
+var TERMINALHIRE_DIR15, CLAIM_PUSH_AUTO_MARKER, CLAIM_PUSH_TOKEN_FILE, CLAIM_PUSH_MANUAL_MARKER, CLAIM_SYNC_BASE, AUTO_CONSENT_VERSION, AUTO_PUSH_THROTTLE_MS, CLAIM_HEARTBEAT_FILE, HEARTBEAT_MIN_INTERVAL_MS, HEARTBEAT_MIN_CONSENT_VERSION;
 var init_claim_push_bg = __esm({
   "bin/claim-push-bg.js"() {
     "use strict";
@@ -16789,8 +16896,11 @@ var init_claim_push_bg = __esm({
     CLAIM_PUSH_TOKEN_FILE = join25(TERMINALHIRE_DIR15, "claim-push-token.enc");
     CLAIM_PUSH_MANUAL_MARKER = join25(TERMINALHIRE_DIR15, "claim-push.json");
     CLAIM_SYNC_BASE = "https://terminalhire.com";
-    AUTO_CONSENT_VERSION = 2;
+    AUTO_CONSENT_VERSION = 3;
     AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
+    CLAIM_HEARTBEAT_FILE = join25(TERMINALHIRE_DIR15, "claim-heartbeat.json");
+    HEARTBEAT_MIN_INTERVAL_MS = 3e4;
+    HEARTBEAT_MIN_CONSENT_VERSION = 3;
   }
 });
 
@@ -31087,6 +31197,7 @@ __export(jpi_claim_exports, {
   SUBMIT_ACCEPTS: () => SUBMIT_ACCEPTS,
   SYNC_BACKGROUND_PUSH_ACTIVE_FIELD: () => SYNC_BACKGROUND_PUSH_ACTIVE_FIELD,
   backgroundEnableFailed: () => backgroundEnableFailed,
+  beatFounderPresence: () => beatFounderPresence,
   buildAssignmentComment: () => buildAssignmentComment,
   buildPatchSubmission: () => buildPatchSubmission,
   buildStakeComment: () => buildStakeComment,
@@ -31123,6 +31234,7 @@ __export(jpi_claim_exports, {
   pickStartableClaim: () => pickStartableClaim,
   printNextSteps: () => printNextSteps,
   readCredentialDisposition: () => readCredentialDisposition,
+  renderAutoConsent: () => renderAutoConsent,
   renderClaimHistory: () => renderClaimHistory,
   renderRunView: () => renderRunView,
   renderServerRefusal: () => renderServerRefusal,
@@ -32078,6 +32190,7 @@ async function registerFounderClaim(b) {
   const postingId = b.bountyId.replace(/^bounty:founder:/, "");
   let clearedLocalCredential = false;
   let refusedForPurpose = false;
+  let preserveBackgroundToken = false;
   const refuse = (reason) => {
     console.error(
       `
@@ -32163,9 +32276,9 @@ terminalhire claim: refusing to record \u2014 ${reason}
     );
   }
   let refusalBody = await readRefusal(res);
-  const pushTokenRefusal = storedPushToken && res.status === 403 && (refusalBody?.error === PUSH_TOKEN_REFUSAL.INVALID || refusalBody?.error === PUSH_TOKEN_REFUSAL.LEGACY || refusalBody?.error === PUSH_TOKEN_REFUSAL.INSUFFICIENT) ? refusalBody.error : null;
+  const pushTokenRefusal = storedPushToken && res.status === 403 && (refusalBody?.error === PUSH_TOKEN_REFUSAL.INVALID || refusalBody?.error === PUSH_TOKEN_REFUSAL.LEGACY || refusalBody?.error === PUSH_TOKEN_REFUSAL.INSUFFICIENT || refusalBody?.error === PUSH_TOKEN_REFUSAL.CONSENT_PREDATES_REGISTER) ? refusalBody.error : null;
   if (pushTokenRefusal) {
-    if (pushTokenRefusal !== PUSH_TOKEN_REFUSAL.INSUFFICIENT) {
+    if (pushTokenRefusal !== PUSH_TOKEN_REFUSAL.INSUFFICIENT && pushTokenRefusal !== PUSH_TOKEN_REFUSAL.CONSENT_PREDATES_REGISTER) {
       if (pushTokenRefusal === PUSH_TOKEN_REFUSAL.LEGACY) {
         console.log("\n  The push token on this machine was issued before terminalhire tied");
         console.log("  tokens to a GitHub account, so it can no longer prove who holds it.");
@@ -32191,8 +32304,17 @@ terminalhire claim: refusing to record \u2014 ${reason}
       }
     } else {
       refusedForPurpose = true;
-      console.log("\n  Registering a claim takes a one-time browser check, which the");
-      console.log("  credential stored on this machine is not for. Falling back to it now.");
+      if (pushTokenRefusal === PUSH_TOKEN_REFUSAL.CONSENT_PREDATES_REGISTER) {
+        preserveBackgroundToken = true;
+        console.log("\n  Your keep-updated enrolment predates the card that discloses");
+        console.log("  claim registration (and founder presence). Nothing was revoked.");
+        console.log("  Registering THIS claim falls back to a one-time browser check.");
+        console.log("  To enrol under the updated card:");
+        console.log("    terminalhire claim --push --keep-updated");
+      } else {
+        console.log("\n  Registering a claim takes a one-time browser check, which the");
+        console.log("  credential stored on this machine is not for. Falling back to it now.");
+      }
       console.log("  It was not revoked or changed \u2014 this refusal was about which");
       console.log("  action the credential is for, not whether it is still good.");
     }
@@ -32232,7 +32354,7 @@ terminalhire claim: refusing to record \u2014 ${reason}
     refuse("malformed registration response from the server.");
   }
   const mintedToken = typeof body.pushToken === "string" && body.pushToken.length > 0 ? body.pushToken : null;
-  if (refusedForPurpose && mintedToken) {
+  if (refusedForPurpose && mintedToken && !preserveBackgroundToken) {
     try {
       await writePushTokenEnc(mintedToken);
       console.log("\n  Your stored credential was refreshed \u2014 registering this claim");
@@ -32250,7 +32372,8 @@ terminalhire claim: refusing to record \u2014 ${reason}
     // Existing-token auth deliberately gets no replacement from the server: reuse the
     // encrypted value we just authenticated with. The one exception is the rotation
     // above — there the stored value is the superseded one, so it must not win.
-    pushToken: refusedForPurpose && mintedToken ? mintedToken : storedPushToken ?? mintedToken
+    // Consent-predates also keeps the background token even if a read mint arrived.
+    pushToken: refusedForPurpose && mintedToken && !preserveBackgroundToken ? mintedToken : storedPushToken ?? mintedToken
   };
 }
 function readCredentialDisposition({
@@ -32286,6 +32409,13 @@ async function bootstrapFounderClaimEnrollment(claim, registration) {
     };
   }
   return { stored: true, reason: "ok" };
+}
+async function beatFounderPresence(claim) {
+  if (!claim) return;
+  await postClaimHeartbeat({
+    bountyId: founderPostingIdOf(claim),
+    claimId: claim.approval?.claimId ?? null
+  });
 }
 async function cmdRecord(arg, flags = {}) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -32520,6 +32650,7 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
       console.log("\n  Founder postings are never forked or cloned \u2014 the work arrives as a");
       console.log("  read-slice through terminalhire, and your patch goes back the same way.");
     }
+    await beatFounderPresence(claim);
     return;
   }
   console.log(`
@@ -32955,6 +33086,7 @@ async function cmdUpdate(id, state, prUrl) {
     process.exit(1);
   }
   console.log(`Updated ${id} \u2192 ${state}${prUrl ? ` (PR: ${prUrl})` : ""}`);
+  await beatFounderPresence(updated);
 }
 async function cmdRelease(id, flags = {}) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -33082,8 +33214,9 @@ async function cmdAttach(id, worktree, branch) {
     console.error(`terminalhire claim: '${worktree}' is not a git work tree.`);
     process.exit(1);
   }
-  claims.updateClaim(id, { worktreePath: toplevel, branch });
+  const attached = claims.updateClaim(id, { worktreePath: toplevel, branch });
   console.log(`Attached ${id}: worktree=${toplevel} branch=${branch}`);
+  await beatFounderPresence(attached);
 }
 function workDirFor(repoFullName, issueNumber) {
   const [owner, repo] = String(repoFullName).split("/");
@@ -33181,6 +33314,7 @@ async function cmdStart(id, flags = {}) {
       if (claim.branch) console.log(`  branch: ${claim.branch}`);
       console.log(`
 When it's done:  terminalhire claim submit ${id}`);
+      await beatFounderPresence(claim);
       return;
     }
   }
@@ -33198,6 +33332,7 @@ ${sanitizeText(claim.title)}`);
       );
     }
     printNextSteps([claim]);
+    await beatFounderPresence(claim);
     return;
   }
   if (flags.here) {
@@ -33651,7 +33786,7 @@ async function cmdSlice(id, flags = {}) {
     );
     process.exit(1);
   }
-  claims.updateClaim(claim.id, { worktreePath: dest, branch, state: "working" });
+  const working = claims.updateClaim(claim.id, { worktreePath: dest, branch, state: "working" });
   console.log(`
   worktree: ${dest}`);
   console.log(`  branch:   ${branch}`);
@@ -33659,6 +33794,7 @@ async function cmdSlice(id, flags = {}) {
     `
   Author your change there (commit as you go), then:  terminalhire claim submit ${claim.id}`
   );
+  await beatFounderPresence(working ?? claim);
 }
 async function cmdRuns(id, flags = {}) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -33842,7 +33978,7 @@ async function submitFounderPatch({ claims, claim, id, wt, flags }) {
     console.error("terminalhire claim: malformed patch response from the server.");
     process.exit(1);
   }
-  claims.updateClaim(id, { state: "submitted" });
+  const submitted = claims.updateClaim(id, { state: "submitted" });
   console.log(`
 \u2713 Patch applied by terminalhire`);
   console.log(`  branch:    ${body.branch}`);
@@ -33850,6 +33986,7 @@ async function submitFounderPatch({ claims, claim, id, wt, flags }) {
   if (Array.isArray(body.touchedPaths)) console.log(`  touched:   ${body.touchedPaths.join(", ")}`);
   console.log(`
   Read the CI result:  terminalhire claim runs ${id} --watch`);
+  await beatFounderPresence(submitted ?? claim);
 }
 async function cmdSubmit(id, flags = {}) {
   const worktreeOverride = flags.worktree;
@@ -34337,9 +34474,18 @@ function renderAutoConsent() {
   console.log("  pushing the SAME score-free fields, at most once/day \u2014 until you run");
   console.log("  `terminalhire claim --push --revoke`.");
   console.log("");
-  console.log("  This stores a push-only credential on this machine (encrypted). It can");
-  console.log("  ONLY add/update your OWN dashboard rows \u2014 it can never read or delete.");
-  console.log("  Nothing new is sent: the payload is identical to the manual push above.");
+  console.log("  It also lets a FOUNDER see, on their own posting, roughly when you were");
+  console.log("  last at the keyboard on a claim of theirs (active / idle). Meaningful");
+  console.log("  steps send a timestamp and nothing else \u2014 never a note, never progress,");
+  console.log("  never a rating, and never on OSS claims, which stay entirely local.");
+  console.log("");
+  console.log("  This stores an encrypted credential on this machine. It can");
+  console.log("  add/update your OWN dashboard claim mirror, register a new");
+  console.log("  claim on a founder posting in your name, write that coarse");
+  console.log("  presence on founder claims you own, and re-read the slice and");
+  console.log("  CI results for those same claims. It can never delete, and it");
+  console.log("  cannot touch anyone else's claims. The daily dashboard payload");
+  console.log("  is otherwise identical to the manual push above.");
   console.log("");
 }
 function backgroundEnableFailed(autoConsent, pushToken) {
@@ -34929,6 +35075,13 @@ var init_jpi_claim = __esm({
       /** The credential is LIVE, just not a registration credential. NEVER clear it. */
       INSUFFICIENT: "insufficient-push-token",
       /**
+       * TERM-499. Live background token, but minted under a consent card that did not
+       * disclose claim registration (or presence). NEVER clear it — the daily push it
+       * was enrolled for still works. Fall back to a one-time browser proof for this
+       * registration, and tell the developer how to re-enrol for the updated card.
+       */
+      CONSENT_PREDATES_REGISTER: "consent-predates-register",
+      /**
        * TERM-325. Minted before tokens were bound to a GitHub account id, so it can no
        * longer prove who holds it. Unrevoked and real, and it fails closed at every scope
        * — the slice route answers `invalid-push-token` for the same row — so the ACTION is
@@ -35090,37 +35243,251 @@ function toSubmittedPosting(draft) {
     ...draft.repo ? { repo: draft.repo } : {}
   };
 }
-function inspectPostingSubmission(draft, currentHome = homedir23()) {
-  const reasons = draft.captureFailures.map((failure) => `capture failed: ${failure}`);
-  const posting = toSubmittedPosting(draft);
-  const wire = [posting.title, posting.symptom, posting.repo].filter(Boolean).join("\n");
-  for (const pattern of SECRET_PATTERNS) {
-    if (pattern.re.test(wire)) reasons.push(`submission contains ${pattern.label}`);
-  }
-  if (currentHome && wire.includes(currentHome)) reasons.push("submission contains your home path");
-  if (CROSS_PLATFORM_HOME_RE.test(wire)) reasons.push("submission contains a home-directory path");
-  if (draft.changedPaths.some((path6) => SECRET_PATH_RE.test(path6))) {
-    reasons.push("submission names a secret-shaped file path");
-  }
-  return reasons.length > 0 ? { ok: false, reasons: [...new Set(reasons)] } : { ok: true, posting };
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
-var SECRET_PATTERNS, SECRET_PATH_RE, CROSS_PLATFORM_HOME_RE;
+function assemblePieces(draft) {
+  const parts = [];
+  if (draft.title) {
+    parts.push({ wire: "title", field: "title", text: draft.title });
+    parts.push({ wire: null, field: "", text: "\n" });
+  }
+  parts.push({ wire: "symptom", field: "symptom", text: draft.symptom });
+  const add2 = (label, field, value) => {
+    const text = section(label, value);
+    if (text) parts.push({ wire: "symptom", field, text });
+  };
+  add2("Branch", "branch", draft.branch);
+  add2("Failing command", "failing command", draft.failingCommand);
+  add2("Output", "output", draft.failingOutput);
+  add2(
+    "Changed paths",
+    "changed paths",
+    draft.changedPaths.length ? draft.changedPaths.map((path6) => `- ${path6}`).join("\n") : null
+  );
+  add2("Detected stack", "detected stack", draft.stack.length ? draft.stack.join(", ") : null);
+  add2("Remote", "remote", draft.remote);
+  add2("Session context", "session context", draft.sessionSummary);
+  if (draft.repo) {
+    parts.push({ wire: null, field: "", text: "\n" });
+    parts.push({ wire: "repo", field: "repo", text: draft.repo });
+  }
+  let scanned = "";
+  const pieces = [];
+  for (const part of parts) {
+    pieces.push({ ...part, start: scanned.length, end: scanned.length + part.text.length });
+    scanned += part.text;
+  }
+  return { scanned, pieces };
+}
+function detections(value, currentHome, fixedOnly = false) {
+  const found = [];
+  const scan = (pattern, label, span) => {
+    const re = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
+    let match2;
+    while ((match2 = re.exec(value)) !== null) {
+      if (match2[0].length === 0) {
+        re.lastIndex += 1;
+        continue;
+      }
+      const hit = span(match2);
+      if (hit) found.push({ label, ...hit });
+    }
+  };
+  const whole = (m, replacement) => ({
+    start: m.index,
+    end: m.index + m[0].length,
+    replacement
+  });
+  for (const rule of FIXED_SECRET_RULES) scan(rule.re, rule.label, (m) => whole(m, REDACTED));
+  if (fixedOnly) return found;
+  scan(ASSIGNED_SECRET_RE, "an assigned secret", (m) => {
+    const secret = m[4] ?? "";
+    if (SECRET_REFERENCE_RE.test(secret)) return null;
+    const start = m.index + (m[1] ?? "").length + (m[2] ?? "").length + (m[3] ?? "").length;
+    return { start, end: start + secret.length, replacement: REDACTED };
+  });
+  if (currentHome) scan(new RegExp(escapeRegExp(currentHome)), "a home-directory path", (m) => whole(m, "~"));
+  scan(CROSS_PLATFORM_HOME_RE, "a home-directory path", (m) => whole(m, "~"));
+  return found;
+}
+function boundaryDetections(scanned, pieces, currentHome, already) {
+  let tight = "";
+  const map = [];
+  for (const piece of pieces) {
+    if (piece.wire === null) continue;
+    for (let i = 0; i < piece.text.length; i += 1) map.push(piece.start + i);
+    tight += piece.text;
+  }
+  if (tight.length === scanned.length) return [];
+  const out = [];
+  for (const match2 of detections(tight, currentHome, true)) {
+    let crosses = false;
+    for (let i = match2.start; i + 1 < match2.end; i += 1) {
+      if ((map[i + 1] ?? 0) !== (map[i] ?? 0) + 1) {
+        crosses = true;
+        break;
+      }
+    }
+    if (!crosses) continue;
+    const start = map[match2.start];
+    const last = map[match2.end - 1];
+    if (start === void 0 || last === void 0) continue;
+    if (already.some((seen) => start < seen.end && last + 1 > seen.start)) continue;
+    out.push({ ...match2, start, end: last + 1 });
+  }
+  return out;
+}
+function mergeSpans(found) {
+  const sorted = [...found].sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged = [];
+  for (const span of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && span.start < last.end) {
+      last.end = Math.max(last.end, span.end);
+      if (span.replacement !== last.replacement) last.replacement = REDACTED;
+      continue;
+    }
+    merged.push({ ...span });
+  }
+  return merged;
+}
+function fieldsCovered(pieces, match2) {
+  const names = [];
+  for (const piece of pieces) {
+    if (piece.wire === null) continue;
+    if (match2.start < piece.end && match2.end > piece.start && !names.includes(piece.field)) {
+      names.push(piece.field);
+    }
+  }
+  return names;
+}
+function describeFields(fields) {
+  if (fields.length === 0) return "across fields";
+  if (fields.length === 1) return fields[0];
+  return `${fields.slice(0, -1).join(", ")} and ${fields[fields.length - 1]}`;
+}
+function rebuild(scanned, pieces, wire, merged) {
+  let out = "";
+  for (const piece of pieces) {
+    if (piece.wire !== wire) continue;
+    let cursor = piece.start;
+    for (const span of merged) {
+      if (span.end <= piece.start || span.start >= piece.end) continue;
+      const from = Math.max(span.start, piece.start);
+      const to = Math.min(span.end, piece.end);
+      out += scanned.slice(cursor, from) + span.replacement;
+      cursor = to;
+    }
+    out += scanned.slice(cursor, piece.end);
+  }
+  return out;
+}
+function dedupe(found) {
+  const seen = /* @__PURE__ */ new Set();
+  return found.filter((redaction) => {
+    const key = `${redaction.field}\0${redaction.label}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function preparePostingSubmission(draft, currentHome = homedir23()) {
+  const keptPaths = [];
+  const found = [];
+  for (const path6 of draft.changedPaths) {
+    if (SECRET_PATH_RE.test(path6)) {
+      found.push({ field: "changed paths", label: "a secret-shaped file path" });
+      continue;
+    }
+    keptPaths.push(path6);
+  }
+  const withPathsDropped = {
+    title: draft.title,
+    symptom: draft.symptom,
+    repo: draft.repo,
+    branch: draft.branch,
+    failingCommand: draft.failingCommand,
+    failingOutput: draft.failingOutput,
+    changedPaths: keptPaths,
+    stack: draft.stack,
+    remote: draft.remote,
+    sessionSummary: draft.sessionSummary
+  };
+  const { scanned, pieces } = assemblePieces(withPathsDropped);
+  const raw = toSubmittedPosting(withPathsDropped);
+  const rawSymptom = rebuild(scanned, pieces, "symptom", []);
+  if (raw.symptom !== rawSymptom || (raw.title ?? "") !== rebuild(scanned, pieces, "title", []) || (raw.repo ?? "") !== rebuild(scanned, pieces, "repo", [])) {
+    throw new Error("posting assembly drift: the piece build and toSubmittedPosting disagree");
+  }
+  const matches = detections(scanned, currentHome);
+  for (const match2 of boundaryDetections(scanned, pieces, currentHome, matches)) {
+    matches.push(match2);
+  }
+  for (const match2 of matches) {
+    found.push({ field: describeFields(fieldsCovered(pieces, match2)), label: match2.label });
+  }
+  const merged = mergeSpans(matches);
+  const posting = {
+    ...raw.title ? { title: rebuild(scanned, pieces, "title", merged) } : {},
+    symptom: rebuild(scanned, pieces, "symptom", merged),
+    ...raw.repo ? { repo: rebuild(scanned, pieces, "repo", merged) } : {}
+  };
+  if (!posting.symptom.replace(EMPTY_AFTER_REDACTION_RE, "")) {
+    return {
+      ok: false,
+      reasons: ["every word of this draft was redacted \u2014 describe the problem and try again"]
+    };
+  }
+  return {
+    ok: true,
+    posting,
+    redactions: dedupe(found),
+    // A capture failure BLOCKED submission before this change, and nothing the
+    // founder could type would clear it — the collector, not the draft, is what
+    // failed. A field we could not read is a gap in the report, never a leak.
+    notices: draft.captureFailures.map((failure) => `could not capture ${failure}`)
+  };
+}
+var REDACTED, EMPTY_AFTER_REDACTION_RE, FIXED_SECRET_RULES, ASSIGNED_SECRET_RE, SECRET_REFERENCE_RE, SECRET_PATH_RE, CROSS_PLATFORM_HOME_RE;
 var init_posting_drafts = __esm({
   "src/posting-drafts.ts"() {
     "use strict";
     init_state_dir();
-    SECRET_PATTERNS = [
-      { label: "a GitHub token", re: /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/ },
-      { label: "an AWS access key", re: /\bAKIA[0-9A-Z]{16}\b/ },
-      { label: "a Stripe secret key", re: /\bsk_(?:live|test)_[A-Za-z0-9]{12,}\b/ },
-      { label: "a private key", re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
+    REDACTED = "[redacted]";
+    EMPTY_AFTER_REDACTION_RE = /(?:\b(?:password|passwd|secret|token|api[_-]?key)\s*[:=]\s*|\[redacted\]|["'`~]|\s)+/g;
+    FIXED_SECRET_RULES = [
+      { label: "a GitHub token", re: /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/g },
+      { label: "an AWS access key", re: /\bAKIA[0-9A-Z]{16}\b/g },
+      { label: "a Stripe secret key", re: /\bsk_(?:live|test)_[A-Za-z0-9]{12,}\b/g },
       {
-        label: "an assigned secret",
-        re: /\b(?:password|passwd|secret|token|api[_-]?key)\s*[:=]\s*["']?[^\s"']{12,}/i
+        label: "a private key",
+        re: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g
       }
     ];
+    ASSIGNED_SECRET_RE = /\b(password|passwd|secret|token|api[_-]?key)(\s*[:=]\s*)(["'`]?)([^\s"'`]{12,})\3/gi;
+    SECRET_REFERENCE_RE = new RegExp(
+      [
+        "^process\\.env\\.[A-Za-z_$][\\w$]*$",
+        "^process\\.env\\[[\"'`][^\"'`]*[\"'`]\\]$",
+        "^import\\.meta\\.env\\.[A-Za-z_$][\\w$]*$",
+        "^Deno\\.env\\.get\\([\"'`][^\"'`]*[\"'`]\\)$",
+        "^os\\.environ(?:\\.get\\(|\\[)[\"'`]?[A-Za-z_]\\w*[\"'`]?[\\])]$",
+        "^ENV\\[[\"'`]?[A-Za-z_]\\w*[\"'`]?\\]$",
+        "^\\$\\{?[A-Za-z_]\\w*\\}?$",
+        // $VAR, ${VAR}
+        "^[A-Za-z_$][\\w$.]*\\(\\s*\\)$",
+        // crypto.randomUUID()
+        // A call WITH arguments, but only when no argument is long enough to be a
+        // credential — `getSecret(actualHardcodedSecret123456)` is not a reference, it is
+        // a secret wearing a function's clothes.
+        "^[A-Za-z_$][\\w$.]*\\((?![^)]{12,})[\\w$.,\\s]*\\)$",
+        "^(?:null|undefined|true|false)$"
+      ].join("|"),
+      "i"
+    );
     SECRET_PATH_RE = /(?:^|[/\\])(?:\.env(?:\.[^/\\]+)?|id_(?:rsa|ed25519)|credentials(?:\.json)?|secrets?)(?:$|[/\\])/i;
-    CROSS_PLATFORM_HOME_RE = /(?:\/(?:Users|home)\/[^/\s]+|[A-Za-z]:\\Users\\[^\\\s]+)/;
+    CROSS_PLATFORM_HOME_RE = /(?:\/(?:Users|home)\/[^/\s]+|[A-Za-z]:\\Users\\[^\\\s]+)/g;
   }
 });
 
@@ -35337,26 +35704,30 @@ function runEdit(id, flags) {
 async function runSubmit(id) {
   const draft = getPostingDraft(id);
   if (!draft) throw new Error(`draft not found: ${id}`);
-  const inspected = inspectPostingSubmission(draft);
-  printDraft(draft);
-  if (!inspected.ok) {
-    console.error("  Refused \u2014 nothing was sent:");
-    for (const reason of inspected.reasons) console.error(`    - ${reason}`);
-    console.error("\n  Edit the draft or withdraw it. Submission fails closed.\n");
+  const prepared = preparePostingSubmission(draft);
+  if (!prepared.ok) {
+    console.error("\n  Nothing to send:");
+    for (const reason of prepared.reasons) console.error(`    - ${reason}`);
+    console.error("");
     process.exitCode = 1;
     return;
   }
-  console.log("  EXACT network body:\n");
-  console.log(JSON.stringify(inspected.posting, null, 2));
+  if (prepared.redactions.length) {
+    console.log("\n  Redacted \u2014 the body below is what goes out:");
+    for (const { field, label } of prepared.redactions) {
+      console.log(`    - ${label}, in ${field}`);
+    }
+  }
+  if (prepared.notices.length) {
+    console.log("\n  Missing from the report (not a problem, just thinner):");
+    for (const notice of prepared.notices) console.log(`    - ${notice}`);
+  }
+  console.log("\n  EXACT network body:\n");
+  console.log(JSON.stringify(prepared.posting, null, 2));
   console.log("");
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error("  Refused \u2014 submit requires a human at an interactive terminal. Nothing was sent.\n");
     process.exitCode = 1;
-    return;
-  }
-  const confirmation = await ask2('  Type "submit" to create the browser-confirmation draft: ');
-  if (confirmation !== "submit") {
-    console.log("\n  Cancelled \u2014 nothing was sent.\n");
     return;
   }
   let response;
@@ -35368,7 +35739,7 @@ async function runSubmit(id) {
         jsonrpc: "2.0",
         id: draft.id,
         method: "tools/call",
-        params: { name: "draft_posting", arguments: inspected.posting }
+        params: { name: "draft_posting", arguments: prepared.posting }
       }),
       signal: AbortSignal.timeout(1e4)
     });
@@ -64728,7 +65099,7 @@ function parseNudgeMode2(raw) {
 function printMixValues() {
   console.log("  Valid mix values (roles vs. contribution items on the ambient surface):");
   console.log("    jobs       \u2014 more roles, fewer contributions (contribute 5, roles ~15)");
-  console.log("    balanced   \u2014 rebalanced default (contribute 8, roles ~12)");
+  console.log("    balanced   \u2014 contribution-first default (contribute 10, roles ~10)");
   console.log("    credential \u2014 contribution-forward (contribute 12, roles ~8)");
 }
 async function run24() {

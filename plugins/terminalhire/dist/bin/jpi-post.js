@@ -211,31 +211,245 @@ function toSubmittedPosting(draft) {
     ...draft.repo ? { repo: draft.repo } : {}
   };
 }
-var SECRET_PATTERNS = [
-  { label: "a GitHub token", re: /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/ },
-  { label: "an AWS access key", re: /\bAKIA[0-9A-Z]{16}\b/ },
-  { label: "a Stripe secret key", re: /\bsk_(?:live|test)_[A-Za-z0-9]{12,}\b/ },
-  { label: "a private key", re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
+var REDACTED = "[redacted]";
+var EMPTY_AFTER_REDACTION_RE = /(?:\b(?:password|passwd|secret|token|api[_-]?key)\s*[:=]\s*|\[redacted\]|["'`~]|\s)+/g;
+var FIXED_SECRET_RULES = [
+  { label: "a GitHub token", re: /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/g },
+  { label: "an AWS access key", re: /\bAKIA[0-9A-Z]{16}\b/g },
+  { label: "a Stripe secret key", re: /\bsk_(?:live|test)_[A-Za-z0-9]{12,}\b/g },
   {
-    label: "an assigned secret",
-    re: /\b(?:password|passwd|secret|token|api[_-]?key)\s*[:=]\s*["']?[^\s"']{12,}/i
+    label: "a private key",
+    re: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g
   }
 ];
+var ASSIGNED_SECRET_RE = /\b(password|passwd|secret|token|api[_-]?key)(\s*[:=]\s*)(["'`]?)([^\s"'`]{12,})\3/gi;
+var SECRET_REFERENCE_RE = new RegExp(
+  [
+    "^process\\.env\\.[A-Za-z_$][\\w$]*$",
+    "^process\\.env\\[[\"'`][^\"'`]*[\"'`]\\]$",
+    "^import\\.meta\\.env\\.[A-Za-z_$][\\w$]*$",
+    "^Deno\\.env\\.get\\([\"'`][^\"'`]*[\"'`]\\)$",
+    "^os\\.environ(?:\\.get\\(|\\[)[\"'`]?[A-Za-z_]\\w*[\"'`]?[\\])]$",
+    "^ENV\\[[\"'`]?[A-Za-z_]\\w*[\"'`]?\\]$",
+    "^\\$\\{?[A-Za-z_]\\w*\\}?$",
+    // $VAR, ${VAR}
+    "^[A-Za-z_$][\\w$.]*\\(\\s*\\)$",
+    // crypto.randomUUID()
+    // A call WITH arguments, but only when no argument is long enough to be a
+    // credential — `getSecret(actualHardcodedSecret123456)` is not a reference, it is
+    // a secret wearing a function's clothes.
+    "^[A-Za-z_$][\\w$.]*\\((?![^)]{12,})[\\w$.,\\s]*\\)$",
+    "^(?:null|undefined|true|false)$"
+  ].join("|"),
+  "i"
+);
 var SECRET_PATH_RE = /(?:^|[/\\])(?:\.env(?:\.[^/\\]+)?|id_(?:rsa|ed25519)|credentials(?:\.json)?|secrets?)(?:$|[/\\])/i;
-var CROSS_PLATFORM_HOME_RE = /(?:\/(?:Users|home)\/[^/\s]+|[A-Za-z]:\\Users\\[^\\\s]+)/;
-function inspectPostingSubmission(draft, currentHome = homedir()) {
-  const reasons = draft.captureFailures.map((failure) => `capture failed: ${failure}`);
-  const posting = toSubmittedPosting(draft);
-  const wire = [posting.title, posting.symptom, posting.repo].filter(Boolean).join("\n");
-  for (const pattern of SECRET_PATTERNS) {
-    if (pattern.re.test(wire)) reasons.push(`submission contains ${pattern.label}`);
+var CROSS_PLATFORM_HOME_RE = /(?:\/(?:Users|home)\/[^/\s]+|[A-Za-z]:\\Users\\[^\\\s]+)/g;
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function assemblePieces(draft) {
+  const parts = [];
+  if (draft.title) {
+    parts.push({ wire: "title", field: "title", text: draft.title });
+    parts.push({ wire: null, field: "", text: "\n" });
   }
-  if (currentHome && wire.includes(currentHome)) reasons.push("submission contains your home path");
-  if (CROSS_PLATFORM_HOME_RE.test(wire)) reasons.push("submission contains a home-directory path");
-  if (draft.changedPaths.some((path) => SECRET_PATH_RE.test(path))) {
-    reasons.push("submission names a secret-shaped file path");
+  parts.push({ wire: "symptom", field: "symptom", text: draft.symptom });
+  const add = (label, field, value) => {
+    const text = section(label, value);
+    if (text) parts.push({ wire: "symptom", field, text });
+  };
+  add("Branch", "branch", draft.branch);
+  add("Failing command", "failing command", draft.failingCommand);
+  add("Output", "output", draft.failingOutput);
+  add(
+    "Changed paths",
+    "changed paths",
+    draft.changedPaths.length ? draft.changedPaths.map((path) => `- ${path}`).join("\n") : null
+  );
+  add("Detected stack", "detected stack", draft.stack.length ? draft.stack.join(", ") : null);
+  add("Remote", "remote", draft.remote);
+  add("Session context", "session context", draft.sessionSummary);
+  if (draft.repo) {
+    parts.push({ wire: null, field: "", text: "\n" });
+    parts.push({ wire: "repo", field: "repo", text: draft.repo });
   }
-  return reasons.length > 0 ? { ok: false, reasons: [...new Set(reasons)] } : { ok: true, posting };
+  let scanned = "";
+  const pieces = [];
+  for (const part of parts) {
+    pieces.push({ ...part, start: scanned.length, end: scanned.length + part.text.length });
+    scanned += part.text;
+  }
+  return { scanned, pieces };
+}
+function detections(value, currentHome, fixedOnly = false) {
+  const found = [];
+  const scan = (pattern, label, span) => {
+    const re = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
+    let match;
+    while ((match = re.exec(value)) !== null) {
+      if (match[0].length === 0) {
+        re.lastIndex += 1;
+        continue;
+      }
+      const hit = span(match);
+      if (hit) found.push({ label, ...hit });
+    }
+  };
+  const whole = (m, replacement) => ({
+    start: m.index,
+    end: m.index + m[0].length,
+    replacement
+  });
+  for (const rule of FIXED_SECRET_RULES) scan(rule.re, rule.label, (m) => whole(m, REDACTED));
+  if (fixedOnly) return found;
+  scan(ASSIGNED_SECRET_RE, "an assigned secret", (m) => {
+    const secret = m[4] ?? "";
+    if (SECRET_REFERENCE_RE.test(secret)) return null;
+    const start = m.index + (m[1] ?? "").length + (m[2] ?? "").length + (m[3] ?? "").length;
+    return { start, end: start + secret.length, replacement: REDACTED };
+  });
+  if (currentHome) scan(new RegExp(escapeRegExp(currentHome)), "a home-directory path", (m) => whole(m, "~"));
+  scan(CROSS_PLATFORM_HOME_RE, "a home-directory path", (m) => whole(m, "~"));
+  return found;
+}
+function boundaryDetections(scanned, pieces, currentHome, already) {
+  let tight = "";
+  const map = [];
+  for (const piece of pieces) {
+    if (piece.wire === null) continue;
+    for (let i = 0; i < piece.text.length; i += 1) map.push(piece.start + i);
+    tight += piece.text;
+  }
+  if (tight.length === scanned.length) return [];
+  const out = [];
+  for (const match of detections(tight, currentHome, true)) {
+    let crosses = false;
+    for (let i = match.start; i + 1 < match.end; i += 1) {
+      if ((map[i + 1] ?? 0) !== (map[i] ?? 0) + 1) {
+        crosses = true;
+        break;
+      }
+    }
+    if (!crosses) continue;
+    const start = map[match.start];
+    const last = map[match.end - 1];
+    if (start === void 0 || last === void 0) continue;
+    if (already.some((seen) => start < seen.end && last + 1 > seen.start)) continue;
+    out.push({ ...match, start, end: last + 1 });
+  }
+  return out;
+}
+function mergeSpans(found) {
+  const sorted = [...found].sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged = [];
+  for (const span of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && span.start < last.end) {
+      last.end = Math.max(last.end, span.end);
+      if (span.replacement !== last.replacement) last.replacement = REDACTED;
+      continue;
+    }
+    merged.push({ ...span });
+  }
+  return merged;
+}
+function fieldsCovered(pieces, match) {
+  const names = [];
+  for (const piece of pieces) {
+    if (piece.wire === null) continue;
+    if (match.start < piece.end && match.end > piece.start && !names.includes(piece.field)) {
+      names.push(piece.field);
+    }
+  }
+  return names;
+}
+function describeFields(fields) {
+  if (fields.length === 0) return "across fields";
+  if (fields.length === 1) return fields[0];
+  return `${fields.slice(0, -1).join(", ")} and ${fields[fields.length - 1]}`;
+}
+function rebuild(scanned, pieces, wire, merged) {
+  let out = "";
+  for (const piece of pieces) {
+    if (piece.wire !== wire) continue;
+    let cursor = piece.start;
+    for (const span of merged) {
+      if (span.end <= piece.start || span.start >= piece.end) continue;
+      const from = Math.max(span.start, piece.start);
+      const to = Math.min(span.end, piece.end);
+      out += scanned.slice(cursor, from) + span.replacement;
+      cursor = to;
+    }
+    out += scanned.slice(cursor, piece.end);
+  }
+  return out;
+}
+function dedupe(found) {
+  const seen = /* @__PURE__ */ new Set();
+  return found.filter((redaction) => {
+    const key = `${redaction.field}\0${redaction.label}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function preparePostingSubmission(draft, currentHome = homedir()) {
+  const keptPaths = [];
+  const found = [];
+  for (const path of draft.changedPaths) {
+    if (SECRET_PATH_RE.test(path)) {
+      found.push({ field: "changed paths", label: "a secret-shaped file path" });
+      continue;
+    }
+    keptPaths.push(path);
+  }
+  const withPathsDropped = {
+    title: draft.title,
+    symptom: draft.symptom,
+    repo: draft.repo,
+    branch: draft.branch,
+    failingCommand: draft.failingCommand,
+    failingOutput: draft.failingOutput,
+    changedPaths: keptPaths,
+    stack: draft.stack,
+    remote: draft.remote,
+    sessionSummary: draft.sessionSummary
+  };
+  const { scanned, pieces } = assemblePieces(withPathsDropped);
+  const raw = toSubmittedPosting(withPathsDropped);
+  const rawSymptom = rebuild(scanned, pieces, "symptom", []);
+  if (raw.symptom !== rawSymptom || (raw.title ?? "") !== rebuild(scanned, pieces, "title", []) || (raw.repo ?? "") !== rebuild(scanned, pieces, "repo", [])) {
+    throw new Error("posting assembly drift: the piece build and toSubmittedPosting disagree");
+  }
+  const matches = detections(scanned, currentHome);
+  for (const match of boundaryDetections(scanned, pieces, currentHome, matches)) {
+    matches.push(match);
+  }
+  for (const match of matches) {
+    found.push({ field: describeFields(fieldsCovered(pieces, match)), label: match.label });
+  }
+  const merged = mergeSpans(matches);
+  const posting = {
+    ...raw.title ? { title: rebuild(scanned, pieces, "title", merged) } : {},
+    symptom: rebuild(scanned, pieces, "symptom", merged),
+    ...raw.repo ? { repo: rebuild(scanned, pieces, "repo", merged) } : {}
+  };
+  if (!posting.symptom.replace(EMPTY_AFTER_REDACTION_RE, "")) {
+    return {
+      ok: false,
+      reasons: ["every word of this draft was redacted \u2014 describe the problem and try again"]
+    };
+  }
+  return {
+    ok: true,
+    posting,
+    redactions: dedupe(found),
+    // A capture failure BLOCKED submission before this change, and nothing the
+    // founder could type would clear it — the collector, not the draft, is what
+    // failed. A field we could not read is a gap in the report, never a leak.
+    notices: draft.captureFailures.map((failure) => `could not capture ${failure}`)
+  };
 }
 
 // bin/jpi-post.js
@@ -452,26 +666,30 @@ function runEdit(id, flags) {
 async function runSubmit(id) {
   const draft = getPostingDraft(id);
   if (!draft) throw new Error(`draft not found: ${id}`);
-  const inspected = inspectPostingSubmission(draft);
-  printDraft(draft);
-  if (!inspected.ok) {
-    console.error("  Refused \u2014 nothing was sent:");
-    for (const reason of inspected.reasons) console.error(`    - ${reason}`);
-    console.error("\n  Edit the draft or withdraw it. Submission fails closed.\n");
+  const prepared = preparePostingSubmission(draft);
+  if (!prepared.ok) {
+    console.error("\n  Nothing to send:");
+    for (const reason of prepared.reasons) console.error(`    - ${reason}`);
+    console.error("");
     process.exitCode = 1;
     return;
   }
-  console.log("  EXACT network body:\n");
-  console.log(JSON.stringify(inspected.posting, null, 2));
+  if (prepared.redactions.length) {
+    console.log("\n  Redacted \u2014 the body below is what goes out:");
+    for (const { field, label } of prepared.redactions) {
+      console.log(`    - ${label}, in ${field}`);
+    }
+  }
+  if (prepared.notices.length) {
+    console.log("\n  Missing from the report (not a problem, just thinner):");
+    for (const notice of prepared.notices) console.log(`    - ${notice}`);
+  }
+  console.log("\n  EXACT network body:\n");
+  console.log(JSON.stringify(prepared.posting, null, 2));
   console.log("");
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error("  Refused \u2014 submit requires a human at an interactive terminal. Nothing was sent.\n");
     process.exitCode = 1;
-    return;
-  }
-  const confirmation = await ask('  Type "submit" to create the browser-confirmation draft: ');
-  if (confirmation !== "submit") {
-    console.log("\n  Cancelled \u2014 nothing was sent.\n");
     return;
   }
   let response;
@@ -483,7 +701,7 @@ async function runSubmit(id) {
         jsonrpc: "2.0",
         id: draft.id,
         method: "tools/call",
-        params: { name: "draft_posting", arguments: inspected.posting }
+        params: { name: "draft_posting", arguments: prepared.posting }
       }),
       signal: AbortSignal.timeout(1e4)
     });

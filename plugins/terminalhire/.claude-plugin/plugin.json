@@ -1,7 +1,7 @@
 {
   "name": "terminalhire",
-  "version": "0.42.3",
-  "description": "Local-first job matching for developers. Two-line ambient surface in the Claude Code spinner (adaptive context header + a ⌘-clickable, tracked job link), kept fresh in the background. Your profile never leaves your machine.",
+  "version": "0.42.4",
+  "description": "Local-first job matching for developers. Two-line ambient surface in the Claude Code spinner (adaptive context header + a \u2318-clickable, tracked job link), kept fresh in the background. Your profile never leaves your machine.",
   "author": {
     "name": "staqs",
     "email": "eric@staqs.io",
