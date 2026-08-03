@@ -176,7 +176,8 @@ var DEFAULT_CONFIG = {
   lastFullFeedbackAt: null,
   lastPulseAskAt: null,
   pulseDisclosed: false,
-  mix: "balanced"
+  mix: "balanced",
+  founderBountyNotify: false
 };
 function readConfig() {
   try {

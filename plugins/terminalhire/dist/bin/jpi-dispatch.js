@@ -175,6 +175,7 @@ __export(config_exports, {
   getSurfaceMix: () => getSurfaceMix,
   isBetaOptIn: () => isBetaOptIn,
   isContributeEnabled: () => isContributeEnabled,
+  isFounderBountyNotifyEnabled: () => isFounderBountyNotifyEnabled,
   isInboundNudgeMuted: () => isInboundNudgeMuted,
   isPeerConnectEnabled: () => isPeerConnectEnabled,
   parseNudgeMode: () => parseNudgeMode,
@@ -259,6 +260,9 @@ function isContributeEnabled() {
 function isBetaOptIn() {
   return readConfig().betaOptIn === true;
 }
+function isFounderBountyNotifyEnabled() {
+  return readConfig().founderBountyNotify === true;
+}
 var TERMINALHIRE_DIR, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
@@ -280,7 +284,8 @@ var init_config = __esm({
       lastFullFeedbackAt: null,
       lastPulseAskAt: null,
       pulseDisclosed: false,
-      mix: "balanced"
+      mix: "balanced",
+      founderBountyNotify: false
     };
   }
 });
@@ -30923,8 +30928,8 @@ function shStream(cmd, args5, opts = {}) {
   const cap = opts.maxStderrBytes ?? 64 * 1024;
   return new Promise((resolve7, reject) => {
     void (async () => {
-      const spawn4 = opts.spawnFn ?? (await import("child_process")).spawn;
-      const child = spawn4(cmd, args5, { shell: false, stdio: ["ignore", "pipe", "pipe"] });
+      const spawn5 = opts.spawnFn ?? (await import("child_process")).spawn;
+      const child = spawn5(cmd, args5, { shell: false, stdio: ["ignore", "pipe", "pipe"] });
       let stdout = "";
       let stderr = "";
       child.stdout?.setEncoding("utf8");
@@ -65167,13 +65172,20 @@ async function run24() {
     if (envOverride) {
       console.log(`  (overridden by TERMINALHIRE_NUDGE=${envOverride} at runtime)`);
     }
-    console.log(`  peer-connect: ${cfg.peerConnect ? "on" : "off"}  (ambient peer & founder surfacing; default off)`);
+    console.log(
+      `  peer-connect: ${cfg.peerConnect ? "on" : "off"}  (ambient peer & founder surfacing; default off)`
+    );
     const mixEnv = process.env["TH_MIX"];
-    console.log(`  mix: ${cfg.mix}  (roles vs. contributions on the ambient surface; default balanced)`);
+    console.log(
+      `  mix: ${cfg.mix}  (roles vs. contributions on the ambient surface; default balanced)`
+    );
     if (mixEnv) {
       console.log(`  (mix overridden by TH_MIX=${mixEnv} at runtime)`);
     }
     console.log(`  lead: ${cfg.surfaceLead ?? "auto"}  (auto derives from your open postings)`);
+    console.log(
+      `  founder-notify: ${cfg.founderBountyNotify ? "on" : "off"}  (OS ping when a paid founder bounty drops; default off)`
+    );
     console.log(`  config file: ${CONFIG_FILE2}`);
     console.log("");
     console.log("  Valid nudge values:");
@@ -65185,8 +65197,14 @@ async function run24() {
     console.log("  (set with: config set mix <value>  \xB7  read with: config get mix)");
     console.log("");
     console.log("  Peer-connect (--connect on|off):");
-    console.log("    on   \u2014 surface peers & founders in the spinner + send an anonymous matched signal");
+    console.log(
+      "    on   \u2014 surface peers & founders in the spinner + send an anonymous matched signal"
+    );
     console.log("    off  \u2014 no peer matching, no directory fetch, no signal (default)");
+    console.log("");
+    console.log("  Founder bounty OS notify (--founder-notify on|off):");
+    console.log("    on   \u2014 ping when a NEW claimable founder bounty appears (TERM-228)");
+    console.log("    off  \u2014 no OS toast for founder supply (default)");
     console.log("");
     return;
   }
@@ -65219,8 +65237,38 @@ async function run24() {
     console.log(`  (saved to ${CONFIG_FILE2})`);
     return;
   }
+  const founderNotifyIdx = filtered.indexOf("--founder-notify");
+  if (founderNotifyIdx !== -1) {
+    const value = filtered[founderNotifyIdx + 1];
+    if (value !== "on" && value !== "off") {
+      console.error("Error: --founder-notify requires a value: on | off");
+      process.exit(1);
+    }
+    writeConfig({ founderBountyNotify: value === "on" });
+    if (value === "on") {
+      try {
+        const { openPaidIds: openPaidIds2 } = await Promise.resolve().then(() => (init_founder_paid_badge(), founder_paid_badge_exports));
+        const { readCacheEntry: readCacheEntry2, updateIndexCache: updateIndexCache2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
+        const entry = readCacheEntry2() ?? {};
+        const ids = openPaidIds2(entry.index);
+        updateIndexCache2({ founderPaidOsNotified: { ids } });
+        console.log(`  founder-notify set to: on`);
+        console.log(
+          `  (seeded ${ids.length} existing open bounty id(s) \u2014 only NEW ones will ping)`
+        );
+      } catch {
+        console.log(`  founder-notify set to: on`);
+        console.log("  (could not seed from cache \u2014 first refresh will silent-seed)");
+      }
+    } else {
+      console.log(`  founder-notify set to: off`);
+    }
+    console.log(`  (saved to ${CONFIG_FILE2})`);
+    return;
+  }
   console.error("Usage: terminalhire config --nudge <session|always|every:N>");
   console.error("       terminalhire config --connect <on|off>");
+  console.error("       terminalhire config --founder-notify <on|off>");
   console.error("       terminalhire config set mix <jobs|balanced|credential>");
   console.error("       terminalhire config get mix");
   console.error("       terminalhire config set lead <auto|dev|founder>");
@@ -66187,6 +66235,113 @@ var init_job_status_suppress = __esm({
   }
 });
 
+// bin/founder-bounty-notify.js
+var founder_bounty_notify_exports = {};
+__export(founder_bounty_notify_exports, {
+  displayLocalNotification: () => displayLocalNotification,
+  escapeAppleScriptString: () => escapeAppleScriptString2,
+  formatFounderBountyNotifyBody: () => formatFounderBountyNotifyBody,
+  maybeNotifyFounderBounties: () => maybeNotifyFounderBounties,
+  nextFounderBountyNotifyState: () => nextFounderBountyNotifyState
+});
+import { spawn as spawn4 } from "child_process";
+function nextFounderBountyNotifyState(index, previous) {
+  const open3 = openPaidIds(index);
+  const prior = previous && Array.isArray(previous.ids) ? previous.ids : null;
+  if (prior === null) {
+    return { ids: open3, fire: [], seeded: true };
+  }
+  const seen = new Set(prior);
+  const fire = open3.filter((id) => !seen.has(id));
+  const ids = [.../* @__PURE__ */ new Set([...prior.filter((id) => open3.includes(id)), ...fire])].sort();
+  return { ids, fire, seeded: false };
+}
+function formatFounderBountyNotifyBody(index, fireIds) {
+  const jobs = index && index.jobs || [];
+  const byId = /* @__PURE__ */ new Map();
+  for (const j of jobs) {
+    if (j && typeof j.id === "string") byId.set(j.id, j);
+  }
+  if (fireIds.length === 1) {
+    const j = byId.get(fireIds[0]);
+    const amount = j && j.bounty && typeof j.bounty.amountUSD === "number" ? j.bounty.amountUSD : null;
+    const price = typeof amount === "number" && Number.isFinite(amount) && amount > 0 ? `$${Math.round(amount)} ` : "";
+    return `${price}founder bounty available \u2014 run: terminalhire bounties`;
+  }
+  return `${fireIds.length} founder bounties available \u2014 run: terminalhire bounties`;
+}
+function escapeAppleScriptString2(s) {
+  return String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+function displayLocalNotification({
+  title = "Terminalhire",
+  body,
+  platform = process.platform,
+  spawnFn = spawn4
+} = {}) {
+  if (!body || typeof body !== "string") return false;
+  try {
+    if (platform === "darwin") {
+      const t = escapeAppleScriptString2(title);
+      const b = escapeAppleScriptString2(body);
+      const child = spawnFn("osascript", ["-e", `display notification "${b}" with title "${t}"`], {
+        detached: true,
+        stdio: "ignore"
+      });
+      if (child && typeof child.unref === "function") child.unref();
+      return true;
+    }
+    if (platform === "win32") {
+      const safeTitle = String(title).replace(/'/g, "''");
+      const safeBody = String(body).replace(/'/g, "''");
+      const ps = `
+Add-Type -AssemblyName System.Windows.Forms
+$n = New-Object System.Windows.Forms.NotifyIcon
+$n.Icon = [System.Drawing.SystemIcons]::Information
+$n.Visible = $true
+$n.ShowBalloonTip(8000, '${safeTitle}', '${safeBody}', [System.Windows.Forms.ToolTipIcon]::Info)
+Start-Sleep -Seconds 9
+$n.Dispose()
+`.trim();
+      const child = spawnFn("powershell.exe", ["-NoProfile", "-Command", ps], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true
+      });
+      if (child && typeof child.unref === "function") child.unref();
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+function maybeNotifyFounderBounties({
+  index,
+  previous,
+  optedIn,
+  display = displayLocalNotification
+} = {}) {
+  if (!optedIn) {
+    const ids = previous && Array.isArray(previous.ids) ? [...previous.ids].sort() : [];
+    return { state: { ids }, fired: [] };
+  }
+  const next = nextFounderBountyNotifyState(index, previous);
+  if (next.fire.length > 0) {
+    display({
+      title: "Terminalhire",
+      body: formatFounderBountyNotifyBody(index, next.fire)
+    });
+  }
+  return { state: { ids: next.ids }, fired: next.fire };
+}
+var init_founder_bounty_notify = __esm({
+  "bin/founder-bounty-notify.js"() {
+    "use strict";
+    init_founder_paid_badge();
+  }
+});
+
 // bin/approved-claims-sync.js
 var approved_claims_sync_exports = {};
 __export(approved_claims_sync_exports, {
@@ -66589,6 +66744,20 @@ async function run28() {
       founderPaid = computeFounderPaid2(index, (readCacheEntry2() ?? {}).founderPaid);
     } catch {
     }
+    let founderPaidOsNotified;
+    try {
+      if (isFounderBountyNotifyEnabled()) {
+        const { maybeNotifyFounderBounties: maybeNotifyFounderBounties2 } = await Promise.resolve().then(() => (init_founder_bounty_notify(), founder_bounty_notify_exports));
+        const { readCacheEntry: readCacheEntry2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
+        const result = maybeNotifyFounderBounties2({
+          index,
+          previous: (readCacheEntry2() ?? {}).founderPaidOsNotified,
+          optedIn: true
+        });
+        founderPaidOsNotified = result.state;
+      }
+    } catch {
+    }
     let approvedClaims;
     try {
       const { syncApprovedClaims: syncApprovedClaims2 } = await Promise.resolve().then(() => (init_approved_claims_sync(), approved_claims_sync_exports));
@@ -66635,6 +66804,7 @@ async function run28() {
       surfaceLead
     };
     if (founderPaid) cacheEntry.founderPaid = founderPaid;
+    if (founderPaidOsNotified) cacheEntry.founderPaidOsNotified = founderPaidOsNotified;
     if (approvedClaims) cacheEntry.approvedClaims = approvedClaims;
     if (founderNotes) cacheEntry.founderNotes = founderNotes;
     if (founderSurface) cacheEntry.founderSurface = founderSurface;

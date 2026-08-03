@@ -148,6 +148,7 @@ __export(config_exports, {
   getSurfaceMix: () => getSurfaceMix,
   isBetaOptIn: () => isBetaOptIn,
   isContributeEnabled: () => isContributeEnabled,
+  isFounderBountyNotifyEnabled: () => isFounderBountyNotifyEnabled,
   isInboundNudgeMuted: () => isInboundNudgeMuted,
   isPeerConnectEnabled: () => isPeerConnectEnabled,
   parseNudgeMode: () => parseNudgeMode,
@@ -232,6 +233,9 @@ function isContributeEnabled() {
 function isBetaOptIn() {
   return readConfig().betaOptIn === true;
 }
+function isFounderBountyNotifyEnabled() {
+  return readConfig().founderBountyNotify === true;
+}
 var TERMINALHIRE_DIR3, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
@@ -253,7 +257,8 @@ var init_config = __esm({
       lastFullFeedbackAt: null,
       lastPulseAskAt: null,
       pulseDisclosed: false,
-      mix: "balanced"
+      mix: "balanced",
+      founderBountyNotify: false
     };
   }
 });
@@ -13121,6 +13126,113 @@ var init_founder_paid_badge = __esm({
   }
 });
 
+// bin/founder-bounty-notify.js
+var founder_bounty_notify_exports = {};
+__export(founder_bounty_notify_exports, {
+  displayLocalNotification: () => displayLocalNotification,
+  escapeAppleScriptString: () => escapeAppleScriptString,
+  formatFounderBountyNotifyBody: () => formatFounderBountyNotifyBody,
+  maybeNotifyFounderBounties: () => maybeNotifyFounderBounties,
+  nextFounderBountyNotifyState: () => nextFounderBountyNotifyState
+});
+import { spawn } from "child_process";
+function nextFounderBountyNotifyState(index, previous) {
+  const open = openPaidIds(index);
+  const prior = previous && Array.isArray(previous.ids) ? previous.ids : null;
+  if (prior === null) {
+    return { ids: open, fire: [], seeded: true };
+  }
+  const seen = new Set(prior);
+  const fire = open.filter((id) => !seen.has(id));
+  const ids = [.../* @__PURE__ */ new Set([...prior.filter((id) => open.includes(id)), ...fire])].sort();
+  return { ids, fire, seeded: false };
+}
+function formatFounderBountyNotifyBody(index, fireIds) {
+  const jobs = index && index.jobs || [];
+  const byId = /* @__PURE__ */ new Map();
+  for (const j of jobs) {
+    if (j && typeof j.id === "string") byId.set(j.id, j);
+  }
+  if (fireIds.length === 1) {
+    const j = byId.get(fireIds[0]);
+    const amount = j && j.bounty && typeof j.bounty.amountUSD === "number" ? j.bounty.amountUSD : null;
+    const price = typeof amount === "number" && Number.isFinite(amount) && amount > 0 ? `$${Math.round(amount)} ` : "";
+    return `${price}founder bounty available \u2014 run: terminalhire bounties`;
+  }
+  return `${fireIds.length} founder bounties available \u2014 run: terminalhire bounties`;
+}
+function escapeAppleScriptString(s) {
+  return String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+function displayLocalNotification({
+  title = "Terminalhire",
+  body,
+  platform = process.platform,
+  spawnFn = spawn
+} = {}) {
+  if (!body || typeof body !== "string") return false;
+  try {
+    if (platform === "darwin") {
+      const t = escapeAppleScriptString(title);
+      const b = escapeAppleScriptString(body);
+      const child = spawnFn("osascript", ["-e", `display notification "${b}" with title "${t}"`], {
+        detached: true,
+        stdio: "ignore"
+      });
+      if (child && typeof child.unref === "function") child.unref();
+      return true;
+    }
+    if (platform === "win32") {
+      const safeTitle = String(title).replace(/'/g, "''");
+      const safeBody = String(body).replace(/'/g, "''");
+      const ps = `
+Add-Type -AssemblyName System.Windows.Forms
+$n = New-Object System.Windows.Forms.NotifyIcon
+$n.Icon = [System.Drawing.SystemIcons]::Information
+$n.Visible = $true
+$n.ShowBalloonTip(8000, '${safeTitle}', '${safeBody}', [System.Windows.Forms.ToolTipIcon]::Info)
+Start-Sleep -Seconds 9
+$n.Dispose()
+`.trim();
+      const child = spawnFn("powershell.exe", ["-NoProfile", "-Command", ps], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true
+      });
+      if (child && typeof child.unref === "function") child.unref();
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+function maybeNotifyFounderBounties({
+  index,
+  previous,
+  optedIn,
+  display = displayLocalNotification
+} = {}) {
+  if (!optedIn) {
+    const ids = previous && Array.isArray(previous.ids) ? [...previous.ids].sort() : [];
+    return { state: { ids }, fired: [] };
+  }
+  const next = nextFounderBountyNotifyState(index, previous);
+  if (next.fire.length > 0) {
+    display({
+      title: "Terminalhire",
+      body: formatFounderBountyNotifyBody(index, next.fire)
+    });
+  }
+  return { state: { ids: next.ids }, fired: next.fire };
+}
+var init_founder_bounty_notify = __esm({
+  "bin/founder-bounty-notify.js"() {
+    "use strict";
+    init_founder_paid_badge();
+  }
+});
+
 // bin/approved-claims-sync.js
 var approved_claims_sync_exports = {};
 __export(approved_claims_sync_exports, {
@@ -14071,6 +14183,20 @@ async function run() {
       founderPaid = computeFounderPaid2(index, (readCacheEntry2() ?? {}).founderPaid);
     } catch {
     }
+    let founderPaidOsNotified;
+    try {
+      if (isFounderBountyNotifyEnabled()) {
+        const { maybeNotifyFounderBounties: maybeNotifyFounderBounties2 } = await Promise.resolve().then(() => (init_founder_bounty_notify(), founder_bounty_notify_exports));
+        const { readCacheEntry: readCacheEntry2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
+        const result = maybeNotifyFounderBounties2({
+          index,
+          previous: (readCacheEntry2() ?? {}).founderPaidOsNotified,
+          optedIn: true
+        });
+        founderPaidOsNotified = result.state;
+      }
+    } catch {
+    }
     let approvedClaims;
     try {
       const { syncApprovedClaims: syncApprovedClaims2 } = await Promise.resolve().then(() => (init_approved_claims_sync(), approved_claims_sync_exports));
@@ -14117,6 +14243,7 @@ async function run() {
       surfaceLead
     };
     if (founderPaid) cacheEntry.founderPaid = founderPaid;
+    if (founderPaidOsNotified) cacheEntry.founderPaidOsNotified = founderPaidOsNotified;
     if (approvedClaims) cacheEntry.approvedClaims = approvedClaims;
     if (founderNotes) cacheEntry.founderNotes = founderNotes;
     if (founderSurface) cacheEntry.founderSurface = founderSurface;

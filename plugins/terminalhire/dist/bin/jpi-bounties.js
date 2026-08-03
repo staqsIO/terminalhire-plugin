@@ -11546,6 +11546,7 @@ __export(config_exports, {
   getSurfaceMix: () => getSurfaceMix,
   isBetaOptIn: () => isBetaOptIn,
   isContributeEnabled: () => isContributeEnabled,
+  isFounderBountyNotifyEnabled: () => isFounderBountyNotifyEnabled,
   isInboundNudgeMuted: () => isInboundNudgeMuted,
   isPeerConnectEnabled: () => isPeerConnectEnabled,
   parseNudgeMode: () => parseNudgeMode,
@@ -11630,6 +11631,9 @@ function isContributeEnabled() {
 function isBetaOptIn() {
   return readConfig().betaOptIn === true;
 }
+function isFounderBountyNotifyEnabled() {
+  return readConfig().founderBountyNotify === true;
+}
 var TERMINALHIRE_DIR6, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
@@ -11651,7 +11655,8 @@ var init_config = __esm({
       lastFullFeedbackAt: null,
       lastPulseAskAt: null,
       pulseDisclosed: false,
-      mix: "balanced"
+      mix: "balanced",
+      founderBountyNotify: false
     };
   }
 });

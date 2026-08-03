@@ -4911,7 +4911,8 @@ var init_config = __esm({
       lastFullFeedbackAt: null,
       lastPulseAskAt: null,
       pulseDisclosed: false,
-      mix: "balanced"
+      mix: "balanced",
+      founderBountyNotify: false
     };
   }
 });

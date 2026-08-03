@@ -68,7 +68,8 @@ var DEFAULT_CONFIG = {
   lastFullFeedbackAt: null,
   lastPulseAskAt: null,
   pulseDisclosed: false,
-  mix: "balanced"
+  mix: "balanced",
+  founderBountyNotify: false
 };
 function readConfig() {
   try {
@@ -143,12 +144,16 @@ function isContributeEnabled() {
 function isBetaOptIn() {
   return readConfig().betaOptIn === true;
 }
+function isFounderBountyNotifyEnabled() {
+  return readConfig().founderBountyNotify === true;
+}
 export {
   getNudgeMode,
   getSurfaceLeadOverride,
   getSurfaceMix,
   isBetaOptIn,
   isContributeEnabled,
+  isFounderBountyNotifyEnabled,
   isInboundNudgeMuted,
   isPeerConnectEnabled,
   parseNudgeMode,
