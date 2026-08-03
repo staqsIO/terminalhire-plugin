@@ -35118,6 +35118,149 @@ var init_jpi_claim = __esm({
   }
 });
 
+// ../../packages/core/dist/secretScan.js
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function findSecrets(value, options = {}) {
+  const { currentHome = "", fixedOnly = false } = options;
+  const found = [];
+  const scan = (pattern, label, severity, span) => {
+    const re = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
+    let match2;
+    while ((match2 = re.exec(value)) !== null) {
+      if (match2[0].length === 0) {
+        re.lastIndex += 1;
+        continue;
+      }
+      const hit = span(match2);
+      if (hit)
+        found.push({ label, severity, ...hit });
+    }
+  };
+  const whole = (m, replacement) => ({
+    start: m.index,
+    end: m.index + m[0].length,
+    replacement
+  });
+  for (const rule of FIXED_SECRET_RULES) {
+    scan(rule.re, rule.label, "credential", (m) => whole(m, REDACTED));
+  }
+  if (fixedOnly)
+    return found;
+  scan(ASSIGNED_SECRET_RE, "an assigned secret", "credential", (m) => {
+    const secret = m[4] ?? "";
+    if (SECRET_REFERENCE_RE.test(secret))
+      return null;
+    const start = m.index + (m[1] ?? "").length + (m[2] ?? "").length + (m[3] ?? "").length;
+    return { start, end: start + secret.length, replacement: REDACTED };
+  });
+  if (currentHome) {
+    scan(new RegExp(escapeRegExp(currentHome)), "a home-directory path", "path", (m) => whole(m, "~"));
+  }
+  scan(CROSS_PLATFORM_HOME_RE, "a home-directory path", "path", (m) => whole(m, "~"));
+  return found;
+}
+var REDACTED, FIXED_SECRET_RULES, ASSIGNED_SECRET_RE, SECRET_REFERENCE_RE, CROSS_PLATFORM_HOME_RE;
+var init_secretScan = __esm({
+  "../../packages/core/dist/secretScan.js"() {
+    "use strict";
+    REDACTED = "[redacted]";
+    FIXED_SECRET_RULES = [
+      { label: "a GitHub token", re: /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/g },
+      /**
+       * FINE-GRAINED PATS, which the rule above cannot match and which are the format GitHub
+       * now issues by default. `github_pat_…` fails `gh[pousr]_` on its third character, and
+       * `_` is a word character so there is no boundary for the rule to catch it mid-string
+       * either — a fine-grained token scored ZERO findings and went out on the anonymous
+       * index. Codex found it after two other reviewers and I had all read this list.
+       *
+       * The lesson is about the tests, not the regex: every case written for this scanner
+       * used `ghp_`, so a hundred more of them would still have missed it. A rule list is
+       * only as good as the shapes someone thought to try.
+       */
+      { label: "a GitHub token", re: /\bgithub_pat_[A-Za-z0-9_]{30,}\b/g },
+      { label: "an AWS access key", re: /\bAKIA[0-9A-Z]{16}\b/g },
+      /**
+       * THE REST OF THE FORMATS A DEVELOPER ACTUALLY PASTES. Found by sweeping candidate
+       * credentials through `findSecrets` and printing which scored zero, rather than by
+       * reading the list and thinking hard — reading it is what missed `github_pat_`.
+       *
+       * Every one of these is a self-identifying PREFIX, which is the property that makes a
+       * rule safe to add here: it can only match a shape that is already a credential, so it
+       * costs nothing when it is wrong. That is also why the AWS SECRET access key is
+       * deliberately absent — it is forty characters of base64 with no prefix, and a rule for
+       * it would refuse any posting that quoted a hash, a checksum or a build id.
+       */
+      { label: "an Anthropic API key", re: /\bsk-ant-[A-Za-z0-9-]{20,}\b/g },
+      /**
+       * NO HYPHEN IN THE BODY, and that restriction is the whole rule. The first cut allowed
+       * `[A-Za-z0-9_-]{20,}` and refused `sk-payments-worker-staging`, `sk-checkout-service-eu-west-1`
+       * and the branch name `sk-fix-the-retry-loop-again` — kebab-case is how services and
+       * branches are named, and `sk-` is an ordinary prefix for one. Four out of four
+       * realistic strings I tried were refused as OpenAI keys.
+       *
+       * A real key carries a long unbroken run of base64 characters; a kebab name never does,
+       * because it has a hyphen every few characters. Requiring twenty consecutive non-hyphen
+       * characters separates them cleanly and costs nothing on the token side.
+       *
+       * This is the rule that would have taught founders to switch the scanner off, and I
+       * only found it because I went looking for false positives as hard as I had gone
+       * looking for misses. The seven prose cases I wrote first all passed.
+       */
+      { label: "an OpenAI API key", re: /\bsk-(?:proj-)?[A-Za-z0-9_]{20,}\b/g },
+      {
+        label: "a Slack token",
+        // `xoxe` (refresh) and `xapp` (app-level) are documented families the first cut did
+        // not know, so both produced zero findings. Same lesson as `github_pat_`: a prefix
+        // list is a guess about a vendor's naming until someone checks the vendor's docs.
+        re: /\b(?:xox[baprse]-|xapp-)[A-Za-z0-9-]{10,}\b/g
+      },
+      { label: "a Google API key", re: /\bAIza[A-Za-z0-9_-]{35}\b/g },
+      { label: "an npm token", re: /\bnpm_[A-Za-z0-9]{36}\b/g },
+      /**
+       * A JWT is not always a secret — plenty are short-lived and harmless. It is here anyway
+       * because the ones people paste into bug reports are session and access tokens, and the
+       * three-segment `eyJ…` shape is specific enough that a false match is nearly impossible.
+       */
+      { label: "a JSON web token", re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g },
+      /**
+       * A password inline in a connection string. Anchored on the SCHEME so it cannot fire on
+       * ordinary prose containing an `@`, and it takes the whole credential pair rather than
+       * just the password — publishing the username alongside the host is most of the harm.
+       */
+      {
+        label: "a database password",
+        re: /\b(?:postgres|postgresql|mysql|mongodb(?:\+srv)?|redis|amqp):\/\/[^\s:/@]+:[^\s:/@]{6,}@/g
+      },
+      { label: "a Stripe secret key", re: /\bsk_(?:live|test)_[A-Za-z0-9]{12,}\b/g },
+      {
+        label: "a private key",
+        re: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g
+      }
+    ];
+    ASSIGNED_SECRET_RE = /\b(password|passwd|secret|token|api[_-]?key)(\s*[:=]\s*)(["'`]?)([^\s"'`]{12,})\3/gi;
+    SECRET_REFERENCE_RE = new RegExp([
+      "^process\\.env\\.[A-Za-z_$][\\w$]*$",
+      "^process\\.env\\[[\"'`][^\"'`]*[\"'`]\\]$",
+      "^import\\.meta\\.env\\.[A-Za-z_$][\\w$]*$",
+      "^Deno\\.env\\.get\\([\"'`][^\"'`]*[\"'`]\\)$",
+      "^os\\.environ(?:\\.get\\(|\\[)[\"'`]?[A-Za-z_]\\w*[\"'`]?[\\])]$",
+      "^ENV\\[[\"'`]?[A-Za-z_]\\w*[\"'`]?\\]$",
+      "^\\$\\{?[A-Za-z_]\\w*\\}?$",
+      // $VAR, ${VAR}
+      "^[A-Za-z_$][\\w$.]*\\(\\s*\\)$",
+      // crypto.randomUUID()
+      // A call WITH arguments, but only when no argument is long enough to be a
+      // credential — `getSecret(actualHardcodedSecret123456)` is not a reference, it is
+      // a secret wearing a function's clothes.
+      "^[A-Za-z_$][\\w$.]*\\((?![^)]{12,})[\\w$.,\\s]*\\)$",
+      "^(?:null|undefined|true|false)$"
+    ].join("|"), "i");
+    CROSS_PLATFORM_HOME_RE = /(?:\/(?:Users|home)\/[^/\s]+|[A-Za-z]:\\Users\\[^\\\s]+)/g;
+  }
+});
+
 // src/posting-drafts.ts
 import {
   chmodSync as chmodSync2,
@@ -35248,9 +35391,6 @@ function toSubmittedPosting(draft) {
     ...draft.repo ? { repo: draft.repo } : {}
   };
 }
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 function assemblePieces(draft) {
   const parts = [];
   if (draft.title) {
@@ -35286,35 +35426,7 @@ function assemblePieces(draft) {
   return { scanned, pieces };
 }
 function detections(value, currentHome, fixedOnly = false) {
-  const found = [];
-  const scan = (pattern, label, span) => {
-    const re = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
-    let match2;
-    while ((match2 = re.exec(value)) !== null) {
-      if (match2[0].length === 0) {
-        re.lastIndex += 1;
-        continue;
-      }
-      const hit = span(match2);
-      if (hit) found.push({ label, ...hit });
-    }
-  };
-  const whole = (m, replacement) => ({
-    start: m.index,
-    end: m.index + m[0].length,
-    replacement
-  });
-  for (const rule of FIXED_SECRET_RULES) scan(rule.re, rule.label, (m) => whole(m, REDACTED));
-  if (fixedOnly) return found;
-  scan(ASSIGNED_SECRET_RE, "an assigned secret", (m) => {
-    const secret = m[4] ?? "";
-    if (SECRET_REFERENCE_RE.test(secret)) return null;
-    const start = m.index + (m[1] ?? "").length + (m[2] ?? "").length + (m[3] ?? "").length;
-    return { start, end: start + secret.length, replacement: REDACTED };
-  });
-  if (currentHome) scan(new RegExp(escapeRegExp(currentHome)), "a home-directory path", (m) => whole(m, "~"));
-  scan(CROSS_PLATFORM_HOME_RE, "a home-directory path", (m) => whole(m, "~"));
-  return found;
+  return findSecrets(value, { currentHome, fixedOnly });
 }
 function boundaryDetections(scanned, pieces, currentHome, already) {
   let tight = "";
@@ -35454,45 +35566,14 @@ function preparePostingSubmission(draft, currentHome = homedir23()) {
     notices: draft.captureFailures.map((failure) => `could not capture ${failure}`)
   };
 }
-var REDACTED, EMPTY_AFTER_REDACTION_RE, FIXED_SECRET_RULES, ASSIGNED_SECRET_RE, SECRET_REFERENCE_RE, SECRET_PATH_RE, CROSS_PLATFORM_HOME_RE;
+var EMPTY_AFTER_REDACTION_RE, SECRET_PATH_RE;
 var init_posting_drafts = __esm({
   "src/posting-drafts.ts"() {
     "use strict";
     init_state_dir();
-    REDACTED = "[redacted]";
+    init_secretScan();
     EMPTY_AFTER_REDACTION_RE = /(?:\b(?:password|passwd|secret|token|api[_-]?key)\s*[:=]\s*|\[redacted\]|["'`~]|\s)+/g;
-    FIXED_SECRET_RULES = [
-      { label: "a GitHub token", re: /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/g },
-      { label: "an AWS access key", re: /\bAKIA[0-9A-Z]{16}\b/g },
-      { label: "a Stripe secret key", re: /\bsk_(?:live|test)_[A-Za-z0-9]{12,}\b/g },
-      {
-        label: "a private key",
-        re: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g
-      }
-    ];
-    ASSIGNED_SECRET_RE = /\b(password|passwd|secret|token|api[_-]?key)(\s*[:=]\s*)(["'`]?)([^\s"'`]{12,})\3/gi;
-    SECRET_REFERENCE_RE = new RegExp(
-      [
-        "^process\\.env\\.[A-Za-z_$][\\w$]*$",
-        "^process\\.env\\[[\"'`][^\"'`]*[\"'`]\\]$",
-        "^import\\.meta\\.env\\.[A-Za-z_$][\\w$]*$",
-        "^Deno\\.env\\.get\\([\"'`][^\"'`]*[\"'`]\\)$",
-        "^os\\.environ(?:\\.get\\(|\\[)[\"'`]?[A-Za-z_]\\w*[\"'`]?[\\])]$",
-        "^ENV\\[[\"'`]?[A-Za-z_]\\w*[\"'`]?\\]$",
-        "^\\$\\{?[A-Za-z_]\\w*\\}?$",
-        // $VAR, ${VAR}
-        "^[A-Za-z_$][\\w$.]*\\(\\s*\\)$",
-        // crypto.randomUUID()
-        // A call WITH arguments, but only when no argument is long enough to be a
-        // credential — `getSecret(actualHardcodedSecret123456)` is not a reference, it is
-        // a secret wearing a function's clothes.
-        "^[A-Za-z_$][\\w$.]*\\((?![^)]{12,})[\\w$.,\\s]*\\)$",
-        "^(?:null|undefined|true|false)$"
-      ].join("|"),
-      "i"
-    );
     SECRET_PATH_RE = /(?:^|[/\\])(?:\.env(?:\.[^/\\]+)?|id_(?:rsa|ed25519)|credentials(?:\.json)?|secrets?)(?:$|[/\\])/i;
-    CROSS_PLATFORM_HOME_RE = /(?:\/(?:Users|home)\/[^/\s]+|[A-Za-z]:\\Users\\[^\\\s]+)/g;
   }
 });
 
