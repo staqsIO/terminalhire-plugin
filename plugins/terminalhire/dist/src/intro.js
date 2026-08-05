@@ -1625,6 +1625,7 @@ __export(profile_exports, {
   accumulateTags: () => accumulateTags,
   addSavedJob: () => addSavedJob,
   deleteProfile: () => deleteProfile,
+  isBlankProfile: () => isBlankProfile,
   listSavedJobs: () => listSavedJobs,
   profileToFingerprint: () => profileToFingerprint,
   readProfile: () => readProfile,
@@ -1664,6 +1665,17 @@ function migrateTagWeights(profile) {
       profile.tagWeights[tag] = { count: 1, firstSeen: seed, lastSeen: seed, sessions: 1 };
     }
   }
+}
+function isBlankProfile(profile) {
+  if (profile.skillTags.length > 0) return false;
+  if (Object.keys(profile.tagWeights).length > 0) return false;
+  for (const [key, value] of Object.entries(profile)) {
+    if (DERIVED_KEYS.has(key)) continue;
+    if (value === void 0 || value === null) continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    return false;
+  }
+  return true;
 }
 async function readProfile() {
   const parsed = await profileStore.read();
@@ -1749,7 +1761,7 @@ function profileToFingerprint(profile) {
     }
   };
 }
-var TERMINALHIRE_DIR2, PROFILE_FILE, profileStore, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var TERMINALHIRE_DIR2, PROFILE_FILE, profileStore, DERIVED_KEYS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
 var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
@@ -1761,6 +1773,13 @@ var init_profile = __esm({
       blank: blankProfile,
       keyPolicy: "keytar-first-file-fallback"
     });
+    DERIVED_KEYS = /* @__PURE__ */ new Set([
+      "version",
+      "updatedAt",
+      "skillTags",
+      "tagWeights",
+      "hasEmployerSessions"
+    ]);
     LANGUAGE_TAGS = /* @__PURE__ */ new Set([
       "typescript",
       "javascript",
@@ -1881,6 +1900,7 @@ function defaultIntroDeps() {
         });
       });
     },
+    isTTY: () => Boolean(process.stdin.isTTY),
     fetchImpl: (...args) => globalThis.fetch(...args),
     openBrowser: (url) => {
       void Promise.resolve().then(() => (init_open_url(), open_url_exports)).then((m) => m.openInBrowser(url)).catch(() => {
@@ -1919,7 +1939,9 @@ async function runIntroRequest(args, overrides) {
   const deps = { ...defaultIntroDeps(), ...overrides };
   const targetLogin = args.targetLogin?.trim().replace(/^@/, "");
   if (!targetLogin) {
-    deps.errorLog('\n  Usage: terminalhire intro <github-login> [--note "..."] [--contact <email>] [--name "..."]\n');
+    deps.errorLog(
+      '\n  Usage: terminalhire intro <github-login> [--note "..."] [--contact <email>] [--name "..."]\n'
+    );
     deps.exit(1);
     return;
   }
@@ -1946,7 +1968,16 @@ async function runIntroRequest(args, overrides) {
     note: args.note
   });
   renderConsentCard(payload, deps);
-  const answer = await deps.prompt('  Type "yes" to send this intro request (anything else cancels): ');
+  if (!deps.isTTY()) {
+    deps.errorLog(
+      "\n  stdin is not interactive \u2014 re-run `terminalhire intro` in a real terminal to confirm.\n"
+    );
+    deps.exit(1);
+    return;
+  }
+  const answer = await deps.prompt(
+    '  Type "yes" to send this intro request (anything else cancels): '
+  );
   if (answer !== "yes") {
     deps.log("\n  Cancelled \u2014 nothing was sent.\n");
     deps.exit(0);
@@ -2014,9 +2045,13 @@ async function runIntroRequest(args, overrides) {
   } catch {
   }
   if (deduped) {
-    deps.log(`
-  You already have a pending intro request to @${targetLogin} \u2014 nothing new was sent.`);
-    deps.log("  They can accept it any time from `terminalhire intro --list` or their dashboard.\n");
+    deps.log(
+      `
+  You already have a pending intro request to @${targetLogin} \u2014 nothing new was sent.`
+    );
+    deps.log(
+      "  They can accept it any time from `terminalhire intro --list` or their dashboard.\n"
+    );
   } else if (notified) {
     deps.log(`
   Intro request sent to @${targetLogin}. They will see only your public login`);
@@ -2062,9 +2097,11 @@ async function runIntroDecision(args, overrides) {
     try {
       intros = await fetchIntros(deps, cookie);
     } catch (err) {
-      deps.errorLog(`
+      deps.errorLog(
+        `
   Could not look up the request: ${err instanceof Error ? err.message : String(err)}
-`);
+`
+      );
       deps.exit(1);
       return;
     }
@@ -2079,8 +2116,10 @@ async function runIntroDecision(args, overrides) {
       return;
     }
     if (matches.length > 1) {
-      deps.errorLog(`
-  ${matches.length} pending requests from @${handle} \u2014 ${args.action === "accept" ? "accepting" : "declining"} one (the rest are redundant duplicates).`);
+      deps.errorLog(
+        `
+  ${matches.length} pending requests from @${handle} \u2014 ${args.action === "accept" ? "accepting" : "declining"} one (the rest are redundant duplicates).`
+      );
     }
     id = matches[0].id;
   }
@@ -2102,7 +2141,16 @@ async function runIntroDecision(args, overrides) {
     }
     deps.log("  Nothing else is shared. Declining shares nothing.");
     deps.log("");
-    const answer = await deps.prompt('  Type "yes" to accept and share your contact (anything else cancels): ');
+    if (!deps.isTTY()) {
+      deps.errorLog(
+        "\n  stdin is not interactive \u2014 re-run `terminalhire intro --accept` in a real terminal to confirm.\n"
+      );
+      deps.exit(1);
+      return;
+    }
+    const answer = await deps.prompt(
+      '  Type "yes" to accept and share your contact (anything else cancels): '
+    );
     if (answer !== "yes") {
       deps.log("\n  Cancelled \u2014 nothing was sent.\n");
       deps.exit(0);
@@ -2199,7 +2247,9 @@ async function runIntroList(overrides) {
   switch (result.status) {
     case "no-session":
       deps.log("\n  No linked web session found on this machine.");
-      deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
+      deps.log(
+        "  Run `terminalhire link` to connect this terminal to your account, then re-run.\n"
+      );
       deps.exit(0);
       return;
     case "expired":

@@ -1082,6 +1082,24 @@ function migrateTagWeights(profile) {
     }
   }
 }
+var DERIVED_KEYS = /* @__PURE__ */ new Set([
+  "version",
+  "updatedAt",
+  "skillTags",
+  "tagWeights",
+  "hasEmployerSessions"
+]);
+function isBlankProfile(profile) {
+  if (profile.skillTags.length > 0) return false;
+  if (Object.keys(profile.tagWeights).length > 0) return false;
+  for (const [key, value] of Object.entries(profile)) {
+    if (DERIVED_KEYS.has(key)) continue;
+    if (value === void 0 || value === null) continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    return false;
+  }
+  return true;
+}
 async function readProfile() {
   const parsed = await profileStore.read();
   migrateTagWeights(parsed);
@@ -1192,6 +1210,7 @@ export {
   accumulateTags,
   addSavedJob,
   deleteProfile,
+  isBlankProfile,
   listSavedJobs,
   profileToFingerprint,
   readProfile,

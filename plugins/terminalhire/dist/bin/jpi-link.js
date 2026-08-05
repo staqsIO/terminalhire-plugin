@@ -412,7 +412,8 @@ var init_link = __esm({
 var cache_store_exports = {};
 __export(cache_store_exports, {
   readCacheEntry: () => readCacheEntry,
-  updateIndexCache: () => updateIndexCache
+  updateIndexCache: () => updateIndexCache,
+  writeIndexCache: () => writeIndexCache
 });
 import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, renameSync } from "fs";
 import { join as join3 } from "path";
@@ -437,6 +438,9 @@ function updateIndexCache(patch) {
   writeFileSync3(tmp, JSON.stringify(entry), "utf8");
   renameSync(tmp, INDEX_CACHE_FILE);
   return entry;
+}
+function writeIndexCache(index) {
+  return updateIndexCache({ index, indexETag: "" });
 }
 var TERMINALHIRE_DIR2, INDEX_CACHE_FILE, SCHEMA_VERSION, tmpCounter;
 var init_cache_store = __esm({

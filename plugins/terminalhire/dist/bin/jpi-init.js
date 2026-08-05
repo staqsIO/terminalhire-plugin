@@ -10833,7 +10833,7 @@ async function run() {
   console.log("");
   console.log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
   console.log("\u2502           terminalhire init \u2014 one-command onboarding            \u2502");
-  console.log("\u2502       Local-first job matching for developers in Claude Code     \u2502");
+  console.log("\u2502      Developer jobs and paid bounties in Claude Code            \u2502");
   console.log("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518");
   console.log("");
   console.log("This will:");
@@ -10845,7 +10845,7 @@ async function run() {
   console.log("     (with backup + your explicit consent before any file is touched)");
   console.log("  5. Optionally show connection notifications in your statusLine");
   console.log("     (\u{1F4AC} unread + intro requests only \u2014 never job ads; separate consent)");
-  console.log("  6. Optionally register terminalhire as a local-first MCP server for your");
+  console.log("  6. Optionally register terminalhire as an MCP server for your");
   console.log("     editor / CLI (VS Code, Cursor, Codex, Gemini, Claude Code; per-host consent)");
   console.log("  7. Optionally register th:// claim links to open in this terminal");
   console.log("");
@@ -10980,7 +10980,7 @@ async function run() {
     console.log("  statusLine setup did not complete. Run manually: node statusline-install.js");
   }
   console.log("");
-  console.log("Step 6/7 \u2014 Register terminalhire as a local-first MCP server (optional)");
+  console.log("Step 6/7 \u2014 Register terminalhire as an MCP server (optional)");
   console.log("");
   console.log("  Exposes your LOCAL matches (jobs, bounties, contribute, inbox counts) to");
   console.log("  a host LLM \u2014 VS Code, Cursor, Codex, Gemini, Claude Code. Read-only, zero");

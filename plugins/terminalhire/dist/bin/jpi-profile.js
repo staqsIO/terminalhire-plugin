@@ -1615,6 +1615,7 @@ __export(profile_exports, {
   accumulateTags: () => accumulateTags,
   addSavedJob: () => addSavedJob,
   deleteProfile: () => deleteProfile,
+  isBlankProfile: () => isBlankProfile,
   listSavedJobs: () => listSavedJobs,
   profileToFingerprint: () => profileToFingerprint,
   readProfile: () => readProfile,
@@ -1654,6 +1655,17 @@ function migrateTagWeights(profile) {
       profile.tagWeights[tag] = { count: 1, firstSeen: seed, lastSeen: seed, sessions: 1 };
     }
   }
+}
+function isBlankProfile(profile) {
+  if (profile.skillTags.length > 0) return false;
+  if (Object.keys(profile.tagWeights).length > 0) return false;
+  for (const [key, value] of Object.entries(profile)) {
+    if (DERIVED_KEYS.has(key)) continue;
+    if (value === void 0 || value === null) continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    return false;
+  }
+  return true;
 }
 async function readProfile() {
   const parsed = await profileStore.read();
@@ -1739,7 +1751,7 @@ function profileToFingerprint(profile) {
     }
   };
 }
-var TERMINALHIRE_DIR2, PROFILE_FILE, profileStore, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var TERMINALHIRE_DIR2, PROFILE_FILE, profileStore, DERIVED_KEYS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
 var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
@@ -1751,6 +1763,13 @@ var init_profile = __esm({
       blank: blankProfile,
       keyPolicy: "keytar-first-file-fallback"
     });
+    DERIVED_KEYS = /* @__PURE__ */ new Set([
+      "version",
+      "updatedAt",
+      "skillTags",
+      "tagWeights",
+      "hasEmployerSessions"
+    ]);
     LANGUAGE_TAGS = /* @__PURE__ */ new Set([
       "typescript",
       "javascript",
@@ -1786,17 +1805,35 @@ function prompt(question) {
   });
 }
 async function run() {
-  const { readProfile: readProfile2, writeProfile: writeProfile2, deleteProfile: deleteProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+  const { readProfile: readProfile2, writeProfile: writeProfile2, deleteProfile: deleteProfile2, isBlankProfile: isBlankProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
   const args = process.argv.slice(2);
   if (args.includes("--show")) {
     const profile = await readProfile2();
-    console.log("\n\u2726 terminalhire local profile (encrypted at rest \u2014 shown here for your review only)\n");
-    console.log("  Skill tags:      " + (profile.skillTags.length > 0 ? profile.skillTags.join(", ") : "(none yet)"));
+    if (isBlankProfile2(profile)) {
+      console.log("\n\u2726 No local profile yet.\n");
+      console.log("  Next step: connect GitHub so skill tags and languages fill in:");
+      console.log("    terminalhire login");
+      console.log("");
+      console.log("  Or set a display name / contact by hand:");
+      console.log("    terminalhire profile --edit");
+      console.log("");
+      console.log("  First-time setup walkthrough:");
+      console.log("    terminalhire init");
+      console.log("");
+      return;
+    }
+    console.log(
+      "\n\u2726 terminalhire local profile (encrypted at rest \u2014 shown here for your review only)\n"
+    );
+    console.log(
+      "  Skill tags:      " + (profile.skillTags.length > 0 ? profile.skillTags.join(", ") : "(none yet)")
+    );
     console.log("  Seniority:       " + (profile.seniority ?? "(not set)"));
     if (profile.displayName) console.log("  Display name:    " + profile.displayName);
     if (profile.contactEmail) console.log("  Contact email:   " + profile.contactEmail);
     if (profile.remoteOnly !== void 0) console.log("  Remote only:     " + profile.remoteOnly);
-    if (profile.compFloorUsd !== void 0) console.log("  Comp floor USD:  $" + profile.compFloorUsd);
+    if (profile.compFloorUsd !== void 0)
+      console.log("  Comp floor USD:  $" + profile.compFloorUsd);
     console.log("  Employer sessions contributed: " + profile.hasEmployerSessions);
     if (profile.github) {
       console.log("");
@@ -1819,7 +1856,9 @@ async function run() {
     return;
   }
   if (args.includes("--delete")) {
-    console.log("\nThis will permanently delete your local terminalhire profile and encryption key.");
+    console.log(
+      "\nThis will permanently delete your local terminalhire profile and encryption key."
+    );
     const answer = await prompt('Type "yes" to confirm: ');
     if (answer !== "yes") {
       console.log("Aborted.");

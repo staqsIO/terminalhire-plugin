@@ -114,7 +114,8 @@ var init_founder_paid_badge = __esm({
 var cache_store_exports = {};
 __export(cache_store_exports, {
   readCacheEntry: () => readCacheEntry,
-  updateIndexCache: () => updateIndexCache
+  updateIndexCache: () => updateIndexCache,
+  writeIndexCache: () => writeIndexCache
 });
 import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, renameSync } from "fs";
 import { join as join2 } from "path";
@@ -139,6 +140,9 @@ function updateIndexCache(patch) {
   writeFileSync2(tmp, JSON.stringify(entry), "utf8");
   renameSync(tmp, INDEX_CACHE_FILE);
   return entry;
+}
+function writeIndexCache(index) {
+  return updateIndexCache({ index, indexETag: "" });
 }
 var TERMINALHIRE_DIR2, INDEX_CACHE_FILE, SCHEMA_VERSION, tmpCounter;
 var init_cache_store = __esm({

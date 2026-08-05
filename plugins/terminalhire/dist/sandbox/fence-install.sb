@@ -1,0 +1,129 @@
+;; fence-install.sb — seatbelt for the ONE networked step: dependency install.
+;;
+;; Identical to fence-offline.sb except that loopback to a single ephemeral port
+;; is permitted, so the child can reach the trusted parent's allowlist CONNECT
+;; proxy (egressProxy.ts) and nothing else. The proxy — not this profile — does
+;; host allowlisting, because SBPL filtering is IP/port based and hostname
+;; filtering here is unreliable.
+;;
+;; Kept as a SEPARATE FILE rather than a parameterized variant of the offline
+;; profile. SBPL has no conditionals, so the alternative is passing a dummy
+;; PROXYADDR on offline runs — and a profile whose network posture depends on
+;; whether a parameter happened to be set correctly is one typo away from
+;; granting egress to a test suite. Two files, each auditable by reading it.
+;;
+;; DNS stays denied here too. The child resolves nothing: it speaks HTTP CONNECT
+;; to 127.0.0.1 and the trusted parent proxy does upstream resolution.
+;;
+;; Params: CLONE, JAIL, TMP as in fence-offline.sb, plus
+;;   PROXYADDR  "localhost:<port>" — the proxy's ephemeral port, scoped to the
+;;              EXACT port rather than localhost:*, so the child cannot pivot to
+;;              some other outbound-capable service listening on loopback.
+;;              (A numeric "127.0.0.1:*" is a hard SBPL syntax error; the host
+;;              part must be * or localhost.)
+
+(version 1)
+
+(import "bsd.sb")
+(deny default)
+
+(allow process-fork)
+(allow process-exec*)
+;; SCOPED to the sandbox (TERM-188). A bare `(allow signal)` let a fenced child
+;; SIGKILL any process owned by the same user — measured, not theorised: the
+;; probe killed a live process outside the jail and the validator watched it
+;; die. A hostile install script could stop the developer's editor, corrupt a
+;; running build, or take down security tooling, none of which needs a file or
+;; a socket. `same-sandbox` keeps what the fence actually needs — a toolchain
+;; signalling its own children, all of which inherit this sandbox — and the
+;; host-side reaper is unaffected, because it signals INTO the sandbox from
+;; outside and is not bound by this profile.
+(allow signal (target same-sandbox))
+(allow sysctl-read)
+(allow ipc-posix-shm)
+
+;; `(allow system-socket)` and `(allow iokit-open)` removed 2026-07-21 — see the
+;; measured rationale in fence-offline.sb. Both profiles must stay identical on
+;; this point; the ONLY intended difference between them is the network stanza
+;; below.
+
+(allow mach-lookup)
+
+(deny mach-lookup
+  (global-name "com.apple.securityd")
+  (global-name "com.apple.SecurityServer")
+  (global-name "com.apple.security.agent")
+  (global-name "com.apple.SecurityAgent"))
+
+(deny mach-lookup
+  (global-name "com.apple.mDNSResponder")
+  (global-name "com.apple.dnssd")
+  (global-name "com.apple.mDNSResponder.dnsproxy"))
+
+;; Out-of-process network + process launch. This matters MORE here than in the
+;; offline profile, not less: this is the one step with a wire, and a reachable
+;; nsurlsessiond would load URLs in its own process — bypassing the allowlist
+;; proxy that is the only thing deciding which hosts this step may reach.
+(deny mach-lookup
+  (global-name "com.apple.nsurlsessiond")
+  (global-name "com.apple.nsurlsessiond.NSURLSessionProxy")
+  (global-name "com.apple.lsd.mapdb")
+  (global-name "com.apple.lsd.modifydb")
+  (global-name "com.apple.coreservices.launchservicesd")
+  (global-name "com.apple.CoreSimulator.CoreSimulatorService"))
+
+;; --- network: loopback to the proxy port, and nothing else ------------------
+;; No (allow network-outbound) beyond this one remote, and no AF_UNIX grant: a
+;; broad unix-socket grant would let an injected child reach arbitrary local
+;; daemons — an IPC/exfil surface the proxy cannot see — and would also reopen
+;; the AF_UNIX path to the DNS resolver that the mach deny above closes.
+(allow network-outbound
+  (remote ip (param "PROXYADDR")))
+
+;; REMOVED 2026-07-21 (TERM-65): (allow network-bind (local ip "localhost:*"))
+;;
+;; It was reported as a rule that never matched. Probing it with a C program
+;; that separates the syscalls showed something more precise: bind() actually
+;; SUCCEEDED under it, and listen() was refused — because listening is gated by
+;; `network-inbound`, which this profile never grants. A Node `server.listen()`
+;; performs both and surfaces one EPERM, which is why it read as "bind is always
+;; denied" from the outside.
+;;
+;; So the rule was not dead, it was USELESS: it granted half of a capability
+;; that cannot be completed. Deleted rather than completed, because nothing in
+;; the pipeline binds anything — the egress proxy listens in the PARENT, outside
+;; the sandbox, and the child only makes an outbound CONNECT to it. Removing it
+;; makes the install profile match the offline profile (bind now EPERM) and
+;; makes the file describe what actually happens, which is the whole reason
+;; these profiles are auditable by reading them.
+
+(allow file-read-metadata)
+
+(allow file-read*
+  (subpath "/usr")
+  (subpath "/bin")
+  (subpath "/sbin")
+  (subpath "/System")
+  (subpath "/Library")
+  (subpath "/private/etc")
+  (subpath "/private/var/db")
+  (subpath "/private/var/select")
+  (subpath "/opt/homebrew")
+  (subpath "/Applications/Xcode.app")
+  (literal "/dev/null")
+  (literal "/dev/zero")
+  (literal "/dev/random")
+  (literal "/dev/urandom")
+  (subpath "/dev/fd")
+  (literal "/dev/tty")
+  (literal "/dev/dtracehelper")
+  (literal "/private/tmp")
+  (literal "/tmp"))
+
+(allow file-write-data
+  (literal "/dev/null")
+  (literal "/dev/tty"))
+
+(allow file* (subpath (param "CLONE")))
+(allow file* (subpath (param "JAIL")))
+(allow file* (subpath (param "TMP")))

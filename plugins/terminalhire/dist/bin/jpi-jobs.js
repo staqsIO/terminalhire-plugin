@@ -10540,7 +10540,8 @@ var init_state_dir = __esm({
 var cache_store_exports = {};
 __export(cache_store_exports, {
   readCacheEntry: () => readCacheEntry,
-  updateIndexCache: () => updateIndexCache
+  updateIndexCache: () => updateIndexCache,
+  writeIndexCache: () => writeIndexCache
 });
 import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, renameSync as renameSync2 } from "fs";
 import { join as join3 } from "path";
@@ -10565,6 +10566,9 @@ function updateIndexCache(patch) {
   writeFileSync2(tmp, JSON.stringify(entry), "utf8");
   renameSync2(tmp, INDEX_CACHE_FILE);
   return entry;
+}
+function writeIndexCache(index) {
+  return updateIndexCache({ index, indexETag: "" });
 }
 var TERMINALHIRE_DIR2, INDEX_CACHE_FILE, SCHEMA_VERSION2, tmpCounter;
 var init_cache_store = __esm({
@@ -11765,6 +11769,7 @@ __export(profile_exports, {
   accumulateTags: () => accumulateTags,
   addSavedJob: () => addSavedJob,
   deleteProfile: () => deleteProfile,
+  isBlankProfile: () => isBlankProfile,
   listSavedJobs: () => listSavedJobs,
   profileToFingerprint: () => profileToFingerprint,
   readProfile: () => readProfile,
@@ -11804,6 +11809,17 @@ function migrateTagWeights(profile) {
       profile.tagWeights[tag] = { count: 1, firstSeen: seed, lastSeen: seed, sessions: 1 };
     }
   }
+}
+function isBlankProfile(profile) {
+  if (profile.skillTags.length > 0) return false;
+  if (Object.keys(profile.tagWeights).length > 0) return false;
+  for (const [key, value] of Object.entries(profile)) {
+    if (DERIVED_KEYS.has(key)) continue;
+    if (value === void 0 || value === null) continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    return false;
+  }
+  return true;
 }
 async function readProfile() {
   const parsed = await profileStore.read();
@@ -11889,7 +11905,7 @@ function profileToFingerprint(profile) {
     }
   };
 }
-var TERMINALHIRE_DIR4, PROFILE_FILE, profileStore, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var TERMINALHIRE_DIR4, PROFILE_FILE, profileStore, DERIVED_KEYS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
 var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
@@ -11901,6 +11917,13 @@ var init_profile = __esm({
       blank: blankProfile,
       keyPolicy: "keytar-first-file-fallback"
     });
+    DERIVED_KEYS = /* @__PURE__ */ new Set([
+      "version",
+      "updatedAt",
+      "skillTags",
+      "tagWeights",
+      "hasEmployerSessions"
+    ]);
     LANGUAGE_TAGS = /* @__PURE__ */ new Set([
       "typescript",
       "javascript",
@@ -12460,9 +12483,6 @@ function readIndexCache() {
     return null;
   }
 }
-function writeIndexCache(index) {
-  updateIndexCache({ index, indexETag: "" });
-}
 async function fetchIndex() {
   const cached = readIndexCache();
   if (cached) return cached;
@@ -12670,7 +12690,9 @@ async function run() {
           const rows = founderRows2(surface, "jobs");
           console.log("\n\u2726 Your open TerminalHire postings\n");
           if (!rows.length) {
-            console.log("  No current posting data. Run `terminalhire refresh`, or lead with roles:");
+            console.log(
+              "  No current posting data. Run `terminalhire refresh`, or lead with roles:"
+            );
             console.log("  terminalhire config set lead dev\n");
           } else {
             rows.forEach((row, index) => {

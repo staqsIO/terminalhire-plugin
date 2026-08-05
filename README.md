@@ -1,8 +1,8 @@
 # terminalhire — Claude Code plugin
 
-Public distribution of the **terminalhire** Claude Code plugin: local-first job
-matching for developers, surfaced in the Claude Code spinner while you work.
-Your profile never leaves your machine.
+Public distribution of the **terminalhire** Claude Code plugin: developer jobs
+and paid bounties, surfaced in the Claude Code spinner while you work. Claim a
+scoped bounty and get paid when the poster accepts it.
 
 > This repository is a **distribution mirror** — it contains only the published
 > plugin bundle and marketplace manifest. It is generated from source on each
@@ -25,4 +25,4 @@ Then run `terminalhire init` (one consent + GitHub sign-in step).
 
 Learn more: https://terminalhire.com · Privacy: https://terminalhire.com/privacy
 
-_Current version: v0.42.6_
+_Current version: v0.42.7_

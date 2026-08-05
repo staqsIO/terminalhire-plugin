@@ -77,7 +77,11 @@ function updateIndexCache(patch) {
   renameSync(tmp, INDEX_CACHE_FILE);
   return entry;
 }
+function writeIndexCache(index) {
+  return updateIndexCache({ index, indexETag: "" });
+}
 export {
   readCacheEntry,
-  updateIndexCache
+  updateIndexCache,
+  writeIndexCache
 };

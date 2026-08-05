@@ -115,7 +115,8 @@ var init_state_dir = __esm({
 var cache_store_exports = {};
 __export(cache_store_exports, {
   readCacheEntry: () => readCacheEntry,
-  updateIndexCache: () => updateIndexCache
+  updateIndexCache: () => updateIndexCache,
+  writeIndexCache: () => writeIndexCache
 });
 import { readFileSync, writeFileSync, renameSync } from "fs";
 import { join } from "path";
@@ -140,6 +141,9 @@ function updateIndexCache(patch) {
   writeFileSync(tmp, JSON.stringify(entry), "utf8");
   renameSync(tmp, INDEX_CACHE_FILE);
   return entry;
+}
+function writeIndexCache(index) {
+  return updateIndexCache({ index, indexETag: "" });
 }
 var TERMINALHIRE_DIR, INDEX_CACHE_FILE, SCHEMA_VERSION, tmpCounter;
 var init_cache_store = __esm({
@@ -25633,6 +25637,7 @@ __export(profile_exports, {
   accumulateTags: () => accumulateTags,
   addSavedJob: () => addSavedJob,
   deleteProfile: () => deleteProfile,
+  isBlankProfile: () => isBlankProfile,
   listSavedJobs: () => listSavedJobs,
   profileToFingerprint: () => profileToFingerprint,
   readProfile: () => readProfile,
@@ -25672,6 +25677,17 @@ function migrateTagWeights(profile) {
       profile.tagWeights[tag] = { count: 1, firstSeen: seed, lastSeen: seed, sessions: 1 };
     }
   }
+}
+function isBlankProfile(profile) {
+  if (profile.skillTags.length > 0) return false;
+  if (Object.keys(profile.tagWeights).length > 0) return false;
+  for (const [key, value] of Object.entries(profile)) {
+    if (DERIVED_KEYS.has(key)) continue;
+    if (value === void 0 || value === null) continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    return false;
+  }
+  return true;
 }
 async function readProfile() {
   const parsed = await profileStore.read();
@@ -25757,7 +25773,7 @@ function profileToFingerprint(profile) {
     }
   };
 }
-var TERMINALHIRE_DIR8, PROFILE_FILE, profileStore, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var TERMINALHIRE_DIR8, PROFILE_FILE, profileStore, DERIVED_KEYS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
 var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
@@ -25769,6 +25785,13 @@ var init_profile = __esm({
       blank: blankProfile,
       keyPolicy: "keytar-first-file-fallback"
     });
+    DERIVED_KEYS = /* @__PURE__ */ new Set([
+      "version",
+      "updatedAt",
+      "skillTags",
+      "tagWeights",
+      "hasEmployerSessions"
+    ]);
     LANGUAGE_TAGS = /* @__PURE__ */ new Set([
       "typescript",
       "javascript",
@@ -28897,6 +28920,7 @@ function renderRunView(run3, message) {
   }
   if (run3.previewUrl) lines.push(`  preview:    ${terminalSafeInline(run3.previewUrl)}`);
   if (run3.roundTrips != null) lines.push(`  round trips: ${run3.roundTrips}`);
+  if (run3.passMeaning) lines.push(`  ${terminalSafeInline(run3.passMeaning)}`);
   if (run3.logTail) {
     lines.push("  \u2500\u2500 log tail \u2500\u2500");
     for (const l of terminalSafeLines(run3.logTail)) lines.push(`  \u2502 ${l}`);
@@ -28949,8 +28973,7 @@ async function watchRunsLoop({
   for (let i = 1; i <= attempts; i++) {
     const r = await fetchOnce();
     if (r.kind === "refusal") {
-      log(`terminalhire claim: ${renderServerRefusal(r.status, r.body)}`);
-      return { outcome: "refused" };
+      return { outcome: "refused", status: r.status, body: r.body };
     }
     if (r.kind === "network") {
       log(`  (attempt ${i}/${attempts}: terminalhire unreachable \u2014 ${r.error}; retrying)`);
@@ -29174,7 +29197,12 @@ async function cmdRuns(id, flags = {}) {
       `  Watching CI for ${id} \u2014 up to ${RUNS_POLL_ATTEMPTS} checks, one every ${Math.round(RUNS_POLL_INTERVAL_MS / 1e3)}s.`
     );
     const out = await watchRunsLoop({ id, fetchOnce });
-    if (out.outcome === "refused") process.exit(1);
+    if (out.outcome === "refused") {
+      if (!retireRevokedReadCredential(out.status, out.body, "reading CI results")) {
+        console.error(`terminalhire claim: ${renderServerRefusal(out.status, out.body)}`);
+      }
+      process.exit(1);
+    }
     return;
   }
   const r = await fetchOnce();

@@ -1941,6 +1941,7 @@ __export(profile_exports, {
   accumulateTags: () => accumulateTags,
   addSavedJob: () => addSavedJob,
   deleteProfile: () => deleteProfile,
+  isBlankProfile: () => isBlankProfile,
   listSavedJobs: () => listSavedJobs,
   profileToFingerprint: () => profileToFingerprint,
   readProfile: () => readProfile,
@@ -1980,6 +1981,17 @@ function migrateTagWeights(profile) {
       profile.tagWeights[tag] = { count: 1, firstSeen: seed, lastSeen: seed, sessions: 1 };
     }
   }
+}
+function isBlankProfile(profile) {
+  if (profile.skillTags.length > 0) return false;
+  if (Object.keys(profile.tagWeights).length > 0) return false;
+  for (const [key, value] of Object.entries(profile)) {
+    if (DERIVED_KEYS.has(key)) continue;
+    if (value === void 0 || value === null) continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    return false;
+  }
+  return true;
 }
 async function readProfile() {
   const parsed = await profileStore.read();
@@ -2065,7 +2077,7 @@ function profileToFingerprint(profile) {
     }
   };
 }
-var TERMINALHIRE_DIR2, PROFILE_FILE, profileStore, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
+var TERMINALHIRE_DIR2, PROFILE_FILE, profileStore, DERIVED_KEYS, LANGUAGE_TAGS, MIN_FINGERPRINT_SCORE;
 var init_profile = __esm({
   "src/profile.ts"() {
     "use strict";
@@ -2077,6 +2089,13 @@ var init_profile = __esm({
       blank: blankProfile,
       keyPolicy: "keytar-first-file-fallback"
     });
+    DERIVED_KEYS = /* @__PURE__ */ new Set([
+      "version",
+      "updatedAt",
+      "skillTags",
+      "tagWeights",
+      "hasEmployerSessions"
+    ]);
     LANGUAGE_TAGS = /* @__PURE__ */ new Set([
       "typescript",
       "javascript",
@@ -2744,7 +2763,7 @@ function renderMarkdown(view) {
   const lines = [];
   lines.push("# Trajectory");
   lines.push("");
-  lines.push("> Your code is your r\xE9sum\xE9. Local-first, derived from your own Claude Code corpus.");
+  lines.push("> Your code is your r\xE9sum\xE9. Derived from your own Claude Code corpus.");
   lines.push("");
   lines.push("## Trajectory");
   lines.push("");
