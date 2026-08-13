@@ -23,7 +23,9 @@ Invoke the bundled engine in a Bash tool call. Pick the subcommand that matches 
    node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim preview <bountyId|issueUrl> --json
    ```
 
-   Parse the single JSON line: `{ bountyId, title, amountUSD, repoFullName, issueUrl, issueState, openPRs, policy: { status, verdict, assignment, rulesetVersion, hits, requirements } }`. The `policy` object is the repo's contribution audit:
+   Parse the single JSON line: `{ bountyId, title, amountUSD, repoFullName, issueUrl, issueState, openPRs, policy: { status, verdict, assignment, rulesetVersion, hits, requirements } }`.
+
+   **`policy` is ABSENT on a founder posting**, and absent means there is no policy step here — not that the audit came back clean. A founder posting is paid work on the founder's own repo: they are the maintainer, they bought agent-driven work, and there is no third-party CONTRIBUTING to read. Skip the whole policy section of the card and never pass an `--ack-policy` flag; `record` will not ask for one. When the key IS present, it is the repo's contribution audit:
    - `verdict` — `"prohibited"` (the repo bans AI-generated contributions), `"disclosure-required"` (allowed, must be disclosed), `"ai-mentioned"` (AI-policy language found, intent unclear), `"clean"`, or `"unavailable"` (docs couldn't be read). `hits` carries `{ file, excerpt, rule }` — the repo's verbatim words.
    - `requirements` — `{ kind, file, excerpt }` entries for non-AI expectations found in the docs: `assignment-required`, `take-bot`, `cla-required`, `discussion-first`.
    - `assignment` — `"required"`, `"take-bot"`, or `"none"`: what the repo's OWN docs say about assignment — not the full posting decision on its own. `claim start` posts a comment for the first two. `"none"` does NOT always mean silence: when the issue is ALSO contested (a competing open PR) and the dev supplies a one-line approach, `start` posts one substantive claim-stake comment instead — the three-way decision tree published at terminalhire.com/social-layer (full behavior documented in _Doing the work_ below). `"none"` + uncontested (or no approach given) still posts nothing unless the dev asks for `--assign`.
@@ -32,7 +34,7 @@ Invoke the bundled engine in a Bash tool call. Pick the subcommand that matches 
 2. **Confirm via a styled `AskUserQuestion`.** One question — _"Claim this bounty?"_ — with options **"Claim it"** (recommended, listed first) and **"Cancel"**. Put a terminal-styled card in the `preview` field of the **Claim it** option so it renders inline. Build the card from the JSON:
 
    ```
-   $ terminalhire claim
+   $ node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim preview <bountyId>
    // BOUNTY · <repoFullName>#<n>
 
      <title>
@@ -58,7 +60,7 @@ Invoke the bundled engine in a Bash tool call. Pick the subcommand that matches 
    - each `requirements[]` entry → one line, e.g. `• repo expects you to request assignment first` / `• CLA required` / `• discuss before opening a PR`
    - the assignment plan → `start will post an assignment request` (`"required"`), `start will post /take` (`"take-bot"`), or, for `"none"`: `start will not comment on the issue` when uncontested, or `start will post a claim-stake comment if you give it a one-line approach` when `openPRs > 0` (the three-way tree — see terminalhire.com/social-layer)
 
-   **If `issueState === "closed"`: do NOT show the confirm card and do NOT call `claim record`.** Tell the dev the issue is closed and can't be claimed (the pool drops closed issues — likely a stale cache entry; suggest `terminalhire bounties` for the current pool), then stop.
+   **If `issueState === "closed"`: do NOT show the confirm card and do NOT call `claim record`.** Tell the dev the issue is closed and can't be claimed (the pool drops closed issues — likely a stale cache entry; offer to rerun the `bounties` skill for the current pool), then stop.
 
 3. **Record only if the dev picks "Claim it":**
 
@@ -140,7 +142,7 @@ If the dev wants to request assignment outside these branches anyway, they can p
 
 **Before writing any code — read the repo's contribution policy.** `claim record` already ran a bounded, deterministic audit (`src/repo-policy.ts`) and printed `POLICY` + `REQUIREMENTS` sections; if it showed excerpts (any non-clean verdict) or said the docs couldn't be read (`unavailable`), read the actual CONTRIBUTING.md / PR template / AGENTS.md yourself — fetch them from the repo if you don't already have them — before doing anything else. The audit is a deterministic pattern match, not comprehension; you are the judgment layer it can't be (it can miss a prohibition phrased unusually, or in a doc it doesn't fetch):
 
-- If the repo's policy **prohibits AI-generated/AI-assisted contributions** (e.g. Gentoo/NetBSD-style "tainted code" language, an outright ban on LLM-authored PRs), **HARD-STOP**. Do not clone, do not write a patch, do not open a worktree for it. Tell the user plainly that this repo doesn't accept AI-assisted work and the claim isn't mergeable as-is — do not attempt to route around it (e.g. "write it as if you wrote it yourself"). Suggest they either work it by hand or `terminalhire claim release <id>`.
+- If the repo's policy **prohibits AI-generated/AI-assisted contributions** (e.g. Gentoo/NetBSD-style "tainted code" language, an outright ban on LLM-authored PRs), **HARD-STOP**. Do not clone, do not write a patch, do not open a worktree for it. Tell the user plainly that this repo doesn't accept AI-assisted work and the claim isn't mergeable as-is — do not attempt to route around it (e.g. "write it as if you wrote it yourself"). Suggest they either work it by hand or run `node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim release <id>`.
 - If the policy is silent, permissive, or merely asks for **disclosure**, proceed — and follow whatever disclosure format the repo asks for (see the submit step below; the CLI's baseline note may need to sit alongside a repo-specific tag/section, not replace it).
 - If you can't find or read the policy docs at all, say so and let the user decide whether to proceed — don't silently treat "couldn't check" as "no policy."
 

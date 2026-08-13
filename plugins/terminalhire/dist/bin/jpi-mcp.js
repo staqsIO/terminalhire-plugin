@@ -157,6 +157,133 @@ var init_cache_store = __esm({
   }
 });
 
+// src/api-base.ts
+function sanitizeOverrideForError(raw) {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return `(disallowed scheme: ${url.protocol.slice(0, -1)})`;
+    }
+    if (url.username !== "" || url.password !== "") {
+      return `${url.protocol}//***@${url.host}`;
+    }
+    return url.origin;
+  } catch {
+    return "(unparseable override)";
+  }
+}
+function isLoopbackOrigin(origin) {
+  try {
+    const host = new URL(origin).hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+function localApiAllowed(env) {
+  return env[ALLOW_LOCAL_API_KEY] === "1";
+}
+function resolveApiBase(env = process.env) {
+  for (const key of ENV_KEYS) {
+    const raw = env[key];
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (trimmed === "") continue;
+    const normalized = normalizeOverride(trimmed);
+    if (normalized === null) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${sanitizeOverrideForError(trimmed)} is not an allowed API host (allowed: ${ALLOWED_DESCRIPTION}). Refusing to continue so we do not silently hit production.`
+      );
+    }
+    if (isLoopbackOrigin(normalized) && !localApiAllowed(env)) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${normalized} is a loopback origin. Set ${ALLOW_LOCAL_API_KEY}=1 to talk to a local web app on purpose. Refusing so stored credentials cannot be exfiltrated to localhost by a poisoned override.`
+      );
+    }
+    return normalized;
+  }
+  return PROD_API_BASE;
+}
+function resolveOAuthBase(env = process.env) {
+  const base = resolveApiBase(env);
+  if (OAUTH_ALLOWED_ORIGINS.includes(base)) return base;
+  if (env[ALLOW_LOCAL_OAUTH_KEY] === "1") return base;
+  throw new ApiBaseError(
+    `terminalhire: the API base is ${base}, which is not a trusted origin for a browser sign-in. Point the CLI at ${DEV_API_BASE} for an end-to-end login, or set ${ALLOW_LOCAL_OAUTH_KEY}=1 (with ${ALLOW_LOCAL_API_KEY}=1) if you are running the web app locally on purpose. Refusing to open production sign-in while the API is local.`
+  );
+}
+function resolveApiBaseOrProd(env = process.env) {
+  try {
+    return resolveApiBase(env);
+  } catch {
+    return PROD_API_BASE;
+  }
+}
+function normalizeOverride(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.username !== "" || url.password !== "") return null;
+  const expectedProtocol = ALLOWED_HOSTS[url.hostname];
+  if (expectedProtocol === void 0) return null;
+  if (url.protocol !== expectedProtocol) return null;
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1" && url.port !== "") {
+    return null;
+  }
+  const rewrite = CANONICAL_REWRITES[url.hostname];
+  if (rewrite !== void 0) return rewrite;
+  return url.origin;
+}
+function isNonProdApiBase(base = resolveApiBaseOrProd()) {
+  return base !== PROD_API_BASE;
+}
+function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
+  if (!isNonProdApiBase(base)) return;
+  try {
+    stream.write(
+      "terminalhire: non-prod API base \u2014 using the same local session/push credentials as prod; do not mix environments casually.\n"
+    );
+  } catch {
+  }
+}
+var PROD_API_BASE, DEV_API_BASE, ApiBaseError, ALLOWED_HOSTS, OAUTH_ALLOWED_ORIGINS, ALLOW_LOCAL_OAUTH_KEY, ALLOW_LOCAL_API_KEY, ALLOWED_DESCRIPTION, CANONICAL_REWRITES, ENV_KEYS;
+var init_api_base = __esm({
+  "src/api-base.ts"() {
+    "use strict";
+    PROD_API_BASE = "https://terminalhire.com";
+    DEV_API_BASE = "https://dev.terminalhire.com";
+    ApiBaseError = class extends Error {
+      constructor(message) {
+        super(message);
+        this.name = "ApiBaseError";
+      }
+    };
+    ALLOWED_HOSTS = {
+      "terminalhire.com": "https:",
+      "www.terminalhire.com": "https:",
+      "dev.terminalhire.com": "https:",
+      localhost: "http:",
+      "127.0.0.1": "http:"
+    };
+    OAUTH_ALLOWED_ORIGINS = [PROD_API_BASE, DEV_API_BASE];
+    ALLOW_LOCAL_OAUTH_KEY = "TERMINALHIRE_ALLOW_LOCAL_OAUTH";
+    ALLOW_LOCAL_API_KEY = "TERMINALHIRE_ALLOW_LOCAL_API";
+    ALLOWED_DESCRIPTION = [
+      PROD_API_BASE,
+      DEV_API_BASE,
+      `http://localhost:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`,
+      `http://127.0.0.1:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`
+    ].join(", ");
+    CANONICAL_REWRITES = {
+      "www.terminalhire.com": PROD_API_BASE
+    };
+    ENV_KEYS = ["TERMINALHIRE_API_URL", "JPI_API_URL"];
+  }
+});
+
 // src/test-race-barrier.ts
 import { closeSync as closeSync2, constants as constants2, existsSync, lstatSync, openSync as openSync2 } from "fs";
 import { join as join3 } from "path";
@@ -11514,11 +11641,13 @@ var init_claim_push_bg = __esm({
     "use strict";
     init_github_auth();
     init_state_dir();
+    init_api_base();
     TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join9(homedir7(), ".terminalhire");
     CLAIM_PUSH_AUTO_MARKER = join9(TERMINALHIRE_DIR6, "claim-push-auto.json");
     CLAIM_PUSH_TOKEN_FILE = join9(TERMINALHIRE_DIR6, "claim-push-token.enc");
     CLAIM_PUSH_MANUAL_MARKER = join9(TERMINALHIRE_DIR6, "claim-push.json");
-    CLAIM_SYNC_BASE = "https://terminalhire.com";
+    CLAIM_SYNC_BASE = resolveApiBase();
+    warnSharedCredentialsIfNonProd(CLAIM_SYNC_BASE);
     AUTO_CONSENT_VERSION = 3;
     AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
     CLAIM_HEARTBEAT_FILE = join9(TERMINALHIRE_DIR6, "claim-heartbeat.json");
@@ -11631,7 +11760,8 @@ var CLAIM_SYNC_BASE2, TERMINAL;
 var init_founder_verdict_sync = __esm({
   "bin/founder-verdict-sync.js"() {
     "use strict";
-    CLAIM_SYNC_BASE2 = "https://terminalhire.com";
+    init_api_base();
+    CLAIM_SYNC_BASE2 = resolveApiBase();
     TERMINAL = /* @__PURE__ */ new Set(["merged", "abandoned"]);
   }
 });
@@ -11709,7 +11839,8 @@ var CLAIM_SYNC_BASE3;
 var init_founder_note_sync = __esm({
   "bin/founder-note-sync.js"() {
     "use strict";
-    CLAIM_SYNC_BASE3 = "https://terminalhire.com";
+    init_api_base();
+    CLAIM_SYNC_BASE3 = resolveApiBase();
   }
 });
 
@@ -25148,10 +25279,8 @@ var init_repo_policy_semantic = __esm({
 // src/repo-policy.ts
 var repo_policy_exports = {};
 __export(repo_policy_exports, {
-  FOUNDER_DECLARATION_SOURCE: () => FOUNDER_DECLARATION_SOURCE,
   POLICY_RULESET_VERSION: () => POLICY_RULESET_VERSION,
   auditContent: () => auditContent,
-  auditDeclaredPolicy: () => auditDeclaredPolicy,
   checkRepoPolicy: () => checkRepoPolicy,
   ghHeaders: () => ghHeaders2
 });
@@ -25357,40 +25486,7 @@ async function checkRepoPolicy(repoFullName, opts = {}) {
     files
   };
 }
-function auditDeclaredPolicy(declaration) {
-  const text = typeof declaration === "string" ? declaration.trim() : "";
-  if (text === "") {
-    return {
-      status: "unavailable",
-      verdict: "unavailable",
-      hits: [],
-      requirements: [],
-      assignment: "none",
-      rulesetVersion: POLICY_RULESET_VERSION,
-      contentHash: null,
-      scanComplete: false,
-      files: []
-    };
-  }
-  const files = [{ file: FOUNDER_DECLARATION_SOURCE, content: text }];
-  const { hits, requirements, verdict, assignment } = auditContent(files);
-  return {
-    // Same status rule as a scanned repo: any classified hit → 'flagged' (the
-    // verdict says how severe), no hit → 'clean'. The declaration is one short
-    // text that was read in full, so the incomplete-scan precedence above can
-    // never apply here.
-    status: hits.length > 0 ? "flagged" : "clean",
-    verdict,
-    hits,
-    requirements,
-    assignment,
-    rulesetVersion: POLICY_RULESET_VERSION,
-    contentHash: hashFiles(files),
-    scanComplete: true,
-    files
-  };
-}
-var GH_API, GH_API_ORIGIN, GH_HEADERS, MAX_REQUESTS, POLICY_RULESET_VERSION, AI_SIGNAL_PATTERNS, AI_TERM, PROHIBITED_PATTERNS, DISCLOSURE_PATTERNS, DISCLOSURE_ENFORCEMENT_PATTERNS, REQUIREMENT_PATTERNS, CANDIDATE_GROUPS, VERDICT_SEVERITY, FOUNDER_DECLARATION_SOURCE;
+var GH_API, GH_API_ORIGIN, GH_HEADERS, MAX_REQUESTS, POLICY_RULESET_VERSION, AI_SIGNAL_PATTERNS, AI_TERM, PROHIBITED_PATTERNS, DISCLOSURE_PATTERNS, DISCLOSURE_ENFORCEMENT_PATTERNS, REQUIREMENT_PATTERNS, CANDIDATE_GROUPS, VERDICT_SEVERITY;
 var init_repo_policy = __esm({
   "src/repo-policy.ts"() {
     "use strict";
@@ -25474,7 +25570,6 @@ var init_repo_policy = __esm({
       "disclosure-required": 2,
       prohibited: 3
     };
-    FOUNDER_DECLARATION_SOURCE = "founder-declaration";
   }
 });
 
@@ -26665,8 +26760,7 @@ function buildSubmitBody(issueNumber, opts = {}) {
   return `${closesLine}${main}${AI_DISCLOSURE_NOTE}`;
 }
 function printPolicySection(policy) {
-  const declared = policy.provenance === "founder-declaration";
-  const subject = declared ? "this posting's declared policy" : "this repo";
+  const subject = "this repo";
   const verdict = policy.verdict ?? (policy.status === "flagged" ? "ai-mentioned" : policy.status);
   if (verdict === "prohibited") {
     console.log(
@@ -26684,11 +26778,7 @@ function printPolicySection(policy) {
     );
   } else if (policy.status === "unavailable") {
     console.log(
-      declared ? "\n  POLICY: the founder declared no AI-assistance policy on this posting \u2014 there is nothing to read; acknowledging means working without a stated policy." : "\n  POLICY: could not read this repo's CONTRIBUTING/PR-template/AGENTS docs (rate-limited or unreachable) \u2014 read them yourself before working."
-    );
-  } else if (declared) {
-    console.log(
-      "  policy: no AI-assistance restriction in the founder's declared policy (shown above verbatim when flagged)"
+      "\n  POLICY: could not read this repo's CONTRIBUTING/PR-template/AGENTS docs (rate-limited or unreachable) \u2014 read them yourself before working."
     );
   } else if (policy.semantic?.status === "not-configured" && (policy.files?.length ?? 0) > 0) {
     console.log(
@@ -26905,8 +26995,7 @@ function extractClaimableFields(job) {
       openPRsAtDiscovery: c.openPRsAtDiscovery,
       // A contribute issue is never first-party founder supply.
       founderPosting: false,
-      claimMode: "open",
-      aiDeclaration: null
+      claimMode: "open"
     };
   }
   const b = job.bounty ?? {};
@@ -26919,15 +27008,13 @@ function extractClaimableFields(job) {
     source: "bounty",
     // Bounties carry no discovery-time PR proof — always live-count (unchanged).
     openPRsAtDiscovery: void 0,
-    // TERM-142 — first-party founder supply drives a different record path: Gate 0
-    // reads the DECLARED policy below (there is no repo to scan — `repoFullName`
+    // TERM-142 — first-party founder supply drives a different record path: no
+    // policy step at all (TERM-625 — there is no repo to scan either, `repoFullName`
     // here is the posting's opaque handle, V-9), and recording registers the claim
-    // server-side (Decision 4). Both fields follow the index row's absent-means-
-    // default conventions: claimMode absent = open, aiDeclaration absent = the
-    // founder declared nothing.
+    // server-side (Decision 4). `claimMode` follows the index row's absent-means-
+    // default convention: absent = open.
     founderPosting: b.bountySource === "founder",
-    claimMode: b.claimMode === "approval-only" ? "approval-only" : "open",
-    aiDeclaration: typeof b.aiDeclaration === "string" && b.aiDeclaration.trim() !== "" ? b.aiDeclaration : null
+    claimMode: b.claimMode === "approval-only" ? "approval-only" : "open"
   };
 }
 function parseGitHubUrl(url) {
@@ -27088,6 +27175,7 @@ async function hasPriorAssignmentRequest(repoFullName, issueNumber, login, marke
   }
 }
 function shouldRequestAssignment(claim, flags = {}) {
+  if (claim && claim.approval) return { post: Boolean(flags.assign), takeBot: false };
   const expectation = claim && claim.policy ? claim.policy.assignment : void 0;
   const post = Boolean(flags.assign) || expectation === void 0 || expectation === "required" || expectation === "take-bot";
   return { post, takeBot: expectation === "take-bot" };
@@ -27342,7 +27430,6 @@ async function resolveBounty(arg) {
   let bountyId, title, repoFullName, issueUrl, amountUSD, source, openPRsAtDiscovery, indexNativeId;
   let founderPosting = false;
   let claimMode = "open";
-  let aiDeclaration = null;
   let job = findClaimableInCache(arg) ?? (looksLikeShortRef(arg) ? findClaimableByShortRef(arg) : null);
   let freshPool;
   if (!job && looksLikeShortRef(arg)) {
@@ -27359,8 +27446,7 @@ async function resolveBounty(arg) {
       source,
       openPRsAtDiscovery,
       founderPosting,
-      claimMode,
-      aiDeclaration
+      claimMode
     } = extractClaimableFields(job));
     indexNativeId = bountyId;
   } else {
@@ -27426,13 +27512,12 @@ async function resolveBounty(arg) {
     // `openPRs`, which may be the discovery-time snapshot used for display.
     openPRsLive,
     issueNumber: ghIssue ? ghIssue.number : null,
-    // TERM-142 — founder-posting facts for cmdRecord's declared-policy gate and
-    // registration call. The URL tier can never resolve a founder posting (its
-    // claimUrl is a docs page, not a GitHub issue), so the defaults above are
-    // correct there: a URL-tier claim is never treated as founder supply.
+    // TERM-142 — founder-posting facts for cmdRecord's registration call. The URL
+    // tier can never resolve a founder posting (its claimUrl is a docs page, not a
+    // GitHub issue), so the defaults above are correct there: a URL-tier claim is
+    // never treated as founder supply.
     founderPosting,
-    claimMode,
-    aiDeclaration
+    claimMode
   };
 }
 function fmtOpenPRsLine(b) {
@@ -27463,9 +27548,16 @@ function fmtContestedWarning(b) {
 async function mintRegistrationProof() {
   console.log("\n  This founder posting registers your claim with terminalhire, so your");
   console.log("  GitHub identity has to be verified once in the browser.");
+  let oauthBase;
+  try {
+    oauthBase = resolveOAuthBase();
+  } catch (err) {
+    console.error(`  ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
   let begin;
   try {
-    const r = await fetch(`${CLAIM_SYNC_BASE4}/api/claim-sync/begin`, {
+    const r = await fetch(`${oauthBase}/api/claim-sync/begin`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ hostname: osHostname() }),
@@ -27498,7 +27590,7 @@ async function mintRegistrationProof() {
     let statusRes;
     try {
       statusRes = await fetch(
-        `${CLAIM_SYNC_BASE4}/api/claim-sync/status?challenge=${encodeURIComponent(challenge)}`,
+        `${oauthBase}/api/claim-sync/status?challenge=${encodeURIComponent(challenge)}`,
         { signal: AbortSignal.timeout(1e4) }
       );
     } catch {
@@ -27817,21 +27909,14 @@ ${contestedWarning}`);
       process.exit(1);
     }
   }
-  const { applySemanticPolicyGate: applySemanticPolicyGate2 } = await Promise.resolve().then(() => (init_repo_policy_semantic(), repo_policy_semantic_exports));
-  let policy;
-  if (b.founderPosting) {
-    const { auditDeclaredPolicy: auditDeclaredPolicy2 } = await Promise.resolve().then(() => (init_repo_policy(), repo_policy_exports));
-    const declared = await applySemanticPolicyGate2(
-      b.repoFullName,
-      auditDeclaredPolicy2(b.aiDeclaration)
-    );
-    policy = { ...declared, provenance: "founder-declaration" };
-  } else {
+  let policy = null;
+  if (!b.founderPosting) {
+    const { applySemanticPolicyGate: applySemanticPolicyGate2 } = await Promise.resolve().then(() => (init_repo_policy_semantic(), repo_policy_semantic_exports));
     const { checkRepoPolicy: checkRepoPolicy2 } = await Promise.resolve().then(() => (init_repo_policy(), repo_policy_exports));
     const keywordPolicy = await checkRepoPolicy2(b.repoFullName, { token: await policyScanToken() });
     policy = await applySemanticPolicyGate2(b.repoFullName, keywordPolicy);
+    printPolicySection(policy);
   }
-  printPolicySection(policy);
   if (process.stdout.isTTY) {
     try {
       const { getRepoEntry: getRepoEntry2, briefingLines: briefingLines2 } = await Promise.resolve().then(() => (init_repo_experience(), repo_experience_exports));
@@ -27846,20 +27931,19 @@ ${contestedWarning}`);
     } catch {
     }
   }
-  const policySubject = policy.provenance === "founder-declaration" ? "this founder posting" : b.repoFullName;
   let ackedAt = null;
-  if (policy.verdict === "prohibited") {
+  if (!policy) {
+  } else if (policy.verdict === "prohibited") {
     let acked = Boolean(flags["ack-policy-prohibited"]);
     if (!acked && process.stdin.isTTY) {
       acked = await confirm(
-        `
-  ${policy.provenance === "founder-declaration" ? "This posting's declared policy" : "This repo"} PROHIBITS AI-generated contributions \u2014 continuing means everything you submit must be hand-written by you. Continue? (y/N) `
+        "\n  This repo PROHIBITS AI-generated contributions \u2014 continuing means everything you submit must be hand-written by you. Continue? (y/N) "
       );
     }
     if (!acked) {
       console.error(
         `
-terminalhire claim: refusing to record \u2014 ${policySubject} prohibits AI-generated contributions.
+terminalhire claim: refusing to record \u2014 ${b.repoFullName} prohibits AI-generated contributions.
   Read the excerpts above. If you will hand-write the work yourself, re-run with
   --ack-policy-prohibited (or confirm interactively). --ack-policy is not enough here.`
       );
@@ -27875,8 +27959,7 @@ terminalhire claim: refusing to record \u2014 ${policySubject} prohibits AI-gene
       );
       ackedAt = prior.ackedAt;
     } else {
-      const declaredProvenance = policy.provenance === "founder-declaration";
-      const reason = policy.status === "flagged" ? declaredProvenance ? "This posting's declared policy has AI-assistance language" : "This repo has AI-assistance policy language" : (policy.hits?.length ?? 0) > 0 ? "This repo's policy scan was cut short \u2014 AI-policy language was found in what WAS read, and other governing docs went unread" : declaredProvenance ? "The founder declared no AI-assistance policy on this posting" : "This repo's contribution policy could not be checked";
+      const reason = policy.status === "flagged" ? "This repo has AI-assistance policy language" : (policy.hits?.length ?? 0) > 0 ? "This repo's policy scan was cut short \u2014 AI-policy language was found in what WAS read, and other governing docs went unread" : "This repo's contribution policy could not be checked";
       let acked = Boolean(flags["ack-policy"]);
       if (!acked && process.stdin.isTTY) {
         acked = await confirm(
@@ -27886,9 +27969,7 @@ terminalhire claim: refusing to record \u2014 ${policySubject} prohibits AI-gene
       }
       if (!acked) {
         console.error(
-          declaredProvenance ? `
-terminalhire claim: refusing to record. ${reason}.
-  Re-run with --ack-policy to acknowledge and proceed (or confirm interactively).` : `
+          `
 terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribution policy first.
   Re-run with --ack-policy once you have (or confirm interactively).`
         );
@@ -27946,17 +28027,22 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
       // start` can drive the assignment decision from it and `claim audit` can
       // show what ruleset the dev acknowledged. Excerpts are NOT persisted —
       // the record stores the conclusion; the docs stay the source of truth.
-      policy: {
-        status: policy.status,
-        verdict: policy.verdict,
-        assignment: policy.assignment,
-        requirements: (policy.requirements ?? []).map((r) => r.kind),
-        rulesetVersion: policy.rulesetVersion,
-        ackedAt,
-        // TERM-142 provenance marker — 'founder-declaration' when this policy came
-        // from the founder's declared text rather than scanned repo docs.
-        ...policy.provenance ? { provenance: policy.provenance } : {}
-      },
+      //
+      // TERM-625: a founder posting has no audit, so the key is OMITTED rather
+      // than filled with a manufactured 'clean'. Absent means "never scanned";
+      // a stored verdict would claim we read something. `shouldRequestAssignment`
+      // reads an absent policy as the legacy-claim branch, which is the right
+      // answer here — there is no third-party assignment convention to honour.
+      ...policy ? {
+        policy: {
+          status: policy.status,
+          verdict: policy.verdict,
+          assignment: policy.assignment,
+          requirements: (policy.requirements ?? []).map((r) => r.kind),
+          rulesetVersion: policy.rulesetVersion,
+          ackedAt
+        }
+      } : {},
       // Registration receipt + approval wait (founder postings only; see claims.ts).
       ...approval ? { approval } : {}
     });
@@ -27964,10 +28050,12 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
     console.error(`terminalhire claim: ${err.message ?? err}`);
     process.exit(1);
   }
-  try {
-    const { recordPolicySnapshot: recordPolicySnapshot2 } = await Promise.resolve().then(() => (init_repo_experience(), repo_experience_exports));
-    await recordPolicySnapshot2(b.repoFullName, policy);
-  } catch {
+  if (policy) {
+    try {
+      const { recordPolicySnapshot: recordPolicySnapshot2 } = await Promise.resolve().then(() => (init_repo_experience(), repo_experience_exports));
+      await recordPolicySnapshot2(b.repoFullName, policy);
+    } catch {
+    }
   }
   try {
     const { markStatus: markStatus2 } = await Promise.resolve().then(() => (init_job_status_store(), job_status_store_exports));
@@ -28059,8 +28147,11 @@ async function cmdPreview(arg, { json } = {}) {
     console.error("  Run `terminalhire bounties` to populate the cache, or pass a full issue URL.");
     process.exit(1);
   }
-  const { checkRepoPolicy: checkRepoPolicy2 } = await Promise.resolve().then(() => (init_repo_policy(), repo_policy_exports));
-  const policy = await checkRepoPolicy2(b.repoFullName, { token: await policyScanToken() });
+  let policy = null;
+  if (!b.founderPosting) {
+    const { checkRepoPolicy: checkRepoPolicy2 } = await Promise.resolve().then(() => (init_repo_policy(), repo_policy_exports));
+    policy = await checkRepoPolicy2(b.repoFullName, { token: await policyScanToken() });
+  }
   if (json) {
     process.stdout.write(
       JSON.stringify({
@@ -28073,14 +28164,18 @@ async function cmdPreview(arg, { json } = {}) {
         openPRs: b.openPRs,
         assignees: b.assignees,
         contested: isContested(b),
-        policy: {
-          status: policy.status,
-          verdict: policy.verdict,
-          assignment: policy.assignment,
-          rulesetVersion: policy.rulesetVersion,
-          hits: policy.hits,
-          requirements: policy.requirements
-        }
+        // Absent on a founder posting — see the scan above. A consumer must read
+        // "no policy key" as "no policy step exists here", never as "clean".
+        ...policy ? {
+          policy: {
+            status: policy.status,
+            verdict: policy.verdict,
+            assignment: policy.assignment,
+            rulesetVersion: policy.rulesetVersion,
+            hits: policy.hits,
+            requirements: policy.requirements
+          }
+        } : {}
       }) + "\n"
     );
     return;
@@ -28099,7 +28194,7 @@ async function cmdPreview(arg, { json } = {}) {
   console.log(fmtOpenPRsLine(b));
   const previewContested = fmtContestedWarning(b);
   if (previewContested) console.log(previewContested);
-  printPolicySection(policy);
+  if (policy) printPolicySection(policy);
   if (process.stdout.isTTY) {
     try {
       const { getRepoEntry: getRepoEntry2, briefingLines: briefingLines2 } = await Promise.resolve().then(() => (init_repo_experience(), repo_experience_exports));
@@ -28908,13 +29003,30 @@ function buildPatchSubmission({ bountyId, claimId, patch, authorName, authorEmai
   }
   return { bountyId, claimId, patch, authorName, authorEmail, proofToken: auth.proofToken };
 }
-function renderRunView(run3, message) {
+function renderRunView(run3, message, extra = {}) {
   const lines = [];
   const sha = run3.commitSha ? String(run3.commitSha).slice(0, 10) : null;
   lines.push(`  run:        ${run3.branch ?? "(no branch)"}${sha ? ` @ ${sha}` : ""}`);
   lines.push(
     `  status:     ${terminalSafeInline(run3.status)}${run3.conclusion ? ` \xB7 conclusion: ${terminalSafeInline(run3.conclusion)}` : ""}`
   );
+  const claimState = extra.claimState ?? run3.claimState;
+  const unverifiedCause = extra.unverifiedCause ?? run3.unverifiedCause;
+  const resetAt = extra.resetAt ?? run3.resetAt;
+  const rateLimitCap = extra.rateLimitCap ?? run3.rateLimitCap ?? 5;
+  const rateLimitCount = extra.rateLimitCount ?? run3.rateLimitCount;
+  if (claimState) {
+    lines.push(`  state:      ${terminalSafeInline(claimState)}`);
+  }
+  if (unverifiedCause) {
+    lines.push(`  cause:      ${terminalSafeInline(unverifiedCause)}`);
+  }
+  if (unverifiedCause === "rate_limited" || resetAt) {
+    const resetStr = resetAt ? ` (resets at ${resetAt})` : "";
+    lines.push(
+      `  rate limit: ${rateLimitCount ?? 5}/${rateLimitCap} runs in 24h cap reached${resetStr}`
+    );
+  }
   if (Array.isArray(run3.failingJobs) && run3.failingJobs.length > 0) {
     lines.push(`  failing:    ${run3.failingJobs.map(terminalSafeInline).join(", ")}`);
   }
@@ -28959,7 +29071,10 @@ function renderClaimHistory(attempts, timeline) {
   }
   return lines.join("\n");
 }
-function isTerminalRunStatus(status) {
+function isTerminalRunStatus(status, claimState) {
+  if (claimState && ["applied", "approved", "unverified"].includes(claimState)) {
+    return true;
+  }
   return status === "completed" || status === "no-ci";
 }
 async function watchRunsLoop({
@@ -28980,8 +29095,8 @@ async function watchRunsLoop({
     } else {
       log(`
   [check ${i}/${attempts}]`);
-      log(renderRunView(r.run, r.message));
-      if (isTerminalRunStatus(r.run.status)) return { outcome: "done", run: r.run };
+      log(renderRunView(r.run, r.message, r));
+      if (isTerminalRunStatus(r.run.status, r.claimState)) return { outcome: "done", run: r.run };
     }
     if (i < attempts) await sleep3(intervalMs);
   }
@@ -29041,7 +29156,9 @@ async function requireReadPushToken(what) {
   if (!stored) {
     console.error(
       `terminalhire claim: ${what} needs the persistent push token, and none is enrolled on this machine.
-  Enroll once (browser verification): terminalhire claim --push`
+  Link this machine to your claim (browser verification): terminalhire claim <claim-token>
+  \u2014 the 8-character token on the claim page. If you already have claims recorded
+  here, terminalhire claim --push enrols too.`
     );
     process.exit(1);
   }
@@ -29049,7 +29166,15 @@ async function requireReadPushToken(what) {
 }
 async function cmdSlice(id, flags = {}) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
-  const claim = requireFounderLoopClaim(claims, id, "slice");
+  if (!id) {
+    console.error("Usage: terminalhire claim slice <id>");
+    process.exit(1);
+  }
+  const local = claims.findClaim(id) ?? null;
+  if (local) {
+    requireFounderLoopClaim(claims, id, "slice");
+  }
+  const bountyId = local ? founderPostingIdOf(local) : String(id).replace(/^bounty:founder:/, "");
   const pushToken = await requireReadPushToken("fetching your granted slice");
   let res;
   try {
@@ -29057,8 +29182,11 @@ async function cmdSlice(id, flags = {}) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        bountyId: founderPostingIdOf(claim),
-        claimId: claim.approval.claimId,
+        bountyId,
+        // Sent only when we hold one. Omitted, the server resolves the caller's single
+        // claim on this posting; sent, it is matched EXACTLY, so a stale local id still
+        // fails closed instead of being redirected to a different claim.
+        ...local ? { claimId: local.approval.claimId } : {},
         pushToken
       }),
       signal: AbortSignal.timeout(3e4)
@@ -29085,6 +29213,40 @@ async function cmdSlice(id, flags = {}) {
       "terminalhire claim: malformed slice response from the server \u2014 nothing was written."
     );
     process.exit(1);
+  }
+  let claim = local;
+  if (!claim) {
+    try {
+      claim = claims.recordClaim({
+        id,
+        bountyId: body.bountyId ?? bountyId,
+        title: body.title ?? null,
+        repoFullName: null,
+        issueUrl: null,
+        amountUSD: null,
+        openPRsAtClaim: null,
+        kind: "bounty",
+        policy: null,
+        approval: {
+          mode: body.claimMode ?? "open",
+          // Granted, not pending: the server only delivers a slice to an approved
+          // claimant. Recording 'pending' here would make `claim start` render a wait
+          // for approval that has already happened.
+          state: "granted",
+          claimId: body.claimId,
+          claimantLogin: null,
+          registeredAt: (/* @__PURE__ */ new Date()).toISOString(),
+          // So a later reader can tell this record was rebuilt from a slice delivery
+          // rather than written by `claim record` — it is deliberately thinner.
+          hydratedFrom: "slice"
+        }
+      });
+    } catch (err) {
+      console.error(
+        `terminalhire claim: the slice was delivered but the local record could not be written (${err?.message ?? err}) \u2014 nothing was written to disk.`
+      );
+      process.exit(1);
+    }
   }
   let dest = flags.dir ? pathResolve(String(flags.dir)) : sliceWorkDirFor(claim.id);
   if (existsSync8(dest) && readdirSync2(dest).length > 0) {
@@ -29189,7 +29351,12 @@ async function cmdRuns(id, flags = {}) {
       run: body.run,
       message: body.message ?? null,
       attempts: Array.isArray(body.attempts) ? body.attempts : [],
-      timeline: Array.isArray(body.timeline) ? body.timeline : []
+      timeline: Array.isArray(body.timeline) ? body.timeline : [],
+      claimState: body.claimState ?? null,
+      unverifiedCause: body.unverifiedCause ?? null,
+      resetAt: body.resetAt ?? null,
+      rateLimitCap: body.rateLimitCap ?? 5,
+      rateLimitCount: body.rateLimitCount ?? null
     };
   };
   if (flags.watch) {
@@ -29218,10 +29385,10 @@ async function cmdRuns(id, flags = {}) {
   }
   console.log(`
 ${claim.title}`);
-  console.log(renderRunView(r.run, r.message));
+  console.log(renderRunView(r.run, r.message, r));
   const history = renderClaimHistory(r.attempts, r.timeline);
   if (history) console.log(history);
-  if (!isTerminalRunStatus(r.run.status)) {
+  if (!isTerminalRunStatus(r.run.status, r.claimState)) {
     console.log(`
   Still running \u2014 poll it: terminalhire claim runs ${id} --watch`);
   }
@@ -29896,9 +30063,17 @@ async function cmdPush({ keepUpdated = false } = {}) {
     }
   }
   console.log("\n  Starting browser verification...");
+  let oauthBase;
+  try {
+    oauthBase = resolveOAuthBase();
+  } catch (err) {
+    console.error(`
+  ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
   let begin;
   try {
-    const r = await fetch(`${CLAIM_SYNC_BASE4}/api/claim-sync/begin`, {
+    const r = await fetch(`${oauthBase}/api/claim-sync/begin`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ hostname: osHostname() }),
@@ -29941,7 +30116,7 @@ async function cmdPush({ keepUpdated = false } = {}) {
     let statusRes;
     try {
       statusRes = await fetch(
-        `${CLAIM_SYNC_BASE4}/api/claim-sync/status?challenge=${encodeURIComponent(challenge)}`,
+        `${oauthBase}/api/claim-sync/status?challenge=${encodeURIComponent(challenge)}`,
         { signal: AbortSignal.timeout(1e4) }
       );
     } catch {
@@ -30016,6 +30191,15 @@ async function cmdPush({ keepUpdated = false } = {}) {
     lastPushedAt: consentedAt,
     lastSnapshotHash: computeSnapshotHash(pushed)
   });
+  const omitted = Number(syncBody?.skipped ?? 0);
+  if (omitted > 0) {
+    console.log(
+      `
+  ${omitted} claim${omitted === 1 ? "" : "s"} could not be shown on your dashboard \u2014 ${omitted === 1 ? "it names" : "they name"} no repository.`
+    );
+    console.log("    A posting claimed on the web withholds its repo until work starts.");
+    console.log("    Everything else in this push is on your dashboard.");
+  }
   if (pushToken) {
     try {
       if (autoConsent) {
@@ -30406,6 +30590,7 @@ var init_jpi_claim = __esm({
     init_policy_acks();
     init_claims();
     init_state_dir();
+    init_api_base();
     init_claim_push_bg();
     init_founder_verdict_sync();
     init_founder_note_sync();
@@ -30413,8 +30598,8 @@ var init_jpi_claim = __esm({
     INDEX_CACHE_FILE2 = join18(TERMINALHIRE_DIR11, "index-cache.json");
     CLAIM_PUSH_MARKER = join18(TERMINALHIRE_DIR11, "claim-push.json");
     REPO_CONTINUITY_NUDGE_MARKER = join18(TERMINALHIRE_DIR11, "repo-continuity-nudged.json");
-    API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
-    CLAIM_SYNC_BASE4 = "https://terminalhire.com";
+    API_URL = resolveApiBase();
+    CLAIM_SYNC_BASE4 = API_URL;
     CLAIM_CONSENT_VERSION = 1;
     CLAIM_POLL_INTERVAL_MS = 2e3;
     CLAIM_POLL_TIMEOUT_MS = 10 * 60 * 1e3;
@@ -52757,6 +52942,7 @@ function partitionFreshMatches(matches, history, getId = defaultGetId) {
 }
 
 // bin/jpi-mcp.js
+init_api_base();
 var TOOL_NAMES = [
   "jobs",
   "bounties",
@@ -52894,14 +53080,17 @@ async function resolveClaimPreview(opportunity, { semantic = false } = {}) {
       hint: "The opportunity is not in the local claimable index and is not a GitHub issue URL."
     };
   }
-  const { checkRepoPolicy: checkRepoPolicy2, auditDeclaredPolicy: auditDeclaredPolicy2 } = await Promise.resolve().then(() => (init_repo_policy(), repo_policy_exports));
-  const keywordPolicy = bounty.founderPosting ? auditDeclaredPolicy2(bounty.aiDeclaration) : await checkRepoPolicy2(bounty.repoFullName, {
-    token: await readPolicyToken()
-  });
-  let policy = keywordPolicy;
-  if (semantic && !bounty.founderPosting) {
-    const { applySemanticPolicyGate: applySemanticPolicyGate2 } = await Promise.resolve().then(() => (init_repo_policy_semantic(), repo_policy_semantic_exports));
-    policy = await applySemanticPolicyGate2(bounty.repoFullName, keywordPolicy);
+  let policy = null;
+  if (!bounty.founderPosting) {
+    const { checkRepoPolicy: checkRepoPolicy2 } = await Promise.resolve().then(() => (init_repo_policy(), repo_policy_exports));
+    const keywordPolicy = await checkRepoPolicy2(bounty.repoFullName, {
+      token: await readPolicyToken()
+    });
+    policy = keywordPolicy;
+    if (semantic) {
+      const { applySemanticPolicyGate: applySemanticPolicyGate2 } = await Promise.resolve().then(() => (init_repo_policy_semantic(), repo_policy_semantic_exports));
+      policy = await applySemanticPolicyGate2(bounty.repoFullName, keywordPolicy);
+    }
   }
   return {
     status: "ok",
@@ -52917,7 +53106,7 @@ async function resolveClaimPreview(opportunity, { semantic = false } = {}) {
     openPRs: bounty.openPRs,
     assignees: bounty.assignees,
     contested: isContested2(bounty),
-    policy: publicPolicy(policy),
+    policy: policy ? publicPolicy(policy) : null,
     _policy: policy,
     // Internal routing bit from the CLI's shared resolver. Founder postings are
     // not ordinary local-only claims: the interactive CLI must register them
@@ -53141,6 +53330,11 @@ var TOOL_DEFS = [
     inputSchema: CLAIM_RECORD_SCHEMA
   }
 ];
+function withEnvironment(result) {
+  if (!isNonProdApiBase()) return result;
+  if (typeof result !== "object" || result === null || Array.isArray(result)) return result;
+  return { ...result, environment: "dev" };
+}
 function buildToolResult(name, args, entry, contributeEnabled, order = {}) {
   const limit2 = args?.limit;
   switch (name) {
@@ -53184,11 +53378,11 @@ async function run2() {
     const args = req.params?.arguments ?? {};
     if (name === "claim_preview") {
       const result2 = await claimPreviewResult(args);
-      return { content: [{ type: "text", text: JSON.stringify(result2) }] };
+      return { content: [{ type: "text", text: JSON.stringify(withEnvironment(result2)) }] };
     }
     if (name === "claim_record") {
       const result2 = await claimRecordResult(args);
-      return { content: [{ type: "text", text: JSON.stringify(result2) }] };
+      return { content: [{ type: "text", text: JSON.stringify(withEnvironment(result2)) }] };
     }
     const entry = readCacheEntry();
     let contributeEnabled = false;
@@ -53206,7 +53400,7 @@ async function run2() {
     } catch {
     }
     const result = buildToolResult(name, args, entry, contributeEnabled, { history });
-    return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    return { content: [{ type: "text", text: JSON.stringify(withEnvironment(result)) }] };
   });
   const transport = new StdioServerTransport2();
   await server.connect(transport);

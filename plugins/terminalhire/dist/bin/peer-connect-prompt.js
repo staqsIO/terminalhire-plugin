@@ -123,8 +123,109 @@ function openInBrowser(url) {
   }
 }
 
+// src/api-base.ts
+var PROD_API_BASE = "https://terminalhire.com";
+var DEV_API_BASE = "https://dev.terminalhire.com";
+var ApiBaseError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ApiBaseError";
+  }
+};
+var ALLOWED_HOSTS = {
+  "terminalhire.com": "https:",
+  "www.terminalhire.com": "https:",
+  "dev.terminalhire.com": "https:",
+  localhost: "http:",
+  "127.0.0.1": "http:"
+};
+var OAUTH_ALLOWED_ORIGINS = [PROD_API_BASE, DEV_API_BASE];
+var ALLOW_LOCAL_OAUTH_KEY = "TERMINALHIRE_ALLOW_LOCAL_OAUTH";
+var ALLOW_LOCAL_API_KEY = "TERMINALHIRE_ALLOW_LOCAL_API";
+var ALLOWED_DESCRIPTION = [
+  PROD_API_BASE,
+  DEV_API_BASE,
+  `http://localhost:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`,
+  `http://127.0.0.1:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`
+].join(", ");
+var CANONICAL_REWRITES = {
+  "www.terminalhire.com": PROD_API_BASE
+};
+var ENV_KEYS = ["TERMINALHIRE_API_URL", "JPI_API_URL"];
+function sanitizeOverrideForError(raw) {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return `(disallowed scheme: ${url.protocol.slice(0, -1)})`;
+    }
+    if (url.username !== "" || url.password !== "") {
+      return `${url.protocol}//***@${url.host}`;
+    }
+    return url.origin;
+  } catch {
+    return "(unparseable override)";
+  }
+}
+function isLoopbackOrigin(origin) {
+  try {
+    const host = new URL(origin).hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+function localApiAllowed(env) {
+  return env[ALLOW_LOCAL_API_KEY] === "1";
+}
+function resolveApiBase(env = process.env) {
+  for (const key of ENV_KEYS) {
+    const raw = env[key];
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (trimmed === "") continue;
+    const normalized = normalizeOverride(trimmed);
+    if (normalized === null) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${sanitizeOverrideForError(trimmed)} is not an allowed API host (allowed: ${ALLOWED_DESCRIPTION}). Refusing to continue so we do not silently hit production.`
+      );
+    }
+    if (isLoopbackOrigin(normalized) && !localApiAllowed(env)) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${normalized} is a loopback origin. Set ${ALLOW_LOCAL_API_KEY}=1 to talk to a local web app on purpose. Refusing so stored credentials cannot be exfiltrated to localhost by a poisoned override.`
+      );
+    }
+    return normalized;
+  }
+  return PROD_API_BASE;
+}
+function resolveOAuthBase(env = process.env) {
+  const base = resolveApiBase(env);
+  if (OAUTH_ALLOWED_ORIGINS.includes(base)) return base;
+  if (env[ALLOW_LOCAL_OAUTH_KEY] === "1") return base;
+  throw new ApiBaseError(
+    `terminalhire: the API base is ${base}, which is not a trusted origin for a browser sign-in. Point the CLI at ${DEV_API_BASE} for an end-to-end login, or set ${ALLOW_LOCAL_OAUTH_KEY}=1 (with ${ALLOW_LOCAL_API_KEY}=1) if you are running the web app locally on purpose. Refusing to open production sign-in while the API is local.`
+  );
+}
+function normalizeOverride(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.username !== "" || url.password !== "") return null;
+  const expectedProtocol = ALLOWED_HOSTS[url.hostname];
+  if (expectedProtocol === void 0) return null;
+  if (url.protocol !== expectedProtocol) return null;
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1" && url.port !== "") {
+    return null;
+  }
+  const rewrite = CANONICAL_REWRITES[url.hostname];
+  if (rewrite !== void 0) return rewrite;
+  return url.origin;
+}
+
 // bin/peer-connect-prompt.js
-var OAUTH_BASE = "https://terminalhire.com";
 var PROMPT = [
   "",
   "  Connect with other builders?",
@@ -196,17 +297,30 @@ async function maybePromptPeerConnect({
     writeConfig({ resumePublishPrompted: true });
     if (wantsPublish) {
       const next = "/dashboard?publish=1";
-      const url = `${OAUTH_BASE}/api/auth/github?next=${encodeURIComponent(next)}`;
-      output.write(
-        `
+      let url = null;
+      try {
+        url = `${resolveOAuthBase()}/api/auth/github?next=${encodeURIComponent(next)}`;
+      } catch (err) {
+        output.write(
+          `
+  Cannot open the publish confirmation: ${err instanceof Error ? err.message : String(err)}
+  You stay viewer-only for now \u2014 publish later from terminalhire.com/dashboard.
+
+`
+        );
+      }
+      if (url !== null) {
+        output.write(
+          `
   Opening your browser to confirm \u2014 nothing is published until you click
   publish there: ${url}
   (You can also publish anytime from terminalhire.com/dashboard.)
 
 `
-      );
-      openUrl(url);
-      resumePublishOpened = true;
+        );
+        openUrl(url);
+        resumePublishOpened = true;
+      }
     } else {
       output.write(
         "\n  No worries \u2014 you stay viewer-only (not listed in the directory).\n  Publish anytime from terminalhire.com/dashboard.\n\n"

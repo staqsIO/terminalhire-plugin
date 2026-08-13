@@ -90,54 +90,72 @@ function normalizeOverride(raw) {
   return url.origin;
 }
 
-// bin/approved-claims-sync.js
+// bin/founder-note-sync.js
 var CLAIM_SYNC_BASE = resolveApiBase();
-function approvalsSyncGate({ autoMarkerExists, tokenFileExists }) {
-  if (!autoMarkerExists || !tokenFileExists) return { sync: false, reason: "not-opted-in" };
-  return { sync: true, reason: "ok" };
+async function fetchFounderNotes(pushToken, fetchImpl = fetch) {
+  if (typeof pushToken !== "string" || pushToken.length === 0) return null;
+  try {
+    const res = await fetchImpl(`${CLAIM_SYNC_BASE}/api/claim/notes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pushToken }),
+      signal: AbortSignal.timeout(15e3)
+    });
+    if (!res?.ok) return null;
+    const body = await res.json();
+    if (!body || !Array.isArray(body.notes)) return null;
+    const notes = body.notes.filter(
+      (n) => n && typeof n.claimId === "string" && n.claimId !== "" && typeof n.note === "string" && n.note !== "" && typeof n.at === "string" && (n.kind === "founder_note" || n.kind === "feedback")
+    );
+    return { notes, latestAt: typeof body.latestAt === "string" ? body.latestAt : null };
+  } catch {
+    return null;
+  }
 }
-function approvalsNudgeGate({ autoMarkerExists, tokenFileExists, awaitingApproval }) {
-  if (approvalsSyncGate({ autoMarkerExists, tokenFileExists }).sync) return false;
-  return Number.isInteger(awaitingApproval) && awaitingApproval > 0;
+function noteKey(note) {
+  return `${note.claimId}@${note.at}`;
 }
-function buildApprovalsNudge(awaitingApproval) {
-  if (!Number.isInteger(awaitingApproval) || awaitingApproval <= 0) return null;
-  const n = awaitingApproval;
-  return `  \u26A0 ${n} claim${n === 1 ? "" : "s"} awaiting founder approval \u2014 terminalhire cannot check in the background until you enrol:
-    terminalhire claim --push --keep-updated    (or check one now: terminalhire claim slice <id>)`;
+function computeFounderNotes(notes, previous) {
+  const keys = Array.isArray(notes) ? notes.map(noteKey) : [];
+  const prior = previous && Array.isArray(previous.seen) ? new Set(previous.seen) : /* @__PURE__ */ new Set();
+  const seen = keys.filter((k) => prior.has(k));
+  return { count: keys.length - seen.length, seen };
 }
-async function syncApprovedClaims({
+function acknowledgeFounderNotes(notes) {
+  const keys = Array.isArray(notes) ? notes.map(noteKey) : [];
+  return { count: 0, seen: keys };
+}
+async function syncFounderNotes({
   readAutoMarker,
   readPushTokenEnc,
   readPrevious,
   fetchImpl = fetch,
-  computeApprovedClaims,
   timeoutMs = 15e3
 } = {}) {
   try {
     const marker = readAutoMarker();
     const token = await readPushTokenEnc();
-    if (!approvalsSyncGate({ autoMarkerExists: !!marker, tokenFileExists: !!token }).sync) {
-      return null;
-    }
-    const res = await fetchImpl(`${CLAIM_SYNC_BASE}/api/claim/approvals`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pushToken: token }),
-      signal: AbortSignal.timeout(timeoutMs)
-    });
-    if (!res || !res.ok) return null;
-    const body = await res.json();
-    const claimIds = body && Array.isArray(body.claimIds) ? body.claimIds : null;
-    if (!claimIds) return null;
-    return computeApprovedClaims(claimIds, readPrevious());
+    if (!marker || !token) return null;
+    const answer = await fetchFounderNotes(
+      token,
+      (url, init) => fetchImpl(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+    );
+    if (!answer) return null;
+    return computeFounderNotes(answer.notes, readPrevious());
   } catch {
     return null;
   }
 }
+function formatNote(note) {
+  const label = note.kind === "feedback" ? "changes requested" : "note";
+  return `  ${note.at.slice(0, 16).replace("T", " ")}  [${label}]  ${note.claimId}
+    ${note.note.split("\n").join("\n    ")}`;
+}
 export {
-  approvalsNudgeGate,
-  approvalsSyncGate,
-  buildApprovalsNudge,
-  syncApprovedClaims
+  acknowledgeFounderNotes,
+  computeFounderNotes,
+  fetchFounderNotes,
+  formatNote,
+  noteKey,
+  syncFounderNotes
 };

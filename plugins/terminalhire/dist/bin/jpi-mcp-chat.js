@@ -4641,6 +4641,114 @@ var init_web_session = __esm({
   }
 });
 
+// src/api-base.ts
+function sanitizeOverrideForError(raw) {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return `(disallowed scheme: ${url.protocol.slice(0, -1)})`;
+    }
+    if (url.username !== "" || url.password !== "") {
+      return `${url.protocol}//***@${url.host}`;
+    }
+    return url.origin;
+  } catch {
+    return "(unparseable override)";
+  }
+}
+function isLoopbackOrigin(origin) {
+  try {
+    const host = new URL(origin).hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+function localApiAllowed(env) {
+  return env[ALLOW_LOCAL_API_KEY] === "1";
+}
+function resolveApiBase(env = process.env) {
+  for (const key of ENV_KEYS) {
+    const raw = env[key];
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (trimmed === "") continue;
+    const normalized = normalizeOverride(trimmed);
+    if (normalized === null) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${sanitizeOverrideForError(trimmed)} is not an allowed API host (allowed: ${ALLOWED_DESCRIPTION}). Refusing to continue so we do not silently hit production.`
+      );
+    }
+    if (isLoopbackOrigin(normalized) && !localApiAllowed(env)) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${normalized} is a loopback origin. Set ${ALLOW_LOCAL_API_KEY}=1 to talk to a local web app on purpose. Refusing so stored credentials cannot be exfiltrated to localhost by a poisoned override.`
+      );
+    }
+    return normalized;
+  }
+  return PROD_API_BASE;
+}
+function resolveApiBaseOrProd(env = process.env) {
+  try {
+    return resolveApiBase(env);
+  } catch {
+    return PROD_API_BASE;
+  }
+}
+function normalizeOverride(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.username !== "" || url.password !== "") return null;
+  const expectedProtocol = ALLOWED_HOSTS[url.hostname];
+  if (expectedProtocol === void 0) return null;
+  if (url.protocol !== expectedProtocol) return null;
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1" && url.port !== "") {
+    return null;
+  }
+  const rewrite = CANONICAL_REWRITES[url.hostname];
+  if (rewrite !== void 0) return rewrite;
+  return url.origin;
+}
+function isNonProdApiBase(base = resolveApiBaseOrProd()) {
+  return base !== PROD_API_BASE;
+}
+var PROD_API_BASE, DEV_API_BASE, ApiBaseError, ALLOWED_HOSTS, ALLOW_LOCAL_API_KEY, ALLOWED_DESCRIPTION, CANONICAL_REWRITES, ENV_KEYS;
+var init_api_base = __esm({
+  "src/api-base.ts"() {
+    "use strict";
+    PROD_API_BASE = "https://terminalhire.com";
+    DEV_API_BASE = "https://dev.terminalhire.com";
+    ApiBaseError = class extends Error {
+      constructor(message) {
+        super(message);
+        this.name = "ApiBaseError";
+      }
+    };
+    ALLOWED_HOSTS = {
+      "terminalhire.com": "https:",
+      "www.terminalhire.com": "https:",
+      "dev.terminalhire.com": "https:",
+      localhost: "http:",
+      "127.0.0.1": "http:"
+    };
+    ALLOW_LOCAL_API_KEY = "TERMINALHIRE_ALLOW_LOCAL_API";
+    ALLOWED_DESCRIPTION = [
+      PROD_API_BASE,
+      DEV_API_BASE,
+      `http://localhost:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`,
+      `http://127.0.0.1:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`
+    ].join(", ");
+    CANONICAL_REWRITES = {
+      "www.terminalhire.com": PROD_API_BASE
+    };
+    ENV_KEYS = ["TERMINALHIRE_API_URL", "JPI_API_URL"];
+  }
+});
+
 // src/chat-client.ts
 import { existsSync as existsSync6, readFileSync as readFileSync6, writeFileSync as writeFileSync5 } from "fs";
 import { homedir as homedir5 } from "os";
@@ -4846,7 +4954,8 @@ var init_chat_client = __esm({
     init_chat_keystore();
     init_web_session();
     init_state_dir();
-    CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
+    init_api_base();
+    CHAT_BASE = resolveApiBase();
     GH_SESSION_COOKIE = "__jpi_gh_session";
     TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join7(homedir5(), ".terminalhire");
     PEERS_FILE = join7(TERMINALHIRE_DIR4, "chat-peers.json");
@@ -5085,8 +5194,9 @@ var init_jpi_chat = __esm({
     init_chat_client();
     init_config();
     init_web_session();
+    init_api_base();
     init_tui_core();
-    CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
+    CHAT_BASE2 = resolveApiBase();
     GH_SESSION_COOKIE2 = "__jpi_gh_session";
     CHAT_DISCLOSURE = "Messages are end-to-end encrypted using keys stored only on your device. Our server cannot read message content. Since we distribute your contact's public key, verify your connection by comparing Safety Numbers to rule out a server-side substitution. We store metadata: who messaged whom, when, and message count. Content is purged after 90 days.";
     CHAT_AT_REST = "Your private key is encrypted against casual access, not full machine compromise.";
@@ -5278,7 +5388,8 @@ var init_jpi_chat_read = __esm({
     init_web_session();
     init_state_dir();
     init_jpi_chat();
-    CHAT_BASE3 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
+    init_api_base();
+    CHAT_BASE3 = resolveApiBase();
     GH_SESSION_COOKIE3 = "__jpi_gh_session";
     TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join10(homedir8(), ".terminalhire");
     READS_FILE = join10(TERMINALHIRE_DIR6, "chat-reads.json");
@@ -27354,10 +27465,13 @@ var init_stdio2 = __esm({
 init_jpi_chat();
 init_jpi_chat_read();
 init_chat_client();
+init_api_base();
 var TOOL_NAMES = ["reply"];
-var SINK = { write() {
-  return true;
-} };
+var SINK = {
+  write() {
+    return true;
+  }
+};
 var DEFAULT_COOLDOWN_MS = 3e3;
 var DEFAULT_MAX_PER_SESSION = 20;
 var MODAL_MAX_MESSAGES = 20;
@@ -27455,7 +27569,10 @@ async function runReply(opts = {}) {
   }
   const action = res && res.action;
   if (action !== "accept") {
-    return { status: action === "decline" ? "declined" : "cancelled", messagesShown: messages.length };
+    return {
+      status: action === "decline" ? "declined" : "cancelled",
+      messagesShown: messages.length
+    };
   }
   const body = String((res && res.content && res.content.reply) ?? "").trim();
   if (!body) return { status: "declined", messagesShown: messages.length };
@@ -27518,7 +27635,14 @@ async function run() {
   server.setRequestHandler(CallToolRequestSchema2, async (req) => {
     const name = req.params?.name;
     if (name !== "reply") {
-      return { content: [{ type: "text", text: JSON.stringify({ status: "error", hint: `Unknown tool: ${name}` }) }] };
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ status: "error", hint: `Unknown tool: ${name}` })
+          }
+        ]
+      };
     }
     const args = req.params?.arguments ?? {};
     const result = await runReply({
@@ -27527,7 +27651,14 @@ async function run() {
       getClientCapabilities: () => server.getClientCapabilities(),
       rateState
     });
-    return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(isNonProdApiBase() ? { ...result, environment: "dev" } : result)
+        }
+      ]
+    };
   });
   const transport = new StdioServerTransport2();
   await server.connect(transport);

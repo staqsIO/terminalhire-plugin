@@ -281,45 +281,9 @@ async function checkRepoPolicy(repoFullName, opts = {}) {
     files
   };
 }
-var FOUNDER_DECLARATION_SOURCE = "founder-declaration";
-function auditDeclaredPolicy(declaration) {
-  const text = typeof declaration === "string" ? declaration.trim() : "";
-  if (text === "") {
-    return {
-      status: "unavailable",
-      verdict: "unavailable",
-      hits: [],
-      requirements: [],
-      assignment: "none",
-      rulesetVersion: POLICY_RULESET_VERSION,
-      contentHash: null,
-      scanComplete: false,
-      files: []
-    };
-  }
-  const files = [{ file: FOUNDER_DECLARATION_SOURCE, content: text }];
-  const { hits, requirements, verdict, assignment } = auditContent(files);
-  return {
-    // Same status rule as a scanned repo: any classified hit → 'flagged' (the
-    // verdict says how severe), no hit → 'clean'. The declaration is one short
-    // text that was read in full, so the incomplete-scan precedence above can
-    // never apply here.
-    status: hits.length > 0 ? "flagged" : "clean",
-    verdict,
-    hits,
-    requirements,
-    assignment,
-    rulesetVersion: POLICY_RULESET_VERSION,
-    contentHash: hashFiles(files),
-    scanComplete: true,
-    files
-  };
-}
 export {
-  FOUNDER_DECLARATION_SOURCE,
   POLICY_RULESET_VERSION,
   auditContent,
-  auditDeclaredPolicy,
   checkRepoPolicy,
   ghHeaders
 };

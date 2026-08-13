@@ -216,11 +216,24 @@ function buildAppleScriptHandler(execPath, dispatchPath, terminalApp) {
   return [
     "on open location theURL",
     '	set launcher to ""',
+    '	set launcherError to ""',
+    "	set launcherErrorNumber to 0",
     "	try",
     `		set launcher to do shell script quoted form of ${execLit} & " " & quoted form of ${dispatchLit} & " write-claim-launcher " & quoted form of theURL`,
+    "	on error errMsg number errNum",
+    "		set launcherError to errMsg",
+    "		set launcherErrorNumber to errNum",
     "	end try",
-    '	if launcher is "" then',
+    "	if launcherErrorNumber is 1 then",
     `		display notification "That isn't a valid Terminalhire claim link." with title "Terminalhire"`,
+    "		return",
+    "	end if",
+    "	if launcherErrorNumber is not 0 then",
+    '		display dialog launcherError with title "Terminalhire" buttons {"OK"} default button "OK"',
+    "		return",
+    "	end if",
+    '	if launcher is "" then',
+    `		display notification "Couldn't prepare this Terminalhire claim link." with title "Terminalhire"`,
     "		return",
     "	end if",
     ...launch,
@@ -270,7 +283,14 @@ function writeClaimLauncher(raw, deps = defaultProtocolDeps()) {
     deps.exit(1);
     return;
   }
-  deps.log(writeLauncherFile(parsed.token, deps));
+  try {
+    deps.log(writeLauncherFile(parsed.token, deps));
+  } catch (err) {
+    const message = err instanceof Error && err.message ? err.message : String(err);
+    deps.errorLog(message.startsWith("terminalhire:") ? message : `terminalhire: ${message}`);
+    deps.exit(2);
+    return;
+  }
   deps.exit(0);
 }
 function darwinAppPaths(deps) {
@@ -281,7 +301,7 @@ function darwinAppPaths(deps) {
 }
 function darwinRegister(deps) {
   const dir = stateDir2(deps);
-  deps.ensureStateDir(dir);
+  deps.ensureStateDirForSecret(dir);
   const { appDir, appPath, plistPath } = darwinAppPaths(deps);
   deps.mkdirSync(appDir);
   const scriptPath = join2(dir, "handler.applescript");
@@ -508,6 +528,9 @@ function healStaleHandler(deps = defaultProtocolDeps()) {
     if (readHandlerTemplateVersion(deps) === String(HANDLER_TEMPLATE_VERSION)) {
       return;
     }
+    if (deps.platform === "darwin") {
+      deps.ensureStateDirForSecret(stateDir2(deps));
+    }
     if (schemeStatus(deps).registered) {
       const r = registerScheme(deps);
       if (r.ok) {
@@ -654,7 +677,7 @@ var init_protocol = __esm({
       ["konsole", ["-e"]],
       ["xterm", ["-e"]]
     ];
-    HANDLER_TEMPLATE_VERSION = 3;
+    HANDLER_TEMPLATE_VERSION = 4;
     PENDING_CLAIMS_CAP = 20;
     PENDING_TOKEN_RE = /^[A-Za-z0-9_-]{8}$/;
   }

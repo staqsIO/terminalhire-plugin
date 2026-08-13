@@ -7,7 +7,7 @@ description: Read and reply to your terminalhire connection chats inline, withou
 
 Read and reply to your end-to-end-encrypted connection chats **inline** in this session — no terminal takeover, no window switch. Messages are E2E encrypted with keys that stay on the device; only ciphertext crosses the wire, and the connection check uses the existing web-session cookie (the GitHub token never leaves the machine).
 
-These are the **on-demand** reader modes — each prints into the conversation and exits. (The live both-typing pane, `terminalhire chat <login>` with no flag, is a separate raw-mode TUI and is **not** used here.)
+These are the **on-demand** reader modes — each prints into the conversation and exits. (The live both-typing pane, `node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" chat <login>` with no flag, is a separate raw-mode TUI and is **not** used here.)
 
 ## Selectable actions — the inline picker (PREFERRED entry point)
 
@@ -22,7 +22,7 @@ When the user opens chat or asks about messages/connections/invitations:
    - **`Open @<login>`** — a read connection → `chat <login> --read`.
    - Include a plain escape option (e.g. "Just print the inbox" / "Nothing now").
 3. After the pick, run the matching command and report the result. For a reply, ask for the line, then `chat <login> --send "…"`. You may chain (e.g. accept → then offer "say hi").
-4. If the user wants to browse/manage everything themselves, mention `terminalhire inbox` — the interactive full-screen inbox (navigate conversations, open threads, accept/decline invitations, mark read). It's for THEM to run in their own terminal; never launch it from a skill (it's a raw-mode TUI).
+4. If the user wants to browse/manage everything themselves, mention `node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" inbox` — the interactive full-screen inbox (navigate conversations, open threads, accept/decline invitations, mark read). It's for THEM to run in their own terminal; never launch it from a skill (it's a raw-mode TUI).
 
 Accept an invitation via the bundled engine:
 
@@ -60,10 +60,10 @@ Send one line to a connection (encrypted before it leaves the machine):
 node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" chat <github-login> --send "sure, after this build"
 ```
 
-Tell the user they can reply with `/chat <login> "…"` or directly via `terminalhire chat <login> --send "…"`, and re-read with `terminalhire chat <login> --read`.
+Tell the user they can reply with `/chat <login> "…"` or directly via `node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" chat <login> --send "…"`, and re-read with `node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" chat <login> --read`.
 
 ## Notes
 
-- Chat is only available for an **accepted** intro. To connect first, use the `connect` skill (`terminalhire intro <login>`).
-- The first chat action shows a one-time privacy notice that must be acknowledged **interactively** — if the inbox/read/send reports it needs acknowledgement, have the user run `terminalhire chat <login>` once in their own terminal to accept it, then retry.
+- Chat is only available for an **accepted** intro. To connect first, use the `connect` skill.
+- The first chat action shows a one-time privacy notice that must be acknowledged **interactively** — if the inbox/read/send reports it needs acknowledgement, have the user run `node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" chat <login>` once in their own terminal to accept it, then retry.
 - Invoke the plugin-bundled engine via `${CLAUDE_PLUGIN_ROOT}` so a plugin update is the only update needed. If `$CLAUDE_PLUGIN_ROOT` is unset (e.g. running outside Claude Code), fall back to the standalone commands `terminalhire chat --inbox` / `terminalhire chat <login> --read` / `terminalhire chat <login> --send "…"`.

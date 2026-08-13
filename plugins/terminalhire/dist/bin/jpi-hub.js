@@ -11845,6 +11845,104 @@ var init_web_session = __esm({
   }
 });
 
+// src/api-base.ts
+function sanitizeOverrideForError(raw) {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return `(disallowed scheme: ${url.protocol.slice(0, -1)})`;
+    }
+    if (url.username !== "" || url.password !== "") {
+      return `${url.protocol}//***@${url.host}`;
+    }
+    return url.origin;
+  } catch {
+    return "(unparseable override)";
+  }
+}
+function isLoopbackOrigin(origin) {
+  try {
+    const host = new URL(origin).hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+function localApiAllowed(env) {
+  return env[ALLOW_LOCAL_API_KEY] === "1";
+}
+function resolveApiBase(env = process.env) {
+  for (const key of ENV_KEYS) {
+    const raw = env[key];
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (trimmed === "") continue;
+    const normalized = normalizeOverride(trimmed);
+    if (normalized === null) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${sanitizeOverrideForError(trimmed)} is not an allowed API host (allowed: ${ALLOWED_DESCRIPTION}). Refusing to continue so we do not silently hit production.`
+      );
+    }
+    if (isLoopbackOrigin(normalized) && !localApiAllowed(env)) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${normalized} is a loopback origin. Set ${ALLOW_LOCAL_API_KEY}=1 to talk to a local web app on purpose. Refusing so stored credentials cannot be exfiltrated to localhost by a poisoned override.`
+      );
+    }
+    return normalized;
+  }
+  return PROD_API_BASE;
+}
+function normalizeOverride(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.username !== "" || url.password !== "") return null;
+  const expectedProtocol = ALLOWED_HOSTS[url.hostname];
+  if (expectedProtocol === void 0) return null;
+  if (url.protocol !== expectedProtocol) return null;
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1" && url.port !== "") {
+    return null;
+  }
+  const rewrite = CANONICAL_REWRITES[url.hostname];
+  if (rewrite !== void 0) return rewrite;
+  return url.origin;
+}
+var PROD_API_BASE, DEV_API_BASE, ApiBaseError, ALLOWED_HOSTS, ALLOW_LOCAL_API_KEY, ALLOWED_DESCRIPTION, CANONICAL_REWRITES, ENV_KEYS;
+var init_api_base = __esm({
+  "src/api-base.ts"() {
+    "use strict";
+    PROD_API_BASE = "https://terminalhire.com";
+    DEV_API_BASE = "https://dev.terminalhire.com";
+    ApiBaseError = class extends Error {
+      constructor(message) {
+        super(message);
+        this.name = "ApiBaseError";
+      }
+    };
+    ALLOWED_HOSTS = {
+      "terminalhire.com": "https:",
+      "www.terminalhire.com": "https:",
+      "dev.terminalhire.com": "https:",
+      localhost: "http:",
+      "127.0.0.1": "http:"
+    };
+    ALLOW_LOCAL_API_KEY = "TERMINALHIRE_ALLOW_LOCAL_API";
+    ALLOWED_DESCRIPTION = [
+      PROD_API_BASE,
+      DEV_API_BASE,
+      `http://localhost:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`,
+      `http://127.0.0.1:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`
+    ].join(", ");
+    CANONICAL_REWRITES = {
+      "www.terminalhire.com": PROD_API_BASE
+    };
+    ENV_KEYS = ["TERMINALHIRE_API_URL", "JPI_API_URL"];
+  }
+});
+
 // src/chat-client.ts
 import { existsSync as existsSync9, readFileSync as readFileSync9, writeFileSync as writeFileSync8 } from "fs";
 import { homedir as homedir8 } from "os";
@@ -12050,7 +12148,8 @@ var init_chat_client = __esm({
     init_chat_keystore();
     init_web_session();
     init_state_dir();
-    CHAT_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
+    init_api_base();
+    CHAT_BASE = resolveApiBase();
     GH_SESSION_COOKIE = "__jpi_gh_session";
     TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join11(homedir8(), ".terminalhire");
     PEERS_FILE = join11(TERMINALHIRE_DIR7, "chat-peers.json");
@@ -12171,8 +12270,9 @@ var init_jpi_chat = __esm({
     init_chat_client();
     init_config();
     init_web_session();
+    init_api_base();
     init_tui_core();
-    CHAT_BASE2 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
+    CHAT_BASE2 = resolveApiBase();
     GH_SESSION_COOKIE2 = "__jpi_gh_session";
     ACTIVE_WINDOW_MS = 2 * 60 * 1e3;
   }
@@ -12270,7 +12370,8 @@ var init_jpi_chat_read = __esm({
     init_web_session();
     init_state_dir();
     init_jpi_chat();
-    CHAT_BASE3 = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
+    init_api_base();
+    CHAT_BASE3 = resolveApiBase();
     TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join13(homedir10(), ".terminalhire");
     READS_FILE = join13(TERMINALHIRE_DIR8, "chat-reads.json");
     INDEX_CACHE_FILE = join13(TERMINALHIRE_DIR8, "index-cache.json");
@@ -12680,7 +12781,8 @@ var init_intro2 = __esm({
     "use strict";
     init_src();
     init_web_session();
-    LINK_BASE = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
+    init_api_base();
+    LINK_BASE = resolveApiBase();
     GH_SESSION_COOKIE3 = "__jpi_gh_session";
   }
 });
@@ -12725,11 +12827,12 @@ var BAK_FILE = `${STATUS_FILE}.bak`;
 // bin/jpi-jobs.js
 init_cache_store();
 init_sanitize();
+init_api_base();
 var __dirname = fileURLToPath2(new URL(".", import.meta.url));
 var TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join16(homedir13(), ".terminalhire");
 var INDEX_CACHE_FILE3 = join16(TERMINALHIRE_DIR11, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
-var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+var API_URL = resolveApiBase();
 var DEFAULT_LIMIT = 10;
 var args = process.argv.slice(2);
 var limitArg = args.indexOf("--limit");
@@ -12814,11 +12917,12 @@ import { homedir as homedir15 } from "os";
 import { createInterface as createInterface3 } from "readline";
 init_cache_store();
 init_sanitize();
+init_api_base();
 init_founder_pin();
 var TERMINALHIRE_DIR13 = process.env.TERMINALHIRE_DIR || join18(homedir15(), ".terminalhire");
 var INDEX_CACHE_FILE4 = join18(TERMINALHIRE_DIR13, "index-cache.json");
 var INDEX_TTL_MS2 = 15 * 60 * 1e3;
-var API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+var API_URL2 = resolveApiBase();
 var RANK_MODE = process.env["TERMINALHIRE_BOUNTY_RANK"] ?? "winnability";
 var CONTINUITY_RANK_DISABLED = process.env["TERMINALHIRE_NO_CONTINUITY_RANK"] === "1";
 var DEFAULT_LIMIT2 = 15;
@@ -12946,6 +13050,7 @@ import { createInterface as createInterface4 } from "readline";
 
 // bin/directory.js
 init_state_dir();
+init_api_base();
 import { readFileSync as readFileSync16, writeFileSync as writeFileSync12, renameSync as renameSync6 } from "fs";
 import { join as join19 } from "path";
 import { homedir as homedir16 } from "os";
@@ -12953,7 +13058,7 @@ var TERMINALHIRE_DIR14 = process.env.TERMINALHIRE_DIR || join19(homedir16(), ".t
 var DIRECTORY_CACHE_FILE = join19(TERMINALHIRE_DIR14, "directory-cache.json");
 var PROJECT_FILE = join19(TERMINALHIRE_DIR14, "project.json");
 var INDEX_TTL_MS3 = 15 * 60 * 1e3;
-var API_URL3 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+var API_URL3 = resolveApiBase();
 function readDirectoryCache() {
   try {
     const entry = JSON.parse(readFileSync16(DIRECTORY_CACHE_FILE, "utf8"));
@@ -13036,7 +13141,8 @@ function selectDirectoryDevs(results, { limit, now = Date.now() } = {}) {
 }
 
 // bin/jpi-devs.js
-var API_URL4 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+init_api_base();
+var API_URL4 = resolveApiBase();
 var DEFAULT_LIMIT3 = 10;
 var args3 = process.argv.slice(2);
 var limitArg3 = args3.indexOf("--limit");

@@ -88,6 +88,123 @@ var init_state_dir = __esm({
   }
 });
 
+// src/api-base.ts
+function sanitizeOverrideForError(raw) {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return `(disallowed scheme: ${url.protocol.slice(0, -1)})`;
+    }
+    if (url.username !== "" || url.password !== "") {
+      return `${url.protocol}//***@${url.host}`;
+    }
+    return url.origin;
+  } catch {
+    return "(unparseable override)";
+  }
+}
+function isLoopbackOrigin(origin) {
+  try {
+    const host = new URL(origin).hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+function localApiAllowed(env) {
+  return env[ALLOW_LOCAL_API_KEY] === "1";
+}
+function resolveApiBase(env = process.env) {
+  for (const key of ENV_KEYS) {
+    const raw = env[key];
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (trimmed === "") continue;
+    const normalized = normalizeOverride(trimmed);
+    if (normalized === null) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${sanitizeOverrideForError(trimmed)} is not an allowed API host (allowed: ${ALLOWED_DESCRIPTION}). Refusing to continue so we do not silently hit production.`
+      );
+    }
+    if (isLoopbackOrigin(normalized) && !localApiAllowed(env)) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${normalized} is a loopback origin. Set ${ALLOW_LOCAL_API_KEY}=1 to talk to a local web app on purpose. Refusing so stored credentials cannot be exfiltrated to localhost by a poisoned override.`
+      );
+    }
+    return normalized;
+  }
+  return PROD_API_BASE;
+}
+function resolveApiBaseOrProd(env = process.env) {
+  try {
+    return resolveApiBase(env);
+  } catch {
+    return PROD_API_BASE;
+  }
+}
+function normalizeOverride(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.username !== "" || url.password !== "") return null;
+  const expectedProtocol = ALLOWED_HOSTS[url.hostname];
+  if (expectedProtocol === void 0) return null;
+  if (url.protocol !== expectedProtocol) return null;
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1" && url.port !== "") {
+    return null;
+  }
+  const rewrite = CANONICAL_REWRITES[url.hostname];
+  if (rewrite !== void 0) return rewrite;
+  return url.origin;
+}
+function isNonProdApiBase(base = resolveApiBaseOrProd()) {
+  return base !== PROD_API_BASE;
+}
+function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
+  if (!isNonProdApiBase(base)) return;
+  try {
+    stream.write(
+      "terminalhire: non-prod API base \u2014 using the same local session/push credentials as prod; do not mix environments casually.\n"
+    );
+  } catch {
+  }
+}
+var PROD_API_BASE, DEV_API_BASE, ApiBaseError, ALLOWED_HOSTS, ALLOW_LOCAL_API_KEY, ALLOWED_DESCRIPTION, CANONICAL_REWRITES, ENV_KEYS;
+var init_api_base = __esm({
+  "src/api-base.ts"() {
+    "use strict";
+    PROD_API_BASE = "https://terminalhire.com";
+    DEV_API_BASE = "https://dev.terminalhire.com";
+    ApiBaseError = class extends Error {
+      constructor(message) {
+        super(message);
+        this.name = "ApiBaseError";
+      }
+    };
+    ALLOWED_HOSTS = {
+      "terminalhire.com": "https:",
+      "www.terminalhire.com": "https:",
+      "dev.terminalhire.com": "https:",
+      localhost: "http:",
+      "127.0.0.1": "http:"
+    };
+    ALLOW_LOCAL_API_KEY = "TERMINALHIRE_ALLOW_LOCAL_API";
+    ALLOWED_DESCRIPTION = [
+      PROD_API_BASE,
+      DEV_API_BASE,
+      `http://localhost:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`,
+      `http://127.0.0.1:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`
+    ].join(", ");
+    CANONICAL_REWRITES = {
+      "www.terminalhire.com": PROD_API_BASE
+    };
+    ENV_KEYS = ["TERMINALHIRE_API_URL", "JPI_API_URL"];
+  }
+});
+
 // bin/cache-store.js
 var cache_store_exports = {};
 __export(cache_store_exports, {
@@ -13099,11 +13216,13 @@ var init_claim_push_bg = __esm({
     "use strict";
     init_github_auth();
     init_state_dir();
+    init_api_base();
     TERMINALHIRE_DIR9 = process.env.TERMINALHIRE_DIR || join17(homedir12(), ".terminalhire");
     CLAIM_PUSH_AUTO_MARKER = join17(TERMINALHIRE_DIR9, "claim-push-auto.json");
     CLAIM_PUSH_TOKEN_FILE = join17(TERMINALHIRE_DIR9, "claim-push-token.enc");
     CLAIM_PUSH_MANUAL_MARKER = join17(TERMINALHIRE_DIR9, "claim-push.json");
-    CLAIM_SYNC_BASE = "https://terminalhire.com";
+    CLAIM_SYNC_BASE = resolveApiBase();
+    warnSharedCredentialsIfNonProd(CLAIM_SYNC_BASE);
     AUTO_CONSENT_VERSION = 3;
     AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
     CLAIM_HEARTBEAT_FILE = join17(TERMINALHIRE_DIR9, "claim-heartbeat.json");
@@ -13311,7 +13430,8 @@ var CLAIM_SYNC_BASE2;
 var init_approved_claims_sync = __esm({
   "bin/approved-claims-sync.js"() {
     "use strict";
-    CLAIM_SYNC_BASE2 = "https://terminalhire.com";
+    init_api_base();
+    CLAIM_SYNC_BASE2 = resolveApiBase();
   }
 });
 
@@ -13423,7 +13543,8 @@ var CLAIM_SYNC_BASE3;
 var init_founder_note_sync = __esm({
   "bin/founder-note-sync.js"() {
     "use strict";
-    CLAIM_SYNC_BASE3 = "https://terminalhire.com";
+    init_api_base();
+    CLAIM_SYNC_BASE3 = resolveApiBase();
   }
 });
 
@@ -13568,6 +13689,7 @@ import { fileURLToPath as fileURLToPath3 } from "url";
 
 // bin/directory.js
 init_state_dir();
+init_api_base();
 import { readFileSync, writeFileSync, renameSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
@@ -13575,7 +13697,7 @@ var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".termina
 var DIRECTORY_CACHE_FILE = join(TERMINALHIRE_DIR, "directory-cache.json");
 var PROJECT_FILE = join(TERMINALHIRE_DIR, "project.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
-var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+var API_URL = resolveApiBase();
 function readDirectoryCache() {
   try {
     const entry = JSON.parse(readFileSync(DIRECTORY_CACHE_FILE, "utf8"));
@@ -13877,9 +13999,10 @@ function readWebSessionFile() {
 }
 
 // bin/jpi-refresh.js
+init_api_base();
 var GH_SESSION_COOKIE = "__jpi_gh_session";
 var __dirname2 = fileURLToPath3(new URL(".", import.meta.url));
-var API_URL2 = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+var API_URL2 = resolveApiBase();
 var CWD_SOFTTAGS_ENABLED = process.env["TH_CWD_SOFTTAGS"] !== "0";
 var CWD_SOFTTAG_WEIGHT = 0.4;
 var DECLARED_SOFTTAG_WEIGHT = 0.6;

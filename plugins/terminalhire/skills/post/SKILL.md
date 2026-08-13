@@ -46,7 +46,7 @@ Never invoke `post submit` for the founder. It is intentionally TTY-only and req
 the human to type `submit` after seeing the exact network body. Tell the founder to run:
 
 ```bash
-terminalhire post submit <draft-id>
+node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" post submit <draft-id>
 ```
 
 That step creates an unowned web draft and prints a browser confirmation URL. It still

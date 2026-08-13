@@ -1825,10 +1825,136 @@ function openInBrowser(url) {
 
 // bin/jpi-sync.js
 init_state_dir();
+
+// src/api-base.ts
+var PROD_API_BASE = "https://terminalhire.com";
+var DEV_API_BASE = "https://dev.terminalhire.com";
+var ApiBaseError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ApiBaseError";
+  }
+};
+var ALLOWED_HOSTS = {
+  "terminalhire.com": "https:",
+  "www.terminalhire.com": "https:",
+  "dev.terminalhire.com": "https:",
+  localhost: "http:",
+  "127.0.0.1": "http:"
+};
+var OAUTH_ALLOWED_ORIGINS = [PROD_API_BASE, DEV_API_BASE];
+var ALLOW_LOCAL_OAUTH_KEY = "TERMINALHIRE_ALLOW_LOCAL_OAUTH";
+var ALLOW_LOCAL_API_KEY = "TERMINALHIRE_ALLOW_LOCAL_API";
+var ALLOWED_DESCRIPTION = [
+  PROD_API_BASE,
+  DEV_API_BASE,
+  `http://localhost:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`,
+  `http://127.0.0.1:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`
+].join(", ");
+var CANONICAL_REWRITES = {
+  "www.terminalhire.com": PROD_API_BASE
+};
+var ENV_KEYS = ["TERMINALHIRE_API_URL", "JPI_API_URL"];
+function sanitizeOverrideForError(raw) {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return `(disallowed scheme: ${url.protocol.slice(0, -1)})`;
+    }
+    if (url.username !== "" || url.password !== "") {
+      return `${url.protocol}//***@${url.host}`;
+    }
+    return url.origin;
+  } catch {
+    return "(unparseable override)";
+  }
+}
+function isLoopbackOrigin(origin) {
+  try {
+    const host = new URL(origin).hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+function localApiAllowed(env) {
+  return env[ALLOW_LOCAL_API_KEY] === "1";
+}
+function resolveApiBase(env = process.env) {
+  for (const key of ENV_KEYS) {
+    const raw = env[key];
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (trimmed === "") continue;
+    const normalized = normalizeOverride(trimmed);
+    if (normalized === null) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${sanitizeOverrideForError(trimmed)} is not an allowed API host (allowed: ${ALLOWED_DESCRIPTION}). Refusing to continue so we do not silently hit production.`
+      );
+    }
+    if (isLoopbackOrigin(normalized) && !localApiAllowed(env)) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${normalized} is a loopback origin. Set ${ALLOW_LOCAL_API_KEY}=1 to talk to a local web app on purpose. Refusing so stored credentials cannot be exfiltrated to localhost by a poisoned override.`
+      );
+    }
+    return normalized;
+  }
+  return PROD_API_BASE;
+}
+function resolveOAuthBase(env = process.env) {
+  const base = resolveApiBase(env);
+  if (OAUTH_ALLOWED_ORIGINS.includes(base)) return base;
+  if (env[ALLOW_LOCAL_OAUTH_KEY] === "1") return base;
+  throw new ApiBaseError(
+    `terminalhire: the API base is ${base}, which is not a trusted origin for a browser sign-in. Point the CLI at ${DEV_API_BASE} for an end-to-end login, or set ${ALLOW_LOCAL_OAUTH_KEY}=1 (with ${ALLOW_LOCAL_API_KEY}=1) if you are running the web app locally on purpose. Refusing to open production sign-in while the API is local.`
+  );
+}
+function resolveApiBaseOrProd(env = process.env) {
+  try {
+    return resolveApiBase(env);
+  } catch {
+    return PROD_API_BASE;
+  }
+}
+function normalizeOverride(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.username !== "" || url.password !== "") return null;
+  const expectedProtocol = ALLOWED_HOSTS[url.hostname];
+  if (expectedProtocol === void 0) return null;
+  if (url.protocol !== expectedProtocol) return null;
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1" && url.port !== "") {
+    return null;
+  }
+  const rewrite = CANONICAL_REWRITES[url.hostname];
+  if (rewrite !== void 0) return rewrite;
+  return url.origin;
+}
+function isNonProdApiBase(base = resolveApiBaseOrProd()) {
+  return base !== PROD_API_BASE;
+}
+function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
+  if (!isNonProdApiBase(base)) return;
+  try {
+    stream.write(
+      "terminalhire: non-prod API base \u2014 using the same local session/push credentials as prod; do not mix environments casually.\n"
+    );
+  } catch {
+  }
+}
+
+// bin/jpi-sync.js
 var TH_DIR = process.env["TERMINALHIRE_DIR"] || join6(homedir3(), ".terminalhire");
 var TIER1_MARKER = join6(TH_DIR, "tier1.json");
-var API_URL = process.env["TERMINALHIRE_API_URL"] || process.env["JPI_API_URL"] || "https://terminalhire.com";
-var SYNC_BASE = "https://terminalhire.com";
+var API_URL = resolveApiBase();
+warnSharedCredentialsIfNonProd(API_URL);
+function oauthSyncBase() {
+  return resolveOAuthBase();
+}
 var POLL_INTERVAL_MS = 2e3;
 var POLL_TIMEOUT_MS = 10 * 60 * 1e3;
 var CONSENT_VERSION = 1;
@@ -1929,7 +2055,7 @@ async function runPush() {
   console.log("  Starting browser verification...");
   let begin;
   try {
-    const r = await fetch(`${SYNC_BASE}/api/profile-sync/begin`, {
+    const r = await fetch(`${oauthSyncBase()}/api/profile-sync/begin`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ hostname: osHostname() }),
@@ -1973,7 +2099,7 @@ async function runPush() {
     let statusRes;
     try {
       statusRes = await fetch(
-        `${SYNC_BASE}/api/profile-sync/status?challenge=${encodeURIComponent(challenge)}`,
+        `${oauthSyncBase()}/api/profile-sync/status?challenge=${encodeURIComponent(challenge)}`,
         { signal: AbortSignal.timeout(1e4) }
       );
     } catch {
@@ -2026,7 +2152,7 @@ async function runPush() {
   console.log("\n  Verified. Sending one-time snapshot...");
   let res;
   try {
-    res = await fetch(`${SYNC_BASE}/api/profile-sync`, {
+    res = await fetch(`${oauthSyncBase()}/api/profile-sync`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(requestBody),

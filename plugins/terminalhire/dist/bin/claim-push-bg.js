@@ -509,11 +509,125 @@ function decrypt(blob, key) {
 
 // bin/claim-push-bg.js
 init_state_dir();
+
+// src/api-base.ts
+var PROD_API_BASE = "https://terminalhire.com";
+var DEV_API_BASE = "https://dev.terminalhire.com";
+var ApiBaseError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ApiBaseError";
+  }
+};
+var ALLOWED_HOSTS = {
+  "terminalhire.com": "https:",
+  "www.terminalhire.com": "https:",
+  "dev.terminalhire.com": "https:",
+  localhost: "http:",
+  "127.0.0.1": "http:"
+};
+var ALLOW_LOCAL_API_KEY = "TERMINALHIRE_ALLOW_LOCAL_API";
+var ALLOWED_DESCRIPTION = [
+  PROD_API_BASE,
+  DEV_API_BASE,
+  `http://localhost:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`,
+  `http://127.0.0.1:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`
+].join(", ");
+var CANONICAL_REWRITES = {
+  "www.terminalhire.com": PROD_API_BASE
+};
+var ENV_KEYS = ["TERMINALHIRE_API_URL", "JPI_API_URL"];
+function sanitizeOverrideForError(raw) {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return `(disallowed scheme: ${url.protocol.slice(0, -1)})`;
+    }
+    if (url.username !== "" || url.password !== "") {
+      return `${url.protocol}//***@${url.host}`;
+    }
+    return url.origin;
+  } catch {
+    return "(unparseable override)";
+  }
+}
+function isLoopbackOrigin(origin) {
+  try {
+    const host = new URL(origin).hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+function localApiAllowed(env) {
+  return env[ALLOW_LOCAL_API_KEY] === "1";
+}
+function resolveApiBase(env = process.env) {
+  for (const key of ENV_KEYS) {
+    const raw = env[key];
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (trimmed === "") continue;
+    const normalized = normalizeOverride(trimmed);
+    if (normalized === null) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${sanitizeOverrideForError(trimmed)} is not an allowed API host (allowed: ${ALLOWED_DESCRIPTION}). Refusing to continue so we do not silently hit production.`
+      );
+    }
+    if (isLoopbackOrigin(normalized) && !localApiAllowed(env)) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${normalized} is a loopback origin. Set ${ALLOW_LOCAL_API_KEY}=1 to talk to a local web app on purpose. Refusing so stored credentials cannot be exfiltrated to localhost by a poisoned override.`
+      );
+    }
+    return normalized;
+  }
+  return PROD_API_BASE;
+}
+function resolveApiBaseOrProd(env = process.env) {
+  try {
+    return resolveApiBase(env);
+  } catch {
+    return PROD_API_BASE;
+  }
+}
+function normalizeOverride(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.username !== "" || url.password !== "") return null;
+  const expectedProtocol = ALLOWED_HOSTS[url.hostname];
+  if (expectedProtocol === void 0) return null;
+  if (url.protocol !== expectedProtocol) return null;
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1" && url.port !== "") {
+    return null;
+  }
+  const rewrite = CANONICAL_REWRITES[url.hostname];
+  if (rewrite !== void 0) return rewrite;
+  return url.origin;
+}
+function isNonProdApiBase(base = resolveApiBaseOrProd()) {
+  return base !== PROD_API_BASE;
+}
+function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
+  if (!isNonProdApiBase(base)) return;
+  try {
+    stream.write(
+      "terminalhire: non-prod API base \u2014 using the same local session/push credentials as prod; do not mix environments casually.\n"
+    );
+  } catch {
+  }
+}
+
+// bin/claim-push-bg.js
 var TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
 var CLAIM_PUSH_AUTO_MARKER = join5(TERMINALHIRE_DIR4, "claim-push-auto.json");
 var CLAIM_PUSH_TOKEN_FILE = join5(TERMINALHIRE_DIR4, "claim-push-token.enc");
 var CLAIM_PUSH_MANUAL_MARKER = join5(TERMINALHIRE_DIR4, "claim-push.json");
-var CLAIM_SYNC_BASE = "https://terminalhire.com";
+var CLAIM_SYNC_BASE = resolveApiBase();
+warnSharedCredentialsIfNonProd(CLAIM_SYNC_BASE);
 var AUTO_CONSENT_VERSION = 3;
 var AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
 async function writePushTokenEnc(rawToken) {

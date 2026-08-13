@@ -38,6 +38,114 @@ var init_open_url = __esm({
   }
 });
 
+// src/api-base.ts
+function sanitizeOverrideForError(raw) {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return `(disallowed scheme: ${url.protocol.slice(0, -1)})`;
+    }
+    if (url.username !== "" || url.password !== "") {
+      return `${url.protocol}//***@${url.host}`;
+    }
+    return url.origin;
+  } catch {
+    return "(unparseable override)";
+  }
+}
+function isLoopbackOrigin(origin) {
+  try {
+    const host = new URL(origin).hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+function localApiAllowed(env) {
+  return env[ALLOW_LOCAL_API_KEY] === "1";
+}
+function resolveApiBase(env = process.env) {
+  for (const key of ENV_KEYS) {
+    const raw = env[key];
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (trimmed === "") continue;
+    const normalized = normalizeOverride(trimmed);
+    if (normalized === null) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${sanitizeOverrideForError(trimmed)} is not an allowed API host (allowed: ${ALLOWED_DESCRIPTION}). Refusing to continue so we do not silently hit production.`
+      );
+    }
+    if (isLoopbackOrigin(normalized) && !localApiAllowed(env)) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${normalized} is a loopback origin. Set ${ALLOW_LOCAL_API_KEY}=1 to talk to a local web app on purpose. Refusing so stored credentials cannot be exfiltrated to localhost by a poisoned override.`
+      );
+    }
+    return normalized;
+  }
+  return PROD_API_BASE;
+}
+function resolveOAuthBase(env = process.env) {
+  const base = resolveApiBase(env);
+  if (OAUTH_ALLOWED_ORIGINS.includes(base)) return base;
+  if (env[ALLOW_LOCAL_OAUTH_KEY] === "1") return base;
+  throw new ApiBaseError(
+    `terminalhire: the API base is ${base}, which is not a trusted origin for a browser sign-in. Point the CLI at ${DEV_API_BASE} for an end-to-end login, or set ${ALLOW_LOCAL_OAUTH_KEY}=1 (with ${ALLOW_LOCAL_API_KEY}=1) if you are running the web app locally on purpose. Refusing to open production sign-in while the API is local.`
+  );
+}
+function normalizeOverride(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.username !== "" || url.password !== "") return null;
+  const expectedProtocol = ALLOWED_HOSTS[url.hostname];
+  if (expectedProtocol === void 0) return null;
+  if (url.protocol !== expectedProtocol) return null;
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1" && url.port !== "") {
+    return null;
+  }
+  const rewrite = CANONICAL_REWRITES[url.hostname];
+  if (rewrite !== void 0) return rewrite;
+  return url.origin;
+}
+var PROD_API_BASE, DEV_API_BASE, ApiBaseError, ALLOWED_HOSTS, OAUTH_ALLOWED_ORIGINS, ALLOW_LOCAL_OAUTH_KEY, ALLOW_LOCAL_API_KEY, ALLOWED_DESCRIPTION, CANONICAL_REWRITES, ENV_KEYS;
+var init_api_base = __esm({
+  "src/api-base.ts"() {
+    "use strict";
+    PROD_API_BASE = "https://terminalhire.com";
+    DEV_API_BASE = "https://dev.terminalhire.com";
+    ApiBaseError = class extends Error {
+      constructor(message) {
+        super(message);
+        this.name = "ApiBaseError";
+      }
+    };
+    ALLOWED_HOSTS = {
+      "terminalhire.com": "https:",
+      "www.terminalhire.com": "https:",
+      "dev.terminalhire.com": "https:",
+      localhost: "http:",
+      "127.0.0.1": "http:"
+    };
+    OAUTH_ALLOWED_ORIGINS = [PROD_API_BASE, DEV_API_BASE];
+    ALLOW_LOCAL_OAUTH_KEY = "TERMINALHIRE_ALLOW_LOCAL_OAUTH";
+    ALLOW_LOCAL_API_KEY = "TERMINALHIRE_ALLOW_LOCAL_API";
+    ALLOWED_DESCRIPTION = [
+      PROD_API_BASE,
+      DEV_API_BASE,
+      `http://localhost:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`,
+      `http://127.0.0.1:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`
+    ].join(", ");
+    CANONICAL_REWRITES = {
+      "www.terminalhire.com": PROD_API_BASE
+    };
+    ENV_KEYS = ["TERMINALHIRE_API_URL", "JPI_API_URL"];
+  }
+});
+
 // src/state-dir.ts
 import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
 function warnStateDirOnce(dir, message) {
@@ -11367,17 +11475,30 @@ async function maybePromptPeerConnect({
     writeConfig({ resumePublishPrompted: true });
     if (wantsPublish) {
       const next = "/dashboard?publish=1";
-      const url = `${OAUTH_BASE}/api/auth/github?next=${encodeURIComponent(next)}`;
-      output.write(
-        `
+      let url = null;
+      try {
+        url = `${resolveOAuthBase()}/api/auth/github?next=${encodeURIComponent(next)}`;
+      } catch (err) {
+        output.write(
+          `
+  Cannot open the publish confirmation: ${err instanceof Error ? err.message : String(err)}
+  You stay viewer-only for now \u2014 publish later from terminalhire.com/dashboard.
+
+`
+        );
+      }
+      if (url !== null) {
+        output.write(
+          `
   Opening your browser to confirm \u2014 nothing is published until you click
   publish there: ${url}
   (You can also publish anytime from terminalhire.com/dashboard.)
 
 `
-      );
-      openUrl(url);
-      resumePublishOpened = true;
+        );
+        openUrl(url);
+        resumePublishOpened = true;
+      }
     } else {
       output.write(
         "\n  No worries \u2014 you stay viewer-only (not listed in the directory).\n  Publish anytime from terminalhire.com/dashboard.\n\n"
@@ -11391,13 +11512,13 @@ async function maybePromptPeerConnect({
     resumePublishOpened
   };
 }
-var OAUTH_BASE, PROMPT;
+var PROMPT;
 var init_peer_connect_prompt = __esm({
   "bin/peer-connect-prompt.js"() {
     "use strict";
     init_config();
     init_open_url();
-    OAUTH_BASE = "https://terminalhire.com";
+    init_api_base();
     PROMPT = [
       "",
       "  Connect with other builders?",
@@ -11415,6 +11536,7 @@ var init_peer_connect_prompt = __esm({
 
 // bin/jpi-login.js
 init_open_url();
+init_api_base();
 async function run() {
   const subcommand = process.argv[2];
   if (subcommand === "logout") {
@@ -11492,11 +11614,15 @@ async function runLogin() {
       console.log("    (No matching vocabulary tags found in public repos/topics)");
     }
     if (profile.acceptance?.status === "ok" && profile.acceptance.qualifyingTotal > 0) {
-      console.log(`    Proof-of-work: ${profile.acceptance.qualifyingTotal} merged PR${profile.acceptance.qualifyingTotal === 1 ? "" : "s"} into external repos`);
+      console.log(
+        `    Proof-of-work: ${profile.acceptance.qualifyingTotal} merged PR${profile.acceptance.qualifyingTotal === 1 ? "" : "s"} into external repos`
+      );
       const { candidatesTruncated, totalMergedExternal, candidatesScanned } = profile.acceptance;
       if (candidatesTruncated === true && typeof totalMergedExternal === "number" && typeof candidatesScanned === "number" && totalMergedExternal > candidatesScanned) {
         const beyond = totalMergedExternal - candidatesScanned;
-        console.log(`    (scanned your ${candidatesScanned} most recent \u2014 ${beyond} more merged PR${beyond === 1 ? "" : "s"} in your history)`);
+        console.log(
+          `    (scanned your ${candidatesScanned} most recent \u2014 ${beyond} more merged PR${beyond === 1 ? "" : "s"} in your history)`
+        );
       }
     }
     console.log("");
@@ -11505,29 +11631,40 @@ async function runLogin() {
     console.log("");
     const skipWeb = process.argv.includes("--no-web");
     if (!isMock && !skipWeb) {
+      let webUrl;
       try {
-        const OAUTH_BASE2 = "https://terminalhire.com";
-        const webUrl = `${OAUTH_BASE2}/api/auth/github?next=/dashboard`;
-        console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
-        console.log("  Your web profile & r\xE9sum\xE9 \u2014 public GitHub data only,");
-        console.log("  your local profile is NOT uploaded.");
-        console.log(`  \u2192 ${webUrl}`);
-        if (process.stdout.isTTY) {
-          console.log("  Opening it now to sign you in at terminalhire.com\u2026");
-          openInBrowser(webUrl);
-        } else {
-          console.log("  Open the link above to sign in & view your r\xE9sum\xE9.");
+        webUrl = `${resolveOAuthBase()}/api/auth/github?next=/dashboard`;
+      } catch (err) {
+        console.error(
+          `
+  Skipping the web sign-in handoff: ${err instanceof Error ? err.message : String(err)}
+`
+        );
+      }
+      if (webUrl !== void 0) {
+        try {
+          console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+          console.log("  Your web profile & r\xE9sum\xE9 \u2014 public GitHub data only,");
+          console.log("  your local profile is NOT uploaded.");
+          console.log(`  \u2192 ${webUrl}`);
+          if (process.stdout.isTTY) {
+            console.log("  Opening it now to sign you in at terminalhire.com\u2026");
+            openInBrowser(webUrl);
+          } else {
+            console.log("  Open the link above to sign in & view your r\xE9sum\xE9.");
+          }
+          console.log("  (skip next time with: terminalhire login --no-web)");
+          console.log("");
+        } catch {
         }
-        console.log("  (skip next time with: terminalhire login --no-web)");
-        console.log("");
-      } catch {
       }
     }
-    if (process.env["JPI_SKIP_PEER_PROMPT"] !== "1") try {
-      const { maybePromptPeerConnect: maybePromptPeerConnect2 } = await Promise.resolve().then(() => (init_peer_connect_prompt(), peer_connect_prompt_exports));
-      await maybePromptPeerConnect2({ login: ghProfile.login });
-    } catch {
-    }
+    if (process.env["JPI_SKIP_PEER_PROMPT"] !== "1")
+      try {
+        const { maybePromptPeerConnect: maybePromptPeerConnect2 } = await Promise.resolve().then(() => (init_peer_connect_prompt(), peer_connect_prompt_exports));
+        await maybePromptPeerConnect2({ login: ghProfile.login });
+      } catch {
+      }
     console.log("  Run `terminalhire jobs` to see matching roles using your enriched profile.");
     console.log("");
   } catch (err) {

@@ -10458,6 +10458,17 @@ var init_src = __esm({
 });
 
 // src/state-dir.ts
+var state_dir_exports = {};
+__export(state_dir_exports, {
+  STATE_DIR_MODE: () => STATE_DIR_MODE,
+  STATE_DIR_OK: () => STATE_DIR_OK,
+  STATE_DIR_SYMLINK: () => STATE_DIR_SYMLINK,
+  STATE_DIR_UNVERIFIED: () => STATE_DIR_UNVERIFIED,
+  __resetUnverifiedSecretWarningForTests: () => __resetUnverifiedSecretWarningForTests,
+  applyStateDirSecretPolicy: () => applyStateDirSecretPolicy,
+  ensureStateDir: () => ensureStateDir,
+  ensureStateDirForSecret: () => ensureStateDirForSecret
+});
 import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
 function warnStateDirOnce(dir, message) {
   if (warnedDirs.has(dir)) return;
@@ -10522,6 +10533,9 @@ then re-run the command. If the symlink is intentional, point TERMINALHIRE_DIR a
 }
 function ensureStateDirForSecret(dir) {
   applyStateDirSecretPolicy(dir, ensureStateDir(dir));
+}
+function __resetUnverifiedSecretWarningForTests() {
+  warnedUnverifiedSecretWriteThisProcess = false;
 }
 var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs, warnedUnverifiedSecretWriteThisProcess;
 var init_state_dir = __esm({
@@ -11775,12 +11789,225 @@ var init_founder_paid_badge = __esm({
   }
 });
 
+// src/web-session.ts
+var web_session_exports = {};
+__export(web_session_exports, {
+  clearWebSessionFile: () => clearWebSessionFile,
+  readWebSessionCookie: () => readWebSessionCookie,
+  readWebSessionFile: () => readWebSessionFile,
+  webSessionFilePath: () => webSessionFilePath,
+  writeWebSessionFile: () => writeWebSessionFile
+});
+import { chmodSync, existsSync as existsSync6, readFileSync as readFileSync7, rmSync as rmSync3, writeFileSync as writeFileSync6 } from "fs";
+import { homedir as homedir7 } from "os";
+import { join as join10 } from "path";
+function terminalhireDir() {
+  return process.env.TERMINALHIRE_DIR || join10(homedir7(), ".terminalhire");
+}
+function webSessionFilePath() {
+  return join10(terminalhireDir(), "web-session");
+}
+function readWebSessionFile() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync6(path)) return null;
+    const v = readFileSync7(path, "utf8").trim();
+    return v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+function readWebSessionCookie() {
+  const fromFile = readWebSessionFile();
+  if (fromFile) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return typeof env === "string" && env.length > 0 ? env : null;
+}
+function writeWebSessionFile(token) {
+  ensureStateDirForSecret(terminalhireDir());
+  const path = webSessionFilePath();
+  writeFileSync6(path, token, { mode: 384, encoding: "utf8" });
+  try {
+    chmodSync(path, 384);
+  } catch {
+  }
+}
+function clearWebSessionFile() {
+  try {
+    rmSync3(webSessionFilePath());
+  } catch {
+  }
+}
+var init_web_session = __esm({
+  "src/web-session.ts"() {
+    "use strict";
+    init_state_dir();
+  }
+});
+
+// bin/jpi-decline.js
+var jpi_decline_exports = {};
+__export(jpi_decline_exports, {
+  DECLINE_CHOICES: () => DECLINE_CHOICES,
+  consentNotice: () => consentNotice,
+  declineBody: () => declineBody,
+  ensureDeclineConsent: () => ensureDeclineConsent,
+  forgetDeclineConsent: () => forgetDeclineConsent,
+  hasDeclineConsent: () => hasDeclineConsent,
+  postingIdFromJobId: () => postingIdFromJobId,
+  reasonForKey: () => reasonForKey,
+  runDeclinePrompt: () => runDeclinePrompt,
+  sendDecline: () => sendDecline
+});
+import { createInterface } from "readline";
+import { existsSync as existsSync7, readFileSync as readFileSync8, writeFileSync as writeFileSync7, rmSync as rmSync4 } from "fs";
+import { homedir as homedir8 } from "os";
+import { join as join11 } from "path";
+function terminalhireDir2() {
+  return process.env.TERMINALHIRE_DIR || join11(homedir8(), ".terminalhire");
+}
+function consentFilePath() {
+  return join11(terminalhireDir2(), "decline-consent");
+}
+function postingIdFromJobId(jobId) {
+  const id = String(jobId ?? "");
+  if (!id.startsWith("bounty:founder:")) return null;
+  const raw = id.slice("bounty:founder:".length).trim();
+  return raw.length > 0 ? raw : null;
+}
+function reasonForKey(key) {
+  const hit = DECLINE_CHOICES.find((c) => c.key === String(key ?? "").trim());
+  return hit ? hit.reason : null;
+}
+function declineBody(bountyId, reason) {
+  return { bountyId, reason };
+}
+function consentNotice(bountyId, reason) {
+  return [
+    "",
+    "This is the first thing you have sent a founder from this machine, so:",
+    "",
+    "  Sending this posts EXACTLY this, and nothing else:",
+    `    ${JSON.stringify(declineBody(bountyId, reason))}`,
+    "",
+    "  The founder sees a COUNT, never your name \u2014 answers are pooled across",
+    "  developers, and the breakdown stays hidden until enough people have",
+    "  answered that no single answer points at one person.",
+    "",
+    "  Your profile, your matches and your local job statuses stay on this",
+    "  machine, exactly as before.",
+    "",
+    "  `terminalhire decline --forget` makes this ask again next time. It does",
+    "  not unsend an answer \u2014 the stored row has no name on it to find.",
+    ""
+  ].join("\n");
+}
+function prompt(question) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(String(answer ?? "").trim());
+    });
+  });
+}
+function hasDeclineConsent() {
+  try {
+    return existsSync7(consentFilePath()) && readFileSync8(consentFilePath(), "utf8").trim() === "yes";
+  } catch {
+    return false;
+  }
+}
+function forgetDeclineConsent() {
+  try {
+    rmSync4(consentFilePath());
+  } catch {
+  }
+}
+async function grantDeclineConsent() {
+  const { ensureStateDir: ensureStateDir2 } = await Promise.resolve().then(() => (init_state_dir(), state_dir_exports));
+  ensureStateDir2(terminalhireDir2());
+  writeFileSync7(consentFilePath(), "yes\n", "utf8");
+}
+async function ensureDeclineConsent(bountyId, reason) {
+  if (hasDeclineConsent()) return true;
+  if (!process.stdin.isTTY) {
+    console.error("Passing on a posting needs an interactive terminal the first time.");
+    return false;
+  }
+  console.log(consentNotice(bountyId, reason));
+  const answer = (await prompt('Send it? Type "yes" to confirm: ')).toLowerCase();
+  if (answer !== "yes") {
+    console.log("Not sent. Nothing left this machine.");
+    return false;
+  }
+  await grantDeclineConsent();
+  return true;
+}
+async function sendDecline(bountyId, reason) {
+  if (!DECLINE_CHOICES.some((c) => c.reason === reason)) {
+    console.error("Not one of the answers \u2014 nothing sent.");
+    return false;
+  }
+  const { readWebSessionCookie: readWebSessionCookie2 } = await Promise.resolve().then(() => (init_web_session(), web_session_exports));
+  const cookie = readWebSessionCookie2();
+  if (!cookie) {
+    console.log("\nRun `terminalhire link` first \u2014 a founder needs to know the answer is real.");
+    return false;
+  }
+  if (!await ensureDeclineConsent(bountyId, reason)) return false;
+  try {
+    const res = await fetch(`${API_URL}/api/posting/decline`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `${GH_SESSION_COOKIE}=${cookie}`
+      },
+      body: JSON.stringify(declineBody(bountyId, reason)),
+      signal: AbortSignal.timeout(1e4)
+    });
+    if (!res.ok) {
+      console.log(`
+Could not send that (${res.status}). Nothing else was sent.`);
+      return false;
+    }
+    console.log("\nSent \u2014 thanks. The founder sees a count, never your name.");
+    return true;
+  } catch {
+    console.log("\nCould not reach terminalhire. Nothing else was sent.");
+    return false;
+  }
+}
+async function runDeclinePrompt(bountyId, { ask = prompt } = {}) {
+  console.log("\nWhy are you passing? The founder sees a count, never your name.");
+  for (const c of DECLINE_CHOICES) console.log(`  ${c.key}. ${c.label}`);
+  const pick = await ask("\nEnter a number, or press Enter to skip: ");
+  const reason = reasonForKey(pick);
+  if (!reason) return false;
+  return sendDecline(bountyId, reason);
+}
+var API_URL, GH_SESSION_COOKIE, DECLINE_CHOICES;
+var init_jpi_decline = __esm({
+  "bin/jpi-decline.js"() {
+    "use strict";
+    API_URL = process.env["TERMINALHIRE_API_URL"] || "https://terminalhire.com";
+    GH_SESSION_COOKIE = "__jpi_gh_session";
+    DECLINE_CHOICES = [
+      { key: "1", reason: "price_low", label: "the price is too low for the work" },
+      { key: "2", reason: "scope_unclear", label: "I can't tell what \u201Cdone\u201D means" },
+      { key: "3", reason: "repo_risky", label: "no tests or CI \u2014 I could not check my own work" },
+      { key: "4", reason: "not_my_stack", label: "not my stack" },
+      { key: "5", reason: "other", label: "something else" }
+    ];
+  }
+});
+
 // bin/jpi-bounties.js
 init_src();
-import { readFileSync as readFileSync7 } from "fs";
-import { join as join10 } from "path";
-import { homedir as homedir7 } from "os";
-import { createInterface } from "readline";
+import { readFileSync as readFileSync9 } from "fs";
+import { join as join12 } from "path";
+import { homedir as homedir9 } from "os";
+import { createInterface as createInterface2 } from "readline";
 
 // ../../packages/core/src/payout-split.ts
 var PLATFORM_TAKE_BPS = 1e3;
@@ -11835,12 +12062,104 @@ function linkTitle(title, url) {
   return href ? `${safeTitle} (${href})` : safeTitle;
 }
 
+// src/api-base.ts
+var PROD_API_BASE = "https://terminalhire.com";
+var DEV_API_BASE = "https://dev.terminalhire.com";
+var ApiBaseError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ApiBaseError";
+  }
+};
+var ALLOWED_HOSTS = {
+  "terminalhire.com": "https:",
+  "www.terminalhire.com": "https:",
+  "dev.terminalhire.com": "https:",
+  localhost: "http:",
+  "127.0.0.1": "http:"
+};
+var ALLOW_LOCAL_API_KEY = "TERMINALHIRE_ALLOW_LOCAL_API";
+var ALLOWED_DESCRIPTION = [
+  PROD_API_BASE,
+  DEV_API_BASE,
+  `http://localhost:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`,
+  `http://127.0.0.1:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`
+].join(", ");
+var CANONICAL_REWRITES = {
+  "www.terminalhire.com": PROD_API_BASE
+};
+var ENV_KEYS = ["TERMINALHIRE_API_URL", "JPI_API_URL"];
+function sanitizeOverrideForError(raw) {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return `(disallowed scheme: ${url.protocol.slice(0, -1)})`;
+    }
+    if (url.username !== "" || url.password !== "") {
+      return `${url.protocol}//***@${url.host}`;
+    }
+    return url.origin;
+  } catch {
+    return "(unparseable override)";
+  }
+}
+function isLoopbackOrigin(origin) {
+  try {
+    const host = new URL(origin).hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+function localApiAllowed(env) {
+  return env[ALLOW_LOCAL_API_KEY] === "1";
+}
+function resolveApiBase(env = process.env) {
+  for (const key of ENV_KEYS) {
+    const raw = env[key];
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (trimmed === "") continue;
+    const normalized = normalizeOverride(trimmed);
+    if (normalized === null) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${sanitizeOverrideForError(trimmed)} is not an allowed API host (allowed: ${ALLOWED_DESCRIPTION}). Refusing to continue so we do not silently hit production.`
+      );
+    }
+    if (isLoopbackOrigin(normalized) && !localApiAllowed(env)) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${normalized} is a loopback origin. Set ${ALLOW_LOCAL_API_KEY}=1 to talk to a local web app on purpose. Refusing so stored credentials cannot be exfiltrated to localhost by a poisoned override.`
+      );
+    }
+    return normalized;
+  }
+  return PROD_API_BASE;
+}
+function normalizeOverride(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.username !== "" || url.password !== "") return null;
+  const expectedProtocol = ALLOWED_HOSTS[url.hostname];
+  if (expectedProtocol === void 0) return null;
+  if (url.protocol !== expectedProtocol) return null;
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1" && url.port !== "") {
+    return null;
+  }
+  const rewrite = CANONICAL_REWRITES[url.hostname];
+  if (rewrite !== void 0) return rewrite;
+  return url.origin;
+}
+
 // bin/jpi-bounties.js
 init_founder_pin();
-var TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join10(homedir7(), ".terminalhire");
-var INDEX_CACHE_FILE2 = join10(TERMINALHIRE_DIR7, "index-cache.json");
+var TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join12(homedir9(), ".terminalhire");
+var INDEX_CACHE_FILE2 = join12(TERMINALHIRE_DIR7, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
-var API_URL = process.env["TERMINALHIRE_API_URL"] ?? process.env["JPI_API_URL"] ?? "https://terminalhire.com";
+var API_URL2 = resolveApiBase();
 var RANK_MODE = process.env["TERMINALHIRE_BOUNTY_RANK"] ?? "winnability";
 var CONTINUITY_RANK_DISABLED = process.env["TERMINALHIRE_NO_CONTINUITY_RANK"] === "1";
 var DEFAULT_LIMIT = 15;
@@ -11852,7 +12171,7 @@ var SHOW_ALL = args.includes("--all");
 var WINNABLE_ONLY = args.includes("--winnable");
 function readIndexCache() {
   try {
-    const entry = JSON.parse(readFileSync7(INDEX_CACHE_FILE2, "utf8"));
+    const entry = JSON.parse(readFileSync9(INDEX_CACHE_FILE2, "utf8"));
     if (Date.now() - entry.ts < INDEX_TTL_MS) return entry.index;
     return null;
   } catch {
@@ -11862,14 +12181,14 @@ function readIndexCache() {
 async function fetchIndex() {
   const cached = readIndexCache();
   if (cached) return cached;
-  const res = await fetch(`${API_URL}/api/index`, { signal: AbortSignal.timeout(1e4) });
+  const res = await fetch(`${API_URL2}/api/index`, { signal: AbortSignal.timeout(1e4) });
   if (!res.ok) throw new Error(`/api/index returned ${res.status}`);
   const index = await res.json();
   writeIndexCache(index);
   return index;
 }
-function prompt(question) {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+function prompt2(question) {
+  const rl = createInterface2({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
     rl.question(question, (answer) => {
       rl.close();
@@ -12006,7 +12325,7 @@ function classifyEmptyStatus({ preFilterCount, postFilterCount, priced }) {
   return "empty";
 }
 async function getBounties({ quiet = false, offline = false, priced = PRICED_ONLY } = {}) {
-  if (!quiet) console.log(`Fetching bounty index from ${API_URL}/api/index...`);
+  if (!quiet) console.log(`Fetching bounty index from ${API_URL2}/api/index...`);
   const index = offline ? readIndexCache() : await fetchIndex();
   if (offline && !index) return { status: "no-cache" };
   let bounties = (index.jobs ?? []).filter((j) => j.source === "bounty");
@@ -12148,10 +12467,25 @@ async function run() {
     }
     if (!process.stdin.isTTY) return;
     console.log("\n" + "\u2500".repeat(70));
-    const pick = await prompt(
+    const pick = await prompt2(
       `
-Enter a number to open a bounty's claim page, or press Enter to exit: `
+Enter a number to open a bounty's claim page, d<number> to say why you're passing, or press Enter to exit: `
     );
+    const declineMatch = /^d\s*(\d+)$/i.exec(pick.trim());
+    if (declineMatch) {
+      const dIdx = parseInt(declineMatch[1], 10) - 1;
+      if (Number.isNaN(dIdx) || dIdx < 0 || dIdx >= shown.length) return;
+      const { postingIdFromJobId: postingIdFromJobId2, runDeclinePrompt: runDeclinePrompt2 } = await Promise.resolve().then(() => (init_jpi_decline(), jpi_decline_exports));
+      const postingId = postingIdFromJobId2(shown[dIdx]?.id);
+      if (!postingId) {
+        console.log(
+          "\nThat one is scraped from a public tracker \u2014 there is no founder here to tell."
+        );
+        return;
+      }
+      await runDeclinePrompt2(postingId);
+      return;
+    }
     const idx = parseInt(pick, 10) - 1;
     if (Number.isNaN(idx) || idx < 0 || idx >= shown.length) return;
     const chosen = shown[idx];

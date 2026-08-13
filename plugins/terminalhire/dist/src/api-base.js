@@ -14,6 +14,8 @@ var ALLOWED_HOSTS = {
   localhost: "http:",
   "127.0.0.1": "http:"
 };
+var OAUTH_ALLOWED_ORIGINS = [PROD_API_BASE, DEV_API_BASE];
+var ALLOW_LOCAL_OAUTH_KEY = "TERMINALHIRE_ALLOW_LOCAL_OAUTH";
 var ALLOW_LOCAL_API_KEY = "TERMINALHIRE_ALLOW_LOCAL_API";
 var ALLOWED_DESCRIPTION = [
   PROD_API_BASE,
@@ -71,6 +73,21 @@ function resolveApiBase(env = process.env) {
   }
   return PROD_API_BASE;
 }
+function resolveOAuthBase(env = process.env) {
+  const base = resolveApiBase(env);
+  if (OAUTH_ALLOWED_ORIGINS.includes(base)) return base;
+  if (env[ALLOW_LOCAL_OAUTH_KEY] === "1") return base;
+  throw new ApiBaseError(
+    `terminalhire: the API base is ${base}, which is not a trusted origin for a browser sign-in. Point the CLI at ${DEV_API_BASE} for an end-to-end login, or set ${ALLOW_LOCAL_OAUTH_KEY}=1 (with ${ALLOW_LOCAL_API_KEY}=1) if you are running the web app locally on purpose. Refusing to open production sign-in while the API is local.`
+  );
+}
+function resolveApiBaseOrProd(env = process.env) {
+  try {
+    return resolveApiBase(env);
+  } catch {
+    return PROD_API_BASE;
+  }
+}
 function normalizeOverride(raw) {
   let url;
   try {
@@ -89,55 +106,51 @@ function normalizeOverride(raw) {
   if (rewrite !== void 0) return rewrite;
   return url.origin;
 }
-
-// bin/approved-claims-sync.js
-var CLAIM_SYNC_BASE = resolveApiBase();
-function approvalsSyncGate({ autoMarkerExists, tokenFileExists }) {
-  if (!autoMarkerExists || !tokenFileExists) return { sync: false, reason: "not-opted-in" };
-  return { sync: true, reason: "ok" };
+function isNonProdApiBase(base = resolveApiBaseOrProd()) {
+  return base !== PROD_API_BASE;
 }
-function approvalsNudgeGate({ autoMarkerExists, tokenFileExists, awaitingApproval }) {
-  if (approvalsSyncGate({ autoMarkerExists, tokenFileExists }).sync) return false;
-  return Number.isInteger(awaitingApproval) && awaitingApproval > 0;
-}
-function buildApprovalsNudge(awaitingApproval) {
-  if (!Number.isInteger(awaitingApproval) || awaitingApproval <= 0) return null;
-  const n = awaitingApproval;
-  return `  \u26A0 ${n} claim${n === 1 ? "" : "s"} awaiting founder approval \u2014 terminalhire cannot check in the background until you enrol:
-    terminalhire claim --push --keep-updated    (or check one now: terminalhire claim slice <id>)`;
-}
-async function syncApprovedClaims({
-  readAutoMarker,
-  readPushTokenEnc,
-  readPrevious,
-  fetchImpl = fetch,
-  computeApprovedClaims,
-  timeoutMs = 15e3
-} = {}) {
+function formatDevMarker(base = resolveApiBaseOrProd()) {
+  if (!isNonProdApiBase(base)) return null;
+  let host = base;
   try {
-    const marker = readAutoMarker();
-    const token = await readPushTokenEnc();
-    if (!approvalsSyncGate({ autoMarkerExists: !!marker, tokenFileExists: !!token }).sync) {
-      return null;
-    }
-    const res = await fetchImpl(`${CLAIM_SYNC_BASE}/api/claim/approvals`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pushToken: token }),
-      signal: AbortSignal.timeout(timeoutMs)
-    });
-    if (!res || !res.ok) return null;
-    const body = await res.json();
-    const claimIds = body && Array.isArray(body.claimIds) ? body.claimIds : null;
-    if (!claimIds) return null;
-    return computeApprovedClaims(claimIds, readPrevious());
+    host = new URL(base).host;
   } catch {
-    return null;
+  }
+  return `[dev \u2192 ${host}]`;
+}
+var markerPrinted = false;
+function printDevMarkerIfNeeded(stream = process.stderr) {
+  if (markerPrinted) return;
+  const marker = formatDevMarker();
+  if (marker === null) return;
+  markerPrinted = true;
+  try {
+    stream.write(`${marker}
+`);
+  } catch {
+  }
+}
+function __resetDevMarkerLatchForTests() {
+  markerPrinted = false;
+}
+function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
+  if (!isNonProdApiBase(base)) return;
+  try {
+    stream.write(
+      "terminalhire: non-prod API base \u2014 using the same local session/push credentials as prod; do not mix environments casually.\n"
+    );
+  } catch {
   }
 }
 export {
-  approvalsNudgeGate,
-  approvalsSyncGate,
-  buildApprovalsNudge,
-  syncApprovedClaims
+  ApiBaseError,
+  DEV_API_BASE,
+  PROD_API_BASE,
+  __resetDevMarkerLatchForTests,
+  formatDevMarker,
+  isNonProdApiBase,
+  printDevMarkerIfNeeded,
+  resolveApiBase,
+  resolveOAuthBase,
+  warnSharedCredentialsIfNonProd
 };
