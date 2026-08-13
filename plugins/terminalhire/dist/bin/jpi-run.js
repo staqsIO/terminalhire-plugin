@@ -411,19 +411,19 @@ function idOrNull(fn) {
   const f = process[fn];
   return typeof f === "function" ? f.call(process) : null;
 }
-function buildJail(root) {
+function buildJail(root, guestUser) {
   const jail = join4(root, JAIL_SEGMENT);
   const tmp = join4(root, JAIL_TMP_SEGMENT);
   for (const dir of [jail, tmp, join4(jail, ".config"), join4(jail, ".cache"), join4(jail, ".npm")]) {
     mkdirSync2(dir, { recursive: true });
   }
   writeFileSync2(join4(jail, ".npmrc"), "", "utf8");
-  writeFileSync2(join4(jail, JAIL_PASSWD_FILE), jailPasswd(), "utf8");
-  writeFileSync2(join4(jail, JAIL_GROUP_FILE), jailGroup(), "utf8");
+  writeFileSync2(join4(jail, JAIL_PASSWD_FILE), guestUser ? jailPasswd(guestUser.uid, guestUser.gid) : jailPasswd(), "utf8");
+  writeFileSync2(join4(jail, JAIL_GROUP_FILE), guestUser ? jailGroup(guestUser.gid) : jailGroup(), "utf8");
   writeFileSync2(join4(jail, ".gitconfig"), '[user]\n	name = sandbox\n	email = sandbox@localhost\n[safe]\n	directory = *\n[url "https://github.com/"]\n	insteadOf = ssh://git@github.com/\n	insteadOf = git@github.com:\n', "utf8");
   return { jail, tmp };
 }
-var FenceError, ContainmentError, JAIL_PASSWD_FILE, JAIL_GROUP_FILE, GUEST_JAIL, FENCE_USER, JAIL_SEGMENT, JAIL_TMP_SEGMENT;
+var FenceError, ContainmentError, ContainmentRefusalError, JAIL_PASSWD_FILE, JAIL_GROUP_FILE, GUEST_JAIL, FENCE_USER, JAIL_SEGMENT, JAIL_TMP_SEGMENT;
 var init_fence = __esm({
   "../../packages/containment/dist/fence.js"() {
     "use strict";
@@ -437,6 +437,8 @@ var init_fence = __esm({
         super(message);
         this.sweep = sweep2;
       }
+    };
+    ContainmentRefusalError = class extends FenceError {
     };
     JAIL_PASSWD_FILE = ".fence-passwd";
     JAIL_GROUP_FILE = ".fence-group";
@@ -479,6 +481,19 @@ function syncResult(res) {
     ...res.error ? { error: res.error } : {}
   };
 }
+function ambientTargetKeysIn(env) {
+  return AMBIENT_TARGET_KEYS.filter((k) => {
+    const v = (env[k] ?? "").trim();
+    if (v.length === 0)
+      return false;
+    if (k === "DOCKER_HOST")
+      return !sharesThisFilesystem(v);
+    return true;
+  });
+}
+function sharesThisFilesystem(dockerHost) {
+  return dockerHost.toLowerCase().startsWith("unix://");
+}
 function localDockerClient() {
   return LOCAL;
 }
@@ -501,6 +516,14 @@ function remoteDockerClient(endpoint) {
   const argv = (args) => ["--host", target, ...args];
   return {
     endpoint: target,
+    // Always empty, and it is a fact about this client rather than about the
+    // process: every call below spawns with `scrubEndpointEnv`, so no ambient
+    // selector reaches the child even when one is exported here. Returning
+    // `ambientTargetKeysIn(process.env)` would report a redirect that cannot
+    // touch this client and refuse a run for no reason.
+    ambientTarget() {
+      return [];
+    },
     spawn(args) {
       return spawn2(DOCKER_BIN, argv(args), {
         stdio: ["ignore", "pipe", "pipe"],
@@ -519,7 +542,7 @@ function remoteDockerClient(endpoint) {
     }
   };
 }
-var DOCKER_BIN, AMBIENT_ENDPOINT_KEYS, LOCAL, SCRUBBED;
+var DOCKER_BIN, AMBIENT_ENDPOINT_KEYS, AMBIENT_TARGET_KEYS, LOCAL, SCRUBBED;
 var init_dockerClient = __esm({
   "../../packages/containment/dist/dockerClient.js"() {
     "use strict";
@@ -531,8 +554,12 @@ var init_dockerClient = __esm({
       "DOCKER_TLS_VERIFY",
       "DOCKER_CERT_PATH"
     ];
+    AMBIENT_TARGET_KEYS = ["DOCKER_HOST", "DOCKER_CONTEXT"];
     LOCAL = {
       endpoint: null,
+      ambientTarget() {
+        return ambientTargetKeysIn(process.env);
+      },
       spawn(args) {
         return spawn2(DOCKER_BIN, [...args], { stdio: ["ignore", "pipe", "pipe"] });
       },
@@ -693,8 +720,17 @@ function hostUserFlag() {
     return [];
   return [`--user=${uid}:${gid}`];
 }
+function guestUserFlag(spec) {
+  const declared = spec.guestUser;
+  if (declared)
+    return [`--user=${declared.uid}:${declared.gid}`];
+  if (pathDomainOf(spec) === "venue") {
+    throw new FenceError("a venue-domain spec must declare guestUser: the tree is owned by the account that staged it on the venue, and this process\u2019s uid is a fact about a different machine. Handing the guest the local id gives it no write access to its own clone, and that EACCES reaches the classifier as the developer\u2019s suite failing.");
+  }
+  return hostUserFlag();
+}
 function guestIdentityMounts(spec) {
-  if (hostUserFlag().length === 0)
+  if (guestUserFlag(spec).length === 0)
     return [];
   const domain = pathDomainOf(spec);
   const resolve2 = resolverFor(domain);
@@ -740,7 +776,7 @@ function containerArgs(spec, env, opts) {
     // exactly what the `--cap-drop=ALL` on the line above is here to prevent.
     // Matching the owner is the narrower fix and it also drops the guest out of
     // root. `getuid`/`getgid` do not exist on Windows; omit the flag there.
-    ...hostUserFlag(),
+    ...guestUserFlag(spec),
     `--volume=${resolveSpecPath(spec.clone, "clone")}:${GUEST.clone}:rw`,
     `--volume=${resolveSpecPath(spec.jail, "jail")}:${GUEST.jail}:rw`,
     // TMP IS A TMPFS, NOT A BIND MOUNT (TERM-644), and the reason is two lines
@@ -952,7 +988,7 @@ async function waitForProxyReady(d, proxyName) {
     await sleep(250);
   }
 }
-async function startProxySidecar(d, allow, idBase, labels) {
+async function startProxySidecar(d, allow, idBase, staged, labels) {
   const label = labelArgs(labels);
   const netInt = `${idBase}-int`;
   const netExt = `${idBase}-ext`;
@@ -974,7 +1010,6 @@ async function startProxySidecar(d, allow, idBase, labels) {
     }
     return inspectNetwork(d, name) === "gone";
   };
-  const staged = stageProxyCode();
   const teardown = () => {
     const proxyGone = ensureContainerGone(proxyName);
     const intGone = ensureNetworkGone(netInt);
@@ -1073,16 +1108,30 @@ function assertDomainDeclared(d, spec) {
     return;
   throw new FenceError(`this client targets ${d.endpoint}, not the ambient daemon, so the spec must declare pathDomain: paths default to 'local' and would be canonicalised against THIS machine, which is the #735 defect (a rewritten mount source Docker then creates as an empty directory). State pathDomain: 'venue' for a remote filesystem, or 'local' to confirm these paths really are on this machine.`);
 }
-function assertProxyStagingPossible(spec) {
+function assertNotAmbientlySteered(d, spec) {
+  if (d.endpoint !== null)
+    return;
+  const steering = d.ambientTarget();
+  if (steering.length === 0)
+    return;
+  if (pathDomainOf(spec) === "venue")
+    return;
+  const names = steering.join(" and ");
+  throw new ContainmentRefusalError(`${names} ${steering.length > 1 ? "are" : "is"} set, so the ambient docker client may be talking to a daemon that does not share this filesystem \u2014 while these paths say they are on THIS machine. Every bind mount would then name a path the daemon does not have; Docker creates those as empty directories and the run fails for reasons that have nothing to do with your repository. Unset ${names} to use the local daemon, or declare pathDomain: 'venue' if the paths really are on the machine it points at.`);
+}
+function assertProxyStagedForVenue(spec, staged) {
   if (spec.profile !== "install")
     return;
   if (pathDomainOf(spec) !== "venue")
     return;
-  throw new FenceError('the container tier cannot run the install profile on a venue: the egress proxy sidecar is staged into a temp directory on THIS machine and bind-mounted by path, so the venue daemon would mount a path it does not have \u2014 Docker creates that as an empty directory and the sidecar dies with "Cannot find module". Venue-side staging is per-run venue work (docs/design-venue-seam.md \xA76); until it exists this refuses rather than reports a proxy failure as the run failing.');
+  if (staged !== void 0)
+    return;
+  throw new FenceError('this install step runs on a venue but no staged proxy code came with it. The runner can only stage on THIS machine, so it would bind-mount a path the venue does not have \u2014 Docker creates that as an empty directory and the sidecar dies with "Cannot find module". Pass RunInFenceOptions.proxyCode from the lease that owns the venue (VenueLease.stageProxyCode).');
 }
 async function runContainedOn(d, spec, env, opts = {}) {
   assertDomainDeclared(d, spec);
-  assertProxyStagingPossible(spec);
+  assertNotAmbientlySteered(d, spec);
+  assertProxyStagedForVenue(spec, opts.proxyCode);
   const leaks = auditEnv(env);
   if (leaks.length > 0) {
     throw new FenceError(`refusing to spawn: environment carries credential material (${leaks.join(", ")})`);
@@ -1092,7 +1141,9 @@ async function runContainedOn(d, spec, env, opts = {}) {
   try {
     if (spec.profile === "install") {
       const allow = opts.installAllowlist ?? DEFAULT_INSTALL_ALLOWLIST;
-      sidecar = await startProxySidecar(d, allow, `${idBase}-sc`, opts.labels);
+      const staged = opts.proxyCode ?? stageProxyCode();
+      const owned = opts.proxyCode === void 0;
+      sidecar = await startProxySidecar(d, allow, `${idBase}-sc`, owned ? staged : { dir: staged.dir, cleanup: leaveToTheLease }, opts.labels);
     }
     const argv = containerArgs(spec, env, {
       name: idBase,
@@ -1113,7 +1164,7 @@ function containerContainmentOn(d) {
     run: (spec, env, opts = {}) => runContainedOn(d, spec, env, opts)
   };
 }
-var DEFAULT_CONTAINER_IMAGE, GUEST, TMPFS_SIZE_MB, DOCKER_TIMEOUT_MS, SIDECAR_PROXY_PORT, SIDECAR_CODE_GUEST, PROXY_ENV_KEYS, WINDOWS_DRIVE_ROOT, IMAGE_HOST, IMAGE_NAME, IMAGE_PATH, IMAGE_TAG, IMAGE_DIGEST, IMAGE_REF, LABEL_KEY, probed, PROXY_FILES;
+var DEFAULT_CONTAINER_IMAGE, GUEST, TMPFS_SIZE_MB, DOCKER_TIMEOUT_MS, SIDECAR_PROXY_PORT, SIDECAR_CODE_GUEST, PROXY_ENV_KEYS, WINDOWS_DRIVE_ROOT, IMAGE_HOST, IMAGE_NAME, IMAGE_PATH, IMAGE_TAG, IMAGE_DIGEST, IMAGE_REF, LABEL_KEY, probed, PROXY_FILES, leaveToTheLease;
 var init_container = __esm({
   "../../packages/containment/dist/container.js"() {
     "use strict";
@@ -1144,6 +1195,8 @@ var init_container = __esm({
     LABEL_KEY = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
     probed = /* @__PURE__ */ new WeakMap();
     PROXY_FILES = ["proxyEntry.js", "egressProxy.js"];
+    leaveToTheLease = () => {
+    };
   }
 });
 
@@ -6885,7 +6938,16 @@ function parseArgs(argv) {
   return out;
 }
 function runScratchRoot() {
-  const root = mkdtempSync3(join11(tmpdir3(), "th-run-"));
+  let root;
+  try {
+    root = mkdtempSync3(join11(tmpdir3(), "th-run-"));
+  } catch (err) {
+    process.stderr.write(
+      `terminalhire: could not create the temporary directory this run works in, so nothing was cloned and nothing was executed. That is our environment failing, not your tests: check that the temp directory is writable. (${String(err?.message ?? err)})
+`
+    );
+    process.exit(2);
+  }
   let cleaned = false;
   const cleanup = () => {
     if (cleaned) return;
