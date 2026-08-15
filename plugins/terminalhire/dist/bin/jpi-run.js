@@ -1321,21 +1321,606 @@ var init_labels = __esm({
   }
 });
 
+// ../../packages/envrun/dist/previewRegistry.js
+function createPreviewRegistry() {
+  const live = /* @__PURE__ */ new Map();
+  return {
+    register(client, container) {
+      const names = live.get(client) ?? /* @__PURE__ */ new Set();
+      names.add(container);
+      live.set(client, names);
+    },
+    deregister(client, container) {
+      const names = live.get(client);
+      if (names === void 0)
+        return;
+      names.delete(container);
+      if (names.size === 0)
+        live.delete(client);
+    },
+    pairs() {
+      const out = [];
+      for (const [client, names] of live) {
+        for (const container of names)
+          out.push({ client, container });
+      }
+      return out;
+    },
+    reapAll() {
+      for (const [client, names] of live) {
+        for (const container of names) {
+          client.sync(["rm", "-f", container], { timeoutMs: 15e3 });
+        }
+      }
+      live.clear();
+    }
+  };
+}
+var init_previewRegistry = __esm({
+  "../../packages/envrun/dist/previewRegistry.js"() {
+    "use strict";
+  }
+});
+
+// ../../packages/envrun/dist/preview.js
+import { randomBytes } from "crypto";
+import { mkdirSync as mkdirSync3, writeFileSync as writeFileSync3 } from "fs";
+import { join as join6 } from "path";
+function docker(client, args, timeoutMs = 6e4) {
+  const res = client.sync([...args], { timeoutMs });
+  return {
+    ok: !res.error && res.status === 0,
+    stdout: res.stdout,
+    stderr: (res.error ? res.error.message : "") + res.stderr
+  };
+}
+function installReaper() {
+  if (reaperInstalled)
+    return;
+  reaperInstalled = true;
+  process.on("exit", () => {
+    livePreviews.reapAll();
+  });
+}
+function readHostPort(client, container) {
+  const res = docker(client, ["port", container, `${String(GUEST_PORT)}/tcp`]);
+  if (!res.ok)
+    return null;
+  for (const line of res.stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "")
+      continue;
+    const idx = trimmed.lastIndexOf(":");
+    if (idx === -1)
+      continue;
+    const port = Number(trimmed.slice(idx + 1));
+    if (Number.isInteger(port) && port > 0)
+      return port;
+  }
+  return null;
+}
+async function fetchInstanceToken(url, authToken) {
+  try {
+    const headers = {};
+    if (authToken) {
+      headers["Authorization"] = `Bearer ${authToken}`;
+    }
+    const res = await fetch(url, { cache: "no-store", headers });
+    if (!res.ok)
+      return null;
+    const body = await res.json();
+    return typeof body.instanceToken === "string" ? body.instanceToken : null;
+  } catch {
+    return null;
+  }
+}
+async function startPreview(req) {
+  const label = labelArgs(req.labels);
+  const container = `${req.idBase}-preview`;
+  const image = validateImage(req.image);
+  const bindAddress = req.bindAddress ?? "127.0.0.1";
+  const client = req.docker;
+  if (!LOOPBACK_BINDS.has(bindAddress) && req.authToken === void 0) {
+    throw new PreviewError(`refusing to publish the preview on ${bindAddress} without an explicit authToken: a bind wider than loopback puts this run \u2014 the test output tail included \u2014 on the developer's local network`);
+  }
+  const authToken = req.authToken ?? randomBytes(24).toString("base64url");
+  const envArgs = ["--env", `PREVIEW_AUTH_TOKEN=${authToken}`];
+  const probeHost = WILDCARD_BINDS.has(bindAddress) ? "127.0.0.1" : bindAddress;
+  const probeAuthority = probeHost.includes(":") ? `[${probeHost}]` : probeHost;
+  mkdirSync3(req.scratchDir, { recursive: true });
+  const docPath = join6(req.scratchDir, "preview-run.json");
+  writeFileSync3(docPath, JSON.stringify(req.document, null, 2), "utf8");
+  const teardown = () => {
+    livePreviews.deregister(client, container);
+    for (let i = 0; i < 3; i += 1) {
+      const inspect = docker(client, ["inspect", "--format", "{{.State.Status}}", container]);
+      if (!inspect.ok)
+        return { clean: true, leaked: [] };
+      docker(client, ["rm", "-f", container]);
+    }
+    const still = docker(client, ["inspect", "--format", "{{.State.Status}}", container]);
+    return still.ok ? { clean: false, leaked: [`container ${container}`] } : { clean: true, leaked: [] };
+  };
+  const startedAt = Date.now();
+  try {
+    const run2 = docker(client, [
+      "run",
+      "-d",
+      "--init",
+      `--name=${container}`,
+      // A network IS granted here, unlike the verification step. It carries our
+      // own argv over a document we wrote; the repo's code never runs in it.
+      "--network=bridge",
+      // Loopback by default, and anything wider was refused above unless the
+      // caller named a token. A bare `-p 8080` would bind 0.0.0.0 and put a
+      // developer's in-progress work on their local network.
+      `--publish=${bindAddress}:0:${String(GUEST_PORT)}`,
+      ...envArgs,
+      "--cap-drop=ALL",
+      "--security-opt=no-new-privileges",
+      "--pids-limit=64",
+      "--memory=256m",
+      "--read-only",
+      "--tmpfs=/tmp:rw,noexec,nosuid,size=8m",
+      ...label,
+      `--volume=${docPath}:${GUEST_DOC}:ro`,
+      "--",
+      image,
+      "node",
+      "-e",
+      SERVER_SOURCE
+    ]);
+    if (!run2.ok) {
+      throw new PreviewError(`could not start the preview container: ${run2.stderr.trim()}`);
+    }
+    const deadline = Date.now() + (req.readyTimeoutMs ?? 6e4);
+    let hostPort = null;
+    let token = null;
+    let lastDetail = "never answered";
+    while (Date.now() < deadline) {
+      hostPort ??= readHostPort(client, container);
+      if (hostPort === null) {
+        lastDetail = "Docker never reported a published host port";
+        await sleep2(200);
+        continue;
+      }
+      token = await fetchInstanceToken(`http://${probeAuthority}:${String(hostPort)}/`, authToken);
+      if (token !== null)
+        break;
+      const alive = docker(client, ["inspect", "--format", "{{.State.Running}}", container]);
+      if (alive.stdout.trim() !== "true") {
+        const logs = docker(client, ["logs", "--tail", "20", container]);
+        throw new PreviewError(`the preview container exited before serving: ${logs.stdout.trim()}${logs.stderr.trim()}`);
+      }
+      lastDetail = "the port is published but the server has not answered yet";
+      await sleep2(150);
+    }
+    if (hostPort === null || token === null) {
+      throw new PreviewError(`the preview URL never became reachable: ${lastDetail}`);
+    }
+    livePreviews.register(client, container);
+    installReaper();
+    const origin = `http://${probeAuthority}:${String(hostPort)}/`;
+    return {
+      url: `${origin}?token=${encodeURIComponent(authToken)}`,
+      origin,
+      authToken,
+      instanceToken: token,
+      container,
+      hostPort,
+      readyMs: Date.now() - startedAt,
+      teardown
+    };
+  } catch (err) {
+    teardown();
+    throw err;
+  }
+}
+function startLocalPreview(req) {
+  return startPreview({ ...req, docker: localDockerClient() });
+}
+var PreviewError, GUEST_PORT, GUEST_DOC, LOOPBACK_BINDS, WILDCARD_BINDS, SERVER_SOURCE, livePreviews, reaperInstalled, sleep2;
+var init_preview = __esm({
+  "../../packages/envrun/dist/preview.js"() {
+    "use strict";
+    init_dist();
+    init_previewRegistry();
+    PreviewError = class extends Error {
+    };
+    GUEST_PORT = 8080;
+    GUEST_DOC = "/preview/run.json";
+    LOOPBACK_BINDS = /* @__PURE__ */ new Set(["127.0.0.1", "localhost", "::1"]);
+    WILDCARD_BINDS = /* @__PURE__ */ new Set(["0.0.0.0", "::"]);
+    SERVER_SOURCE = `
+const http = require('node:http');
+const { readFileSync } = require('node:fs');
+const { randomUUID, timingSafeEqual } = require('node:crypto');
+
+// Read ONCE, at startup, and refuse to run without it. An unset token used to
+// skip the check entirely, which meant the one configuration nobody sets on
+// purpose was also the one that served a developer's in-progress work to
+// anything that could reach the port. Absent must never mean permitted \u2014 the
+// polarity requireSecret() holds in apps/web/lib/secrets.ts.
+const AUTH_TOKEN = process.env.PREVIEW_AUTH_TOKEN || '';
+if (AUTH_TOKEN === '') {
+  process.stderr.write(
+    'preview: refusing to start \u2014 PREVIEW_AUTH_TOKEN is unset, and this server will not ' +
+      'serve a run document unauthenticated\\n',
+  );
+  process.exit(1);
+}
+const EXPECTED = Buffer.from(AUTH_TOKEN, 'utf8');
+
+/** The token the client presented, or null. */
+function presented(req) {
+  const header = req.headers['authorization'];
+  const bearer = typeof header === 'string' ? /^Bearer\\s+(.+)$/i.exec(header) : null;
+  if (bearer !== null) return bearer[1];
+  // A non-Bearer Authorization header FALLS THROUGH to the query parameter. The
+  // earlier ternary branched on the header merely EXISTING, so a client sending
+  // "Basic \u2026" produced an empty string and could never authenticate at all.
+  //
+  // The query form stays because the founder opens this in a browser and a
+  // browser sends no Authorization header. That is the only reason it is
+  // accepted: a token in a URL lands in browser history, shell history and any
+  // proxy log on the way, where a header does not.
+  return new URL(req.url, 'http://localhost').searchParams.get('token');
+}
+
+function authorized(req) {
+  const given = presented(req);
+  if (typeof given !== 'string') return false;
+  const got = Buffer.from(given, 'utf8');
+  // timingSafeEqual THROWS on a length mismatch, so length is compared first and
+  // refused here. The length is not the secret; the bytes are.
+  if (got.length !== EXPECTED.length) return false;
+  return timingSafeEqual(got, EXPECTED);
+}
+
+// Per-INSTANCE, minted at boot. Not passed in, not derived from anything the
+// host controls \u2014 that is what makes "same token \u21D2 same instance" hold.
+const INSTANCE_TOKEN = randomUUID();
+const DOC = JSON.parse(readFileSync(${JSON.stringify(GUEST_DOC)}, 'utf8'));
+let served = 0;
+
+http
+  .createServer((req, res) => {
+    if (!authorized(req)) {
+      res.writeHead(401, { 'content-type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ error: 'unauthorized' }));
+    }
+    served += 1;
+    const body = JSON.stringify(
+      {
+        instanceToken: INSTANCE_TOKEN,
+        servedCount: served,
+        pid: process.pid,
+        run: DOC,
+      },
+      null,
+      2,
+    );
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+      'x-th-instance': INSTANCE_TOKEN,
+    });
+    res.end(body);
+  })
+  .listen(${String(GUEST_PORT)}, '0.0.0.0', () => {
+    console.log('preview-ready ' + INSTANCE_TOKEN);
+  });
+`;
+    livePreviews = createPreviewRegistry();
+    reaperInstalled = false;
+    sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
+  }
+});
+
+// ../../packages/envrun/dist/venue.js
+import { join as join7 } from "path";
+function localJailPaths(scratchRoot) {
+  return {
+    jail: join7(scratchRoot, JAIL_SEGMENT),
+    tmp: join7(scratchRoot, JAIL_TMP_SEGMENT)
+  };
+}
+function localVenue() {
+  return {
+    kind: "local",
+    acquire: (runId) => acquireTransactionally((allocated) => {
+      void allocated;
+      return Promise.resolve(acquireLocalLease(runId));
+    })
+  };
+}
+async function acquireTransactionally(body) {
+  const undos = [];
+  try {
+    return await body({
+      onRollback: (undo) => {
+        undos.push(undo);
+      }
+    });
+  } catch (err) {
+    const failures = [];
+    for (const undo of undos.reverse()) {
+      let failed = null;
+      try {
+        await undo();
+      } catch (rollbackErr) {
+        failed = { thrown: rollbackErr };
+      }
+      if (failed === null)
+        continue;
+      let entry;
+      try {
+        entry = describeThrown(failed.thrown, { includeName: true });
+      } catch {
+        entry = UNDESCRIBABLE_THROWN;
+      }
+      failures.push(entry);
+    }
+    if (failures.length > 0)
+      throw new VenueRollbackError(err, failures);
+    throw err;
+  }
+}
+function rollbackMessage(cause, rollbackFailures) {
+  const headline = describeThrown(cause, { includeName: false });
+  let tail2;
+  try {
+    tail2 = `[venue acquisition rolled back with ${String(rollbackFailures.length)} failure(s): ${rollbackFailures.join("; ")} \u2014 one or more allocated resources may still exist]`;
+  } catch {
+    tail2 = UNLISTABLE_ROLLBACK_FAILURES;
+  }
+  return `${headline} ${tail2}`;
+}
+function describeThrown(thrown, opts) {
+  try {
+    if (isErrorValue(thrown)) {
+      const message = readErrorField(thrown, "message", UNREADABLE_MESSAGE);
+      if (!opts.includeName)
+        return message;
+      const name = readErrorField(thrown, "name", UNREADABLE_NAME);
+      return message === "" ? name : `${name}: ${message}`;
+    }
+    return coerceToString(thrown);
+  } catch {
+    return UNDESCRIBABLE_THROWN;
+  }
+}
+function isErrorValue(thrown) {
+  try {
+    return thrown instanceof Error;
+  } catch {
+    return false;
+  }
+}
+function readErrorField(thrown, key, fallback) {
+  let raw;
+  try {
+    raw = thrown[key];
+  } catch {
+    return fallback;
+  }
+  return typeof raw === "string" ? raw : coerceToString(raw);
+}
+function coerceToString(thrown) {
+  try {
+    return String(thrown);
+  } catch {
+    return UNCOERCIBLE_THROWN;
+  }
+}
+function acquireLocalLease(runId) {
+  const docker3 = localDockerClient();
+  const containment = selectContainment([containerContainmentOn(docker3)]);
+  let released = false;
+  const stagedProxies = [];
+  const lease = {
+    kind: "local",
+    runId,
+    containment,
+    docker: docker3,
+    // Stated, not inferred from `kind`. On this venue it is the truth twice over:
+    // the paths are on this machine AND `canonical()` is what should resolve
+    // them, which is the behaviour every local run has always had.
+    pathDomain: "local",
+    get released() {
+      return released;
+    },
+    stage: (local) => (
+      // The local venue IS the developer's machine, so staging is the identity
+      // and the paths are already canonical here. This is not a stub: it is the
+      // one venue for which the answer is "nothing to copy", and having it go
+      // through the same method as a hosted venue is what stops `thrun.ts` from
+      // ever holding a path it did not get from a venue.
+      //
+      // `jail` and `tmp` are DERIVED here rather than carried in on `LocalTree`,
+      // because the join differs by side and the venue owns the spelling of its
+      // own paths: the host's `join` here, `venueJoin` on a hosted venue. The
+      // segments are one constant in `fence.ts`, so the tree `buildJail` wrote
+      // and the tree a venue mounts cannot drift apart.
+      Promise.resolve({
+        cloneDir: local.cloneDir,
+        scratchRoot: local.scratchRoot,
+        previewDir: local.previewDir,
+        ...localJailPaths(local.scratchRoot)
+      })
+    ),
+    // The containment function verbatim, which is the point of the barrel
+    // re-export rather than a copy here: this venue's daemon and this process
+    // share a filesystem, so the directory it makes under `tmpdir()` is already
+    // venue-side and has been on every local run since the sidecar existed.
+    //
+    // TRACKED, so `release()` can be the guaranteed owner the interface
+    // promises. Returning a bare handle made that promise the CALLER's to keep,
+    // and a caller that staged and then failed outside `runEnvironmentSpec`'s
+    // `finally` left the directory behind while release reported success.
+    //
+    // REFUSING AFTER RELEASE is the other half of the same promise. Staging onto
+    // a drained list would leak with nothing left to drain, and `release()` has
+    // already reported it had nothing to do — the split ownership this tracking
+    // exists to close, reached from the other side.
+    //
+    // ONLY THIS ARM CHECKS IT. An earlier draft of this comment said the hosted
+    // arm refuses the same way through `check()`, and that is not what `check()`
+    // tests: `assertVenueUnchanged` reads the tunnel's failure and classifies
+    // the daemon, and never looks at `released`. Hosted refuses a post-release
+    // staging only incidentally, because by then the VM is gone. Naming the
+    // check and what it actually tests is the rule this branch spent its length
+    // on, and that draft broke it in the same breath as stating it.
+    //
+    // That leaves the two arms answering one programmer error with different
+    // exit codes — hosted's incidental failure is a `HostedVenueError` at 2,
+    // this one is a plain throw at 1. Recorded on TERM-752 rather than fixed
+    // here: it is unreachable while `placement.ts` refuses first.
+    //
+    // THE EXIT CODE IS WHY IT IS NOT A REFUSAL TYPE. Nothing catches it and
+    // `findRunRefusal` does not match it, so it reaches the top-level catch at
+    // exit 1 — correct, because only our own call ordering can reach this, which
+    // is `assertDomainDeclared`'s reasoning and the same one this branch applied
+    // to `assertProxyStagedForVenue`. Giving it `RunRefusalError` would dress
+    // our defect as a polite refusal, TERM-649's lie inverted.
+    //
+    // It is a NAMED subclass rather than a bare `Error` for a hazard already
+    // here, not a speculative one. `stageProxyCode()` in `containment` throws
+    // `FenceError` on a damaged install, telling the developer to reinstall the
+    // CLI. Two distinguishable failures leave this one call, so the day anyone
+    // adds a catch to surface that instruction, an unnamed ordering bug gets
+    // swept into it and tells a developer to reinstall over our mistake.
+    stageProxyCode: () => {
+      if (released) {
+        return Promise.reject(new LeaseReleasedError("this lease was already released, so a staging made now would never be removed: release() has run and drained what it was holding."));
+      }
+      const staged = stageProxyCode();
+      stagedProxies.push(staged);
+      return Promise.resolve(staged);
+    },
+    census: (label) => Promise.resolve(released ? {
+      observed: false,
+      census: { containers: [], volumes: [], networks: [] },
+      unobservedReason: RELEASED_LEASE_CENSUS_REASON
+    } : { observed: true, census: census(docker3, label), unobservedReason: null }),
+    publishPreview: (req) => startPreview({ ...req, docker: docker3 }),
+    release: () => {
+      if (released) {
+        return Promise.resolve({
+          kind: "local",
+          released: false,
+          alreadyReleased: true,
+          error: null,
+          detail: "already released; nothing to do"
+        });
+      }
+      released = true;
+      const staged = stagedProxies.splice(0, stagedProxies.length);
+      for (const s of staged)
+        s.cleanup();
+      return Promise.resolve({
+        kind: "local",
+        released: true,
+        alreadyReleased: false,
+        error: null,
+        detail: "the local venue owns no host resources; the lease is closed"
+      });
+    }
+  };
+  return lease;
+}
+var VenueRollbackError, UNREADABLE_MESSAGE, UNREADABLE_NAME, UNCOERCIBLE_THROWN, UNDESCRIBABLE_THROWN, UNLISTABLE_ROLLBACK_FAILURES, RELEASED_LEASE_CENSUS_REASON, LeaseReleasedError;
+var init_venue = __esm({
+  "../../packages/envrun/dist/venue.js"() {
+    "use strict";
+    init_dist();
+    init_labels();
+    init_preview();
+    VenueRollbackError = class extends Error {
+      /** Every undo that threw, in the order they ran (reverse allocation order). */
+      rollbackFailures;
+      constructor(cause, rollbackFailures) {
+        super(rollbackMessage(cause, rollbackFailures), { cause });
+        this.name = "VenueRollbackError";
+        this.rollbackFailures = rollbackFailures;
+      }
+    };
+    UNREADABLE_MESSAGE = "<an error whose message could not be read>";
+    UNREADABLE_NAME = "<an error whose name could not be read>";
+    UNCOERCIBLE_THROWN = "<a thrown value that cannot be converted to a string>";
+    UNDESCRIBABLE_THROWN = "<a thrown value that could not be described>";
+    UNLISTABLE_ROLLBACK_FAILURES = "[venue acquisition rolled back, and the failures could not be listed \u2014 one or more allocated resources may still exist]";
+    RELEASED_LEASE_CENSUS_REASON = "the lease was already released, so this venue can no longer be interrogated";
+    LeaseReleasedError = class extends Error {
+      name = "LeaseReleasedError";
+    };
+  }
+});
+
 // ../../packages/envrun/dist/execute.js
 import { spawnSync as spawnSync4 } from "child_process";
 function findRunRefusal(err) {
-  let current = err;
-  for (let depth = 0; depth < 16; depth += 1) {
-    if (current instanceof RunRefusalError)
-      return current;
-    if (!(current instanceof Error))
-      return null;
-    const next = current.cause;
-    if (next === void 0 || next === null)
-      return null;
-    current = next;
+  try {
+    let current = err;
+    for (let depth = 0; depth < MAX_CAUSE_FRAMES; depth += 1) {
+      if (current instanceof RunRefusalError)
+        return current;
+      if (current instanceof ContainmentRefusalError) {
+        return new RunRefusalError(current.message, { cause: current });
+      }
+      const next = current?.cause;
+      if (next === void 0 || next === null)
+        return null;
+      current = next;
+    }
+  } catch {
+    return null;
   }
   return null;
+}
+function describeCause(err) {
+  let out = "";
+  let frames = 0;
+  const append = (frame) => {
+    out = frames === 0 ? frame : `${out}
+caused by: ${frame}`;
+    frames += 1;
+  };
+  let current = err;
+  try {
+    for (let depth = 0; depth < MAX_CAUSE_FRAMES && current !== void 0 && current !== null; depth += 1) {
+      let frame = describeThrown(current, { includeName: true });
+      let next;
+      let asError = null;
+      try {
+        asError = current instanceof Error ? current : null;
+      } catch {
+        append(frame);
+        append(CHAIN_UNREADABLE);
+        return out;
+      }
+      try {
+        const stack = asError?.stack;
+        if (typeof stack === "string" && stack !== "")
+          frame = stack;
+      } catch {
+      }
+      try {
+        next = current.cause;
+      } catch {
+        append(frame);
+        append(CHAIN_UNREADABLE);
+        return out;
+      }
+      append(frame);
+      current = next;
+    }
+    if (current !== void 0 && current !== null)
+      append(CHAIN_TOO_DEEP);
+  } catch {
+    append(CHAIN_UNREADABLE);
+  }
+  return frames === 0 ? null : out;
 }
 function atLeast(a, b) {
   const left = a.split(".").map(Number);
@@ -1411,12 +1996,18 @@ function toExecution(step) {
     timedOut: step.timedOut
   };
 }
+function assertVenueOwnerDeclared(lease) {
+  if (lease.pathDomain !== "venue" || lease.guestUser)
+    return;
+  throw new RunRefusalError("this venue did not say which account owns the tree it staged, so the guest would run under this machine's uid and could not write its own clone. We refuse rather than report that permission error as the repo's tests failing.");
+}
 async function runEnvironmentSpec(req) {
   const startedAt = Date.now();
   const containment = req.lease.containment;
   if (containment.kind !== "container") {
     throw new EnvRunError(`phase 2 requires the container tier, got ${containment.kind}. Refusing: a container phase that silently ran under seatbelt would make every container claim vacuous.`);
   }
+  assertVenueOwnerDeclared(req.lease);
   const image = resolveImageForSpec(req.spec, req.image);
   const { jail, tmp } = req;
   const env = scrubEnv(process.env, scrubEnvPathsFor("container", { jail, tmp }));
@@ -1426,16 +2017,22 @@ async function runEnvironmentSpec(req) {
   let install = null;
   let test = null;
   let result;
+  let proxyCode = null;
   try {
     if (req.spec.installCommand !== null) {
+      proxyCode = await req.lease.stageProxyCode();
       install = await runStep(containment, {
         step: "install",
         profile: "install",
+        proxyCode,
         command: req.spec.installCommand,
         repoDir: req.repoDir,
         jail,
         tmp,
         pathDomain: req.lease.pathDomain,
+        // TERM-729: travels WITH pathDomain, because it answers the same
+        // question about the same machine. Undefined on a local lease.
+        guestUser: req.lease.guestUser,
         env,
         image,
         labels,
@@ -1463,6 +2060,9 @@ async function runEnvironmentSpec(req) {
         jail,
         tmp,
         pathDomain: req.lease.pathDomain,
+        // TERM-729: travels WITH pathDomain, because it answers the same
+        // question about the same machine. Undefined on a local lease.
+        guestUser: req.lease.guestUser,
         env,
         image,
         labels,
@@ -1473,6 +2073,7 @@ async function runEnvironmentSpec(req) {
     }
   } finally {
     watch?.stop();
+    proxyCode?.cleanup();
   }
   const peak = watch?.peak ?? { containers: [], volumes: [], networks: [] };
   const afterReport = labels ? await req.lease.census(labelSelector(labels)) : null;
@@ -1512,6 +2113,7 @@ async function runStep(containment, r) {
     // path in front of a remote daemon. The venue that produced these paths is
     // the one party that knows, and it is the lease this value came from.
     pathDomain: r.pathDomain,
+    guestUser: r.guestUser,
     program: "/bin/sh",
     args: ["-c", r.command]
   };
@@ -1519,7 +2121,8 @@ async function runStep(containment, r) {
   const res = await containment.run(spec, r.env, {
     timeoutMs: r.timeoutMs,
     image: r.image,
-    ...r.labels ? { labels: r.labels } : {}
+    ...r.labels ? { labels: r.labels } : {},
+    ...r.proxyCode ? { proxyCode: r.proxyCode } : {}
   });
   return {
     step: r.step,
@@ -1533,17 +2136,21 @@ async function runStep(containment, r) {
     wallMs: Date.now() - startedAt
   };
 }
-var EnvRunError, RunRefusalError, RUNTIME_IMAGES, unversionedImage, TAG_VERSION, dockerManifestProbe, manifestProbe;
+var EnvRunError, RunRefusalError, MAX_CAUSE_FRAMES, CHAIN_UNREADABLE, CHAIN_TOO_DEEP, RUNTIME_IMAGES, unversionedImage, TAG_VERSION, dockerManifestProbe, manifestProbe;
 var init_execute = __esm({
   "../../packages/envrun/dist/execute.js"() {
     "use strict";
     init_dist();
     init_classify();
     init_labels();
+    init_venue();
     EnvRunError = class extends Error {
     };
     RunRefusalError = class extends EnvRunError {
     };
+    MAX_CAUSE_FRAMES = 16;
+    CHAIN_UNREADABLE = "<the cause chain stopped: a value refused to be read>";
+    CHAIN_TOO_DEEP = `<the cause chain continued past ${MAX_CAUSE_FRAMES} frames and was not followed further>`;
     RUNTIME_IMAGES = {
       node: {
         repository: "node",
@@ -1645,7 +2252,7 @@ var init_dsse = __esm({
 });
 
 // ../../packages/attest/dist/sealedbox.js
-import { createCipheriv, createDecipheriv, diffieHellman, generateKeyPairSync as generateKeyPairSync2, hkdfSync, randomBytes } from "crypto";
+import { createCipheriv, createDecipheriv, diffieHellman, generateKeyPairSync as generateKeyPairSync2, hkdfSync, randomBytes as randomBytes2 } from "crypto";
 var init_sealedbox = __esm({
   "../../packages/attest/dist/sealedbox.js"() {
     "use strict";
@@ -1655,7 +2262,7 @@ var init_sealedbox = __esm({
 });
 
 // ../../packages/attest/dist/aead.js
-import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes2 } from "crypto";
+import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes3 } from "crypto";
 var init_aead = __esm({
   "../../packages/attest/dist/aead.js"() {
     "use strict";
@@ -1837,7 +2444,7 @@ var init_result = __esm({
 });
 
 // ../../packages/envrun/dist/attestation.js
-import { createHash, randomBytes as randomBytes3 } from "crypto";
+import { createHash, randomBytes as randomBytes4 } from "crypto";
 function contradicts(outcome, counts, exitCode) {
   const budget = OUTCOME_TO_BUDGET[outcome];
   if (budget === null)
@@ -1949,7 +2556,7 @@ function toAcceptancePredicate(pair, opts = {}) {
       // always one the run actually observed. A fallback would have made the fabrication
       // unreachable to notice.
       enclave_measurement: localMeasurement(patched.containerImage),
-      nonce: opts.nonce ?? randomBytes3(16).toString("hex"),
+      nonce: opts.nonce ?? randomBytes4(16).toString("hex"),
       run_policy: { max_attempts: opts.maxAttempts ?? 1, budget_outcome: budget }
     }
   };
@@ -2423,486 +3030,6 @@ var init_boundary = __esm({
   }
 });
 
-// ../../packages/envrun/dist/previewRegistry.js
-function createPreviewRegistry() {
-  const live = /* @__PURE__ */ new Map();
-  return {
-    register(client, container) {
-      const names = live.get(client) ?? /* @__PURE__ */ new Set();
-      names.add(container);
-      live.set(client, names);
-    },
-    deregister(client, container) {
-      const names = live.get(client);
-      if (names === void 0)
-        return;
-      names.delete(container);
-      if (names.size === 0)
-        live.delete(client);
-    },
-    pairs() {
-      const out = [];
-      for (const [client, names] of live) {
-        for (const container of names)
-          out.push({ client, container });
-      }
-      return out;
-    },
-    reapAll() {
-      for (const [client, names] of live) {
-        for (const container of names) {
-          client.sync(["rm", "-f", container], { timeoutMs: 15e3 });
-        }
-      }
-      live.clear();
-    }
-  };
-}
-var init_previewRegistry = __esm({
-  "../../packages/envrun/dist/previewRegistry.js"() {
-    "use strict";
-  }
-});
-
-// ../../packages/envrun/dist/preview.js
-import { randomBytes as randomBytes4 } from "crypto";
-import { mkdirSync as mkdirSync3, writeFileSync as writeFileSync3 } from "fs";
-import { join as join6 } from "path";
-function docker(client, args, timeoutMs = 6e4) {
-  const res = client.sync([...args], { timeoutMs });
-  return {
-    ok: !res.error && res.status === 0,
-    stdout: res.stdout,
-    stderr: (res.error ? res.error.message : "") + res.stderr
-  };
-}
-function installReaper() {
-  if (reaperInstalled)
-    return;
-  reaperInstalled = true;
-  process.on("exit", () => {
-    livePreviews.reapAll();
-  });
-}
-function readHostPort(client, container) {
-  const res = docker(client, ["port", container, `${String(GUEST_PORT)}/tcp`]);
-  if (!res.ok)
-    return null;
-  for (const line of res.stdout.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed === "")
-      continue;
-    const idx = trimmed.lastIndexOf(":");
-    if (idx === -1)
-      continue;
-    const port = Number(trimmed.slice(idx + 1));
-    if (Number.isInteger(port) && port > 0)
-      return port;
-  }
-  return null;
-}
-async function fetchInstanceToken(url, authToken) {
-  try {
-    const headers = {};
-    if (authToken) {
-      headers["Authorization"] = `Bearer ${authToken}`;
-    }
-    const res = await fetch(url, { cache: "no-store", headers });
-    if (!res.ok)
-      return null;
-    const body = await res.json();
-    return typeof body.instanceToken === "string" ? body.instanceToken : null;
-  } catch {
-    return null;
-  }
-}
-async function startPreview(req) {
-  const label = labelArgs(req.labels);
-  const container = `${req.idBase}-preview`;
-  const image = validateImage(req.image);
-  const bindAddress = req.bindAddress ?? "127.0.0.1";
-  const client = req.docker;
-  if (!LOOPBACK_BINDS.has(bindAddress) && req.authToken === void 0) {
-    throw new PreviewError(`refusing to publish the preview on ${bindAddress} without an explicit authToken: a bind wider than loopback puts this run \u2014 the test output tail included \u2014 on the developer's local network`);
-  }
-  const authToken = req.authToken ?? randomBytes4(24).toString("base64url");
-  const envArgs = ["--env", `PREVIEW_AUTH_TOKEN=${authToken}`];
-  const probeHost = WILDCARD_BINDS.has(bindAddress) ? "127.0.0.1" : bindAddress;
-  const probeAuthority = probeHost.includes(":") ? `[${probeHost}]` : probeHost;
-  mkdirSync3(req.scratchDir, { recursive: true });
-  const docPath = join6(req.scratchDir, "preview-run.json");
-  writeFileSync3(docPath, JSON.stringify(req.document, null, 2), "utf8");
-  const teardown = () => {
-    livePreviews.deregister(client, container);
-    for (let i = 0; i < 3; i += 1) {
-      const inspect = docker(client, ["inspect", "--format", "{{.State.Status}}", container]);
-      if (!inspect.ok)
-        return { clean: true, leaked: [] };
-      docker(client, ["rm", "-f", container]);
-    }
-    const still = docker(client, ["inspect", "--format", "{{.State.Status}}", container]);
-    return still.ok ? { clean: false, leaked: [`container ${container}`] } : { clean: true, leaked: [] };
-  };
-  const startedAt = Date.now();
-  try {
-    const run2 = docker(client, [
-      "run",
-      "-d",
-      "--init",
-      `--name=${container}`,
-      // A network IS granted here, unlike the verification step. It carries our
-      // own argv over a document we wrote; the repo's code never runs in it.
-      "--network=bridge",
-      // Loopback by default, and anything wider was refused above unless the
-      // caller named a token. A bare `-p 8080` would bind 0.0.0.0 and put a
-      // developer's in-progress work on their local network.
-      `--publish=${bindAddress}:0:${String(GUEST_PORT)}`,
-      ...envArgs,
-      "--cap-drop=ALL",
-      "--security-opt=no-new-privileges",
-      "--pids-limit=64",
-      "--memory=256m",
-      "--read-only",
-      "--tmpfs=/tmp:rw,noexec,nosuid,size=8m",
-      ...label,
-      `--volume=${docPath}:${GUEST_DOC}:ro`,
-      "--",
-      image,
-      "node",
-      "-e",
-      SERVER_SOURCE
-    ]);
-    if (!run2.ok) {
-      throw new PreviewError(`could not start the preview container: ${run2.stderr.trim()}`);
-    }
-    const deadline = Date.now() + (req.readyTimeoutMs ?? 6e4);
-    let hostPort = null;
-    let token = null;
-    let lastDetail = "never answered";
-    while (Date.now() < deadline) {
-      hostPort ??= readHostPort(client, container);
-      if (hostPort === null) {
-        lastDetail = "Docker never reported a published host port";
-        await sleep2(200);
-        continue;
-      }
-      token = await fetchInstanceToken(`http://${probeAuthority}:${String(hostPort)}/`, authToken);
-      if (token !== null)
-        break;
-      const alive = docker(client, ["inspect", "--format", "{{.State.Running}}", container]);
-      if (alive.stdout.trim() !== "true") {
-        const logs = docker(client, ["logs", "--tail", "20", container]);
-        throw new PreviewError(`the preview container exited before serving: ${logs.stdout.trim()}${logs.stderr.trim()}`);
-      }
-      lastDetail = "the port is published but the server has not answered yet";
-      await sleep2(150);
-    }
-    if (hostPort === null || token === null) {
-      throw new PreviewError(`the preview URL never became reachable: ${lastDetail}`);
-    }
-    livePreviews.register(client, container);
-    installReaper();
-    const origin = `http://${probeAuthority}:${String(hostPort)}/`;
-    return {
-      url: `${origin}?token=${encodeURIComponent(authToken)}`,
-      origin,
-      authToken,
-      instanceToken: token,
-      container,
-      hostPort,
-      readyMs: Date.now() - startedAt,
-      teardown
-    };
-  } catch (err) {
-    teardown();
-    throw err;
-  }
-}
-function startLocalPreview(req) {
-  return startPreview({ ...req, docker: localDockerClient() });
-}
-var PreviewError, GUEST_PORT, GUEST_DOC, LOOPBACK_BINDS, WILDCARD_BINDS, SERVER_SOURCE, livePreviews, reaperInstalled, sleep2;
-var init_preview = __esm({
-  "../../packages/envrun/dist/preview.js"() {
-    "use strict";
-    init_dist();
-    init_previewRegistry();
-    PreviewError = class extends Error {
-    };
-    GUEST_PORT = 8080;
-    GUEST_DOC = "/preview/run.json";
-    LOOPBACK_BINDS = /* @__PURE__ */ new Set(["127.0.0.1", "localhost", "::1"]);
-    WILDCARD_BINDS = /* @__PURE__ */ new Set(["0.0.0.0", "::"]);
-    SERVER_SOURCE = `
-const http = require('node:http');
-const { readFileSync } = require('node:fs');
-const { randomUUID, timingSafeEqual } = require('node:crypto');
-
-// Read ONCE, at startup, and refuse to run without it. An unset token used to
-// skip the check entirely, which meant the one configuration nobody sets on
-// purpose was also the one that served a developer's in-progress work to
-// anything that could reach the port. Absent must never mean permitted \u2014 the
-// polarity requireSecret() holds in apps/web/lib/secrets.ts.
-const AUTH_TOKEN = process.env.PREVIEW_AUTH_TOKEN || '';
-if (AUTH_TOKEN === '') {
-  process.stderr.write(
-    'preview: refusing to start \u2014 PREVIEW_AUTH_TOKEN is unset, and this server will not ' +
-      'serve a run document unauthenticated\\n',
-  );
-  process.exit(1);
-}
-const EXPECTED = Buffer.from(AUTH_TOKEN, 'utf8');
-
-/** The token the client presented, or null. */
-function presented(req) {
-  const header = req.headers['authorization'];
-  const bearer = typeof header === 'string' ? /^Bearer\\s+(.+)$/i.exec(header) : null;
-  if (bearer !== null) return bearer[1];
-  // A non-Bearer Authorization header FALLS THROUGH to the query parameter. The
-  // earlier ternary branched on the header merely EXISTING, so a client sending
-  // "Basic \u2026" produced an empty string and could never authenticate at all.
-  //
-  // The query form stays because the founder opens this in a browser and a
-  // browser sends no Authorization header. That is the only reason it is
-  // accepted: a token in a URL lands in browser history, shell history and any
-  // proxy log on the way, where a header does not.
-  return new URL(req.url, 'http://localhost').searchParams.get('token');
-}
-
-function authorized(req) {
-  const given = presented(req);
-  if (typeof given !== 'string') return false;
-  const got = Buffer.from(given, 'utf8');
-  // timingSafeEqual THROWS on a length mismatch, so length is compared first and
-  // refused here. The length is not the secret; the bytes are.
-  if (got.length !== EXPECTED.length) return false;
-  return timingSafeEqual(got, EXPECTED);
-}
-
-// Per-INSTANCE, minted at boot. Not passed in, not derived from anything the
-// host controls \u2014 that is what makes "same token \u21D2 same instance" hold.
-const INSTANCE_TOKEN = randomUUID();
-const DOC = JSON.parse(readFileSync(${JSON.stringify(GUEST_DOC)}, 'utf8'));
-let served = 0;
-
-http
-  .createServer((req, res) => {
-    if (!authorized(req)) {
-      res.writeHead(401, { 'content-type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({ error: 'unauthorized' }));
-    }
-    served += 1;
-    const body = JSON.stringify(
-      {
-        instanceToken: INSTANCE_TOKEN,
-        servedCount: served,
-        pid: process.pid,
-        run: DOC,
-      },
-      null,
-      2,
-    );
-    res.writeHead(200, {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store',
-      'x-th-instance': INSTANCE_TOKEN,
-    });
-    res.end(body);
-  })
-  .listen(${String(GUEST_PORT)}, '0.0.0.0', () => {
-    console.log('preview-ready ' + INSTANCE_TOKEN);
-  });
-`;
-    livePreviews = createPreviewRegistry();
-    reaperInstalled = false;
-    sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
-  }
-});
-
-// ../../packages/envrun/dist/venue.js
-import { join as join7 } from "path";
-function localJailPaths(scratchRoot) {
-  return {
-    jail: join7(scratchRoot, JAIL_SEGMENT),
-    tmp: join7(scratchRoot, JAIL_TMP_SEGMENT)
-  };
-}
-function localVenue() {
-  return {
-    kind: "local",
-    acquire: (runId) => acquireTransactionally((allocated) => {
-      void allocated;
-      return Promise.resolve(acquireLocalLease(runId));
-    })
-  };
-}
-async function acquireTransactionally(body) {
-  const undos = [];
-  try {
-    return await body({
-      onRollback: (undo) => {
-        undos.push(undo);
-      }
-    });
-  } catch (err) {
-    const failures = [];
-    for (const undo of undos.reverse()) {
-      let failed = null;
-      try {
-        await undo();
-      } catch (rollbackErr) {
-        failed = { thrown: rollbackErr };
-      }
-      if (failed === null)
-        continue;
-      let entry;
-      try {
-        entry = describeThrown(failed.thrown, { includeName: true });
-      } catch {
-        entry = UNDESCRIBABLE_THROWN;
-      }
-      failures.push(entry);
-    }
-    if (failures.length > 0)
-      throw new VenueRollbackError(err, failures);
-    throw err;
-  }
-}
-function rollbackMessage(cause, rollbackFailures) {
-  const headline = describeThrown(cause, { includeName: false });
-  let tail2;
-  try {
-    tail2 = `[venue acquisition rolled back with ${String(rollbackFailures.length)} failure(s): ${rollbackFailures.join("; ")} \u2014 one or more allocated resources may still exist]`;
-  } catch {
-    tail2 = UNLISTABLE_ROLLBACK_FAILURES;
-  }
-  return `${headline} ${tail2}`;
-}
-function describeThrown(thrown, opts) {
-  try {
-    if (isErrorValue(thrown)) {
-      const message = readErrorField(thrown, "message", UNREADABLE_MESSAGE);
-      if (!opts.includeName)
-        return message;
-      const name = readErrorField(thrown, "name", UNREADABLE_NAME);
-      return message === "" ? name : `${name}: ${message}`;
-    }
-    return coerceToString(thrown);
-  } catch {
-    return UNDESCRIBABLE_THROWN;
-  }
-}
-function isErrorValue(thrown) {
-  try {
-    return thrown instanceof Error;
-  } catch {
-    return false;
-  }
-}
-function readErrorField(thrown, key, fallback) {
-  let raw;
-  try {
-    raw = thrown[key];
-  } catch {
-    return fallback;
-  }
-  return typeof raw === "string" ? raw : coerceToString(raw);
-}
-function coerceToString(thrown) {
-  try {
-    return String(thrown);
-  } catch {
-    return UNCOERCIBLE_THROWN;
-  }
-}
-function acquireLocalLease(runId) {
-  const docker3 = localDockerClient();
-  const containment = selectContainment([containerContainmentOn(docker3)]);
-  let released = false;
-  const lease = {
-    kind: "local",
-    runId,
-    containment,
-    docker: docker3,
-    // Stated, not inferred from `kind`. On this venue it is the truth twice over:
-    // the paths are on this machine AND `canonical()` is what should resolve
-    // them, which is the behaviour every local run has always had.
-    pathDomain: "local",
-    get released() {
-      return released;
-    },
-    stage: (local) => (
-      // The local venue IS the developer's machine, so staging is the identity
-      // and the paths are already canonical here. This is not a stub: it is the
-      // one venue for which the answer is "nothing to copy", and having it go
-      // through the same method as a hosted venue is what stops `thrun.ts` from
-      // ever holding a path it did not get from a venue.
-      //
-      // `jail` and `tmp` are DERIVED here rather than carried in on `LocalTree`,
-      // because the join differs by side and the venue owns the spelling of its
-      // own paths: the host's `join` here, `venueJoin` on a hosted venue. The
-      // segments are one constant in `fence.ts`, so the tree `buildJail` wrote
-      // and the tree a venue mounts cannot drift apart.
-      Promise.resolve({
-        cloneDir: local.cloneDir,
-        scratchRoot: local.scratchRoot,
-        previewDir: local.previewDir,
-        ...localJailPaths(local.scratchRoot)
-      })
-    ),
-    census: (label) => Promise.resolve(released ? {
-      observed: false,
-      census: { containers: [], volumes: [], networks: [] },
-      unobservedReason: RELEASED_LEASE_CENSUS_REASON
-    } : { observed: true, census: census(docker3, label), unobservedReason: null }),
-    publishPreview: (req) => startPreview({ ...req, docker: docker3 }),
-    release: () => {
-      if (released) {
-        return Promise.resolve({
-          kind: "local",
-          released: false,
-          alreadyReleased: true,
-          error: null,
-          detail: "already released; nothing to do"
-        });
-      }
-      released = true;
-      return Promise.resolve({
-        kind: "local",
-        released: true,
-        alreadyReleased: false,
-        error: null,
-        detail: "the local venue owns no host resources; the lease is closed"
-      });
-    }
-  };
-  return lease;
-}
-var VenueRollbackError, UNREADABLE_MESSAGE, UNREADABLE_NAME, UNCOERCIBLE_THROWN, UNDESCRIBABLE_THROWN, UNLISTABLE_ROLLBACK_FAILURES, RELEASED_LEASE_CENSUS_REASON;
-var init_venue = __esm({
-  "../../packages/envrun/dist/venue.js"() {
-    "use strict";
-    init_dist();
-    init_labels();
-    init_preview();
-    VenueRollbackError = class extends Error {
-      /** Every undo that threw, in the order they ran (reverse allocation order). */
-      rollbackFailures;
-      constructor(cause, rollbackFailures) {
-        super(rollbackMessage(cause, rollbackFailures), { cause });
-        this.name = "VenueRollbackError";
-        this.rollbackFailures = rollbackFailures;
-      }
-    };
-    UNREADABLE_MESSAGE = "<an error whose message could not be read>";
-    UNREADABLE_NAME = "<an error whose name could not be read>";
-    UNCOERCIBLE_THROWN = "<a thrown value that cannot be converted to a string>";
-    UNDESCRIBABLE_THROWN = "<a thrown value that could not be described>";
-    UNLISTABLE_ROLLBACK_FAILURES = "[venue acquisition rolled back, and the failures could not be listed \u2014 one or more allocated resources may still exist]";
-    RELEASED_LEASE_CENSUS_REASON = "the lease was already released, so this venue can no longer be interrogated";
-  }
-});
-
 // ../../packages/envrun/dist/placement.js
 function localDockerPlacement() {
   return {
@@ -2925,10 +3052,12 @@ function hostedPoolPlacement() {
     // the developer's own machine.
     //
     // `hostedVenue()` (design §6 item 4) NOW EXISTS and this still refuses.
-    // Building it was never the condition — index.ts states the two that are:
-    // `stage()` hands back venue-side paths that `canonical()` still resolves
-    // against this machine, and the acquire can only REJECT the venue that is
-    // this machine, not prove the venue IS the instance we booted.
+    // Building it was never the condition. **The condition is stated ONCE, in
+    // index.ts beside the `hostedVenue` export** — deliberately not restated
+    // here, because this comment and that one were two copies of the same
+    // paragraph and TERM-780 found them disagreeing: one named a blocker that
+    // had been fixed underneath it. A pointer cannot drift from its target the
+    // way a copy drifts from its original.
     venue: () => {
       throw new Error(HOSTED_POOL_REFUSAL);
     },
@@ -2949,21 +3078,31 @@ async function resolveLease(placement, runId) {
       throw err;
     return {
       ok: false,
-      refusal: containmentUnavailableRefusal(err instanceof Error ? err.message : String(err))
+      // `describeThrown`, not `err.message`/`String(err)`. Both of those are unguarded
+      // reads on a value we have just established we cannot trust, and this expression is
+      // evaluated BEFORE `diagnostic` in the same object literal — so a hostile value threw
+      // here while the total helper two lines down never ran.
+      refusal: containmentUnavailableRefusal(describeThrown(err, { includeName: false })),
+      // The error ITSELF, not just the message folded into the sentence above. Kept apart
+      // from `refusal` because the two have different audiences and different rules: the
+      // sentence is shown to a developer, this is logged for us, after redaction.
+      diagnostic: describeCause(err)
     };
   }
 }
 function findNoContainment(err) {
-  let current = err;
-  for (let depth = 0; depth < 16; depth += 1) {
-    if (current instanceof NoContainmentError)
-      return current;
-    if (!(current instanceof Error))
-      return null;
-    const next = current.cause;
-    if (next === void 0 || next === null)
-      return null;
-    current = next;
+  try {
+    let current = err;
+    for (let depth = 0; depth < 16; depth += 1) {
+      if (current instanceof NoContainmentError)
+        return current;
+      const next = current?.cause;
+      if (next === void 0 || next === null)
+        return null;
+      current = next;
+    }
+  } catch {
+    return null;
   }
   return null;
 }
@@ -3108,7 +3247,7 @@ var init_gcpPlacement = __esm({
     init_placement();
     init_execute();
     DEFAULT_GCP_PROJECT = "terminalhire-pool";
-    DEFAULT_GCP_ZONE = "us-central1-a";
+    DEFAULT_GCP_ZONE = "us-east1-b";
     DEFAULT_GCP_MACHINE_TYPE = "e2-standard-2";
     GcpPlacementError = class extends Error {
       constructor(message) {
@@ -3188,9 +3327,51 @@ var init_venueProof = __esm({
 
 // ../../packages/envrun/dist/hostedVenue.js
 import { spawn as spawn4, spawnSync as spawnSync6 } from "child_process";
-import { chmodSync as chmodSync2, existsSync as existsSync6, mkdtempSync as mkdtempSync2, rmSync as rmSync3 } from "fs";
+import { chmodSync as chmodSync2, existsSync as existsSync6, mkdtempSync as mkdtempSync2, readFileSync as readFileSync3, rmSync as rmSync3 } from "fs";
 import { join as join8 } from "path";
 import { tmpdir as tmpdir2 } from "os";
+function credentialInGitConfig(text) {
+  for (const match of text.matchAll(/\b([a-z][a-z0-9+.-]*):\/\/(\S+)/gi)) {
+    const scheme = (match[1] ?? "").toLowerCase();
+    const rest = match[2] ?? "";
+    const authority = rest.split(/[/?#]/, 1)[0] ?? "";
+    const at = authority.lastIndexOf("@");
+    if (at >= 0) {
+      const overWeb = scheme === "http" || scheme === "https";
+      if (overWeb || decodeMaybe(authority.slice(0, at)).includes(":")) {
+        return "a credential embedded in a remote URL";
+      }
+    }
+    if (CREDENTIAL_QUERY_PARAM.test(decodeMaybe(rest))) {
+      return "a credential in a remote URL query string";
+    }
+  }
+  if (/^[^\n]*\bextraHeader\s*=\s*\S/im.test(text))
+    return "a persisted HTTP header";
+  if (/^\s*(password|token|secret|apikey|api_key)\s*=\s*\S/im.test(text)) {
+    return "a credential in a config value";
+  }
+  if (/\b(gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,})\b/.test(text)) {
+    return "a GitHub token";
+  }
+  return null;
+}
+function decodeMaybe(url) {
+  try {
+    return decodeURIComponent(url);
+  } catch {
+    return UNDECODABLE;
+  }
+}
+function failureSourceOf(err) {
+  if (err === null || typeof err !== "object")
+    return "venue";
+  const source = err.source;
+  return source === "ours" ? "ours" : "venue";
+}
+function venueGcloudEnv(config) {
+  return { CLOUDSDK_ACTIVE_CONFIG_NAME: config };
+}
 function execFailureOf(err, timeoutMs) {
   if (err === void 0)
     return null;
@@ -3200,8 +3381,18 @@ function execFailureOf(err, timeoutMs) {
   }
   return { kind: "spawn", message: `${code ?? "spawn failed"}: ${err.message}` };
 }
-function execWithSpawnSync(file, args, timeoutMs) {
-  const res = spawnSync6(file, [...args], { encoding: "utf8", timeout: timeoutMs });
+function childEnv(env) {
+  const inherited = { ...process.env };
+  for (const name of GCLOUD_PRINCIPAL_OVERRIDES)
+    delete inherited[name];
+  return { ...inherited, ...env };
+}
+function execWithSpawnSync(file, args, timeoutMs, env) {
+  const res = spawnSync6(file, [...args], {
+    encoding: "utf8",
+    timeout: timeoutMs,
+    env: childEnv(env)
+  });
   return {
     ok: res.status === 0,
     stdout: res.stdout ?? "",
@@ -3216,12 +3407,12 @@ function pushFailure(timedOut, timeoutMs, spawnFailure) {
     return { kind: "spawn", message: spawnFailure };
   return null;
 }
-function pushTreeWithTar(from, file, args, timeoutMs) {
+function pushTreeWithTar(from, file, args, timeoutMs, env) {
   return new Promise((settle) => {
     const source = spawn4("tar", ["-C", from, "-cf", "-", "."], {
       stdio: ["ignore", "pipe", "pipe"]
     });
-    const sink = spawn4(file, [...args], { stdio: ["pipe", "pipe", "pipe"] });
+    const sink = spawn4(file, [...args], { stdio: ["pipe", "pipe", "pipe"], env: childEnv(env) });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
@@ -3357,9 +3548,16 @@ function venueStagePaths(stageBase) {
     tmp: venueJoin(scratchRoot, JAIL_TMP_SEGMENT)
   };
 }
+function venueProxyDir(stageBase) {
+  return `${stageBase}/proxy`;
+}
 function stageMkdirArgv(vm, project, zone, stageBase) {
   const dirs = Object.values(venueStagePaths(stageBase)).map(quoteForRemoteShell);
   return iapSshArgv(vm, project, zone, `mkdir -p ${dirs.join(" ")}`);
+}
+function iapUntarProxyArgv(vm, project, zone, dir) {
+  const d = quoteForRemoteShell(dir);
+  return iapSshArgv(vm, project, zone, `mkdir -p ${d} && tar -C ${d} -xf - && chmod 0644 ${d}/*.js && chmod 0755 ${d}`);
 }
 function lastLineOf(blob) {
   const lines = blob.split("\n").map((line) => line.trim()).filter((line) => line !== "");
@@ -3422,11 +3620,30 @@ ${r.stderr}`;
     reason: line === "" ? "the probe failed without writing to either stream" : `unrecognised probe failure: ${line.slice(0, 200)}`
   };
 }
+function assertServiceCredentials(config, io) {
+  const env = venueGcloudEnv(config);
+  const active = io.exec("gcloud", ["auth", "list", "--filter=status:ACTIVE", "--format=value(account)"], 2e4, env);
+  if (!active.ok) {
+    throw new HostedVenueError(`could not read which account the ${config} gcloud configuration acts as, so booting would run as whoever this terminal is signed in as: ${execDetail(active).slice(0, 300)}`, "ours");
+  }
+  const account = active.stdout.trim();
+  if (account === "") {
+    throw new HostedVenueError(`the ${config} gcloud configuration has no active account. Activate the service credential first \u2014 docs/runbooks/gcp-tier-1-provisioning.md Step 6.`, "ours");
+  }
+  if (!account.endsWith(SERVICE_ACCOUNT_SUFFIX)) {
+    throw new HostedVenueError(`the ${config} gcloud configuration acts as ${account}, which is a person and not a service account. A dispatched run has nobody at a terminal, so the venue must come up under a credential the service owns \u2014 docs/runbooks/gcp-tier-1-provisioning.md Step 6.`, "ours");
+  }
+  return account;
+}
 function hostedVenueAvailable(opts = {}, io = defaultHostedVenueIo) {
   const project = opts.project ?? DEFAULT_GCP_PROJECT;
-  const account = io.exec("gcloud", ["config", "get-value", "account"], 1e4);
-  if (!account.ok || account.stdout.trim() === "")
+  const config = opts.gcloudConfig ?? VENUE_GCLOUD_CONFIG;
+  const env = venueGcloudEnv(config);
+  try {
+    assertServiceCredentials(config, io);
+  } catch {
     return false;
+  }
   const iap = io.exec("gcloud", [
     "services",
     "list",
@@ -3434,7 +3651,7 @@ function hostedVenueAvailable(opts = {}, io = defaultHostedVenueIo) {
     `--project=${project}`,
     "--filter=name:iap.googleapis.com",
     "--format=value(config.name)"
-  ], 2e4);
+  ], 2e4, env);
   if (!iap.ok || !iap.stdout.includes("iap.googleapis.com"))
     return false;
   const fw = io.exec("gcloud", [
@@ -3443,7 +3660,7 @@ function hostedVenueAvailable(opts = {}, io = defaultHostedVenueIo) {
     "list",
     `--project=${project}`,
     "--format=value(sourceRanges.list())"
-  ], 2e4);
+  ], 2e4, env);
   return fw.ok && fw.stdout.includes("35.235.240.0/20");
 }
 function execDetail(res) {
@@ -3452,38 +3669,95 @@ function execDetail(res) {
     return said === "" ? "it said nothing" : said;
   return said === "" ? res.failure.message : `${res.failure.message}: ${said}`;
 }
+function classifyBootFailure(res) {
+  const said = `${res.stdout}
+${res.stderr}`;
+  const detail = execDetail(res);
+  if (res.failure?.kind === "spawn") {
+    return {
+      source: "ours",
+      created: "none",
+      reason: `gcloud never ran here, so nothing reached GCE \u2014 ${res.failure.message}`
+    };
+  }
+  if (res.failure?.kind === "timeout") {
+    return {
+      source: "ours",
+      created: "unknown",
+      reason: `the create was killed on this machine before GCE answered, so whether an instance exists is unknown \u2014 ${res.failure.message}`
+    };
+  }
+  if (/ZONE_RESOURCE_POOL_EXHAUSTED/.test(said)) {
+    return {
+      source: "ours",
+      created: "none",
+      reason: `the zone had no spare capacity, so no venue was ever created \u2014 ${detail}`
+    };
+  }
+  if (/QUOTA_EXCEEDED/.test(said) || /Quota '[A-Z_]+' exceeded/.test(said)) {
+    return {
+      source: "ours",
+      created: "none",
+      reason: `the project's quota refused the instance before it existed \u2014 ${detail}`
+    };
+  }
+  if (/PERMISSION_DENIED/.test(said) || /Required '[a-z.]+' permission/.test(said)) {
+    return {
+      source: "ours",
+      created: "none",
+      reason: `GCE refused the create for this credential, so no venue was started \u2014 ${detail}`
+    };
+  }
+  return { source: "venue", created: "unknown", reason: detail };
+}
+function deleteFoundNothing(res, vm) {
+  if (res.ok || res.failure !== null)
+    return false;
+  const named = /The resource '([^']+)' was not found/.exec(`${res.stdout}
+${res.stderr}`);
+  return named !== null && named[1].endsWith(`/instances/${vm}`);
+}
 function manualDeleteCommand(vm, project, zone) {
   return `gcloud compute instances delete ${vm} --project=${project} --zone=${zone} --quiet`;
 }
 function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
   const project = opts.project ?? DEFAULT_GCP_PROJECT;
   const zone = opts.zone ?? DEFAULT_GCP_ZONE;
+  const gcloudConfig = opts.gcloudConfig ?? VENUE_GCLOUD_CONFIG;
+  const env = venueGcloudEnv(gcloudConfig);
   return {
     kind: "hosted-pool",
     acquire: (runId) => acquireTransactionally(async (allocated) => {
       const vm = `th-run-${runId}`.toLowerCase().slice(0, 62);
       const stageBase = `/tmp/th-stage-${runId}`;
-      const boot = io.exec("gcloud", gcpBootArgv({
+      const bootArgv = gcpBootArgv({
         vmName: vm,
         project,
         zone,
         runId,
         machineType: opts.machineType ?? DEFAULT_GCP_MACHINE_TYPE
-      }), BOOT_TIMEOUT_MS);
+      });
+      assertServiceCredentials(gcloudConfig, io);
+      const boot = io.exec("gcloud", bootArgv, BOOT_TIMEOUT_MS, env);
+      let instanceState = "unknown";
       allocated.onRollback(() => {
-        const del = io.exec("gcloud", gcpDeleteArgv({ vmName: vm, project, zone }), DELETE_TIMEOUT_MS);
-        if (!del.ok) {
-          throw new HostedVenueError(`${vm} may still exist and is still billing: ${execDetail(del).slice(0, 300)} \u2014 to remove it now: ` + manualDeleteCommand(vm, project, zone));
+        const del = io.exec("gcloud", gcpDeleteArgv({ vmName: vm, project, zone }), DELETE_TIMEOUT_MS, env);
+        const foundNothing = deleteFoundNothing(del, vm);
+        if (!del.ok && !(foundNothing && instanceState !== "unknown")) {
+          throw new HostedVenueError(foundNothing ? `${vm} was not found when we tried to delete it, but the create never answered \u2014 so it may yet appear and bill until its --max-run-duration expires. Check, and remove it if it is there: ${manualDeleteCommand(vm, project, zone)}` : `${vm} may still exist and is still billing: ${execDetail(del).slice(0, 300)} \u2014 to remove it now: ` + manualDeleteCommand(vm, project, zone));
         }
       });
       if (!boot.ok) {
-        throw new HostedVenueError(`could not boot ${vm}: ${execDetail(boot).slice(0, 400)}`);
+        const verdict2 = classifyBootFailure(boot);
+        instanceState = verdict2.created;
+        throw new HostedVenueError(`could not boot ${vm}: ${verdict2.reason.slice(0, 400)}`, verdict2.source);
       }
+      instanceState = "exists";
       const deadline = io.now() + SSH_READY_BUDGET_MS;
       let last = { retryable: true, reason: "no probe ran" };
       let ready = false;
       while (io.now() < deadline) {
-        const probe = io.exec("gcloud", iapSshArgv(vm, project, zone, "docker info --format {{.ID}}"), SSH_PROBE_TIMEOUT_MS);
+        const probe = io.exec("gcloud", iapSshArgv(vm, project, zone, "docker info --format {{.ID}}"), SSH_PROBE_TIMEOUT_MS, env);
         if (probe.ok && probe.stdout.trim() !== "") {
           ready = true;
           break;
@@ -3501,7 +3775,7 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
       try {
         socketDir = io.makePrivateDir();
       } catch (err) {
-        throw new HostedVenueError(`could not create a private directory for ${vm}'s docker socket, and binding it somewhere shared would let any local process answer for the venue: ${describeErr(err)}`);
+        throw new HostedVenueError(`could not create a private directory for ${vm}'s docker socket, and binding it somewhere shared would let any local process answer for the venue: ${describeErr(err)}`, "ours");
       }
       allocated.onRollback(() => {
         try {
@@ -3512,9 +3786,9 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
       });
       const socketPath = join8(socketDir, VENUE_SOCKET_NAME);
       if (io.exists(socketPath)) {
-        throw new HostedVenueError(`something already exists at ${socketPath}, inside a directory created seconds ago for this run alone. Refusing rather than clearing it: the tunnel would carry the whole run over a path we cannot account for`);
+        throw new HostedVenueError(`something already exists at ${socketPath}, inside a directory created seconds ago for this run alone. Refusing rather than clearing it: the tunnel would carry the whole run over a path we cannot account for`, "ours");
       }
-      const tunnel = io.spawnTunnel("gcloud", iapTunnelArgv(vm, project, zone, socketPath));
+      const tunnel = io.spawnTunnel("gcloud", iapTunnelArgv(vm, project, zone, socketPath), env);
       allocated.onRollback(() => {
         try {
           tunnel.kill("SIGTERM");
@@ -3538,7 +3812,7 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
         throw new HostedVenueError(`refusing to hand out a hosted lease: ${describeVenueDaemon(verdict)}`);
       }
       const venueDaemonId = verdict.venueDaemonId;
-      const prepared = io.exec("gcloud", stageMkdirArgv(vm, project, zone, stageBase), MKDIR_TIMEOUT_MS);
+      const prepared = io.exec("gcloud", stageMkdirArgv(vm, project, zone, stageBase), MKDIR_TIMEOUT_MS, env);
       if (!prepared.ok) {
         throw new HostedVenueError(`could not prepare the stage on ${vm}: ${execDetail(prepared).slice(0, 300)}`);
       }
@@ -3553,6 +3827,7 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
         socketDir,
         socketPath,
         venueDaemonId,
+        env,
         io
       });
     })
@@ -3612,6 +3887,29 @@ function makeLease(p) {
     tunnelClosed = true;
     return null;
   };
+  let stagedOwner;
+  const readStagedOwner = () => {
+    const res = p.io.exec(
+      "gcloud",
+      iapSshArgv(p.vm, p.project, p.zone, "id -u && id -g"),
+      OWNER_PROBE_TIMEOUT_MS,
+      // `p.env`, like every other gcloud call here. TERM-724 made the venue boot under the
+      // SERVICE configuration rather than whoever is at the terminal, and a probe that
+      // omitted this would ssh under the person's own credential — then report an owner
+      // measured against a session the run does not use.
+      p.env
+    );
+    if (!res.ok) {
+      throw new HostedVenueError(`could not read the staged tree's owner on ${p.vm}: ${execDetail(res).slice(0, 300)}. Refusing rather than falling back to this machine\u2019s uid, which would hand the guest an id with no write access to its own clone.`);
+    }
+    const lines = res.stdout.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+    const ids2 = lines.slice(-2).map((l) => Number(l));
+    if (ids2.length !== 2 || !ids2.every((n) => Number.isInteger(n) && n > 0)) {
+      throw new HostedVenueError(`the venue ${p.vm} answered 'id -u && id -g' with ${JSON.stringify(res.stdout.slice(0, 120))}, which is not a uid/gid pair. Refusing rather than guessing an owner.`);
+    }
+    return { uid: ids2[0], gid: ids2[1] };
+  };
+  stagedOwner = readStagedOwner();
   return {
     kind: "hosted-pool",
     runId: p.runId,
@@ -3625,14 +3923,38 @@ function makeLease(p) {
     // and `assertDomainDeclared` refuses a spec that omits it on a redirected
     // client, so forgetting this is loud rather than silent.
     pathDomain: "venue",
+    // Beside `pathDomain` because it answers the same question about the same
+    // machine: that one says WHOSE filesystem, this one says WHOSE account.
+    get guestUser() {
+      return stagedOwner;
+    },
     get released() {
       return released;
+    },
+    async stageProxyCode() {
+      check("staging the egress proxy");
+      const dir = venueProxyDir(p.stageBase);
+      const buffer = stageProxyCode();
+      try {
+        const res = await p.io.pushTree(buffer.dir, "gcloud", iapUntarProxyArgv(p.vm, p.project, p.zone, dir), STAGE_PUSH_TIMEOUT_MS, p.env);
+        if (!res.ok) {
+          throw new HostedVenueError(`could not stage the egress proxy onto ${p.vm}: ${execDetail(res).slice(0, 300)}`);
+        }
+      } finally {
+        buffer.cleanup();
+      }
+      return {
+        dir,
+        cleanup: () => {
+          p.io.exec("gcloud", iapSshArgv(p.vm, p.project, p.zone, `rm -rf ${quoteForRemoteShell(dir)}`), PROXY_CLEANUP_TIMEOUT_MS, p.env);
+        }
+      };
     },
     async stage(local) {
       check("staging the tree");
       const paths = venueStagePaths(p.stageBase);
       const push = async (from, to) => {
-        const res = await p.io.pushTree(from, "gcloud", iapUntarArgv(p.vm, p.project, p.zone, to), STAGE_PUSH_TIMEOUT_MS);
+        const res = await p.io.pushTree(from, "gcloud", iapUntarArgv(p.vm, p.project, p.zone, to), STAGE_PUSH_TIMEOUT_MS, p.env);
         if (!res.ok) {
           throw new HostedVenueError(`could not stage ${from} onto ${p.vm}: ${execDetail(res).slice(0, 300)}`);
         }
@@ -3646,6 +3968,24 @@ function makeLease(p) {
       const missing = required.filter((path) => !p.io.exists(path));
       if (missing.length > 0) {
         throw new HostedVenueError(`refusing to stage ${local.scratchRoot} onto ${p.vm}: the jail at ${localJail} is incomplete \u2014 missing ${missing.join(", ")}. buildJail must run to completion before stage(), or the venue mounts a directory with no identity database.`);
+      }
+      const gitConfigPath = join8(local.cloneDir, ".git", "config");
+      let gitConfig;
+      try {
+        gitConfig = p.io.readTextIfPresent(gitConfigPath);
+      } catch (err) {
+        throw new HostedVenueError(
+          `refusing to stage ${local.cloneDir} onto ${p.vm}: ${gitConfigPath} exists but could not be read, so it cannot be screened for a credential, and the whole tree is mounted where the repo\u2019s own test command runs.`,
+          // `'ours'` and not the default `'venue'`: the venue is fine, we cannot read a file
+          // on this side. The acceptance harness's scheme exists to keep "the venue failed"
+          // apart from "we could not look" (TERM-710).
+          "ours",
+          { cause: err }
+        );
+      }
+      const carried = gitConfig === null ? null : credentialInGitConfig(gitConfig);
+      if (carried !== null) {
+        throw new HostedVenueError(`refusing to stage ${local.cloneDir} onto ${p.vm}: its .git/config carries ${carried}, and the whole tree is mounted where the repo\u2019s own test command runs. Fetch with the credential out of band (http.extraHeader or GIT_ASKPASS) so it is never written to disk.`);
       }
       await push(local.cloneDir, paths.cloneDir);
       await push(local.scratchRoot, paths.scratchRoot);
@@ -3689,7 +4029,17 @@ function makeLease(p) {
           detail: tunnelResidue === null ? `${p.vm} was already released` : `${p.vm} was already released, but ${tunnelResidue}`
         });
       }
-      const del = p.io.exec("gcloud", gcpDeleteArgv({ vmName: p.vm, project: p.project, zone: p.zone }), DELETE_TIMEOUT_MS);
+      const del = p.io.exec("gcloud", gcpDeleteArgv({ vmName: p.vm, project: p.project, zone: p.zone }), DELETE_TIMEOUT_MS, p.env);
+      if (!del.ok && deleteFoundNothing(del, p.vm)) {
+        released = true;
+        return Promise.resolve({
+          kind: "hosted-pool",
+          released: true,
+          alreadyReleased: false,
+          error: tunnelResidue,
+          detail: `${p.vm} is already gone \u2014 GCE reports no such instance, so something removed it first (the hard --max-run-duration is the likely one). Nothing is billing` + (tunnelResidue === null ? "" : `, but ${tunnelResidue}`)
+        });
+      }
       if (!del.ok) {
         const deleteError = execDetail(del).slice(0, 300);
         return Promise.resolve({
@@ -3714,7 +4064,7 @@ function makeLease(p) {
     }
   };
 }
-var SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, STAGE_PUSH_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, defaultHostedVenueIo, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING;
+var SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING;
 var init_hostedVenue = __esm({
   "../../packages/envrun/dist/hostedVenue.js"() {
     "use strict";
@@ -3729,23 +4079,48 @@ var init_hostedVenue = __esm({
     SSH_PROBE_TIMEOUT_MS = 25e3;
     TUNNEL_BUDGET_MS = 6e4;
     TUNNEL_POLL_INTERVAL_MS = 500;
+    CREDENTIAL_QUERY_PARAM = /[?&][^=&\s]*(token|secret|password|passwd|api[-_]?key|signature|sig|auth|credential)[^=&\s]*=[^\s&]/i;
+    UNDECODABLE = "?token=this:url-could-not-be-decoded-so-it-is-refused";
     STAGE_PUSH_TIMEOUT_MS = 3e5;
+    PROXY_CLEANUP_TIMEOUT_MS = 3e4;
+    OWNER_PROBE_TIMEOUT_MS = 3e4;
     BOOT_TIMEOUT_MS = 18e4;
     MKDIR_TIMEOUT_MS = 6e4;
     DELETE_TIMEOUT_MS = 3e5;
     SOCKET_DIR_PREFIX = "th-venue-";
     VENUE_SOCKET_NAME = "docker.sock";
     HostedVenueError = class extends RunRefusalError {
-      constructor(message) {
-        super(message);
+      source;
+      constructor(message, source = "venue", options) {
+        super(message, options);
         this.name = "HostedVenueError";
+        this.source = source;
       }
     };
+    VENUE_GCLOUD_CONFIG = "pool-runner";
+    SERVICE_ACCOUNT_SUFFIX = ".iam.gserviceaccount.com";
+    GCLOUD_PRINCIPAL_OVERRIDES = [
+      "CLOUDSDK_AUTH_ACCESS_TOKEN_FILE",
+      "CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT",
+      "CLOUDSDK_CORE_ACCOUNT"
+    ];
     defaultHostedVenueIo = {
       exec: execWithSpawnSync,
       pushTree: pushTreeWithTar,
-      spawnTunnel: (file, args) => {
-        const child = spawn4(file, [...args], { stdio: ["ignore", "ignore", "ignore"] });
+      readTextIfPresent: (path) => {
+        try {
+          return readFileSync3(path, "utf8");
+        } catch (err) {
+          if (err.code === "ENOENT")
+            return null;
+          throw err;
+        }
+      },
+      spawnTunnel: (file, args, env) => {
+        const child = spawn4(file, [...args], {
+          stdio: ["ignore", "ignore", "ignore"],
+          env: childEnv(env)
+        });
         let failure = null;
         let killed = false;
         child.on("error", (err) => {
@@ -4543,14 +4918,14 @@ var init_references = __esm({
 });
 
 // ../../packages/envspec/dist/repo.js
-import { readdirSync as readdirSync2, readFileSync as readFileSync3, statSync as statSync2 } from "fs";
+import { readdirSync as readdirSync2, readFileSync as readFileSync4, statSync as statSync2 } from "fs";
 import { join as join9, relative, sep } from "path";
 function createRepoReader(repoPath) {
   const resolveIn = (relativePath) => relativePath === "" ? repoPath : join9(repoPath, relativePath);
   const toPosix = (absolute) => relative(repoPath, absolute).split(sep).join("/");
   const readText = (relativePath) => {
     try {
-      return readFileSync3(resolveIn(relativePath), "utf8");
+      return readFileSync4(resolveIn(relativePath), "utf8");
     } catch {
       return null;
     }
@@ -5173,8 +5548,9 @@ var init_dist3 = __esm({
 
 // ../../packages/envrun/dist/thrun.js
 import { execFileSync, spawnSync as spawnSync7 } from "child_process";
-import { existsSync as existsSync7, mkdirSync as mkdirSync5 } from "fs";
+import { existsSync as existsSync7, mkdirSync as mkdirSync5, mkdtempSync as mkdtempSync3, rmSync as rmSync4 } from "fs";
 import { randomUUID as randomUUID2 } from "crypto";
+import { devNull, tmpdir as tmpdir3 } from "os";
 import { join as join10 } from "path";
 function git(repoDir, args, allowNonZero = false) {
   const res = spawnSync7("git", [...args], {
@@ -5213,6 +5589,47 @@ function isLocalPath(p) {
 function refuseTransport(scheme) {
   throw new ThRunError(`refusing a target whose transport (${scheme ?? "no recognised scheme"}) is not one this runner clones from. ${TRANSPORT_REASON}`);
 }
+function separatorInTarget(url) {
+  const describe = (ch, index, what) => ({
+    what,
+    codePoint: (ch.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0"),
+    index
+  });
+  const cc = /[\p{Cc}\p{Cf}]/u.exec(url);
+  if (cc !== null) {
+    const ch = cc[0] ?? "";
+    return describe(ch, cc.index, new RegExp("\\p{Cf}", "u").test(ch) ? "an invisible formatting character" : "a control character");
+  }
+  const SCHEME = /[A-Za-z][A-Za-z0-9+.-]*:\/\//g;
+  const schemes = [...url.matchAll(SCHEME)];
+  if (schemes.length > 1) {
+    const second = schemes[1];
+    return describe(url[second?.index ?? 0] ?? "", second?.index ?? 0, "a second URL");
+  }
+  const opensWithScheme = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(url);
+  if (schemes.length === 1 && !opensWithScheme) {
+    const at = schemes[0]?.index ?? 0;
+    return describe(url[at] ?? "", at, "a URL embedded in a value that does not begin with one");
+  }
+  const isRemote = opensWithScheme ? !/^file:\/\//i.test(url) : (
+    // scp-style `host:path`: a colon before any slash, no backslash anywhere, and not a
+    // Windows drive. Anything else scheme-less is a path.
+    /^[^/\\]+:[^\\]*$/.test(url) && !/^[A-Za-z]:/.test(url)
+  );
+  if (isRemote) {
+    const chars = [...url];
+    const offending = chars.findIndex((ch) => !/[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]/.test(ch));
+    if (offending >= 0) {
+      const ch = chars[offending] ?? "";
+      return describe(ch, offending, ch === " " ? "whitespace" : "a character no URL may contain");
+    }
+    return null;
+  }
+  const blank = /[\p{Zl}\p{Zp}]|(?![ ])[\p{Zs}]/u.exec(url);
+  if (blank !== null)
+    return describe(blank[0] ?? "", blank.index, "whitespace");
+  return null;
+}
 function assertSafeTargetUrl(url) {
   if (url.startsWith("-")) {
     throw new ThRunError(`refusing a target beginning with "-": git reads it as an option, not a URL, which is the same class of hole as a transport helper. ${TRANSPORT_REASON}`);
@@ -5221,6 +5638,10 @@ function assertSafeTargetUrl(url) {
   if (beforeFirstSlash.includes("::")) {
     const scheme2 = beforeFirstSlash.slice(0, beforeFirstSlash.indexOf("::"));
     throw new ThRunError(`refusing a target that names the "${scheme2}::" transport helper. ${TRANSPORT_REASON}`);
+  }
+  const offender = separatorInTarget(url);
+  if (offender !== null) {
+    throw new ThRunError(`refusing a target containing ${offender.what} (U+${offender.codePoint} at index ${String(offender.index)}): git takes a single value here, and one that carries a second target is judged only up to the join while being printed whole. The position is named and the value is not, because what follows it is exactly where a credential would sit.`);
   }
   if (url.startsWith("file:///")) {
     let decoded;
@@ -5253,13 +5674,117 @@ function assertSafeTargetSha(sha) {
 function endOfOptionsUnsupported(stderr) {
   return /unknown option[^\n]*end-of-options/i.test(stderr);
 }
+function gitCloneEnv(auth) {
+  const env = {};
+  for (const name of GIT_ENV_ALLOWLIST) {
+    const value = process.env[name];
+    if (value !== void 0)
+      env[name] = value;
+  }
+  env["GIT_CONFIG_GLOBAL"] = devNull;
+  env["GIT_CONFIG_SYSTEM"] = devNull;
+  env["GIT_CONFIG_NOSYSTEM"] = "1";
+  env["GIT_TERMINAL_PROMPT"] = "0";
+  for (const name of ["HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"]) {
+    env[name] = credentialFreeHome();
+  }
+  env["GIT_SSH_COMMAND"] = `ssh ${SSH_ISOLATION_ARGS.join(" ")}`;
+  if (auth !== void 0) {
+    env["GIT_CONFIG_COUNT"] = "1";
+    env["GIT_CONFIG_KEY_0"] = "http.extraHeader";
+    env["GIT_CONFIG_VALUE_0"] = auth.header;
+  }
+  return env;
+}
+function credentialFreeHome() {
+  if (credentialFreeHomeDir !== void 0)
+    return credentialFreeHomeDir;
+  let made;
+  try {
+    made = mkdtempSync3(join10(tmpdir3(), "th-run-nohome-"));
+  } catch (err) {
+    throw new RunRefusalError("could not create the empty directory this clone uses as its home, so the clone would read the credentials on this machine instead. That is our environment failing, not your tests: check that the temp directory is writable.", { cause: err });
+  }
+  credentialFreeHomeDir = made;
+  process.once("exit", () => {
+    try {
+      rmSync4(made, { recursive: true, force: true });
+    } catch {
+    }
+  });
+  return made;
+}
+function gitConfigArgs() {
+  return ["-c", "credential.helper="];
+}
+function refuseSshTransport(url) {
+  const scheme = URL_SCHEME.exec(url)?.[1]?.toLowerCase();
+  const isSsh = scheme === "ssh" || scheme === void 0 && SCP_STYLE.test(url);
+  if (!isSsh)
+    return;
+  throw new RunRefusalError("refusing an ssh target: this clone runs with no credential of yours, and an ssh host authenticates the client before it serves anything \u2014 including a public repository. Use the https URL for the same repo; a private one is reached with a credential this runner is handed deliberately. We refuse rather than let the fetch fail and read as your own tests failing.");
+}
 function cloneTargetAt(opts) {
+  try {
+    return cloneTargetAtUnguarded(opts);
+  } catch (err) {
+    throw redactTarget(err, opts.url, opts.cacheDir);
+  }
+}
+function redactTarget(err, ...targets) {
+  if (!(err instanceof Error))
+    return err;
+  const spellings = /* @__PURE__ */ new Set();
+  const unscheme = (s) => s.replace(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, "");
+  for (const t of targets) {
+    if (t === void 0 || t === "")
+      continue;
+    const decodings = [t];
+    try {
+      decodings.push(decodeURIComponent(t));
+    } catch {
+    }
+    for (const d of decodings) {
+      spellings.add(d);
+      spellings.add(unscheme(d));
+    }
+  }
+  const ordered = [...spellings].sort((a, b) => b.length - a.length);
+  const scrub = (s) => ordered.reduce((acc, t) => acc.split(t).join(UNPARSEABLE_TARGET), s);
+  for (let e = err, depth = 0; e instanceof Error && depth < 16; e = e.cause, depth += 1) {
+    assign(e, "message", scrub(e.message));
+    if (typeof e.stack === "string")
+      assign(e, "stack", scrub(e.stack));
+    const s = e.stderr;
+    if (typeof s === "string")
+      assign(e, "stderr", scrub(s));
+  }
+  return err;
+}
+function assign(target, field, value) {
+  try {
+    target[field] = value;
+  } catch {
+  }
+}
+function cloneTargetAtUnguarded(opts) {
   assertSafeTargetSha(opts.sha);
   const source = opts.cacheDir ?? opts.url;
   assertSafeTargetUrl(source);
+  refuseSshTransport(source);
+  const persisted = credentialInGitUrl(source);
+  if (persisted !== null) {
+    throw new RunRefusalError(`refusing to clone from a URL carrying ${persisted}: \`git remote add\` writes the source verbatim into .git/config, which is mounted where the repo\u2019s own test command runs. Fetch with the credential out of band so it is never written to disk \u2014 this runner takes one as an HTTP header, which is never persisted.`);
+  }
   mkdirSync5(opts.dest, { recursive: true });
+  const runOut = (args) => execFileSync("git", [...gitConfigArgs(), ...args], {
+    cwd: opts.dest,
+    encoding: "utf8",
+    stdio: "pipe",
+    env: gitCloneEnv(opts.auth)
+  });
   const run2 = (args) => {
-    execFileSync("git", [...args], { cwd: opts.dest, encoding: "utf8", stdio: "pipe" });
+    runOut(args);
   };
   run2(["init", "-q"]);
   run2(["remote", "add", "origin", source]);
@@ -5268,19 +5793,106 @@ function cloneTargetAt(opts) {
   } catch (err) {
     const stderr = String(err.stderr ?? "");
     if (endOfOptionsUnsupported(stderr)) {
-      throw new ThRunError(`this git does not understand "--end-of-options", so the target ref cannot be passed where git is guaranteed to read it as data. Upgrade to git ${MIN_GIT_VERSION_FOR_END_OF_OPTIONS} or newer. The clone is refused rather than retried without the marker: dropping it would remove the protection a caller that skips validation depends on.`);
+      throw new CloneUnavailableError(
+        `this git does not understand "--end-of-options", so the target ref cannot be passed where git is guaranteed to read it as data. Upgrade to git ${MIN_GIT_VERSION_FOR_END_OF_OPTIONS} or newer. The clone is refused rather than retried without the marker: dropping it would remove the protection a caller that skips validation depends on.`,
+        // THE THIRD CAUSE-DISCARDING SEAM (TERM-738, found by review). This branch already
+        // held the child-process error and threw it away, so an operator got our sentence
+        // and nothing else — no git version, no argv, no stderr. The sibling throw below
+        // attaches its cause; this one silently did not, which is exactly the shape a
+        // per-site fix leaves behind.
+        { cause: err }
+      );
     }
-    throw err;
+    throw new CloneUnavailableError(`we could not fetch ${opts.sha.slice(0, 12)} from ${opts.url}. Nothing ran, so this says nothing about the code \u2014 our environment could not obtain it.`, { cause: err });
   }
   run2(["checkout", "-q", "FETCH_HEAD"]);
-  const head = execFileSync("git", ["rev-parse", "HEAD"], {
-    cwd: opts.dest,
-    encoding: "utf8"
-  }).trim();
+  const head = runOut(["rev-parse", "HEAD"]).trim();
   if (head !== opts.sha) {
     throw new ThRunError(`the target checkout is at ${head}, not the requested ${opts.sha}. Refusing to verify against a commit the result would misattribute.`);
   }
+  scrubCloneSource(opts.dest, run2);
   return head;
+}
+function scrubCloneSource(dest, run2) {
+  run2(["remote", "remove", "origin"]);
+  rmSync4(join10(dest, ".git", "FETCH_HEAD"), { force: true });
+}
+function publishableTarget(url) {
+  if (separatorInTarget(url) !== null)
+    return UNPARSEABLE_TARGET;
+  const m = /^([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^/?#]*)([^?#]*)/.exec(url);
+  if (m === null)
+    return url.includes("?") ? UNPARSEABLE_TARGET : redactPathCredentials(url);
+  const authority = m[2] ?? "";
+  const at = authority.lastIndexOf("@");
+  const path = m[3] ?? "";
+  return `${m[1] ?? ""}${at >= 0 ? authority.slice(at + 1) : authority}${redactPathCredentials(path)}`;
+}
+function redactPathCredentials(path) {
+  return path.replace(/[^/]+/g, (segment) => {
+    const seen = decodeToFixedPoint(segment);
+    if (seen === null)
+      return WITHHELD_SEGMENT;
+    return /:[^@]*@/.test(seen) ? WITHHELD_SEGMENT : segment;
+  });
+}
+function decodeToFixedPoint(s) {
+  let current = s;
+  for (let round = 0; round < 4; round += 1) {
+    let next;
+    try {
+      next = decodeURIComponent(current);
+    } catch {
+      return null;
+    }
+    if (next === current)
+      return current;
+    current = next;
+  }
+  return null;
+}
+function credentialInGitUrl(url) {
+  if (separatorInTarget(url) !== null)
+    return "a separator hiding whatever follows it";
+  const m = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^/?#]*)(.*)$/.exec(url);
+  if (m === null)
+    return null;
+  const scheme = (m[1] ?? "").toLowerCase();
+  const authority = m[2] ?? "";
+  const at = authority.lastIndexOf("@");
+  if (at >= 0) {
+    const overWeb = scheme === "http" || scheme === "https";
+    let userinfo;
+    try {
+      userinfo = decodeURIComponent(authority.slice(0, at));
+    } catch {
+      return "an unreadable escape in its userinfo";
+    }
+    if (overWeb || userinfo.includes(":"))
+      return "a credential in its userinfo";
+  }
+  const afterAuthority = m[3] ?? "";
+  if (afterAuthority.includes("?"))
+    return "a query string";
+  if (afterAuthority.includes("#"))
+    return "a fragment";
+  return null;
+}
+function targetCarriesCredential(url) {
+  if (separatorInTarget(url) !== null)
+    return true;
+  const rest = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/(.*)$/.exec(url)?.[1];
+  if (rest === void 0)
+    return false;
+  const authority = rest.split(/[/?#]/, 1)[0] ?? "";
+  const at = authority.lastIndexOf("@");
+  if (at < 0)
+    return false;
+  try {
+    return decodeURIComponent(authority.slice(0, at)).includes(":");
+  } catch {
+    return true;
+  }
 }
 function patchedTreeDigest(repoDir) {
   execFileSync("git", ["-C", repoDir, "add", "-A", "-f"], { stdio: "pipe" });
@@ -5360,6 +5972,21 @@ function unacceptableTarget(req) {
       return err.message;
     throw err;
   }
+  try {
+    refuseSshTransport(req.targetRepo);
+    if (req.targetCacheDir !== void 0)
+      refuseSshTransport(req.targetCacheDir);
+  } catch (err) {
+    if (err instanceof RunRefusalError)
+      return err.message;
+    throw err;
+  }
+  if (targetCarriesCredential(req.targetRepo)) {
+    return "refusing a target URL that carries a password in its userinfo: it would be printed";
+  }
+  if (req.targetCacheDir !== void 0 && targetCarriesCredential(req.targetCacheDir)) {
+    return "refusing a target cache path that carries a password in its userinfo: it would be printed";
+  }
   return null;
 }
 function toPreviewHandle(p) {
@@ -5377,7 +6004,13 @@ async function releaseWithoutThrowing(lease, progress) {
       progress("teardown", `venue ${report.kind} reported a teardown failure: ${report.error}`);
     }
   } catch (err) {
-    progress("teardown", `venue ${lease.kind} threw while releasing, which its contract forbids: ${String(err)}. The run result above stands; this is our environment failing to clean up, not a finding about the diff.`);
+    progress(
+      "teardown",
+      // `describeThrown`, not `String(err)`. This catch runs from a `finally`, so a value
+      // that traps its own coercion turns a clean-up complaint into a throw that REPLACES
+      // the run's real result — the exact cost this function's own docblock names.
+      `venue ${lease.kind} threw while releasing, which its contract forbids: ${describeThrown(err, { includeName: true })}. The run result above stands; this is our environment failing to clean up, not a finding about the diff.`
+    );
   }
 }
 async function verifyWorkingDiff(req) {
@@ -5385,6 +6018,11 @@ async function verifyWorkingDiff(req) {
     startedAt: Date.now(),
     runId: req.runId ?? `run-${randomUUID2().slice(0, 8)}`,
     touchedPaths: []
+  };
+  const target = {
+    claimId: req.claimId,
+    targetRepo: publishableTarget(req.targetRepo),
+    targetSha: req.targetSha
   };
   try {
     return await runVerification(req, ctx);
@@ -5395,11 +6033,44 @@ async function verifyWorkingDiff(req) {
     return {
       result: refusedRun({
         runId: ctx.runId,
-        claimId: req.claimId,
-        reason: refusal2.message,
+        claimId: target.claimId,
+        // `describeThrown`, not `refusal.message`. Classifying a value does not make
+        // reading it safe: `Error.prototype.message` is configurable, so a
+        // `RunRefusalError` carrying a throwing `message` getter passes
+        // `findRunRefusal` and then explodes HERE, inside the catch that exists to
+        // convert it. The refusal would reject instead of returning, and a run we
+        // refused would exit 1 — the developer's suite blamed for our own seam.
+        //
+        // This is the same lesson as the cause-walks above it, one accessor later:
+        // the read that runs BEFORE the diagnostic is the one that defeats it. With
+        // this call there is no raw read of a caller-supplied value left on the
+        // path. For an ordinary error `describeThrown(x, { includeName: false })`
+        // returns exactly `x.message`, so no founder-facing sentence changes.
+        reason: describeThrown(refusal2, { includeName: false }),
         wallMs: Date.now() - ctx.startedAt,
-        targetRepo: req.targetRepo,
-        targetSha: req.targetSha,
+        // The SNAPSHOT, already redacted above — not `publishableTarget(req.targetRepo)`
+        // again. Calling it here would re-read `req` inside the very catch that exists to
+        // build the refusal, which is the read TERM-738 moved out.
+        // BOTH, and a rebase kept only one. `publishableTarget` is TERM-731/745's
+        // credential strip; `target.*` is TERM-738's snapshot, taken before any
+        // caller-controlled code runs. This line was edited on both sides of a rebase
+        // onto main, the merge was clean, and the resolution silently dropped the strip.
+        //
+        // WHAT IS AND IS NOT DEMONSTRATED, because I first called this a live leak and
+        // could not then produce one. `refusedRun` passes this field through unchanged,
+        // and it is published where a founder reads it, so the strip is load-bearing in
+        // principle. But no fixture here reaches THIS site with a value the strip would
+        // change: the shapes it redacts (`x:secret@host`) are ones git reads as an
+        // scp-style remote, so the clone fails and the refusal is built at an earlier
+        // site that already strips. Two tests written for this line passed with the
+        // strip deleted, for two different reasons, before that was clear.
+        //
+        // So this is consistency with every other construction site and defence in
+        // depth, NOT a fix for a reproduced leak. Restated deliberately: overclaiming a
+        // security fix is the same species of error as the diagnostics this file exists
+        // to keep honest.
+        targetRepo: publishableTarget(target.targetRepo),
+        targetSha: target.targetSha,
         // Empty, for the reason STEP 0 and the lease refusal both give:
         // `renderVerdictLine` says "outside this bounty's slice" only when there
         // IS a slice refusal here, and no image we cannot supply is a finding
@@ -5410,7 +6081,11 @@ async function verifyWorkingDiff(req) {
       }),
       preview: null,
       spec: null,
-      verdict: null
+      verdict: null,
+      // The whole point of TERM-738. `refusal.message` above is the sentence we show; this
+      // is what actually went wrong, and without it the cause we attached at the throw site
+      // is discarded here — a returned refusal never reaches a caller's `catch`.
+      diagnostic: describeCause(err)
     };
   }
 }
@@ -5435,7 +6110,10 @@ async function runVerification(req, ctx) {
       }),
       preview: null,
       spec: null,
-      verdict: null
+      verdict: null,
+      // Null, and not an oversight: this refusal is our own check failing, so the sentence
+      // above IS the whole cause and there is no error underneath it to carry.
+      diagnostic: null
     };
   }
   const placement = req.placement ?? localDockerPlacement();
@@ -5446,7 +6124,7 @@ async function runVerification(req, ctx) {
         claimId: req.claimId,
         reason: placement.refusal,
         wallMs: Date.now() - startedAt,
-        targetRepo: req.targetRepo,
+        targetRepo: publishableTarget(req.targetRepo),
         targetSha: req.targetSha,
         // Empty, and read as a discriminator downstream: `renderVerdictLine`
         // says "outside this bounty's slice" only when there IS a slice refusal
@@ -5457,7 +6135,10 @@ async function runVerification(req, ctx) {
       }),
       preview: null,
       spec: null,
-      verdict: null
+      verdict: null,
+      // Null, and not an oversight: this refusal is our own check failing, so the sentence
+      // above IS the whole cause and there is no error underneath it to carry.
+      diagnostic: null
     };
   }
   const source = req.source;
@@ -5483,14 +6164,17 @@ async function runVerification(req, ctx) {
         claimId: req.claimId,
         reason: first?.detail ?? "the diff was refused by the local slice pre-flight, but no reason was recorded",
         wallMs: Date.now() - startedAt,
-        targetRepo: req.targetRepo,
+        targetRepo: publishableTarget(req.targetRepo),
         targetSha: req.targetSha,
         boundaryRefusals: pre.refusals,
         touchedPaths: pre.touchedPaths
       }),
       preview: null,
       spec: null,
-      verdict: null
+      verdict: null,
+      // Null, and not an oversight: this refusal is our own check failing, so the sentence
+      // above IS the whole cause and there is no error underneath it to carry.
+      diagnostic: null
     };
   }
   const stage = join10(req.scratchRoot, runId);
@@ -5498,12 +6182,16 @@ async function runVerification(req, ctx) {
   const scratch = join10(stage, "scratch");
   mkdirSync5(scratch, { recursive: true });
   assertSafeTargetSha(req.targetSha);
-  progress("clone", `${req.targetRepo} @ ${req.targetSha.slice(0, 12)}`);
+  progress("clone", `${publishableTarget(req.targetRepo)} @ ${req.targetSha.slice(0, 12)}`);
   cloneTargetAt({
     url: req.targetRepo,
     sha: req.targetSha,
     dest: cloneDir,
-    ...req.targetCacheDir ? { cacheDir: req.targetCacheDir } : {}
+    ...req.targetCacheDir ? { cacheDir: req.targetCacheDir } : {},
+    // Note this rides alongside `cacheDir` rather than instead of it. A cached fetch
+    // reads a local bare clone and needs no credential, but the header is harmless
+    // there and passing it unconditionally keeps one code path instead of two.
+    ...req.targetAuth ? { auth: req.targetAuth } : {}
   });
   const baselinePatch = source.kind === "working-diff" ? source.baselinePatch : void 0;
   const hasBaselinePatch = baselinePatch !== void 0 && baselinePatch.trim() !== "";
@@ -5528,7 +6216,7 @@ async function runVerification(req, ctx) {
         claimId: req.claimId,
         reason: resolved.refusal,
         wallMs: Date.now() - startedAt,
-        targetRepo: req.targetRepo,
+        targetRepo: publishableTarget(req.targetRepo),
         targetSha: req.targetSha,
         // Empty, and for the same reason as STEP 0: `renderVerdictLine` says
         // "outside this bounty's slice" only when there IS a slice refusal here.
@@ -5539,6 +6227,10 @@ async function runVerification(req, ctx) {
         touchedPaths: pre.touchedPaths
       }),
       preview: null,
+      // Carried out of `resolveLease`, which used to keep only `err.message` and drop the
+      // error. `resolved.refusal` is the sentence a developer reads; this is the stack
+      // under it, and it is the only copy that exists (TERM-738).
+      diagnostic: resolved.diagnostic,
       // Null though a spec WAS derived: `VerifyOutcome.spec` is documented null on
       // a refusal, and a caller reading it as "this much of the run happened"
       // would be reading a run that did not.
@@ -5581,7 +6273,7 @@ async function runVerification(req, ctx) {
       testOutputTail: outputTail,
       counts: verdict.counts,
       wallMs: Date.now() - startedAt,
-      targetRepo: req.targetRepo,
+      targetRepo: publishableTarget(req.targetRepo),
       targetSha: req.targetSha,
       patchSha256,
       treeDigest,
@@ -5601,7 +6293,7 @@ async function runVerification(req, ctx) {
       leaksClean: verdict.leaks.clean
     };
     if (req.preview === false)
-      return { result: base, preview: null, spec, verdict };
+      return { result: base, preview: null, spec, verdict, diagnostic: null };
     progress("preview", "starting one instance both parties can open");
     const instance = await lease.publishPreview({
       labels,
@@ -5624,13 +6316,14 @@ async function runVerification(req, ctx) {
       },
       preview: instance,
       spec,
-      verdict
+      verdict,
+      diagnostic: null
     };
   } finally {
     await releaseWithoutThrowing(lease, progress);
   }
 }
-var ThRunError, OUTPUT_TAIL_BYTES, ALLOWED_URL_SCHEMES, SCP_STYLE, URL_SCHEME, WINDOWS_ABSOLUTE, UNC_PATH, TRANSPORT_REASON, SHA_REASON, FULL_SHA, MIN_GIT_VERSION_FOR_END_OF_OPTIONS, FAILURE_LINE, REDACTED_TARGET_REPO, REDACTED_TARGET_SHA;
+var ThRunError, OUTPUT_TAIL_BYTES, ALLOWED_URL_SCHEMES, SCP_STYLE, URL_SCHEME, WINDOWS_ABSOLUTE, UNC_PATH, TRANSPORT_REASON, SHA_REASON, FULL_SHA, MIN_GIT_VERSION_FOR_END_OF_OPTIONS, CloneUnavailableError, GIT_ENV_ALLOWLIST, credentialFreeHomeDir, SSH_ISOLATION_ARGS, WITHHELD_SEGMENT, UNPARSEABLE_TARGET, FAILURE_LINE, REDACTED_TARGET_REPO, REDACTED_TARGET_SHA;
 var init_thrun = __esm({
   "../../packages/envrun/dist/thrun.js"() {
     "use strict";
@@ -5641,6 +6334,7 @@ var init_thrun = __esm({
     init_labels();
     init_execute();
     init_placement();
+    init_venue();
     init_result();
     ThRunError = class extends Error {
     };
@@ -5654,6 +6348,58 @@ var init_thrun = __esm({
     SHA_REASON = 'git parses a fetch argument that begins with "-" as an OPTION and not a refspec, so a value like `--upload-pack=<command>` makes git run that command on this machine at clone time, before any container or fence exists. Quoting cannot make that safe, so the value is refused rather than sanitised.';
     FULL_SHA = /^[0-9a-f]{40}$/;
     MIN_GIT_VERSION_FOR_END_OF_OPTIONS = "2.24";
+    CloneUnavailableError = class extends RunRefusalError {
+    };
+    GIT_ENV_ALLOWLIST = [
+      "PATH",
+      "HOME",
+      "TMPDIR",
+      "LANG",
+      "LC_ALL",
+      "SSL_CERT_FILE",
+      // WHOM TO BELIEVE, NOT WHO WE ARE — and that distinction is the whole rule this list
+      // encodes. A CA bundle says which certificates to trust; it authenticates nobody, and a
+      // clone that cannot verify a corporate MITM CA fails TLS with a message about
+      // certificates rather than about anything a developer can act on. `SSL_CERT_FILE` above
+      // is the OpenSSL spelling of exactly this and was already here, so omitting git's own
+      // spellings made the list inconsistent rather than stricter.
+      //
+      // The client-auth variables — `GIT_SSL_CERT`, `GIT_SSL_KEY`, and the `GIT_PROXY_SSL_*`
+      // pair — are deliberately NOT here. A client certificate is a credential: an https target
+      // asking for mutual TLS would authenticate this clone as the developer with every other
+      // channel already shut. Pinned in `test/thrun-target-url.test.mjs`, in both directions.
+      "GIT_SSL_CAINFO",
+      "GIT_SSL_CAPATH",
+      // Windows
+      "SystemRoot",
+      "windir",
+      "ComSpec",
+      "USERPROFILE",
+      "HOMEDRIVE",
+      "HOMEPATH",
+      "APPDATA",
+      "LOCALAPPDATA",
+      "TEMP",
+      "TMP",
+      "PATHEXT",
+      "PROCESSOR_ARCHITECTURE",
+      "SYSTEMDRIVE",
+      "PROGRAMDATA"
+    ];
+    SSH_ISOLATION_ARGS = [
+      "-F",
+      "none",
+      "-o",
+      "IdentitiesOnly=yes",
+      "-o",
+      "IdentityAgent=none",
+      "-o",
+      "IdentityFile=none",
+      "-o",
+      "BatchMode=yes"
+    ];
+    WITHHELD_SEGMENT = "(credential withheld)";
+    UNPARSEABLE_TARGET = "(a target this runner could not parse, withheld)";
     FAILURE_LINE = /^(?:[ \t]*(?:not ok |FAILED |FAIL )|E {3}|# fail [1-9])/m;
     REDACTED_TARGET_REPO = "(refused before the target was accepted)";
     REDACTED_TARGET_SHA = "(refused)";
@@ -6452,6 +7198,7 @@ __export(dist_exports, {
   ATTEST_REFUSAL_REASONS: () => ATTEST_REFUSAL_REASONS,
   BOOKKEEPING_TABLES: () => BOOKKEEPING_TABLES,
   CONTAINMENT_UNAVAILABLE_PREFIX: () => CONTAINMENT_UNAVAILABLE_PREFIX,
+  CloneUnavailableError: () => CloneUnavailableError,
   DEFAULT_GCP_PROJECT: () => DEFAULT_GCP_PROJECT,
   DEFAULT_GCP_ZONE: () => DEFAULT_GCP_ZONE,
   DEFAULT_PLACEMENT_KIND: () => DEFAULT_PLACEMENT_KIND,
@@ -6484,11 +7231,14 @@ __export(dist_exports, {
   RUN_TEST_COMMAND_SOURCES: () => RUN_TEST_COMMAND_SOURCES,
   RunRefusalError: () => RunRefusalError,
   SERVER_SOURCE: () => SERVER_SOURCE,
+  SERVICE_ACCOUNT_SUFFIX: () => SERVICE_ACCOUNT_SUFFIX,
   SSH_PROBE_INTERVAL_MS: () => SSH_PROBE_INTERVAL_MS,
   SSH_READY_BUDGET_MS: () => SSH_READY_BUDGET_MS,
   STOCK_POSTGRES_IMAGE: () => STOCK_POSTGRES_IMAGE,
   SUPPORTED_RUNNERS: () => SUPPORTED_RUNNERS,
   ThRunError: () => ThRunError,
+  UNPARSEABLE_TARGET: () => UNPARSEABLE_TARGET,
+  VENUE_GCLOUD_CONFIG: () => VENUE_GCLOUD_CONFIG,
   VENV_DIR: () => VENV_DIR,
   VenueRollbackError: () => VenueRollbackError,
   acquireTransactionally: () => acquireTransactionally,
@@ -6499,9 +7249,12 @@ __export(dist_exports, {
   applySeeds: () => applySeeds,
   assertSafeTargetSha: () => assertSafeTargetSha,
   assertSafeTargetUrl: () => assertSafeTargetUrl,
+  assertServiceCredentials: () => assertServiceCredentials,
+  assertVenueOwnerDeclared: () => assertVenueOwnerDeclared,
   bookkeepingFor: () => bookkeepingFor,
   census: () => census,
   censusTotal: () => censusTotal,
+  classifyBootFailure: () => classifyBootFailure,
   classifyProbeFailure: () => classifyProbeFailure,
   classifySingleRun: () => classifySingleRun,
   classifyVenueDaemon: () => classifyVenueDaemon,
@@ -6510,10 +7263,14 @@ __export(dist_exports, {
   collectWorkingDiff: () => collectWorkingDiff,
   connectionUrl: () => connectionUrl,
   containmentUnavailableRefusal: () => containmentUnavailableRefusal,
+  credentialInGitUrl: () => credentialInGitUrl,
   defaultHostedVenueIo: () => defaultHostedVenueIo,
+  deleteFoundNothing: () => deleteFoundNothing,
+  describeCause: () => describeCause,
   describeVenueDaemon: () => describeVenueDaemon,
   detectRunner: () => detectRunner,
   endOfOptionsUnsupported: () => endOfOptionsUnsupported,
+  failureSourceOf: () => failureSourceOf,
   findRunRefusal: () => findRunRefusal,
   gcpBootArgv: () => gcpBootArgv,
   gcpDeleteArgv: () => gcpDeleteArgv,
@@ -6547,11 +7304,13 @@ __export(dist_exports, {
   preflightBoundary: () => preflightBoundary,
   probeEgressControl: () => probeEgressControl,
   probeReachability: () => probeReachability,
+  publishableTarget: () => publishableTarget,
   quoteForRemoteShell: () => quoteForRemoteShell,
   readAlembicChain: () => readAlembicChain,
   readCounts: () => readCounts,
   readSchema: () => readSchema,
   recordedApplied: () => recordedApplied,
+  refuseSshTransport: () => refuseSshTransport,
   renderRunReport: () => renderRunReport,
   renderVerdictLine: () => renderVerdictLine,
   resolveImageForSpec: () => resolveImageForSpec,
@@ -6564,9 +7323,11 @@ __export(dist_exports, {
   startDatabase: () => startDatabase,
   startLocalPreview: () => startLocalPreview,
   startPreview: () => startPreview,
+  targetCarriesCredential: () => targetCarriesCredential,
   toAcceptancePredicate: () => toAcceptancePredicate,
   toolingImageFor: () => toolingImageFor,
   unquoteDiffPath: () => unquoteDiffPath,
+  venueGcloudEnv: () => venueGcloudEnv,
   venueStagePaths: () => venueStagePaths,
   verifyWorkingDiff: () => verifyWorkingDiff
 });
@@ -6593,10 +7354,10 @@ var init_dist4 = __esm({
 });
 
 // bin/jpi-run.js
-import { existsSync as existsSync8, readFileSync as readFileSync4 } from "fs";
+import { existsSync as existsSync8, readFileSync as readFileSync5 } from "fs";
 import { join as join11, resolve } from "path";
-import { tmpdir as tmpdir3 } from "os";
-import { mkdtempSync as mkdtempSync3, rmSync as rmSync4 } from "fs";
+import { tmpdir as tmpdir4 } from "os";
+import { mkdtempSync as mkdtempSync4, rmSync as rmSync5 } from "fs";
 
 // bin/recall-check.js
 import {
@@ -6940,7 +7701,7 @@ function parseArgs(argv) {
 function runScratchRoot() {
   let root;
   try {
-    root = mkdtempSync3(join11(tmpdir3(), "th-run-"));
+    root = mkdtempSync4(join11(tmpdir4(), "th-run-"));
   } catch (err) {
     process.stderr.write(
       `terminalhire: could not create the temporary directory this run works in, so nothing was cloned and nothing was executed. That is our environment failing, not your tests: check that the temp directory is writable. (${String(err?.message ?? err)})
@@ -6953,7 +7714,7 @@ function runScratchRoot() {
     if (cleaned) return;
     cleaned = true;
     try {
-      rmSync4(root, { recursive: true, force: true });
+      rmSync5(root, { recursive: true, force: true });
     } catch {
     }
   };
@@ -6980,7 +7741,7 @@ function readConfig(localDir) {
   const file = join11(localDir, ".th-run.json");
   if (!existsSync8(file)) return {};
   try {
-    const parsed = JSON.parse(readFileSync4(file, "utf8"));
+    const parsed = JSON.parse(readFileSync5(file, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch (err) {
     throw new Error(
