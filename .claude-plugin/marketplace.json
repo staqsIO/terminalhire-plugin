@@ -7,14 +7,14 @@
   },
   "metadata": {
     "description": "Developer tools by staqs",
-    "version": "0.42.11"
+    "version": "0.42.12"
   },
   "plugins": [
     {
       "name": "terminalhire",
       "source": "./plugins/terminalhire",
       "description": "Developer jobs and paid bounties, in the terminal. Surfaces contextually-relevant roles in the Claude Code spinner while you work, and lets you claim a scoped bounty and get paid when the poster accepts it. Run `terminalhire init` after install.",
-      "version": "0.42.11",
+      "version": "0.42.12",
       "author": {
         "name": "staqs",
         "email": "eric@staqs.io"

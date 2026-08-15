@@ -1,6 +1,6 @@
 {
   "name": "terminalhire",
-  "version": "0.42.11",
+  "version": "0.42.12",
   "description": "Developer jobs and paid bounties in the terminal. Two-line ambient surface in the Claude Code spinner (adaptive context header + a ⌘-clickable, tracked job link), kept fresh in the background. Claim a scoped bounty and get paid when the poster accepts it.",
   "author": {
     "name": "staqs",

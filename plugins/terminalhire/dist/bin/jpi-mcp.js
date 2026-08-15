@@ -28703,6 +28703,177 @@ var init_nonce = __esm({
   }
 });
 
+// ../../packages/attest/dist/gceIdentity.js
+import { createHash as createHash6, createPublicKey as createPublicKey2, verify as cryptoVerify2 } from "crypto";
+function expectedAudience(dispatchId) {
+  if (dispatchId === "")
+    throw new TypeError("expectedAudience: dispatchId is empty");
+  return `${VERIFICATION_RUN_AUDIENCE_BASE}#${dispatchId}`;
+}
+function venueIdentityEmail(projectId) {
+  if (projectId === "")
+    throw new TypeError("venueIdentityEmail: projectId is empty");
+  return `venue-identity@${projectId}.iam.gserviceaccount.com`;
+}
+function refuseIdentity(reason, detail) {
+  return { ok: false, reason, detail };
+}
+function strictBase64UrlDecode(s) {
+  if (!/^[A-Za-z0-9_-]*$/.test(s) || s.length % 4 === 1)
+    return null;
+  const decoded = Buffer.from(s, "base64url");
+  if (decoded.toString("base64url") !== s)
+    return null;
+  return decoded;
+}
+function decodeJsonSegment(segment) {
+  const bytes = strictBase64UrlDecode(segment);
+  if (bytes === null)
+    return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+    return null;
+  return parsed;
+}
+function assertExpectationsComplete(expectations) {
+  const required2 = [
+    ["audience", expectations.audience],
+    ["serviceAccountEmail", expectations.serviceAccountEmail],
+    ["projectId", expectations.projectId],
+    ["instanceName", expectations.instanceName]
+  ];
+  for (const [name, value] of required2) {
+    if (value === "")
+      throw new TypeError(`verifyGceIdentityToken: expectations.${name} is empty`);
+  }
+  if (expectations.instanceId === "") {
+    throw new TypeError("verifyGceIdentityToken: expectations.instanceId is empty");
+  }
+}
+async function verifyGceIdentityToken(token, expectations, deps) {
+  assertExpectationsComplete(expectations);
+  if (!Number.isFinite(deps.now)) {
+    throw new TypeError("verifyGceIdentityToken: deps.now is not a finite number");
+  }
+  if (token.length > MAX_TOKEN_LENGTH) {
+    return refuseIdentity("token-malformed", "longer than any GCE identity token");
+  }
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    return refuseIdentity("token-malformed", "not a three-segment compact JWT");
+  }
+  const [headerB64, payloadB64, signatureB64] = parts;
+  const header = decodeJsonSegment(headerB64);
+  if (header === null) {
+    return refuseIdentity("token-malformed", "header segment is not base64url-encoded JSON");
+  }
+  if (header.alg !== "RS256") {
+    return refuseIdentity("algorithm-not-rs256", "token names an unsupported algorithm");
+  }
+  if (typeof header.kid !== "string" || header.kid === "") {
+    return refuseIdentity("unknown-key", "token header names no key id");
+  }
+  const jwks = await deps.fetchJwks();
+  const jwk = jwks.keys.find((k) => k.kid === header.kid && k.kty === "RSA");
+  if (jwk === void 0) {
+    return refuseIdentity("unknown-key", "token key id is not in the published key set");
+  }
+  const signature = strictBase64UrlDecode(signatureB64);
+  if (signature === null) {
+    return refuseIdentity("token-malformed", "signature segment is not base64url");
+  }
+  let signatureValid = false;
+  try {
+    const publicKey = createPublicKey2({ key: jwk, format: "jwk" });
+    signatureValid = cryptoVerify2("sha256", Buffer.from(`${headerB64}.${payloadB64}`, "utf8"), publicKey, signature);
+  } catch {
+    signatureValid = false;
+  }
+  if (!signatureValid) {
+    return refuseIdentity("signature-invalid", "signature does not verify under the named key");
+  }
+  const payload = decodeJsonSegment(payloadB64);
+  if (payload === null) {
+    return refuseIdentity("token-malformed", "payload segment is not base64url-encoded JSON");
+  }
+  if (payload.iss !== "https://accounts.google.com") {
+    return refuseIdentity("issuer-mismatch", "issuer is not https://accounts.google.com");
+  }
+  if (payload.aud !== expectations.audience) {
+    return refuseIdentity("audience-mismatch", "audience is not the one this run expects");
+  }
+  const nowSeconds = deps.now / 1e3;
+  const exp = payload.exp;
+  if (typeof exp !== "number" || !Number.isFinite(exp) || exp <= nowSeconds) {
+    return refuseIdentity("token-expired", "exp is missing, malformed, or in the past");
+  }
+  const iat = payload.iat;
+  if (typeof iat !== "number" || !Number.isFinite(iat) || iat > nowSeconds + IAT_FUTURE_SKEW_MS / 1e3) {
+    return refuseIdentity("issued-in-future", "iat is missing, malformed, or too far in the future");
+  }
+  if (payload.email !== expectations.serviceAccountEmail || payload.email_verified !== true) {
+    return refuseIdentity("wrong-account", "token is not from the venue identity account");
+  }
+  const google = payload.google;
+  const computeEngine = typeof google === "object" && google !== null && !Array.isArray(google) ? google.compute_engine : void 0;
+  if (typeof computeEngine !== "object" || computeEngine === null || Array.isArray(computeEngine)) {
+    return refuseIdentity("compute-engine-block-missing", "no google.compute_engine block \u2014 was the token fetched with format=full?");
+  }
+  const ce = computeEngine;
+  if (ce.project_id !== expectations.projectId) {
+    return refuseIdentity("project-mismatch", "token names an instance in a different project");
+  }
+  if (ce.instance_name !== expectations.instanceName) {
+    return refuseIdentity("instance-name-mismatch", "token names a different instance than this run booted");
+  }
+  if (typeof ce.instance_id !== "string" || ce.instance_id === "") {
+    return refuseIdentity("instance-id-missing", "instance id is absent or not a string");
+  }
+  if (expectations.instanceId !== void 0 && ce.instance_id !== expectations.instanceId) {
+    return refuseIdentity("instance-id-mismatch", "token names a different instance than the boot record");
+  }
+  if (typeof ce.zone !== "string" || !expectations.allowedZones.includes(ce.zone)) {
+    return refuseIdentity("zone-not-allowed", "zone is not one the pool is configured to use");
+  }
+  return {
+    ok: true,
+    value: {
+      instanceId: ce.instance_id,
+      instanceName: expectations.instanceName,
+      zone: ce.zone,
+      projectId: expectations.projectId,
+      email: expectations.serviceAccountEmail,
+      iat,
+      exp,
+      tokenSha256: createHash6("sha256").update(token, "utf8").digest("hex")
+    }
+  };
+}
+var VERIFICATION_RUN_AUDIENCE_BASE, IAT_FUTURE_SKEW_MS, MAX_TOKEN_LENGTH;
+var init_gceIdentity = __esm({
+  "../../packages/attest/dist/gceIdentity.js"() {
+    "use strict";
+    VERIFICATION_RUN_AUDIENCE_BASE = "https://terminalhire.com/api/verification-run";
+    IAT_FUTURE_SKEW_MS = 5 * 60 * 1e3;
+    MAX_TOKEN_LENGTH = 8192;
+  }
+});
+
+// ../../packages/attest/dist/venueInstanceName.js
+function venueInstanceName(runId) {
+  return `th-run-${runId}`.replace(/_/g, "-").toLowerCase().slice(0, 62);
+}
+var init_venueInstanceName = __esm({
+  "../../packages/attest/dist/venueInstanceName.js"() {
+    "use strict";
+  }
+});
+
 // ../../packages/attest/dist/verify.js
 var init_verify = __esm({
   "../../packages/attest/dist/verify.js"() {
@@ -28726,6 +28897,8 @@ var init_dist2 = __esm({
     init_manifest();
     init_attestation();
     init_nonce();
+    init_gceIdentity();
+    init_venueInstanceName();
     init_verify();
   }
 });
@@ -28851,7 +29024,7 @@ var init_result = __esm({
 });
 
 // ../../packages/envrun/dist/attestation.js
-import { createHash as createHash6, randomBytes as randomBytes10 } from "crypto";
+import { createHash as createHash7, randomBytes as randomBytes10 } from "crypto";
 function contradicts(outcome, counts, exitCode) {
   const budget = OUTCOME_TO_BUDGET[outcome];
   if (budget === null)
@@ -28862,7 +29035,7 @@ function localMeasurement(imageReference) {
   return `${LOCAL_MEASUREMENT_PREFIX}${imageReference}`;
 }
 function sha256Hex(data) {
-  return createHash6("sha256").update(typeof data === "string" ? Buffer.from(data, "utf8") : data).digest("hex");
+  return createHash7("sha256").update(typeof data === "string" ? Buffer.from(data, "utf8") : data).digest("hex");
 }
 function toTestRunResult(result, outputSha256) {
   return {
@@ -29595,10 +29768,32 @@ function gcpBootArgv(p) {
     // A survivor has to be findable. An unlabelled orphan can only be told apart from
     // a legitimate instance by a human who remembers booting it.
     `--labels=${GCP_RUN_LABEL_KEY}=${p.runId},${GCP_MANAGED_LABEL_KEY}=true`,
-    // This instance runs untrusted third-party code. With a service account attached,
-    // that code reaches the metadata server at 169.254.169.254 and lifts the default
-    // account's token — nothing on the VM needs one, so it does not get one.
-    "--no-service-account",
+    // This instance runs untrusted third-party code, and it now carries a service
+    // account — the venue-identity binding needs an instance-identity token, and only
+    // an ATTACHED account can mint one (TERM-794/TERM-802). This replaces
+    // `--no-service-account`, which used to mean "nothing on the metadata service to
+    // steal". Attaching an account removes that, so the safety now rests on two things,
+    // and this change MUST land together with proof #2 — never ahead of it:
+    //
+    //   1. `--no-scopes` + ZERO project roles bound the BLAST RADIUS of a lifted token.
+    //      No scopes → the OAuth access-token endpoint serves nothing (measured,
+    //      TERM-706); zero roles → the token authorizes no GCP API. But it is NOT
+    //      valueless: it is the attestation evidence itself, so a lifted token still
+    //      authorizes a false claim about WHERE a run happened (the steal-a-true-token
+    //      attack in the item-2 spike). `--no-scopes` stays because it removes lateral
+    //      GCP access; it does not make losing the identity token cheap.
+    //   2. The untrusted code cannot reach the metadata server to lift the token at all.
+    //      The test step runs `--network=none`; the install step runs on an `--internal`
+    //      network whose only egress is a CONNECT-only, registry-allowlisted proxy that
+    //      denies the metadata host three ways. Measured once on a real VM in
+    //      docs/spikes/term-483-item2-metadata-denial.md (only a user bridge, which no
+    //      profile here grants, ever reached metadata). The STANDING, per-push proof is
+    //      the validate-fence metadata group (TERM-805), which lands in the SAME change
+    //      as this SA-attach — that co-landing is the whole safety argument, not a nicety.
+    // The email comes from the SAME speller acquire's serviceAccountEmail
+    // expectation uses (TERM-832): two inline spellings of one value is how
+    // the boot path and the verifier drift apart silently.
+    `--service-account=${venueIdentityEmail(p.project)}`,
     "--no-scopes",
     "--shielded-secure-boot",
     "--shielded-vtpm",
@@ -29651,6 +29846,7 @@ var init_gcpPlacement = __esm({
   "../../packages/envrun/dist/gcpPlacement.js"() {
     "use strict";
     init_dist();
+    init_dist2();
     init_placement();
     init_execute();
     DEFAULT_GCP_PROJECT = "terminalhire-pool";
@@ -29933,6 +30129,26 @@ function iapTunnelArgv(vm, project, zone, socketPath) {
     `${socketPath}:/var/run/docker.sock`
   ];
 }
+function identityProbeCommand(runId) {
+  const url = `${GCE_METADATA_IDENTITY_URL}?audience=${encodeURIComponent(expectedAudience(runId))}&format=full`;
+  return `curl -sS -f -m 5 -H ${quoteForRemoteShell("Metadata-Flavor: Google")} ${quoteForRemoteShell(url)} && echo && docker info --format {{.ID}}`;
+}
+function parseIdentityProbeOutput(stdout) {
+  const lines = stdout.split("\n").map((line) => line.trim()).filter((line) => line !== "");
+  if (lines.length !== 2)
+    return null;
+  const token = lines[0];
+  const daemonId = lines[1];
+  if (token === void 0 || daemonId === void 0)
+    return null;
+  if (token.length > MAX_TOKEN_LENGTH)
+    return null;
+  if (!COMPACT_JWT.test(token))
+    return null;
+  if (!DAEMON_ID.test(daemonId))
+    return null;
+  return { token, daemonId };
+}
 function iapUntarArgv(vm, project, zone, dir) {
   return iapSshArgv(vm, project, zone, `tar -C ${quoteForRemoteShell(dir)} -xf -`);
 }
@@ -30029,7 +30245,7 @@ ${r.stderr}`;
 }
 function assertServiceCredentials(config2, io) {
   const env = venueGcloudEnv(config2);
-  const active = io.exec("gcloud", ["auth", "list", "--filter=status:ACTIVE", "--format=value(account)"], 2e4, env);
+  const active = io.exec("gcloud", ["auth", "list", "--filter=status:ACTIVE", "--format=value(account)"], LOCAL_GCLOUD_TIMEOUT_MS, env);
   if (!active.ok) {
     throw new HostedVenueError(`could not read which account the ${config2} gcloud configuration acts as, so booting would run as whoever this terminal is signed in as: ${execDetail(active).slice(0, 300)}`, "ours");
   }
@@ -30041,6 +30257,38 @@ function assertServiceCredentials(config2, io) {
     throw new HostedVenueError(`the ${config2} gcloud configuration acts as ${account}, which is a person and not a service account. A dispatched run has nobody at a terminal, so the venue must come up under a credential the service owns \u2014 docs/runbooks/gcp-tier-1-provisioning.md Step 6.`, "ours");
   }
   return account;
+}
+function resolveServiceAccountKeyFile(opts) {
+  const explicit = opts.serviceAccountKeyFile;
+  if (explicit !== void 0 && explicit.trim() !== "")
+    return explicit;
+  const fromEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  return fromEnv === void 0 || fromEnv.trim() === "" ? null : fromEnv;
+}
+function configurationPresent(config2, io) {
+  const listed = io.exec("gcloud", ["config", "configurations", "list", "--format=value(name)"], LOCAL_GCLOUD_TIMEOUT_MS, venueGcloudEnv(config2));
+  if (!listed.ok) {
+    throw new HostedVenueError(`could not read the gcloud configuration list, so the ${config2} configuration could not be provisioned: ${execDetail(listed).slice(0, 300)}`, "ours");
+  }
+  return listed.stdout.split("\n").map((line) => line.trim()).includes(config2);
+}
+function redactKeyFile(detail, keyFile) {
+  return keyFile === "" ? detail : detail.split(keyFile).join("<key-file>");
+}
+function ensureVenueServiceCredentials(config2, keyFile, io) {
+  if (keyFile === null)
+    return assertServiceCredentials(config2, io);
+  if (!configurationPresent(config2, io)) {
+    const created = io.exec("gcloud", ["config", "configurations", "create", config2, "--no-activate"], LOCAL_GCLOUD_TIMEOUT_MS, venueGcloudEnv(config2));
+    if (!created.ok && !configurationPresent(config2, io)) {
+      throw new HostedVenueError(`could not create the ${config2} gcloud configuration to hold the service credential: ${execDetail(created).slice(0, 300)}`, "ours");
+    }
+  }
+  const activated = io.exec("gcloud", ["auth", "activate-service-account", `--key-file=${keyFile}`], SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, venueGcloudEnv(config2));
+  if (!activated.ok) {
+    throw new HostedVenueError(`could not activate the runner service credential into the ${config2} gcloud configuration: ${redactKeyFile(execDetail(activated), keyFile).slice(0, 300)}`, "ours");
+  }
+  return assertServiceCredentials(config2, io);
 }
 function hostedVenueAvailable(opts = {}, io = defaultHostedVenueIo) {
   const project = opts.project ?? DEFAULT_GCP_PROJECT;
@@ -30131,11 +30379,12 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
   const project = opts.project ?? DEFAULT_GCP_PROJECT;
   const zone = opts.zone ?? DEFAULT_GCP_ZONE;
   const gcloudConfig = opts.gcloudConfig ?? VENUE_GCLOUD_CONFIG;
+  const keyFile = resolveServiceAccountKeyFile(opts);
   const env = venueGcloudEnv(gcloudConfig);
   return {
     kind: "hosted-pool",
     acquire: (runId) => acquireTransactionally(async (allocated) => {
-      const vm = `th-run-${runId}`.toLowerCase().slice(0, 62);
+      const vm = venueInstanceName(runId);
       const stageBase = `/tmp/th-stage-${runId}`;
       const bootArgv = gcpBootArgv({
         vmName: vm,
@@ -30144,7 +30393,7 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
         runId,
         machineType: opts.machineType ?? DEFAULT_GCP_MACHINE_TYPE
       });
-      assertServiceCredentials(gcloudConfig, io);
+      ensureVenueServiceCredentials(gcloudConfig, keyFile, io);
       const boot = io.exec("gcloud", bootArgv, BOOT_TIMEOUT_MS, env);
       let instanceState = "unknown";
       allocated.onRollback(() => {
@@ -30162,22 +30411,50 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
       instanceState = "exists";
       const deadline = io.now() + SSH_READY_BUDGET_MS;
       let last = { retryable: true, reason: "no probe ran" };
-      let ready = false;
+      let identity = null;
       while (io.now() < deadline) {
-        const probe = io.exec("gcloud", iapSshArgv(vm, project, zone, "docker info --format {{.ID}}"), SSH_PROBE_TIMEOUT_MS, env);
-        if (probe.ok && probe.stdout.trim() !== "") {
-          ready = true;
-          break;
-        }
-        last = classifyProbeFailure(probe);
-        if (!last.retryable) {
-          throw new HostedVenueError(`${vm} cannot be reached over IAP and waiting will not change that \u2014 ${last.reason}`);
+        const probe = io.exec("gcloud", iapSshArgv(vm, project, zone, identityProbeCommand(runId)), SSH_PROBE_TIMEOUT_MS, env);
+        if (probe.ok) {
+          identity = parseIdentityProbeOutput(probe.stdout);
+          if (identity !== null)
+            break;
+          last = { retryable: true, reason: "probe answered without token + daemon id" };
+        } else {
+          last = classifyProbeFailure(probe);
+          if (!last.retryable) {
+            throw new HostedVenueError(`${vm} cannot be reached over IAP and waiting will not change that \u2014 ${last.reason}`);
+          }
         }
         await io.sleep(SSH_PROBE_INTERVAL_MS);
       }
-      if (!ready) {
+      if (identity === null) {
         throw new HostedVenueError(`${vm} was not reachable over IAP within ${SSH_READY_BUDGET_MS / 1e3}s \u2014 last reason: ${last.reason}`);
       }
+      let jwks;
+      try {
+        jwks = await io.fetchJwks();
+      } catch (err) {
+        throw new HostedVenueError(`could not reach Google's JWKS to check ${vm}'s identity token \u2014 ${describeErr(err)}`, "ours", { cause: err });
+      }
+      const identityVerdict = await verifyGceIdentityToken(identity.token, {
+        audience: expectedAudience(runId),
+        serviceAccountEmail: venueIdentityEmail(project),
+        projectId: project,
+        instanceName: vm,
+        // The exact boot zone, a singleton — "the booted instance", not
+        // "a pool VM of the right name" (the expectations docblock's own
+        // distinction). No instanceId: this boot path never reads the
+        // create call's output, so there is no token-independent id to
+        // expect; the token's own id is recorded on the lease instead.
+        allowedZones: [zone]
+      }, { fetchJwks: () => Promise.resolve(jwks), now: io.now() });
+      if (!identityVerdict.ok) {
+        throw new HostedVenueError(`${vm} presented an identity token this lease refuses (${identityVerdict.reason}): ${identityVerdict.detail}`);
+      }
+      const venueIdentity = {
+        token: identity.token,
+        claims: identityVerdict.value
+      };
       let socketDir;
       try {
         socketDir = io.makePrivateDir();
@@ -30218,6 +30495,9 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
       if (!verdict.distinct) {
         throw new HostedVenueError(`refusing to hand out a hosted lease: ${describeVenueDaemon(verdict)}`);
       }
+      if (verdict.venueDaemonId !== identity.daemonId) {
+        throw new HostedVenueError(`refusing to hand out a hosted lease: the tunnel answers as daemon ${verdict.venueDaemonId}, but ${vm}'s identity probe reported ${identity.daemonId} from its own socket`);
+      }
       const venueDaemonId = verdict.venueDaemonId;
       const prepared = io.exec("gcloud", stageMkdirArgv(vm, project, zone, stageBase), MKDIR_TIMEOUT_MS, env);
       if (!prepared.ok) {
@@ -30234,6 +30514,7 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
         socketDir,
         socketPath,
         venueDaemonId,
+        venueIdentity,
         env,
         io
       });
@@ -30335,6 +30616,11 @@ function makeLease(p) {
     get guestUser() {
       return stagedOwner;
     },
+    // Verified at acquire, before anything was staged; carried so the caller
+    // can hand PR 5's intake the evidence. The lease is the only holder of
+    // the raw token — `VenueLease.venueIdentity` says why it is not a result
+    // field.
+    venueIdentity: p.venueIdentity,
     get released() {
       return released;
     },
@@ -30471,11 +30757,12 @@ function makeLease(p) {
     }
   };
 }
-var SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING;
+var SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING;
 var init_hostedVenue = __esm({
   "../../packages/envrun/dist/hostedVenue.js"() {
     "use strict";
     init_dist();
+    init_dist2();
     init_gcpPlacement();
     init_execute();
     init_labels();
@@ -30486,6 +30773,8 @@ var init_hostedVenue = __esm({
     SSH_PROBE_TIMEOUT_MS = 25e3;
     TUNNEL_BUDGET_MS = 6e4;
     TUNNEL_POLL_INTERVAL_MS = 500;
+    GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
+    JWKS_FETCH_TIMEOUT_MS = 1e4;
     CREDENTIAL_QUERY_PARAM = /[?&][^=&\s]*(token|secret|password|passwd|api[-_]?key|signature|sig|auth|credential)[^=&\s]*=[^\s&]/i;
     UNDECODABLE = "?token=this:url-could-not-be-decoded-so-it-is-refused";
     STAGE_PUSH_TIMEOUT_MS = 3e5;
@@ -30494,6 +30783,8 @@ var init_hostedVenue = __esm({
     BOOT_TIMEOUT_MS = 18e4;
     MKDIR_TIMEOUT_MS = 6e4;
     DELETE_TIMEOUT_MS = 3e5;
+    LOCAL_GCLOUD_TIMEOUT_MS = 2e4;
+    SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS = 3e4;
     SOCKET_DIR_PREFIX = "th-venue-";
     VENUE_SOCKET_NAME = "docker.sock";
     HostedVenueError = class extends RunRefusalError {
@@ -30559,8 +30850,23 @@ var init_hostedVenue = __esm({
       },
       dockerFor: (socketPath) => remoteDockerClient(`unix://${socketPath}`),
       classifyDaemon: (docker3) => classifyVenueDaemon(docker3),
-      containmentOn: (docker3) => containerContainmentOn(docker3)
+      containmentOn: (docker3) => containerContainmentOn(docker3),
+      fetchJwks: async () => {
+        const res = await globalThis.fetch(GOOGLE_JWKS_URL, {
+          signal: AbortSignal.timeout(JWKS_FETCH_TIMEOUT_MS)
+        });
+        if (!res.ok) {
+          throw new Error(`JWKS fetch returned HTTP ${String(res.status)}`);
+        }
+        const body = await res.json();
+        if (typeof body !== "object" || body === null || !Array.isArray(body.keys)) {
+          throw new Error("JWKS fetch returned a body with no keys array");
+        }
+        return body;
+      }
     };
+    GCE_METADATA_IDENTITY_URL = "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/identity";
+    COMPACT_JWT = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
     IAP_NOT_READY = /\b4047\s*[:\]]/;
     IAP_BACKEND_UNREACHABLE = /\b4003\s*[:\]]/;
     IAP_DENIED = /PERMISSION_DENIED|Required '[^']+' permission/;
@@ -32492,7 +32798,8 @@ async function verifyWorkingDiff(req) {
       // The whole point of TERM-738. `refusal.message` above is the sentence we show; this
       // is what actually went wrong, and without it the cause we attached at the throw site
       // is discarded here — a returned refusal never reaches a caller's `catch`.
-      diagnostic: describeCause(err)
+      diagnostic: describeCause(err),
+      venueIdentity: null
     };
   }
 }
@@ -32520,7 +32827,8 @@ async function runVerification(req, ctx) {
       verdict: null,
       // Null, and not an oversight: this refusal is our own check failing, so the sentence
       // above IS the whole cause and there is no error underneath it to carry.
-      diagnostic: null
+      diagnostic: null,
+      venueIdentity: null
     };
   }
   const placement = req.placement ?? localDockerPlacement();
@@ -32545,7 +32853,8 @@ async function runVerification(req, ctx) {
       verdict: null,
       // Null, and not an oversight: this refusal is our own check failing, so the sentence
       // above IS the whole cause and there is no error underneath it to carry.
-      diagnostic: null
+      diagnostic: null,
+      venueIdentity: null
     };
   }
   const source = req.source;
@@ -32581,7 +32890,8 @@ async function runVerification(req, ctx) {
       verdict: null,
       // Null, and not an oversight: this refusal is our own check failing, so the sentence
       // above IS the whole cause and there is no error underneath it to carry.
-      diagnostic: null
+      diagnostic: null,
+      venueIdentity: null
     };
   }
   const stage = join25(req.scratchRoot, runId);
@@ -32642,7 +32952,8 @@ async function runVerification(req, ctx) {
       // a refusal, and a caller reading it as "this much of the run happened"
       // would be reading a run that did not.
       spec: null,
-      verdict: null
+      verdict: null,
+      venueIdentity: null
     };
   }
   const lease = resolved.lease;
@@ -32700,7 +33011,14 @@ async function runVerification(req, ctx) {
       leaksClean: verdict.leaks.clean
     };
     if (req.preview === false)
-      return { result: base, preview: null, spec, verdict, diagnostic: null };
+      return {
+        result: base,
+        preview: null,
+        spec,
+        verdict,
+        diagnostic: null,
+        venueIdentity: lease.venueIdentity ?? null
+      };
     progress("preview", "starting one instance both parties can open");
     const instance = await lease.publishPreview({
       labels,
@@ -32724,7 +33042,8 @@ async function runVerification(req, ctx) {
       preview: instance,
       spec,
       verdict,
-      diagnostic: null
+      diagnostic: null,
+      venueIdentity: lease.venueIdentity ?? null
     };
   } finally {
     await releaseWithoutThrowing(lease, progress);
@@ -33612,11 +33931,14 @@ __export(dist_exports, {
   DbStackError: () => DbStackError,
   EGRESS_PROBE: () => EGRESS_PROBE,
   EnvRunError: () => EnvRunError,
+  GCE_METADATA_IDENTITY_URL: () => GCE_METADATA_IDENTITY_URL,
   GCP_MANAGED_LABEL_KEY: () => GCP_MANAGED_LABEL_KEY,
   GCP_MAX_RUN_DURATION_SECONDS: () => GCP_MAX_RUN_DURATION_SECONDS,
   GCP_RUN_LABEL_KEY: () => GCP_RUN_LABEL_KEY,
+  GOOGLE_JWKS_URL: () => GOOGLE_JWKS_URL,
   HOSTED_POOL_REFUSAL: () => HOSTED_POOL_REFUSAL,
   HostedVenueError: () => HostedVenueError,
+  JWKS_FETCH_TIMEOUT_MS: () => JWKS_FETCH_TIMEOUT_MS,
   LOCAL_MEASUREMENT_PREFIX: () => LOCAL_MEASUREMENT_PREFIX,
   LabelWatch: () => LabelWatch,
   MIN_GIT_VERSION_FOR_END_OF_OPTIONS: () => MIN_GIT_VERSION_FOR_END_OF_OPTIONS,
@@ -33677,6 +33999,7 @@ __export(dist_exports, {
   describeVenueDaemon: () => describeVenueDaemon,
   detectRunner: () => detectRunner,
   endOfOptionsUnsupported: () => endOfOptionsUnsupported,
+  ensureVenueServiceCredentials: () => ensureVenueServiceCredentials,
   failureSourceOf: () => failureSourceOf,
   findRunRefusal: () => findRunRefusal,
   gcpBootArgv: () => gcpBootArgv,
@@ -33689,6 +34012,7 @@ __export(dist_exports, {
   iapSshArgv: () => iapSshArgv,
   iapTunnelArgv: () => iapTunnelArgv,
   iapUntarArgv: () => iapUntarArgv,
+  identityProbeCommand: () => identityProbeCommand,
   imageForRuntime: () => imageForRuntime,
   installCommandFor: () => installCommandFor,
   installLocalMigrationTooling: () => installLocalMigrationTooling,
@@ -33705,6 +34029,7 @@ __export(dist_exports, {
   manualDeleteCommand: () => manualDeleteCommand,
   migrationUnits: () => migrationUnits,
   parseAlembicRevision: () => parseAlembicRevision,
+  parseIdentityProbeOutput: () => parseIdentityProbeOutput,
   parsePlacementKind: () => parsePlacementKind,
   placementFor: () => placementFor,
   planDatabase: () => planDatabase,
@@ -33989,6 +34314,8 @@ var init_audit2 = __esm({
 var jpi_claim_exports = {};
 __export(jpi_claim_exports, {
   AI_DISCLOSURE_NOTE: () => AI_DISCLOSURE_NOTE,
+  BRIEF_DIR: () => BRIEF_DIR,
+  BRIEF_REL_PATH: () => BRIEF_REL_PATH,
   CLAIM_CONSENT_VERSION: () => CLAIM_CONSENT_VERSION,
   PUSH_TOKEN_REFUSAL: () => PUSH_TOKEN_REFUSAL,
   REVISE_RECOVERY_STATES: () => REVISE_RECOVERY_STATES,
@@ -34058,9 +34385,18 @@ __export(jpi_claim_exports, {
   terminalSafeLines: () => terminalSafeLines,
   watchRunsLoop: () => watchRunsLoop,
   workDirFor: () => workDirFor,
+  writeDeliveredBrief: () => writeDeliveredBrief,
   writeSliceFiles: () => writeSliceFiles
 });
-import { readFileSync as readFileSync14, writeFileSync as writeFileSync13, mkdirSync as mkdirSync8, existsSync as existsSync13, rmSync as rmSync9, readdirSync as readdirSync3 } from "fs";
+import {
+  readFileSync as readFileSync14,
+  writeFileSync as writeFileSync13,
+  mkdirSync as mkdirSync8,
+  existsSync as existsSync13,
+  lstatSync as lstatSync3,
+  rmSync as rmSync9,
+  readdirSync as readdirSync3
+} from "fs";
 import { join as join26, dirname as dirname9, isAbsolute as isAbsolute4, resolve as pathResolve } from "path";
 import { homedir as homedir13, hostname as osHostname } from "os";
 import { execFile as execFile3, execFileSync as execFileSync2 } from "child_process";
@@ -36333,6 +36669,56 @@ function writeSliceFiles(destDir, files) {
   }
   return { written, unavailable };
 }
+function writeDeliveredBrief(destDir, spec) {
+  if (typeof spec !== "string" || spec.trim() === "") {
+    return { written: false, reason: "the server sent no brief for this posting" };
+  }
+  const abs = join26(destDir, BRIEF_REL_PATH);
+  const briefDir = join26(destDir, BRIEF_DIR);
+  let occupant = null;
+  try {
+    occupant = lstatSync3(briefDir);
+  } catch {
+  }
+  if (occupant) {
+    return {
+      written: false,
+      reason: `${BRIEF_DIR}/ already exists in the delivered tree, and excluding it would hide that content from your patch`
+    };
+  }
+  const excludeFile = join26(destDir, ".git", "info", "exclude");
+  try {
+    const existing = existsSync13(excludeFile) ? readFileSync14(excludeFile, "utf8") : "";
+    if (!existing.split("\n").includes(BRIEF_EXCLUDE_LINE)) {
+      mkdirSync8(dirname9(excludeFile), { recursive: true });
+      writeFileSync13(
+        excludeFile,
+        `${existing}${existing === "" || existing.endsWith("\n") ? "" : "\n"}${BRIEF_EXCLUDE_LINE}
+`,
+        "utf8"
+      );
+    }
+  } catch (err) {
+    return { written: false, reason: `the git exclude could not be written (${err.message})` };
+  }
+  try {
+    mkdirSync8(dirname9(abs), { recursive: true });
+    writeFileSync13(abs, spec, { encoding: "utf8", flag: "wx" });
+  } catch (err) {
+    return { written: false, reason: `the brief could not be written (${err.message})` };
+  }
+  return { written: true, reason: null };
+}
+function printDeliveredBrief(result) {
+  if (!result) return;
+  if (result.written) {
+    console.log(
+      `  brief:    ${BRIEF_REL_PATH} \u2014 the founder's write-up, excluded from your commits`
+    );
+  } else {
+    console.log(`  brief:    not delivered \u2014 ${result.reason}`);
+  }
+}
 function buildPatchSubmission({ bountyId, claimId, patch, authorName, authorEmail, auth }) {
   if (auth && "pushToken" in auth) {
     throw new Error(
@@ -36635,6 +37021,7 @@ async function cmdSliceFullTier(claims, id, local, fullTierBody, flags, cloneRep
     );
     process.exit(1);
   }
+  const brief = writeDeliveredBrief(dest, body.spec);
   const working = claims.updateClaim(claim.id, { worktreePath: dest, branch, state: "working" });
   console.log(`
 \u2713 Repository received: ${mintedRepoFullName} at ${baseSha.slice(0, 12)}`);
@@ -36650,6 +37037,7 @@ async function cmdSliceFullTier(claims, id, local, fullTierBody, flags, cloneRep
   console.log(`
   worktree: ${dest}`);
   console.log(`  branch:   ${branch}`);
+  printDeliveredBrief(brief);
   console.log(
     `
   Author your change there (commit as you go), then:  terminalhire claim submit ${claim.id}`
@@ -36780,8 +37168,10 @@ async function cmdSlice(id, flags = {}) {
     for (const l of String(body.spec).split("\n")) console.log(`  ${l}`);
   }
   const branch = `claim/${String(claim.id).replace(/[^A-Za-z0-9._-]/g, "-")}`;
+  let brief;
   try {
     await sh("git", ["-C", dest, "init"]);
+    brief = writeDeliveredBrief(dest, body.spec);
     await sh("git", ["-C", dest, "add", "-A"]);
     await sh("git", [
       "-C",
@@ -36807,6 +37197,7 @@ async function cmdSlice(id, flags = {}) {
   console.log(`
   worktree: ${dest}`);
   console.log(`  branch:   ${branch}`);
+  printDeliveredBrief(brief);
   console.log(
     `
   Author your change there (commit as you go), then:  terminalhire claim submit ${claim.id}`
@@ -38076,7 +38467,7 @@ async function run() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR11, INDEX_CACHE_FILE2, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, GH_API2, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3;
+var TERMINALHIRE_DIR11, INDEX_CACHE_FILE2, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, GH_API2, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, BRIEF_DIR, BRIEF_REL_PATH, BRIEF_EXCLUDE_LINE, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
@@ -38142,6 +38533,9 @@ var init_jpi_claim = __esm({
     ISSUE_OUTCOME_TERMINAL = /* @__PURE__ */ new Set(["own-merge", "other-merge", "closed-unmerged"]);
     RUNS_POLL_INTERVAL_MS = 15e3;
     RUNS_POLL_ATTEMPTS = 20;
+    BRIEF_DIR = ".terminalhire";
+    BRIEF_REL_PATH = `${BRIEF_DIR}/BRIEF.md`;
+    BRIEF_EXCLUDE_LINE = `/${BRIEF_DIR}/`;
     CLAIM_EVENT_LABEL = {
       claimed: "you claimed this",
       claimant_approved: "the founder approved you to start",
