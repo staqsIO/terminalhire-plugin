@@ -10550,52 +10550,6 @@ var init_state_dir = __esm({
   }
 });
 
-// bin/cache-store.js
-var cache_store_exports = {};
-__export(cache_store_exports, {
-  readCacheEntry: () => readCacheEntry,
-  updateIndexCache: () => updateIndexCache,
-  writeIndexCache: () => writeIndexCache
-});
-import { readFileSync as readFileSync2, writeFileSync, renameSync } from "fs";
-import { join as join2 } from "path";
-import { homedir } from "os";
-function readCacheEntry() {
-  try {
-    return JSON.parse(readFileSync2(INDEX_CACHE_FILE, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function updateIndexCache(patch) {
-  ensureStateDir(TERMINALHIRE_DIR);
-  const existing = readCacheEntry() ?? {};
-  const entry = {
-    ...existing,
-    ...patch,
-    schemaVersion: SCHEMA_VERSION2,
-    ts: Date.now()
-  };
-  const tmp = `${INDEX_CACHE_FILE}.${process.pid}.${tmpCounter++}.tmp`;
-  writeFileSync(tmp, JSON.stringify(entry), "utf8");
-  renameSync(tmp, INDEX_CACHE_FILE);
-  return entry;
-}
-function writeIndexCache(index) {
-  return updateIndexCache({ index, indexETag: "" });
-}
-var TERMINALHIRE_DIR, INDEX_CACHE_FILE, SCHEMA_VERSION2, tmpCounter;
-var init_cache_store = __esm({
-  "bin/cache-store.js"() {
-    "use strict";
-    init_state_dir();
-    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
-    INDEX_CACHE_FILE = join2(TERMINALHIRE_DIR, "index-cache.json");
-    SCHEMA_VERSION2 = 1;
-    tmpCounter = 0;
-  }
-});
-
 // bin/founder-pin.js
 function isPinnedFounderBounty(j) {
   return j?.bounty?.bountySource === "founder" && j?.bounty?.claimable === true;
@@ -12021,8 +11975,168 @@ function formatCents(cents) {
   return cents % 100 === 0 ? `$${cents / 100}` : `$${(cents / 100).toFixed(2)}`;
 }
 
-// bin/jpi-bounties.js
-init_cache_store();
+// bin/cache-store.js
+init_state_dir();
+import { readFileSync as readFileSync2, writeFileSync, renameSync } from "fs";
+import { join as join2 } from "path";
+import { homedir } from "os";
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
+var INDEX_CACHE_FILE = join2(TERMINALHIRE_DIR, "index-cache.json");
+var SCHEMA_VERSION2 = 1;
+var tmpCounter = 0;
+function readCacheEntry() {
+  try {
+    return JSON.parse(readFileSync2(INDEX_CACHE_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function updateIndexCache(patch) {
+  ensureStateDir(TERMINALHIRE_DIR);
+  const existing = readCacheEntry() ?? {};
+  const entry = {
+    ...existing,
+    ...patch,
+    schemaVersion: SCHEMA_VERSION2,
+    ts: Date.now()
+  };
+  const tmp = `${INDEX_CACHE_FILE}.${process.pid}.${tmpCounter++}.tmp`;
+  writeFileSync(tmp, JSON.stringify(entry), "utf8");
+  renameSync(tmp, INDEX_CACHE_FILE);
+  return entry;
+}
+
+// bin/index-revalidate.js
+var PULSE_TIMEOUT_MS = 2e3;
+var INDEX_TIMEOUT_WARM_MS = 5e3;
+var INDEX_TIMEOUT_COLD_MS = 1e4;
+function usableMember(member) {
+  return typeof member === "object" && member !== null && !Array.isArray(member) && Array.isArray(member.tags);
+}
+function usableIndex(index) {
+  if (!index || typeof index !== "object" || Array.isArray(index)) return false;
+  if (!Array.isArray(index.jobs) || !index.jobs.every(usableMember)) return false;
+  if (index.contribute !== void 0) {
+    if (!Array.isArray(index.contribute) || !index.contribute.every(usableMember)) return false;
+  }
+  return true;
+}
+function deadlineFetch(fetchImpl, url, { headers, timeoutMs }) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("deadline exceeded")), timeoutMs);
+  timer.unref?.();
+  const promise = Promise.resolve(fetchImpl(url, { headers, signal: controller.signal })).finally(
+    () => clearTimeout(timer)
+  );
+  return { promise, abort: () => controller.abort(new Error("superseded")) };
+}
+function cacheFallbackNotice(source, cachedAt, now = Date.now()) {
+  if (source !== "cache-fallback") return null;
+  const base = "terminalhire: could not refresh the list \u2014 showing cached results";
+  if (typeof cachedAt !== "number" || !Number.isFinite(cachedAt)) return `${base}.`;
+  const minutes = Math.floor(Math.max(0, now - cachedAt) / 6e4);
+  if (minutes < 1) return `${base} from moments ago.`;
+  if (minutes < 60) return `${base} from ${minutes}m ago.`;
+  const hours = Math.floor(minutes / 60);
+  return `${base} from ${hours}h ago.`;
+}
+async function revalidateIndex({
+  apiUrl,
+  fetchImpl,
+  readEntry,
+  writeEntry,
+  pulseTimeoutMs = PULSE_TIMEOUT_MS,
+  indexTimeoutWarmMs = INDEX_TIMEOUT_WARM_MS,
+  indexTimeoutColdMs = INDEX_TIMEOUT_COLD_MS
+}) {
+  let entry = {};
+  try {
+    entry = readEntry() ?? {};
+  } catch {
+  }
+  const cached = usableIndex(entry.index) ? entry.index : null;
+  const cachedAt = cached && typeof entry.ts === "number" ? entry.ts : null;
+  const indexTimeoutMs = cached ? indexTimeoutWarmMs : indexTimeoutColdMs;
+  const headers = { Accept: "application/json" };
+  if (cached && typeof entry.indexETag === "string" && entry.indexETag !== "") {
+    headers["If-None-Match"] = entry.indexETag;
+  }
+  const pulseCall = deadlineFetch(fetchImpl, `${apiUrl}/api/pulse`, {
+    headers: { Accept: "application/json" },
+    timeoutMs: pulseTimeoutMs
+  });
+  const speculative = deadlineFetch(fetchImpl, `${apiUrl}/api/index`, {
+    headers,
+    timeoutMs: indexTimeoutMs
+  });
+  const speculativeSettled = speculative.promise.then(
+    (res2) => ({ ok: true, res: res2 }),
+    (err) => ({ ok: false, err })
+  );
+  let latestPostedAt = null;
+  try {
+    const res2 = await pulseCall.promise;
+    if (res2.ok) {
+      const pulse = await res2.json();
+      latestPostedAt = pulse?.latestPostedAt ?? null;
+    }
+  } catch {
+  }
+  const bust = latestPostedAt !== null && entry.latestPostedAt !== latestPostedAt;
+  let outcome;
+  let reachedOrigin = false;
+  if (bust) {
+    speculative.abort();
+    const bustCall = deadlineFetch(fetchImpl, `${apiUrl}/api/index`, {
+      // `no-cache` forces revalidation against the origin; the validator rides along
+      // so a genuinely unchanged body still costs a 304 rather than a full download.
+      headers: { ...headers, "Cache-Control": "no-cache" },
+      timeoutMs: indexTimeoutMs
+    });
+    try {
+      outcome = { ok: true, res: await bustCall.promise };
+      reachedOrigin = true;
+    } catch (err) {
+      const spec = await speculativeSettled;
+      outcome = spec.ok ? spec : { ok: false, err };
+    }
+  } else {
+    outcome = await speculativeSettled;
+  }
+  const fellBack = (reason) => cached ? { index: cached, source: "cache-fallback", reason, cachedAt } : { index: null, source: "none", reason, cachedAt };
+  if (!outcome.ok) {
+    const err = outcome.err;
+    return fellBack(err instanceof Error ? err.message : String(err));
+  }
+  const res = outcome.res;
+  try {
+    if (res.status === 304 && cached) {
+      if (reachedOrigin && latestPostedAt && latestPostedAt !== entry.latestPostedAt) {
+        try {
+          writeEntry({ latestPostedAt });
+        } catch {
+        }
+      }
+      return { index: cached, source: "cache-304", reason: null, cachedAt };
+    }
+    if (!res.ok) {
+      return fellBack(`/api/index returned ${res.status}`);
+    }
+    const body = await res.json();
+    if (!usableIndex(body)) {
+      return fellBack("/api/index returned a body that will not render");
+    }
+    const patch = { index: body, indexETag: res.headers.get("etag") ?? "" };
+    if (reachedOrigin && latestPostedAt) patch.latestPostedAt = latestPostedAt;
+    try {
+      writeEntry(patch);
+    } catch {
+    }
+    return { index: body, source: "fresh", reason: null, cachedAt };
+  } catch (err) {
+    return fellBack(err instanceof Error ? err.message : String(err));
+  }
+}
 
 // bin/sanitize.js
 var WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
@@ -12178,14 +12292,20 @@ function readIndexCache() {
     return null;
   }
 }
-async function fetchIndex() {
-  const cached = readIndexCache();
-  if (cached) return cached;
-  const res = await fetch(`${API_URL2}/api/index`, { signal: AbortSignal.timeout(1e4) });
-  if (!res.ok) throw new Error(`/api/index returned ${res.status}`);
-  const index = await res.json();
-  writeIndexCache(index);
-  return index;
+async function fetchIndex(quiet = false) {
+  const { index, reason, source, cachedAt } = await revalidateIndex({
+    apiUrl: API_URL2,
+    fetchImpl: (url, init) => fetch(url, init),
+    readEntry: readCacheEntry,
+    writeEntry: updateIndexCache
+  });
+  if (!quiet) {
+    const notice = cacheFallbackNotice(source, cachedAt);
+    if (notice) process.stderr.write(`${notice}
+`);
+  }
+  if (index) return index;
+  throw new Error(reason ?? "/api/index returned no usable index");
 }
 function prompt2(question) {
   const rl = createInterface2({ input: process.stdin, output: process.stdout });
@@ -12326,7 +12446,7 @@ function classifyEmptyStatus({ preFilterCount, postFilterCount, priced }) {
 }
 async function getBounties({ quiet = false, offline = false, priced = PRICED_ONLY } = {}) {
   if (!quiet) console.log(`Fetching bounty index from ${API_URL2}/api/index...`);
-  const index = offline ? readIndexCache() : await fetchIndex();
+  const index = offline ? readIndexCache() : await fetchIndex(quiet);
   if (offline && !index) return { status: "no-cache" };
   let bounties = (index.jobs ?? []).filter((j) => j.source === "bounty");
   if (PRICED_ONLY) bounties = bounties.filter((j) => j.bounty?.amountUSD != null);
@@ -12378,10 +12498,9 @@ async function run() {
   try {
     if (args.length === 0) {
       try {
-        const { readCacheEntry: readCacheEntry2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
         const { getSurfaceLeadOverride: getSurfaceLeadOverride2 } = await Promise.resolve().then(() => (init_config(), config_exports));
         const { founderRows: founderRows2, resolveSurfaceLead: resolveSurfaceLead2 } = await Promise.resolve().then(() => (init_founder_surface(), founder_surface_exports));
-        const surface = (readCacheEntry2() ?? {}).founderSurface;
+        const surface = (readCacheEntry() ?? {}).founderSurface;
         if (resolveSurfaceLead2(getSurfaceLeadOverride2(), surface) === "founder") {
           const rows = founderRows2(surface, "bounties");
           console.log("\n\u26A1 Your TerminalHire postings\n");
@@ -12449,12 +12568,11 @@ async function run() {
     }
     try {
       const { acknowledgeFounderPaid: acknowledgeFounderPaid2 } = await Promise.resolve().then(() => (init_founder_paid_badge(), founder_paid_badge_exports));
-      const { readCacheEntry: readCacheEntry2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
       updateIndexCache({
         founderPaid: acknowledgeFounderPaid2({
           shown,
           open: bounties,
-          previous: (readCacheEntry2() ?? {}).founderPaid
+          previous: (readCacheEntry() ?? {}).founderPaid
         })
       });
     } catch {

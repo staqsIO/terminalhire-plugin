@@ -2101,6 +2101,9 @@ function labelSelector(labels) {
     throw new EnvRunError("labels object is empty; pass at least one label or omit it");
   return `${first[0]}=${first[1]}`;
 }
+function withUserScriptPath(command) {
+  return `PATH="$PATH:$HOME/.local/bin"; export PATH; ${command}`;
+}
 async function runStep(containment, r) {
   const spec = {
     profile: r.profile,
@@ -2115,7 +2118,7 @@ async function runStep(containment, r) {
     pathDomain: r.pathDomain,
     guestUser: r.guestUser,
     program: "/bin/sh",
-    args: ["-c", r.command]
+    args: ["-c", withUserScriptPath(r.command)]
   };
   const startedAt = Date.now();
   const res = await containment.run(spec, r.env, {
@@ -2496,6 +2499,122 @@ var init_dist2 = __esm({
   }
 });
 
+// ../../packages/envrun/dist/venueProof.js
+function readDaemonId(docker3, label) {
+  let res;
+  try {
+    res = docker3.sync(["info", "--format", "{{.ID}}"], { timeoutMs: PROBE_TIMEOUT_MS });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { id: null, detail: `${label} daemon probe threw: ${msg}` };
+  }
+  if (res.error) {
+    return { id: null, detail: `${label} daemon probe failed: ${res.error.message}` };
+  }
+  if (res.status !== 0) {
+    const tail2 = res.stderr.trim().split("\n").slice(-1)[0] ?? "";
+    return { id: null, detail: `${label} daemon probe exited ${String(res.status)}: ${tail2}` };
+  }
+  const id = res.stdout.trim();
+  if (id === "") {
+    return { id: null, detail: `${label} daemon reported an empty ID` };
+  }
+  if (!DAEMON_ID.test(id)) {
+    return {
+      id: null,
+      detail: `${label} daemon returned a non-identity: ${JSON.stringify(id.slice(0, 80))}`
+    };
+  }
+  return { id, detail: `${label} daemon ${id}` };
+}
+function classifyVenueDaemon(venue, local = localDockerClient()) {
+  const v = readDaemonId(venue, "venue");
+  const l = readDaemonId(local, "local");
+  if (v.id === null || l.id === null) {
+    const unread = [v.id === null ? v.detail : null, l.id === null ? l.detail : null].filter((d) => d !== null).join("; ");
+    return { distinct: false, reason: "unknown", detail: unread };
+  }
+  if (v.id === l.id) {
+    return {
+      distinct: false,
+      reason: "same-daemon",
+      daemonId: v.id,
+      detail: `the venue and this machine are the same Docker daemon (${v.id}), so nothing ran elsewhere`
+    };
+  }
+  return { distinct: true, localDaemonId: l.id, venueDaemonId: v.id };
+}
+function describeVenueDaemon(verdict) {
+  if (verdict.distinct) {
+    return `venue daemon ${verdict.venueDaemonId} is a different daemon from this machine's ${verdict.localDaemonId} (which does not by itself establish a different machine)`;
+  }
+  return `venue daemon not distinct (${verdict.reason}): ${verdict.detail}`;
+}
+var PROBE_TIMEOUT_MS, DAEMON_ID;
+var init_venueProof = __esm({
+  "../../packages/envrun/dist/venueProof.js"() {
+    "use strict";
+    init_dist();
+    PROBE_TIMEOUT_MS = 2e4;
+    DAEMON_ID = /^[A-Za-z0-9:._-]+$/;
+  }
+});
+
+// ../../packages/envrun/dist/venueDescriptor.js
+function readDaemonFacts(docker3) {
+  let res;
+  try {
+    res = docker3.sync(["info", "--format", DAEMON_FACTS_FORMAT], {
+      timeoutMs: PROBE_TIMEOUT_MS
+    });
+  } catch {
+    return null;
+  }
+  if (res.error || res.status !== 0)
+    return null;
+  const lines = res.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+  const last = lines.at(-1);
+  if (last === void 0)
+    return null;
+  const parts = last.split(/\s+/);
+  if (parts.length !== 2)
+    return null;
+  const [id, version] = parts;
+  if (!DAEMON_ID.test(id))
+    return null;
+  return { id, version };
+}
+function describeVenue(lease) {
+  const daemon = readDaemonFacts(lease.docker);
+  if (daemon === null)
+    return null;
+  const claims = lease.venueIdentity?.claims ?? null;
+  return {
+    kind: lease.kind,
+    daemonId: daemon.id,
+    daemonVersion: daemon.version,
+    instance: claims?.instanceId ?? null,
+    zone: claims?.zone ?? null,
+    // Driven by whether an identity was actually verified, never by `kind`.
+    // Reading it off the kind would be the placement flag arriving by another
+    // route: a venue that CALLS itself hosted would certify itself.
+    evidence: claims === null ? "self-reported" : "google-signed-instance-identity"
+  };
+}
+function renderVenueLine(v) {
+  const where = v.instance === null ? v.kind : `${v.kind} instance ${v.instance}`;
+  const zone = v.zone === null ? "" : ` (${v.zone})`;
+  return `venue        ${where}${zone} \u2014 daemon ${v.daemonId} v${v.daemonVersion}, ${v.evidence}`;
+}
+var DAEMON_FACTS_FORMAT;
+var init_venueDescriptor = __esm({
+  "../../packages/envrun/dist/venueDescriptor.js"() {
+    "use strict";
+    init_venueProof();
+    DAEMON_FACTS_FORMAT = "{{.ID}} {{.ServerVersion}}";
+  }
+});
+
 // ../../packages/envrun/dist/result.js
 function fmtMs(ms) {
   return ms < 1e3 ? `${String(ms)}ms` : `${(ms / 1e3).toFixed(1)}s`;
@@ -2557,6 +2676,7 @@ var init_result = __esm({
     "use strict";
     init_dist2();
     init_classify();
+    init_venueDescriptor();
     RUN_TEST_COMMAND_SOURCES = [...TEST_COMMAND_SOURCES, "developer-declared"];
     RUN_RESULT_SCHEMA = "terminalhire.verification-run/1";
     RUN_RESULT_FIELDS = [
@@ -2581,7 +2701,9 @@ var init_result = __esm({
       "touchedPaths",
       "preview",
       "containerImage",
-      "leaksClean"
+      "containerImageDigest",
+      "leaksClean",
+      "venue"
     ];
     RENDER_NONE = null;
     FIELD_VIEWS = {
@@ -2611,7 +2733,12 @@ var init_result = __esm({
       touchedPaths: (r) => r.touchedPaths.length === 0 ? null : `files        ${String(r.touchedPaths.length)}: ${r.touchedPaths.join(", ")}`,
       preview: (r) => r.preview === null ? null : `preview      ${r.preview.url}`,
       containerImage: (r) => r.containerImage === null ? null : `image        ${r.containerImage}`,
-      leaksClean: (r) => r.leaksClean === null ? null : r.leaksClean ? null : "WARNING      labelled Docker objects survived teardown"
+      containerImageDigest: (r) => r.containerImageDigest === null ? null : `image digest ${r.containerImageDigest}`,
+      leaksClean: (r) => r.leaksClean === null ? null : r.leaksClean ? null : "WARNING      labelled Docker objects survived teardown",
+      // Absent on most runs, so it prints only when there is something to say. Silence
+      // here is the honest rendering of "no venue answered": a placeholder line would
+      // invite a reader to treat an unanswered probe as a described venue.
+      venue: (r) => r.venue === null ? null : renderVenueLine(r.venue)
     };
   }
 });
@@ -2626,6 +2753,37 @@ function contradicts(outcome, counts, exitCode) {
 }
 function localMeasurement(imageReference) {
   return `${LOCAL_MEASUREMENT_PREFIX}${imageReference}`;
+}
+function isCanonicalRepoDigest(value) {
+  const match = REPO_DIGEST_RE.exec(value);
+  if (match === null)
+    return false;
+  const name = value.slice(0, value.indexOf("@"));
+  const captured = match[1];
+  let domain = null;
+  let path = name;
+  if (captured !== void 0) {
+    const isRegistry = captured.includes(".") || captured.includes(":") || captured === "localhost" || captured.toLowerCase() !== captured;
+    if (isRegistry) {
+      domain = captured;
+      path = name.slice(captured.length + 1);
+    }
+  }
+  const onDockerHub = domain === null || domain === "docker.io" || domain === "index.docker.io";
+  if (onDockerHub && !path.includes("/"))
+    path = `library/${path}`;
+  return path.length <= 255;
+}
+function imageRepo(ref) {
+  const at = ref.indexOf("@");
+  const base = at === -1 ? ref : ref.slice(0, at);
+  const slash = base.lastIndexOf("/");
+  const colon = base.lastIndexOf(":");
+  return colon > slash ? base.slice(0, colon) : base;
+}
+function imageDigestOf(ref) {
+  const at = ref.indexOf("@");
+  return at === -1 ? null : ref.slice(at + 1);
 }
 function sha256Hex(data) {
   return createHash2("sha256").update(typeof data === "string" ? Buffer.from(data, "utf8") : data).digest("hex");
@@ -2714,6 +2872,31 @@ function toAcceptancePredicate(pair, opts = {}) {
   if (patched.containerImage === null || patched.containerImage === "") {
     return refuse2("missing-container-image", "no container image was recorded, so the measurement would name a stand-in rather than the environment the suite actually ran in");
   }
+  if (patched.containerImageDigest == null || patched.containerImageDigest === "") {
+    return refuse2("missing-image-digest", "no image digest was recorded for the patched half, so the measurement would name the mutable tag rather than the bytes the suite actually ran in. A run without the digest is recordable but not attestable \u2014 the `missing-patch-digest` split.");
+  }
+  if (typeof patched.containerImageDigest !== "string" || !isCanonicalRepoDigest(patched.containerImageDigest)) {
+    return refuse2("malformed-image-digest", `the patched half carries ${JSON.stringify(patched.containerImageDigest).slice(0, 120)} where a RepoDigest (\`repo@sha256:<64 hex>\`) belongs. A tag or a stand-in string here would be signed as if it were content-addressed, which is the lie the digest axis exists to refuse.`);
+  }
+  if (imageRepo(patched.containerImageDigest) !== imageRepo(patched.containerImage)) {
+    return refuse2("image-digest-repo-mismatch", `the patched half's digest names repository ${imageRepo(patched.containerImageDigest)} but the pair ran ${patched.containerImage}. An image can carry digests for several repositories; signing one the pair did not name would attribute these bytes to a different name.`);
+  }
+  if (baseline.containerImageDigest == null || baseline.containerImageDigest === "") {
+    return refuse2("missing-image-digest", "no image digest was recorded for the baseline half, so the measurement would name the mutable tag rather than the bytes the suite actually ran in. A run without the digest is recordable but not attestable \u2014 the `missing-patch-digest` split.");
+  }
+  if (typeof baseline.containerImageDigest !== "string" || !isCanonicalRepoDigest(baseline.containerImageDigest)) {
+    return refuse2("malformed-image-digest", `the baseline half carries ${JSON.stringify(baseline.containerImageDigest).slice(0, 120)} where a RepoDigest (\`repo@sha256:<64 hex>\`) belongs. A tag or a stand-in string here would be signed as if it were content-addressed, which is the lie the digest axis exists to refuse.`);
+  }
+  if (imageRepo(baseline.containerImageDigest) !== imageRepo(patched.containerImage)) {
+    return refuse2("image-digest-repo-mismatch", `the baseline half's digest names repository ${imageRepo(baseline.containerImageDigest)} but the pair ran ${patched.containerImage}. An image can carry digests for several repositories; signing one the pair did not name would attribute these bytes to a different name.`);
+  }
+  if (baseline.containerImageDigest !== patched.containerImageDigest) {
+    return refuse2("pair-disagrees-on-image-digest", `baseline ran image digest ${String(baseline.containerImageDigest)} and patched ${String(patched.containerImageDigest)} under one tag. The tag agreeing is the trap: a re-pointed tag is two environments wearing one name.`);
+  }
+  const claimedDigest = imageDigestOf(patched.containerImage);
+  if (claimedDigest !== null && claimedDigest !== imageDigestOf(patched.containerImageDigest)) {
+    return refuse2("image-digest-contradicts-image", `the pair ran ${patched.containerImage}, whose reference pins digest ${claimedDigest}, but the digest field says ${String(imageDigestOf(patched.containerImageDigest))}. A measurement must not sign one digest while the record names another.`);
+  }
   return {
     ok: true,
     predicate: {
@@ -2725,10 +2908,11 @@ function toAcceptancePredicate(pair, opts = {}) {
       test_command_source: patched.testCommandSource,
       baseline_result: toTestRunResult(baseline, opts.baselineOutputSha256),
       patched_result: toTestRunResult(patched, opts.patchedOutputSha256),
-      // No `?? 'unknown-image'`: `missing-container-image` refuses above, so the value here is
-      // always one the run actually observed. A fallback would have made the fabrication
-      // unreachable to notice.
-      enclave_measurement: localMeasurement(patched.containerImage),
+      // No `?? 'unknown-image'`: `missing-image-digest` refuses above, so the value here is
+      // always one the audit actually observed. The DIGEST, not `containerImage`: the
+      // RepoDigest (`repo@sha256:…`) carries the repo name and the content hash, and the
+      // tag it drops is the part a registry can re-point (TERM-893).
+      enclave_measurement: localMeasurement(patched.containerImageDigest),
       nonce: opts.nonce ?? randomBytes4(16).toString("hex"),
       run_policy: { max_attempts: opts.maxAttempts ?? 1, budget_outcome: budget }
     }
@@ -2738,7 +2922,7 @@ function signRunStatement(predicate, privateKey, keyid) {
   const statement = createAcceptanceStatement(predicate);
   return { statement, envelope: signStatement(statement, privateKey, keyid) };
 }
-var OUTCOME_TO_BUDGET, BASELINE_IS_A_VERDICT, CONTRADICTS_COUNTS, SOURCE_IS_SIGNABLE, ATTEST_REFUSAL_REASONS, refuse2, LOCAL_MEASUREMENT_PREFIX;
+var OUTCOME_TO_BUDGET, BASELINE_IS_A_VERDICT, CONTRADICTS_COUNTS, SOURCE_IS_SIGNABLE, ATTEST_REFUSAL_REASONS, refuse2, LOCAL_MEASUREMENT_PREFIX, REFERENCE_DOMAIN_COMPONENT, REFERENCE_DOMAIN_NAME, REFERENCE_IPV6, REFERENCE_DOMAIN, REFERENCE_PATH_COMPONENT, REPO_DIGEST_RE;
 var init_attestation2 = __esm({
   "../../packages/envrun/dist/attestation.js"() {
     "use strict";
@@ -2813,6 +2997,21 @@ var init_attestation2 = __esm({
       // halves and `containerImage` was not, so two different environments signed one measurement.
       "pair-disagrees-on-image",
       "missing-container-image",
+      // TERM-893: the digest axis. The two guards above compare NAMES, and a name is
+      // exactly what a registry can re-point between the two halves of a pair — so the
+      // measurement signs the RepoDigest, and these refuse when it is absent or split.
+      // `malformed` and `repo-mismatch` exist because this is a RUNTIME boundary
+      // (Codex round 1): the .mjs audit calls through here untyped, so `undefined`,
+      // a tag, or an arbitrary string would otherwise flow into the signed
+      // measurement wearing a digest's name.
+      "pair-disagrees-on-image-digest",
+      "missing-image-digest",
+      "malformed-image-digest",
+      "image-digest-repo-mismatch",
+      // Codex round 4: a digest-QUALIFIED image reference pins a digest of its
+      // own, and the repo-mismatch guards compare repositories only — so
+      // `node@sha256:A` could ride above digest fields saying `node@sha256:B`.
+      "image-digest-contradicts-image",
       // ── The BASELINE half. Added TERM-354 review round 2: every guard above reads
       // `patched`, so a baseline could be anything at all and still be signed as the "before"
       // half of a comparison. That is the worst direction for this bug to point, because a
@@ -2833,6 +3032,12 @@ var init_attestation2 = __esm({
       detail
     });
     LOCAL_MEASUREMENT_PREFIX = "NOT-AN-ENCLAVE:local-container:";
+    REFERENCE_DOMAIN_COMPONENT = "[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?";
+    REFERENCE_DOMAIN_NAME = `${REFERENCE_DOMAIN_COMPONENT}(?:\\.${REFERENCE_DOMAIN_COMPONENT})*`;
+    REFERENCE_IPV6 = "\\[(?:[a-fA-F0-9:]+)\\]";
+    REFERENCE_DOMAIN = `(?:${REFERENCE_DOMAIN_NAME}|${REFERENCE_IPV6})(?::[0-9]+)?`;
+    REFERENCE_PATH_COMPONENT = "[a-z0-9]+(?:(?:\\.|_{1,2}|-+)[a-z0-9]+)*";
+    REPO_DIGEST_RE = new RegExp(`^(?:(${REFERENCE_DOMAIN})/)?${REFERENCE_PATH_COMPONENT}(?:/${REFERENCE_PATH_COMPONENT})*@sha256:[0-9a-f]{64}$`);
   }
 });
 
@@ -3203,119 +3408,7 @@ var init_boundary = __esm({
   }
 });
 
-// ../../packages/envrun/dist/placement.js
-function localDockerPlacement() {
-  return {
-    kind: "local-docker",
-    refusal: null,
-    venue: () => localVenue(),
-    imageFor: (runtime, override, version) => imageForRuntime(runtime, override, version)
-  };
-}
-function hostedPoolPlacement() {
-  return {
-    kind: "hosted-pool",
-    // Declared AND thrown, from one constant. Two spellings of the same refusal
-    // is how a gate on the door stops matching the gate in the room.
-    refusal: HOSTED_POOL_REFUSAL,
-    // The backstop survives the venue refactor UNCHANGED, and that is the
-    // point of writing it here rather than returning some inert venue: a
-    // placement that handed back a working `Venue` would become runnable by
-    // accident, and the run it then reported as hosted would have happened on
-    // the developer's own machine.
-    //
-    // `hostedVenue()` (design §6 item 4) NOW EXISTS and this still refuses.
-    // Building it was never the condition. **The condition is stated ONCE, in
-    // index.ts beside the `hostedVenue` export** — deliberately not restated
-    // here, because this comment and that one were two copies of the same
-    // paragraph and TERM-780 found them disagreeing: one named a blocker that
-    // had been fixed underneath it. A pointer cannot drift from its target the
-    // way a copy drifts from its original.
-    venue: () => {
-      throw new Error(HOSTED_POOL_REFUSAL);
-    },
-    imageFor: (runtime, override, version) => imageForRuntime(runtime, override, version)
-  };
-}
-function placementFor(kind) {
-  return PLACEMENTS[kind]();
-}
-function containmentUnavailableRefusal(detail) {
-  return `${CONTAINMENT_UNAVAILABLE_PREFIX}${detail}`;
-}
-async function resolveLease(placement, runId) {
-  try {
-    return { ok: true, lease: await placement.venue().acquire(runId) };
-  } catch (err) {
-    if (findNoContainment(err) === null)
-      throw err;
-    return {
-      ok: false,
-      // `describeThrown`, not `err.message`/`String(err)`. Both of those are unguarded
-      // reads on a value we have just established we cannot trust, and this expression is
-      // evaluated BEFORE `diagnostic` in the same object literal — so a hostile value threw
-      // here while the total helper two lines down never ran.
-      refusal: containmentUnavailableRefusal(describeThrown(err, { includeName: false })),
-      // The error ITSELF, not just the message folded into the sentence above. Kept apart
-      // from `refusal` because the two have different audiences and different rules: the
-      // sentence is shown to a developer, this is logged for us, after redaction.
-      diagnostic: describeCause(err)
-    };
-  }
-}
-function findNoContainment(err) {
-  try {
-    let current = err;
-    for (let depth = 0; depth < 16; depth += 1) {
-      if (current instanceof NoContainmentError)
-        return current;
-      const next = current?.cause;
-      if (next === void 0 || next === null)
-        return null;
-      current = next;
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-function parsePlacementKind(raw) {
-  if (raw === void 0 || raw === null)
-    return DEFAULT_PLACEMENT_KIND;
-  const kinds = Object.keys(PLACEMENTS);
-  const text = String(raw);
-  if (kinds.includes(text))
-    return text;
-  const alias = PLACEMENT_ALIASES[text];
-  if (alias !== void 0)
-    return alias;
-  const accepted = [...kinds, ...Object.keys(PLACEMENT_ALIASES)].join(", ");
-  throw new Error(`terminalhire: unknown placement ${JSON.stringify(text)}. Accepted: ${accepted}. Refused rather than defaulted: a misspelled placement that quietly ran on your own machine would still print a verdict, and a verdict from the machine under test is exactly what a hosted run exists to avoid.`);
-}
-var HOSTED_POOL_REFUSAL, PLACEMENTS, CONTAINMENT_UNAVAILABLE_PREFIX, PLACEMENT_ALIASES, DEFAULT_PLACEMENT_KIND;
-var init_placement = __esm({
-  "../../packages/envrun/dist/placement.js"() {
-    "use strict";
-    init_dist();
-    init_execute();
-    init_venue();
-    HOSTED_POOL_REFUSAL = "terminalhire: --placement hosted is declared but not implemented yet (TERM-483). The hosted runner currently executes on the LOCAL Docker daemon while booting a billable VM, so a run it reported as hosted would in fact have happened on this machine. Refusing rather than reporting a verification we cannot stand behind. Use --placement local-docker, which is honest about where it runs.";
-    PLACEMENTS = {
-      "local-docker": localDockerPlacement,
-      "hosted-pool": hostedPoolPlacement
-    };
-    CONTAINMENT_UNAVAILABLE_PREFIX = "terminalhire: no container runtime is available on this machine, so there is nowhere to run your suite under containment. Nothing was built, run or judged \u2014 this is OUR environment refusing, not a verdict on your diff. Start Docker (or point DOCKER_HOST at a reachable daemon) and run again. What the probe found: ";
-    PLACEMENT_ALIASES = {
-      hosted: "hosted-pool"
-    };
-    DEFAULT_PLACEMENT_KIND = "local-docker";
-  }
-});
-
 // ../../packages/envrun/dist/gcpPlacement.js
-import { spawn as spawn3, spawnSync as spawnSync5 } from "child_process";
-import { randomUUID } from "crypto";
-import { existsSync as existsSync5, mkdirSync as mkdirSync4, rmSync as rmSync2 } from "fs";
 function assertInstanceIdentity(fn, id) {
   const fields = [
     ["vmName", id.vmName, GCE_INSTANCE_NAME],
@@ -3420,28 +3513,11 @@ function gcpDeleteArgv(p) {
     "--quiet"
   ];
 }
-function gcpRunnerPlacement(opts) {
-  return {
-    kind: "hosted-pool",
-    refusal: HOSTED_POOL_REFUSAL,
-    // `venue()` since TERM-667, and still a throw. The seam changed shape; what
-    // must not change is that this door stays shut — a `Venue` returned here
-    // would make the chokepoint runnable, which is the one thing the chokepoint
-    // exists to prevent.
-    venue: () => {
-      throw new GcpPlacementError(HOSTED_POOL_REFUSAL);
-    },
-    imageFor: (runtime, override, version) => imageForRuntime(runtime, override, version)
-  };
-}
 var DEFAULT_GCP_PROJECT, DEFAULT_GCP_ZONE, DEFAULT_GCP_MACHINE_TYPE, GcpPlacementError, GCP_MAX_RUN_DURATION_SECONDS, GCP_MANAGED_LABEL_KEY, GCP_RUN_LABEL_KEY, GCP_LABEL_VALUE, GCE_INSTANCE_NAME, GCP_RESOURCE_ID;
 var init_gcpPlacement = __esm({
   "../../packages/envrun/dist/gcpPlacement.js"() {
     "use strict";
-    init_dist();
     init_dist2();
-    init_placement();
-    init_execute();
     DEFAULT_GCP_PROJECT = "terminalhire-pool";
     DEFAULT_GCP_ZONE = "us-east1-b";
     DEFAULT_GCP_MACHINE_TYPE = "e2-standard-2";
@@ -3460,72 +3536,11 @@ var init_gcpPlacement = __esm({
   }
 });
 
-// ../../packages/envrun/dist/venueProof.js
-function readDaemonId(docker3, label) {
-  let res;
-  try {
-    res = docker3.sync(["info", "--format", "{{.ID}}"], { timeoutMs: PROBE_TIMEOUT_MS });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { id: null, detail: `${label} daemon probe threw: ${msg}` };
-  }
-  if (res.error) {
-    return { id: null, detail: `${label} daemon probe failed: ${res.error.message}` };
-  }
-  if (res.status !== 0) {
-    const tail2 = res.stderr.trim().split("\n").slice(-1)[0] ?? "";
-    return { id: null, detail: `${label} daemon probe exited ${String(res.status)}: ${tail2}` };
-  }
-  const id = res.stdout.trim();
-  if (id === "") {
-    return { id: null, detail: `${label} daemon reported an empty ID` };
-  }
-  if (!DAEMON_ID.test(id)) {
-    return {
-      id: null,
-      detail: `${label} daemon returned a non-identity: ${JSON.stringify(id.slice(0, 80))}`
-    };
-  }
-  return { id, detail: `${label} daemon ${id}` };
-}
-function classifyVenueDaemon(venue, local = localDockerClient()) {
-  const v = readDaemonId(venue, "venue");
-  const l = readDaemonId(local, "local");
-  if (v.id === null || l.id === null) {
-    const unread = [v.id === null ? v.detail : null, l.id === null ? l.detail : null].filter((d) => d !== null).join("; ");
-    return { distinct: false, reason: "unknown", detail: unread };
-  }
-  if (v.id === l.id) {
-    return {
-      distinct: false,
-      reason: "same-daemon",
-      daemonId: v.id,
-      detail: `the venue and this machine are the same Docker daemon (${v.id}), so nothing ran elsewhere`
-    };
-  }
-  return { distinct: true, localDaemonId: l.id, venueDaemonId: v.id };
-}
-function describeVenueDaemon(verdict) {
-  if (verdict.distinct) {
-    return `venue daemon ${verdict.venueDaemonId} is a different daemon from this machine's ${verdict.localDaemonId} (which does not by itself establish a different machine)`;
-  }
-  return `venue daemon not distinct (${verdict.reason}): ${verdict.detail}`;
-}
-var PROBE_TIMEOUT_MS, DAEMON_ID;
-var init_venueProof = __esm({
-  "../../packages/envrun/dist/venueProof.js"() {
-    "use strict";
-    init_dist();
-    PROBE_TIMEOUT_MS = 2e4;
-    DAEMON_ID = /^[A-Za-z0-9:._-]+$/;
-  }
-});
-
 // ../../packages/envrun/dist/hostedVenue.js
-import { spawn as spawn4, spawnSync as spawnSync6 } from "child_process";
-import { chmodSync as chmodSync2, existsSync as existsSync6, mkdtempSync as mkdtempSync2, readFileSync as readFileSync3, rmSync as rmSync3 } from "fs";
+import { spawn as spawn3, spawnSync as spawnSync5 } from "child_process";
+import { chmodSync as chmodSync2, existsSync as existsSync5, mkdtempSync as mkdtempSync2, readFileSync as readFileSync3, rmSync as rmSync2 } from "fs";
 import { join as join8 } from "path";
-import { tmpdir as tmpdir2 } from "os";
+import { devNull, tmpdir as tmpdir2 } from "os";
 function credentialInGitConfig(text) {
   for (const match of text.matchAll(/\b([a-z][a-z0-9+.-]*):\/\/(\S+)/gi)) {
     const scheme = (match[1] ?? "").toLowerCase();
@@ -3559,6 +3574,31 @@ function decodeMaybe(url) {
     return UNDECODABLE;
   }
 }
+function dispatchedGitBinary() {
+  for (const candidate of DISPATCHED_GIT_CANDIDATES) {
+    if (existsSync5(candidate))
+      return candidate;
+  }
+  return "git";
+}
+function dispatchedProbeEnv(cloneDir, base) {
+  const gitDir = join8(cloneDir, ".git");
+  return {
+    ...base,
+    GIT_DIR: gitDir,
+    GIT_WORK_TREE: cloneDir,
+    GIT_INDEX_FILE: join8(gitDir, "index"),
+    GIT_OBJECT_DIRECTORY: join8(gitDir, "objects"),
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: "",
+    GIT_COMMON_DIR: gitDir,
+    GIT_NAMESPACE: "",
+    GIT_CONFIG_GLOBAL: devNull,
+    GIT_CONFIG_SYSTEM: devNull,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_COUNT: "0",
+    GIT_CONFIG_PARAMETERS: ""
+  };
+}
 function failureSourceOf(err) {
   if (err === null || typeof err !== "object")
     return "venue";
@@ -3581,10 +3621,15 @@ function childEnv(env) {
   const inherited = { ...process.env };
   for (const name of GCLOUD_PRINCIPAL_OVERRIDES)
     delete inherited[name];
+  for (const name of Object.keys(inherited)) {
+    if (name.startsWith("GIT_") || name.startsWith("LD_") || name.startsWith("DYLD_")) {
+      delete inherited[name];
+    }
+  }
   return { ...inherited, ...env };
 }
 function execWithSpawnSync(file, args, timeoutMs, env) {
-  const res = spawnSync6(file, [...args], {
+  const res = spawnSync5(file, [...args], {
     encoding: "utf8",
     timeout: timeoutMs,
     env: childEnv(env)
@@ -3605,10 +3650,10 @@ function pushFailure(timedOut, timeoutMs, spawnFailure) {
 }
 function pushTreeWithTar(from, file, args, timeoutMs, env) {
   return new Promise((settle) => {
-    const source = spawn4("tar", ["-C", from, "-cf", "-", "."], {
+    const source = spawn3("tar", ["-C", from, "-cf", "-", "."], {
       stdio: ["ignore", "pipe", "pipe"]
     });
-    const sink = spawn4(file, [...args], { stdio: ["pipe", "pipe", "pipe"], env: childEnv(env) });
+    const sink = spawn3(file, [...args], { stdio: ["pipe", "pipe", "pipe"], env: childEnv(env) });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
@@ -3693,11 +3738,14 @@ timed out after ${String(timeoutMs)}ms` : stderr,
 function quoteForRemoteShell(arg) {
   return `'${arg.replace(/'/g, "'\\''")}'`;
 }
+function venueSshTarget(vm) {
+  return `${VENUE_SSH_USER}@${vm}`;
+}
 function iapSshArgv(vm, project, zone, command) {
   return [
     "compute",
     "ssh",
-    vm,
+    venueSshTarget(vm),
     `--project=${project}`,
     `--zone=${zone}`,
     "--tunnel-through-iap",
@@ -3709,7 +3757,7 @@ function iapTunnelArgv(vm, project, zone, socketPath) {
   return [
     "compute",
     "ssh",
-    vm,
+    venueSshTarget(vm),
     `--project=${project}`,
     `--zone=${zone}`,
     "--tunnel-through-iap",
@@ -4273,6 +4321,39 @@ function makeLease(p) {
       if (carried !== null) {
         throw new HostedVenueError(`refusing to stage ${local.cloneDir} onto ${p.vm}: its .git/config carries ${carried}, and the whole tree is mounted where the repo\u2019s own test command runs. Fetch with the credential out of band (http.extraHeader or GIT_ASKPASS) so it is never written to disk.`);
       }
+      if (local.dispatchedHead !== void 0) {
+        const probeEnv = dispatchedProbeEnv(local.cloneDir, p.env);
+        const gitBinary = dispatchedGitBinary();
+        const probe = (args) => p.io.exec(gitBinary, ["-C", local.cloneDir, ...args], DISPATCHED_PROBE_TIMEOUT_MS, probeEnv);
+        const head = probe(["rev-parse", "HEAD"]);
+        if (!head.ok) {
+          throw new HostedVenueError(
+            `refusing to stage ${local.cloneDir} onto ${p.vm}: the tree declares dispatched commit ${local.dispatchedHead} but its HEAD could not be read (${execDetail(head).slice(0, 200)}), so the declaration cannot be checked.`,
+            // 'ours', like the unreadable .git/config above: the venue is
+            // fine, we could not look on this side (TERM-710).
+            "ours"
+          );
+        }
+        const actual = head.stdout.trim();
+        if (actual !== local.dispatchedHead) {
+          throw new HostedVenueError(`refusing to stage ${local.cloneDir} onto ${p.vm}: the tree declares dispatched commit ${local.dispatchedHead} but its HEAD is ${actual}. On a dispatched run the commit is the statement of what was tested, so a tree at any other commit must never reach the venue.`);
+        }
+        const status = probe(DISPATCHED_STATUS_ARGV);
+        if (!status.ok) {
+          throw new HostedVenueError(`refusing to stage ${local.cloneDir} onto ${p.vm}: the tree declares dispatched commit ${local.dispatchedHead} but its status could not be read (${execDetail(status).slice(0, 200)}), so cleanliness cannot be checked.`, "ours");
+        }
+        if (status.stdout.trim() !== "") {
+          throw new HostedVenueError(`refusing to stage ${local.cloneDir} onto ${p.vm}: the tree declares dispatched commit ${local.dispatchedHead} but carries uncommitted state (${status.stdout.trim().split("\n").slice(0, 5).join("; ").slice(0, 300)}). Bytes the commit does not name must never reach the venue on a dispatched run.`);
+        }
+        const flags = probe(["ls-files", "-v"]);
+        if (!flags.ok) {
+          throw new HostedVenueError(`refusing to stage ${local.cloneDir} onto ${p.vm}: the tree declares dispatched commit ${local.dispatchedHead} but its index flags could not be read (${execDetail(flags).slice(0, 200)}), so cleanliness cannot be trusted.`, "ours");
+        }
+        const masked = flags.stdout.split("\n").filter((line) => /^(?:[a-z]|S) /.test(line)).map((line) => line.slice(2));
+        if (masked.length > 0) {
+          throw new HostedVenueError(`refusing to stage ${local.cloneDir} onto ${p.vm}: the tree declares dispatched commit ${local.dispatchedHead} but ${String(masked.length)} tracked path(s) carry assume-unchanged or skip-worktree index flags (${masked.slice(0, 5).join("; ").slice(0, 300)}), which blind the cleanliness check to their contents. A dispatched tree must keep the instrument honest.`);
+        }
+      }
       await push(local.cloneDir, paths.cloneDir);
       await push(local.scratchRoot, paths.scratchRoot);
       return paths;
@@ -4350,7 +4431,7 @@ function makeLease(p) {
     }
   };
 }
-var SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING;
+var SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING;
 var init_hostedVenue = __esm({
   "../../packages/envrun/dist/hostedVenue.js"() {
     "use strict";
@@ -4371,6 +4452,20 @@ var init_hostedVenue = __esm({
     CREDENTIAL_QUERY_PARAM = /[?&][^=&\s]*(token|secret|password|passwd|api[-_]?key|signature|sig|auth|credential)[^=&\s]*=[^\s&]/i;
     UNDECODABLE = "?token=this:url-could-not-be-decoded-so-it-is-refused";
     STAGE_PUSH_TIMEOUT_MS = 3e5;
+    DISPATCHED_PROBE_TIMEOUT_MS = 6e4;
+    DISPATCHED_STATUS_ARGV = [
+      // `-c core.fsmonitor=false` (command line beats every config file, including
+      // the clone's own .git/config): a status served by an fsmonitor daemon is a
+      // status somebody else computed, and this probe exists to look for itself.
+      "-c",
+      "core.fsmonitor=false",
+      "status",
+      "--porcelain=v1",
+      "--untracked-files=all",
+      "--ignored",
+      "--ignore-submodules=none"
+    ];
+    DISPATCHED_GIT_CANDIDATES = ["/usr/bin/git", "/bin/git"];
     PROXY_CLEANUP_TIMEOUT_MS = 3e4;
     OWNER_PROBE_TIMEOUT_MS = 3e4;
     BOOT_TIMEOUT_MS = 18e4;
@@ -4408,7 +4503,7 @@ var init_hostedVenue = __esm({
         }
       },
       spawnTunnel: (file, args, env) => {
-        const child = spawn4(file, [...args], {
+        const child = spawn3(file, [...args], {
           stdio: ["ignore", "ignore", "ignore"],
           env: childEnv(env)
         });
@@ -4432,14 +4527,14 @@ var init_hostedVenue = __esm({
       },
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
       now: () => Date.now(),
-      exists: (path) => existsSync6(path),
+      exists: (path) => existsSync5(path),
       makePrivateDir: () => {
         const dir = mkdtempSync2(join8(tmpdir2(), SOCKET_DIR_PREFIX));
         chmodSync2(dir, 448);
         return dir;
       },
       removeTree: (path) => {
-        rmSync3(path, { recursive: true, force: true });
+        rmSync2(path, { recursive: true, force: true });
       },
       dockerFor: (socketPath) => remoteDockerClient(`unix://${socketPath}`),
       classifyDaemon: (docker3) => classifyVenueDaemon(docker3),
@@ -4458,6 +4553,7 @@ var init_hostedVenue = __esm({
         return body;
       }
     };
+    VENUE_SSH_USER = "th-runner";
     GCE_METADATA_IDENTITY_URL = "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/identity";
     COMPACT_JWT = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
     IAP_NOT_READY = /\b4047\s*[:\]]/;
@@ -4470,6 +4566,98 @@ var init_hostedVenue = __esm({
     SSH_KEY_NOT_READY = /Permission denied \(publickey/;
     DAEMON_NOT_READY = /Cannot connect to the Docker daemon/;
     SSH_NOT_ANSWERING = /Connection refused|Connection reset|Connection closed by|kex_exchange_identification|Operation timed out/;
+  }
+});
+
+// ../../packages/envrun/dist/placement.js
+function localDockerPlacement() {
+  return {
+    kind: "local-docker",
+    refusal: null,
+    venue: () => localVenue(),
+    imageFor: (runtime, override, version) => imageForRuntime(runtime, override, version)
+  };
+}
+function hostedPoolPlacement() {
+  return {
+    kind: "hosted-pool",
+    refusal: null,
+    venue: () => hostedVenue(),
+    imageFor: (runtime, override, version) => imageForRuntime(runtime, override, version)
+  };
+}
+function placementFor(kind) {
+  return PLACEMENTS[kind]();
+}
+function containmentUnavailableRefusal(detail) {
+  return `${CONTAINMENT_UNAVAILABLE_PREFIX}${detail}`;
+}
+async function resolveLease(placement, runId) {
+  try {
+    return { ok: true, lease: await placement.venue().acquire(runId) };
+  } catch (err) {
+    if (findNoContainment(err) === null)
+      throw err;
+    return {
+      ok: false,
+      // `describeThrown`, not `err.message`/`String(err)`. Both of those are unguarded
+      // reads on a value we have just established we cannot trust, and this expression is
+      // evaluated BEFORE `diagnostic` in the same object literal — so a hostile value threw
+      // here while the total helper two lines down never ran.
+      refusal: containmentUnavailableRefusal(describeThrown(err, { includeName: false })),
+      // The error ITSELF, not just the message folded into the sentence above. Kept apart
+      // from `refusal` because the two have different audiences and different rules: the
+      // sentence is shown to a developer, this is logged for us, after redaction.
+      diagnostic: describeCause(err)
+    };
+  }
+}
+function findNoContainment(err) {
+  try {
+    let current = err;
+    for (let depth = 0; depth < 16; depth += 1) {
+      if (current instanceof NoContainmentError)
+        return current;
+      const next = current?.cause;
+      if (next === void 0 || next === null)
+        return null;
+      current = next;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+function parsePlacementKind(raw) {
+  if (raw === void 0 || raw === null)
+    return DEFAULT_PLACEMENT_KIND;
+  const kinds = Object.keys(PLACEMENTS);
+  const text = String(raw);
+  if (kinds.includes(text))
+    return text;
+  const alias = PLACEMENT_ALIASES[text];
+  if (alias !== void 0)
+    return alias;
+  const accepted = [...kinds, ...Object.keys(PLACEMENT_ALIASES)].join(", ");
+  throw new Error(`terminalhire: unknown placement ${JSON.stringify(text)}. Accepted: ${accepted}. Refused rather than defaulted: a misspelled placement that quietly ran on your own machine would still print a verdict, and a verdict from the machine under test is exactly what a hosted run exists to avoid.`);
+}
+var PLACEMENTS, CONTAINMENT_UNAVAILABLE_PREFIX, PLACEMENT_ALIASES, DEFAULT_PLACEMENT_KIND;
+var init_placement = __esm({
+  "../../packages/envrun/dist/placement.js"() {
+    "use strict";
+    init_dist();
+    init_execute();
+    init_hostedVenue();
+    init_venue();
+    PLACEMENTS = {
+      "local-docker": localDockerPlacement,
+      "hosted-pool": hostedPoolPlacement
+    };
+    CONTAINMENT_UNAVAILABLE_PREFIX = "terminalhire: no container runtime is available on this machine, so there is nowhere to run your suite under containment. Nothing was built, run or judged \u2014 this is OUR environment refusing, not a verdict on your diff. Start Docker (or point DOCKER_HOST at a reachable daemon) and run again. What the probe found: ";
+    PLACEMENT_ALIASES = {
+      hosted: "hosted-pool"
+    };
+    DEFAULT_PLACEMENT_KIND = "local-docker";
   }
 });
 
@@ -5853,13 +6041,13 @@ var init_dist3 = __esm({
 });
 
 // ../../packages/envrun/dist/thrun.js
-import { execFileSync, spawnSync as spawnSync7 } from "child_process";
-import { existsSync as existsSync7, mkdirSync as mkdirSync5, mkdtempSync as mkdtempSync3, rmSync as rmSync4 } from "fs";
-import { randomUUID as randomUUID2 } from "crypto";
-import { devNull, tmpdir as tmpdir3 } from "os";
+import { execFileSync, spawnSync as spawnSync6 } from "child_process";
+import { existsSync as existsSync6, mkdirSync as mkdirSync4, mkdtempSync as mkdtempSync3, rmSync as rmSync3 } from "fs";
+import { randomUUID } from "crypto";
+import { devNull as devNull2, tmpdir as tmpdir3 } from "os";
 import { join as join10 } from "path";
 function git(repoDir, args, allowNonZero = false) {
-  const res = spawnSync7("git", [...args], {
+  const res = spawnSync6("git", [...args], {
     cwd: repoDir,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024
@@ -5872,7 +6060,7 @@ function git(repoDir, args, allowNonZero = false) {
   return res.stdout ?? "";
 }
 function collectWorkingDiff(repoDir) {
-  if (!existsSync7(join10(repoDir, ".git"))) {
+  if (!existsSync6(join10(repoDir, ".git"))) {
     throw new ThRunError(`${repoDir} is not a git checkout (no .git). \`th run\` ships the working diff, so it needs a repository to read one from.`);
   }
   const headSha = git(repoDir, ["rev-parse", "HEAD"]).trim();
@@ -5987,8 +6175,8 @@ function gitCloneEnv(auth) {
     if (value !== void 0)
       env[name] = value;
   }
-  env["GIT_CONFIG_GLOBAL"] = devNull;
-  env["GIT_CONFIG_SYSTEM"] = devNull;
+  env["GIT_CONFIG_GLOBAL"] = devNull2;
+  env["GIT_CONFIG_SYSTEM"] = devNull2;
   env["GIT_CONFIG_NOSYSTEM"] = "1";
   env["GIT_TERMINAL_PROMPT"] = "0";
   for (const name of ["HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"]) {
@@ -6014,7 +6202,7 @@ function credentialFreeHome() {
   credentialFreeHomeDir = made;
   process.once("exit", () => {
     try {
-      rmSync4(made, { recursive: true, force: true });
+      rmSync3(made, { recursive: true, force: true });
     } catch {
     }
   });
@@ -6082,7 +6270,7 @@ function cloneTargetAtUnguarded(opts) {
   if (persisted !== null) {
     throw new RunRefusalError(`refusing to clone from a URL carrying ${persisted}: \`git remote add\` writes the source verbatim into .git/config, which is mounted where the repo\u2019s own test command runs. Fetch with the credential out of band so it is never written to disk \u2014 this runner takes one as an HTTP header, which is never persisted.`);
   }
-  mkdirSync5(opts.dest, { recursive: true });
+  mkdirSync4(opts.dest, { recursive: true });
   const runOut = (args) => execFileSync("git", [...gitConfigArgs(), ...args], {
     cwd: opts.dest,
     encoding: "utf8",
@@ -6121,7 +6309,7 @@ function cloneTargetAtUnguarded(opts) {
 }
 function scrubCloneSource(dest, run2) {
   run2(["remote", "remove", "origin"]);
-  rmSync4(join10(dest, ".git", "FETCH_HEAD"), { force: true });
+  rmSync3(join10(dest, ".git", "FETCH_HEAD"), { force: true });
 }
 function publishableTarget(url) {
   if (separatorInTarget(url) !== null)
@@ -6210,7 +6398,7 @@ function patchedTreeDigest(repoDir) {
 function applyPatch(repoDir, patch, what) {
   if (patch.trim() === "")
     return;
-  const res = spawnSync7("git", ["apply", "--whitespace=nowarn", "-"], {
+  const res = spawnSync6("git", ["apply", "--whitespace=nowarn", "-"], {
     cwd: repoDir,
     input: patch,
     encoding: "utf8"
@@ -6264,7 +6452,12 @@ function refusedRun(fields) {
     touchedPaths: fields.touchedPaths,
     preview: null,
     containerImage: null,
-    leaksClean: null
+    containerImageDigest: null,
+    leaksClean: null,
+    // A refused run never held a lease, so there is no venue to describe. Same
+    // reasoning as `leaksClean` above: null because nothing happened, and it must
+    // not read as a venue we looked at and could not name.
+    venue: null
   };
 }
 function unacceptableTarget(req) {
@@ -6322,7 +6515,7 @@ async function releaseWithoutThrowing(lease, progress) {
 async function verifyWorkingDiff(req) {
   const ctx = {
     startedAt: Date.now(),
-    runId: req.runId ?? `run-${randomUUID2().slice(0, 8)}`,
+    runId: req.runId ?? `run-${randomUUID().slice(0, 8)}`,
     touchedPaths: []
   };
   const target = {
@@ -6490,7 +6683,7 @@ async function runVerification(req, ctx) {
   const stage = join10(req.scratchRoot, runId);
   const cloneDir = join10(stage, "clone");
   const scratch = join10(stage, "scratch");
-  mkdirSync5(scratch, { recursive: true });
+  mkdirSync4(scratch, { recursive: true });
   assertSafeTargetSha(req.targetSha);
   progress("clone", `${publishableTarget(req.targetRepo)} @ ${req.targetSha.slice(0, 12)}`);
   cloneTargetAt({
@@ -6555,7 +6748,13 @@ async function runVerification(req, ctx) {
     const venuePaths = await lease.stage({
       cloneDir,
       scratchRoot: scratch,
-      previewDir: join10(stage, "preview")
+      previewDir: join10(stage, "preview"),
+      // On a dispatched run the commit is the statement of what was tested, so
+      // it rides with the tree and the venue seam refuses a tree that is not
+      // that commit (design §6 item 4, TERM-892 — the guard lives in
+      // hostedVenue's stage(); the local venue reads nothing). Never declared
+      // on a working-diff run, whose tree is legitimately the developer's own.
+      ...source.kind === "dispatched-commit" ? { dispatchedHead: req.targetSha } : {}
     });
     progress("run", `placement ${placement.kind}, venue ${lease.kind}, image ${image}`);
     const verdict = await runEnvironmentSpec({
@@ -6601,7 +6800,16 @@ async function runVerification(req, ctx) {
       touchedPaths: pre.touchedPaths,
       preview: null,
       containerImage: verdict.image,
-      leaksClean: verdict.leaks.clean
+      // The run body never inspects the image, so it records no digest rather than
+      // a re-read of the name. The audit harness (`e2e-audit.mjs`) is the producer
+      // that measures one; a run without it is recordable but not attestable —
+      // `toAcceptancePredicate` refuses `missing-image-digest` (TERM-893).
+      containerImageDigest: null,
+      leaksClean: verdict.leaks.clean,
+      // Built from the LEASE, over the client that ran the steps — never from
+      // `req.placement`, which is a request. `venueDescriptor.ts` carries the
+      // reasoning and the #735 failure that makes the distinction load-bearing.
+      venue: describeVenue(lease)
     };
     if (req.preview === false)
       return {
@@ -6654,6 +6862,7 @@ var init_thrun = __esm({
     init_execute();
     init_placement();
     init_venue();
+    init_venueDescriptor();
     init_result();
     ThRunError = class extends Error {
     };
@@ -6893,9 +7102,9 @@ var init_dbplan = __esm({
 });
 
 // ../../packages/envrun/dist/dbstack.js
-import { spawnSync as spawnSync8 } from "child_process";
+import { spawnSync as spawnSync7 } from "child_process";
 import { randomBytes as randomBytes5 } from "crypto";
-import { mkdirSync as mkdirSync6 } from "fs";
+import { mkdirSync as mkdirSync5 } from "fs";
 function installCommandFor(runner) {
   switch (runner) {
     case "sql":
@@ -6919,7 +7128,7 @@ function toolingImageFor(runner) {
   }
 }
 function docker2(args, timeoutMs = DOCKER_TIMEOUT_MS2) {
-  const res = spawnSync8("docker", [...args], { encoding: "utf8", timeout: timeoutMs });
+  const res = spawnSync7("docker", [...args], { encoding: "utf8", timeout: timeoutMs });
   return {
     ok: !res.error && res.status === 0,
     status: res.status,
@@ -6982,7 +7191,7 @@ function waitForPostgres(container, creds, timeoutMs) {
         detail: `the server container exited before becoming ready: ${(logs.stdout + logs.stderr).trim().slice(-400)}`
       };
     }
-    spawnSync8("sleep", ["0.25"]);
+    spawnSync7("sleep", ["0.25"]);
   }
   return { ok: false, ms: Date.now() - startedAt, detail: `timed out: ${lastDetail}` };
 }
@@ -7237,8 +7446,8 @@ async function installLocalMigrationTooling(opts) {
     };
   }
   const { jail, tmp } = buildJail(opts.scratchRoot);
-  mkdirSync6(jail, { recursive: true });
-  mkdirSync6(tmp, { recursive: true });
+  mkdirSync5(jail, { recursive: true });
+  mkdirSync5(tmp, { recursive: true });
   const spec = {
     profile: "install",
     clone: opts.repoDir,
@@ -7518,6 +7727,7 @@ __export(dist_exports, {
   BOOKKEEPING_TABLES: () => BOOKKEEPING_TABLES,
   CONTAINMENT_UNAVAILABLE_PREFIX: () => CONTAINMENT_UNAVAILABLE_PREFIX,
   CloneUnavailableError: () => CloneUnavailableError,
+  DAEMON_FACTS_FORMAT: () => DAEMON_FACTS_FORMAT,
   DEFAULT_GCP_PROJECT: () => DEFAULT_GCP_PROJECT,
   DEFAULT_GCP_ZONE: () => DEFAULT_GCP_ZONE,
   DEFAULT_PLACEMENT_KIND: () => DEFAULT_PLACEMENT_KIND,
@@ -7529,7 +7739,6 @@ __export(dist_exports, {
   GCP_MAX_RUN_DURATION_SECONDS: () => GCP_MAX_RUN_DURATION_SECONDS,
   GCP_RUN_LABEL_KEY: () => GCP_RUN_LABEL_KEY,
   GOOGLE_JWKS_URL: () => GOOGLE_JWKS_URL,
-  HOSTED_POOL_REFUSAL: () => HOSTED_POOL_REFUSAL,
   HostedVenueError: () => HostedVenueError,
   JWKS_FETCH_TIMEOUT_MS: () => JWKS_FETCH_TIMEOUT_MS,
   LOCAL_MEASUREMENT_PREFIX: () => LOCAL_MEASUREMENT_PREFIX,
@@ -7547,6 +7756,7 @@ __export(dist_exports, {
   REDACTED_TARGET_REPO: () => REDACTED_TARGET_REPO,
   REDACTED_TARGET_SHA: () => REDACTED_TARGET_SHA,
   RELEASED_LEASE_CENSUS_REASON: () => RELEASED_LEASE_CENSUS_REASON,
+  REPO_DIGEST_RE: () => REPO_DIGEST_RE,
   RUN_LABEL_KEY: () => RUN_LABEL_KEY,
   RUN_RESULT_FIELDS: () => RUN_RESULT_FIELDS,
   RUN_RESULT_SCHEMA: () => RUN_RESULT_SCHEMA,
@@ -7561,6 +7771,7 @@ __export(dist_exports, {
   ThRunError: () => ThRunError,
   UNPARSEABLE_TARGET: () => UNPARSEABLE_TARGET,
   VENUE_GCLOUD_CONFIG: () => VENUE_GCLOUD_CONFIG,
+  VENUE_SSH_USER: () => VENUE_SSH_USER,
   VENV_DIR: () => VENV_DIR,
   VenueRollbackError: () => VenueRollbackError,
   acquireTransactionally: () => acquireTransactionally,
@@ -7589,6 +7800,7 @@ __export(dist_exports, {
   defaultHostedVenueIo: () => defaultHostedVenueIo,
   deleteFoundNothing: () => deleteFoundNothing,
   describeCause: () => describeCause,
+  describeVenue: () => describeVenue,
   describeVenueDaemon: () => describeVenueDaemon,
   detectRunner: () => detectRunner,
   endOfOptionsUnsupported: () => endOfOptionsUnsupported,
@@ -7597,7 +7809,6 @@ __export(dist_exports, {
   findRunRefusal: () => findRunRefusal,
   gcpBootArgv: () => gcpBootArgv,
   gcpDeleteArgv: () => gcpDeleteArgv,
-  gcpRunnerPlacement: () => gcpRunnerPlacement,
   generateCredentials: () => generateCredentials,
   hostedPoolPlacement: () => hostedPoolPlacement,
   hostedVenue: () => hostedVenue,
@@ -7607,6 +7818,7 @@ __export(dist_exports, {
   iapUntarArgv: () => iapUntarArgv,
   identityProbeCommand: () => identityProbeCommand,
   imageForRuntime: () => imageForRuntime,
+  imageRepo: () => imageRepo,
   installCommandFor: () => installCommandFor,
   installLocalMigrationTooling: () => installLocalMigrationTooling,
   isBookkeepingTable: () => isBookkeepingTable,
@@ -7637,6 +7849,7 @@ __export(dist_exports, {
   recordedApplied: () => recordedApplied,
   refuseSshTransport: () => refuseSshTransport,
   renderRunReport: () => renderRunReport,
+  renderVenueLine: () => renderVenueLine,
   renderVerdictLine: () => renderVerdictLine,
   resolveImageForSpec: () => resolveImageForSpec,
   resolveLease: () => resolveLease,
@@ -7667,8 +7880,8 @@ var init_dist4 = __esm({
     init_boundary();
     init_placement();
     init_gcpPlacement();
-    init_gcpPlacement();
     init_venue();
+    init_venueDescriptor();
     init_hostedVenue();
     init_venueProof();
     init_preview();
@@ -7679,10 +7892,10 @@ var init_dist4 = __esm({
 });
 
 // bin/jpi-run.js
-import { existsSync as existsSync8, readFileSync as readFileSync5 } from "fs";
+import { existsSync as existsSync7, readFileSync as readFileSync5 } from "fs";
 import { join as join11, resolve } from "path";
 import { tmpdir as tmpdir4 } from "os";
-import { mkdtempSync as mkdtempSync4, rmSync as rmSync5 } from "fs";
+import { mkdtempSync as mkdtempSync4, rmSync as rmSync4 } from "fs";
 
 // bin/recall-check.js
 import {
@@ -8039,7 +8252,7 @@ function runScratchRoot() {
     if (cleaned) return;
     cleaned = true;
     try {
-      rmSync5(root, { recursive: true, force: true });
+      rmSync4(root, { recursive: true, force: true });
     } catch {
     }
   };
@@ -8064,7 +8277,7 @@ async function loadEngine() {
 }
 function readConfig(localDir) {
   const file = join11(localDir, ".th-run.json");
-  if (!existsSync8(file)) return {};
+  if (!existsSync7(file)) return {};
   try {
     const parsed = JSON.parse(readFileSync5(file, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};

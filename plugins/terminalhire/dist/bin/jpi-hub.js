@@ -12379,46 +12379,6 @@ var init_jpi_chat_read = __esm({
   }
 });
 
-// bin/cache-store.js
-import { readFileSync as readFileSync13, writeFileSync as writeFileSync11, renameSync as renameSync5 } from "fs";
-import { join as join15 } from "path";
-import { homedir as homedir12 } from "os";
-function readCacheEntry() {
-  try {
-    return JSON.parse(readFileSync13(INDEX_CACHE_FILE2, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function updateIndexCache(patch) {
-  ensureStateDir(TERMINALHIRE_DIR10);
-  const existing = readCacheEntry() ?? {};
-  const entry = {
-    ...existing,
-    ...patch,
-    schemaVersion: SCHEMA_VERSION2,
-    ts: Date.now()
-  };
-  const tmp = `${INDEX_CACHE_FILE2}.${process.pid}.${tmpCounter++}.tmp`;
-  writeFileSync11(tmp, JSON.stringify(entry), "utf8");
-  renameSync5(tmp, INDEX_CACHE_FILE2);
-  return entry;
-}
-function writeIndexCache(index) {
-  return updateIndexCache({ index, indexETag: "" });
-}
-var TERMINALHIRE_DIR10, INDEX_CACHE_FILE2, SCHEMA_VERSION2, tmpCounter;
-var init_cache_store = __esm({
-  "bin/cache-store.js"() {
-    "use strict";
-    init_state_dir();
-    TERMINALHIRE_DIR10 = process.env.TERMINALHIRE_DIR || join15(homedir12(), ".terminalhire");
-    INDEX_CACHE_FILE2 = join15(TERMINALHIRE_DIR10, "index-cache.json");
-    SCHEMA_VERSION2 = 1;
-    tmpCounter = 0;
-  }
-});
-
 // bin/founder-pin.js
 function isPinnedFounderBounty(j) {
   return j?.bounty?.bountySource === "founder" && j?.bounty?.claimable === true;
@@ -12824,8 +12784,170 @@ var STATUS_FILE = join14(TERMINALHIRE_DIR9, "job-status.json");
 var LOCK_FILE = `${STATUS_FILE}.lock`;
 var BAK_FILE = `${STATUS_FILE}.bak`;
 
+// bin/cache-store.js
+init_state_dir();
+import { readFileSync as readFileSync13, writeFileSync as writeFileSync11, renameSync as renameSync5 } from "fs";
+import { join as join15 } from "path";
+import { homedir as homedir12 } from "os";
+var TERMINALHIRE_DIR10 = process.env.TERMINALHIRE_DIR || join15(homedir12(), ".terminalhire");
+var INDEX_CACHE_FILE2 = join15(TERMINALHIRE_DIR10, "index-cache.json");
+var SCHEMA_VERSION2 = 1;
+var tmpCounter = 0;
+function readCacheEntry() {
+  try {
+    return JSON.parse(readFileSync13(INDEX_CACHE_FILE2, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function updateIndexCache(patch) {
+  ensureStateDir(TERMINALHIRE_DIR10);
+  const existing = readCacheEntry() ?? {};
+  const entry = {
+    ...existing,
+    ...patch,
+    schemaVersion: SCHEMA_VERSION2,
+    ts: Date.now()
+  };
+  const tmp = `${INDEX_CACHE_FILE2}.${process.pid}.${tmpCounter++}.tmp`;
+  writeFileSync11(tmp, JSON.stringify(entry), "utf8");
+  renameSync5(tmp, INDEX_CACHE_FILE2);
+  return entry;
+}
+
+// bin/index-revalidate.js
+var PULSE_TIMEOUT_MS = 2e3;
+var INDEX_TIMEOUT_WARM_MS = 5e3;
+var INDEX_TIMEOUT_COLD_MS = 1e4;
+function usableMember(member) {
+  return typeof member === "object" && member !== null && !Array.isArray(member) && Array.isArray(member.tags);
+}
+function usableIndex(index) {
+  if (!index || typeof index !== "object" || Array.isArray(index)) return false;
+  if (!Array.isArray(index.jobs) || !index.jobs.every(usableMember)) return false;
+  if (index.contribute !== void 0) {
+    if (!Array.isArray(index.contribute) || !index.contribute.every(usableMember)) return false;
+  }
+  return true;
+}
+function deadlineFetch(fetchImpl, url, { headers, timeoutMs }) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("deadline exceeded")), timeoutMs);
+  timer.unref?.();
+  const promise = Promise.resolve(fetchImpl(url, { headers, signal: controller.signal })).finally(
+    () => clearTimeout(timer)
+  );
+  return { promise, abort: () => controller.abort(new Error("superseded")) };
+}
+function cacheFallbackNotice(source, cachedAt, now = Date.now()) {
+  if (source !== "cache-fallback") return null;
+  const base = "terminalhire: could not refresh the list \u2014 showing cached results";
+  if (typeof cachedAt !== "number" || !Number.isFinite(cachedAt)) return `${base}.`;
+  const minutes = Math.floor(Math.max(0, now - cachedAt) / 6e4);
+  if (minutes < 1) return `${base} from moments ago.`;
+  if (minutes < 60) return `${base} from ${minutes}m ago.`;
+  const hours = Math.floor(minutes / 60);
+  return `${base} from ${hours}h ago.`;
+}
+async function revalidateIndex({
+  apiUrl,
+  fetchImpl,
+  readEntry,
+  writeEntry,
+  pulseTimeoutMs = PULSE_TIMEOUT_MS,
+  indexTimeoutWarmMs = INDEX_TIMEOUT_WARM_MS,
+  indexTimeoutColdMs = INDEX_TIMEOUT_COLD_MS
+}) {
+  let entry = {};
+  try {
+    entry = readEntry() ?? {};
+  } catch {
+  }
+  const cached = usableIndex(entry.index) ? entry.index : null;
+  const cachedAt = cached && typeof entry.ts === "number" ? entry.ts : null;
+  const indexTimeoutMs = cached ? indexTimeoutWarmMs : indexTimeoutColdMs;
+  const headers = { Accept: "application/json" };
+  if (cached && typeof entry.indexETag === "string" && entry.indexETag !== "") {
+    headers["If-None-Match"] = entry.indexETag;
+  }
+  const pulseCall = deadlineFetch(fetchImpl, `${apiUrl}/api/pulse`, {
+    headers: { Accept: "application/json" },
+    timeoutMs: pulseTimeoutMs
+  });
+  const speculative = deadlineFetch(fetchImpl, `${apiUrl}/api/index`, {
+    headers,
+    timeoutMs: indexTimeoutMs
+  });
+  const speculativeSettled = speculative.promise.then(
+    (res2) => ({ ok: true, res: res2 }),
+    (err) => ({ ok: false, err })
+  );
+  let latestPostedAt = null;
+  try {
+    const res2 = await pulseCall.promise;
+    if (res2.ok) {
+      const pulse = await res2.json();
+      latestPostedAt = pulse?.latestPostedAt ?? null;
+    }
+  } catch {
+  }
+  const bust = latestPostedAt !== null && entry.latestPostedAt !== latestPostedAt;
+  let outcome;
+  let reachedOrigin = false;
+  if (bust) {
+    speculative.abort();
+    const bustCall = deadlineFetch(fetchImpl, `${apiUrl}/api/index`, {
+      // `no-cache` forces revalidation against the origin; the validator rides along
+      // so a genuinely unchanged body still costs a 304 rather than a full download.
+      headers: { ...headers, "Cache-Control": "no-cache" },
+      timeoutMs: indexTimeoutMs
+    });
+    try {
+      outcome = { ok: true, res: await bustCall.promise };
+      reachedOrigin = true;
+    } catch (err) {
+      const spec = await speculativeSettled;
+      outcome = spec.ok ? spec : { ok: false, err };
+    }
+  } else {
+    outcome = await speculativeSettled;
+  }
+  const fellBack = (reason) => cached ? { index: cached, source: "cache-fallback", reason, cachedAt } : { index: null, source: "none", reason, cachedAt };
+  if (!outcome.ok) {
+    const err = outcome.err;
+    return fellBack(err instanceof Error ? err.message : String(err));
+  }
+  const res = outcome.res;
+  try {
+    if (res.status === 304 && cached) {
+      if (reachedOrigin && latestPostedAt && latestPostedAt !== entry.latestPostedAt) {
+        try {
+          writeEntry({ latestPostedAt });
+        } catch {
+        }
+      }
+      return { index: cached, source: "cache-304", reason: null, cachedAt };
+    }
+    if (!res.ok) {
+      return fellBack(`/api/index returned ${res.status}`);
+    }
+    const body = await res.json();
+    if (!usableIndex(body)) {
+      return fellBack("/api/index returned a body that will not render");
+    }
+    const patch = { index: body, indexETag: res.headers.get("etag") ?? "" };
+    if (reachedOrigin && latestPostedAt) patch.latestPostedAt = latestPostedAt;
+    try {
+      writeEntry(patch);
+    } catch {
+    }
+    return { index: body, source: "fresh", reason: null, cachedAt };
+  } catch (err) {
+    return fellBack(err instanceof Error ? err.message : String(err));
+  }
+}
+
 // bin/jpi-jobs.js
-init_cache_store();
 init_sanitize();
 init_api_base();
 var __dirname = fileURLToPath2(new URL(".", import.meta.url));
@@ -12857,16 +12979,20 @@ function readIndexCache() {
     return null;
   }
 }
-async function fetchIndex() {
-  const cached = readIndexCache();
-  if (cached) return cached;
-  const res = await fetch(`${API_URL}/api/index`, {
-    signal: AbortSignal.timeout(1e4)
+async function fetchIndex(quiet = false) {
+  const { index, reason, source, cachedAt } = await revalidateIndex({
+    apiUrl: API_URL,
+    fetchImpl: (url, init) => fetch(url, init),
+    readEntry: readCacheEntry,
+    writeEntry: updateIndexCache
   });
-  if (!res.ok) throw new Error(`/api/index returned ${res.status}`);
-  const index = await res.json();
-  writeIndexCache(index);
-  return index;
+  if (!quiet) {
+    const notice = cacheFallbackNotice(source, cachedAt);
+    if (notice) process.stderr.write(`${notice}
+`);
+  }
+  if (index) return index;
+  throw new Error(reason ?? "/api/index returned no usable index");
 }
 async function getJobMatches({ quiet = false, offline = false } = {}) {
   const { readProfile: readProfile2, profileToFingerprint: profileToFingerprint2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
@@ -12876,7 +13002,7 @@ async function getJobMatches({ quiet = false, offline = false } = {}) {
     return { status: "no-profile" };
   }
   if (!quiet) console.log(`Fetching job index from ${API_URL}/api/index...`);
-  const index = offline ? readIndexCache() : await fetchIndex();
+  const index = offline ? readIndexCache() : await fetchIndex(quiet);
   if (offline && !index) return { status: "no-cache" };
   const allListings = index.jobs ?? [];
   const jobs = allListings.filter((j) => j.source !== "bounty");
@@ -12915,7 +13041,6 @@ import { readFileSync as readFileSync15 } from "fs";
 import { join as join18 } from "path";
 import { homedir as homedir15 } from "os";
 import { createInterface as createInterface3 } from "readline";
-init_cache_store();
 init_sanitize();
 init_api_base();
 init_founder_pin();
@@ -12941,14 +13066,20 @@ function readIndexCache2() {
     return null;
   }
 }
-async function fetchIndex2() {
-  const cached = readIndexCache2();
-  if (cached) return cached;
-  const res = await fetch(`${API_URL2}/api/index`, { signal: AbortSignal.timeout(1e4) });
-  if (!res.ok) throw new Error(`/api/index returned ${res.status}`);
-  const index = await res.json();
-  writeIndexCache(index);
-  return index;
+async function fetchIndex2(quiet = false) {
+  const { index, reason, source, cachedAt } = await revalidateIndex({
+    apiUrl: API_URL2,
+    fetchImpl: (url, init) => fetch(url, init),
+    readEntry: readCacheEntry,
+    writeEntry: updateIndexCache
+  });
+  if (!quiet) {
+    const notice = cacheFallbackNotice(source, cachedAt);
+    if (notice) process.stderr.write(`${notice}
+`);
+  }
+  if (index) return index;
+  throw new Error(reason ?? "/api/index returned no usable index");
 }
 function rankBounties(bounties, { rankMode = "winnability", scoreOf = () => 0 } = {}) {
   const legacy = rankMode === "legacy";
@@ -12996,7 +13127,7 @@ function classifyEmptyStatus({ preFilterCount, postFilterCount, priced }) {
 }
 async function getBounties({ quiet = false, offline = false, priced = PRICED_ONLY } = {}) {
   if (!quiet) console.log(`Fetching bounty index from ${API_URL2}/api/index...`);
-  const index = offline ? readIndexCache2() : await fetchIndex2();
+  const index = offline ? readIndexCache2() : await fetchIndex2(quiet);
   if (offline && !index) return { status: "no-cache" };
   let bounties = (index.jobs ?? []).filter((j) => j.source === "bounty");
   if (PRICED_ONLY) bounties = bounties.filter((j) => j.bounty?.amountUSD != null);
@@ -13188,7 +13319,6 @@ async function getDevs({ quiet = false, offline = false } = {}) {
 }
 
 // bin/jpi-hub.js
-init_cache_store();
 init_intro2();
 init_open_url();
 var KEY_CTRL_K = "\v";

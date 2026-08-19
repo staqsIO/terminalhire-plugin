@@ -97,6 +97,41 @@ node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim list --active   # ex
 node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim status [<id>]   # poll source PR merge state → updates the metric
 ```
 
+### Founder postings — one verb, agent-ready workspace
+
+A founder posting (first-party paid bounty) is never forked or cloned: the work is
+delivered THROUGH terminalhire. Registration is identity + money, so it stays in the
+human CLI — but it is ONE command now, and the same command delivers the workspace:
+
+```bash
+terminalhire claim start <shortRef|bountyId> --watch   # the human runs this, in their own terminal
+```
+
+That records the claim (server registration included), then asks the server for the
+workspace. Approval already granted (or an open posting) → the workspace materializes
+in the same breath. Approval pending → `--watch` polls at a human's terminal and
+delivers the moment the founder approves; without a terminal the command prints the
+pending state once and exits cleanly (safe to re-run anytime — the ask is free and
+repeatable, and Ctrl-C loses nothing).
+
+When the MCP `claim_record` tool answers `human_action_required` for a founder
+posting, its `humanCommand` field carries exactly this command — hand it to the
+human verbatim and stop; never try to register through MCP or the Bash tool with
+worked-around flags.
+
+**Picking the work back up after delivery:** the workspace path lands in the local
+ledger. The MCP `claim_workspace` tool (read-only, no network) returns
+`worktreePath`, `branch`, and the orientation files. In the workspace,
+`.terminalhire/` is terminalhire's own directory:
+
+- `.terminalhire/AGENTS.md` — read this FIRST when working in a claim workspace
+- `.terminalhire/BRIEF.md` — the founder's write-up (absent when they wrote none)
+- `.terminalhire/VERIFY.md` — how the work is checked and handed back
+
+Never `git push` from a founder-claim workspace, never touch `.terminalhire/` in the
+patch (submit refuses it), and `claim submit` remains the human's command — its
+confirmation flag included, which is never yours to pass.
+
 ### Advance a claim
 
 ```bash
