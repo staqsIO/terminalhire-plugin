@@ -10581,6 +10581,8 @@ var init_sanitize = __esm({
 });
 
 // src/api-base.ts
+import { homedir as homedir3 } from "os";
+import { join as join4 } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -10695,17 +10697,17 @@ import {
   readlinkSync,
   unlinkSync as unlinkSync2
 } from "fs";
-import { join as join4, dirname as dirname2, basename, resolve, isAbsolute } from "path";
-import { homedir as homedir3 } from "os";
+import { join as join5, dirname as dirname2, basename, resolve, isAbsolute } from "path";
+import { homedir as homedir4 } from "os";
 function thDir() {
-  const raw = process.env["TERMINALHIRE_DIR"] || join4(homedir3(), ".terminalhire");
+  const raw = process.env["TERMINALHIRE_DIR"] || join5(homedir4(), ".terminalhire");
   return resolve(raw);
 }
 function claudeSettingsPath() {
-  return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join4(homedir3(), ".claude", "settings.json");
+  return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join5(homedir4(), ".claude", "settings.json");
 }
 function spinnerStateFilePath() {
-  return join4(thDir(), "spinner-state.json");
+  return join5(thDir(), "spinner-state.json");
 }
 function readJson(path, fallback) {
   try {
@@ -10749,7 +10751,7 @@ function resolveTarget(path) {
         break;
       }
       const dest = readlinkSync(cur);
-      next = isAbsolute(dest) ? dest : join4(dirname2(cur), dest);
+      next = isAbsolute(dest) ? dest : join5(dirname2(cur), dest);
     } catch {
       settled = true;
       break;
@@ -10759,7 +10761,7 @@ function resolveTarget(path) {
   if (!settled) return null;
   if (cur !== path) return cur;
   try {
-    return join4(realpathSync(dirname2(path)), basename(path));
+    return join5(realpathSync(dirname2(path)), basename(path));
   } catch {
     return path;
   }
@@ -10999,9 +11001,9 @@ var init_spinner_io = __esm({
 });
 
 // bin/spinner-config.js
-import { join as join5 } from "path";
+import { join as join6 } from "path";
 function configFilePath() {
-  return join5(thDir(), "config.json");
+  return join6(thDir(), "config.json");
 }
 function readSpinnerConfig() {
   const CONFIG_FILE2 = configFilePath();
@@ -11039,14 +11041,14 @@ __export(spinner_seen_exports, {
   seenFilePath: () => seenFilePath
 });
 import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, renameSync as renameSync4 } from "fs";
-import { join as join6, dirname as dirname3 } from "path";
-import { homedir as homedir4 } from "os";
+import { join as join7, dirname as dirname3 } from "path";
+import { homedir as homedir5 } from "os";
 function isAtCapacity(history) {
   return Object.keys(history?.entries ?? {}).length >= SEEN_MAX_ENTRIES;
 }
 function seenFilePath() {
-  const dir = process.env["TERMINALHIRE_DIR"] || join6(homedir4(), ".terminalhire");
-  return join6(dir, "seen-history.json");
+  const dir = process.env["TERMINALHIRE_DIR"] || join7(homedir5(), ".terminalhire");
+  return join7(dir, "seen-history.json");
 }
 function atomicWriteJson3(path, obj) {
   ensureStateDir(dirname3(path));
@@ -11206,6 +11208,23 @@ var init_spinner_select = __esm({
   }
 });
 
+// bin/session-case.js
+function sessionCase(entry, { stale }) {
+  const m = entry && entry.sessionHostMismatch;
+  if (m && typeof m.linkedHost === "string" && typeof m.currentHost === "string") {
+    return { kind: "mismatch", linkedHost: m.linkedHost, currentHost: m.currentHost };
+  }
+  if (!stale) return null;
+  const host = entry && entry.staleHost;
+  if (typeof host === "string" && host.length > 0) return { kind: "refused", host };
+  return { kind: "expired" };
+}
+var init_session_case = __esm({
+  "bin/session-case.js"() {
+    "use strict";
+  }
+});
+
 // bin/spinner-verbs.js
 function titleCase(s) {
   return String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -11274,12 +11293,14 @@ function buildIncomingIntroLine(incomingPending) {
 function hostLabel(base) {
   return String(base ?? "").replace(/^https?:\/\//, "");
 }
-function buildSessionStaleLine(sessionStale, sessionHostMismatch) {
-  if (sessionHostMismatch) {
-    const { linkedHost, currentHost } = sessionHostMismatch;
-    return `\u26A0 terminalhire: linked to ${hostLabel(linkedHost)}, polling ${hostLabel(currentHost)} \u2014 run: terminalhire link`;
-  }
-  return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire link" : null;
+function buildSessionStaleLine(sessionStale, sessionHostMismatch, staleHost = null) {
+  const c = sessionCase({ sessionHostMismatch, staleHost }, { stale: sessionStale === true });
+  if (!c) return null;
+  if (c.kind === "mismatch")
+    return `\u26A0 terminalhire: linked to ${hostLabel(c.linkedHost)}, polling ${hostLabel(c.currentHost)} \u2014 run: terminalhire link`;
+  if (c.kind === "refused")
+    return `\u26A0 terminalhire: session was refused by ${hostLabel(c.host)} \u2014 run: terminalhire link`;
+  return "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire link";
 }
 function buildUnpushedClaimsLine(unpushedClaims) {
   return unpushedClaims === true ? "\u26A0 new claims not yet on your dashboard \u2014 run: terminalhire claim --push --keep-updated" : null;
@@ -11292,10 +11313,11 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
     incomingPending,
     sessionStale,
     sessionHostMismatch,
+    staleHost,
     unpushedClaims,
     seenHistory
   } = opts;
-  const staleLine = buildSessionStaleLine(sessionStale, sessionHostMismatch);
+  const staleLine = buildSessionStaleLine(sessionStale, sessionHostMismatch, staleHost);
   const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
   const introLine = buildIncomingIntroLine(incomingPending);
   const unpushedLine = buildUnpushedClaimsLine(unpushedClaims);
@@ -11318,6 +11340,7 @@ var init_spinner_verbs = __esm({
   "bin/spinner-verbs.js"() {
     "use strict";
     init_spinner_select();
+    init_session_case();
   }
 });
 
@@ -11470,6 +11493,7 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
     incomingPending: opts.incomingPending,
     sessionStale: opts.sessionStale,
     sessionHostMismatch: opts.sessionHostMismatch,
+    staleHost: opts.staleHost,
     unpushedClaims: opts.unpushedClaims,
     seenHistory
   });
@@ -11562,17 +11586,17 @@ var init_spinner = __esm({
 
 // src/test-race-barrier.ts
 import { closeSync as closeSync4, constants as constants2, existsSync as existsSync3, lstatSync as lstatSync2, openSync as openSync4 } from "fs";
-import { join as join7 } from "path";
+import { join as join8 } from "path";
 function syncSleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 function waitForTestRaceBarrier(phase) {
   const root = process.env[ENV_VAR];
   if (!root) return;
-  const phaseDir = join7(root, phase);
+  const phaseDir = join8(root, phase);
   if (!existsSync3(phaseDir)) return;
-  const readyFile = join7(phaseDir, `ready-${process.pid}`);
-  const goFile = join7(phaseDir, "go");
+  const readyFile = join8(phaseDir, `ready-${process.pid}`);
+  const goFile = join8(phaseDir, "go");
   const noFollow = constants2.O_NOFOLLOW ?? 0;
   if (lstatSync2(readyFile, { throwIfNoEntry: false })) {
     throw new Error(
@@ -11612,8 +11636,8 @@ var init_test_race_barrier = __esm({
 // src/shared-key.ts
 import { randomBytes as randomBytes3 } from "crypto";
 import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, existsSync as existsSync4, linkSync, unlinkSync as unlinkSync3 } from "fs";
-import { join as join8 } from "path";
-import { homedir as homedir5 } from "os";
+import { join as join9 } from "path";
+import { homedir as homedir6 } from "os";
 function isValidKeyHex(value) {
   return KEY_HEX_RE.test(value);
 }
@@ -11667,8 +11691,8 @@ var init_shared_key = __esm({
     "use strict";
     init_state_dir();
     init_test_race_barrier();
-    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join8(homedir5(), ".terminalhire");
-    KEY_FILE = join8(TERMINALHIRE_DIR3, "key");
+    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join9(homedir6(), ".terminalhire");
+    KEY_FILE = join9(TERMINALHIRE_DIR3, "key");
     KEY_BYTES = 32;
     KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
   }
@@ -11677,7 +11701,7 @@ var init_shared_key = __esm({
 // src/crypto-store.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes4 } from "crypto";
 import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, existsSync as existsSync5, renameSync as renameSync5, rmSync, readdirSync } from "fs";
-import { join as join9, dirname as dirname4, basename as basename2 } from "path";
+import { join as join10, dirname as dirname4, basename as basename2 } from "path";
 import { createRequire } from "module";
 function encrypt(plaintext, key) {
   const iv = randomBytes4(IV_BYTES);
@@ -11732,7 +11756,7 @@ function makeWarnOnce() {
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname4(filePath);
   ensureStateDirForSecret(dir);
-  const tmp = join9(
+  const tmp = join10(
     dir,
     `.${basename2(filePath)}.tmp-${process.pid}-${randomBytes4(6).toString("hex")}`
   );
@@ -11750,7 +11774,7 @@ async function deleteKey() {
   }
   for (const name of encFiles) {
     try {
-      rmSync(join9(stateDir, name));
+      rmSync(join10(stateDir, name));
     } catch (e) {
       const code = e.code;
       if (code !== "ENOENT") {
@@ -11841,8 +11865,8 @@ __export(profile_exports, {
   removeSavedJob: () => removeSavedJob,
   writeProfile: () => writeProfile
 });
-import { join as join10 } from "path";
-import { homedir as homedir6 } from "os";
+import { join as join11 } from "path";
+import { homedir as homedir7 } from "os";
 function blankProfile() {
   return {
     version: 3,
@@ -11975,8 +11999,8 @@ var init_profile = __esm({
     "use strict";
     init_src();
     init_crypto_store();
-    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join10(homedir6(), ".terminalhire");
-    PROFILE_FILE = join10(TERMINALHIRE_DIR4, "profile.enc");
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join11(homedir7(), ".terminalhire");
+    PROFILE_FILE = join11(TERMINALHIRE_DIR4, "profile.enc");
     profileStore = createEncryptedStore(PROFILE_FILE, {
       blank: blankProfile,
       keyPolicy: "keytar-first-file-fallback"
@@ -12029,8 +12053,8 @@ __export(config_exports, {
   writeConfig: () => writeConfig
 });
 import { readFileSync as readFileSync8, writeFileSync as writeFileSync7, existsSync as existsSync6 } from "fs";
-import { join as join11 } from "path";
-import { homedir as homedir7 } from "os";
+import { join as join12 } from "path";
+import { homedir as homedir8 } from "os";
 function readConfig() {
   try {
     if (!existsSync6(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
@@ -12112,8 +12136,8 @@ var init_config = __esm({
   "src/config.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join11(homedir7(), ".terminalhire");
-    CONFIG_FILE = join11(TERMINALHIRE_DIR5, "config.json");
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join12(homedir8(), ".terminalhire");
+    CONFIG_FILE = join12(TERMINALHIRE_DIR5, "config.json");
     DEFAULT_CONFIG = {
       nudge: "session",
       peerConnect: false,
@@ -12190,13 +12214,13 @@ var init_founder_surface = __esm({
 
 // src/web-session.ts
 import { chmodSync, existsSync as existsSync7, readFileSync as readFileSync9, rmSync as rmSync2, writeFileSync as writeFileSync8 } from "fs";
-import { homedir as homedir8 } from "os";
-import { join as join12 } from "path";
+import { homedir as homedir9 } from "os";
+import { join as join13 } from "path";
 function terminalhireDir() {
-  return process.env.TERMINALHIRE_DIR || join12(homedir8(), ".terminalhire");
+  return process.env.TERMINALHIRE_DIR || join13(homedir9(), ".terminalhire");
 }
 function webSessionFilePath() {
-  return join12(terminalhireDir(), "web-session");
+  return join13(terminalhireDir(), "web-session");
 }
 function parseWebSessionFile(raw) {
   const trimmed = raw.trim();
@@ -12245,11 +12269,11 @@ __export(pulse_prompt_exports, {
 });
 import { createInterface } from "readline";
 import { readFileSync as readFileSync10, existsSync as existsSync8 } from "fs";
-import { join as join13 } from "path";
+import { join as join14 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 function readLocalVersion() {
   try {
-    for (const p of [join13(__dirname, "..", "..", "package.json"), join13(__dirname, "..", "package.json")]) {
+    for (const p of [join14(__dirname, "..", "..", "package.json"), join14(__dirname, "..", "package.json")]) {
       if (existsSync8(p)) {
         const pkg = JSON.parse(readFileSync10(p, "utf8"));
         if (pkg.version) return pkg.version;
@@ -12330,8 +12354,8 @@ var init_pulse_prompt = __esm({
 
 // bin/jpi-jobs.js
 import { readFileSync as readFileSync11 } from "fs";
-import { join as join14 } from "path";
-import { homedir as homedir9 } from "os";
+import { join as join15 } from "path";
+import { homedir as homedir10 } from "os";
 import { createInterface as createInterface2 } from "readline";
 import { fileURLToPath as fileURLToPath3 } from "url";
 
@@ -12645,8 +12669,8 @@ async function revalidateIndex({
 init_sanitize();
 init_api_base();
 var __dirname2 = fileURLToPath3(new URL(".", import.meta.url));
-var TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join14(homedir9(), ".terminalhire");
-var INDEX_CACHE_FILE2 = join14(TERMINALHIRE_DIR6, "index-cache.json");
+var TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join15(homedir10(), ".terminalhire");
+var INDEX_CACHE_FILE2 = join15(TERMINALHIRE_DIR6, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = resolveApiBase();
 var DEFAULT_LIMIT = 10;

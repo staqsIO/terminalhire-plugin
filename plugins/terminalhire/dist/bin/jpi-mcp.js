@@ -158,6 +158,8 @@ var init_cache_store = __esm({
 });
 
 // src/api-base.ts
+import { homedir as homedir3 } from "os";
+import { join as join3 } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -242,6 +244,7 @@ function isNonProdApiBase(base = resolveApiBaseOrProd()) {
 }
 function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
   if (!isNonProdApiBase(base)) return;
+  if (usingSeparateStateDir()) return;
   try {
     stream.write(
       "terminalhire: non-prod API base \u2014 using the same local session/push credentials as prod; do not mix environments casually.\n"
@@ -249,12 +252,18 @@ function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
   } catch {
   }
 }
-var PROD_API_BASE, DEV_API_BASE, ApiBaseError, ALLOWED_HOSTS, OAUTH_ALLOWED_ORIGINS, ALLOW_LOCAL_OAUTH_KEY, ALLOW_LOCAL_API_KEY, ALLOWED_DESCRIPTION, CANONICAL_REWRITES, ENV_KEYS;
+function usingSeparateStateDir(env = process.env) {
+  const dir = env["TERMINALHIRE_DIR"];
+  if (dir === void 0 || dir === "") return false;
+  return dir.endsWith(DEV_STATE_DIR_NAME);
+}
+var PROD_API_BASE, DEV_API_BASE, DEV_STATE_DIR_NAME, ApiBaseError, ALLOWED_HOSTS, OAUTH_ALLOWED_ORIGINS, ALLOW_LOCAL_OAUTH_KEY, ALLOW_LOCAL_API_KEY, ALLOWED_DESCRIPTION, CANONICAL_REWRITES, ENV_KEYS;
 var init_api_base = __esm({
   "src/api-base.ts"() {
     "use strict";
     PROD_API_BASE = "https://terminalhire.com";
     DEV_API_BASE = "https://dev.terminalhire.com";
+    DEV_STATE_DIR_NAME = ".terminalhire-dev";
     ApiBaseError = class extends Error {
       constructor(message) {
         super(message);
@@ -286,17 +295,17 @@ var init_api_base = __esm({
 
 // src/test-race-barrier.ts
 import { closeSync as closeSync2, constants as constants2, existsSync, lstatSync, openSync as openSync2 } from "fs";
-import { join as join3 } from "path";
+import { join as join4 } from "path";
 function syncSleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 function waitForTestRaceBarrier(phase) {
   const root = process.env[ENV_VAR];
   if (!root) return;
-  const phaseDir = join3(root, phase);
+  const phaseDir = join4(root, phase);
   if (!existsSync(phaseDir)) return;
-  const readyFile = join3(phaseDir, `ready-${process.pid}`);
-  const goFile = join3(phaseDir, "go");
+  const readyFile = join4(phaseDir, `ready-${process.pid}`);
+  const goFile = join4(phaseDir, "go");
   const noFollow = constants2.O_NOFOLLOW ?? 0;
   if (lstatSync(readyFile, { throwIfNoEntry: false })) {
     throw new Error(
@@ -336,8 +345,8 @@ var init_test_race_barrier = __esm({
 // src/shared-key.ts
 import { randomBytes } from "crypto";
 import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, existsSync as existsSync2, linkSync, unlinkSync } from "fs";
-import { join as join4 } from "path";
-import { homedir as homedir3 } from "os";
+import { join as join5 } from "path";
+import { homedir as homedir4 } from "os";
 function isValidKeyHex(value) {
   return KEY_HEX_RE.test(value);
 }
@@ -394,8 +403,8 @@ var init_shared_key = __esm({
     "use strict";
     init_state_dir();
     init_test_race_barrier();
-    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
-    KEY_FILE = join4(TERMINALHIRE_DIR2, "key");
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
+    KEY_FILE = join5(TERMINALHIRE_DIR2, "key");
     KEY_BYTES = 32;
     KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
   }
@@ -419,8 +428,8 @@ __export(github_auth_exports, {
 });
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
 import { readFileSync as readFileSync4, writeFileSync as writeFileSync4, existsSync as existsSync3, rmSync, renameSync as renameSync3 } from "fs";
-import { join as join5 } from "path";
-import { homedir as homedir4 } from "os";
+import { join as join6 } from "path";
+import { homedir as homedir5 } from "os";
 async function loadKey() {
   return loadOrCreateSharedKey();
 }
@@ -618,8 +627,8 @@ var init_github_auth = __esm({
     init_state_dir();
     init_shared_key();
     init_shared_key();
-    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
-    TOKEN_FILE = join5(TERMINALHIRE_DIR3, "github-token.enc");
+    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join6(homedir5(), ".terminalhire");
+    TOKEN_FILE = join6(TERMINALHIRE_DIR3, "github-token.enc");
     ALGO = "aes-256-gcm";
     IV_BYTES = 12;
     GITHUB_SCOPE = "read:user";
@@ -5478,14 +5487,14 @@ var init_feeds = __esm({
 
 // ../../packages/core/src/partners.ts
 import { readFileSync as readFileSync5 } from "fs";
-import { join as join6 } from "path";
+import { join as join7 } from "path";
 import { fileURLToPath } from "url";
 function resolveDataPath() {
   try {
     const dir = fileURLToPath(new URL("../../../data", import.meta.url));
-    return join6(dir, "partner-roles.json");
+    return join7(dir, "partner-roles.json");
   } catch {
-    return join6(process.cwd(), "data", "partner-roles.json");
+    return join7(process.cwd(), "data", "partner-roles.json");
   }
 }
 function loadPartnerRoles() {
@@ -11136,8 +11145,8 @@ __export(policy_acks_exports, {
   rememberPolicyAck: () => rememberPolicyAck
 });
 import { lstatSync as lstatSync2, readFileSync as readFileSync6, writeFileSync as writeFileSync5 } from "fs";
-import { join as join7 } from "path";
-import { homedir as homedir5 } from "os";
+import { join as join8 } from "path";
+import { homedir as homedir6 } from "os";
 function isSymlink(path5) {
   try {
     return lstatSync2(path5).isSymbolicLink();
@@ -11191,8 +11200,8 @@ var init_policy_acks = __esm({
   "src/policy-acks.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join7(homedir5(), ".terminalhire");
-    ACKS_FILE = join7(TERMINALHIRE_DIR4, "policy-acks.json");
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join8(homedir6(), ".terminalhire");
+    ACKS_FILE = join8(TERMINALHIRE_DIR4, "policy-acks.json");
     REMEMBERABLE_VERDICTS = /* @__PURE__ */ new Set(["ai-mentioned", "disclosure-required"]);
     HEX64 = /^[0-9a-f]{64}$/;
     POLICY_ACKS_FILE = ACKS_FILE;
@@ -11227,8 +11236,8 @@ import {
   statSync
 } from "fs";
 import { randomBytes as randomBytes5 } from "crypto";
-import { join as join8 } from "path";
-import { homedir as homedir6 } from "os";
+import { join as join9 } from "path";
+import { homedir as homedir7 } from "os";
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -11422,8 +11431,8 @@ var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join8(homedir6(), ".terminalhire");
-    CLAIMS_FILE = join8(TERMINALHIRE_DIR5, "claims.json");
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join9(homedir7(), ".terminalhire");
+    CLAIMS_FILE = join9(TERMINALHIRE_DIR5, "claims.json");
     LOCK_DIR = `${CLAIMS_FILE}.lock`;
     LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
     LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
@@ -11480,13 +11489,13 @@ var init_claims = __esm({
 
 // src/web-session.ts
 import { chmodSync, existsSync as existsSync5, readFileSync as readFileSync8, rmSync as rmSync3, writeFileSync as writeFileSync7 } from "fs";
-import { homedir as homedir7 } from "os";
-import { join as join9 } from "path";
+import { homedir as homedir8 } from "os";
+import { join as join10 } from "path";
 function terminalhireDir() {
-  return process.env.TERMINALHIRE_DIR || join9(homedir7(), ".terminalhire");
+  return process.env.TERMINALHIRE_DIR || join10(homedir8(), ".terminalhire");
 }
 function webSessionFilePath() {
-  return join9(terminalhireDir(), "web-session");
+  return join10(terminalhireDir(), "web-session");
 }
 function parseWebSessionFile(raw) {
   const trimmed = raw.trim();
@@ -11536,8 +11545,8 @@ var init_web_session = __esm({
 // bin/claim-push-bg.js
 import { createHash as createHash3 } from "crypto";
 import { readFileSync as readFileSync9, writeFileSync as writeFileSync8, existsSync as existsSync6, rmSync as rmSync4 } from "fs";
-import { join as join10 } from "path";
-import { homedir as homedir8 } from "os";
+import { join as join11 } from "path";
+import { homedir as homedir9 } from "os";
 async function writePushTokenEnc(rawToken) {
   ensureStateDirForSecret(TERMINALHIRE_DIR6);
   const key = await loadKey();
@@ -11697,15 +11706,15 @@ var init_claim_push_bg = __esm({
     init_github_auth();
     init_state_dir();
     init_api_base();
-    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join10(homedir8(), ".terminalhire");
-    CLAIM_PUSH_AUTO_MARKER = join10(TERMINALHIRE_DIR6, "claim-push-auto.json");
-    CLAIM_PUSH_TOKEN_FILE = join10(TERMINALHIRE_DIR6, "claim-push-token.enc");
-    CLAIM_PUSH_MANUAL_MARKER = join10(TERMINALHIRE_DIR6, "claim-push.json");
+    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join11(homedir9(), ".terminalhire");
+    CLAIM_PUSH_AUTO_MARKER = join11(TERMINALHIRE_DIR6, "claim-push-auto.json");
+    CLAIM_PUSH_TOKEN_FILE = join11(TERMINALHIRE_DIR6, "claim-push-token.enc");
+    CLAIM_PUSH_MANUAL_MARKER = join11(TERMINALHIRE_DIR6, "claim-push.json");
     CLAIM_SYNC_BASE = resolveApiBase();
     warnSharedCredentialsIfNonProd(CLAIM_SYNC_BASE);
     AUTO_CONSENT_VERSION = 3;
     AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
-    CLAIM_HEARTBEAT_FILE = join10(TERMINALHIRE_DIR6, "claim-heartbeat.json");
+    CLAIM_HEARTBEAT_FILE = join11(TERMINALHIRE_DIR6, "claim-heartbeat.json");
     HEARTBEAT_MIN_INTERVAL_MS = 3e4;
     HEARTBEAT_MIN_CONSENT_VERSION = 3;
   }
@@ -25042,8 +25051,8 @@ __export(repo_policy_semantic_exports, {
   quoteFound: () => quoteFound
 });
 import { createHash as createHash4 } from "crypto";
-import { homedir as homedir9 } from "os";
-import { join as join14 } from "path";
+import { homedir as homedir10 } from "os";
+import { join as join15 } from "path";
 import { readFileSync as readFileSync10, writeFileSync as writeFileSync9 } from "fs";
 function quoteFound(quote, content) {
   const q = normalize2(quote);
@@ -25307,8 +25316,8 @@ var init_repo_policy_semantic = __esm({
     "use strict";
     init_policy_audit();
     init_state_dir();
-    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join14(homedir9(), ".terminalhire");
-    CACHE_FILE = join14(TERMINALHIRE_DIR7, "semantic-policy-cache.json");
+    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join15(homedir10(), ".terminalhire");
+    CACHE_FILE = join15(TERMINALHIRE_DIR7, "semantic-policy-cache.json");
     MIN_QUOTE_CHARS = 16;
     normalize2 = (s) => s.toLowerCase().replace(/\s+/g, " ").trim();
     SemanticAuditUnavailableError = class extends Error {
@@ -25631,7 +25640,7 @@ var init_repo_policy = __esm({
 // src/crypto-store.ts
 import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes6 } from "crypto";
 import { readFileSync as readFileSync11, writeFileSync as writeFileSync10, existsSync as existsSync7, renameSync as renameSync5, rmSync as rmSync5, readdirSync } from "fs";
-import { join as join15, dirname as dirname5, basename as basename3 } from "path";
+import { join as join16, dirname as dirname5, basename as basename3 } from "path";
 import { createRequire } from "module";
 function encrypt2(plaintext, key) {
   const iv = randomBytes6(IV_BYTES2);
@@ -25686,7 +25695,7 @@ function makeWarnOnce() {
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname5(filePath);
   ensureStateDirForSecret(dir);
-  const tmp = join15(
+  const tmp = join16(
     dir,
     `.${basename3(filePath)}.tmp-${process.pid}-${randomBytes6(6).toString("hex")}`
   );
@@ -25704,7 +25713,7 @@ async function deleteKey() {
   }
   for (const name of encFiles) {
     try {
-      rmSync5(join15(stateDir, name));
+      rmSync5(join16(stateDir, name));
     } catch (e) {
       const code = e.code;
       if (code !== "ENOENT") {
@@ -25795,8 +25804,8 @@ __export(profile_exports, {
   removeSavedJob: () => removeSavedJob,
   writeProfile: () => writeProfile
 });
-import { join as join16 } from "path";
-import { homedir as homedir10 } from "os";
+import { join as join17 } from "path";
+import { homedir as homedir11 } from "os";
 function blankProfile() {
   return {
     version: 3,
@@ -25929,8 +25938,8 @@ var init_profile = __esm({
     "use strict";
     init_src();
     init_crypto_store();
-    TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join16(homedir10(), ".terminalhire");
-    PROFILE_FILE = join16(TERMINALHIRE_DIR8, "profile.enc");
+    TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join17(homedir11(), ".terminalhire");
+    PROFILE_FILE = join17(TERMINALHIRE_DIR8, "profile.enc");
     profileStore = createEncryptedStore(PROFILE_FILE, {
       blank: blankProfile,
       keyPolicy: "keytar-first-file-fallback"
@@ -25982,8 +25991,8 @@ __export(repo_experience_exports, {
   recordPolicySnapshot: () => recordPolicySnapshot,
   writeTombstone: () => writeTombstone
 });
-import { join as join17 } from "path";
-import { homedir as homedir11 } from "os";
+import { join as join18 } from "path";
+import { homedir as homedir12 } from "os";
 function blankFile() {
   return { version: 1, repos: {} };
 }
@@ -26190,8 +26199,8 @@ var init_repo_experience = __esm({
     "use strict";
     init_crypto_store();
     init_profile();
-    TERMINALHIRE_DIR9 = process.env.TERMINALHIRE_DIR || join17(homedir11(), ".terminalhire");
-    REPO_EXPERIENCE_FILE = join17(TERMINALHIRE_DIR9, "repo-experience.enc");
+    TERMINALHIRE_DIR9 = process.env.TERMINALHIRE_DIR || join18(homedir12(), ".terminalhire");
+    REPO_EXPERIENCE_FILE = join18(TERMINALHIRE_DIR9, "repo-experience.enc");
     MAX_REPOS = 100;
     MAX_CULTURE_SAMPLES = 12;
     MAX_NOTES = 10;
@@ -26224,8 +26233,8 @@ import {
   unlinkSync as unlinkSync2,
   statSync as statSync2
 } from "fs";
-import { join as join18, dirname as dirname6 } from "path";
-import { homedir as homedir12 } from "os";
+import { join as join19, dirname as dirname6 } from "path";
+import { homedir as homedir13 } from "os";
 function statusFilePath() {
   return STATUS_FILE;
 }
@@ -26353,8 +26362,8 @@ var init_job_status_store = __esm({
     "use strict";
     init_src();
     init_state_dir();
-    TERMINALHIRE_DIR10 = process.env.TERMINALHIRE_DIR || join18(homedir12(), ".terminalhire");
-    STATUS_FILE = join18(TERMINALHIRE_DIR10, "job-status.json");
+    TERMINALHIRE_DIR10 = process.env.TERMINALHIRE_DIR || join19(homedir13(), ".terminalhire");
+    STATUS_FILE = join19(TERMINALHIRE_DIR10, "job-status.json");
     LOCK_FILE = `${STATUS_FILE}.lock`;
     BAK_FILE = `${STATUS_FILE}.bak`;
     LOCK_STALE_MS2 = 2e3;
@@ -26712,7 +26721,7 @@ var init_classify2 = __esm({
 });
 
 // ../../packages/containment/dist/env.js
-import { homedir as homedir13 } from "os";
+import { homedir as homedir14 } from "os";
 import { posix } from "path";
 function realHomeCandidates(source) {
   const candidates = [];
@@ -26721,7 +26730,7 @@ function realHomeCandidates(source) {
     candidates.push(fromEnv);
   let fromOs;
   try {
-    fromOs = homedir13();
+    fromOs = homedir14();
   } catch {
     fromOs = void 0;
   }
@@ -26755,24 +26764,24 @@ function scrubEnv(source, opts) {
   env["PATH"] = [...opts.toolPaths ?? [], ...BASE_PATH].join(":");
   env["HOME"] = jailHome;
   env["TMPDIR"] = tmpDir;
-  env["XDG_CONFIG_HOME"] = join19(jailHome, ".config");
-  env["XDG_CACHE_HOME"] = join19(jailHome, ".cache");
-  env["XDG_DATA_HOME"] = join19(jailHome, ".local", "share");
-  env["GIT_CONFIG_GLOBAL"] = join19(jailHome, ".gitconfig");
+  env["XDG_CONFIG_HOME"] = join20(jailHome, ".config");
+  env["XDG_CACHE_HOME"] = join20(jailHome, ".cache");
+  env["XDG_DATA_HOME"] = join20(jailHome, ".local", "share");
+  env["GIT_CONFIG_GLOBAL"] = join20(jailHome, ".gitconfig");
   env["GIT_CONFIG_SYSTEM"] = "/dev/null";
   env["GIT_TERMINAL_PROMPT"] = "0";
   env["GIT_ASKPASS"] = "/usr/bin/false";
   env["SSH_ASKPASS"] = "/usr/bin/false";
-  env["npm_config_userconfig"] = join19(jailHome, ".npmrc");
-  env["npm_config_cache"] = join19(jailHome, ".npm");
+  env["npm_config_userconfig"] = join20(jailHome, ".npmrc");
+  env["npm_config_cache"] = join20(jailHome, ".npm");
   env["npm_config_update_notifier"] = "false";
   env["npm_config_fund"] = "false";
   env["npm_config_audit"] = "false";
-  env["GOPATH"] = join19(jailHome, "go");
-  env["GOMODCACHE"] = join19(jailHome, "go", "pkg", "mod");
-  env["GOCACHE"] = join19(jailHome, ".cache", "go-build");
+  env["GOPATH"] = join20(jailHome, "go");
+  env["GOMODCACHE"] = join20(jailHome, "go", "pkg", "mod");
+  env["GOCACHE"] = join20(jailHome, ".cache", "go-build");
   env["GOFLAGS"] = "-modcacherw";
-  env["CARGO_HOME"] = join19(jailHome, ".cargo");
+  env["CARGO_HOME"] = join20(jailHome, ".cargo");
   const proxy = opts.proxyUrl ?? DEAD_PROXY;
   env["HTTP_PROXY"] = proxy;
   env["HTTPS_PROXY"] = proxy;
@@ -26800,11 +26809,11 @@ function auditEnv(env) {
   }
   return leaks;
 }
-var join19, ENV_ALLOWLIST, BASE_PATH, DEAD_PROXY, SandboxEnvError, FORBIDDEN_EXTRA;
+var join20, ENV_ALLOWLIST, BASE_PATH, DEAD_PROXY, SandboxEnvError, FORBIDDEN_EXTRA;
 var init_env2 = __esm({
   "../../packages/containment/dist/env.js"() {
     "use strict";
-    join19 = posix.join;
+    join20 = posix.join;
     ENV_ALLOWLIST = ["LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM"];
     BASE_PATH = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
     DEAD_PROXY = "http://127.0.0.1:1";
@@ -26825,7 +26834,7 @@ var init_reap = __esm({
 // ../../packages/containment/dist/fence.js
 import { spawn as spawn3, spawnSync as spawnSync2 } from "child_process";
 import { existsSync as existsSync9, mkdirSync as mkdirSync3, realpathSync, writeFileSync as writeFileSync12 } from "fs";
-import { dirname as dirname7, isAbsolute as isAbsolute3, join as join20, posix as posix2 } from "path";
+import { dirname as dirname7, isAbsolute as isAbsolute3, join as join21, posix as posix2 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 function canonical(path5, label) {
   if (!isAbsolute3(path5)) {
@@ -26874,15 +26883,15 @@ function idOrNull(fn) {
   return typeof f === "function" ? f.call(process) : null;
 }
 function buildJail(root, guestUser) {
-  const jail = join20(root, JAIL_SEGMENT);
-  const tmp = join20(root, JAIL_TMP_SEGMENT);
-  for (const dir of [jail, tmp, join20(jail, ".config"), join20(jail, ".cache"), join20(jail, ".npm")]) {
+  const jail = join21(root, JAIL_SEGMENT);
+  const tmp = join21(root, JAIL_TMP_SEGMENT);
+  for (const dir of [jail, tmp, join21(jail, ".config"), join21(jail, ".cache"), join21(jail, ".npm")]) {
     mkdirSync3(dir, { recursive: true });
   }
-  writeFileSync12(join20(jail, ".npmrc"), "", "utf8");
-  writeFileSync12(join20(jail, JAIL_PASSWD_FILE), guestUser ? jailPasswd(guestUser.uid, guestUser.gid) : jailPasswd(), "utf8");
-  writeFileSync12(join20(jail, JAIL_GROUP_FILE), guestUser ? jailGroup(guestUser.gid) : jailGroup(), "utf8");
-  writeFileSync12(join20(jail, ".gitconfig"), '[user]\n	name = sandbox\n	email = sandbox@localhost\n[safe]\n	directory = *\n[url "https://github.com/"]\n	insteadOf = ssh://git@github.com/\n	insteadOf = git@github.com:\n', "utf8");
+  writeFileSync12(join21(jail, ".npmrc"), "", "utf8");
+  writeFileSync12(join21(jail, JAIL_PASSWD_FILE), guestUser ? jailPasswd(guestUser.uid, guestUser.gid) : jailPasswd(), "utf8");
+  writeFileSync12(join21(jail, JAIL_GROUP_FILE), guestUser ? jailGroup(guestUser.gid) : jailGroup(), "utf8");
+  writeFileSync12(join21(jail, ".gitconfig"), '[user]\n	name = sandbox\n	email = sandbox@localhost\n[safe]\n	directory = *\n[url "https://github.com/"]\n	insteadOf = ssh://git@github.com/\n	insteadOf = git@github.com:\n', "utf8");
   return { jail, tmp };
 }
 var FenceError, ContainmentError, ContainmentRefusalError, JAIL_PASSWD_FILE, JAIL_GROUP_FILE, GUEST_JAIL, FENCE_USER, JAIL_SEGMENT, JAIL_TMP_SEGMENT;
@@ -27076,7 +27085,7 @@ var init_egressProxy = __esm({
 
 // ../../packages/containment/dist/container.js
 import { fileURLToPath as fileURLToPath3 } from "url";
-import { dirname as dirname8, join as join21 } from "path";
+import { dirname as dirname8, join as join22 } from "path";
 import { chmodSync as chmodSync2, copyFileSync as copyFileSync2, existsSync as existsSync10, mkdtempSync, rmSync as rmSync6 } from "fs";
 import { tmpdir } from "os";
 function scrubEnvPathsFor(containmentKind, host) {
@@ -27196,7 +27205,7 @@ function guestIdentityMounts(spec) {
     return [];
   const domain = pathDomainOf(spec);
   const resolve4 = resolverFor(domain);
-  const under = domain === "venue" ? venueJoin : join21;
+  const under = domain === "venue" ? venueJoin : join22;
   const jail = resolve4(spec.jail, "jail");
   const passwd = resolve4(under(jail, JAIL_PASSWD_FILE), "the jail passwd file");
   const group = resolve4(under(jail, JAIL_GROUP_FILE), "the jail group file");
@@ -27381,8 +27390,8 @@ function dockerSync(d, args, timeoutMs = DOCKER_TIMEOUT_MS) {
   };
 }
 function pickProxyDir(baseDir) {
-  const scoped = join21(baseDir, "proxy");
-  if (existsSync10(join21(scoped, "proxyEntry.js")))
+  const scoped = join22(baseDir, "proxy");
+  if (existsSync10(join22(scoped, "proxyEntry.js")))
     return scoped;
   return baseDir;
 }
@@ -27390,17 +27399,17 @@ function resolveProxyCodeSource() {
   return pickProxyDir(dirname8(fileURLToPath3(import.meta.url)));
 }
 function stageProxyCode(source = resolveProxyCodeSource()) {
-  const missing = PROXY_FILES.map((f) => join21(source, f)).filter((p) => !existsSync10(p));
+  const missing = PROXY_FILES.map((f) => join22(source, f)).filter((p) => !existsSync10(p));
   if (missing.length > 0) {
     throw new FenceError(`the egress proxy is missing from this install: ${missing.join(", ")} not found. Reinstall the CLI, or update the Claude Code plugin.`);
   }
-  const dir = mkdtempSync(join21(tmpdir(), "th-proxy-"));
+  const dir = mkdtempSync(join22(tmpdir(), "th-proxy-"));
   try {
     for (const file of PROXY_FILES) {
-      copyFileSync2(join21(source, file), join21(dir, file));
+      copyFileSync2(join22(source, file), join22(dir, file));
     }
     for (const file of PROXY_FILES) {
-      chmodSync2(join21(dir, file), 420);
+      chmodSync2(join22(dir, file), 420);
     }
     chmodSync2(dir, 493);
   } catch (err) {
@@ -27827,7 +27836,7 @@ var init_previewRegistry = __esm({
 // ../../packages/envrun/dist/preview.js
 import { randomBytes as randomBytes7 } from "crypto";
 import { mkdirSync as mkdirSync4, writeFileSync as writeFileSync13 } from "fs";
-import { join as join22 } from "path";
+import { join as join23 } from "path";
 function docker(client, args, timeoutMs = 6e4) {
   const res = client.sync([...args], { timeoutMs });
   return {
@@ -27890,7 +27899,7 @@ async function startPreview(req) {
   const probeHost = WILDCARD_BINDS.has(bindAddress) ? "127.0.0.1" : bindAddress;
   const probeAuthority = probeHost.includes(":") ? `[${probeHost}]` : probeHost;
   mkdirSync4(req.scratchDir, { recursive: true });
-  const docPath = join22(req.scratchDir, "preview-run.json");
+  const docPath = join23(req.scratchDir, "preview-run.json");
   writeFileSync13(docPath, JSON.stringify(req.document, null, 2), "utf8");
   const teardown = () => {
     livePreviews.deregister(client, container);
@@ -28080,11 +28089,11 @@ http
 });
 
 // ../../packages/envrun/dist/venue.js
-import { join as join23 } from "path";
+import { join as join24 } from "path";
 function localJailPaths(scratchRoot) {
   return {
-    jail: join23(scratchRoot, JAIL_SEGMENT),
-    tmp: join23(scratchRoot, JAIL_TMP_SEGMENT)
+    jail: join24(scratchRoot, JAIL_SEGMENT),
+    tmp: join24(scratchRoot, JAIL_TMP_SEGMENT)
   };
 }
 function localVenue() {
@@ -30009,7 +30018,7 @@ var init_gcpPlacement = __esm({
 // ../../packages/envrun/dist/hostedVenue.js
 import { spawn as spawn5, spawnSync as spawnSync5 } from "child_process";
 import { chmodSync as chmodSync3, existsSync as existsSync11, mkdtempSync as mkdtempSync2, readFileSync as readFileSync13, rmSync as rmSync7 } from "fs";
-import { join as join24 } from "path";
+import { join as join25 } from "path";
 import { devNull, tmpdir as tmpdir2 } from "os";
 function credentialInGitConfig(text) {
   for (const match2 of text.matchAll(/\b([a-z][a-z0-9+.-]*):\/\/(\S+)/gi)) {
@@ -30052,13 +30061,13 @@ function dispatchedGitBinary() {
   return "git";
 }
 function dispatchedProbeEnv(cloneDir, base) {
-  const gitDir = join24(cloneDir, ".git");
+  const gitDir = join25(cloneDir, ".git");
   return {
     ...base,
     GIT_DIR: gitDir,
     GIT_WORK_TREE: cloneDir,
-    GIT_INDEX_FILE: join24(gitDir, "index"),
-    GIT_OBJECT_DIRECTORY: join24(gitDir, "objects"),
+    GIT_INDEX_FILE: join25(gitDir, "index"),
+    GIT_OBJECT_DIRECTORY: join25(gitDir, "objects"),
     GIT_ALTERNATE_OBJECT_DIRECTORIES: "",
     GIT_COMMON_DIR: gitDir,
     GIT_NAMESPACE: "",
@@ -30579,7 +30588,7 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
           throw new HostedVenueError(`the tunnel socket directory ${socketDir} could not be removed and is left behind: ${describeErr(err)}`);
         }
       });
-      const socketPath = join24(socketDir, VENUE_SOCKET_NAME);
+      const socketPath = join25(socketDir, VENUE_SOCKET_NAME);
       if (io.exists(socketPath)) {
         throw new HostedVenueError(`something already exists at ${socketPath}, inside a directory created seconds ago for this run alone. Refusing rather than clearing it: the tunnel would carry the whole run over a path we cannot account for`, "ours");
       }
@@ -30766,14 +30775,14 @@ function makeLease(p) {
       const { jail: localJail, tmp: localTmp } = localJailPaths(local.scratchRoot);
       const required2 = [
         localTmp,
-        join24(localJail, JAIL_PASSWD_FILE),
-        join24(localJail, JAIL_GROUP_FILE)
+        join25(localJail, JAIL_PASSWD_FILE),
+        join25(localJail, JAIL_GROUP_FILE)
       ];
       const missing = required2.filter((path5) => !p.io.exists(path5));
       if (missing.length > 0) {
         throw new HostedVenueError(`refusing to stage ${local.scratchRoot} onto ${p.vm}: the jail at ${localJail} is incomplete \u2014 missing ${missing.join(", ")}. buildJail must run to completion before stage(), or the venue mounts a directory with no identity database.`);
       }
-      const gitConfigPath = join24(local.cloneDir, ".git", "config");
+      const gitConfigPath = join25(local.cloneDir, ".git", "config");
       let gitConfig;
       try {
         gitConfig = p.io.readTextIfPresent(gitConfigPath);
@@ -30999,7 +31008,7 @@ var init_hostedVenue = __esm({
       now: () => Date.now(),
       exists: (path5) => existsSync11(path5),
       makePrivateDir: () => {
-        const dir = mkdtempSync2(join24(tmpdir2(), SOCKET_DIR_PREFIX));
+        const dir = mkdtempSync2(join25(tmpdir2(), SOCKET_DIR_PREFIX));
         chmodSync3(dir, 448);
         return dir;
       },
@@ -31883,9 +31892,9 @@ var init_references = __esm({
 
 // ../../packages/envspec/dist/repo.js
 import { readdirSync as readdirSync2, readFileSync as readFileSync14, statSync as statSync3 } from "fs";
-import { join as join25, relative as relative2, sep as sep4 } from "path";
+import { join as join26, relative as relative2, sep as sep4 } from "path";
 function createRepoReader(repoPath) {
-  const resolveIn = (relativePath) => relativePath === "" ? repoPath : join25(repoPath, relativePath);
+  const resolveIn = (relativePath) => relativePath === "" ? repoPath : join26(repoPath, relativePath);
   const toPosix = (absolute) => relative2(repoPath, absolute).split(sep4).join("/");
   const readText = (relativePath) => {
     try {
@@ -31915,7 +31924,7 @@ function createRepoReader(repoPath) {
       for (const name of names.slice().sort()) {
         if (SKIP_DIRECTORIES.has(name))
           continue;
-        const child = join25(dir, name);
+        const child = join26(dir, name);
         const st = statOf(toPosix(child));
         if (st === null)
           continue;
@@ -32515,7 +32524,7 @@ import { execFileSync, spawnSync as spawnSync6 } from "child_process";
 import { existsSync as existsSync12, mkdirSync as mkdirSync5, mkdtempSync as mkdtempSync3, rmSync as rmSync8 } from "fs";
 import { randomUUID as randomUUID3 } from "crypto";
 import { devNull as devNull2, tmpdir as tmpdir3 } from "os";
-import { join as join26 } from "path";
+import { join as join27 } from "path";
 function git(repoDir, args, allowNonZero = false) {
   const res = spawnSync6("git", [...args], {
     cwd: repoDir,
@@ -32530,7 +32539,7 @@ function git(repoDir, args, allowNonZero = false) {
   return res.stdout ?? "";
 }
 function collectWorkingDiff(repoDir) {
-  if (!existsSync12(join26(repoDir, ".git"))) {
+  if (!existsSync12(join27(repoDir, ".git"))) {
     throw new ThRunError(`${repoDir} is not a git checkout (no .git). \`th run\` ships the working diff, so it needs a repository to read one from.`);
   }
   const headSha = git(repoDir, ["rev-parse", "HEAD"]).trim();
@@ -32665,7 +32674,7 @@ function credentialFreeHome() {
     return credentialFreeHomeDir;
   let made;
   try {
-    made = mkdtempSync3(join26(tmpdir3(), "th-run-nohome-"));
+    made = mkdtempSync3(join27(tmpdir3(), "th-run-nohome-"));
   } catch (err) {
     throw new RunRefusalError("could not create the empty directory this clone uses as its home, so the clone would read the credentials on this machine instead. That is our environment failing, not your tests: check that the temp directory is writable.", { cause: err });
   }
@@ -32779,7 +32788,7 @@ function cloneTargetAtUnguarded(opts) {
 }
 function scrubCloneSource(dest, run3) {
   run3(["remote", "remove", "origin"]);
-  rmSync8(join26(dest, ".git", "FETCH_HEAD"), { force: true });
+  rmSync8(join27(dest, ".git", "FETCH_HEAD"), { force: true });
 }
 function publishableTarget(url) {
   if (separatorInTarget(url) !== null)
@@ -33150,9 +33159,9 @@ async function runVerification(req, ctx) {
       venueIdentity: null
     };
   }
-  const stage = join26(req.scratchRoot, runId);
-  const cloneDir = join26(stage, "clone");
-  const scratch = join26(stage, "scratch");
+  const stage = join27(req.scratchRoot, runId);
+  const cloneDir = join27(stage, "clone");
+  const scratch = join27(stage, "scratch");
   mkdirSync5(scratch, { recursive: true });
   assertSafeTargetSha(req.targetSha);
   progress("clone", `${publishableTarget(req.targetRepo)} @ ${req.targetSha.slice(0, 12)}`);
@@ -33218,7 +33227,7 @@ async function runVerification(req, ctx) {
     const venuePaths = await lease.stage({
       cloneDir,
       scratchRoot: scratch,
-      previewDir: join26(stage, "preview"),
+      previewDir: join27(stage, "preview"),
       // On a dispatched run the commit is the statement of what was tested, so
       // it rides with the tree and the venue seam refuses a tree that is not
       // that commit (design §6 item 4, TERM-892 — the guard lives in
@@ -34697,9 +34706,9 @@ import {
   rmSync as rmSync9,
   readdirSync as readdirSync3
 } from "fs";
-import { join as join27, dirname as dirname9, isAbsolute as isAbsolute4, resolve as pathResolve } from "path";
+import { join as join28, dirname as dirname9, isAbsolute as isAbsolute4, resolve as pathResolve } from "path";
 import { createHash as createHash8 } from "crypto";
-import { homedir as homedir14, hostname as osHostname } from "os";
+import { homedir as homedir15, hostname as osHostname } from "os";
 import { execFile as execFile3, execFileSync as execFileSync2, spawnSync as spawnSync8 } from "child_process";
 import { promisify as promisify3 } from "util";
 import { createInterface as createInterface2 } from "readline";
@@ -34721,7 +34730,11 @@ function markClaimNudged(id) {
   }
 }
 function nextStep(command) {
-  return isNonProdApiBase(API_URL) ? `TERMINALHIRE_API_URL=${API_URL} ${command}` : command;
+  if (!isNonProdApiBase(API_URL)) return command;
+  if (API_URL === DEV_API_BASE && command.startsWith("terminalhire ")) {
+    return `thdev${command.slice("terminalhire".length)}`;
+  }
+  return `TERMINALHIRE_API_URL=${API_URL} ${command}`;
 }
 async function policyScanToken() {
   try {
@@ -36906,7 +36919,7 @@ async function cmdAttach(id, worktree, branch) {
 function workDirFor(repoFullName, issueNumber) {
   const [owner, repo] = String(repoFullName).split("/");
   const suffix = issueNumber ? `-${issueNumber}` : "";
-  return join27(homedir14(), "terminalhire", "work", `${owner}-${repo}${suffix}`);
+  return join28(homedir15(), "terminalhire", "work", `${owner}-${repo}${suffix}`);
 }
 function startBranchFor(repoFullName, issueNumber) {
   const repo = String(repoFullName).split("/")[1] || "claim";
@@ -37154,7 +37167,7 @@ terminalhire claim: not started \u2014 starting forks ${claim.repoFullName} to y
     );
     process.exit(1);
   }
-  mkdirSync7(join27(homedir14(), "terminalhire", "work"), { recursive: true });
+  mkdirSync7(join28(homedir15(), "terminalhire", "work"), { recursive: true });
   const { createProgress: createProgress2, parseGitProgress: parseGitProgress2, splitProgressChunk: splitProgressChunk2, shStream: shStream2 } = await Promise.resolve().then(() => (init_progress(), progress_exports));
   const progress = createProgress2();
   let forkFullName;
@@ -37280,7 +37293,7 @@ function founderPostingIdOf(claim) {
 }
 function sliceWorkDirFor(claimLocalId) {
   const safe = String(claimLocalId).replace(/[^A-Za-z0-9._-]/g, "-");
-  return join27(homedir14(), "terminalhire", "work", `slice-${safe}`);
+  return join28(homedir15(), "terminalhire", "work", `slice-${safe}`);
 }
 function assertNoBooleanPath(dest, flagName) {
   const last = String(dest).split(/[\\/]/).filter(Boolean).pop();
@@ -37397,7 +37410,7 @@ function writeSliceFiles(destDir, files) {
   const unavailable = [];
   for (const f of files) {
     if (typeof f.content === "string") {
-      const abs = join27(destDir, f.path);
+      const abs = join28(destDir, f.path);
       mkdirSync7(dirname9(abs), { recursive: true });
       writeFileSync14(abs, f.content, "utf8");
       written.push(f.path);
@@ -37428,7 +37441,7 @@ function writeDeliveredBrief(destDir, spec) {
 function ensureExcludedPackDir(destDir) {
   let occupant = null;
   try {
-    occupant = lstatSync3(join27(destDir, BRIEF_DIR));
+    occupant = lstatSync3(join28(destDir, BRIEF_DIR));
   } catch (err) {
     if (err?.code !== "ENOENT") {
       return {
@@ -37443,7 +37456,7 @@ function ensureExcludedPackDir(destDir) {
       reason: `${BRIEF_DIR}/ already exists in the delivered tree, and excluding it would hide that content from your patch`
     };
   }
-  const excludeFile = join27(destDir, ".git", "info", "exclude");
+  const excludeFile = join28(destDir, ".git", "info", "exclude");
   try {
     const existing = existsSync13(excludeFile) ? readFileSync15(excludeFile, "utf8") : "";
     if (!existing.split("\n").includes(BRIEF_EXCLUDE_LINE)) {
@@ -37462,7 +37475,7 @@ function ensureExcludedPackDir(destDir) {
 }
 function writePackFile(destDir, relPath, content, what) {
   try {
-    const abs = join27(destDir, relPath);
+    const abs = join28(destDir, relPath);
     mkdirSync7(dirname9(abs), { recursive: true });
     writeFileSync14(abs, content, { encoding: "utf8", flag: "wx" });
   } catch (err) {
@@ -38565,7 +38578,7 @@ async function cmdSubmit(id, flags = {}) {
   const head = `${ghUser}:${claim.branch}`;
   const title = flags.title || claim.title;
   const noBody = Boolean(flags["no-body"]);
-  const prBodyPath = join27(wt, "PR-BODY.md");
+  const prBodyPath = join28(wt, "PR-BODY.md");
   const bodySource = pickBodySource({
     bodyFileFlag: flags["body-file"],
     noBody,
@@ -39431,10 +39444,10 @@ var init_jpi_claim = __esm({
     init_claim_push_bg();
     init_founder_verdict_sync();
     init_founder_note_sync();
-    TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join27(homedir14(), ".terminalhire");
-    INDEX_CACHE_FILE2 = join27(TERMINALHIRE_DIR11, "index-cache.json");
-    CLAIM_PUSH_MARKER = join27(TERMINALHIRE_DIR11, "claim-push.json");
-    REPO_CONTINUITY_NUDGE_MARKER = join27(TERMINALHIRE_DIR11, "repo-continuity-nudged.json");
+    TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join28(homedir15(), ".terminalhire");
+    INDEX_CACHE_FILE2 = join28(TERMINALHIRE_DIR11, "index-cache.json");
+    CLAIM_PUSH_MARKER = join28(TERMINALHIRE_DIR11, "claim-push.json");
+    REPO_CONTINUITY_NUDGE_MARKER = join28(TERMINALHIRE_DIR11, "repo-continuity-nudged.json");
     API_URL = resolveApiBase();
     CLAIM_SYNC_BASE4 = API_URL;
     CLAIM_CONSENT_VERSION = 1;
@@ -61606,8 +61619,8 @@ __export(config_exports, {
   writeConfig: () => writeConfig
 });
 import { readFileSync as readFileSync16, writeFileSync as writeFileSync15, existsSync as existsSync14 } from "fs";
-import { join as join28 } from "path";
-import { homedir as homedir15 } from "os";
+import { join as join29 } from "path";
+import { homedir as homedir16 } from "os";
 function readConfig() {
   try {
     if (!existsSync14(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
@@ -61689,8 +61702,8 @@ var init_config = __esm({
   "src/config.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR12 = process.env.TERMINALHIRE_DIR || join28(homedir15(), ".terminalhire");
-    CONFIG_FILE = join28(TERMINALHIRE_DIR12, "config.json");
+    TERMINALHIRE_DIR12 = process.env.TERMINALHIRE_DIR || join29(homedir16(), ".terminalhire");
+    CONFIG_FILE = join29(TERMINALHIRE_DIR12, "config.json");
     DEFAULT_CONFIG = {
       nudge: "session",
       peerConnect: false,
@@ -62133,7 +62146,7 @@ async function claimWorkspaceResult(args = {}) {
   try {
     const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
     const { existsSync: existsSync15, readFileSync: readFileSync17, lstatSync: lstatSync4 } = await import("fs");
-    const { join: join29 } = await import("path");
+    const { join: join30 } = await import("path");
     const { BRIEF_REL_PATH: BRIEF_REL_PATH2, VERIFY_REL_PATH: VERIFY_REL_PATH2, AGENTS_REL_PATH: AGENTS_REL_PATH2, sha256OfUtf8: sha256OfUtf82 } = await Promise.resolve().then(() => (init_jpi_claim(), jpi_claim_exports));
     const packPaths = (c) => {
       const p = {};
@@ -62146,7 +62159,7 @@ async function claimWorkspaceResult(args = {}) {
         if (c.workspacePack?.[member] !== true) continue;
         const digest = c.packDigests?.[member];
         if (typeof digest !== "string" || digest === "") continue;
-        const abs = join29(c.worktreePath, rel);
+        const abs = join30(c.worktreePath, rel);
         try {
           const st = lstatSync4(abs);
           if (!st.isFile() || st.size > 1024 * 1024) continue;
@@ -62165,7 +62178,7 @@ async function claimWorkspaceResult(args = {}) {
           hint: `No workspace has been delivered for this claim yet. A human runs: terminalhire claim start ${c.id} --watch`
         };
       }
-      if (!existsSync15(c.worktreePath) || !existsSync15(join29(c.worktreePath, ".git"))) {
+      if (!existsSync15(c.worktreePath) || !existsSync15(join30(c.worktreePath, ".git"))) {
         return {
           status: "not_ready",
           claimId: c.id,
@@ -62371,10 +62384,10 @@ async function run2() {
   let version2 = "0.0.0";
   try {
     const { readFileSync: readFileSync17, existsSync: existsSync15 } = await import("fs");
-    const { join: join29 } = await import("path");
+    const { join: join30 } = await import("path");
     const { fileURLToPath: fileURLToPath4 } = await import("url");
     const here = fileURLToPath4(new URL(".", import.meta.url));
-    for (const p of [join29(here, "..", "..", "package.json"), join29(here, "..", "package.json")]) {
+    for (const p of [join30(here, "..", "..", "package.json"), join30(here, "..", "package.json")]) {
       if (existsSync15(p)) {
         const pkg = JSON.parse(readFileSync17(p, "utf8"));
         if (pkg.version) {

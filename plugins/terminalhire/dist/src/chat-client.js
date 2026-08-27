@@ -1,7 +1,7 @@
 // src/chat-client.ts
 import { existsSync as existsSync6, readFileSync as readFileSync6, writeFileSync as writeFileSync5 } from "fs";
-import { homedir as homedir5 } from "os";
-import { join as join7 } from "path";
+import { homedir as homedir6 } from "os";
+import { join as join8 } from "path";
 
 // ../../packages/core/src/vocab/graph.data.ts
 var VOCAB_NODES = [
@@ -3938,6 +3938,8 @@ function readWebSessionCookie() {
 }
 
 // src/api-base.ts
+import { homedir as homedir5 } from "os";
+import { join as join7 } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {
@@ -4032,8 +4034,8 @@ function normalizeOverride(raw) {
 // src/chat-client.ts
 var CHAT_BASE = resolveApiBase();
 var GH_SESSION_COOKIE = "__jpi_gh_session";
-var TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join7(homedir5(), ".terminalhire");
-var PEERS_FILE = join7(TERMINALHIRE_DIR4, "chat-peers.json");
+var TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join8(homedir6(), ".terminalhire");
+var PEERS_FILE = join8(TERMINALHIRE_DIR4, "chat-peers.json");
 var REQUEST_TIMEOUT_MS = 1e4;
 var ChatNotLinkedError = class extends Error {
   constructor() {

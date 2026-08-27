@@ -30,13 +30,18 @@ function incomingCount(entry) {
 function sessionStale(entry) {
   return !!entry && entry.sessionStale === true;
 }
-function hostDisagreement(entry) {
-  const m = entry && entry.sessionHostMismatch;
-  if (!m || typeof m.linkedHost !== "string" || typeof m.currentHost !== "string") return null;
-  return m;
-}
 function hostLabel(base) {
   return String(base ?? "").replace(/^https?:\/\//, "");
+}
+function sessionCase(entry, { stale }) {
+  const m = entry && entry.sessionHostMismatch;
+  if (m && typeof m.linkedHost === "string" && typeof m.currentHost === "string") {
+    return { kind: "mismatch", linkedHost: m.linkedHost, currentHost: m.currentHost };
+  }
+  if (!stale) return null;
+  const host = entry && entry.staleHost;
+  if (typeof host === "string" && host.length > 0) return { kind: "refused", host };
+  return { kind: "expired" };
 }
 function founderPaidCount(entry) {
   const n = entry && entry.founderPaid && entry.founderPaid.count;
@@ -103,8 +108,19 @@ function render() {
     const founderNotes = founderNoteCount(entry);
     const founderNeedsYou = founderNeedsYouCount(entry);
     const founderOpen = founderOpenCount(entry);
-    const mismatch = hostDisagreement(entry);
     const stale = sessionStale(entry) && unread === 0 && incoming === 0;
+    const session = sessionCase(entry, { stale });
+    const sessionLine = !session ? null : session.kind === "mismatch" ? (
+      // Names both hosts rather than picking one of two causes. This is the
+      // line that used to read "session expired" for a session that was
+      // alive on the host that minted it (TERM-970).
+      `\u26A0 terminalhire linked to ${hostLabel(session.linkedHost)}, polling ${hostLabel(session.currentHost)} \u2014 run: th link`
+    ) : session.kind === "refused" ? (
+      // A legacy token records no host, so nothing disagrees and the cookie
+      // is sent. Name the server that refused it instead of asserting an
+      // expiry we cannot tell apart from a session minted elsewhere.
+      `\u26A0 terminalhire session was refused by ${hostLabel(session.host)} \u2014 run: th link`
+    ) : "\u26A0 terminalhire session expired \u2014 run: th link";
     const segments = [];
     if (approved > 0) segments.push(`\u2705 ${approved} approved \u2014 run: th claim start`);
     if (founderNotes > 0) {
@@ -125,12 +141,8 @@ function render() {
     if (incoming > 0) conn.push(`\u2709 ${incoming} intro request${incoming === 1 ? "" : "s"}`);
     if (conn.length > 0) {
       segments.push(`${conn.join("  \xB7  ")} \u2014 run: th inbox`);
-    } else if (mismatch) {
-      segments.push(
-        `\u26A0 terminalhire linked to ${hostLabel(mismatch.linkedHost)}, polling ${hostLabel(mismatch.currentHost)} \u2014 run: th link`
-      );
-    } else if (stale) {
-      segments.push("\u26A0 terminalhire session expired \u2014 run: th link");
+    } else if (sessionLine) {
+      segments.push(sessionLine);
     }
     const update = updateAvailable(entry);
     if (update) segments.push(`\u2B06 terminalhire ${update} \u2014 run: th update`);

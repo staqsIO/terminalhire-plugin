@@ -250,7 +250,7 @@ var init_classify = __esm({
 });
 
 // ../../packages/containment/dist/env.js
-import { homedir as homedir2 } from "os";
+import { homedir as homedir3 } from "os";
 import { posix } from "path";
 function realHomeCandidates(source) {
   const candidates = [];
@@ -259,7 +259,7 @@ function realHomeCandidates(source) {
     candidates.push(fromEnv);
   let fromOs;
   try {
-    fromOs = homedir2();
+    fromOs = homedir3();
   } catch {
     fromOs = void 0;
   }
@@ -293,24 +293,24 @@ function scrubEnv(source, opts) {
   env["PATH"] = [...opts.toolPaths ?? [], ...BASE_PATH].join(":");
   env["HOME"] = jailHome;
   env["TMPDIR"] = tmpDir;
-  env["XDG_CONFIG_HOME"] = join3(jailHome, ".config");
-  env["XDG_CACHE_HOME"] = join3(jailHome, ".cache");
-  env["XDG_DATA_HOME"] = join3(jailHome, ".local", "share");
-  env["GIT_CONFIG_GLOBAL"] = join3(jailHome, ".gitconfig");
+  env["XDG_CONFIG_HOME"] = join4(jailHome, ".config");
+  env["XDG_CACHE_HOME"] = join4(jailHome, ".cache");
+  env["XDG_DATA_HOME"] = join4(jailHome, ".local", "share");
+  env["GIT_CONFIG_GLOBAL"] = join4(jailHome, ".gitconfig");
   env["GIT_CONFIG_SYSTEM"] = "/dev/null";
   env["GIT_TERMINAL_PROMPT"] = "0";
   env["GIT_ASKPASS"] = "/usr/bin/false";
   env["SSH_ASKPASS"] = "/usr/bin/false";
-  env["npm_config_userconfig"] = join3(jailHome, ".npmrc");
-  env["npm_config_cache"] = join3(jailHome, ".npm");
+  env["npm_config_userconfig"] = join4(jailHome, ".npmrc");
+  env["npm_config_cache"] = join4(jailHome, ".npm");
   env["npm_config_update_notifier"] = "false";
   env["npm_config_fund"] = "false";
   env["npm_config_audit"] = "false";
-  env["GOPATH"] = join3(jailHome, "go");
-  env["GOMODCACHE"] = join3(jailHome, "go", "pkg", "mod");
-  env["GOCACHE"] = join3(jailHome, ".cache", "go-build");
+  env["GOPATH"] = join4(jailHome, "go");
+  env["GOMODCACHE"] = join4(jailHome, "go", "pkg", "mod");
+  env["GOCACHE"] = join4(jailHome, ".cache", "go-build");
   env["GOFLAGS"] = "-modcacherw";
-  env["CARGO_HOME"] = join3(jailHome, ".cargo");
+  env["CARGO_HOME"] = join4(jailHome, ".cargo");
   const proxy = opts.proxyUrl ?? DEAD_PROXY;
   env["HTTP_PROXY"] = proxy;
   env["HTTPS_PROXY"] = proxy;
@@ -338,11 +338,11 @@ function auditEnv(env) {
   }
   return leaks;
 }
-var join3, ENV_ALLOWLIST, BASE_PATH, DEAD_PROXY, SandboxEnvError, FORBIDDEN_EXTRA;
+var join4, ENV_ALLOWLIST, BASE_PATH, DEAD_PROXY, SandboxEnvError, FORBIDDEN_EXTRA;
 var init_env = __esm({
   "../../packages/containment/dist/env.js"() {
     "use strict";
-    join3 = posix.join;
+    join4 = posix.join;
     ENV_ALLOWLIST = ["LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM"];
     BASE_PATH = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
     DEAD_PROXY = "http://127.0.0.1:1";
@@ -363,7 +363,7 @@ var init_reap = __esm({
 // ../../packages/containment/dist/fence.js
 import { spawn, spawnSync as spawnSync2 } from "child_process";
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, realpathSync, writeFileSync as writeFileSync2 } from "fs";
-import { dirname as dirname2, isAbsolute, join as join4, posix as posix2 } from "path";
+import { dirname as dirname2, isAbsolute, join as join5, posix as posix2 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 function canonical(path, label) {
   if (!isAbsolute(path)) {
@@ -412,15 +412,15 @@ function idOrNull(fn) {
   return typeof f === "function" ? f.call(process) : null;
 }
 function buildJail(root, guestUser) {
-  const jail = join4(root, JAIL_SEGMENT);
-  const tmp = join4(root, JAIL_TMP_SEGMENT);
-  for (const dir of [jail, tmp, join4(jail, ".config"), join4(jail, ".cache"), join4(jail, ".npm")]) {
+  const jail = join5(root, JAIL_SEGMENT);
+  const tmp = join5(root, JAIL_TMP_SEGMENT);
+  for (const dir of [jail, tmp, join5(jail, ".config"), join5(jail, ".cache"), join5(jail, ".npm")]) {
     mkdirSync2(dir, { recursive: true });
   }
-  writeFileSync2(join4(jail, ".npmrc"), "", "utf8");
-  writeFileSync2(join4(jail, JAIL_PASSWD_FILE), guestUser ? jailPasswd(guestUser.uid, guestUser.gid) : jailPasswd(), "utf8");
-  writeFileSync2(join4(jail, JAIL_GROUP_FILE), guestUser ? jailGroup(guestUser.gid) : jailGroup(), "utf8");
-  writeFileSync2(join4(jail, ".gitconfig"), '[user]\n	name = sandbox\n	email = sandbox@localhost\n[safe]\n	directory = *\n[url "https://github.com/"]\n	insteadOf = ssh://git@github.com/\n	insteadOf = git@github.com:\n', "utf8");
+  writeFileSync2(join5(jail, ".npmrc"), "", "utf8");
+  writeFileSync2(join5(jail, JAIL_PASSWD_FILE), guestUser ? jailPasswd(guestUser.uid, guestUser.gid) : jailPasswd(), "utf8");
+  writeFileSync2(join5(jail, JAIL_GROUP_FILE), guestUser ? jailGroup(guestUser.gid) : jailGroup(), "utf8");
+  writeFileSync2(join5(jail, ".gitconfig"), '[user]\n	name = sandbox\n	email = sandbox@localhost\n[safe]\n	directory = *\n[url "https://github.com/"]\n	insteadOf = ssh://git@github.com/\n	insteadOf = git@github.com:\n', "utf8");
   return { jail, tmp };
 }
 var FenceError, ContainmentError, ContainmentRefusalError, JAIL_PASSWD_FILE, JAIL_GROUP_FILE, GUEST_JAIL, FENCE_USER, JAIL_SEGMENT, JAIL_TMP_SEGMENT;
@@ -614,7 +614,7 @@ var init_egressProxy = __esm({
 
 // ../../packages/containment/dist/container.js
 import { fileURLToPath as fileURLToPath3 } from "url";
-import { dirname as dirname3, join as join5 } from "path";
+import { dirname as dirname3, join as join6 } from "path";
 import { chmodSync, copyFileSync, existsSync as existsSync4, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 function scrubEnvPathsFor(containmentKind, host) {
@@ -734,7 +734,7 @@ function guestIdentityMounts(spec) {
     return [];
   const domain = pathDomainOf(spec);
   const resolve2 = resolverFor(domain);
-  const under = domain === "venue" ? venueJoin : join5;
+  const under = domain === "venue" ? venueJoin : join6;
   const jail = resolve2(spec.jail, "jail");
   const passwd = resolve2(under(jail, JAIL_PASSWD_FILE), "the jail passwd file");
   const group = resolve2(under(jail, JAIL_GROUP_FILE), "the jail group file");
@@ -919,8 +919,8 @@ function dockerSync(d, args, timeoutMs = DOCKER_TIMEOUT_MS) {
   };
 }
 function pickProxyDir(baseDir) {
-  const scoped = join5(baseDir, "proxy");
-  if (existsSync4(join5(scoped, "proxyEntry.js")))
+  const scoped = join6(baseDir, "proxy");
+  if (existsSync4(join6(scoped, "proxyEntry.js")))
     return scoped;
   return baseDir;
 }
@@ -928,17 +928,17 @@ function resolveProxyCodeSource() {
   return pickProxyDir(dirname3(fileURLToPath3(import.meta.url)));
 }
 function stageProxyCode(source = resolveProxyCodeSource()) {
-  const missing = PROXY_FILES.map((f) => join5(source, f)).filter((p) => !existsSync4(p));
+  const missing = PROXY_FILES.map((f) => join6(source, f)).filter((p) => !existsSync4(p));
   if (missing.length > 0) {
     throw new FenceError(`the egress proxy is missing from this install: ${missing.join(", ")} not found. Reinstall the CLI, or update the Claude Code plugin.`);
   }
-  const dir = mkdtempSync(join5(tmpdir(), "th-proxy-"));
+  const dir = mkdtempSync(join6(tmpdir(), "th-proxy-"));
   try {
     for (const file of PROXY_FILES) {
-      copyFileSync(join5(source, file), join5(dir, file));
+      copyFileSync(join6(source, file), join6(dir, file));
     }
     for (const file of PROXY_FILES) {
-      chmodSync(join5(dir, file), 420);
+      chmodSync(join6(dir, file), 420);
     }
     chmodSync(dir, 493);
   } catch (err) {
@@ -1365,7 +1365,7 @@ var init_previewRegistry = __esm({
 // ../../packages/envrun/dist/preview.js
 import { randomBytes } from "crypto";
 import { mkdirSync as mkdirSync3, writeFileSync as writeFileSync3 } from "fs";
-import { join as join6 } from "path";
+import { join as join7 } from "path";
 function docker(client, args, timeoutMs = 6e4) {
   const res = client.sync([...args], { timeoutMs });
   return {
@@ -1428,7 +1428,7 @@ async function startPreview(req) {
   const probeHost = WILDCARD_BINDS.has(bindAddress) ? "127.0.0.1" : bindAddress;
   const probeAuthority = probeHost.includes(":") ? `[${probeHost}]` : probeHost;
   mkdirSync3(req.scratchDir, { recursive: true });
-  const docPath = join6(req.scratchDir, "preview-run.json");
+  const docPath = join7(req.scratchDir, "preview-run.json");
   writeFileSync3(docPath, JSON.stringify(req.document, null, 2), "utf8");
   const teardown = () => {
     livePreviews.deregister(client, container);
@@ -1618,11 +1618,11 @@ http
 });
 
 // ../../packages/envrun/dist/venue.js
-import { join as join7 } from "path";
+import { join as join8 } from "path";
 function localJailPaths(scratchRoot) {
   return {
-    jail: join7(scratchRoot, JAIL_SEGMENT),
-    tmp: join7(scratchRoot, JAIL_TMP_SEGMENT)
+    jail: join8(scratchRoot, JAIL_SEGMENT),
+    tmp: join8(scratchRoot, JAIL_TMP_SEGMENT)
   };
 }
 function localVenue() {
@@ -3547,7 +3547,7 @@ var init_gcpPlacement = __esm({
 // ../../packages/envrun/dist/hostedVenue.js
 import { spawn as spawn3, spawnSync as spawnSync5 } from "child_process";
 import { chmodSync as chmodSync2, existsSync as existsSync5, mkdtempSync as mkdtempSync2, readFileSync as readFileSync3, rmSync as rmSync2 } from "fs";
-import { join as join8 } from "path";
+import { join as join9 } from "path";
 import { devNull, tmpdir as tmpdir2 } from "os";
 function credentialInGitConfig(text) {
   for (const match of text.matchAll(/\b([a-z][a-z0-9+.-]*):\/\/(\S+)/gi)) {
@@ -3590,13 +3590,13 @@ function dispatchedGitBinary() {
   return "git";
 }
 function dispatchedProbeEnv(cloneDir, base) {
-  const gitDir = join8(cloneDir, ".git");
+  const gitDir = join9(cloneDir, ".git");
   return {
     ...base,
     GIT_DIR: gitDir,
     GIT_WORK_TREE: cloneDir,
-    GIT_INDEX_FILE: join8(gitDir, "index"),
-    GIT_OBJECT_DIRECTORY: join8(gitDir, "objects"),
+    GIT_INDEX_FILE: join9(gitDir, "index"),
+    GIT_OBJECT_DIRECTORY: join9(gitDir, "objects"),
     GIT_ALTERNATE_OBJECT_DIRECTORIES: "",
     GIT_COMMON_DIR: gitDir,
     GIT_NAMESPACE: "",
@@ -4117,7 +4117,7 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
           throw new HostedVenueError(`the tunnel socket directory ${socketDir} could not be removed and is left behind: ${describeErr(err)}`);
         }
       });
-      const socketPath = join8(socketDir, VENUE_SOCKET_NAME);
+      const socketPath = join9(socketDir, VENUE_SOCKET_NAME);
       if (io.exists(socketPath)) {
         throw new HostedVenueError(`something already exists at ${socketPath}, inside a directory created seconds ago for this run alone. Refusing rather than clearing it: the tunnel would carry the whole run over a path we cannot account for`, "ours");
       }
@@ -4304,14 +4304,14 @@ function makeLease(p) {
       const { jail: localJail, tmp: localTmp } = localJailPaths(local.scratchRoot);
       const required = [
         localTmp,
-        join8(localJail, JAIL_PASSWD_FILE),
-        join8(localJail, JAIL_GROUP_FILE)
+        join9(localJail, JAIL_PASSWD_FILE),
+        join9(localJail, JAIL_GROUP_FILE)
       ];
       const missing = required.filter((path) => !p.io.exists(path));
       if (missing.length > 0) {
         throw new HostedVenueError(`refusing to stage ${local.scratchRoot} onto ${p.vm}: the jail at ${localJail} is incomplete \u2014 missing ${missing.join(", ")}. buildJail must run to completion before stage(), or the venue mounts a directory with no identity database.`);
       }
-      const gitConfigPath = join8(local.cloneDir, ".git", "config");
+      const gitConfigPath = join9(local.cloneDir, ".git", "config");
       let gitConfig;
       try {
         gitConfig = p.io.readTextIfPresent(gitConfigPath);
@@ -4537,7 +4537,7 @@ var init_hostedVenue = __esm({
       now: () => Date.now(),
       exists: (path) => existsSync5(path),
       makePrivateDir: () => {
-        const dir = mkdtempSync2(join8(tmpdir2(), SOCKET_DIR_PREFIX));
+        const dir = mkdtempSync2(join9(tmpdir2(), SOCKET_DIR_PREFIX));
         chmodSync2(dir, 448);
         return dir;
       },
@@ -5421,9 +5421,9 @@ var init_references = __esm({
 
 // ../../packages/envspec/dist/repo.js
 import { readdirSync as readdirSync2, readFileSync as readFileSync4, statSync as statSync2 } from "fs";
-import { join as join9, relative, sep } from "path";
+import { join as join10, relative, sep } from "path";
 function createRepoReader(repoPath) {
-  const resolveIn = (relativePath) => relativePath === "" ? repoPath : join9(repoPath, relativePath);
+  const resolveIn = (relativePath) => relativePath === "" ? repoPath : join10(repoPath, relativePath);
   const toPosix = (absolute) => relative(repoPath, absolute).split(sep).join("/");
   const readText = (relativePath) => {
     try {
@@ -5453,7 +5453,7 @@ function createRepoReader(repoPath) {
       for (const name of names.slice().sort()) {
         if (SKIP_DIRECTORIES.has(name))
           continue;
-        const child = join9(dir, name);
+        const child = join10(dir, name);
         const st = statOf(toPosix(child));
         if (st === null)
           continue;
@@ -6053,7 +6053,7 @@ import { execFileSync, spawnSync as spawnSync6 } from "child_process";
 import { existsSync as existsSync6, mkdirSync as mkdirSync4, mkdtempSync as mkdtempSync3, rmSync as rmSync3 } from "fs";
 import { randomUUID } from "crypto";
 import { devNull as devNull2, tmpdir as tmpdir3 } from "os";
-import { join as join10 } from "path";
+import { join as join11 } from "path";
 function git(repoDir, args, allowNonZero = false) {
   const res = spawnSync6("git", [...args], {
     cwd: repoDir,
@@ -6068,7 +6068,7 @@ function git(repoDir, args, allowNonZero = false) {
   return res.stdout ?? "";
 }
 function collectWorkingDiff(repoDir) {
-  if (!existsSync6(join10(repoDir, ".git"))) {
+  if (!existsSync6(join11(repoDir, ".git"))) {
     throw new ThRunError(`${repoDir} is not a git checkout (no .git). \`th run\` ships the working diff, so it needs a repository to read one from.`);
   }
   const headSha = git(repoDir, ["rev-parse", "HEAD"]).trim();
@@ -6203,7 +6203,7 @@ function credentialFreeHome() {
     return credentialFreeHomeDir;
   let made;
   try {
-    made = mkdtempSync3(join10(tmpdir3(), "th-run-nohome-"));
+    made = mkdtempSync3(join11(tmpdir3(), "th-run-nohome-"));
   } catch (err) {
     throw new RunRefusalError("could not create the empty directory this clone uses as its home, so the clone would read the credentials on this machine instead. That is our environment failing, not your tests: check that the temp directory is writable.", { cause: err });
   }
@@ -6317,7 +6317,7 @@ function cloneTargetAtUnguarded(opts) {
 }
 function scrubCloneSource(dest, run2) {
   run2(["remote", "remove", "origin"]);
-  rmSync3(join10(dest, ".git", "FETCH_HEAD"), { force: true });
+  rmSync3(join11(dest, ".git", "FETCH_HEAD"), { force: true });
 }
 function publishableTarget(url) {
   if (separatorInTarget(url) !== null)
@@ -6688,9 +6688,9 @@ async function runVerification(req, ctx) {
       venueIdentity: null
     };
   }
-  const stage = join10(req.scratchRoot, runId);
-  const cloneDir = join10(stage, "clone");
-  const scratch = join10(stage, "scratch");
+  const stage = join11(req.scratchRoot, runId);
+  const cloneDir = join11(stage, "clone");
+  const scratch = join11(stage, "scratch");
   mkdirSync4(scratch, { recursive: true });
   assertSafeTargetSha(req.targetSha);
   progress("clone", `${publishableTarget(req.targetRepo)} @ ${req.targetSha.slice(0, 12)}`);
@@ -6756,7 +6756,7 @@ async function runVerification(req, ctx) {
     const venuePaths = await lease.stage({
       cloneDir,
       scratchRoot: scratch,
-      previewDir: join10(stage, "preview"),
+      previewDir: join11(stage, "preview"),
       // On a dispatched run the commit is the statement of what was tested, so
       // it rides with the tree and the venue seam refuses a tree that is not
       // that commit (design §6 item 4, TERM-892 — the guard lives in
@@ -7901,7 +7901,7 @@ var init_dist4 = __esm({
 
 // bin/jpi-run.js
 import { existsSync as existsSync7, readFileSync as readFileSync5 } from "fs";
-import { join as join11, resolve } from "path";
+import { join as join12, resolve } from "path";
 import { tmpdir as tmpdir4 } from "os";
 import { mkdtempSync as mkdtempSync4, rmSync as rmSync4 } from "fs";
 
@@ -7918,10 +7918,12 @@ import {
   unlinkSync,
   writeFileSync
 } from "fs";
-import { homedir } from "os";
-import { basename, dirname, join } from "path";
+import { homedir as homedir2 } from "os";
+import { basename, dirname, join as join2 } from "path";
 
 // src/api-base.ts
+import { homedir } from "os";
+import { join } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {
@@ -8020,10 +8022,10 @@ function defaultUrl() {
 }
 var TIMEOUT_MS = 2e3;
 function stateDir() {
-  return process.env["TERMINALHIRE_DIR"] || join(homedir(), ".terminalhire");
+  return process.env["TERMINALHIRE_DIR"] || join2(homedir2(), ".terminalhire");
 }
 function recallCachePath() {
-  return join(stateDir(), "recall.json");
+  return join2(stateDir(), "recall.json");
 }
 async function fetchRecalls(url = defaultUrl()) {
   try {
@@ -8106,7 +8108,7 @@ function sweepTempFiles(path) {
     const prefix = `${basename(path)}.`;
     for (const name of readdirSync(dir)) {
       if (!name.startsWith(prefix) || !name.endsWith(".tmp")) continue;
-      const full = join(dir, name);
+      const full = join2(dir, name);
       try {
         if (Date.now() - statSync(full).mtimeMs > 6e4) unlinkSync(full);
       } catch {
@@ -8176,14 +8178,14 @@ async function checkRecall(version, { url = defaultUrl(), path = recallCachePath
 
 // bin/package-version.js
 import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
-import { join as join2 } from "path";
+import { join as join3 } from "path";
 import { fileURLToPath } from "url";
 var __dirname = fileURLToPath(new URL(".", import.meta.url));
 function readPackageVersion() {
   try {
     const candidates = [
-      join2(__dirname, "..", "..", "package.json"),
-      join2(__dirname, "..", "package.json")
+      join3(__dirname, "..", "..", "package.json"),
+      join3(__dirname, "..", "package.json")
     ];
     for (const p of candidates) {
       if (existsSync2(p)) {
@@ -8247,7 +8249,7 @@ function parseArgs(argv) {
 function runScratchRoot() {
   let root;
   try {
-    root = mkdtempSync4(join11(tmpdir4(), "th-run-"));
+    root = mkdtempSync4(join12(tmpdir4(), "th-run-"));
   } catch (err) {
     process.stderr.write(
       `terminalhire: could not create the temporary directory this run works in, so nothing was cloned and nothing was executed. That is our environment failing, not your tests: check that the temp directory is writable. (${String(err?.message ?? err)})
@@ -8284,7 +8286,7 @@ async function loadEngine() {
   }
 }
 function readConfig(localDir) {
-  const file = join11(localDir, ".th-run.json");
+  const file = join12(localDir, ".th-run.json");
   if (!existsSync7(file)) return {};
   try {
     const parsed = JSON.parse(readFileSync5(file, "utf8"));

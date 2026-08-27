@@ -11863,6 +11863,8 @@ var init_web_session = __esm({
 });
 
 // src/api-base.ts
+import { homedir as homedir8 } from "os";
+import { join as join11 } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -11962,8 +11964,8 @@ var init_api_base = __esm({
 
 // src/chat-client.ts
 import { existsSync as existsSync9, readFileSync as readFileSync9, writeFileSync as writeFileSync8 } from "fs";
-import { homedir as homedir8 } from "os";
-import { join as join11 } from "path";
+import { homedir as homedir9 } from "os";
+import { join as join12 } from "path";
 function defaultReadPeerPins() {
   try {
     if (!existsSync9(PEERS_FILE)) return {};
@@ -12168,8 +12170,8 @@ var init_chat_client = __esm({
     init_api_base();
     CHAT_BASE = resolveApiBase();
     GH_SESSION_COOKIE = "__jpi_gh_session";
-    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join11(homedir8(), ".terminalhire");
-    PEERS_FILE = join11(TERMINALHIRE_DIR7, "chat-peers.json");
+    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join12(homedir9(), ".terminalhire");
+    PEERS_FILE = join12(TERMINALHIRE_DIR7, "chat-peers.json");
     REQUEST_TIMEOUT_MS = 1e4;
     ChatNotLinkedError = class extends Error {
       constructor() {
@@ -12212,11 +12214,18 @@ var init_chat_client = __esm({
   }
 });
 
+// bin/session-case.js
+var init_session_case = __esm({
+  "bin/session-case.js"() {
+    "use strict";
+  }
+});
+
 // bin/jpi-chat.js
 import { createInterface } from "readline";
 import { existsSync as existsSync10, readFileSync as readFileSync10 } from "fs";
-import { homedir as homedir9 } from "os";
-import { join as join12 } from "path";
+import { homedir as homedir10 } from "os";
+import { join as join13 } from "path";
 function defaultSessionCookie() {
   return readWebSessionCookie();
 }
@@ -12289,6 +12298,7 @@ var init_jpi_chat = __esm({
     init_web_session();
     init_api_base();
     init_tui_core();
+    init_session_case();
     CHAT_BASE2 = resolveApiBase();
     GH_SESSION_COOKIE2 = "__jpi_gh_session";
     ACTIVE_WINDOW_MS = 2 * 60 * 1e3;
@@ -12297,8 +12307,8 @@ var init_jpi_chat = __esm({
 
 // bin/jpi-chat-read.js
 import { existsSync as existsSync11, readFileSync as readFileSync11, writeFileSync as writeFileSync9 } from "fs";
-import { homedir as homedir10 } from "os";
-import { join as join13 } from "path";
+import { homedir as homedir11 } from "os";
+import { join as join14 } from "path";
 function readReadCursors() {
   try {
     if (!existsSync11(READS_FILE)) return {};
@@ -12389,9 +12399,9 @@ var init_jpi_chat_read = __esm({
     init_jpi_chat();
     init_api_base();
     CHAT_BASE3 = resolveApiBase();
-    TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join13(homedir10(), ".terminalhire");
-    READS_FILE = join13(TERMINALHIRE_DIR8, "chat-reads.json");
-    INDEX_CACHE_FILE = join13(TERMINALHIRE_DIR8, "index-cache.json");
+    TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join14(homedir11(), ".terminalhire");
+    READS_FILE = join14(TERMINALHIRE_DIR8, "chat-reads.json");
+    INDEX_CACHE_FILE = join14(TERMINALHIRE_DIR8, "index-cache.json");
     REACHABLE_DISPLAY = { shareActivity: false, optin: false, lastSeen: null };
   }
 });
@@ -12423,8 +12433,8 @@ __export(repo_experience_exports, {
   recordPolicySnapshot: () => recordPolicySnapshot,
   writeTombstone: () => writeTombstone
 });
-import { join as join17 } from "path";
-import { homedir as homedir14 } from "os";
+import { join as join18 } from "path";
+import { homedir as homedir15 } from "os";
 function blankFile() {
   return { version: 1, repos: {} };
 }
@@ -12631,8 +12641,8 @@ var init_repo_experience = __esm({
     "use strict";
     init_crypto_store();
     init_profile();
-    TERMINALHIRE_DIR12 = process.env.TERMINALHIRE_DIR || join17(homedir14(), ".terminalhire");
-    REPO_EXPERIENCE_FILE = join17(TERMINALHIRE_DIR12, "repo-experience.enc");
+    TERMINALHIRE_DIR12 = process.env.TERMINALHIRE_DIR || join18(homedir15(), ".terminalhire");
+    REPO_EXPERIENCE_FILE = join18(TERMINALHIRE_DIR12, "repo-experience.enc");
     MAX_REPOS = 100;
     MAX_CULTURE_SAMPLES = 12;
     MAX_NOTES = 10;
@@ -12775,8 +12785,8 @@ init_jpi_chat();
 
 // bin/jpi-jobs.js
 import { readFileSync as readFileSync14 } from "fs";
-import { join as join16 } from "path";
-import { homedir as homedir13 } from "os";
+import { join as join17 } from "path";
+import { homedir as homedir14 } from "os";
 import { createInterface as createInterface2 } from "readline";
 import { fileURLToPath as fileURLToPath2 } from "url";
 
@@ -12794,20 +12804,20 @@ import {
   unlinkSync as unlinkSync3,
   statSync as statSync2
 } from "fs";
-import { join as join14, dirname as dirname2 } from "path";
-import { homedir as homedir11 } from "os";
-var TERMINALHIRE_DIR9 = process.env.TERMINALHIRE_DIR || join14(homedir11(), ".terminalhire");
-var STATUS_FILE = join14(TERMINALHIRE_DIR9, "job-status.json");
+import { join as join15, dirname as dirname2 } from "path";
+import { homedir as homedir12 } from "os";
+var TERMINALHIRE_DIR9 = process.env.TERMINALHIRE_DIR || join15(homedir12(), ".terminalhire");
+var STATUS_FILE = join15(TERMINALHIRE_DIR9, "job-status.json");
 var LOCK_FILE = `${STATUS_FILE}.lock`;
 var BAK_FILE = `${STATUS_FILE}.bak`;
 
 // bin/cache-store.js
 init_state_dir();
 import { readFileSync as readFileSync13, writeFileSync as writeFileSync11, renameSync as renameSync5 } from "fs";
-import { join as join15 } from "path";
-import { homedir as homedir12 } from "os";
-var TERMINALHIRE_DIR10 = process.env.TERMINALHIRE_DIR || join15(homedir12(), ".terminalhire");
-var INDEX_CACHE_FILE2 = join15(TERMINALHIRE_DIR10, "index-cache.json");
+import { join as join16 } from "path";
+import { homedir as homedir13 } from "os";
+var TERMINALHIRE_DIR10 = process.env.TERMINALHIRE_DIR || join16(homedir13(), ".terminalhire");
+var INDEX_CACHE_FILE2 = join16(TERMINALHIRE_DIR10, "index-cache.json");
 var SCHEMA_VERSION2 = 1;
 var tmpCounter = 0;
 function readCacheEntry() {
@@ -12968,8 +12978,8 @@ async function revalidateIndex({
 init_sanitize();
 init_api_base();
 var __dirname = fileURLToPath2(new URL(".", import.meta.url));
-var TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join16(homedir13(), ".terminalhire");
-var INDEX_CACHE_FILE3 = join16(TERMINALHIRE_DIR11, "index-cache.json");
+var TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join17(homedir14(), ".terminalhire");
+var INDEX_CACHE_FILE3 = join17(TERMINALHIRE_DIR11, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = resolveApiBase();
 var DEFAULT_LIMIT = 10;
@@ -13055,14 +13065,14 @@ async function getJobMatches({ quiet = false, offline = false } = {}) {
 // bin/jpi-bounties.js
 init_src();
 import { readFileSync as readFileSync15 } from "fs";
-import { join as join18 } from "path";
-import { homedir as homedir15 } from "os";
+import { join as join19 } from "path";
+import { homedir as homedir16 } from "os";
 import { createInterface as createInterface3 } from "readline";
 init_sanitize();
 init_api_base();
 init_founder_pin();
-var TERMINALHIRE_DIR13 = process.env.TERMINALHIRE_DIR || join18(homedir15(), ".terminalhire");
-var INDEX_CACHE_FILE4 = join18(TERMINALHIRE_DIR13, "index-cache.json");
+var TERMINALHIRE_DIR13 = process.env.TERMINALHIRE_DIR || join19(homedir16(), ".terminalhire");
+var INDEX_CACHE_FILE4 = join19(TERMINALHIRE_DIR13, "index-cache.json");
 var INDEX_TTL_MS2 = 15 * 60 * 1e3;
 var API_URL2 = resolveApiBase();
 var RANK_MODE = process.env["TERMINALHIRE_BOUNTY_RANK"] ?? "winnability";
@@ -13200,11 +13210,11 @@ import { createInterface as createInterface4 } from "readline";
 init_state_dir();
 init_api_base();
 import { readFileSync as readFileSync16, writeFileSync as writeFileSync12, renameSync as renameSync6 } from "fs";
-import { join as join19 } from "path";
-import { homedir as homedir16 } from "os";
-var TERMINALHIRE_DIR14 = process.env.TERMINALHIRE_DIR || join19(homedir16(), ".terminalhire");
-var DIRECTORY_CACHE_FILE = join19(TERMINALHIRE_DIR14, "directory-cache.json");
-var PROJECT_FILE = join19(TERMINALHIRE_DIR14, "project.json");
+import { join as join20 } from "path";
+import { homedir as homedir17 } from "os";
+var TERMINALHIRE_DIR14 = process.env.TERMINALHIRE_DIR || join20(homedir17(), ".terminalhire");
+var DIRECTORY_CACHE_FILE = join20(TERMINALHIRE_DIR14, "directory-cache.json");
+var PROJECT_FILE = join20(TERMINALHIRE_DIR14, "project.json");
 var INDEX_TTL_MS3 = 15 * 60 * 1e3;
 var API_URL3 = resolveApiBase();
 function readDirectoryCache() {

@@ -4,7 +4,7 @@
 import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
 import { spawnSync } from "child_process";
 import { createInterface } from "readline";
-import { basename, join as join2 } from "path";
+import { basename, join as join3 } from "path";
 
 // src/posting-drafts.ts
 import {
@@ -527,6 +527,8 @@ function preparePostingSubmission(draft, currentHome = homedir()) {
 }
 
 // src/api-base.ts
+import { homedir as homedir2 } from "os";
+import { join as join2 } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {
@@ -671,15 +673,15 @@ function ownerRepo(remote) {
 }
 function detectStack(cwd) {
   const stack = [];
-  if (existsSync2(join2(cwd, "package.json"))) stack.push("node");
-  if (existsSync2(join2(cwd, "next.config.js")) || existsSync2(join2(cwd, "next.config.mjs"))) {
+  if (existsSync2(join3(cwd, "package.json"))) stack.push("node");
+  if (existsSync2(join3(cwd, "next.config.js")) || existsSync2(join3(cwd, "next.config.mjs"))) {
     stack.push("next.js");
   }
-  if (existsSync2(join2(cwd, "pyproject.toml")) || existsSync2(join2(cwd, "requirements.txt"))) {
+  if (existsSync2(join3(cwd, "pyproject.toml")) || existsSync2(join3(cwd, "requirements.txt"))) {
     stack.push("python");
   }
-  if (existsSync2(join2(cwd, "Cargo.toml"))) stack.push("rust");
-  if (existsSync2(join2(cwd, "go.mod"))) stack.push("go");
+  if (existsSync2(join3(cwd, "Cargo.toml"))) stack.push("rust");
+  if (existsSync2(join3(cwd, "go.mod"))) stack.push("go");
   return stack;
 }
 function captureRepository(cwd = process.cwd()) {

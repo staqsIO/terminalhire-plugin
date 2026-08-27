@@ -997,7 +997,7 @@ var init_feeds = __esm({
 
 // ../../packages/core/src/partners.ts
 import { readFileSync } from "fs";
-import { join } from "path";
+import { join as join2 } from "path";
 import { fileURLToPath } from "url";
 var EXAMPLE_BUYER, BUYER_REGISTRY;
 var init_partners = __esm({
@@ -1344,17 +1344,17 @@ var init_src = __esm({
 
 // src/test-race-barrier.ts
 import { closeSync as closeSync2, constants as constants2, existsSync, lstatSync, openSync as openSync2 } from "fs";
-import { join as join2 } from "path";
+import { join as join3 } from "path";
 function syncSleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 function waitForTestRaceBarrier(phase) {
   const root = process.env[ENV_VAR];
   if (!root) return;
-  const phaseDir = join2(root, phase);
+  const phaseDir = join3(root, phase);
   if (!existsSync(phaseDir)) return;
-  const readyFile = join2(phaseDir, `ready-${process.pid}`);
-  const goFile = join2(phaseDir, "go");
+  const readyFile = join3(phaseDir, `ready-${process.pid}`);
+  const goFile = join3(phaseDir, "go");
   const noFollow = constants2.O_NOFOLLOW ?? 0;
   if (lstatSync(readyFile, { throwIfNoEntry: false })) {
     throw new Error(
@@ -1394,8 +1394,8 @@ var init_test_race_barrier = __esm({
 // src/shared-key.ts
 import { randomBytes as randomBytes2 } from "crypto";
 import { readFileSync as readFileSync2, writeFileSync, existsSync as existsSync2, linkSync, unlinkSync } from "fs";
-import { join as join3 } from "path";
-import { homedir } from "os";
+import { join as join4 } from "path";
+import { homedir as homedir2 } from "os";
 function isValidKeyHex(value) {
   return KEY_HEX_RE.test(value);
 }
@@ -1449,8 +1449,8 @@ var init_shared_key = __esm({
     "use strict";
     init_state_dir();
     init_test_race_barrier();
-    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join3(homedir(), ".terminalhire");
-    KEY_FILE = join3(TERMINALHIRE_DIR, "key");
+    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join4(homedir2(), ".terminalhire");
+    KEY_FILE = join4(TERMINALHIRE_DIR, "key");
     KEY_BYTES = 32;
     KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
   }
@@ -1459,7 +1459,7 @@ var init_shared_key = __esm({
 // src/crypto-store.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes3 } from "crypto";
 import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, existsSync as existsSync3, renameSync, rmSync, readdirSync } from "fs";
-import { join as join4, dirname, basename } from "path";
+import { join as join5, dirname, basename } from "path";
 import { createRequire } from "module";
 function encrypt(plaintext, key) {
   const iv = randomBytes3(IV_BYTES);
@@ -1514,7 +1514,7 @@ function makeWarnOnce() {
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname(filePath);
   ensureStateDirForSecret(dir);
-  const tmp = join4(
+  const tmp = join5(
     dir,
     `.${basename(filePath)}.tmp-${process.pid}-${randomBytes3(6).toString("hex")}`
   );
@@ -1532,7 +1532,7 @@ async function deleteKey() {
   }
   for (const name of encFiles) {
     try {
-      rmSync(join4(stateDir, name));
+      rmSync(join5(stateDir, name));
     } catch (e) {
       const code = e.code;
       if (code !== "ENOENT") {
@@ -1623,8 +1623,8 @@ __export(profile_exports, {
   removeSavedJob: () => removeSavedJob,
   writeProfile: () => writeProfile
 });
-import { join as join5 } from "path";
-import { homedir as homedir2 } from "os";
+import { join as join6 } from "path";
+import { homedir as homedir3 } from "os";
 function blankProfile() {
   return {
     version: 3,
@@ -1757,8 +1757,8 @@ var init_profile = __esm({
     "use strict";
     init_src();
     init_crypto_store();
-    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join5(homedir2(), ".terminalhire");
-    PROFILE_FILE = join5(TERMINALHIRE_DIR2, "profile.enc");
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join6(homedir3(), ".terminalhire");
+    PROFILE_FILE = join6(TERMINALHIRE_DIR2, "profile.enc");
     profileStore = createEncryptedStore(PROFILE_FILE, {
       blank: blankProfile,
       keyPolicy: "keytar-first-file-fallback"
@@ -1795,8 +1795,8 @@ var init_profile = __esm({
 
 // bin/jpi-sync.js
 import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, existsSync as existsSync4, rmSync as rmSync2 } from "fs";
-import { join as join6 } from "path";
-import { homedir as homedir3, hostname as osHostname } from "os";
+import { join as join7 } from "path";
+import { homedir as homedir4, hostname as osHostname } from "os";
 import { createInterface } from "readline";
 
 // src/open-url.js
@@ -1827,8 +1827,11 @@ function openInBrowser(url) {
 init_state_dir();
 
 // src/api-base.ts
+import { homedir } from "os";
+import { join } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
+var DEV_STATE_DIR_NAME = ".terminalhire-dev";
 var ApiBaseError = class extends Error {
   constructor(message) {
     super(message);
@@ -1939,6 +1942,7 @@ function isNonProdApiBase(base = resolveApiBaseOrProd()) {
 }
 function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
   if (!isNonProdApiBase(base)) return;
+  if (usingSeparateStateDir()) return;
   try {
     stream.write(
       "terminalhire: non-prod API base \u2014 using the same local session/push credentials as prod; do not mix environments casually.\n"
@@ -1946,10 +1950,15 @@ function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
   } catch {
   }
 }
+function usingSeparateStateDir(env = process.env) {
+  const dir = env["TERMINALHIRE_DIR"];
+  if (dir === void 0 || dir === "") return false;
+  return dir.endsWith(DEV_STATE_DIR_NAME);
+}
 
 // bin/jpi-sync.js
-var TH_DIR = process.env["TERMINALHIRE_DIR"] || join6(homedir3(), ".terminalhire");
-var TIER1_MARKER = join6(TH_DIR, "tier1.json");
+var TH_DIR = process.env["TERMINALHIRE_DIR"] || join7(homedir4(), ".terminalhire");
+var TIER1_MARKER = join7(TH_DIR, "tier1.json");
 var API_URL = resolveApiBase();
 warnSharedCredentialsIfNonProd(API_URL);
 function oauthSyncBase() {

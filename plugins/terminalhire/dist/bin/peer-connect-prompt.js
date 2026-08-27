@@ -124,6 +124,8 @@ function openInBrowser(url) {
 }
 
 // src/api-base.ts
+import { homedir as homedir2 } from "os";
+import { join as join2 } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {

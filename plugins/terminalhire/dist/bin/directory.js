@@ -2,8 +2,8 @@
 
 // bin/directory.js
 import { readFileSync, writeFileSync, renameSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
+import { join as join2 } from "path";
+import { homedir as homedir2 } from "os";
 
 // src/state-dir.ts
 import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
@@ -54,6 +54,8 @@ function ensureStateDir(dir) {
 }
 
 // src/api-base.ts
+import { homedir } from "os";
+import { join } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {
@@ -146,9 +148,9 @@ function normalizeOverride(raw) {
 }
 
 // bin/directory.js
-var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
-var DIRECTORY_CACHE_FILE = join(TERMINALHIRE_DIR, "directory-cache.json");
-var PROJECT_FILE = join(TERMINALHIRE_DIR, "project.json");
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
+var DIRECTORY_CACHE_FILE = join2(TERMINALHIRE_DIR, "directory-cache.json");
+var PROJECT_FILE = join2(TERMINALHIRE_DIR, "project.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = resolveApiBase();
 function readDirectoryCache() {

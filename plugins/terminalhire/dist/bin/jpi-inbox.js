@@ -4660,6 +4660,8 @@ var init_web_session = __esm({
 });
 
 // src/api-base.ts
+import { homedir as homedir5 } from "os";
+import { join as join7 } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -4759,8 +4761,8 @@ var init_api_base = __esm({
 
 // src/chat-client.ts
 import { existsSync as existsSync6, readFileSync as readFileSync6, writeFileSync as writeFileSync5 } from "fs";
-import { homedir as homedir5 } from "os";
-import { join as join7 } from "path";
+import { homedir as homedir6 } from "os";
+import { join as join8 } from "path";
 function defaultReadPeerPins() {
   try {
     if (!existsSync6(PEERS_FILE)) return {};
@@ -4965,8 +4967,8 @@ var init_chat_client = __esm({
     init_api_base();
     CHAT_BASE = resolveApiBase();
     GH_SESSION_COOKIE = "__jpi_gh_session";
-    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join7(homedir5(), ".terminalhire");
-    PEERS_FILE = join7(TERMINALHIRE_DIR4, "chat-peers.json");
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join8(homedir6(), ".terminalhire");
+    PEERS_FILE = join8(TERMINALHIRE_DIR4, "chat-peers.json");
     REQUEST_TIMEOUT_MS = 1e4;
     ChatNotLinkedError = class extends Error {
       constructor() {
@@ -5011,8 +5013,8 @@ var init_chat_client = __esm({
 
 // src/config.ts
 import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, existsSync as existsSync7 } from "fs";
-import { join as join8 } from "path";
-import { homedir as homedir6 } from "os";
+import { join as join9 } from "path";
+import { homedir as homedir7 } from "os";
 function readConfig() {
   try {
     if (!existsSync7(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
@@ -5040,8 +5042,8 @@ var init_config = __esm({
   "src/config.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join8(homedir6(), ".terminalhire");
-    CONFIG_FILE = join8(TERMINALHIRE_DIR5, "config.json");
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join9(homedir7(), ".terminalhire");
+    CONFIG_FILE = join9(TERMINALHIRE_DIR5, "config.json");
     DEFAULT_CONFIG = {
       nudge: "session",
       peerConnect: false,
@@ -5117,6 +5119,26 @@ var init_tui_core = __esm({
   }
 });
 
+// bin/session-case.js
+function hostLabel(base) {
+  return String(base ?? "").replace(/^https?:\/\//, "");
+}
+function sessionCase(entry, { stale }) {
+  const m = entry && entry.sessionHostMismatch;
+  if (m && typeof m.linkedHost === "string" && typeof m.currentHost === "string") {
+    return { kind: "mismatch", linkedHost: m.linkedHost, currentHost: m.currentHost };
+  }
+  if (!stale) return null;
+  const host = entry && entry.staleHost;
+  if (typeof host === "string" && host.length > 0) return { kind: "refused", host };
+  return { kind: "expired" };
+}
+var init_session_case = __esm({
+  "bin/session-case.js"() {
+    "use strict";
+  }
+});
+
 // bin/jpi-chat-read.js
 var jpi_chat_read_exports = {};
 __export(jpi_chat_read_exports, {
@@ -5134,8 +5156,8 @@ __export(jpi_chat_read_exports, {
   writeReadCursor: () => writeReadCursor
 });
 import { existsSync as existsSync8, readFileSync as readFileSync8, writeFileSync as writeFileSync7 } from "fs";
-import { homedir as homedir7 } from "os";
-import { join as join9 } from "path";
+import { homedir as homedir8 } from "os";
+import { join as join10 } from "path";
 async function syncUnreadBadge(deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
@@ -5542,9 +5564,9 @@ var init_jpi_chat_read = __esm({
     init_api_base();
     CHAT_BASE2 = resolveApiBase();
     GH_SESSION_COOKIE2 = "__jpi_gh_session";
-    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join9(homedir7(), ".terminalhire");
-    READS_FILE = join9(TERMINALHIRE_DIR6, "chat-reads.json");
-    INDEX_CACHE_FILE = join9(TERMINALHIRE_DIR6, "index-cache.json");
+    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join10(homedir8(), ".terminalhire");
+    READS_FILE = join10(TERMINALHIRE_DIR6, "chat-reads.json");
+    INDEX_CACHE_FILE = join10(TERMINALHIRE_DIR6, "index-cache.json");
     REACHABLE_DISPLAY = { shareActivity: false, optin: false, lastSeen: null };
   }
 });
@@ -5552,7 +5574,7 @@ var init_jpi_chat_read = __esm({
 // src/crypto-store.ts
 import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes6 } from "crypto";
 import { readFileSync as readFileSync9, writeFileSync as writeFileSync8, existsSync as existsSync9, renameSync as renameSync2, rmSync as rmSync4, readdirSync } from "fs";
-import { join as join10, dirname, basename } from "path";
+import { join as join11, dirname, basename } from "path";
 import { createRequire } from "module";
 function encrypt2(plaintext, key) {
   const iv = randomBytes6(IV_BYTES2);
@@ -5607,7 +5629,7 @@ function makeWarnOnce() {
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname(filePath);
   ensureStateDirForSecret(dir);
-  const tmp = join10(
+  const tmp = join11(
     dir,
     `.${basename(filePath)}.tmp-${process.pid}-${randomBytes6(6).toString("hex")}`
   );
@@ -5625,7 +5647,7 @@ async function deleteKey() {
   }
   for (const name of encFiles) {
     try {
-      rmSync4(join10(stateDir, name));
+      rmSync4(join11(stateDir, name));
     } catch (e) {
       const code = e.code;
       if (code !== "ENOENT") {
@@ -5716,8 +5738,8 @@ __export(profile_exports, {
   removeSavedJob: () => removeSavedJob,
   writeProfile: () => writeProfile
 });
-import { join as join11 } from "path";
-import { homedir as homedir8 } from "os";
+import { join as join12 } from "path";
+import { homedir as homedir9 } from "os";
 function blankProfile() {
   return {
     version: 3,
@@ -5850,8 +5872,8 @@ var init_profile = __esm({
     "use strict";
     init_src();
     init_crypto_store();
-    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join11(homedir8(), ".terminalhire");
-    PROFILE_FILE = join11(TERMINALHIRE_DIR7, "profile.enc");
+    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join12(homedir9(), ".terminalhire");
+    PROFILE_FILE = join12(TERMINALHIRE_DIR7, "profile.enc");
     profileStore = createEncryptedStore(PROFILE_FILE, {
       blank: blankProfile,
       keyPolicy: "keytar-first-file-fallback"
@@ -5889,8 +5911,8 @@ var init_profile = __esm({
 // bin/jpi-chat.js
 import { createInterface } from "readline";
 import { existsSync as existsSync10, readFileSync as readFileSync10 } from "fs";
-import { homedir as homedir9 } from "os";
-import { join as join12 } from "path";
+import { homedir as homedir10 } from "os";
+import { join as join13 } from "path";
 function defaultPromptAck({ input = process.stdin, output = process.stdout } = {}) {
   if (!input || input.isTTY !== true) return Promise.resolve(false);
   const rl = createInterface({ input, output });
@@ -6015,9 +6037,18 @@ function formatThread(state) {
   const status = formatPresence(presence);
   const lines = [];
   lines.push(`  chat with @${safePeer}   ${status}`);
-  if (self && (self.login || self.expired)) {
-    if (self.expired) {
-      lines.push("  \u26A0 your linked session expired \u2014 run: terminalhire login");
+  if (self && (self.login || self.sessionCase)) {
+    if (self.sessionCase) {
+      const c = self.sessionCase;
+      if (c.kind === "mismatch") {
+        lines.push(
+          `  \u26A0 your session is linked to ${hostLabel(c.linkedHost)}, this terminal is on ${hostLabel(c.currentHost)} \u2014 run: terminalhire link`
+        );
+      } else if (c.kind === "refused") {
+        lines.push(`  \u26A0 your session was refused by ${hostLabel(c.host)} \u2014 run: terminalhire link`);
+      } else {
+        lines.push("  \u26A0 your linked session expired \u2014 run: terminalhire login");
+      }
     } else {
       const activity = self.shareActivity === true ? "visible" : "hidden";
       lines.push(`  you: @${sanitizeLine(self.login)} \xB7 connected \xB7 activity: ${activity}`);
@@ -6054,17 +6085,17 @@ function mergeMessages(existing, incoming) {
   }
   return out;
 }
-function readCachedSessionStale() {
+function readCachedSessionCase() {
   try {
-    const p = join12(
-      process.env.TERMINALHIRE_DIR || join12(homedir9(), ".terminalhire"),
+    const p = join13(
+      process.env.TERMINALHIRE_DIR || join13(homedir10(), ".terminalhire"),
       "index-cache.json"
     );
-    if (!existsSync10(p)) return false;
+    if (!existsSync10(p)) return null;
     const cache = JSON.parse(readFileSync10(p, "utf8"));
-    return cache?.sessionStale === true;
+    return sessionCase(cache, { stale: cache?.sessionStale === true });
   } catch {
-    return false;
+    return null;
   }
 }
 async function defaultMarkThreadRead(peerLogin, iso) {
@@ -6296,7 +6327,7 @@ async function runChatPane(opts = {}) {
     selfLogin = (await readProfile2())?.github?.login;
   } catch {
   }
-  let selfExpired = readCachedSessionStale();
+  let selfCase = readCachedSessionCase();
   let selfShareActivity = false;
   try {
     selfShareActivity = readConfig().chatShareActivity === true;
@@ -6318,7 +6349,7 @@ async function runChatPane(opts = {}) {
         formatThread({
           peerLogin,
           presence,
-          self: { login: selfLogin, expired: selfExpired, shareActivity: selfShareActivity },
+          self: { login: selfLogin, sessionCase: selfCase, shareActivity: selfShareActivity },
           messages,
           inputBuffer,
           banner,
@@ -6600,6 +6631,7 @@ var init_jpi_chat = __esm({
     init_web_session();
     init_api_base();
     init_tui_core();
+    init_session_case();
     CHAT_BASE3 = resolveApiBase();
     GH_SESSION_COOKIE3 = "__jpi_gh_session";
     HIDE_CURSOR = "\x1B[?25l";

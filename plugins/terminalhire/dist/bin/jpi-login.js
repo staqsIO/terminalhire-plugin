@@ -39,6 +39,8 @@ var init_open_url = __esm({
 });
 
 // src/api-base.ts
+import { homedir } from "os";
+import { join } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -227,17 +229,17 @@ var init_state_dir = __esm({
 
 // src/test-race-barrier.ts
 import { closeSync as closeSync2, constants as constants2, existsSync, lstatSync, openSync as openSync2 } from "fs";
-import { join } from "path";
+import { join as join2 } from "path";
 function syncSleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 function waitForTestRaceBarrier(phase) {
   const root = process.env[ENV_VAR];
   if (!root) return;
-  const phaseDir = join(root, phase);
+  const phaseDir = join2(root, phase);
   if (!existsSync(phaseDir)) return;
-  const readyFile = join(phaseDir, `ready-${process.pid}`);
-  const goFile = join(phaseDir, "go");
+  const readyFile = join2(phaseDir, `ready-${process.pid}`);
+  const goFile = join2(phaseDir, "go");
   const noFollow = constants2.O_NOFOLLOW ?? 0;
   if (lstatSync(readyFile, { throwIfNoEntry: false })) {
     throw new Error(
@@ -277,8 +279,8 @@ var init_test_race_barrier = __esm({
 // src/shared-key.ts
 import { randomBytes } from "crypto";
 import { readFileSync, writeFileSync, existsSync as existsSync2, linkSync, unlinkSync } from "fs";
-import { join as join2 } from "path";
-import { homedir } from "os";
+import { join as join3 } from "path";
+import { homedir as homedir2 } from "os";
 function isValidKeyHex(value) {
   return KEY_HEX_RE.test(value);
 }
@@ -335,8 +337,8 @@ var init_shared_key = __esm({
     "use strict";
     init_state_dir();
     init_test_race_barrier();
-    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
-    KEY_FILE = join2(TERMINALHIRE_DIR, "key");
+    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
+    KEY_FILE = join3(TERMINALHIRE_DIR, "key");
     KEY_BYTES = 32;
     KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
   }
@@ -360,8 +362,8 @@ __export(github_auth_exports, {
 });
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
 import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync3, rmSync, renameSync } from "fs";
-import { join as join3 } from "path";
-import { homedir as homedir2 } from "os";
+import { join as join4 } from "path";
+import { homedir as homedir3 } from "os";
 async function loadKey() {
   return loadOrCreateSharedKey();
 }
@@ -559,8 +561,8 @@ var init_github_auth = __esm({
     init_state_dir();
     init_shared_key();
     init_shared_key();
-    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
-    TOKEN_FILE = join3(TERMINALHIRE_DIR2, "github-token.enc");
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
+    TOKEN_FILE = join4(TERMINALHIRE_DIR2, "github-token.enc");
     ALGO = "aes-256-gcm";
     IV_BYTES = 12;
     GITHUB_SCOPE = "read:user";
@@ -5419,14 +5421,14 @@ var init_feeds = __esm({
 
 // ../../packages/core/src/partners.ts
 import { readFileSync as readFileSync3 } from "fs";
-import { join as join4 } from "path";
+import { join as join5 } from "path";
 import { fileURLToPath } from "url";
 function resolveDataPath() {
   try {
     const dir = fileURLToPath(new URL("../../../data", import.meta.url));
-    return join4(dir, "partner-roles.json");
+    return join5(dir, "partner-roles.json");
   } catch {
-    return join4(process.cwd(), "data", "partner-roles.json");
+    return join5(process.cwd(), "data", "partner-roles.json");
   }
 }
 function loadPartnerRoles() {
@@ -11023,7 +11025,7 @@ var init_src = __esm({
 // src/crypto-store.ts
 import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes5 } from "crypto";
 import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, existsSync as existsSync4, renameSync as renameSync2, rmSync as rmSync2, readdirSync } from "fs";
-import { join as join5, dirname, basename } from "path";
+import { join as join6, dirname, basename } from "path";
 import { createRequire } from "module";
 function encrypt2(plaintext, key) {
   const iv = randomBytes5(IV_BYTES2);
@@ -11078,7 +11080,7 @@ function makeWarnOnce() {
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname(filePath);
   ensureStateDirForSecret(dir);
-  const tmp = join5(
+  const tmp = join6(
     dir,
     `.${basename(filePath)}.tmp-${process.pid}-${randomBytes5(6).toString("hex")}`
   );
@@ -11096,7 +11098,7 @@ async function deleteKey() {
   }
   for (const name of encFiles) {
     try {
-      rmSync2(join5(stateDir, name));
+      rmSync2(join6(stateDir, name));
     } catch (e) {
       const code = e.code;
       if (code !== "ENOENT") {
@@ -11187,8 +11189,8 @@ __export(profile_exports, {
   removeSavedJob: () => removeSavedJob,
   writeProfile: () => writeProfile
 });
-import { join as join6 } from "path";
-import { homedir as homedir3 } from "os";
+import { join as join7 } from "path";
+import { homedir as homedir4 } from "os";
 function blankProfile() {
   return {
     version: 3,
@@ -11321,8 +11323,8 @@ var init_profile = __esm({
     "use strict";
     init_src();
     init_crypto_store();
-    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join6(homedir3(), ".terminalhire");
-    PROFILE_FILE = join6(TERMINALHIRE_DIR3, "profile.enc");
+    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join7(homedir4(), ".terminalhire");
+    PROFILE_FILE = join7(TERMINALHIRE_DIR3, "profile.enc");
     profileStore = createEncryptedStore(PROFILE_FILE, {
       blank: blankProfile,
       keyPolicy: "keytar-first-file-fallback"
@@ -11359,8 +11361,8 @@ var init_profile = __esm({
 
 // src/config.ts
 import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, existsSync as existsSync5 } from "fs";
-import { join as join7 } from "path";
-import { homedir as homedir4 } from "os";
+import { join as join8 } from "path";
+import { homedir as homedir5 } from "os";
 function readConfig() {
   try {
     if (!existsSync5(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
@@ -11388,8 +11390,8 @@ var init_config = __esm({
   "src/config.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join7(homedir4(), ".terminalhire");
-    CONFIG_FILE = join7(TERMINALHIRE_DIR4, "config.json");
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join8(homedir5(), ".terminalhire");
+    CONFIG_FILE = join8(TERMINALHIRE_DIR4, "config.json");
     DEFAULT_CONFIG = {
       nudge: "session",
       peerConnect: false,
@@ -11565,9 +11567,9 @@ async function runLogin() {
     let ghProfile;
     if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
       const { fileURLToPath: fileURLToPath2 } = await import("url");
-      const { join: join8 } = await import("path");
+      const { join: join9 } = await import("path");
       const __dirname = fileURLToPath2(new URL(".", import.meta.url));
-      const fixturePath = join8(__dirname, "../../fixtures/github-sample.json");
+      const fixturePath = join9(__dirname, "../../fixtures/github-sample.json");
       const { readFileSync: readFileSync6 } = await import("fs");
       ghProfile = JSON.parse(readFileSync6(fixturePath, "utf8"));
     } else {

@@ -11,10 +11,12 @@ import {
   unlinkSync,
   writeFileSync
 } from "fs";
-import { homedir } from "os";
-import { basename, dirname, join } from "path";
+import { homedir as homedir2 } from "os";
+import { basename, dirname, join as join2 } from "path";
 
 // src/api-base.ts
+import { homedir } from "os";
+import { join } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {
@@ -113,10 +115,10 @@ function defaultUrl() {
 }
 var TIMEOUT_MS = 2e3;
 function stateDir() {
-  return process.env["TERMINALHIRE_DIR"] || join(homedir(), ".terminalhire");
+  return process.env["TERMINALHIRE_DIR"] || join2(homedir2(), ".terminalhire");
 }
 function recallCachePath() {
-  return join(stateDir(), "recall.json");
+  return join2(stateDir(), "recall.json");
 }
 async function fetchRecalls(url = defaultUrl()) {
   try {
@@ -199,7 +201,7 @@ function sweepTempFiles(path) {
     const prefix = `${basename(path)}.`;
     for (const name of readdirSync(dir)) {
       if (!name.startsWith(prefix) || !name.endsWith(".tmp")) continue;
-      const full = join(dir, name);
+      const full = join2(dir, name);
       try {
         if (Date.now() - statSync(full).mtimeMs > 6e4) unlinkSync(full);
       } catch {

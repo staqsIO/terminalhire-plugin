@@ -285,7 +285,7 @@ function finalize(build) {
   };
 }
 function reconstruct(files, opts = {}) {
-  const join8 = opts.joinSidechains !== false;
+  const join9 = opts.joinSidechains !== false;
   const mains = [];
   const sidechains = [];
   for (const file of files) {
@@ -310,7 +310,7 @@ function reconstruct(files, opts = {}) {
   }
   const orphanedSidechainPaths = [];
   const joinedPaths = /* @__PURE__ */ new Set();
-  if (join8) {
+  if (join9) {
     const sidechainsBySession = /* @__PURE__ */ new Map();
     for (const sc of sidechains) {
       const acc = sidechainsBySession.get(sc.sessionId) ?? [];
@@ -2233,6 +2233,8 @@ var init_web_session = __esm({
 });
 
 // src/api-base.ts
+import { homedir as homedir2 } from "os";
+import { join as join3 } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -2342,17 +2344,17 @@ var init_api_base = __esm({
 
 // src/test-race-barrier.ts
 import { closeSync as closeSync2, constants as constants2, existsSync as existsSync2, lstatSync, openSync as openSync2 } from "fs";
-import { join as join3 } from "path";
+import { join as join4 } from "path";
 function syncSleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 function waitForTestRaceBarrier(phase) {
   const root = process.env[ENV_VAR];
   if (!root) return;
-  const phaseDir = join3(root, phase);
+  const phaseDir = join4(root, phase);
   if (!existsSync2(phaseDir)) return;
-  const readyFile = join3(phaseDir, `ready-${process.pid}`);
-  const goFile = join3(phaseDir, "go");
+  const readyFile = join4(phaseDir, `ready-${process.pid}`);
+  const goFile = join4(phaseDir, "go");
   const noFollow = constants2.O_NOFOLLOW ?? 0;
   if (lstatSync(readyFile, { throwIfNoEntry: false })) {
     throw new Error(
@@ -2392,8 +2394,8 @@ var init_test_race_barrier = __esm({
 // src/shared-key.ts
 import { randomBytes as randomBytes2 } from "crypto";
 import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, existsSync as existsSync3, linkSync, unlinkSync } from "fs";
-import { join as join4 } from "path";
-import { homedir as homedir2 } from "os";
+import { join as join5 } from "path";
+import { homedir as homedir3 } from "os";
 function isValidKeyHex(value) {
   return KEY_HEX_RE.test(value);
 }
@@ -2447,8 +2449,8 @@ var init_shared_key = __esm({
     "use strict";
     init_state_dir();
     init_test_race_barrier();
-    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join4(homedir2(), ".terminalhire");
-    KEY_FILE = join4(TERMINALHIRE_DIR, "key");
+    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join5(homedir3(), ".terminalhire");
+    KEY_FILE = join5(TERMINALHIRE_DIR, "key");
     KEY_BYTES = 32;
     KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
   }
@@ -2457,7 +2459,7 @@ var init_shared_key = __esm({
 // src/crypto-store.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes3 } from "crypto";
 import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, existsSync as existsSync4, renameSync, rmSync as rmSync2, readdirSync } from "fs";
-import { join as join5, dirname, basename } from "path";
+import { join as join6, dirname, basename } from "path";
 import { createRequire } from "module";
 function encrypt(plaintext, key) {
   const iv = randomBytes3(IV_BYTES);
@@ -2512,7 +2514,7 @@ function makeWarnOnce() {
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname(filePath);
   ensureStateDirForSecret(dir);
-  const tmp = join5(
+  const tmp = join6(
     dir,
     `.${basename(filePath)}.tmp-${process.pid}-${randomBytes3(6).toString("hex")}`
   );
@@ -2530,7 +2532,7 @@ async function deleteKey() {
   }
   for (const name of encFiles) {
     try {
-      rmSync2(join5(stateDir, name));
+      rmSync2(join6(stateDir, name));
     } catch (e) {
       const code = e.code;
       if (code !== "ENOENT") {
@@ -2621,8 +2623,8 @@ __export(profile_exports, {
   removeSavedJob: () => removeSavedJob,
   writeProfile: () => writeProfile
 });
-import { join as join6 } from "path";
-import { homedir as homedir3 } from "os";
+import { join as join7 } from "path";
+import { homedir as homedir4 } from "os";
 function blankProfile() {
   return {
     version: 3,
@@ -2755,8 +2757,8 @@ var init_profile = __esm({
     "use strict";
     init_src();
     init_crypto_store();
-    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join6(homedir3(), ".terminalhire");
-    PROFILE_FILE = join6(TERMINALHIRE_DIR2, "profile.enc");
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join7(homedir4(), ".terminalhire");
+    PROFILE_FILE = join7(TERMINALHIRE_DIR2, "profile.enc");
     profileStore = createEncryptedStore(PROFILE_FILE, {
       blank: blankProfile,
       keyPolicy: "keytar-first-file-fallback"
@@ -2833,8 +2835,8 @@ __export(trajectory_exports, {
   runTrajectoryPush: () => runTrajectoryPush
 });
 import { existsSync as existsSync5, readFileSync as readFileSync5, readdirSync as readdirSync2, writeFileSync as writeFileSync4 } from "fs";
-import { homedir as homedir4 } from "os";
-import { join as join7 } from "path";
+import { homedir as homedir5 } from "os";
+import { join as join8 } from "path";
 function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -2866,7 +2868,7 @@ function findJsonlFiles(dir) {
     return out;
   }
   for (const entry of entries) {
-    const full = join7(dir, entry.name);
+    const full = join8(dir, entry.name);
     if (entry.isDirectory()) {
       out.push(...findJsonlFiles(full));
     } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
@@ -2987,10 +2989,10 @@ function renderMarkdown(view) {
   return lines.join("\n");
 }
 function writeExportArtifacts(score, markdown) {
-  const dir = process.env.TERMINALHIRE_DIR || join7(homedir4(), ".terminalhire");
+  const dir = process.env.TERMINALHIRE_DIR || join8(homedir5(), ".terminalhire");
   ensureStateDir(dir);
-  const jsonPath = join7(dir, "trajectory-export.json");
-  const mdPath = join7(dir, "trajectory-export.md");
+  const jsonPath = join8(dir, "trajectory-export.json");
+  const mdPath = join8(dir, "trajectory-export.md");
   writeFileSync4(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
   writeFileSync4(mdPath, markdown, "utf8");
   return { jsonPath, mdPath };
@@ -3011,7 +3013,7 @@ function renderInward(allNodes, view, files) {
   console.log("");
 }
 function buildTrajectory() {
-  const projectsDir = join7(homedir4(), ".claude", "projects");
+  const projectsDir = join8(homedir5(), ".claude", "projects");
   if (!existsSync5(projectsDir)) return null;
   const paths = findJsonlFiles(projectsDir);
   if (paths.length === 0) return null;

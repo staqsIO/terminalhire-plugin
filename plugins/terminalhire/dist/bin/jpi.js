@@ -57,6 +57,21 @@ function ensureStateDir(dir) {
   }
 }
 
+// bin/session-case.js
+function hostLabel(base) {
+  return String(base ?? "").replace(/^https?:\/\//, "");
+}
+function sessionCase(entry, { stale }) {
+  const m = entry && entry.sessionHostMismatch;
+  if (m && typeof m.linkedHost === "string" && typeof m.currentHost === "string") {
+    return { kind: "mismatch", linkedHost: m.linkedHost, currentHost: m.currentHost };
+  }
+  if (!stale) return null;
+  const host = entry && entry.staleHost;
+  if (typeof host === "string" && host.length > 0) return { kind: "refused", host };
+  return { kind: "expired" };
+}
+
 // bin/jpi.js
 var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
 var INDEX_CACHE_FILE = join(TERMINALHIRE_DIR, "index-cache.json");
@@ -354,6 +369,24 @@ function getCachedSessionStale() {
     return false;
   }
 }
+function getCachedEntry() {
+  try {
+    const raw = readFileSync(INDEX_CACHE_FILE, "utf8");
+    const entry = JSON.parse(raw);
+    if (Date.now() - entry.ts > INDEX_CACHE_TTL_MS) return null;
+    return entry;
+  } catch {
+    return null;
+  }
+}
+function sessionComplaint(c) {
+  if (!c) return "\u26A0 terminalhire session expired \u2014 run: th link to restore your connection signals";
+  if (c.kind === "mismatch")
+    return `\u26A0 terminalhire linked to ${hostLabel(c.linkedHost)}, polling ${hostLabel(c.currentHost)} \u2014 run: th link`;
+  if (c.kind === "refused")
+    return `\u26A0 terminalhire session was refused by ${hostLabel(c.host)} \u2014 run: th link`;
+  return "\u26A0 terminalhire session expired \u2014 run: th link to restore your connection signals";
+}
 function getNudgeMode() {
   const envVal = process.env["TERMINALHIRE_NUDGE"];
   if (envVal) {
@@ -428,9 +461,10 @@ try {
   const incomingCount = getCachedIncomingCount();
   const unreadChatCount = getCachedUnreadChatCount();
   const sessionStale = getCachedSessionStale() && incomingCount === 0 && unreadChatCount === 0;
+  const sessionMsg = sessionCase(getCachedEntry(), { stale: sessionStale });
   const haveRoles = matchCount !== null && matchCount > 0;
-  if (!haveRoles && incomingCount === 0 && unreadChatCount === 0 && !sessionStale) process.exit(0);
-  const hasConnectionSignal = incomingCount > 0 || unreadChatCount > 0 || sessionStale;
+  if (!haveRoles && incomingCount === 0 && unreadChatCount === 0 && !sessionMsg) process.exit(0);
+  const hasConnectionSignal = incomingCount > 0 || unreadChatCount > 0 || Boolean(sessionMsg);
   const nudgeMode = getNudgeMode();
   if (!hasConnectionSignal && !shouldNudge(nudgeMode, sessionId)) process.exit(0);
   let line;
@@ -440,14 +474,18 @@ try {
     if (incomingCount > 0)
       line += `  \xB7  \u2709 ${incomingCount} intro request${incomingCount === 1 ? "" : "s"}`;
     if (unreadChatCount > 0) line += `  \xB7  \u{1F4AC} ${unreadChatCount} unread`;
-    if (sessionStale) line += `  \xB7  \u26A0 session expired \u2014 run: th link`;
+    if (sessionMsg && sessionMsg.kind === "mismatch")
+      line += `  \xB7  \u26A0 linked to ${hostLabel(sessionMsg.linkedHost)}, polling ${hostLabel(sessionMsg.currentHost)} \u2014 run: th link`;
+    else if (sessionMsg && sessionMsg.kind === "refused")
+      line += `  \xB7  \u26A0 session refused by ${hostLabel(sessionMsg.host)} \u2014 run: th link`;
+    else if (sessionMsg) line += `  \xB7  \u26A0 session expired \u2014 run: th link`;
   } else if (incomingCount > 0) {
     line = `\u2709 ${incomingCount} intro request${incomingCount === 1 ? "" : "s"} \u2014 run: th inbox`;
     if (unreadChatCount > 0) line += `  \xB7  \u{1F4AC} ${unreadChatCount} unread`;
   } else if (unreadChatCount > 0) {
     line = `\u{1F4AC} ${unreadChatCount} unread \u2014 run: th inbox`;
   } else {
-    line = `\u26A0 terminalhire session expired \u2014 run: th link to restore your connection signals`;
+    line = sessionComplaint(sessionMsg);
   }
   process.stdout.write(line + "\n");
   if (haveRoles && nudgeMode === "session") {

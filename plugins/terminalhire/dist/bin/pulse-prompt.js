@@ -3,7 +3,7 @@
 // bin/pulse-prompt.js
 import { createInterface } from "readline";
 import { readFileSync as readFileSync3, existsSync as existsSync3 } from "fs";
-import { join as join3 } from "path";
+import { join as join4 } from "path";
 import { fileURLToPath } from "url";
 
 // src/web-session.ts
@@ -147,6 +147,8 @@ function writeConfig(config) {
 }
 
 // src/api-base.ts
+import { homedir as homedir3 } from "os";
+import { join as join3 } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {
@@ -245,7 +247,7 @@ var GH_SESSION_COOKIE = "__jpi_gh_session";
 var PULSE_ASK_INTERVAL_MS = 24 * 60 * 60 * 1e3;
 function readLocalVersion() {
   try {
-    for (const p of [join3(__dirname, "..", "..", "package.json"), join3(__dirname, "..", "package.json")]) {
+    for (const p of [join4(__dirname, "..", "..", "package.json"), join4(__dirname, "..", "package.json")]) {
       if (existsSync3(p)) {
         const pkg = JSON.parse(readFileSync3(p, "utf8"));
         if (pkg.version) return pkg.version;

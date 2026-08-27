@@ -4856,14 +4856,14 @@ var init_feeds = __esm({
 
 // ../../packages/core/src/partners.ts
 import { readFileSync as readFileSync2 } from "fs";
-import { join as join2 } from "path";
+import { join as join3 } from "path";
 import { fileURLToPath } from "url";
 function resolveDataPath() {
   try {
     const dir = fileURLToPath(new URL("../../../data", import.meta.url));
-    return join2(dir, "partner-roles.json");
+    return join3(dir, "partner-roles.json");
   } catch {
-    return join2(process.cwd(), "data", "partner-roles.json");
+    return join3(process.cwd(), "data", "partner-roles.json");
   }
 }
 function loadPartnerRoles() {
@@ -10459,14 +10459,14 @@ var init_src = __esm({
 
 // bin/jpi-project.js
 import { readFileSync as readFileSync3 } from "fs";
-import { join as join3 } from "path";
-import { homedir as homedir2 } from "os";
+import { join as join4 } from "path";
+import { homedir as homedir3 } from "os";
 import { createInterface } from "readline";
 
 // bin/directory.js
 import { readFileSync, writeFileSync, renameSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
+import { join as join2 } from "path";
+import { homedir as homedir2 } from "os";
 
 // src/state-dir.ts
 import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
@@ -10517,6 +10517,8 @@ function ensureStateDir(dir) {
 }
 
 // src/api-base.ts
+import { homedir } from "os";
+import { join } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {
@@ -10609,9 +10611,9 @@ function normalizeOverride(raw) {
 }
 
 // bin/directory.js
-var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
-var DIRECTORY_CACHE_FILE = join(TERMINALHIRE_DIR, "directory-cache.json");
-var PROJECT_FILE = join(TERMINALHIRE_DIR, "project.json");
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
+var DIRECTORY_CACHE_FILE = join2(TERMINALHIRE_DIR, "directory-cache.json");
+var PROJECT_FILE = join2(TERMINALHIRE_DIR, "project.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = resolveApiBase();
 function readProject() {
@@ -10633,8 +10635,8 @@ function writeProject(patch) {
 }
 
 // bin/jpi-project.js
-var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
-var PROJECT_FILE2 = join3(TERMINALHIRE_DIR2, "project.json");
+var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
+var PROJECT_FILE2 = join4(TERMINALHIRE_DIR2, "project.json");
 var args = process.argv.slice(2);
 var SHOW = args.includes("--show");
 var declarationArg = args.filter((a) => !a.startsWith("--")).join(" ").trim();

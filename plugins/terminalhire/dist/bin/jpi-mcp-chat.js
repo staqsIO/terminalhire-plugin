@@ -4659,6 +4659,8 @@ var init_web_session = __esm({
 });
 
 // src/api-base.ts
+import { homedir as homedir5 } from "os";
+import { join as join7 } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -4768,8 +4770,8 @@ var init_api_base = __esm({
 
 // src/chat-client.ts
 import { existsSync as existsSync6, readFileSync as readFileSync6, writeFileSync as writeFileSync5 } from "fs";
-import { homedir as homedir5 } from "os";
-import { join as join7 } from "path";
+import { homedir as homedir6 } from "os";
+import { join as join8 } from "path";
 function defaultReadPeerPins() {
   try {
     if (!existsSync6(PEERS_FILE)) return {};
@@ -4974,8 +4976,8 @@ var init_chat_client = __esm({
     init_api_base();
     CHAT_BASE = resolveApiBase();
     GH_SESSION_COOKIE = "__jpi_gh_session";
-    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join7(homedir5(), ".terminalhire");
-    PEERS_FILE = join7(TERMINALHIRE_DIR4, "chat-peers.json");
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join8(homedir6(), ".terminalhire");
+    PEERS_FILE = join8(TERMINALHIRE_DIR4, "chat-peers.json");
     REQUEST_TIMEOUT_MS = 1e4;
     ChatNotLinkedError = class extends Error {
       constructor() {
@@ -5020,8 +5022,8 @@ var init_chat_client = __esm({
 
 // src/config.ts
 import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, existsSync as existsSync7 } from "fs";
-import { join as join8 } from "path";
-import { homedir as homedir6 } from "os";
+import { join as join9 } from "path";
+import { homedir as homedir7 } from "os";
 function readConfig() {
   try {
     if (!existsSync7(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
@@ -5049,8 +5051,8 @@ var init_config = __esm({
   "src/config.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join8(homedir6(), ".terminalhire");
-    CONFIG_FILE = join8(TERMINALHIRE_DIR5, "config.json");
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join9(homedir7(), ".terminalhire");
+    CONFIG_FILE = join9(TERMINALHIRE_DIR5, "config.json");
     DEFAULT_CONFIG = {
       nudge: "session",
       peerConnect: false,
@@ -5122,11 +5124,18 @@ var init_tui_core = __esm({
   }
 });
 
+// bin/session-case.js
+var init_session_case = __esm({
+  "bin/session-case.js"() {
+    "use strict";
+  }
+});
+
 // bin/jpi-chat.js
 import { createInterface } from "readline";
 import { existsSync as existsSync8, readFileSync as readFileSync8 } from "fs";
-import { homedir as homedir7 } from "os";
-import { join as join9 } from "path";
+import { homedir as homedir8 } from "os";
+import { join as join10 } from "path";
 function defaultPromptAck({ input = process.stdin, output = process.stdout } = {}) {
   if (!input || input.isTTY !== true) return Promise.resolve(false);
   const rl = createInterface({ input, output });
@@ -5213,6 +5222,7 @@ var init_jpi_chat = __esm({
     init_web_session();
     init_api_base();
     init_tui_core();
+    init_session_case();
     CHAT_BASE2 = resolveApiBase();
     GH_SESSION_COOKIE2 = "__jpi_gh_session";
     CHAT_DISCLOSURE = "Messages are end-to-end encrypted using keys stored only on your device. Our server cannot read message content. Since we distribute your contact's public key, verify your connection by comparing Safety Numbers to rule out a server-side substitution. We store metadata: who messaged whom, when, and message count. Content is purged after 90 days.";
@@ -5225,8 +5235,8 @@ var init_jpi_chat = __esm({
 
 // bin/jpi-chat-read.js
 import { existsSync as existsSync9, readFileSync as readFileSync9, writeFileSync as writeFileSync7 } from "fs";
-import { homedir as homedir8 } from "os";
-import { join as join10 } from "path";
+import { homedir as homedir9 } from "os";
+import { join as join11 } from "path";
 async function syncUnreadBadge(deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
@@ -5408,9 +5418,9 @@ var init_jpi_chat_read = __esm({
     init_api_base();
     CHAT_BASE3 = resolveApiBase();
     GH_SESSION_COOKIE3 = "__jpi_gh_session";
-    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join10(homedir8(), ".terminalhire");
-    READS_FILE = join10(TERMINALHIRE_DIR6, "chat-reads.json");
-    INDEX_CACHE_FILE = join10(TERMINALHIRE_DIR6, "index-cache.json");
+    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join11(homedir9(), ".terminalhire");
+    READS_FILE = join11(TERMINALHIRE_DIR6, "chat-reads.json");
+    INDEX_CACHE_FILE = join11(TERMINALHIRE_DIR6, "index-cache.json");
   }
 });
 
@@ -27629,10 +27639,10 @@ async function run() {
   let version2 = "0.0.0";
   try {
     const { readFileSync: readFileSync10, existsSync: existsSync10 } = await import("fs");
-    const { join: join11 } = await import("path");
+    const { join: join12 } = await import("path");
     const { fileURLToPath: fileURLToPath2 } = await import("url");
     const here = fileURLToPath2(new URL(".", import.meta.url));
-    for (const p of [join11(here, "..", "..", "package.json"), join11(here, "..", "package.json")]) {
+    for (const p of [join12(here, "..", "..", "package.json"), join12(here, "..", "package.json")]) {
       if (existsSync10(p)) {
         const pkg = JSON.parse(readFileSync10(p, "utf8"));
         if (pkg.version) {

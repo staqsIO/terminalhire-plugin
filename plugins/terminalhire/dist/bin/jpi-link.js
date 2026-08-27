@@ -199,6 +199,8 @@ var init_config = __esm({
 });
 
 // src/api-base.ts
+import { homedir as homedir3 } from "os";
+import { join as join3 } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -576,8 +578,8 @@ __export(cache_store_exports, {
   writeIndexCache: () => writeIndexCache
 });
 import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, renameSync } from "fs";
-import { join as join3 } from "path";
-import { homedir as homedir3 } from "os";
+import { join as join4 } from "path";
+import { homedir as homedir4 } from "os";
 function readCacheEntry() {
   try {
     return JSON.parse(readFileSync3(INDEX_CACHE_FILE, "utf8"));
@@ -607,8 +609,8 @@ var init_cache_store = __esm({
   "bin/cache-store.js"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir3(), ".terminalhire");
-    INDEX_CACHE_FILE = join3(TERMINALHIRE_DIR2, "index-cache.json");
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join4(homedir4(), ".terminalhire");
+    INDEX_CACHE_FILE = join4(TERMINALHIRE_DIR2, "index-cache.json");
     SCHEMA_VERSION = 1;
     tmpCounter = 0;
   }
@@ -635,7 +637,7 @@ async function run() {
       // Optimistic in the same way and for the same reason: if the monitor's own
       // environment still points elsewhere, its next poll re-asserts the mismatch,
       // truthfully. That is the flag working, not the clear failing.
-      clearSessionStale: () => updateIndexCache2({ sessionStale: false, sessionHostMismatch: null })
+      clearSessionStale: () => updateIndexCache2({ sessionStale: false, sessionHostMismatch: null, staleHost: null })
     });
   } catch (err) {
     console.error("terminalhire link error:", err?.message ?? err);

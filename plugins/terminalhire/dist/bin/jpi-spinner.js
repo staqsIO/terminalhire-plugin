@@ -389,6 +389,18 @@ function partitionFreshMatches(matches, history, getId = defaultGetId) {
   return { eligible, suppressed };
 }
 
+// bin/session-case.js
+function sessionCase(entry, { stale }) {
+  const m = entry && entry.sessionHostMismatch;
+  if (m && typeof m.linkedHost === "string" && typeof m.currentHost === "string") {
+    return { kind: "mismatch", linkedHost: m.linkedHost, currentHost: m.currentHost };
+  }
+  if (!stale) return null;
+  const host = entry && entry.staleHost;
+  if (typeof host === "string" && host.length > 0) return { kind: "refused", host };
+  return { kind: "expired" };
+}
+
 // bin/spinner-verbs.js
 function titleCase(s) {
   return String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -457,12 +469,14 @@ function buildIncomingIntroLine(incomingPending) {
 function hostLabel(base) {
   return String(base ?? "").replace(/^https?:\/\//, "");
 }
-function buildSessionStaleLine(sessionStale, sessionHostMismatch) {
-  if (sessionHostMismatch) {
-    const { linkedHost, currentHost } = sessionHostMismatch;
-    return `\u26A0 terminalhire: linked to ${hostLabel(linkedHost)}, polling ${hostLabel(currentHost)} \u2014 run: terminalhire link`;
-  }
-  return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire link" : null;
+function buildSessionStaleLine(sessionStale, sessionHostMismatch, staleHost = null) {
+  const c = sessionCase({ sessionHostMismatch, staleHost }, { stale: sessionStale === true });
+  if (!c) return null;
+  if (c.kind === "mismatch")
+    return `\u26A0 terminalhire: linked to ${hostLabel(c.linkedHost)}, polling ${hostLabel(c.currentHost)} \u2014 run: terminalhire link`;
+  if (c.kind === "refused")
+    return `\u26A0 terminalhire: session was refused by ${hostLabel(c.host)} \u2014 run: terminalhire link`;
+  return "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire link";
 }
 function buildUnpushedClaimsLine(unpushedClaims) {
   return unpushedClaims === true ? "\u26A0 new claims not yet on your dashboard \u2014 run: terminalhire claim --push --keep-updated" : null;
@@ -475,10 +489,11 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
     incomingPending,
     sessionStale,
     sessionHostMismatch,
+    staleHost,
     unpushedClaims,
     seenHistory
   } = opts;
-  const staleLine = buildSessionStaleLine(sessionStale, sessionHostMismatch);
+  const staleLine = buildSessionStaleLine(sessionStale, sessionHostMismatch, staleHost);
   const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
   const introLine = buildIncomingIntroLine(incomingPending);
   const unpushedLine = buildUnpushedClaimsLine(unpushedClaims);

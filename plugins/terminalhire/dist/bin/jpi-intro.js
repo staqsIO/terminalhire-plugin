@@ -1404,6 +1404,8 @@ var init_web_session = __esm({
 });
 
 // src/api-base.ts
+import { homedir as homedir2 } from "os";
+import { join as join3 } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -1503,17 +1505,17 @@ var init_api_base = __esm({
 
 // src/test-race-barrier.ts
 import { closeSync as closeSync2, constants as constants2, existsSync as existsSync2, lstatSync, openSync as openSync2 } from "fs";
-import { join as join3 } from "path";
+import { join as join4 } from "path";
 function syncSleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 function waitForTestRaceBarrier(phase) {
   const root = process.env[ENV_VAR];
   if (!root) return;
-  const phaseDir = join3(root, phase);
+  const phaseDir = join4(root, phase);
   if (!existsSync2(phaseDir)) return;
-  const readyFile = join3(phaseDir, `ready-${process.pid}`);
-  const goFile = join3(phaseDir, "go");
+  const readyFile = join4(phaseDir, `ready-${process.pid}`);
+  const goFile = join4(phaseDir, "go");
   const noFollow = constants2.O_NOFOLLOW ?? 0;
   if (lstatSync(readyFile, { throwIfNoEntry: false })) {
     throw new Error(
@@ -1553,8 +1555,8 @@ var init_test_race_barrier = __esm({
 // src/shared-key.ts
 import { randomBytes as randomBytes2 } from "crypto";
 import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, existsSync as existsSync3, linkSync, unlinkSync } from "fs";
-import { join as join4 } from "path";
-import { homedir as homedir2 } from "os";
+import { join as join5 } from "path";
+import { homedir as homedir3 } from "os";
 function isValidKeyHex(value) {
   return KEY_HEX_RE.test(value);
 }
@@ -1608,8 +1610,8 @@ var init_shared_key = __esm({
     "use strict";
     init_state_dir();
     init_test_race_barrier();
-    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join4(homedir2(), ".terminalhire");
-    KEY_FILE = join4(TERMINALHIRE_DIR, "key");
+    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join5(homedir3(), ".terminalhire");
+    KEY_FILE = join5(TERMINALHIRE_DIR, "key");
     KEY_BYTES = 32;
     KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
   }
@@ -1618,7 +1620,7 @@ var init_shared_key = __esm({
 // src/crypto-store.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes3 } from "crypto";
 import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, existsSync as existsSync4, renameSync, rmSync as rmSync2, readdirSync } from "fs";
-import { join as join5, dirname, basename } from "path";
+import { join as join6, dirname, basename } from "path";
 import { createRequire } from "module";
 function encrypt(plaintext, key) {
   const iv = randomBytes3(IV_BYTES);
@@ -1673,7 +1675,7 @@ function makeWarnOnce() {
 function atomicWriteFileSync(filePath, content) {
   const dir = dirname(filePath);
   ensureStateDirForSecret(dir);
-  const tmp = join5(
+  const tmp = join6(
     dir,
     `.${basename(filePath)}.tmp-${process.pid}-${randomBytes3(6).toString("hex")}`
   );
@@ -1691,7 +1693,7 @@ async function deleteKey() {
   }
   for (const name of encFiles) {
     try {
-      rmSync2(join5(stateDir, name));
+      rmSync2(join6(stateDir, name));
     } catch (e) {
       const code = e.code;
       if (code !== "ENOENT") {
@@ -1782,8 +1784,8 @@ __export(profile_exports, {
   removeSavedJob: () => removeSavedJob,
   writeProfile: () => writeProfile
 });
-import { join as join6 } from "path";
-import { homedir as homedir3 } from "os";
+import { join as join7 } from "path";
+import { homedir as homedir4 } from "os";
 function blankProfile() {
   return {
     version: 3,
@@ -1916,8 +1918,8 @@ var init_profile = __esm({
     "use strict";
     init_src();
     init_crypto_store();
-    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join6(homedir3(), ".terminalhire");
-    PROFILE_FILE = join6(TERMINALHIRE_DIR2, "profile.enc");
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join7(homedir4(), ".terminalhire");
+    PROFILE_FILE = join7(TERMINALHIRE_DIR2, "profile.enc");
     profileStore = createEncryptedStore(PROFILE_FILE, {
       blank: blankProfile,
       keyPolicy: "keytar-first-file-fallback"

@@ -115,8 +115,8 @@ import {
   statSync
 } from "fs";
 import { randomBytes as randomBytes3 } from "crypto";
-import { join as join4 } from "path";
-import { homedir as homedir3 } from "os";
+import { join as join5 } from "path";
+import { homedir as homedir4 } from "os";
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -310,8 +310,8 @@ var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
-    CLAIMS_FILE = join4(TERMINALHIRE_DIR3, "claims.json");
+    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
+    CLAIMS_FILE = join5(TERMINALHIRE_DIR3, "claims.json");
     LOCK_DIR = `${CLAIMS_FILE}.lock`;
     LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
     LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
@@ -369,8 +369,8 @@ var init_claims = __esm({
 // bin/claim-push-bg.js
 import { createHash } from "crypto";
 import { readFileSync as readFileSync4, writeFileSync as writeFileSync4, existsSync as existsSync5, rmSync as rmSync3 } from "fs";
-import { join as join5 } from "path";
-import { homedir as homedir4 } from "os";
+import { join as join6 } from "path";
+import { homedir as homedir5 } from "os";
 
 // src/github-auth.ts
 init_state_dir();
@@ -511,8 +511,11 @@ function decrypt(blob, key) {
 init_state_dir();
 
 // src/api-base.ts
+import { homedir as homedir3 } from "os";
+import { join as join4 } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
+var DEV_STATE_DIR_NAME = ".terminalhire-dev";
 var ApiBaseError = class extends Error {
   constructor(message) {
     super(message);
@@ -613,6 +616,7 @@ function isNonProdApiBase(base = resolveApiBaseOrProd()) {
 }
 function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
   if (!isNonProdApiBase(base)) return;
+  if (usingSeparateStateDir()) return;
   try {
     stream.write(
       "terminalhire: non-prod API base \u2014 using the same local session/push credentials as prod; do not mix environments casually.\n"
@@ -620,12 +624,17 @@ function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
   } catch {
   }
 }
+function usingSeparateStateDir(env = process.env) {
+  const dir = env["TERMINALHIRE_DIR"];
+  if (dir === void 0 || dir === "") return false;
+  return dir.endsWith(DEV_STATE_DIR_NAME);
+}
 
 // bin/claim-push-bg.js
-var TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
-var CLAIM_PUSH_AUTO_MARKER = join5(TERMINALHIRE_DIR4, "claim-push-auto.json");
-var CLAIM_PUSH_TOKEN_FILE = join5(TERMINALHIRE_DIR4, "claim-push-token.enc");
-var CLAIM_PUSH_MANUAL_MARKER = join5(TERMINALHIRE_DIR4, "claim-push.json");
+var TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join6(homedir5(), ".terminalhire");
+var CLAIM_PUSH_AUTO_MARKER = join6(TERMINALHIRE_DIR4, "claim-push-auto.json");
+var CLAIM_PUSH_TOKEN_FILE = join6(TERMINALHIRE_DIR4, "claim-push-token.enc");
+var CLAIM_PUSH_MANUAL_MARKER = join6(TERMINALHIRE_DIR4, "claim-push.json");
 var CLAIM_SYNC_BASE = resolveApiBase();
 warnSharedCredentialsIfNonProd(CLAIM_SYNC_BASE);
 var AUTO_CONSENT_VERSION = 3;
@@ -731,7 +740,7 @@ async function shouldNudgeUnpushed() {
     return false;
   }
 }
-var CLAIM_HEARTBEAT_FILE = join5(TERMINALHIRE_DIR4, "claim-heartbeat.json");
+var CLAIM_HEARTBEAT_FILE = join6(TERMINALHIRE_DIR4, "claim-heartbeat.json");
 var HEARTBEAT_MIN_INTERVAL_MS = 3e4;
 var HEARTBEAT_MIN_CONSENT_VERSION = 3;
 function readHeartbeatState() {

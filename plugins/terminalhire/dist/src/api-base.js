@@ -1,6 +1,9 @@
 // src/api-base.ts
+import { homedir } from "os";
+import { join } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
+var DEV_STATE_DIR_NAME = ".terminalhire-dev";
 var ApiBaseError = class extends Error {
   constructor(message) {
     super(message);
@@ -51,6 +54,11 @@ function isLoopbackOrigin(origin) {
 }
 function localApiAllowed(env) {
   return env[ALLOW_LOCAL_API_KEY] === "1";
+}
+function pinToDevApiBase(env = process.env) {
+  env["TERMINALHIRE_API_URL"] = DEV_API_BASE;
+  env["TERMINALHIRE_DIR"] = env["TERMINALHIRE_DIR"] || join(homedir(), DEV_STATE_DIR_NAME);
+  return DEV_API_BASE;
 }
 function resolveApiBase(env = process.env) {
   for (const key of ENV_KEYS) {
@@ -135,6 +143,7 @@ function __resetDevMarkerLatchForTests() {
 }
 function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
   if (!isNonProdApiBase(base)) return;
+  if (usingSeparateStateDir()) return;
   try {
     stream.write(
       "terminalhire: non-prod API base \u2014 using the same local session/push credentials as prod; do not mix environments casually.\n"
@@ -142,13 +151,20 @@ function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
   } catch {
   }
 }
+function usingSeparateStateDir(env = process.env) {
+  const dir = env["TERMINALHIRE_DIR"];
+  if (dir === void 0 || dir === "") return false;
+  return dir.endsWith(DEV_STATE_DIR_NAME);
+}
 export {
   ApiBaseError,
   DEV_API_BASE,
+  DEV_STATE_DIR_NAME,
   PROD_API_BASE,
   __resetDevMarkerLatchForTests,
   formatDevMarker,
   isNonProdApiBase,
+  pinToDevApiBase,
   printDevMarkerIfNeeded,
   resolveApiBase,
   resolveOAuthBase,

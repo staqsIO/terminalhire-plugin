@@ -4856,14 +4856,14 @@ var init_feeds = __esm({
 
 // ../../packages/core/src/partners.ts
 import { readFileSync as readFileSync2 } from "fs";
-import { join as join2 } from "path";
+import { join as join3 } from "path";
 import { fileURLToPath } from "url";
 function resolveDataPath() {
   try {
     const dir = fileURLToPath(new URL("../../../data", import.meta.url));
-    return join2(dir, "partner-roles.json");
+    return join3(dir, "partner-roles.json");
   } catch {
-    return join2(process.cwd(), "data", "partner-roles.json");
+    return join3(process.cwd(), "data", "partner-roles.json");
   }
 }
 function loadPartnerRoles() {
@@ -10474,16 +10474,16 @@ __export(mcp_config_exports, {
   tomlSnippet: () => tomlSnippet,
   writeServerToFile: () => writeServerToFile
 });
-import { homedir as homedir2 } from "os";
-import { join as join3 } from "path";
+import { homedir as homedir3 } from "os";
+import { join as join4 } from "path";
 import { existsSync, readFileSync as readFileSync3, copyFileSync, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2 } from "fs";
 import { dirname } from "path";
 function serverEntry() {
   return { command: SERVER_COMMAND, args: [...SERVER_ARGS] };
 }
-function hostConfigPath(host, home = homedir2()) {
+function hostConfigPath(host, home = homedir3()) {
   if (!host || !Array.isArray(host.relPath)) return null;
-  return join3(home, ...host.relPath);
+  return join4(home, ...host.relPath);
 }
 function jsonSnippet(host) {
   const entry = serverEntry();
@@ -10587,7 +10587,7 @@ function writeServerToFile(configPath, serversKey, entry = serverEntry()) {
 async function initMcpStep({
   ask,
   isTTY = process.stdin.isTTY,
-  home = homedir2(),
+  home = homedir3(),
   out = console.log
 } = {}) {
   out("  Expose your LOCAL matches and claim ledger to your editor / CLI as an MCP server.");
@@ -10706,15 +10706,15 @@ var init_mcp_config = __esm({
 
 // bin/jpi-init.js
 import { existsSync as existsSync2 } from "fs";
-import { join as join4, resolve } from "path";
+import { join as join5, resolve } from "path";
 import { fileURLToPath as fileURLToPath2, pathToFileURL } from "url";
 import { createInterface } from "readline";
 import { spawnSync } from "child_process";
 
 // bin/directory.js
 import { readFileSync, writeFileSync, renameSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
+import { join as join2 } from "path";
+import { homedir as homedir2 } from "os";
 
 // src/state-dir.ts
 import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
@@ -10765,6 +10765,8 @@ function ensureStateDir(dir) {
 }
 
 // src/api-base.ts
+import { homedir } from "os";
+import { join } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {
@@ -10857,9 +10859,9 @@ function normalizeOverride(raw) {
 }
 
 // bin/directory.js
-var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
-var DIRECTORY_CACHE_FILE = join(TERMINALHIRE_DIR, "directory-cache.json");
-var PROJECT_FILE = join(TERMINALHIRE_DIR, "project.json");
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
+var DIRECTORY_CACHE_FILE = join2(TERMINALHIRE_DIR, "directory-cache.json");
+var PROJECT_FILE = join2(TERMINALHIRE_DIR, "project.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
 var API_URL = resolveApiBase();
 function readProject() {
@@ -10884,25 +10886,25 @@ function writeProject(patch) {
 var __dirname = fileURLToPath2(new URL(".", import.meta.url));
 var INTEREST_PROMPT = "A language or domain you want to grow into? We'll point you to open-source and stretch roles there. (optional \u2014 press Enter to skip)";
 function resolveScript(name) {
-  const distPath = resolve(join4(__dirname, "..", "..", "dist", "bin", `${name}.js`));
-  const legacyPath = resolve(join4(__dirname, `${name}.js`));
+  const distPath = resolve(join5(__dirname, "..", "..", "dist", "bin", `${name}.js`));
+  const legacyPath = resolve(join5(__dirname, `${name}.js`));
   return existsSync2(distPath) ? distPath : legacyPath;
 }
 function resolveSrc(name) {
-  const distPath = resolve(join4(__dirname, "..", "..", "dist", "src", `${name}.js`));
-  const legacyPath = resolve(join4(__dirname, "..", "src", `${name}.js`));
+  const distPath = resolve(join5(__dirname, "..", "..", "dist", "src", `${name}.js`));
+  const legacyPath = resolve(join5(__dirname, "..", "src", `${name}.js`));
   return existsSync2(distPath) ? distPath : legacyPath;
 }
 function resolveInstallJs() {
-  const fromDist = resolve(join4(__dirname, "..", "..", "install.js"));
-  const fromBin = resolve(join4(__dirname, "..", "install.js"));
+  const fromDist = resolve(join5(__dirname, "..", "..", "install.js"));
+  const fromBin = resolve(join5(__dirname, "..", "install.js"));
   if (existsSync2(fromDist)) return fromDist;
   if (existsSync2(fromBin)) return fromBin;
   return fromBin;
 }
 function resolveStatuslineInstallJs() {
-  const fromDist = resolve(join4(__dirname, "..", "..", "statusline-install.js"));
-  const fromBin = resolve(join4(__dirname, "..", "statusline-install.js"));
+  const fromDist = resolve(join5(__dirname, "..", "..", "statusline-install.js"));
+  const fromBin = resolve(join5(__dirname, "..", "statusline-install.js"));
   if (existsSync2(fromDist)) return fromDist;
   if (existsSync2(fromBin)) return fromBin;
   return fromBin;

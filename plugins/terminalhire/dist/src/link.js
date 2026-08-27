@@ -218,6 +218,8 @@ function writeConfig(config) {
 }
 
 // src/api-base.ts
+import { homedir as homedir3 } from "os";
+import { join as join3 } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {
