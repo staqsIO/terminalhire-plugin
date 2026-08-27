@@ -149,10 +149,10 @@ function buildVerdictNotice(t) {
   if (!t || typeof t.to !== "string") return null;
   const amount = typeof t.amountUSD === "number" && t.amountUSD > 0 ? `$${t.amountUSD}` : null;
   if (t.verdict === "rejected") {
-    return `  \u2717 founder rejected${amount ? ` \u2014 ${amount}` : ""} \xB7 claim moved to ${t.to}`;
+    return `  \u2717 poster rejected${amount ? ` \u2014 ${amount}` : ""} \xB7 claim moved to ${t.to}`;
   }
   const paid = t.settled ? " \xB7 paid" : "";
-  return `  \u2713 founder accepted${amount ? ` \u2014 ${amount}` : ""}${paid} \xB7 claim moved to ${t.to}`;
+  return `  \u2713 poster accepted${amount ? ` \u2014 ${amount}` : ""}${paid} \xB7 claim moved to ${t.to}`;
 }
 async function syncFounderVerdicts({
   claimsModule,

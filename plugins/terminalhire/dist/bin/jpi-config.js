@@ -295,7 +295,7 @@ async function run() {
       console.log(`  (overridden by TERMINALHIRE_NUDGE=${envOverride} at runtime)`);
     }
     console.log(
-      `  peer-connect: ${cfg.peerConnect ? "on" : "off"}  (ambient peer & founder surfacing; default off)`
+      `  peer-connect: ${cfg.peerConnect ? "on" : "off"}  (ambient peer & poster surfacing; default off)`
     );
     const mixEnv = process.env["TH_MIX"];
     console.log(
@@ -306,7 +306,7 @@ async function run() {
     }
     console.log(`  lead: ${cfg.surfaceLead ?? "auto"}  (auto derives from your open postings)`);
     console.log(
-      `  founder-notify: ${cfg.founderBountyNotify ? "on" : "off"}  (OS ping when a paid founder bounty drops; default off)`
+      `  founder-notify: ${cfg.founderBountyNotify ? "on" : "off"}  (OS ping when a paid posted bounty drops; default off)`
     );
     console.log(`  config file: ${CONFIG_FILE2}`);
     console.log("");
@@ -320,13 +320,13 @@ async function run() {
     console.log("");
     console.log("  Peer-connect (--connect on|off):");
     console.log(
-      "    on   \u2014 surface peers & founders in the spinner + send an anonymous matched signal"
+      "    on   \u2014 surface peers & posters in the spinner + send an anonymous matched signal"
     );
     console.log("    off  \u2014 no peer matching, no directory fetch, no signal (default)");
     console.log("");
-    console.log("  Founder bounty OS notify (--founder-notify on|off):");
-    console.log("    on   \u2014 ping when a NEW claimable founder bounty appears (TERM-228)");
-    console.log("    off  \u2014 no OS toast for founder supply (default)");
+    console.log("  Posted bounty OS notify (--founder-notify on|off):");
+    console.log("    on   \u2014 ping when a NEW claimable posted bounty appears (TERM-228)");
+    console.log("    off  \u2014 no OS toast for posted bounties (default)");
     console.log("");
     return;
   }

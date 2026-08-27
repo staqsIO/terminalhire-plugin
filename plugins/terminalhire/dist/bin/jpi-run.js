@@ -1985,6 +1985,13 @@ function resolveImageForSpec(spec, override) {
   }
   return image;
 }
+function installEnvironmentFailureNote(install, image) {
+  const base = `the install step exited ${String(install.exitCode)}, so the test command was never invoked. The repo has not been judged; this is an environment failure.`;
+  if (!MISSING_IMAGE_SHAPE.test(`${install.stdout}
+${install.stderr}`))
+    return base;
+  return `${base} The container image ${image} is not present on this machine \u2014 run \`docker pull ${image}\` and try again.`;
+}
 function classifySingleRun(run2) {
   return classifyVerification(run2).outcome;
 }
@@ -2042,7 +2049,7 @@ async function runEnvironmentSpec(req) {
     if (install !== null && install.exitCode !== 0) {
       result = {
         outcome: "test-command-unavailable",
-        note: `the install step exited ${String(install.exitCode)}, so the test command was never invoked. The repo has not been judged; this is an environment failure.`,
+        note: installEnvironmentFailureNote(install, image),
         installOk: false
       };
     } else if (req.spec.testCommand === null) {
@@ -2139,7 +2146,7 @@ async function runStep(containment, r) {
     wallMs: Date.now() - startedAt
   };
 }
-var EnvRunError, RunRefusalError, MAX_CAUSE_FRAMES, CHAIN_UNREADABLE, CHAIN_TOO_DEEP, RUNTIME_IMAGES, unversionedImage, TAG_VERSION, dockerManifestProbe, manifestProbe;
+var EnvRunError, RunRefusalError, MAX_CAUSE_FRAMES, CHAIN_UNREADABLE, CHAIN_TOO_DEEP, RUNTIME_IMAGES, unversionedImage, TAG_VERSION, dockerManifestProbe, manifestProbe, MISSING_IMAGE_SHAPE;
 var init_execute = __esm({
   "../../packages/envrun/dist/execute.js"() {
     "use strict";
@@ -2181,6 +2188,7 @@ var init_execute = __esm({
       return { status: res.status, output: `${res.stdout ?? ""}${res.stderr ?? ""}` };
     };
     manifestProbe = dockerManifestProbe;
+    MISSING_IMAGE_SHAPE = /Unable to find image ['"][^'"]*['"] locally/i;
   }
 });
 

@@ -83,15 +83,46 @@ function terminalhireDir() {
 function webSessionFilePath() {
   return join(terminalhireDir(), "web-session");
 }
-function readWebSessionFile() {
+function parseWebSessionFile(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
   try {
-    const path = webSessionFilePath();
-    if (!existsSync(path)) return null;
-    const v = readFileSync(path, "utf8").trim();
-    return v.length > 0 ? v : null;
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const rec = parsed;
+    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
+    const host = typeof rec.host === "string" ? rec.host.trim() : "";
+    return { token: rec.token, host: host === "" ? null : host };
   } catch {
     return null;
   }
+}
+function readWebSessionRecord() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync(path)) return null;
+    return parseWebSessionFile(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function readWebSessionFile() {
+  return readWebSessionRecord()?.token ?? null;
+}
+function webSessionForHost(apiBase) {
+  const record = readWebSessionRecord();
+  if (!record) return { cookie: null, mismatch: null };
+  if (record.host !== null && record.host !== apiBase) {
+    return { cookie: null, mismatch: { linkedHost: record.host, currentHost: apiBase } };
+  }
+  return { cookie: record.token, mismatch: null };
+}
+function webSessionCookieForHost(apiBase) {
+  const fromFile = webSessionForHost(apiBase);
+  if (fromFile.cookie || fromFile.mismatch) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return { cookie: typeof env === "string" && env.length > 0 ? env : null, mismatch: null };
 }
 function readWebSessionCookie() {
   const fromFile = readWebSessionFile();
@@ -99,10 +130,11 @@ function readWebSessionCookie() {
   const env = process.env["TERMINALHIRE_WEB_SESSION"];
   return typeof env === "string" && env.length > 0 ? env : null;
 }
-function writeWebSessionFile(token) {
+function writeWebSessionFile(token, host) {
   ensureStateDirForSecret(terminalhireDir());
   const path = webSessionFilePath();
-  writeFileSync(path, token, { mode: 384, encoding: "utf8" });
+  const body = typeof host === "string" && host.length > 0 ? JSON.stringify({ v: 1, host, token }) : token;
+  writeFileSync(path, body, { mode: 384, encoding: "utf8" });
   try {
     chmodSync(path, 384);
   } catch {
@@ -118,6 +150,9 @@ export {
   clearWebSessionFile,
   readWebSessionCookie,
   readWebSessionFile,
+  readWebSessionRecord,
+  webSessionCookieForHost,
   webSessionFilePath,
+  webSessionForHost,
   writeWebSessionFile
 };

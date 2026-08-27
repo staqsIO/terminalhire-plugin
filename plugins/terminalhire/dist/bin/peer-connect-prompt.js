@@ -230,7 +230,7 @@ var PROMPT = [
   "",
   "  Connect with other builders?",
   "",
-  "  See peers and founders building what you're building \u2014 from a profile that",
+  "  See peers and posters building what you're building \u2014 from a profile that",
   "  never leaves your machine. The only thing ever sent is anonymous: the",
   "  matched person's public username, never yours, never your profile or fingerprint.",
   "",
@@ -288,7 +288,7 @@ async function maybePromptPeerConnect({
   const optedIn = answer === "y" || answer === "yes";
   writeConfig({ peerConnect: optedIn, peerConnectPrompted: true });
   output.write(
-    optedIn ? "\n  Peer-connect ON \u2014 peers & founders may surface in your spinner.\n  Turn it off anytime: terminalhire config --connect off\n\n" : "\n  Peer-connect stays OFF. Enable anytime: terminalhire config --connect on\n\n"
+    optedIn ? "\n  Peer-connect ON \u2014 peers & posters may surface in your spinner.\n  Turn it off anytime: terminalhire config --connect off\n\n" : "\n  Peer-connect stays OFF. Enable anytime: terminalhire config --connect on\n\n"
   );
   let resumePublishOpened = false;
   if (optedIn && cfg.resumePublishPrompted !== true) {

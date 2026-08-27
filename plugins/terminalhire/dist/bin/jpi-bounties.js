@@ -11749,7 +11749,10 @@ __export(web_session_exports, {
   clearWebSessionFile: () => clearWebSessionFile,
   readWebSessionCookie: () => readWebSessionCookie,
   readWebSessionFile: () => readWebSessionFile,
+  readWebSessionRecord: () => readWebSessionRecord,
+  webSessionCookieForHost: () => webSessionCookieForHost,
   webSessionFilePath: () => webSessionFilePath,
+  webSessionForHost: () => webSessionForHost,
   writeWebSessionFile: () => writeWebSessionFile
 });
 import { chmodSync, existsSync as existsSync6, readFileSync as readFileSync7, rmSync as rmSync3, writeFileSync as writeFileSync6 } from "fs";
@@ -11761,15 +11764,46 @@ function terminalhireDir() {
 function webSessionFilePath() {
   return join10(terminalhireDir(), "web-session");
 }
-function readWebSessionFile() {
+function parseWebSessionFile(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
   try {
-    const path = webSessionFilePath();
-    if (!existsSync6(path)) return null;
-    const v = readFileSync7(path, "utf8").trim();
-    return v.length > 0 ? v : null;
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const rec = parsed;
+    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
+    const host = typeof rec.host === "string" ? rec.host.trim() : "";
+    return { token: rec.token, host: host === "" ? null : host };
   } catch {
     return null;
   }
+}
+function readWebSessionRecord() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync6(path)) return null;
+    return parseWebSessionFile(readFileSync7(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function readWebSessionFile() {
+  return readWebSessionRecord()?.token ?? null;
+}
+function webSessionForHost(apiBase) {
+  const record = readWebSessionRecord();
+  if (!record) return { cookie: null, mismatch: null };
+  if (record.host !== null && record.host !== apiBase) {
+    return { cookie: null, mismatch: { linkedHost: record.host, currentHost: apiBase } };
+  }
+  return { cookie: record.token, mismatch: null };
+}
+function webSessionCookieForHost(apiBase) {
+  const fromFile = webSessionForHost(apiBase);
+  if (fromFile.cookie || fromFile.mismatch) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return { cookie: typeof env === "string" && env.length > 0 ? env : null, mismatch: null };
 }
 function readWebSessionCookie() {
   const fromFile = readWebSessionFile();
@@ -11777,10 +11811,11 @@ function readWebSessionCookie() {
   const env = process.env["TERMINALHIRE_WEB_SESSION"];
   return typeof env === "string" && env.length > 0 ? env : null;
 }
-function writeWebSessionFile(token) {
+function writeWebSessionFile(token, host) {
   ensureStateDirForSecret(terminalhireDir());
   const path = webSessionFilePath();
-  writeFileSync6(path, token, { mode: 384, encoding: "utf8" });
+  const body = typeof host === "string" && host.length > 0 ? JSON.stringify({ v: 1, host, token }) : token;
+  writeFileSync6(path, body, { mode: 384, encoding: "utf8" });
   try {
     chmodSync(path, 384);
   } catch {
@@ -11839,12 +11874,12 @@ function declineBody(bountyId, reason) {
 function consentNotice(bountyId, reason) {
   return [
     "",
-    "This is the first thing you have sent a founder from this machine, so:",
+    "This is the first thing you have sent a poster from this machine, so:",
     "",
     "  Sending this posts EXACTLY this, and nothing else:",
     `    ${JSON.stringify(declineBody(bountyId, reason))}`,
     "",
-    "  The founder sees a COUNT, never your name \u2014 answers are pooled across",
+    "  The poster sees a COUNT, never your name \u2014 answers are pooled across",
     "  developers, and the breakdown stays hidden until enough people have",
     "  answered that no single answer points at one person.",
     "",
@@ -11906,7 +11941,7 @@ async function sendDecline(bountyId, reason) {
   const { readWebSessionCookie: readWebSessionCookie2 } = await Promise.resolve().then(() => (init_web_session(), web_session_exports));
   const cookie = readWebSessionCookie2();
   if (!cookie) {
-    console.log("\nRun `terminalhire link` first \u2014 a founder needs to know the answer is real.");
+    console.log("\nRun `terminalhire link` first \u2014 a poster needs to know the answer is real.");
     return false;
   }
   if (!await ensureDeclineConsent(bountyId, reason)) return false;
@@ -11925,7 +11960,7 @@ async function sendDecline(bountyId, reason) {
 Could not send that (${res.status}). Nothing else was sent.`);
       return false;
     }
-    console.log("\nSent \u2014 thanks. The founder sees a count, never your name.");
+    console.log("\nSent \u2014 thanks. The poster sees a count, never your name.");
     return true;
   } catch {
     console.log("\nCould not reach terminalhire. Nothing else was sent.");
@@ -11933,7 +11968,7 @@ Could not send that (${res.status}). Nothing else was sent.`);
   }
 }
 async function runDeclinePrompt(bountyId, { ask = prompt } = {}) {
-  console.log("\nWhy are you passing? The founder sees a count, never your name.");
+  console.log("\nWhy are you passing? The poster sees a count, never your name.");
   for (const c of DECLINE_CHOICES) console.log(`  ${c.key}. ${c.label}`);
   const pick = await ask("\nEnter a number, or press Enter to skip: ");
   const reason = reasonForKey(pick);
@@ -12335,7 +12370,7 @@ function founderClaimBlurb(amountUSD, paidWork) {
   if (typeof amountUSD === "number" && Number.isFinite(amountUSD) && amountUSD > 0) {
     share = ` You'd receive ${formatCents(developerShareCents(Math.round(amountUSD * 100)))} of the ${formatCents(Math.round(amountUSD * 100))} posted; terminalhire keeps 10%.`;
   }
-  return `Claim it from here \u2014 the founder pays through terminalhire rather than off-platform, and their acceptance is what triggers your payout.${share}`;
+  return `Claim it from here \u2014 the poster pays through terminalhire rather than off-platform, and their acceptance is what triggers your payout.${share}`;
 }
 function founderClaimBlock(job) {
   const ref = opportunityShortToken(job.id);
@@ -12383,7 +12418,7 @@ ${i + 1}. ${linkTitle(job.title, job.url)} [${ref}]`);
   }
   if (b.bountySource === "founder" && b.specProvenance) {
     console.log(
-      `   Spec: ${b.specProvenance === "agent_drafted_human_confirmed" ? "agent drafted \xB7 founder confirmed" : "founder authored"}`
+      `   Spec: ${b.specProvenance === "agent_drafted_human_confirmed" ? "agent drafted \xB7 poster confirmed" : "poster authored"}`
     );
   }
   if (matchedTags && matchedTags.length)
@@ -12597,7 +12632,7 @@ Enter a number to open a bounty's claim page, d<number> to say why you're passin
       const postingId = postingIdFromJobId2(shown[dIdx]?.id);
       if (!postingId) {
         console.log(
-          "\nThat one is scraped from a public tracker \u2014 there is no founder here to tell."
+          "\nThat one is scraped from a public tracker \u2014 there is no poster here to tell."
         );
         return;
       }

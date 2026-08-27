@@ -98,20 +98,35 @@ function terminalhireDir() {
 function webSessionFilePath() {
   return join(terminalhireDir(), "web-session");
 }
-function readWebSessionFile() {
+function parseWebSessionFile(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
   try {
-    const path = webSessionFilePath();
-    if (!existsSync(path)) return null;
-    const v = readFileSync(path, "utf8").trim();
-    return v.length > 0 ? v : null;
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const rec = parsed;
+    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
+    const host = typeof rec.host === "string" ? rec.host.trim() : "";
+    return { token: rec.token, host: host === "" ? null : host };
   } catch {
     return null;
   }
 }
-function writeWebSessionFile(token) {
+function readWebSessionRecord() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync(path)) return null;
+    return parseWebSessionFile(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function writeWebSessionFile(token, host) {
   ensureStateDirForSecret(terminalhireDir());
   const path = webSessionFilePath();
-  writeFileSync(path, token, { mode: 384, encoding: "utf8" });
+  const body = typeof host === "string" && host.length > 0 ? JSON.stringify({ v: 1, host, token }) : token;
+  writeFileSync(path, body, { mode: 384, encoding: "utf8" });
   try {
     chmodSync(path, 384);
   } catch {
@@ -398,7 +413,10 @@ function defaultLinkDeps() {
       });
     },
     generateNonce: () => randomBytes(16).toString("hex"),
-    persistToken: (token) => writeWebSessionFile(token),
+    // LINK_BASE, not a re-resolve: the session must record the host this link
+    // actually ran against, and re-reading the environment here could name a
+    // different one if it changed mid-flow (TERM-970).
+    persistToken: (token) => writeWebSessionFile(token, LINK_BASE),
     markNudgeDisclosed: () => writeConfig({ inboundNudgeDisclosed: true }),
     // No-op by default: the index-cache is a bin-layer concern (statusline/spinner
     // render), so the real writer (cache-store.updateIndexCache) is injected by
@@ -462,7 +480,7 @@ async function runLink(overrides) {
 function defaultLinkLogoutDeps() {
   return {
     fetchImpl: (...args) => globalThis.fetch(...args),
-    readSessionFile: () => readWebSessionFile(),
+    readSessionRecord: () => readWebSessionRecord(),
     clearSessionFile: () => clearWebSessionFile(),
     log: (msg) => console.log(msg),
     errorLog: (msg) => console.error(msg),
@@ -471,17 +489,47 @@ function defaultLinkLogoutDeps() {
 }
 async function runLinkLogout(overrides) {
   const deps = { ...defaultLinkLogoutDeps(), ...overrides };
-  const token = deps.readSessionFile();
-  if (!token) {
+  const record = deps.readSessionRecord();
+  if (!record) {
     deps.log("\n  No linked web session on this machine \u2014 nothing to unlink.\n");
     deps.exit(0);
     return;
   }
+  let target = LINK_BASE;
+  if (record.host !== null && record.host !== LINK_BASE) {
+    try {
+      target = resolveApiBase({ ...process.env, TERMINALHIRE_API_URL: record.host });
+    } catch {
+      let flagWouldFixIt = false;
+      try {
+        resolveApiBase({
+          ...process.env,
+          TERMINALHIRE_API_URL: record.host,
+          TERMINALHIRE_ALLOW_LOCAL_API: "1"
+        });
+        flagWouldFixIt = true;
+      } catch {
+      }
+      deps.errorLog("\n  This session was linked to a host this CLI does not permit from here:");
+      deps.errorLog(`    ${record.host}`);
+      deps.errorLog("  Nothing was sent. The local record was KEPT \u2014 it is the only thing on");
+      deps.errorLog("  this machine that can revoke that session, which may still be live there.");
+      if (flagWouldFixIt) {
+        deps.errorLog("  To revoke it, re-run this command with TERMINALHIRE_ALLOW_LOCAL_API=1.");
+        deps.errorLog("  Do NOT link first \u2014 `terminalhire link` replaces this record.\n");
+      } else {
+        deps.errorLog("  That host is not one this CLI permits under any setting, so it cannot");
+        deps.errorLog("  revoke it from here. The session expires on its own.\n");
+      }
+      deps.exit(1);
+      return;
+    }
+  }
   let revoked = false;
   try {
-    const res = await deps.fetchImpl(`${LINK_BASE}/api/auth/session`, {
+    const res = await deps.fetchImpl(`${target}/api/auth/session`, {
       method: "DELETE",
-      headers: { Cookie: `${GH_SESSION_COOKIE}=${token}` },
+      headers: { Cookie: `${GH_SESSION_COOKIE}=${record.token}` },
       signal: AbortSignal.timeout(1e4)
     });
     revoked = res.ok;
@@ -578,7 +626,16 @@ async function run() {
     const { runLink: runLink2 } = await Promise.resolve().then(() => (init_link(), link_exports));
     const { updateIndexCache: updateIndexCache2 } = await Promise.resolve().then(() => (init_cache_store(), cache_store_exports));
     await runLink2({
-      clearSessionStale: () => updateIndexCache2({ sessionStale: false })
+      // BOTH session complaints. The link rewrote the file, including the host it
+      // records, so a mismatch observed before it is a statement about a file that
+      // no longer exists. Clearing only `sessionStale` would leave the mismatch
+      // banner up until the next poll — the lag this optimistic clear exists to
+      // avoid (TERM-970).
+      //
+      // Optimistic in the same way and for the same reason: if the monitor's own
+      // environment still points elsewhere, its next poll re-asserts the mismatch,
+      // truthfully. That is the flag working, not the clear failing.
+      clearSessionStale: () => updateIndexCache2({ sessionStale: false, sessionHostMismatch: null })
     });
   } catch (err) {
     console.error("terminalhire link error:", err?.message ?? err);

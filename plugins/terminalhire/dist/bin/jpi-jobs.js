@@ -11252,7 +11252,10 @@ function buildContextVerbs(topMatches, sessionTags) {
     headers = [`\u2726 Fits your ${a} + ${b} work`, `\u2726 A match for what you're building \u2014 link below`];
   } else if (overlap.length === 1) {
     const a = titleCase(overlap[0]);
-    headers = [`\u2726 Work in your ${a} stack \u2014 link below`, `\u2726 Your ${a} work \u2014 link in the tip below`];
+    headers = [
+      `\u2726 Work in your ${a} stack \u2014 link below`,
+      `\u2726 Your ${a} work \u2014 link in the tip below`
+    ];
   } else {
     headers = [`\u2726 Work that fits your stack`, `\u2726 A match for you \u2014 link in the tip below`];
   }
@@ -11268,8 +11271,15 @@ function buildIncomingIntroLine(incomingPending) {
   if (n < 1) return null;
   return n === 1 ? `\u2198 someone wants to connect \xB7 terminalhire intro --list` : `\u2198 ${n} people want to connect \xB7 terminalhire intro --list`;
 }
-function buildSessionStaleLine(sessionStale) {
-  return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire login" : null;
+function hostLabel(base) {
+  return String(base ?? "").replace(/^https?:\/\//, "");
+}
+function buildSessionStaleLine(sessionStale, sessionHostMismatch) {
+  if (sessionHostMismatch) {
+    const { linkedHost, currentHost } = sessionHostMismatch;
+    return `\u26A0 terminalhire: linked to ${hostLabel(linkedHost)}, polling ${hostLabel(currentHost)} \u2014 run: terminalhire link`;
+  }
+  return sessionStale === true ? "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire link" : null;
 }
 function buildUnpushedClaimsLine(unpushedClaims) {
   return unpushedClaims === true ? "\u26A0 new claims not yet on your dashboard \u2014 run: terminalhire claim --push --keep-updated" : null;
@@ -11281,10 +11291,11 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
     topPeers,
     incomingPending,
     sessionStale,
+    sessionHostMismatch,
     unpushedClaims,
     seenHistory
   } = opts;
-  const staleLine = buildSessionStaleLine(sessionStale);
+  const staleLine = buildSessionStaleLine(sessionStale, sessionHostMismatch);
   const withStale = (pool2) => staleLine ? [staleLine, ...pool2] : pool2;
   const introLine = buildIncomingIntroLine(incomingPending);
   const unpushedLine = buildUnpushedClaimsLine(unpushedClaims);
@@ -11458,6 +11469,7 @@ function renderRefreshSurface(topMatches, sc, opts = {}) {
     topPeers: opts.topPeers,
     incomingPending: opts.incomingPending,
     sessionStale: opts.sessionStale,
+    sessionHostMismatch: opts.sessionHostMismatch,
     unpushedClaims: opts.unpushedClaims,
     seenHistory
   });
@@ -12186,15 +12198,32 @@ function terminalhireDir() {
 function webSessionFilePath() {
   return join12(terminalhireDir(), "web-session");
 }
-function readWebSessionFile() {
+function parseWebSessionFile(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
   try {
-    const path = webSessionFilePath();
-    if (!existsSync7(path)) return null;
-    const v = readFileSync9(path, "utf8").trim();
-    return v.length > 0 ? v : null;
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const rec = parsed;
+    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
+    const host = typeof rec.host === "string" ? rec.host.trim() : "";
+    return { token: rec.token, host: host === "" ? null : host };
   } catch {
     return null;
   }
+}
+function readWebSessionRecord() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync7(path)) return null;
+    return parseWebSessionFile(readFileSync9(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function readWebSessionFile() {
+  return readWebSessionRecord()?.token ?? null;
 }
 function readWebSessionCookie() {
   const fromFile = readWebSessionFile();

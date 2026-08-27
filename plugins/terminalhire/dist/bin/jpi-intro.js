@@ -1363,15 +1363,32 @@ function terminalhireDir() {
 function webSessionFilePath() {
   return join2(terminalhireDir(), "web-session");
 }
-function readWebSessionFile() {
+function parseWebSessionFile(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
   try {
-    const path = webSessionFilePath();
-    if (!existsSync(path)) return null;
-    const v = readFileSync2(path, "utf8").trim();
-    return v.length > 0 ? v : null;
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const rec = parsed;
+    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
+    const host = typeof rec.host === "string" ? rec.host.trim() : "";
+    return { token: rec.token, host: host === "" ? null : host };
   } catch {
     return null;
   }
+}
+function readWebSessionRecord() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync(path)) return null;
+    return parseWebSessionFile(readFileSync2(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function readWebSessionFile() {
+  return readWebSessionRecord()?.token ?? null;
 }
 function readWebSessionCookie() {
   const fromFile = readWebSessionFile();

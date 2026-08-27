@@ -30,6 +30,14 @@ function incomingCount(entry) {
 function sessionStale(entry) {
   return !!entry && entry.sessionStale === true;
 }
+function hostDisagreement(entry) {
+  const m = entry && entry.sessionHostMismatch;
+  if (!m || typeof m.linkedHost !== "string" || typeof m.currentHost !== "string") return null;
+  return m;
+}
+function hostLabel(base) {
+  return String(base ?? "").replace(/^https?:\/\//, "");
+}
 function founderPaidCount(entry) {
   const n = entry && entry.founderPaid && entry.founderPaid.count;
   return typeof n === "number" && n > 0 ? n : 0;
@@ -95,11 +103,12 @@ function render() {
     const founderNotes = founderNoteCount(entry);
     const founderNeedsYou = founderNeedsYouCount(entry);
     const founderOpen = founderOpenCount(entry);
+    const mismatch = hostDisagreement(entry);
     const stale = sessionStale(entry) && unread === 0 && incoming === 0;
     const segments = [];
     if (approved > 0) segments.push(`\u2705 ${approved} approved \u2014 run: th claim start`);
     if (founderNotes > 0) {
-      segments.push(`\u{1F4DD} ${founderNotes} from your founder \u2014 run: th claim notes`);
+      segments.push(`\u{1F4DD} ${founderNotes} from your poster \u2014 run: th claim notes`);
     }
     if (founderNeedsYou > 0) {
       segments.push(
@@ -116,6 +125,10 @@ function render() {
     if (incoming > 0) conn.push(`\u2709 ${incoming} intro request${incoming === 1 ? "" : "s"}`);
     if (conn.length > 0) {
       segments.push(`${conn.join("  \xB7  ")} \u2014 run: th inbox`);
+    } else if (mismatch) {
+      segments.push(
+        `\u26A0 terminalhire linked to ${hostLabel(mismatch.linkedHost)}, polling ${hostLabel(mismatch.currentHost)} \u2014 run: th link`
+      );
     } else if (stale) {
       segments.push("\u26A0 terminalhire session expired \u2014 run: th link");
     }
