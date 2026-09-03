@@ -115,6 +115,30 @@ var CLAIM_STATES = Object.freeze([
   "abandoned"
   // released, or PR closed unmerged
 ]);
+var CLAIM_TURN_BY_STATE = Object.freeze({
+  claimed: "you",
+  working: "you",
+  "in-review": "you",
+  ready: "you",
+  submitted: "poster",
+  merged: "merged",
+  abandoned: "closed"
+});
+function claimTurn(state) {
+  return CLAIM_TURN_BY_STATE[state] ?? "you";
+}
+var CLAIM_TURN_LABEL = Object.freeze({
+  you: "waiting on you",
+  poster: "waiting on poster",
+  merged: "merged",
+  closed: "closed"
+});
+function claimTurnLabel(state) {
+  return CLAIM_TURN_LABEL[claimTurn(state)];
+}
+var CLAIM_TURN_LABEL_WIDTH = Math.max(
+  ...Object.values(CLAIM_TURN_LABEL).map((label) => label.length)
+);
 var PUSHED_CLAIM_FIELDS = [
   "kind",
   "repoFullName",
@@ -297,17 +321,31 @@ function countAwaitingFounderApproval(claims = readClaims()) {
     return 0;
   }
 }
+var DECIDED_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;
   const merged = claims.filter((c) => c.state === "merged").length;
-  return { merged, total, rate: total === 0 ? 0 : merged / total };
+  const decided = claims.filter((c) => DECIDED_STATES.has(c.state)).length;
+  return { merged, decided, inFlight: total - decided, total, rate: decided === 0 ? 0 : merged / decided };
+}
+function formatAcceptedPRRate(rate) {
+  const inFlight = rate.inFlight > 0 ? ` \xB7 ${rate.inFlight} in flight` : "";
+  if (rate.decided === 0) {
+    return `Accepted-PR rate: no claims decided yet${inFlight}`;
+  }
+  const pct = Math.round(rate.rate * 100);
+  return `Accepted-PR rate: ${rate.merged}/${rate.decided} decided claims merged (${pct}%)${inFlight}`;
 }
 export {
   CLAIM_STATES,
+  CLAIM_TURN_LABEL_WIDTH,
   PUSHED_CLAIM_FIELDS,
   acceptedPRRate,
+  claimTurn,
+  claimTurnLabel,
   countAwaitingFounderApproval,
   findClaim,
+  formatAcceptedPRRate,
   listClaims,
   nextPolledState,
   readClaims,

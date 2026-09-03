@@ -1834,10 +1834,14 @@ var init_repo_experience = __esm({
 var claims_exports = {};
 __export(claims_exports, {
   CLAIM_STATES: () => CLAIM_STATES,
+  CLAIM_TURN_LABEL_WIDTH: () => CLAIM_TURN_LABEL_WIDTH,
   PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
   acceptedPRRate: () => acceptedPRRate,
+  claimTurn: () => claimTurn,
+  claimTurnLabel: () => claimTurnLabel,
   countAwaitingFounderApproval: () => countAwaitingFounderApproval,
   findClaim: () => findClaim,
+  formatAcceptedPRRate: () => formatAcceptedPRRate,
   listClaims: () => listClaims,
   nextPolledState: () => nextPolledState,
   readClaims: () => readClaims,
@@ -1891,6 +1895,12 @@ function withClaimsLock(fn) {
   } finally {
     rmSync2(LOCK_DIR, { recursive: true, force: true });
   }
+}
+function claimTurn(state) {
+  return CLAIM_TURN_BY_STATE[state] ?? "you";
+}
+function claimTurnLabel(state) {
+  return CLAIM_TURN_LABEL[claimTurn(state)];
 }
 function toPushedClaim(claim) {
   return {
@@ -2046,9 +2056,18 @@ function countAwaitingFounderApproval(claims = readClaims()) {
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;
   const merged = claims.filter((c) => c.state === "merged").length;
-  return { merged, total, rate: total === 0 ? 0 : merged / total };
+  const decided = claims.filter((c) => DECIDED_STATES.has(c.state)).length;
+  return { merged, decided, inFlight: total - decided, total, rate: decided === 0 ? 0 : merged / decided };
 }
-var TERMINALHIRE_DIR4, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, WHITESPACE_CONTROLS, CONTROL_CHARS;
+function formatAcceptedPRRate(rate) {
+  const inFlight = rate.inFlight > 0 ? ` \xB7 ${rate.inFlight} in flight` : "";
+  if (rate.decided === 0) {
+    return `Accepted-PR rate: no claims decided yet${inFlight}`;
+  }
+  const pct = Math.round(rate.rate * 100);
+  return `Accepted-PR rate: ${rate.merged}/${rate.decided} decided claims merged (${pct}%)${inFlight}`;
+}
+var TERMINALHIRE_DIR4, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, CLAIM_TURN_BY_STATE, CLAIM_TURN_LABEL, CLAIM_TURN_LABEL_WIDTH, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, WHITESPACE_CONTROLS, CONTROL_CHARS, DECIDED_STATES;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
@@ -2075,6 +2094,24 @@ var init_claims = __esm({
       "abandoned"
       // released, or PR closed unmerged
     ]);
+    CLAIM_TURN_BY_STATE = Object.freeze({
+      claimed: "you",
+      working: "you",
+      "in-review": "you",
+      ready: "you",
+      submitted: "poster",
+      merged: "merged",
+      abandoned: "closed"
+    });
+    CLAIM_TURN_LABEL = Object.freeze({
+      you: "waiting on you",
+      poster: "waiting on poster",
+      merged: "merged",
+      closed: "closed"
+    });
+    CLAIM_TURN_LABEL_WIDTH = Math.max(
+      ...Object.values(CLAIM_TURN_LABEL).map((label) => label.length)
+    );
     PUSHED_CLAIM_FIELDS = [
       "kind",
       "repoFullName",
@@ -2106,6 +2143,7 @@ var init_claims = __esm({
     };
     WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
     CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
+    DECIDED_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
   }
 });
 

@@ -10563,10 +10563,14 @@ var init_state_dir = __esm({
 var claims_exports = {};
 __export(claims_exports, {
   CLAIM_STATES: () => CLAIM_STATES,
+  CLAIM_TURN_LABEL_WIDTH: () => CLAIM_TURN_LABEL_WIDTH,
   PUSHED_CLAIM_FIELDS: () => PUSHED_CLAIM_FIELDS,
   acceptedPRRate: () => acceptedPRRate,
+  claimTurn: () => claimTurn,
+  claimTurnLabel: () => claimTurnLabel,
   countAwaitingFounderApproval: () => countAwaitingFounderApproval,
   findClaim: () => findClaim,
+  formatAcceptedPRRate: () => formatAcceptedPRRate,
   listClaims: () => listClaims,
   nextPolledState: () => nextPolledState,
   readClaims: () => readClaims,
@@ -10620,6 +10624,12 @@ function withClaimsLock(fn) {
   } finally {
     rmSync(LOCK_DIR, { recursive: true, force: true });
   }
+}
+function claimTurn(state) {
+  return CLAIM_TURN_BY_STATE[state] ?? "you";
+}
+function claimTurnLabel(state) {
+  return CLAIM_TURN_LABEL[claimTurn(state)];
 }
 function toPushedClaim(claim) {
   return {
@@ -10775,9 +10785,18 @@ function countAwaitingFounderApproval(claims = readClaims()) {
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;
   const merged = claims.filter((c) => c.state === "merged").length;
-  return { merged, total, rate: total === 0 ? 0 : merged / total };
+  const decided = claims.filter((c) => DECIDED_STATES.has(c.state)).length;
+  return { merged, decided, inFlight: total - decided, total, rate: decided === 0 ? 0 : merged / decided };
 }
-var TERMINALHIRE_DIR2, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, WHITESPACE_CONTROLS2, CONTROL_CHARS2;
+function formatAcceptedPRRate(rate) {
+  const inFlight = rate.inFlight > 0 ? ` \xB7 ${rate.inFlight} in flight` : "";
+  if (rate.decided === 0) {
+    return `Accepted-PR rate: no claims decided yet${inFlight}`;
+  }
+  const pct = Math.round(rate.rate * 100);
+  return `Accepted-PR rate: ${rate.merged}/${rate.decided} decided claims merged (${pct}%)${inFlight}`;
+}
+var TERMINALHIRE_DIR2, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, CLAIM_TURN_BY_STATE, CLAIM_TURN_LABEL, CLAIM_TURN_LABEL_WIDTH, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, WHITESPACE_CONTROLS2, CONTROL_CHARS2, DECIDED_STATES;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
@@ -10804,6 +10823,24 @@ var init_claims = __esm({
       "abandoned"
       // released, or PR closed unmerged
     ]);
+    CLAIM_TURN_BY_STATE = Object.freeze({
+      claimed: "you",
+      working: "you",
+      "in-review": "you",
+      ready: "you",
+      submitted: "poster",
+      merged: "merged",
+      abandoned: "closed"
+    });
+    CLAIM_TURN_LABEL = Object.freeze({
+      you: "waiting on you",
+      poster: "waiting on poster",
+      merged: "merged",
+      closed: "closed"
+    });
+    CLAIM_TURN_LABEL_WIDTH = Math.max(
+      ...Object.values(CLAIM_TURN_LABEL).map((label) => label.length)
+    );
     PUSHED_CLAIM_FIELDS = [
       "kind",
       "repoFullName",
@@ -10835,6 +10872,7 @@ var init_claims = __esm({
     };
     WHITESPACE_CONTROLS2 = /[\t\n\v\f\r]+/g;
     CONTROL_CHARS2 = /[\x00-\x1f\x7f-\x9f]/g;
+    DECIDED_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
   }
 });
 
@@ -34740,7 +34778,9 @@ var VALUE_FLAGS = /* @__PURE__ */ new Set([
   "intent",
   "eta",
   "dir",
-  "open"
+  "open",
+  "reason",
+  "note"
 ]);
 function parseArgs(argv) {
   const flags = {};
@@ -35307,9 +35347,8 @@ function fmtClaimAmount(c) {
   return c.kind === "contribution" ? "contribution" : fmtAmount(c.amountUSD);
 }
 function printMetric(rate) {
-  const pct = Math.round(rate.rate * 100);
   console.log(`
-\u{1F4CA} Accepted-PR rate: ${rate.merged}/${rate.total} claims merged (${pct}%)`);
+\u{1F4CA} ${formatAcceptedPRRate(rate)}`);
 }
 var SUBMIT_ACCEPTS = Object.freeze(["working", "ready"]);
 var REVISE_RECOVERY_STATES = Object.freeze(["working", "in-review", "ready"]);
@@ -36417,11 +36456,12 @@ ${list.length} ${active ? "active " : ""}claim${list.length === 1 ? "" : "s"}:
 `);
   for (const c of list) {
     const pr = c.prUrl ? ` \xB7 ${c.prUrl}` : "";
-    console.log(`  [${c.state}] ${fmtClaimAmount(c)} \xB7 ${c.title}`);
-    console.log(`    id: ${c.id}${pr}`);
+    console.log(`  [${claimTurnLabel(c.state)}] ${fmtClaimAmount(c)} \xB7 ${c.title}`);
+    console.log(`    id: ${c.id} \xB7 ${c.state}${pr}`);
   }
   printMetric(claims.acceptedPRRate());
   printNextSteps(list);
+  printResolveHint(list, console.log);
   try {
     if (await shouldNudgeUnpushed()) {
       console.log(
@@ -36525,23 +36565,24 @@ async function syncFounderApprovals(claimsModule, targets) {
   return { pushToken, approvalsChecked, approvalsUnavailable };
 }
 function founderClaimStanding(claim, approvalsChecked) {
+  const turn = claimTurnLabel(claim.state);
   switch (claim.state) {
     case "merged":
-      return "accepted";
+      return `${turn} \u2014 accepted by the poster`;
     case "abandoned":
-      return "rejected or closed locally";
+      return `${turn} \u2014 rejected, or released locally`;
     case "submitted":
-      return `submitted \u2014 CI and the poster's verdict: ${nextStep(`terminalhire claim runs ${claim.id}`)}`;
+      return `${turn} \u2014 CI and the verdict: ${nextStep(`terminalhire claim runs ${claim.id}`)}`;
     case "working":
     case "in-review":
     case "ready":
-      return `approved, slice received \u2014 ${claim.state}`;
+      return `${turn} \u2014 approved, slice received (${claim.state})`;
     default:
       break;
   }
-  if (claim.approval?.mode === "open") return "registered \u2014 slice ready (no approval required)";
-  if (claim.approval?.state === "granted") return "approved, slice ready";
-  return approvalsChecked ? "registered \u2014 awaiting the poster's approval" : "registered locally";
+  if (claim.approval?.mode === "open") return `${turn} \u2014 slice ready (no approval required)`;
+  if (claim.approval?.state === "granted") return `${turn} \u2014 approved, slice ready`;
+  return approvalsChecked ? "waiting on poster \u2014 approval not granted yet" : `${turn} \u2014 registered locally, approval not checked`;
 }
 async function cmdStatus(id) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
@@ -36719,8 +36760,26 @@ async function cmdUpdate(id, state, prUrl) {
   console.log(`Updated ${id} \u2192 ${state}${prUrl ? ` (PR: ${prUrl})` : ""}`);
   await beatFounderPresence(updated);
 }
-async function cmdRelease(id, flags = {}) {
-  const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+function printReleaseIsLocalOnly(id, claim, log, standDownOutcome = null) {
+  log("");
+  log("  Release updates this machine \u2014 terminalhire is not told, so the poster hears");
+  log("  nothing about it.");
+  if (standDownOutcome === "posted") {
+    log("  Your stand-down comment did go to the issue on GitHub.");
+  } else if (standDownOutcome === "failed") {
+    log("  Your stand-down comment was attempted and errored, so whether it reached the");
+    log("  issue is unknown. Check it there.");
+  }
+  if (claim?.approval?.claimId) {
+    log("  To tell the poster why you are handing it back, run this first:");
+    log(`    terminalhire claim resolve ${id} --reason <reason>`);
+  }
+  log("");
+}
+async function cmdRelease(id, flags = {}, deps = {}) {
+  const claims = deps.claimsModule ?? await Promise.resolve().then(() => (init_claims(), claims_exports));
+  const log = deps.log ?? console.log;
+  const standDown = deps.standDown ?? offerStandDown;
   if (!id) {
     console.error("Usage: terminalhire claim release <id> [--force]");
     process.exit(1);
@@ -36739,24 +36798,39 @@ async function cmdRelease(id, flags = {}) {
   }
   let standDownOutcome = null;
   if (target && target.stake && target.stake.branch === "contested") {
-    const outcome = await offerStandDown(target);
+    const outcome = await standDown(target);
     standDownOutcome = outcome;
-    if (outcome === "skipped" || outcome === "failed") {
+    if (outcome === "skipped" || outcome === "failed" || outcome === "unchecked") {
       if (!flags.force) {
-        console.log(
-          `
-  Not released \u2014 ${id} still has a public stake on the issue and nothing has retracted it.`
-        );
-        console.log("  Retract it, then release:");
-        console.log(`    terminalhire claim release ${id}          # at a real terminal`);
-        console.log(
-          `    terminalhire claim release ${id} --force  # release anyway, stake stays up`
+        log("");
+        if (outcome === "failed") {
+          log(`  Not released \u2014 whether your stand-down comment on ${id} reached the issue is`);
+          log("  unknown: the post errored after it went out.");
+          log("  Read the issue before writing one by hand \u2014 it may already be there.");
+          log("  Once the issue reads as stood down, release:");
+        } else if (outcome === "unchecked") {
+          log(`  Not released \u2014 whether your stake comment on ${id} ever reached the issue`);
+          log("  is unknown: the post errored, and the issue could not be read to check.");
+          log("  Read the issue. If your comment is there, reply that you are standing");
+          log("  down; then release:");
+        } else {
+          log(
+            `  Not released \u2014 ${id} still has a public stake on the issue and nothing has retracted it.`
+          );
+          log("  Retract it, then release:");
+        }
+        log(`    terminalhire claim release ${id}          # at a real terminal`);
+        log(
+          outcome === "failed" ? `    terminalhire claim release ${id} --force  # release anyway; delivery stays unknown` : outcome === "unchecked" ? `    terminalhire claim release ${id} --force  # release anyway; standing unknown` : `    terminalhire claim release ${id} --force  # release anyway, stake stays up`
         );
         return;
       }
-      console.log("  (--force \u2014 releasing with the public stake still standing)");
+      log(
+        outcome === "failed" ? "  (--force \u2014 releasing without knowing whether your stand-down comment landed)" : outcome === "unchecked" ? "  (--force \u2014 releasing; whether your stake comment ever landed is unknown)" : "  (--force \u2014 releasing with the public stake still standing)"
+      );
     }
   }
+  if (target) printReleaseIsLocalOnly(id, target, log, standDownOutcome);
   const expectedStake = standDownOutcome === "absent" ? null : target?.stake?.postedAt ?? null;
   const removed = claims.removeClaimIfStakeMatches(id, expectedStake);
   if (!removed && claims.findClaim(id)) {
@@ -36798,7 +36872,7 @@ async function offerStandDown(claim) {
       console.log(
         `  (couldn't reach ${repoFullName}#${number} to check whether your comment posted \u2014 check it manually; the claim is kept so the stake isn't lost)`
       );
-      return "skipped";
+      return "unchecked";
     }
   }
   if (!process.stdin.isTTY) {
@@ -36820,7 +36894,7 @@ async function offerStandDown(claim) {
     return "posted";
   } catch (err) {
     console.log(
-      `  (could not post the stand-down: ${err.stderr || err.message || err} \u2014 do it manually)`
+      `  (the stand-down post errored: ${err.stderr || err.message || err}. It may still have landed \u2014 read ${repoFullName}#${number} before writing one by hand.)`
     );
     return "failed";
   }
@@ -36969,7 +37043,13 @@ async function cmdStart(id, flags = {}) {
   if (!claim) {
     const b = await resolveBounty(id);
     if (!b) {
-      const { recovered, reason, id: recoveredId, linkedHost, currentHost } = await recoverHeldClaim(id, flags);
+      const {
+        recovered,
+        reason,
+        id: recoveredId,
+        linkedHost,
+        currentHost
+      } = await recoverHeldClaim(id, flags);
       if (recovered) {
         claim = recovered;
         id = recoveredId;
@@ -37034,7 +37114,9 @@ async function cmdStart(id, flags = {}) {
     if (!chainedFromRecord) {
       console.log(`
 ${sanitizeText(claim.title)}`);
-      console.log("\n  No fork was attempted \u2014 terminalhire postings are never forked or cloned. Your");
+      console.log(
+        "\n  No fork was attempted \u2014 terminalhire postings are never forked or cloned. Your"
+      );
       console.log("  work slice is delivered through terminalhire, and your patch goes back the");
       console.log("  same way.");
     }
@@ -39315,6 +39397,162 @@ async function acknowledgeNotesQuietly(notes) {
   } catch {
   }
 }
+var CLAIM_RESOLUTION_REASONS = [
+  "not-my-stack",
+  "out-of-time",
+  "already-implemented",
+  "repo-does-not-build",
+  "brief-insufficient"
+];
+var POSTING_LEVEL_RESOLUTION_REASONS = [
+  "already-implemented",
+  "repo-does-not-build",
+  "brief-insufficient"
+];
+var RESOLUTION_REASON_BLURB = {
+  "not-my-stack": "this is not the kind of work you take",
+  "out-of-time": "you ran out of time for it",
+  "already-implemented": "the repo already has this",
+  "repo-does-not-build": "the repo will not build, so nobody can finish it",
+  "brief-insufficient": "the brief does not say enough to do the work"
+};
+function isPostingLevelResolutionReason(reason) {
+  return POSTING_LEVEL_RESOLUTION_REASONS.includes(reason);
+}
+function resolutionReasonHelpLines() {
+  const lines = [];
+  const width = Math.max(...CLAIM_RESOLUTION_REASONS.map((r) => r.length));
+  const halves = [
+    ["These take the posting off the market until the poster acts:", true],
+    ["These hand it back for someone else:", false]
+  ];
+  for (const [heading, postingLevel] of halves) {
+    lines.push(`  ${heading}`);
+    for (const reason of CLAIM_RESOLUTION_REASONS) {
+      if (isPostingLevelResolutionReason(reason) !== postingLevel) continue;
+      lines.push(`    ${reason.padEnd(width)}  ${RESOLUTION_REASON_BLURB[reason] ?? ""}`);
+    }
+    lines.push("");
+  }
+  return lines;
+}
+function resolveUsageLines() {
+  return [
+    'Usage: terminalhire claim resolve <id> --reason <reason> [--note "..."]',
+    "",
+    "  Hand a claim back and tell the poster why. Needs `terminalhire link`.",
+    "",
+    ...resolutionReasonHelpLines()
+  ];
+}
+function printResolveHint(list, log) {
+  const resolvable = list.filter(
+    (c) => c?.approval?.claimId && !["merged", "abandoned"].includes(c.state)
+  );
+  if (resolvable.length === 0) return;
+  log("");
+  log("  Cannot finish one of these? Say why, and the poster hears it:");
+  log(`    terminalhire claim resolve <id> --reason <reason>   (\`--help\` lists them)`);
+}
+async function cmdResolve(id, flags = {}, deps = {}) {
+  const log = deps.log ?? console.log;
+  const err = deps.err ?? console.error;
+  const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+  const askImpl = deps.ask ?? ask;
+  const isTTY = deps.isTTY ?? Boolean(process.stdin.isTTY);
+  if (flags.help) {
+    for (const line of resolveUsageLines()) log(line);
+    return 0;
+  }
+  if (!id) {
+    for (const line of resolveUsageLines()) err(line);
+    return 1;
+  }
+  const claims = deps.claimsModule ?? await Promise.resolve().then(() => (init_claims(), claims_exports));
+  const claim = claims.findClaim(id);
+  if (!claim) {
+    err(`terminalhire claim resolve: no claim with id '${id}'.`);
+    return 1;
+  }
+  const claimId = claim.approval?.claimId ?? null;
+  if (!claimId) {
+    err(`terminalhire claim resolve: '${id}' is not a terminalhire posting, so there is`);
+    err("  no poster to tell. Use `terminalhire claim release` to drop it locally.");
+    return 1;
+  }
+  let reason = typeof flags.reason === "string" ? flags.reason.trim() : "";
+  if (!reason) {
+    if (!isTTY) {
+      err("terminalhire claim resolve: --reason is required when there is no terminal.");
+      for (const line of resolutionReasonHelpLines()) err(line);
+      return 1;
+    }
+    log("");
+    log(`  Handing back ${id}. Why?`);
+    log("");
+    for (const line of resolutionReasonHelpLines()) log(line);
+    reason = (await askImpl("  reason: ")).trim();
+  }
+  if (!CLAIM_RESOLUTION_REASONS.includes(reason)) {
+    err(`terminalhire claim resolve: '${reason}' is not one of the reasons.`);
+    for (const line of resolutionReasonHelpLines()) err(line);
+    return 1;
+  }
+  const linked = deps.cookie ? { cookie: deps.cookie, mismatch: null } : webSessionCookieForHost(CLAIM_SYNC_BASE4);
+  if (linked.mismatch) {
+    err(
+      `terminalhire claim resolve: your session was minted by ${linked.mismatch.linkedHost}, and this is ${linked.mismatch.currentHost}. Run \`terminalhire link\` against this one.`
+    );
+    return 1;
+  }
+  if (!linked.cookie) {
+    err("terminalhire claim resolve: needs a linked session. Run `terminalhire link` first.");
+    return 1;
+  }
+  const note = typeof flags.note === "string" && flags.note.trim() ? flags.note.trim() : null;
+  const body = { bountyId: founderPostingIdOf(claim), claimId, reason };
+  if (note) body.note = note;
+  let res;
+  try {
+    res = await fetchImpl(`${CLAIM_SYNC_BASE4}/api/claim/resolution`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${GH_SESSION_COOKIE}=${linked.cookie}`
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15e3)
+    });
+  } catch {
+    err("terminalhire claim resolve: could not reach terminalhire just now. Nothing changed.");
+    return 1;
+  }
+  let answer = null;
+  try {
+    answer = await res.json();
+  } catch {
+  }
+  if (!res.ok) {
+    if (res.status === 401) {
+      err("terminalhire claim resolve: terminalhire did not recognise your session.");
+      err("  Run `terminalhire link` and try again.");
+      return 1;
+    }
+    const message = typeof answer?.error === "string" && answer.error ? answer.error : `terminalhire answered ${res.status}`;
+    err(`terminalhire claim resolve: ${message}`);
+    return 1;
+  }
+  const suspended = typeof answer?.postingSuspended === "boolean" ? answer.postingSuspended : isPostingLevelResolutionReason(reason);
+  log("");
+  log(`  \u2713 Handed ${id} back \u2014 reason: ${reason}`);
+  log(
+    suspended ? "    The posting is off the market until the poster acts on it." : "    The posting is open again for someone else."
+  );
+  log("");
+  log(`  The local record is still here. To drop it: terminalhire claim release ${id}`);
+  log("");
+  return 0;
+}
 async function run() {
   const verb = process.argv[2];
   const rawArgs = process.argv.slice(3).map((a) => a === "-y" ? "--yes" : a);
@@ -39374,6 +39612,15 @@ async function run() {
       case "release":
         await cmdRelease(positional[0], flags);
         break;
+      // Sits beside `release` because that is where a developer giving up on a claim
+      // already looks, and the two are the local and the told-the-poster halves of the
+      // same act. `cmdResolve` returns its exit code rather than calling process.exit,
+      // so its refusals can be tested without spawning a process.
+      case "resolve": {
+        const code = await cmdResolve(positional[0], flags);
+        if (code !== 0) process.exit(code);
+        break;
+      }
       case "audit":
         await cmdAudit(positional[0], flags);
         break;
@@ -39382,7 +39629,7 @@ async function run() {
         break;
       default:
         console.error(
-          `terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | slice | list | status | update | submit | runs | notes | audit | release`
+          `terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | slice | list | status | update | submit | runs | notes | audit | release | resolve`
         );
         process.exit(1);
     }
@@ -39397,8 +39644,10 @@ export {
   BRIEF_DIR,
   BRIEF_REL_PATH,
   CLAIM_CONSENT_VERSION,
+  CLAIM_RESOLUTION_REASONS,
   CLOSED_STATES,
   OPENABLE_AGENTS,
+  POSTING_LEVEL_RESOLUTION_REASONS,
   PUSH_TOKEN_REFUSAL,
   REVISE_RECOVERY_STATES,
   SUBMIT_ACCEPTS,
@@ -39417,6 +39666,8 @@ export {
   cloneFullTierRepo,
   cmdPush,
   cmdRecord,
+  cmdRelease,
+  cmdResolve,
   cmdRuns,
   cmdSlice,
   cmdSliceFullTier,
@@ -39439,6 +39690,7 @@ export {
   indexNativeIdForShortRef,
   inferSubmitClaim,
   isContested,
+  isPostingLevelResolutionReason,
   isStrayArgShortRefClaim,
   isTerminalRunStatus,
   isVerblessShortRefClaim,
@@ -39455,12 +39707,15 @@ export {
   pickExistingPr,
   pickStartableClaim,
   printNextSteps,
+  printReleaseIsLocalOnly,
+  printResolveHint,
   readCredentialDisposition,
   recoverHeldClaim,
   renderAutoConsent,
   renderClaimHistory,
   renderRunView,
   renderServerRefusal,
+  resolutionReasonHelpLines,
   resolveBounty,
   resolveDeliveryDir,
   resolveSubmitWorktree,
