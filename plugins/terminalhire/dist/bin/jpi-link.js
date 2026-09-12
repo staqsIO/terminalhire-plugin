@@ -9,198 +9,9 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// src/state-dir.ts
-import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
-function warnStateDirOnce(dir, message) {
-  if (warnedDirs.has(dir)) return;
-  warnedDirs.add(dir);
-  try {
-    process.stderr.write(message);
-  } catch {
-  }
-}
-function ensureStateDir(dir) {
-  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
-  const noFollow = constants.O_NOFOLLOW ?? 0;
-  let fd;
-  try {
-    fd = openSync(dir, constants.O_RDONLY | noFollow);
-  } catch (err) {
-    if (err?.code === "ELOOP") {
-      warnStateDirOnce(
-        dir,
-        `terminalhire: ${dir} is a symlink \u2014 leaving its permissions alone; the 0700 guarantee on the state directory is NOT enforced.
-`
-      );
-      return STATE_DIR_SYMLINK;
-    }
-    return STATE_DIR_UNVERIFIED;
-  }
-  try {
-    const currentMode = fstatSync(fd).mode & 511;
-    if ((currentMode & ~STATE_DIR_MODE) !== 0) {
-      fchmodSync(fd, currentMode & STATE_DIR_MODE);
-    }
-    return STATE_DIR_OK;
-  } catch {
-    return STATE_DIR_UNVERIFIED;
-  } finally {
-    try {
-      closeSync(fd);
-    } catch {
-    }
-  }
-}
-function applyStateDirSecretPolicy(dir, status) {
-  if (status === STATE_DIR_SYMLINK) {
-    throw new Error(
-      `terminalhire: refusing to write key material into ${dir} \u2014 it is a symlink, not a directory.
-A write through it would FOLLOW THE LINK and place key/token material wherever the symlink points, outside our control and outside the "owner-only" (0700) guarantee this directory is supposed to carry.
-Fix: remove the symlink so terminalhire can recreate it as a real directory \u2014
-  rm ${dir}
-then re-run the command. If the symlink is intentional, point TERMINALHIRE_DIR at a real directory instead of routing it through this one.`
-    );
-  }
-  if (status === STATE_DIR_UNVERIFIED && !warnedUnverifiedSecretWriteThisProcess) {
-    warnedUnverifiedSecretWriteThisProcess = true;
-    try {
-      process.stderr.write(
-        `terminalhire: could not verify ${dir}'s permissions (expected on Windows \u2014 POSIX mode bits do not apply there) \u2014 proceeding, but the "owner-only" guarantee on key/token storage is NOT enforced on this platform.
-`
-      );
-    } catch {
-    }
-  }
-}
-function ensureStateDirForSecret(dir) {
-  applyStateDirSecretPolicy(dir, ensureStateDir(dir));
-}
-var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs, warnedUnverifiedSecretWriteThisProcess;
-var init_state_dir = __esm({
-  "src/state-dir.ts"() {
-    "use strict";
-    STATE_DIR_MODE = 448;
-    STATE_DIR_OK = "ok";
-    STATE_DIR_SYMLINK = "symlink";
-    STATE_DIR_UNVERIFIED = "unverified";
-    warnedDirs = /* @__PURE__ */ new Set();
-    warnedUnverifiedSecretWriteThisProcess = false;
-  }
-});
-
-// src/web-session.ts
-import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "fs";
+// src/api-base.ts
 import { homedir } from "os";
 import { join } from "path";
-function terminalhireDir() {
-  return process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
-}
-function webSessionFilePath() {
-  return join(terminalhireDir(), "web-session");
-}
-function parseWebSessionFile(raw) {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return null;
-  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const rec = parsed;
-    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
-    const host = typeof rec.host === "string" ? rec.host.trim() : "";
-    return { token: rec.token, host: host === "" ? null : host };
-  } catch {
-    return null;
-  }
-}
-function readWebSessionRecord() {
-  try {
-    const path = webSessionFilePath();
-    if (!existsSync(path)) return null;
-    return parseWebSessionFile(readFileSync(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function writeWebSessionFile(token, host) {
-  ensureStateDirForSecret(terminalhireDir());
-  const path = webSessionFilePath();
-  const body = typeof host === "string" && host.length > 0 ? JSON.stringify({ v: 1, host, token }) : token;
-  writeFileSync(path, body, { mode: 384, encoding: "utf8" });
-  try {
-    chmodSync(path, 384);
-  } catch {
-  }
-}
-function clearWebSessionFile() {
-  try {
-    rmSync(webSessionFilePath());
-  } catch {
-  }
-}
-var init_web_session = __esm({
-  "src/web-session.ts"() {
-    "use strict";
-    init_state_dir();
-  }
-});
-
-// src/config.ts
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync2 } from "fs";
-import { join as join2 } from "path";
-import { homedir as homedir2 } from "os";
-function readConfig() {
-  try {
-    if (!existsSync2(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
-    const raw = readFileSync2(CONFIG_FILE, "utf8");
-    const parsed = JSON.parse(raw);
-    return { ...DEFAULT_CONFIG, ...parsed };
-  } catch {
-    return { ...DEFAULT_CONFIG };
-  }
-}
-function writeConfig(config) {
-  ensureStateDir(TERMINALHIRE_DIR);
-  const current = readConfig();
-  const merged = { ...current, ...config };
-  if ("contributePrompted" in merged) {
-    if (merged.contributeEnabled === false && !("contributeEnabled" in config)) {
-      delete merged.contributeEnabled;
-    }
-    delete merged.contributePrompted;
-  }
-  writeFileSync2(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
-}
-var TERMINALHIRE_DIR, CONFIG_FILE, DEFAULT_CONFIG;
-var init_config = __esm({
-  "src/config.ts"() {
-    "use strict";
-    init_state_dir();
-    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
-    CONFIG_FILE = join2(TERMINALHIRE_DIR, "config.json");
-    DEFAULT_CONFIG = {
-      nudge: "session",
-      peerConnect: false,
-      peerConnectPrompted: false,
-      resumePublishPrompted: false,
-      chatDisclosureAck: false,
-      chatShareActivity: false,
-      inboundNudgeMuted: false,
-      inboundNudgeDisclosed: false,
-      contributeEnabled: true,
-      betaOptIn: false,
-      lastFullFeedbackAt: null,
-      lastPulseAskAt: null,
-      pulseDisclosed: false,
-      mix: "balanced",
-      founderBountyNotify: false
-    };
-  }
-});
-
-// src/api-base.ts
-import { homedir as homedir3 } from "os";
-import { join as join3 } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -305,6 +116,196 @@ var init_api_base = __esm({
       "www.terminalhire.com": PROD_API_BASE
     };
     ENV_KEYS = ["TERMINALHIRE_API_URL", "JPI_API_URL"];
+  }
+});
+
+// src/state-dir.ts
+import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
+function warnStateDirOnce(dir, message) {
+  if (warnedDirs.has(dir)) return;
+  warnedDirs.add(dir);
+  try {
+    process.stderr.write(message);
+  } catch {
+  }
+}
+function ensureStateDir(dir) {
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let fd;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | noFollow);
+  } catch (err) {
+    if (err?.code === "ELOOP") {
+      warnStateDirOnce(
+        dir,
+        `terminalhire: ${dir} is a symlink \u2014 leaving its permissions alone; the 0700 guarantee on the state directory is NOT enforced.
+`
+      );
+      return STATE_DIR_SYMLINK;
+    }
+    return STATE_DIR_UNVERIFIED;
+  }
+  try {
+    const currentMode = fstatSync(fd).mode & 511;
+    if ((currentMode & ~STATE_DIR_MODE) !== 0) {
+      fchmodSync(fd, currentMode & STATE_DIR_MODE);
+    }
+    return STATE_DIR_OK;
+  } catch {
+    return STATE_DIR_UNVERIFIED;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+    }
+  }
+}
+function applyStateDirSecretPolicy(dir, status) {
+  if (status === STATE_DIR_SYMLINK) {
+    throw new Error(
+      `terminalhire: refusing to write key material into ${dir} \u2014 it is a symlink, not a directory.
+A write through it would FOLLOW THE LINK and place key/token material wherever the symlink points, outside our control and outside the "owner-only" (0700) guarantee this directory is supposed to carry.
+Fix: remove the symlink so terminalhire can recreate it as a real directory \u2014
+  rm ${dir}
+then re-run the command. If the symlink is intentional, point TERMINALHIRE_DIR at a real directory instead of routing it through this one.`
+    );
+  }
+  if (status === STATE_DIR_UNVERIFIED && !warnedUnverifiedSecretWriteThisProcess) {
+    warnedUnverifiedSecretWriteThisProcess = true;
+    try {
+      process.stderr.write(
+        `terminalhire: could not verify ${dir}'s permissions (expected on Windows \u2014 POSIX mode bits do not apply there) \u2014 proceeding, but the "owner-only" guarantee on key/token storage is NOT enforced on this platform.
+`
+      );
+    } catch {
+    }
+  }
+}
+function ensureStateDirForSecret(dir) {
+  applyStateDirSecretPolicy(dir, ensureStateDir(dir));
+}
+var STATE_DIR_MODE, STATE_DIR_OK, STATE_DIR_SYMLINK, STATE_DIR_UNVERIFIED, warnedDirs, warnedUnverifiedSecretWriteThisProcess;
+var init_state_dir = __esm({
+  "src/state-dir.ts"() {
+    "use strict";
+    STATE_DIR_MODE = 448;
+    STATE_DIR_OK = "ok";
+    STATE_DIR_SYMLINK = "symlink";
+    STATE_DIR_UNVERIFIED = "unverified";
+    warnedDirs = /* @__PURE__ */ new Set();
+    warnedUnverifiedSecretWriteThisProcess = false;
+  }
+});
+
+// src/web-session.ts
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { homedir as homedir2 } from "os";
+import { join as join2 } from "path";
+function terminalhireDir() {
+  return process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
+}
+function webSessionFilePath() {
+  return join2(terminalhireDir(), "web-session");
+}
+function parseWebSessionFile(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const rec = parsed;
+    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
+    const host = typeof rec.host === "string" ? rec.host.trim() : "";
+    return { token: rec.token, host: host === "" ? null : host };
+  } catch {
+    return null;
+  }
+}
+function readWebSessionRecord() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync(path)) return null;
+    return parseWebSessionFile(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function writeWebSessionFile(token, host) {
+  ensureStateDirForSecret(terminalhireDir());
+  const path = webSessionFilePath();
+  const body = typeof host === "string" && host.length > 0 ? JSON.stringify({ v: 1, host, token }) : token;
+  writeFileSync(path, body, { mode: 384, encoding: "utf8" });
+  try {
+    chmodSync(path, 384);
+  } catch {
+  }
+}
+function clearWebSessionFile() {
+  try {
+    rmSync(webSessionFilePath());
+  } catch {
+  }
+}
+var init_web_session = __esm({
+  "src/web-session.ts"() {
+    "use strict";
+    init_api_base();
+    init_state_dir();
+  }
+});
+
+// src/config.ts
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync2 } from "fs";
+import { join as join3 } from "path";
+import { homedir as homedir3 } from "os";
+function readConfig() {
+  try {
+    if (!existsSync2(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
+    const raw = readFileSync2(CONFIG_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_CONFIG, ...parsed };
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+}
+function writeConfig(config) {
+  ensureStateDir(TERMINALHIRE_DIR);
+  const current = readConfig();
+  const merged = { ...current, ...config };
+  if ("contributePrompted" in merged) {
+    if (merged.contributeEnabled === false && !("contributeEnabled" in config)) {
+      delete merged.contributeEnabled;
+    }
+    delete merged.contributePrompted;
+  }
+  writeFileSync2(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
+}
+var TERMINALHIRE_DIR, CONFIG_FILE, DEFAULT_CONFIG;
+var init_config = __esm({
+  "src/config.ts"() {
+    "use strict";
+    init_state_dir();
+    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join3(homedir3(), ".terminalhire");
+    CONFIG_FILE = join3(TERMINALHIRE_DIR, "config.json");
+    DEFAULT_CONFIG = {
+      nudge: "session",
+      peerConnect: false,
+      peerConnectPrompted: false,
+      resumePublishPrompted: false,
+      chatDisclosureAck: false,
+      chatShareActivity: false,
+      inboundNudgeMuted: false,
+      inboundNudgeDisclosed: false,
+      contributeEnabled: true,
+      betaOptIn: false,
+      lastFullFeedbackAt: null,
+      lastPulseAskAt: null,
+      pulseDisclosed: false,
+      mix: "balanced",
+      founderBountyNotify: false
+    };
   }
 });
 

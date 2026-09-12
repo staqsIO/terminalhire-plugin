@@ -182,7 +182,7 @@ async function syncFounderVerdicts({
     const applied = [];
     for (const t of plan) {
       try {
-        claimsModule.updateClaim(t.id, { state: t.to });
+        claimsModule.updateClaim(t.id, { state: t.to, posterVerdict: t.verdict });
         applied.push(t);
         const line = buildVerdictNotice(t);
         if (line) log(line);

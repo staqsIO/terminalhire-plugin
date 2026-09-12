@@ -2578,6 +2578,106 @@ var init_state_dir = __esm({
   }
 });
 
+// src/api-base.ts
+import { homedir as homedir3 } from "os";
+import { join as join4 } from "path";
+function sanitizeOverrideForError(raw) {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return `(disallowed scheme: ${url.protocol.slice(0, -1)})`;
+    }
+    if (url.username !== "" || url.password !== "") {
+      return `${url.protocol}//***@${url.host}`;
+    }
+    return url.origin;
+  } catch {
+    return "(unparseable override)";
+  }
+}
+function isLoopbackOrigin(origin) {
+  try {
+    const host = new URL(origin).hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+function localApiAllowed(env) {
+  return env[ALLOW_LOCAL_API_KEY] === "1";
+}
+function resolveApiBase(env = process.env) {
+  for (const key of ENV_KEYS) {
+    const raw = env[key];
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (trimmed === "") continue;
+    const normalized = normalizeOverride(trimmed);
+    if (normalized === null) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${sanitizeOverrideForError(trimmed)} is not an allowed API host (allowed: ${ALLOWED_DESCRIPTION}). Refusing to continue so we do not silently hit production.`
+      );
+    }
+    if (isLoopbackOrigin(normalized) && !localApiAllowed(env)) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${normalized} is a loopback origin. Set ${ALLOW_LOCAL_API_KEY}=1 to talk to a local web app on purpose. Refusing so stored credentials cannot be exfiltrated to localhost by a poisoned override.`
+      );
+    }
+    return normalized;
+  }
+  return PROD_API_BASE;
+}
+function normalizeOverride(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.username !== "" || url.password !== "") return null;
+  const expectedProtocol = ALLOWED_HOSTS[url.hostname];
+  if (expectedProtocol === void 0) return null;
+  if (url.protocol !== expectedProtocol) return null;
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1" && url.port !== "") {
+    return null;
+  }
+  const rewrite = CANONICAL_REWRITES[url.hostname];
+  if (rewrite !== void 0) return rewrite;
+  return url.origin;
+}
+var PROD_API_BASE, DEV_API_BASE, ApiBaseError, ALLOWED_HOSTS, ALLOW_LOCAL_API_KEY, ALLOWED_DESCRIPTION, CANONICAL_REWRITES, ENV_KEYS;
+var init_api_base = __esm({
+  "src/api-base.ts"() {
+    "use strict";
+    PROD_API_BASE = "https://terminalhire.com";
+    DEV_API_BASE = "https://dev.terminalhire.com";
+    ApiBaseError = class extends Error {
+      constructor(message) {
+        super(message);
+        this.name = "ApiBaseError";
+      }
+    };
+    ALLOWED_HOSTS = {
+      "terminalhire.com": "https:",
+      "www.terminalhire.com": "https:",
+      "dev.terminalhire.com": "https:",
+      localhost: "http:",
+      "127.0.0.1": "http:"
+    };
+    ALLOW_LOCAL_API_KEY = "TERMINALHIRE_ALLOW_LOCAL_API";
+    ALLOWED_DESCRIPTION = [
+      PROD_API_BASE,
+      DEV_API_BASE,
+      `http://localhost:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`,
+      `http://127.0.0.1:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`
+    ].join(", ");
+    CANONICAL_REWRITES = {
+      "www.terminalhire.com": PROD_API_BASE
+    };
+    ENV_KEYS = ["TERMINALHIRE_API_URL", "JPI_API_URL"];
+  }
+});
+
 // src/test-race-barrier.ts
 import { closeSync as closeSync2, constants as constants2, existsSync as existsSync2, lstatSync, openSync as openSync2 } from "fs";
 import { join as join5 } from "path";
@@ -3036,12 +3136,16 @@ var init_profile = __esm({
 var web_session_exports = {};
 __export(web_session_exports, {
   clearWebSessionFile: () => clearWebSessionFile,
+  hostLabel: () => hostLabel,
+  missingSessionLines: () => missingSessionLines,
   readWebSessionCookie: () => readWebSessionCookie,
   readWebSessionFile: () => readWebSessionFile,
   readWebSessionRecord: () => readWebSessionRecord,
+  refusedSessionLines: () => refusedSessionLines,
   webSessionCookieForHost: () => webSessionCookieForHost,
   webSessionFilePath: () => webSessionFilePath,
   webSessionForHost: () => webSessionForHost,
+  withSessionDeps: () => withSessionDeps,
   writeWebSessionFile: () => writeWebSessionFile
 });
 import { chmodSync, existsSync as existsSync5, readFileSync as readFileSync6, rmSync as rmSync2, writeFileSync as writeFileSync5 } from "fs";
@@ -3081,6 +3185,7 @@ function readWebSessionFile() {
   return readWebSessionRecord()?.token ?? null;
 }
 function webSessionForHost(apiBase) {
+  assertBase(apiBase, "webSessionForHost");
   const record = readWebSessionRecord();
   if (!record) return { cookie: null, mismatch: null };
   if (record.host !== null && record.host !== apiBase) {
@@ -3094,11 +3199,50 @@ function webSessionCookieForHost(apiBase) {
   const env = process.env["TERMINALHIRE_WEB_SESSION"];
   return { cookie: typeof env === "string" && env.length > 0 ? env : null, mismatch: null };
 }
-function readWebSessionCookie() {
-  const fromFile = readWebSessionFile();
-  if (fromFile) return fromFile;
-  const env = process.env["TERMINALHIRE_WEB_SESSION"];
-  return typeof env === "string" && env.length > 0 ? env : null;
+function assertBase(apiBase, fn) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `${fn}(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+}
+function hostLabel(base) {
+  return String(base ?? "").replace(/^https?:\/\//, "");
+}
+function missingSessionLines(mismatch) {
+  if (!mismatch) {
+    return [
+      "No linked web session found on this machine.",
+      "Run `terminalhire link` to connect this terminal to your account, then re-run."
+    ];
+  }
+  const linked = hostLabel(mismatch.linkedHost);
+  const current = hostLabel(mismatch.currentHost);
+  const reach = mismatch.linkedHost === PROD_API_BASE ? `unset TERMINALHIRE_API_URL to reach ${linked}` : isLoopbackOrigin(mismatch.linkedHost) ? `set TERMINALHIRE_ALLOW_LOCAL_API=1 TERMINALHIRE_API_URL=${mismatch.linkedHost} to reach ${linked}` : `set TERMINALHIRE_API_URL=${mismatch.linkedHost} to reach ${linked}`;
+  const link = isLoopbackOrigin(mismatch.currentHost) ? "`TERMINALHIRE_ALLOW_LOCAL_OAUTH=1 terminalhire link`" : "`terminalhire link`";
+  return [
+    `This terminal is on ${current}, but your linked session belongs to ${linked}. Nothing was sent.`,
+    `Either ${reach}, or run ${link} to link this terminal to ${current} instead.`
+  ];
+}
+function withSessionDeps(defaults, overrides) {
+  const merged = { ...defaults, ...overrides };
+  if (overrides?.sessionCookie && !overrides.sessionMismatch) merged.sessionMismatch = () => null;
+  return merged;
+}
+function refusedSessionLines(apiBase) {
+  return [
+    `${hostLabel(apiBase)} refused your linked session.`,
+    "Run `terminalhire link` to link this terminal again, then re-run."
+  ];
+}
+function readWebSessionCookie(apiBase) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `readWebSessionCookie(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+  return webSessionCookieForHost(apiBase).cookie;
 }
 function writeWebSessionFile(token, host) {
   ensureStateDirForSecret(terminalhireDir());
@@ -3119,6 +3263,7 @@ function clearWebSessionFile() {
 var init_web_session = __esm({
   "src/web-session.ts"() {
     "use strict";
+    init_api_base();
     init_state_dir();
   }
 });
@@ -4228,101 +4373,8 @@ function renderRepoHeader(repo, extras = {}) {
   return lines.join("\n");
 }
 
-// src/api-base.ts
-import { homedir as homedir3 } from "os";
-import { join as join4 } from "path";
-var PROD_API_BASE = "https://terminalhire.com";
-var DEV_API_BASE = "https://dev.terminalhire.com";
-var ApiBaseError = class extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "ApiBaseError";
-  }
-};
-var ALLOWED_HOSTS = {
-  "terminalhire.com": "https:",
-  "www.terminalhire.com": "https:",
-  "dev.terminalhire.com": "https:",
-  localhost: "http:",
-  "127.0.0.1": "http:"
-};
-var ALLOW_LOCAL_API_KEY = "TERMINALHIRE_ALLOW_LOCAL_API";
-var ALLOWED_DESCRIPTION = [
-  PROD_API_BASE,
-  DEV_API_BASE,
-  `http://localhost:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`,
-  `http://127.0.0.1:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`
-].join(", ");
-var CANONICAL_REWRITES = {
-  "www.terminalhire.com": PROD_API_BASE
-};
-var ENV_KEYS = ["TERMINALHIRE_API_URL", "JPI_API_URL"];
-function sanitizeOverrideForError(raw) {
-  try {
-    const url = new URL(raw);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return `(disallowed scheme: ${url.protocol.slice(0, -1)})`;
-    }
-    if (url.username !== "" || url.password !== "") {
-      return `${url.protocol}//***@${url.host}`;
-    }
-    return url.origin;
-  } catch {
-    return "(unparseable override)";
-  }
-}
-function isLoopbackOrigin(origin) {
-  try {
-    const host = new URL(origin).hostname;
-    return host === "localhost" || host === "127.0.0.1";
-  } catch {
-    return false;
-  }
-}
-function localApiAllowed(env) {
-  return env[ALLOW_LOCAL_API_KEY] === "1";
-}
-function resolveApiBase(env = process.env) {
-  for (const key of ENV_KEYS) {
-    const raw = env[key];
-    if (typeof raw !== "string") continue;
-    const trimmed = raw.trim();
-    if (trimmed === "") continue;
-    const normalized = normalizeOverride(trimmed);
-    if (normalized === null) {
-      throw new ApiBaseError(
-        `terminalhire: ${key}=${sanitizeOverrideForError(trimmed)} is not an allowed API host (allowed: ${ALLOWED_DESCRIPTION}). Refusing to continue so we do not silently hit production.`
-      );
-    }
-    if (isLoopbackOrigin(normalized) && !localApiAllowed(env)) {
-      throw new ApiBaseError(
-        `terminalhire: ${key}=${normalized} is a loopback origin. Set ${ALLOW_LOCAL_API_KEY}=1 to talk to a local web app on purpose. Refusing so stored credentials cannot be exfiltrated to localhost by a poisoned override.`
-      );
-    }
-    return normalized;
-  }
-  return PROD_API_BASE;
-}
-function normalizeOverride(raw) {
-  let url;
-  try {
-    url = new URL(raw);
-  } catch {
-    return null;
-  }
-  if (url.username !== "" || url.password !== "") return null;
-  const expectedProtocol = ALLOWED_HOSTS[url.hostname];
-  if (expectedProtocol === void 0) return null;
-  if (url.protocol !== expectedProtocol) return null;
-  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1" && url.port !== "") {
-    return null;
-  }
-  const rewrite = CANONICAL_REWRITES[url.hostname];
-  if (rewrite !== void 0) return rewrite;
-  return url.origin;
-}
-
 // bin/jpi-contribute.js
+init_api_base();
 var TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join13(homedir10(), ".terminalhire");
 var INDEX_CACHE_FILE2 = join13(TERMINALHIRE_DIR8, "index-cache.json");
 var INDEX_TTL_MS = 15 * 60 * 1e3;
@@ -4611,10 +4663,13 @@ async function readFingerprint(injected) {
 async function runScoped(repoFullName, { log, fetchImpl, useCache, opts }) {
   const apiBase = opts.apiUrl ?? API_URL;
   let cookie = opts.webSessionCookie ?? null;
+  let linkedElsewhere = null;
   if (cookie === null && useCache) {
     try {
-      const { readWebSessionCookie: readWebSessionCookie2 } = await Promise.resolve().then(() => (init_web_session(), web_session_exports));
-      cookie = readWebSessionCookie2();
+      const { webSessionCookieForHost: webSessionCookieForHost2 } = await Promise.resolve().then(() => (init_web_session(), web_session_exports));
+      const session = webSessionCookieForHost2(API_URL);
+      cookie = session.cookie;
+      linkedElsewhere = session.mismatch;
     } catch {
       cookie = null;
     }
@@ -4645,7 +4700,7 @@ async function runScoped(repoFullName, { log, fetchImpl, useCache, opts }) {
       return;
     }
     if (!cookie) {
-      sharedIndexNote = "Run `terminalhire link` to add repos you look up to the shared index for everyone.";
+      sharedIndexNote = linkedElsewhere ? (await Promise.resolve().then(() => (init_web_session(), web_session_exports))).missingSessionLines(linkedElsewhere).join(" ") : "Run `terminalhire link` to add repos you look up to the shared index for everyone.";
     }
   }
   const fp = await readFingerprint(opts.fingerprint);

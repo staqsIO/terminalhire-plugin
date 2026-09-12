@@ -8,147 +8,12 @@ import { fileURLToPath } from "url";
 
 // src/web-session.ts
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
-
-// src/state-dir.ts
-import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
-var STATE_DIR_MODE = 448;
-var STATE_DIR_OK = "ok";
-var STATE_DIR_SYMLINK = "symlink";
-var STATE_DIR_UNVERIFIED = "unverified";
-var warnedDirs = /* @__PURE__ */ new Set();
-function warnStateDirOnce(dir, message) {
-  if (warnedDirs.has(dir)) return;
-  warnedDirs.add(dir);
-  try {
-    process.stderr.write(message);
-  } catch {
-  }
-}
-function ensureStateDir(dir) {
-  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
-  const noFollow = constants.O_NOFOLLOW ?? 0;
-  let fd;
-  try {
-    fd = openSync(dir, constants.O_RDONLY | noFollow);
-  } catch (err) {
-    if (err?.code === "ELOOP") {
-      warnStateDirOnce(
-        dir,
-        `terminalhire: ${dir} is a symlink \u2014 leaving its permissions alone; the 0700 guarantee on the state directory is NOT enforced.
-`
-      );
-      return STATE_DIR_SYMLINK;
-    }
-    return STATE_DIR_UNVERIFIED;
-  }
-  try {
-    const currentMode = fstatSync(fd).mode & 511;
-    if ((currentMode & ~STATE_DIR_MODE) !== 0) {
-      fchmodSync(fd, currentMode & STATE_DIR_MODE);
-    }
-    return STATE_DIR_OK;
-  } catch {
-    return STATE_DIR_UNVERIFIED;
-  } finally {
-    try {
-      closeSync(fd);
-    } catch {
-    }
-  }
-}
-
-// src/web-session.ts
-function terminalhireDir() {
-  return process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
-}
-function webSessionFilePath() {
-  return join(terminalhireDir(), "web-session");
-}
-function parseWebSessionFile(raw) {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return null;
-  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const rec = parsed;
-    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
-    const host = typeof rec.host === "string" ? rec.host.trim() : "";
-    return { token: rec.token, host: host === "" ? null : host };
-  } catch {
-    return null;
-  }
-}
-function readWebSessionRecord() {
-  try {
-    const path = webSessionFilePath();
-    if (!existsSync(path)) return null;
-    return parseWebSessionFile(readFileSync(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function readWebSessionFile() {
-  return readWebSessionRecord()?.token ?? null;
-}
-function readWebSessionCookie() {
-  const fromFile = readWebSessionFile();
-  if (fromFile) return fromFile;
-  const env = process.env["TERMINALHIRE_WEB_SESSION"];
-  return typeof env === "string" && env.length > 0 ? env : null;
-}
-
-// src/config.ts
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync2 } from "fs";
-import { join as join2 } from "path";
 import { homedir as homedir2 } from "os";
-var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
-var CONFIG_FILE = join2(TERMINALHIRE_DIR, "config.json");
-var DEFAULT_CONFIG = {
-  nudge: "session",
-  peerConnect: false,
-  peerConnectPrompted: false,
-  resumePublishPrompted: false,
-  chatDisclosureAck: false,
-  chatShareActivity: false,
-  inboundNudgeMuted: false,
-  inboundNudgeDisclosed: false,
-  contributeEnabled: true,
-  betaOptIn: false,
-  lastFullFeedbackAt: null,
-  lastPulseAskAt: null,
-  pulseDisclosed: false,
-  mix: "balanced",
-  founderBountyNotify: false
-};
-function readConfig() {
-  try {
-    if (!existsSync2(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
-    const raw = readFileSync2(CONFIG_FILE, "utf8");
-    const parsed = JSON.parse(raw);
-    return { ...DEFAULT_CONFIG, ...parsed };
-  } catch {
-    return { ...DEFAULT_CONFIG };
-  }
-}
-function writeConfig(config) {
-  ensureStateDir(TERMINALHIRE_DIR);
-  const current = readConfig();
-  const merged = { ...current, ...config };
-  if ("contributePrompted" in merged) {
-    if (merged.contributeEnabled === false && !("contributeEnabled" in config)) {
-      delete merged.contributeEnabled;
-    }
-    delete merged.contributePrompted;
-  }
-  writeFileSync2(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
-}
+import { join as join2 } from "path";
 
 // src/api-base.ts
-import { homedir as homedir3 } from "os";
-import { join as join3 } from "path";
+import { homedir } from "os";
+import { join } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {
@@ -240,6 +105,162 @@ function normalizeOverride(raw) {
   return url.origin;
 }
 
+// src/state-dir.ts
+import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
+var STATE_DIR_MODE = 448;
+var STATE_DIR_OK = "ok";
+var STATE_DIR_SYMLINK = "symlink";
+var STATE_DIR_UNVERIFIED = "unverified";
+var warnedDirs = /* @__PURE__ */ new Set();
+function warnStateDirOnce(dir, message) {
+  if (warnedDirs.has(dir)) return;
+  warnedDirs.add(dir);
+  try {
+    process.stderr.write(message);
+  } catch {
+  }
+}
+function ensureStateDir(dir) {
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let fd;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | noFollow);
+  } catch (err) {
+    if (err?.code === "ELOOP") {
+      warnStateDirOnce(
+        dir,
+        `terminalhire: ${dir} is a symlink \u2014 leaving its permissions alone; the 0700 guarantee on the state directory is NOT enforced.
+`
+      );
+      return STATE_DIR_SYMLINK;
+    }
+    return STATE_DIR_UNVERIFIED;
+  }
+  try {
+    const currentMode = fstatSync(fd).mode & 511;
+    if ((currentMode & ~STATE_DIR_MODE) !== 0) {
+      fchmodSync(fd, currentMode & STATE_DIR_MODE);
+    }
+    return STATE_DIR_OK;
+  } catch {
+    return STATE_DIR_UNVERIFIED;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+    }
+  }
+}
+
+// src/web-session.ts
+function terminalhireDir() {
+  return process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
+}
+function webSessionFilePath() {
+  return join2(terminalhireDir(), "web-session");
+}
+function parseWebSessionFile(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const rec = parsed;
+    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
+    const host = typeof rec.host === "string" ? rec.host.trim() : "";
+    return { token: rec.token, host: host === "" ? null : host };
+  } catch {
+    return null;
+  }
+}
+function readWebSessionRecord() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync(path)) return null;
+    return parseWebSessionFile(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function webSessionForHost(apiBase) {
+  assertBase(apiBase, "webSessionForHost");
+  const record = readWebSessionRecord();
+  if (!record) return { cookie: null, mismatch: null };
+  if (record.host !== null && record.host !== apiBase) {
+    return { cookie: null, mismatch: { linkedHost: record.host, currentHost: apiBase } };
+  }
+  return { cookie: record.token, mismatch: null };
+}
+function webSessionCookieForHost(apiBase) {
+  const fromFile = webSessionForHost(apiBase);
+  if (fromFile.cookie || fromFile.mismatch) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return { cookie: typeof env === "string" && env.length > 0 ? env : null, mismatch: null };
+}
+function assertBase(apiBase, fn) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `${fn}(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+}
+function readWebSessionCookie(apiBase) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `readWebSessionCookie(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+  return webSessionCookieForHost(apiBase).cookie;
+}
+
+// src/config.ts
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync2 } from "fs";
+import { join as join3 } from "path";
+import { homedir as homedir3 } from "os";
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join3(homedir3(), ".terminalhire");
+var CONFIG_FILE = join3(TERMINALHIRE_DIR, "config.json");
+var DEFAULT_CONFIG = {
+  nudge: "session",
+  peerConnect: false,
+  peerConnectPrompted: false,
+  resumePublishPrompted: false,
+  chatDisclosureAck: false,
+  chatShareActivity: false,
+  inboundNudgeMuted: false,
+  inboundNudgeDisclosed: false,
+  contributeEnabled: true,
+  betaOptIn: false,
+  lastFullFeedbackAt: null,
+  lastPulseAskAt: null,
+  pulseDisclosed: false,
+  mix: "balanced",
+  founderBountyNotify: false
+};
+function readConfig() {
+  try {
+    if (!existsSync2(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
+    const raw = readFileSync2(CONFIG_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_CONFIG, ...parsed };
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+}
+function writeConfig(config) {
+  ensureStateDir(TERMINALHIRE_DIR);
+  const current = readConfig();
+  const merged = { ...current, ...config };
+  if ("contributePrompted" in merged) {
+    if (merged.contributeEnabled === false && !("contributeEnabled" in config)) {
+      delete merged.contributeEnabled;
+    }
+    delete merged.contributePrompted;
+  }
+  writeFileSync2(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
+}
+
 // bin/pulse-prompt.js
 var __dirname = fileURLToPath(new URL(".", import.meta.url));
 var API_BASE = resolveApiBase();
@@ -261,7 +282,7 @@ async function maybeAskPulse() {
   if (!(process.stdout.isTTY && process.stdin.isTTY)) return;
   const config = readConfig();
   if (config.betaOptIn !== true) return;
-  const cookie = readWebSessionCookie();
+  const cookie = readWebSessionCookie(API_BASE);
   if (!cookie) return;
   const last = config.lastPulseAskAt;
   if (last && Date.now() - Date.parse(last) < PULSE_ASK_INTERVAL_MS) return;

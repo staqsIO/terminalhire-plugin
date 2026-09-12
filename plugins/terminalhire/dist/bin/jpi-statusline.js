@@ -141,6 +141,7 @@ function render() {
     if (incoming > 0) conn.push(`\u2709 ${incoming} intro request${incoming === 1 ? "" : "s"}`);
     if (conn.length > 0) {
       segments.push(`${conn.join("  \xB7  ")} \u2014 run: th inbox`);
+      if (session && session.kind === "mismatch") segments.push(sessionLine);
     } else if (sessionLine) {
       segments.push(sessionLine);
     }

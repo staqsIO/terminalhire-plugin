@@ -1,7 +1,28 @@
 // src/web-session.ts
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { homedir as homedir2 } from "os";
+import { join as join2 } from "path";
+
+// src/api-base.ts
 import { homedir } from "os";
 import { join } from "path";
+var PROD_API_BASE = "https://terminalhire.com";
+var DEV_API_BASE = "https://dev.terminalhire.com";
+var ALLOW_LOCAL_API_KEY = "TERMINALHIRE_ALLOW_LOCAL_API";
+var ALLOWED_DESCRIPTION = [
+  PROD_API_BASE,
+  DEV_API_BASE,
+  `http://localhost:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`,
+  `http://127.0.0.1:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`
+].join(", ");
+function isLoopbackOrigin(origin) {
+  try {
+    const host = new URL(origin).hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
 
 // src/state-dir.ts
 import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
@@ -78,10 +99,10 @@ function ensureStateDirForSecret(dir) {
 
 // src/web-session.ts
 function terminalhireDir() {
-  return process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
+  return process.env.TERMINALHIRE_DIR || join2(homedir2(), ".terminalhire");
 }
 function webSessionFilePath() {
-  return join(terminalhireDir(), "web-session");
+  return join2(terminalhireDir(), "web-session");
 }
 function parseWebSessionFile(raw) {
   const trimmed = raw.trim();
@@ -111,6 +132,7 @@ function readWebSessionFile() {
   return readWebSessionRecord()?.token ?? null;
 }
 function webSessionForHost(apiBase) {
+  assertBase(apiBase, "webSessionForHost");
   const record = readWebSessionRecord();
   if (!record) return { cookie: null, mismatch: null };
   if (record.host !== null && record.host !== apiBase) {
@@ -124,11 +146,50 @@ function webSessionCookieForHost(apiBase) {
   const env = process.env["TERMINALHIRE_WEB_SESSION"];
   return { cookie: typeof env === "string" && env.length > 0 ? env : null, mismatch: null };
 }
-function readWebSessionCookie() {
-  const fromFile = readWebSessionFile();
-  if (fromFile) return fromFile;
-  const env = process.env["TERMINALHIRE_WEB_SESSION"];
-  return typeof env === "string" && env.length > 0 ? env : null;
+function assertBase(apiBase, fn) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `${fn}(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+}
+function hostLabel(base) {
+  return String(base ?? "").replace(/^https?:\/\//, "");
+}
+function missingSessionLines(mismatch) {
+  if (!mismatch) {
+    return [
+      "No linked web session found on this machine.",
+      "Run `terminalhire link` to connect this terminal to your account, then re-run."
+    ];
+  }
+  const linked = hostLabel(mismatch.linkedHost);
+  const current = hostLabel(mismatch.currentHost);
+  const reach = mismatch.linkedHost === PROD_API_BASE ? `unset TERMINALHIRE_API_URL to reach ${linked}` : isLoopbackOrigin(mismatch.linkedHost) ? `set TERMINALHIRE_ALLOW_LOCAL_API=1 TERMINALHIRE_API_URL=${mismatch.linkedHost} to reach ${linked}` : `set TERMINALHIRE_API_URL=${mismatch.linkedHost} to reach ${linked}`;
+  const link = isLoopbackOrigin(mismatch.currentHost) ? "`TERMINALHIRE_ALLOW_LOCAL_OAUTH=1 terminalhire link`" : "`terminalhire link`";
+  return [
+    `This terminal is on ${current}, but your linked session belongs to ${linked}. Nothing was sent.`,
+    `Either ${reach}, or run ${link} to link this terminal to ${current} instead.`
+  ];
+}
+function withSessionDeps(defaults, overrides) {
+  const merged = { ...defaults, ...overrides };
+  if (overrides?.sessionCookie && !overrides.sessionMismatch) merged.sessionMismatch = () => null;
+  return merged;
+}
+function refusedSessionLines(apiBase) {
+  return [
+    `${hostLabel(apiBase)} refused your linked session.`,
+    "Run `terminalhire link` to link this terminal again, then re-run."
+  ];
+}
+function readWebSessionCookie(apiBase) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `readWebSessionCookie(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+  return webSessionCookieForHost(apiBase).cookie;
 }
 function writeWebSessionFile(token, host) {
   ensureStateDirForSecret(terminalhireDir());
@@ -148,11 +209,15 @@ function clearWebSessionFile() {
 }
 export {
   clearWebSessionFile,
+  hostLabel,
+  missingSessionLines,
   readWebSessionCookie,
   readWebSessionFile,
   readWebSessionRecord,
+  refusedSessionLines,
   webSessionCookieForHost,
   webSessionFilePath,
   webSessionForHost,
+  withSessionDeps,
   writeWebSessionFile
 };

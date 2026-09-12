@@ -2616,56 +2616,13 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
 init_src();
 
 // src/web-session.ts
-init_state_dir();
 import { chmodSync, existsSync, readFileSync as readFileSync2, rmSync, writeFileSync } from "fs";
-import { homedir } from "os";
-import { join as join2 } from "path";
-function terminalhireDir() {
-  return process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
-}
-function webSessionFilePath() {
-  return join2(terminalhireDir(), "web-session");
-}
-function parseWebSessionFile(raw) {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return null;
-  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const rec = parsed;
-    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
-    const host = typeof rec.host === "string" ? rec.host.trim() : "";
-    return { token: rec.token, host: host === "" ? null : host };
-  } catch {
-    return null;
-  }
-}
-function readWebSessionRecord() {
-  try {
-    const path = webSessionFilePath();
-    if (!existsSync(path)) return null;
-    return parseWebSessionFile(readFileSync2(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function readWebSessionFile() {
-  return readWebSessionRecord()?.token ?? null;
-}
-function readWebSessionCookie() {
-  const fromFile = readWebSessionFile();
-  if (fromFile) return fromFile;
-  const env = process.env["TERMINALHIRE_WEB_SESSION"];
-  return typeof env === "string" && env.length > 0 ? env : null;
-}
-
-// src/trajectory.ts
-init_state_dir();
-
-// src/api-base.ts
 import { homedir as homedir2 } from "os";
 import { join as join3 } from "path";
+
+// src/api-base.ts
+import { homedir } from "os";
+import { join as join2 } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {
@@ -2767,7 +2724,95 @@ function normalizeOverride(raw) {
   return url.origin;
 }
 
+// src/web-session.ts
+init_state_dir();
+function terminalhireDir() {
+  return process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
+}
+function webSessionFilePath() {
+  return join3(terminalhireDir(), "web-session");
+}
+function parseWebSessionFile(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const rec = parsed;
+    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
+    const host = typeof rec.host === "string" ? rec.host.trim() : "";
+    return { token: rec.token, host: host === "" ? null : host };
+  } catch {
+    return null;
+  }
+}
+function readWebSessionRecord() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync(path)) return null;
+    return parseWebSessionFile(readFileSync2(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function webSessionForHost(apiBase) {
+  assertBase(apiBase, "webSessionForHost");
+  const record = readWebSessionRecord();
+  if (!record) return { cookie: null, mismatch: null };
+  if (record.host !== null && record.host !== apiBase) {
+    return { cookie: null, mismatch: { linkedHost: record.host, currentHost: apiBase } };
+  }
+  return { cookie: record.token, mismatch: null };
+}
+function webSessionCookieForHost(apiBase) {
+  const fromFile = webSessionForHost(apiBase);
+  if (fromFile.cookie || fromFile.mismatch) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return { cookie: typeof env === "string" && env.length > 0 ? env : null, mismatch: null };
+}
+function assertBase(apiBase, fn) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `${fn}(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+}
+function hostLabel(base) {
+  return String(base ?? "").replace(/^https?:\/\//, "");
+}
+function missingSessionLines(mismatch) {
+  if (!mismatch) {
+    return [
+      "No linked web session found on this machine.",
+      "Run `terminalhire link` to connect this terminal to your account, then re-run."
+    ];
+  }
+  const linked = hostLabel(mismatch.linkedHost);
+  const current = hostLabel(mismatch.currentHost);
+  const reach = mismatch.linkedHost === PROD_API_BASE ? `unset TERMINALHIRE_API_URL to reach ${linked}` : isLoopbackOrigin(mismatch.linkedHost) ? `set TERMINALHIRE_ALLOW_LOCAL_API=1 TERMINALHIRE_API_URL=${mismatch.linkedHost} to reach ${linked}` : `set TERMINALHIRE_API_URL=${mismatch.linkedHost} to reach ${linked}`;
+  const link = isLoopbackOrigin(mismatch.currentHost) ? "`TERMINALHIRE_ALLOW_LOCAL_OAUTH=1 terminalhire link`" : "`terminalhire link`";
+  return [
+    `This terminal is on ${current}, but your linked session belongs to ${linked}. Nothing was sent.`,
+    `Either ${reach}, or run ${link} to link this terminal to ${current} instead.`
+  ];
+}
+function withSessionDeps(defaults, overrides) {
+  const merged = { ...defaults, ...overrides };
+  if (overrides?.sessionCookie && !overrides.sessionMismatch) merged.sessionMismatch = () => null;
+  return merged;
+}
+function readWebSessionCookie(apiBase) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `readWebSessionCookie(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+  return webSessionCookieForHost(apiBase).cookie;
+}
+
 // src/trajectory.ts
+init_state_dir();
 function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -3048,11 +3093,19 @@ function defaultPushDeps() {
     },
     // Session source priority: persisted file (`terminalhire link`) FIRST, then the
     // legacy TERMINALHIRE_WEB_SESSION env, then none.
-    sessionCookie: () => readWebSessionCookie(),
+    sessionCookie: () => readWebSessionCookie(LINK_BASE),
+    sessionMismatch: () => webSessionCookieForHost(LINK_BASE).mismatch,
     log: (msg) => console.log(msg),
     errorLog: (msg) => console.error(msg),
     exit: (code) => process.exit(code)
   };
+}
+function logIfLinkedElsewhere(deps) {
+  const mismatch = deps.sessionMismatch();
+  if (!mismatch) return;
+  const lines = missingSessionLines(mismatch);
+  deps.log(`
+  ${lines.join("\n  ")}`);
 }
 function renderConsentCard(score, login, log) {
   const h = score.headline;
@@ -3084,7 +3137,7 @@ function renderConsentCard(score, login, log) {
   log("");
 }
 async function runTrajectoryPush(opts, overrides) {
-  const deps = { ...defaultPushDeps(), ...overrides };
+  const deps = withSessionDeps(defaultPushDeps(), overrides);
   const login = await deps.readGithubLogin();
   if (!login) {
     deps.log("");
@@ -3104,6 +3157,7 @@ async function runTrajectoryPush(opts, overrides) {
       return;
     }
     if (!cookie) {
+      logIfLinkedElsewhere(deps);
       deps.log('\n  Open your dashboard and use "remove trajectory" there, or set a bridged');
       deps.log("  session. Nothing was sent.\n");
       deps.openBrowser(`${LINK_BASE}/dashboard`);
@@ -3165,6 +3219,7 @@ async function runTrajectoryPush(opts, overrides) {
     return;
   }
   if (!cookie) {
+    logIfLinkedElsewhere(deps);
     const url = dashboardLinkUrl(serialized);
     deps.log("  Opening your browser to finish linking\u2026");
     deps.log(`  \u2192 ${url}`);
@@ -3191,7 +3246,10 @@ async function runTrajectoryPush(opts, overrides) {
   }
   if (res.status === 401) {
     const url = dashboardLinkUrl(serialized);
-    deps.log("\n  Your web session expired \u2014 opening your browser to re-auth and finish linking\u2026");
+    deps.log(
+      `
+  ${hostLabel(LINK_BASE)} refused your linked session \u2014 opening your browser to sign in there and finish linking\u2026`
+    );
     deps.log(`  \u2192 ${url}
 `);
     deps.openBrowser(url);

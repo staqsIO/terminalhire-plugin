@@ -12246,18 +12246,40 @@ function readWebSessionRecord() {
     return null;
   }
 }
-function readWebSessionFile() {
-  return readWebSessionRecord()?.token ?? null;
+function webSessionForHost(apiBase) {
+  assertBase(apiBase, "webSessionForHost");
+  const record = readWebSessionRecord();
+  if (!record) return { cookie: null, mismatch: null };
+  if (record.host !== null && record.host !== apiBase) {
+    return { cookie: null, mismatch: { linkedHost: record.host, currentHost: apiBase } };
+  }
+  return { cookie: record.token, mismatch: null };
 }
-function readWebSessionCookie() {
-  const fromFile = readWebSessionFile();
-  if (fromFile) return fromFile;
+function webSessionCookieForHost(apiBase) {
+  const fromFile = webSessionForHost(apiBase);
+  if (fromFile.cookie || fromFile.mismatch) return fromFile;
   const env = process.env["TERMINALHIRE_WEB_SESSION"];
-  return typeof env === "string" && env.length > 0 ? env : null;
+  return { cookie: typeof env === "string" && env.length > 0 ? env : null, mismatch: null };
+}
+function assertBase(apiBase, fn) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `${fn}(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+}
+function readWebSessionCookie(apiBase) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `readWebSessionCookie(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+  return webSessionCookieForHost(apiBase).cookie;
 }
 var init_web_session = __esm({
   "src/web-session.ts"() {
     "use strict";
+    init_api_base();
     init_state_dir();
   }
 });
@@ -12287,7 +12309,7 @@ async function maybeAskPulse() {
   if (!(process.stdout.isTTY && process.stdin.isTTY)) return;
   const config = readConfig();
   if (config.betaOptIn !== true) return;
-  const cookie = readWebSessionCookie();
+  const cookie = readWebSessionCookie(API_BASE);
   if (!cookie) return;
   const last = config.lastPulseAskAt;
   if (last && Date.now() - Date.parse(last) < PULSE_ASK_INTERVAL_MS) return;

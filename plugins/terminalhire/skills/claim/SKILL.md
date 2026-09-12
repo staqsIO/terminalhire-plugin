@@ -119,6 +119,27 @@ posting, its `humanCommand` field carries exactly this command — hand it to th
 human verbatim and stop; never try to register through MCP or the Bash tool with
 worked-around flags.
 
+**Claimed in the browser first?** The claim exists on the server and nowhere on this
+machine. `claim list` and the MCP `claim_workspace` tool read the local ledger, so
+they cannot see it, and "not recorded on this machine" never means "no claim". Ask
+the server, through the deployment the claim was made on:
+
+```bash
+terminalhire claim start <shortRef|bountyId>   # terminalhire.com
+thdev claim start <shortRef|bountyId>          # dev.terminalhire.com
+```
+
+The claim page prints the right one into its copy button; run that line as printed.
+Through the bundled engine, name the deployment with `TERMINALHIRE_API_URL`. The
+credential store follows it (`~/.terminalhire-dev` for dev), so a claim made on dev
+is asked for on dev with the dev sign-in. The server answers one of:
+
+- the workspace — carry on from "Picking the work back up" below
+- `approval-pending` — the poster has not approved yet; `--watch` at a terminal, or re-run later
+- not linked — run `terminalhire link` (or `thdev link`), then re-run
+- not among your claims — you are asking a different deployment than the one you
+  claimed on, or the id is wrong; the message prints the page to check
+
 **Picking the work back up after delivery:** the workspace path lands in the local
 ledger. The MCP `claim_workspace` tool (read-only, no network) returns
 `worktreePath`, `branch`, and the orientation files. In the workspace,
@@ -128,9 +149,11 @@ ledger. The MCP `claim_workspace` tool (read-only, no network) returns
 - `.terminalhire/BRIEF.md` — the founder's write-up (absent when they wrote none)
 - `.terminalhire/VERIFY.md` — how the work is checked and handed back
 
-Never `git push` from a founder-claim workspace, never touch `.terminalhire/` in the
-patch (submit refuses it), and `claim submit` remains the human's command — its
-confirmation flag included, which is never yours to pass.
+Never `git push` from a founder-claim workspace, and never touch `.terminalhire/` in
+the patch (submit refuses it). `claim submit` is the hand-back step: run it yourself
+once the claim is `ready`. It prints the preflight card first; at a real terminal it
+asks y/N, in your session it proceeds, and for a posting the developer confirms their
+identity once in the browser before anything leaves the machine.
 
 ### Advance a claim
 
@@ -155,7 +178,7 @@ Do not invent or suggest a `claim review`/`claim re-review` verb — neither exi
 node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim submit <id>   # runs from anywhere — auto-resolves the recorded worktree
 ```
 
-`submit` pushes the worktree branch to the user's **fork** and opens the PR against the upstream bounty repo, then advances `ready → submitted` with the PR URL attached. It resolves the worktree automatically: the cwd if it matches the recorded path, else the recorded worktree (an explicit `--worktree` that contradicts the record is a hard error, as is a recorded worktree that no longer exists — re-run `attach`). It refuses unless the claim is `ready` (and not `revise`), the branch matches what was recorded (see `attach` below), and the tree is clean. Any configured remote pointing at the user's fork of the upstream works (not just `origin`); if no fork remote exists, submit offers to create the fork and add it as a `fork` remote (only with a human at an interactive terminal, and it never repoints `origin`). A `PR-BODY.md` at the worktree root is auto-detected as the PR body (`--body-file` overrides it, `--no-body` suppresses); the confirm card shows which body source is used plus any competing open PRs referencing the issue. It **always asks for explicit confirmation** before pushing and **never force-pushes**. If the push succeeds but PR creation fails, open the PR manually then `claim update <id> submitted <prUrl>`.
+`submit` pushes the worktree branch to the user's **fork** and opens the PR against the upstream bounty repo, then advances `ready → submitted` with the PR URL attached. It resolves the worktree automatically: the cwd if it matches the recorded path, else the recorded worktree (an explicit `--worktree` that contradicts the record is a hard error, as is a recorded worktree that no longer exists — re-run `attach`). It refuses on a `revise` verdict, when the branch does not match what was recorded (see `attach` below), or when the tree is dirty. From `working` it pushes only after a y/N at a real terminal; in your session (no terminal) it refuses from `working` and tells you to run `claim update <id> ready` first. That transition is your recorded attestation that the diff passed the review gate; nothing verifies it, so make it only after the gate actually passed. From `ready` it proceeds. Any configured remote pointing at the user's fork of the upstream works (not just `origin`); if no fork remote exists, submit offers to create the fork and add it as a `fork` remote (only with a human at an interactive terminal, and it never repoints `origin`). A `PR-BODY.md` at the worktree root is auto-detected as the PR body (`--body-file` overrides it, `--no-body` suppresses); the confirm card shows which body source is used plus any competing open PRs referencing the issue. At an interactive terminal it asks y/N before pushing; in a non-interactive session (yours) it proceeds after printing the card when the claim is `ready`, because that transition after the review gate is the consent. It **never force-pushes**. If the push succeeds but PR creation fails, open the PR manually then `claim update <id> submitted <prUrl>`.
 
 **Duplicate-PR guard:** `submit` re-checks for open PRs referencing the issue right before it pushes, and **refuses** if one authored by someone else already addresses it — a competing PR that landed while the work was in progress (a "0 open PRs" check at claim time goes stale over hours of work). This is a hard stop by design: do not try to route around it. When it fires, tell the dev a PR already exists and suggest they stand down or add value on the existing PR (a review, a test, a comment) instead of opening a duplicate.
 

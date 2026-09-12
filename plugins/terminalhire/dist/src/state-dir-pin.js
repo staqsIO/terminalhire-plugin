@@ -1,3 +1,7 @@
+// src/state-dir-pin.ts
+import { homedir as homedir2 } from "os";
+import { join as join2 } from "path";
+
 // src/api-base.ts
 import { homedir } from "os";
 import { join } from "path";
@@ -17,8 +21,6 @@ var ALLOWED_HOSTS = {
   localhost: "http:",
   "127.0.0.1": "http:"
 };
-var OAUTH_ALLOWED_ORIGINS = [PROD_API_BASE, DEV_API_BASE];
-var ALLOW_LOCAL_OAUTH_KEY = "TERMINALHIRE_ALLOW_LOCAL_OAUTH";
 var ALLOW_LOCAL_API_KEY = "TERMINALHIRE_ALLOW_LOCAL_API";
 var ALLOWED_DESCRIPTION = [
   PROD_API_BASE,
@@ -55,11 +57,6 @@ function isLoopbackOrigin(origin) {
 function localApiAllowed(env) {
   return env[ALLOW_LOCAL_API_KEY] === "1";
 }
-function pinToDevApiBase(env = process.env) {
-  env["TERMINALHIRE_API_URL"] = DEV_API_BASE;
-  env["TERMINALHIRE_DIR"] = env["TERMINALHIRE_DIR"] || join(homedir(), DEV_STATE_DIR_NAME);
-  return DEV_API_BASE;
-}
 function resolveApiBase(env = process.env) {
   for (const key of ENV_KEYS) {
     const raw = env[key];
@@ -81,21 +78,6 @@ function resolveApiBase(env = process.env) {
   }
   return PROD_API_BASE;
 }
-function resolveOAuthBase(env = process.env) {
-  const base = resolveApiBase(env);
-  if (OAUTH_ALLOWED_ORIGINS.includes(base)) return base;
-  if (env[ALLOW_LOCAL_OAUTH_KEY] === "1") return base;
-  throw new ApiBaseError(
-    `terminalhire: the API base is ${base}, which is not a trusted origin for a browser sign-in. Point the CLI at ${DEV_API_BASE} for an end-to-end login, or set ${ALLOW_LOCAL_OAUTH_KEY}=1 (with ${ALLOW_LOCAL_API_KEY}=1) if you are running the web app locally on purpose. Refusing to open production sign-in while the API is local.`
-  );
-}
-function resolveApiBaseOrProd(env = process.env) {
-  try {
-    return resolveApiBase(env);
-  } catch {
-    return PROD_API_BASE;
-  }
-}
 function normalizeOverride(raw) {
   let url;
   try {
@@ -114,60 +96,20 @@ function normalizeOverride(raw) {
   if (rewrite !== void 0) return rewrite;
   return url.origin;
 }
-function isNonProdApiBase(base = resolveApiBaseOrProd()) {
-  return base !== PROD_API_BASE;
-}
-function formatDevMarker(base = resolveApiBaseOrProd()) {
-  if (!isNonProdApiBase(base)) return null;
-  let host = base;
+
+// src/state-dir-pin.ts
+function pinStateDirToApiBase(env = process.env) {
+  if (env["TERMINALHIRE_DIR"]) return null;
+  let base;
   try {
-    host = new URL(base).host;
+    base = resolveApiBase(env);
   } catch {
+    return null;
   }
-  return `[dev \u2192 ${host}]`;
-}
-var markerPrinted = false;
-function printDevMarkerIfNeeded(stream = process.stderr) {
-  if (markerPrinted) return;
-  const marker = formatDevMarker();
-  if (marker === null) return;
-  markerPrinted = true;
-  try {
-    stream.write(`${marker}
-`);
-  } catch {
-  }
-}
-function __resetDevMarkerLatchForTests() {
-  markerPrinted = false;
-}
-function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
-  if (!isNonProdApiBase(base)) return;
-  if (usingSeparateStateDir()) return;
-  try {
-    stream.write(
-      "terminalhire: non-prod API base \u2014 using the same local session/push credentials as prod; do not mix environments casually.\n"
-    );
-  } catch {
-  }
-}
-function usingSeparateStateDir(env = process.env) {
-  const dir = env["TERMINALHIRE_DIR"];
-  if (dir === void 0 || dir === "") return false;
-  return dir.endsWith(DEV_STATE_DIR_NAME);
+  if (base !== DEV_API_BASE) return null;
+  env["TERMINALHIRE_DIR"] = env["TERMINALHIRE_DIR"] || join2(homedir2(), DEV_STATE_DIR_NAME);
+  return env["TERMINALHIRE_DIR"];
 }
 export {
-  ApiBaseError,
-  DEV_API_BASE,
-  DEV_STATE_DIR_NAME,
-  PROD_API_BASE,
-  __resetDevMarkerLatchForTests,
-  formatDevMarker,
-  isLoopbackOrigin,
-  isNonProdApiBase,
-  pinToDevApiBase,
-  printDevMarkerIfNeeded,
-  resolveApiBase,
-  resolveOAuthBase,
-  warnSharedCredentialsIfNonProd
+  pinStateDirToApiBase
 };

@@ -4,8 +4,8 @@
 import { readFileSync, writeFileSync, existsSync, readSync } from "fs";
 import { isatty } from "tty";
 import net from "net";
-import { join } from "path";
-import { homedir } from "os";
+import { join as join3 } from "path";
+import { homedir as homedir3 } from "os";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
 
@@ -72,12 +72,126 @@ function sessionCase(entry, { stale }) {
   return { kind: "expired" };
 }
 
+// src/state-dir-pin.ts
+import { homedir as homedir2 } from "os";
+import { join as join2 } from "path";
+
+// src/api-base.ts
+import { homedir } from "os";
+import { join } from "path";
+var PROD_API_BASE = "https://terminalhire.com";
+var DEV_API_BASE = "https://dev.terminalhire.com";
+var DEV_STATE_DIR_NAME = ".terminalhire-dev";
+var ApiBaseError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ApiBaseError";
+  }
+};
+var ALLOWED_HOSTS = {
+  "terminalhire.com": "https:",
+  "www.terminalhire.com": "https:",
+  "dev.terminalhire.com": "https:",
+  localhost: "http:",
+  "127.0.0.1": "http:"
+};
+var ALLOW_LOCAL_API_KEY = "TERMINALHIRE_ALLOW_LOCAL_API";
+var ALLOWED_DESCRIPTION = [
+  PROD_API_BASE,
+  DEV_API_BASE,
+  `http://localhost:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`,
+  `http://127.0.0.1:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`
+].join(", ");
+var CANONICAL_REWRITES = {
+  "www.terminalhire.com": PROD_API_BASE
+};
+var ENV_KEYS = ["TERMINALHIRE_API_URL", "JPI_API_URL"];
+function sanitizeOverrideForError(raw) {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return `(disallowed scheme: ${url.protocol.slice(0, -1)})`;
+    }
+    if (url.username !== "" || url.password !== "") {
+      return `${url.protocol}//***@${url.host}`;
+    }
+    return url.origin;
+  } catch {
+    return "(unparseable override)";
+  }
+}
+function isLoopbackOrigin(origin) {
+  try {
+    const host = new URL(origin).hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+function localApiAllowed(env) {
+  return env[ALLOW_LOCAL_API_KEY] === "1";
+}
+function resolveApiBase(env = process.env) {
+  for (const key of ENV_KEYS) {
+    const raw = env[key];
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (trimmed === "") continue;
+    const normalized = normalizeOverride(trimmed);
+    if (normalized === null) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${sanitizeOverrideForError(trimmed)} is not an allowed API host (allowed: ${ALLOWED_DESCRIPTION}). Refusing to continue so we do not silently hit production.`
+      );
+    }
+    if (isLoopbackOrigin(normalized) && !localApiAllowed(env)) {
+      throw new ApiBaseError(
+        `terminalhire: ${key}=${normalized} is a loopback origin. Set ${ALLOW_LOCAL_API_KEY}=1 to talk to a local web app on purpose. Refusing so stored credentials cannot be exfiltrated to localhost by a poisoned override.`
+      );
+    }
+    return normalized;
+  }
+  return PROD_API_BASE;
+}
+function normalizeOverride(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.username !== "" || url.password !== "") return null;
+  const expectedProtocol = ALLOWED_HOSTS[url.hostname];
+  if (expectedProtocol === void 0) return null;
+  if (url.protocol !== expectedProtocol) return null;
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1" && url.port !== "") {
+    return null;
+  }
+  const rewrite = CANONICAL_REWRITES[url.hostname];
+  if (rewrite !== void 0) return rewrite;
+  return url.origin;
+}
+
+// src/state-dir-pin.ts
+function pinStateDirToApiBase(env = process.env) {
+  if (env["TERMINALHIRE_DIR"]) return null;
+  let base;
+  try {
+    base = resolveApiBase(env);
+  } catch {
+    return null;
+  }
+  if (base !== DEV_API_BASE) return null;
+  env["TERMINALHIRE_DIR"] = env["TERMINALHIRE_DIR"] || join2(homedir2(), DEV_STATE_DIR_NAME);
+  return env["TERMINALHIRE_DIR"];
+}
+
 // bin/jpi.js
-var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), ".terminalhire");
-var INDEX_CACHE_FILE = join(TERMINALHIRE_DIR, "index-cache.json");
-var NUDGE_FILE = join(TERMINALHIRE_DIR, "nudged.json");
-var NUDGE_COUNTER_FILE = join(TERMINALHIRE_DIR, "nudge-counter.json");
-var LEARNED_FILE = join(TERMINALHIRE_DIR, "learned-sessions.json");
+pinStateDirToApiBase();
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join3(homedir3(), ".terminalhire");
+var INDEX_CACHE_FILE = join3(TERMINALHIRE_DIR, "index-cache.json");
+var NUDGE_FILE = join3(TERMINALHIRE_DIR, "nudged.json");
+var NUDGE_COUNTER_FILE = join3(TERMINALHIRE_DIR, "nudge-counter.json");
+var LEARNED_FILE = join3(TERMINALHIRE_DIR, "learned-sessions.json");
 var INDEX_CACHE_TTL_MS = 15 * 60 * 1e3;
 var __dirname = fileURLToPath(new URL(".", import.meta.url));
 function envMs(name, fallback) {
@@ -305,7 +419,7 @@ function markLearned(sessionId) {
 }
 function spawnLearnDetached(cwd) {
   try {
-    const learnScript = join(__dirname, "jpi-learn.js");
+    const learnScript = join3(__dirname, "jpi-learn.js");
     const child = spawn(process.execPath, [learnScript, "--cwd", cwd], {
       detached: true,
       stdio: "ignore"
@@ -394,7 +508,7 @@ function getNudgeMode() {
     if (parsed) return parsed;
   }
   try {
-    const configFile = join(TERMINALHIRE_DIR, "config.json");
+    const configFile = join3(TERMINALHIRE_DIR, "config.json");
     if (existsSync(configFile)) {
       const cfg = JSON.parse(readFileSync(configFile, "utf8"));
       if (cfg.nudge) {
@@ -467,6 +581,7 @@ try {
   const hasConnectionSignal = incomingCount > 0 || unreadChatCount > 0 || Boolean(sessionMsg);
   const nudgeMode = getNudgeMode();
   if (!hasConnectionSignal && !shouldNudge(nudgeMode, sessionId)) process.exit(0);
+  const mismatchSuffix = sessionMsg && sessionMsg.kind === "mismatch" ? `  \xB7  \u26A0 linked to ${hostLabel(sessionMsg.linkedHost)}, polling ${hostLabel(sessionMsg.currentHost)} \u2014 run: th link` : "";
   let line;
   if (haveRoles) {
     const plural = matchCount === 1 ? "role" : "roles";
@@ -474,16 +589,17 @@ try {
     if (incomingCount > 0)
       line += `  \xB7  \u2709 ${incomingCount} intro request${incomingCount === 1 ? "" : "s"}`;
     if (unreadChatCount > 0) line += `  \xB7  \u{1F4AC} ${unreadChatCount} unread`;
-    if (sessionMsg && sessionMsg.kind === "mismatch")
-      line += `  \xB7  \u26A0 linked to ${hostLabel(sessionMsg.linkedHost)}, polling ${hostLabel(sessionMsg.currentHost)} \u2014 run: th link`;
+    if (mismatchSuffix) line += mismatchSuffix;
     else if (sessionMsg && sessionMsg.kind === "refused")
       line += `  \xB7  \u26A0 session refused by ${hostLabel(sessionMsg.host)} \u2014 run: th link`;
     else if (sessionMsg) line += `  \xB7  \u26A0 session expired \u2014 run: th link`;
   } else if (incomingCount > 0) {
     line = `\u2709 ${incomingCount} intro request${incomingCount === 1 ? "" : "s"} \u2014 run: th inbox`;
     if (unreadChatCount > 0) line += `  \xB7  \u{1F4AC} ${unreadChatCount} unread`;
+    line += mismatchSuffix;
   } else if (unreadChatCount > 0) {
     line = `\u{1F4AC} ${unreadChatCount} unread \u2014 run: th inbox`;
+    line += mismatchSuffix;
   } else {
     line = sessionComplaint(sessionMsg);
   }

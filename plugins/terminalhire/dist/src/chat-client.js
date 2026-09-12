@@ -3895,51 +3895,12 @@ function publishIdentityBlob(blob) {
 
 // src/web-session.ts
 import { chmodSync, existsSync as existsSync5, readFileSync as readFileSync5, rmSync as rmSync3, writeFileSync as writeFileSync4 } from "fs";
-import { homedir as homedir4 } from "os";
-import { join as join6 } from "path";
-function terminalhireDir() {
-  return process.env.TERMINALHIRE_DIR || join6(homedir4(), ".terminalhire");
-}
-function webSessionFilePath() {
-  return join6(terminalhireDir(), "web-session");
-}
-function parseWebSessionFile(raw) {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return null;
-  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const rec = parsed;
-    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
-    const host = typeof rec.host === "string" ? rec.host.trim() : "";
-    return { token: rec.token, host: host === "" ? null : host };
-  } catch {
-    return null;
-  }
-}
-function readWebSessionRecord() {
-  try {
-    const path = webSessionFilePath();
-    if (!existsSync5(path)) return null;
-    return parseWebSessionFile(readFileSync5(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function readWebSessionFile() {
-  return readWebSessionRecord()?.token ?? null;
-}
-function readWebSessionCookie() {
-  const fromFile = readWebSessionFile();
-  if (fromFile) return fromFile;
-  const env = process.env["TERMINALHIRE_WEB_SESSION"];
-  return typeof env === "string" && env.length > 0 ? env : null;
-}
-
-// src/api-base.ts
 import { homedir as homedir5 } from "os";
 import { join as join7 } from "path";
+
+// src/api-base.ts
+import { homedir as homedir4 } from "os";
+import { join as join6 } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {
@@ -4031,6 +3992,98 @@ function normalizeOverride(raw) {
   return url.origin;
 }
 
+// src/web-session.ts
+function terminalhireDir() {
+  return process.env.TERMINALHIRE_DIR || join7(homedir5(), ".terminalhire");
+}
+function webSessionFilePath() {
+  return join7(terminalhireDir(), "web-session");
+}
+function parseWebSessionFile(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const rec = parsed;
+    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
+    const host = typeof rec.host === "string" ? rec.host.trim() : "";
+    return { token: rec.token, host: host === "" ? null : host };
+  } catch {
+    return null;
+  }
+}
+function readWebSessionRecord() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync5(path)) return null;
+    return parseWebSessionFile(readFileSync5(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function webSessionForHost(apiBase) {
+  assertBase(apiBase, "webSessionForHost");
+  const record = readWebSessionRecord();
+  if (!record) return { cookie: null, mismatch: null };
+  if (record.host !== null && record.host !== apiBase) {
+    return { cookie: null, mismatch: { linkedHost: record.host, currentHost: apiBase } };
+  }
+  return { cookie: record.token, mismatch: null };
+}
+function webSessionCookieForHost(apiBase) {
+  const fromFile = webSessionForHost(apiBase);
+  if (fromFile.cookie || fromFile.mismatch) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return { cookie: typeof env === "string" && env.length > 0 ? env : null, mismatch: null };
+}
+function assertBase(apiBase, fn) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `${fn}(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+}
+function hostLabel(base) {
+  return String(base ?? "").replace(/^https?:\/\//, "");
+}
+function missingSessionLines(mismatch) {
+  if (!mismatch) {
+    return [
+      "No linked web session found on this machine.",
+      "Run `terminalhire link` to connect this terminal to your account, then re-run."
+    ];
+  }
+  const linked = hostLabel(mismatch.linkedHost);
+  const current = hostLabel(mismatch.currentHost);
+  const reach = mismatch.linkedHost === PROD_API_BASE ? `unset TERMINALHIRE_API_URL to reach ${linked}` : isLoopbackOrigin(mismatch.linkedHost) ? `set TERMINALHIRE_ALLOW_LOCAL_API=1 TERMINALHIRE_API_URL=${mismatch.linkedHost} to reach ${linked}` : `set TERMINALHIRE_API_URL=${mismatch.linkedHost} to reach ${linked}`;
+  const link = isLoopbackOrigin(mismatch.currentHost) ? "`TERMINALHIRE_ALLOW_LOCAL_OAUTH=1 terminalhire link`" : "`terminalhire link`";
+  return [
+    `This terminal is on ${current}, but your linked session belongs to ${linked}. Nothing was sent.`,
+    `Either ${reach}, or run ${link} to link this terminal to ${current} instead.`
+  ];
+}
+function withSessionDeps(defaults, overrides) {
+  const merged = { ...defaults, ...overrides };
+  if (overrides?.sessionCookie && !overrides.sessionMismatch) merged.sessionMismatch = () => null;
+  return merged;
+}
+function refusedSessionLines(apiBase) {
+  return [
+    `${hostLabel(apiBase)} refused your linked session.`,
+    "Run `terminalhire link` to link this terminal again, then re-run."
+  ];
+}
+function readWebSessionCookie(apiBase) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `readWebSessionCookie(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+  return webSessionCookieForHost(apiBase).cookie;
+}
+
 // src/chat-client.ts
 var CHAT_BASE = resolveApiBase();
 var GH_SESSION_COOKIE = "__jpi_gh_session";
@@ -4038,18 +4091,24 @@ var TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join8(homedir6(), ".term
 var PEERS_FILE = join8(TERMINALHIRE_DIR4, "chat-peers.json");
 var REQUEST_TIMEOUT_MS = 1e4;
 var ChatNotLinkedError = class extends Error {
-  constructor() {
-    super(
-      "No linked web session found on this machine. Run `terminalhire link` to connect this terminal to your account, then re-run."
-    );
+  constructor(message = missingSessionLines(null).join(" ")) {
+    super(message);
     this.name = "ChatNotLinkedError";
+  }
+};
+var ChatSessionElsewhereError = class extends ChatNotLinkedError {
+  linkedHost;
+  currentHost;
+  constructor(mismatch) {
+    super(missingSessionLines(mismatch).join(" "));
+    this.name = "ChatSessionElsewhereError";
+    this.linkedHost = mismatch.linkedHost;
+    this.currentHost = mismatch.currentHost;
   }
 };
 var ChatSessionExpiredError = class extends Error {
   constructor() {
-    super(
-      "Your linked web session expired. Run `terminalhire link` to reconnect this terminal, then re-run."
-    );
+    super(refusedSessionLines(CHAT_BASE).join(" "));
     this.name = "ChatSessionExpiredError";
   }
 };
@@ -4098,17 +4157,21 @@ function defaultChatClientDeps() {
     fetchImpl: (...args) => globalThis.fetch(...args),
     // Session source priority: persisted file (`terminalhire link`) FIRST, then the
     // legacy TERMINALHIRE_WEB_SESSION env, then none.
-    sessionCookie: () => readWebSessionCookie(),
+    sessionCookie: () => readWebSessionCookie(CHAT_BASE),
+    sessionMismatch: () => webSessionCookieForHost(CHAT_BASE).mismatch,
     loadIdentity: () => loadOrCreateIdentity(),
     readPeerPins: defaultReadPeerPins,
     writePeerPins: defaultWritePeerPins
   };
 }
 function createChatClient(overrides) {
-  const deps = { ...defaultChatClientDeps(), ...overrides };
+  const deps = withSessionDeps(defaultChatClientDeps(), overrides);
   function requireCookie() {
     const cookie = deps.sessionCookie();
-    if (!cookie) throw new ChatNotLinkedError();
+    if (!cookie) {
+      const mismatch = deps.sessionMismatch();
+      throw mismatch ? new ChatSessionElsewhereError(mismatch) : new ChatNotLinkedError();
+    }
     return cookie;
   }
   async function authedFetch(path, init) {
@@ -4271,6 +4334,7 @@ function createChatClient(overrides) {
 export {
   ChatNotLinkedError,
   ChatRequestError,
+  ChatSessionElsewhereError,
   ChatSessionExpiredError,
   SafetyNumberChangedError,
   createChatClient

@@ -20,6 +20,14 @@ ${stderr}`;
   }
   return null;
 }
+function coverageThresholdUnmet(facts, counts) {
+  if (counts === null || counts.runner !== "node-tap")
+    return false;
+  if (counts.tests_failed > 0 || facts.exitCode === 0)
+    return false;
+  return COVERAGE_TABLE.test(`${facts.stdout}
+${facts.stderr}`);
+}
 function resourceExhaustion(facts, counts) {
   if (counts !== null && counts.tests_failed > 0)
     return null;
@@ -78,6 +86,13 @@ function classifyVerification(facts) {
       };
     }
     if (facts.exitCode !== 0) {
+      if (coverageThresholdUnmet(facts, counts)) {
+        return {
+          outcome: "tests-failed",
+          counts,
+          reason: `${String(counts.tests_passed)} test(s) passed and none failed (${counts.runner}), but the command exited ${String(facts.exitCode)} because its COVERAGE THRESHOLD was not met \u2014 node-tap defaults that threshold to 100% and prints the coverage table only when it is unmet. No assertion failed, so this is a coverage shortfall in the repository, not a failing suite.`
+        };
+      }
       return {
         outcome: "tests-failed",
         counts,
@@ -116,7 +131,7 @@ function isGreen(outcome) {
 function isOurFault(outcome) {
   return outcome === "test-command-unavailable" || outcome === "counts-unparsed";
 }
-var int, withSuiteFailures, READERS, SUPPORTED_RUNNERS, EXEC_FAILURE, SUITE_REPORTED_FAILURE;
+var int, withSuiteFailures, READERS, SUPPORTED_RUNNERS, COVERAGE_TABLE, EXEC_FAILURE, SUITE_REPORTED_FAILURE;
 var init_classify = __esm({
   "../../packages/envrun/dist/classify.js"() {
     "use strict";
@@ -137,6 +152,33 @@ var init_classify = __esm({
           if (!pass || !fail)
             return null;
           return { tests_passed: int(pass), tests_failed: int(fail) };
+        }
+      },
+      {
+        // node-tap's runner summary, which is NOT the `# pass N` / `# fail N` pair
+        // above. tap closes a run with one comment carrying a brace-wrapped tally:
+        //
+        //     # { total: 4, pass: 3, fail: 1 }
+        //
+        // The `fail` key is OMITTED when nothing failed (`# { total: 4, pass: 4 }`),
+        // which is why this cannot be folded into the reader above — that one
+        // requires BOTH `# pass` and `# fail` and returns null when either is
+        // missing, so a node-tap run read as "unknown" however many tests passed.
+        // Measured against tap@21.8.0, not taken from the docs, which do not
+        // describe this line at all.
+        //
+        // Anchored and brace-delimited, so it is a protocol match rather than a
+        // phrase match. `total` is required for the same reason: a bare `# {` is
+        // something a repo's own log could print.
+        runner: "node-tap",
+        read: (out) => {
+          const line = /^# \{ (total: \d+[^}\n]*) \}$/m.exec(out);
+          if (!line)
+            return null;
+          return {
+            tests_passed: int(/\bpass: (\d+)/.exec(line[1])),
+            tests_failed: int(/\bfail: (\d+)/.exec(line[1]))
+          };
         }
       },
       {
@@ -229,6 +271,7 @@ var init_classify = __esm({
       }
     ];
     SUPPORTED_RUNNERS = READERS.map((r) => r.runner);
+    COVERAGE_TABLE = /^\s*File\s*\|\s*% Stmts\s*\|/m;
     EXEC_FAILURE = /(?:command not found|: not found|No such file or directory|ENOENT)/;
     SUITE_REPORTED_FAILURE = new RegExp([
       "---\\s*FAIL:",
@@ -729,6 +772,35 @@ function guestUserFlag(spec) {
   }
   return hostUserFlag();
 }
+function validateVolumeName(name, label) {
+  if (!VOLUME_NAME.test(name) || name.length > VOLUME_NAME_MAX) {
+    throw new FenceError(`${label} must be a Docker volume name (${VOLUME_NAME.source}, at most ${String(VOLUME_NAME_MAX)} characters), got ${JSON.stringify(name)}`);
+  }
+  return name;
+}
+function stageMounts(spec) {
+  const domain = pathDomainOf(spec);
+  const resolve2 = resolverFor(domain);
+  const volumes = spec.stageVolumes;
+  if (domain === "venue") {
+    if (volumes === void 0) {
+      throw new FenceError("a venue-domain spec must declare stageVolumes: every writable host path on the venue is mounted noexec, so a bind mount of the staged clone cannot run the binaries an install step downloads (esbuild, swc, sharp, node-gyp \u2014 EACCES). The venue that staged the tree names the volumes it populated; a spec without them would reproduce that EACCES and report it as the developer\u2019s suite failing.");
+    }
+    resolve2(spec.clone, "clone");
+    resolve2(spec.jail, "jail");
+    return [
+      `--volume=${validateVolumeName(volumes.clone, "the clone volume")}:${GUEST.clone}:rw`,
+      `--volume=${validateVolumeName(volumes.jail, "the jail volume")}:${GUEST.jail}:rw`
+    ];
+  }
+  if (volumes !== void 0) {
+    throw new FenceError("a local-domain spec must not declare stageVolumes: the paths are on this machine and ARE the mount sources, and nothing on the local path populates a volume \u2014 honouring the field would mount an empty clone. Volumes exist for the venue\u2019s noexec host only.");
+  }
+  return [
+    `--volume=${resolve2(spec.clone, "clone")}:${GUEST.clone}:rw`,
+    `--volume=${resolve2(spec.jail, "jail")}:${GUEST.jail}:rw`
+  ];
+}
 function guestIdentityMounts(spec) {
   if (guestUserFlag(spec).length === 0)
     return [];
@@ -777,8 +849,9 @@ function containerArgs(spec, env, opts) {
     // Matching the owner is the narrower fix and it also drops the guest out of
     // root. `getuid`/`getgid` do not exist on Windows; omit the flag there.
     ...guestUserFlag(spec),
-    `--volume=${resolveSpecPath(spec.clone, "clone")}:${GUEST.clone}:rw`,
-    `--volume=${resolveSpecPath(spec.jail, "jail")}:${GUEST.jail}:rw`,
+    // Bind mounts of the resolved paths on a local spec; the venue's named
+    // volumes on a venue spec (TERM-913). `stageMounts` carries the reasoning.
+    ...stageMounts(spec),
     // TMP IS A TMPFS, NOT A BIND MOUNT (TERM-644), and the reason is two lines
     // above: Docker Desktop's `fakeowner` synthesizes ownership for the guest, so
     // a bind-mounted path does not enforce POSIX permission bits at all.
@@ -1164,7 +1237,7 @@ function containerContainmentOn(d) {
     run: (spec, env, opts = {}) => runContainedOn(d, spec, env, opts)
   };
 }
-var DEFAULT_CONTAINER_IMAGE, GUEST, TMPFS_SIZE_MB, DOCKER_TIMEOUT_MS, SIDECAR_PROXY_PORT, SIDECAR_CODE_GUEST, PROXY_ENV_KEYS, WINDOWS_DRIVE_ROOT, IMAGE_HOST, IMAGE_NAME, IMAGE_PATH, IMAGE_TAG, IMAGE_DIGEST, IMAGE_REF, LABEL_KEY, probed, PROXY_FILES, leaveToTheLease;
+var DEFAULT_CONTAINER_IMAGE, GUEST, TMPFS_SIZE_MB, DOCKER_TIMEOUT_MS, SIDECAR_PROXY_PORT, SIDECAR_CODE_GUEST, PROXY_ENV_KEYS, WINDOWS_DRIVE_ROOT, IMAGE_HOST, IMAGE_NAME, IMAGE_PATH, IMAGE_TAG, IMAGE_DIGEST, IMAGE_REF, LABEL_KEY, VOLUME_NAME, VOLUME_NAME_MAX, probed, PROXY_FILES, leaveToTheLease;
 var init_container = __esm({
   "../../packages/containment/dist/container.js"() {
     "use strict";
@@ -1193,6 +1266,8 @@ var init_container = __esm({
     IMAGE_DIGEST = "[a-z0-9]+(?:[+._-][a-z0-9]+)*:[a-fA-F0-9]{32,}";
     IMAGE_REF = new RegExp(`^(?:${IMAGE_HOST}/)?${IMAGE_PATH}(?::${IMAGE_TAG})?(?:@${IMAGE_DIGEST})?$`);
     LABEL_KEY = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+    VOLUME_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
+    VOLUME_NAME_MAX = 128;
     probed = /* @__PURE__ */ new WeakMap();
     PROXY_FILES = ["proxyEntry.js", "egressProxy.js"];
     leaveToTheLease = () => {
@@ -2040,6 +2115,9 @@ async function runEnvironmentSpec(req) {
         // TERM-729: travels WITH pathDomain, because it answers the same
         // question about the same machine. Undefined on a local lease.
         guestUser: req.lease.guestUser,
+        // TERM-913: the third answer about that machine — which volumes the
+        // fence mounts in place of the noexec stage. Undefined on a local lease.
+        stageVolumes: req.lease.stageVolumes,
         env,
         image,
         labels,
@@ -2070,6 +2148,9 @@ async function runEnvironmentSpec(req) {
         // TERM-729: travels WITH pathDomain, because it answers the same
         // question about the same machine. Undefined on a local lease.
         guestUser: req.lease.guestUser,
+        // TERM-913: the third answer about that machine — which volumes the
+        // fence mounts in place of the noexec stage. Undefined on a local lease.
+        stageVolumes: req.lease.stageVolumes,
         env,
         image,
         labels,
@@ -2124,6 +2205,7 @@ async function runStep(containment, r) {
     // the one party that knows, and it is the lease this value came from.
     pathDomain: r.pathDomain,
     guestUser: r.guestUser,
+    stageVolumes: r.stageVolumes,
     program: "/bin/sh",
     args: ["-c", withUserScriptPath(r.command)]
   };
@@ -2164,7 +2246,14 @@ var init_execute = __esm({
     RUNTIME_IMAGES = {
       node: {
         repository: "node",
-        suffix: "-bookworm-slim",
+        // NOT `-bookworm-slim`, and the reason is `git`. The slim variant ships none,
+        // and npm resolves a GitHub-shorthand dependency by spawning it: measured
+        // 2026-08-26 on `gang-jiffy/th-globby`, `npm install` exited 254 with
+        // `syscall spawn git / errno -2` before the suite was ever invoked, and the
+        // developer read "our environment could not run your tests" for a repository
+        // that was fine. `image-tooling-live.test.mjs` opens the image and checks,
+        // because a tag cannot tell you what is inside it.
+        suffix: "-bookworm",
         defaultVersion: "22",
         declaredIsFloor: false
       },
@@ -3544,11 +3633,44 @@ var init_gcpPlacement = __esm({
   }
 });
 
+// ../../packages/envrun/dist/emptyGitConfig.js
+import { mkdtempSync as mkdtempSync2, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "fs";
+import { tmpdir as tmpdir2 } from "os";
+import { join as join9 } from "path";
+function emptyGitConfig() {
+  if (emptyGitConfigFile !== void 0)
+    return emptyGitConfigFile;
+  let dir;
+  let file;
+  try {
+    dir = mkdtempSync2(join9(tmpdir2(), "th-run-nogitconfig-"));
+    file = join9(dir, "config");
+    writeFileSync4(file, "", { mode: 384 });
+  } catch (err) {
+    throw new RunRefusalError("could not create the empty git config this run points GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM at, so git would read the configuration \u2014 and the credential helpers \u2014 on this machine instead. That is our environment failing, not your tests: check that the temp directory is writable.", { cause: err });
+  }
+  emptyGitConfigFile = file;
+  process.once("exit", () => {
+    try {
+      rmSync2(dir, { recursive: true, force: true });
+    } catch {
+    }
+  });
+  return file;
+}
+var emptyGitConfigFile;
+var init_emptyGitConfig = __esm({
+  "../../packages/envrun/dist/emptyGitConfig.js"() {
+    "use strict";
+    init_execute();
+  }
+});
+
 // ../../packages/envrun/dist/hostedVenue.js
 import { spawn as spawn3, spawnSync as spawnSync5 } from "child_process";
-import { chmodSync as chmodSync2, existsSync as existsSync5, mkdtempSync as mkdtempSync2, readFileSync as readFileSync3, rmSync as rmSync2 } from "fs";
-import { join as join9 } from "path";
-import { devNull, tmpdir as tmpdir2 } from "os";
+import { chmodSync as chmodSync2, existsSync as existsSync5, mkdtempSync as mkdtempSync3, readFileSync as readFileSync3, rmSync as rmSync3 } from "fs";
+import { join as join10 } from "path";
+import { tmpdir as tmpdir3 } from "os";
 function credentialInGitConfig(text) {
   for (const match of text.matchAll(/\b([a-z][a-z0-9+.-]*):\/\/(\S+)/gi)) {
     const scheme = (match[1] ?? "").toLowerCase();
@@ -3590,18 +3712,23 @@ function dispatchedGitBinary() {
   return "git";
 }
 function dispatchedProbeEnv(cloneDir, base) {
-  const gitDir = join9(cloneDir, ".git");
+  const gitDir = join10(cloneDir, ".git");
   return {
     ...base,
     GIT_DIR: gitDir,
     GIT_WORK_TREE: cloneDir,
-    GIT_INDEX_FILE: join9(gitDir, "index"),
-    GIT_OBJECT_DIRECTORY: join9(gitDir, "objects"),
+    GIT_INDEX_FILE: join10(gitDir, "index"),
+    GIT_OBJECT_DIRECTORY: join10(gitDir, "objects"),
     GIT_ALTERNATE_OBJECT_DIRECTORIES: "",
     GIT_COMMON_DIR: gitDir,
     GIT_NAMESPACE: "",
-    GIT_CONFIG_GLOBAL: devNull,
-    GIT_CONFIG_SYSTEM: devNull,
+    // `emptyGitConfig()`, not `os.devNull`: this probe runs a HOST-side git against
+    // `local.cloneDir`, so it carried the same defect `gitCloneEnv` did — git cannot
+    // open Node's Windows devNull as a config path. Fixed by type rather than at the
+    // one seam that happened to be red, because the seam a later fix forgets is the
+    // one that keeps failing (TERM-653's rule, a package further down).
+    GIT_CONFIG_GLOBAL: emptyGitConfig(),
+    GIT_CONFIG_SYSTEM: emptyGitConfig(),
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_CONFIG_COUNT: "0",
     GIT_CONFIG_PARAMETERS: ""
@@ -3826,6 +3953,59 @@ function venueProxyDir(stageBase) {
 function stageMkdirArgv(vm, project, zone, stageBase) {
   const dirs = Object.values(venueStagePaths(stageBase)).map(quoteForRemoteShell);
   return iapSshArgv(vm, project, zone, `mkdir -p ${dirs.join(" ")}`);
+}
+function stageProofFile(volume) {
+  return `${STAGE_PROOF_PREFIX}${validateVolumeName(volume, "the proved volume")}`;
+}
+function stageVolumeNames(vm) {
+  return {
+    clone: validateVolumeName(`${vm}-clone`, "the clone volume"),
+    jail: validateVolumeName(`${vm}-jail`, "the jail volume")
+  };
+}
+function volumeCreateArgv(name, runId) {
+  return ["volume", "create", `--label=${STAGE_VOLUME_LABEL_KEY}=${runId}`, "--", name];
+}
+function execProbeArgv(volume) {
+  const file = `/probe/${stageProofFile(volume)}`;
+  return [
+    "run",
+    "--rm",
+    "--network=none",
+    `--volume=${validateVolumeName(volume, "the probe volume")}:/probe:rw`,
+    "--",
+    STAGE_HELPER_IMAGE,
+    "sh",
+    "-c",
+    `printf '#!/bin/sh\\nexit 0\\n' > ${file} && chmod 0755 ${file} && ${file}`
+  ];
+}
+function populateVolumeArgv(from, volume, owner) {
+  const proof = `/dst/${stageProofFile(volume)}`;
+  return [
+    "run",
+    "--rm",
+    "--network=none",
+    `--volume=${from}:/src:ro`,
+    `--volume=${validateVolumeName(volume, "the stage volume")}:/dst:rw`,
+    "--",
+    STAGE_HELPER_IMAGE,
+    "sh",
+    "-c",
+    `if [ ! -x ${proof} ]; then echo "no proof ${stageProofFile(volume)} in /dst: this volume was not proved here" >&2; exit 90; fi && ${proof} && rm ${proof} && cp -a /src/. /dst/ && chown ${String(owner.uid)}:${String(owner.gid)} /dst`
+  ];
+}
+function stagedOwnerOrThrow(owner, vm) {
+  if (owner === void 0) {
+    throw new Error(`the staged tree's owner on ${vm} is unknown when the stage volumes are being filled: acquire reads it before any lease exists, so stage() ran against a lease that was never acquired here. This is a defect in hostedVenue.ts, not something the venue did.`);
+  }
+  return owner;
+}
+function dockerDetail(res) {
+  if (res.error)
+    return `docker did not run: ${res.error.message}`;
+  const said = res.stderr.trim();
+  return `exit ${String(res.status)}${said === "" ? "" : ` \u2014 ${said}`}`;
 }
 function iapUntarProxyArgv(vm, project, zone, dir) {
   const d = quoteForRemoteShell(dir);
@@ -4117,7 +4297,7 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
           throw new HostedVenueError(`the tunnel socket directory ${socketDir} could not be removed and is left behind: ${describeErr(err)}`);
         }
       });
-      const socketPath = join9(socketDir, VENUE_SOCKET_NAME);
+      const socketPath = join10(socketDir, VENUE_SOCKET_NAME);
       if (io.exists(socketPath)) {
         throw new HostedVenueError(`something already exists at ${socketPath}, inside a directory created seconds ago for this run alone. Refusing rather than clearing it: the tunnel would carry the whole run over a path we cannot account for`, "ours");
       }
@@ -4152,12 +4332,34 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
       if (!prepared.ok) {
         throw new HostedVenueError(`could not prepare the stage on ${vm}: ${execDetail(prepared).slice(0, 300)}`);
       }
+      const stageVolumes = stageVolumeNames(vm);
+      for (const name of [stageVolumes.clone, stageVolumes.jail]) {
+        const created = docker3.sync(volumeCreateArgv(name, runId), {
+          timeoutMs: VOLUME_CREATE_TIMEOUT_MS
+        });
+        if (created.error || created.status !== 0) {
+          throw new HostedVenueError(`could not create the stage volume ${name} on ${vm}: ${dockerDetail(created).slice(0, 300)}`);
+        }
+      }
+      for (const name of [stageVolumes.clone, stageVolumes.jail]) {
+        const probe = docker3.sync(execProbeArgv(name), {
+          timeoutMs: EXEC_PROBE_TIMEOUT_MS
+        });
+        if (probe.error || probe.status !== 0) {
+          throw new HostedVenueError(`${vm} cannot execute a file written to its own Docker volume ${name}, so no install step with a native postinstall could run there. Refusing before staging anything: ${dockerDetail(probe).slice(0, 300)}`);
+        }
+      }
+      const after = io.classifyDaemon(docker3);
+      if (!after.distinct || after.venueDaemonId !== venueDaemonId) {
+        throw new HostedVenueError(`the daemon at ${socketPath} changed while the stage volumes were being created and proved: it now answers as ${after.distinct ? `daemon ${after.venueDaemonId}` : describeVenueDaemon(after)}, not ${venueDaemonId}. Refusing to hand out a lease whose proof was made elsewhere.`);
+      }
       return makeLease({
         runId,
         vm,
         project,
         zone,
         stageBase,
+        stageVolumes,
         docker: docker3,
         tunnel,
         socketDir,
@@ -4265,6 +4467,9 @@ function makeLease(p) {
     get guestUser() {
       return stagedOwner;
     },
+    // The third field about the same machine (TERM-913): WHICH volumes back
+    // the paths `stage()` returns. Names only; the contents arrive in `stage()`.
+    stageVolumes: p.stageVolumes,
     // Verified at acquire, before anything was staged; carried so the caller
     // can hand PR 5's intake the evidence. The lease is the only holder of
     // the raw token — `VenueLease.venueIdentity` says why it is not a result
@@ -4304,14 +4509,14 @@ function makeLease(p) {
       const { jail: localJail, tmp: localTmp } = localJailPaths(local.scratchRoot);
       const required = [
         localTmp,
-        join9(localJail, JAIL_PASSWD_FILE),
-        join9(localJail, JAIL_GROUP_FILE)
+        join10(localJail, JAIL_PASSWD_FILE),
+        join10(localJail, JAIL_GROUP_FILE)
       ];
       const missing = required.filter((path) => !p.io.exists(path));
       if (missing.length > 0) {
         throw new HostedVenueError(`refusing to stage ${local.scratchRoot} onto ${p.vm}: the jail at ${localJail} is incomplete \u2014 missing ${missing.join(", ")}. buildJail must run to completion before stage(), or the venue mounts a directory with no identity database.`);
       }
-      const gitConfigPath = join9(local.cloneDir, ".git", "config");
+      const gitConfigPath = join10(local.cloneDir, ".git", "config");
       let gitConfig;
       try {
         gitConfig = p.io.readTextIfPresent(gitConfigPath);
@@ -4364,6 +4569,21 @@ function makeLease(p) {
       }
       await push(local.cloneDir, paths.cloneDir);
       await push(local.scratchRoot, paths.scratchRoot);
+      const owner = stagedOwnerOrThrow(stagedOwner, p.vm);
+      const fills = [
+        ["clone", paths.cloneDir, p.stageVolumes.clone],
+        ["jail", paths.jail, p.stageVolumes.jail]
+      ];
+      for (const [what, from, volume] of fills) {
+        check(`filling the ${what} volume`);
+        const filled = p.docker.sync(populateVolumeArgv(from, volume, owner), {
+          timeoutMs: POPULATE_TIMEOUT_MS
+        });
+        if (filled.error || filled.status !== 0) {
+          throw new HostedVenueError(`could not copy the staged ${what} into its volume ${volume} on ${p.vm} (the copy runs only after the volume presents the proof acquire left in it): ${dockerDetail(filled).slice(0, 300)}`);
+        }
+        check(`confirming the ${what} volume fill`);
+      }
       return paths;
     },
     census(label) {
@@ -4439,7 +4659,7 @@ function makeLease(p) {
     }
   };
 }
-var SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING;
+var SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, STAGE_HELPER_IMAGE, VOLUME_CREATE_TIMEOUT_MS, EXEC_PROBE_TIMEOUT_MS, POPULATE_TIMEOUT_MS, STAGE_VOLUME_LABEL_KEY, STAGE_PROOF_PREFIX, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING;
 var init_hostedVenue = __esm({
   "../../packages/envrun/dist/hostedVenue.js"() {
     "use strict";
@@ -4447,6 +4667,7 @@ var init_hostedVenue = __esm({
     init_dist2();
     init_gcpPlacement();
     init_execute();
+    init_emptyGitConfig();
     init_labels();
     init_venueProof();
     init_venue();
@@ -4537,12 +4758,12 @@ var init_hostedVenue = __esm({
       now: () => Date.now(),
       exists: (path) => existsSync5(path),
       makePrivateDir: () => {
-        const dir = mkdtempSync2(join9(tmpdir2(), SOCKET_DIR_PREFIX));
+        const dir = mkdtempSync3(join10(tmpdir3(), SOCKET_DIR_PREFIX));
         chmodSync2(dir, 448);
         return dir;
       },
       removeTree: (path) => {
-        rmSync2(path, { recursive: true, force: true });
+        rmSync3(path, { recursive: true, force: true });
       },
       dockerFor: (socketPath) => remoteDockerClient(`unix://${socketPath}`),
       classifyDaemon: (docker3) => classifyVenueDaemon(docker3),
@@ -4564,6 +4785,12 @@ var init_hostedVenue = __esm({
     VENUE_SSH_USER = "th-runner";
     GCE_METADATA_IDENTITY_URL = "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/identity";
     COMPACT_JWT = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+    STAGE_HELPER_IMAGE = "busybox:1.37.0";
+    VOLUME_CREATE_TIMEOUT_MS = 3e4;
+    EXEC_PROBE_TIMEOUT_MS = 12e4;
+    POPULATE_TIMEOUT_MS = STAGE_PUSH_TIMEOUT_MS;
+    STAGE_VOLUME_LABEL_KEY = "terminalhire.stage";
+    STAGE_PROOF_PREFIX = ".th-proven-";
     IAP_NOT_READY = /\b4047\s*[:\]]/;
     IAP_BACKEND_UNREACHABLE = /\b4003\s*[:\]]/;
     IAP_DENIED = /PERMISSION_DENIED|Required '[^']+' permission/;
@@ -5237,7 +5464,58 @@ function pythonTestCommand(repo) {
   }
   return null;
 }
+function toxTestenvDeps(repo) {
+  const text = repo.readText("tox.ini");
+  if (text === null)
+    return [];
+  const deps = [];
+  let inTestenv = false;
+  let inDeps = false;
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    const trimmed = line.trim();
+    if (trimmed.startsWith("[")) {
+      inTestenv = trimmed === "[testenv]";
+      inDeps = false;
+      continue;
+    }
+    if (!inTestenv)
+      continue;
+    const assignment = /^([A-Za-z0-9_]+)\s*=\s*(.*)$/.exec(trimmed);
+    if (assignment !== null && !/^\s/.test(line)) {
+      inDeps = assignment[1] === "deps";
+      if (inDeps && assignment[2] !== "")
+        deps.push(assignment[2]);
+      continue;
+    }
+    if (inDeps && trimmed !== "")
+      deps.push(trimmed);
+  }
+  return deps.filter((d) => REQUIREMENT_SPECIFIER.test(d));
+}
+function pytestIsDeclaredForInstall(repo) {
+  const names = /(?:^|[\s"'[])pytest(?:[\s"'\]<>=~!,]|$)/m;
+  if (names.test(repo.readText("pyproject.toml") ?? ""))
+    return true;
+  for (const name of ["requirements.txt", "requirements-dev.txt", "requirements/dev.txt"]) {
+    const text = repo.readText(name);
+    if (text !== null && names.test(text))
+      return true;
+  }
+  return false;
+}
 function pythonInstallCommand(repo) {
+  const base = basePythonInstallCommand(repo);
+  if (base === null || !base.startsWith("pip install "))
+    return base;
+  if (pythonTestCommand(repo) !== "pytest" || pytestIsDeclaredForInstall(repo))
+    return base;
+  const deps = toxTestenvDeps(repo);
+  if (deps.length === 0)
+    return base;
+  return `${base} && pip install ${deps.map((d) => `'${d}'`).join(" ")}`;
+}
+function basePythonInstallCommand(repo) {
   if (repo.exists("poetry.lock"))
     return "poetry install";
   if (repo.exists("uv.lock"))
@@ -5333,7 +5611,7 @@ function matchFirst(text, pattern) {
   const match = pattern.exec(text);
   return match === null ? null : match[1];
 }
-var RUNTIME_MANIFESTS, MANIFEST_FILENAMES, NPM_PLACEHOLDER_TEST, EXACT_VERSION;
+var RUNTIME_MANIFESTS, MANIFEST_FILENAMES, NPM_PLACEHOLDER_TEST, REQUIREMENT_SPECIFIER, EXACT_VERSION;
 var init_manifest2 = __esm({
   "../../packages/envspec/dist/manifest.js"() {
     "use strict";
@@ -5348,6 +5626,7 @@ var init_manifest2 = __esm({
     ];
     MANIFEST_FILENAMES = RUNTIME_MANIFESTS.flatMap((m) => m.files).concat(["*.csproj", "*.fsproj", "*.sln"]).sort();
     NPM_PLACEHOLDER_TEST = /^echo\s+["']?Error:\s*no test specified["']?\s*&&\s*exit\s+1$/;
+    REQUIREMENT_SPECIFIER = /^[A-Za-z0-9._-]+(\[[A-Za-z0-9._,-]+\])?([<>=!~]=?[A-Za-z0-9._*+-]+(,[<>=!~]=?[A-Za-z0-9._*+-]+)*)?$/;
     EXACT_VERSION = /^v?(\d+(?:\.\d+){0,2})$/;
   }
 });
@@ -5421,9 +5700,9 @@ var init_references = __esm({
 
 // ../../packages/envspec/dist/repo.js
 import { readdirSync as readdirSync2, readFileSync as readFileSync4, statSync as statSync2 } from "fs";
-import { join as join10, relative, sep } from "path";
+import { join as join11, relative, sep } from "path";
 function createRepoReader(repoPath) {
-  const resolveIn = (relativePath) => relativePath === "" ? repoPath : join10(repoPath, relativePath);
+  const resolveIn = (relativePath) => relativePath === "" ? repoPath : join11(repoPath, relativePath);
   const toPosix = (absolute) => relative(repoPath, absolute).split(sep).join("/");
   const readText = (relativePath) => {
     try {
@@ -5453,7 +5732,7 @@ function createRepoReader(repoPath) {
       for (const name of names.slice().sort()) {
         if (SKIP_DIRECTORIES.has(name))
           continue;
-        const child = join10(dir, name);
+        const child = join11(dir, name);
         const st = statOf(toPosix(child));
         if (st === null)
           continue;
@@ -6050,10 +6329,10 @@ var init_dist3 = __esm({
 
 // ../../packages/envrun/dist/thrun.js
 import { execFileSync, spawnSync as spawnSync6 } from "child_process";
-import { existsSync as existsSync6, mkdirSync as mkdirSync4, mkdtempSync as mkdtempSync3, rmSync as rmSync3 } from "fs";
+import { existsSync as existsSync6, mkdirSync as mkdirSync4, mkdtempSync as mkdtempSync4, rmSync as rmSync4 } from "fs";
 import { randomUUID } from "crypto";
-import { devNull as devNull2, tmpdir as tmpdir3 } from "os";
-import { join as join11 } from "path";
+import { tmpdir as tmpdir4 } from "os";
+import { join as join12 } from "path";
 function git(repoDir, args, allowNonZero = false) {
   const res = spawnSync6("git", [...args], {
     cwd: repoDir,
@@ -6068,7 +6347,7 @@ function git(repoDir, args, allowNonZero = false) {
   return res.stdout ?? "";
 }
 function collectWorkingDiff(repoDir) {
-  if (!existsSync6(join11(repoDir, ".git"))) {
+  if (!existsSync6(join12(repoDir, ".git"))) {
     throw new ThRunError(`${repoDir} is not a git checkout (no .git). \`th run\` ships the working diff, so it needs a repository to read one from.`);
   }
   const headSha = git(repoDir, ["rev-parse", "HEAD"]).trim();
@@ -6183,8 +6462,8 @@ function gitCloneEnv(auth) {
     if (value !== void 0)
       env[name] = value;
   }
-  env["GIT_CONFIG_GLOBAL"] = devNull2;
-  env["GIT_CONFIG_SYSTEM"] = devNull2;
+  env["GIT_CONFIG_GLOBAL"] = emptyGitConfig();
+  env["GIT_CONFIG_SYSTEM"] = emptyGitConfig();
   env["GIT_CONFIG_NOSYSTEM"] = "1";
   env["GIT_TERMINAL_PROMPT"] = "0";
   for (const name of ["HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"]) {
@@ -6203,14 +6482,14 @@ function credentialFreeHome() {
     return credentialFreeHomeDir;
   let made;
   try {
-    made = mkdtempSync3(join11(tmpdir3(), "th-run-nohome-"));
+    made = mkdtempSync4(join12(tmpdir4(), "th-run-nohome-"));
   } catch (err) {
     throw new RunRefusalError("could not create the empty directory this clone uses as its home, so the clone would read the credentials on this machine instead. That is our environment failing, not your tests: check that the temp directory is writable.", { cause: err });
   }
   credentialFreeHomeDir = made;
   process.once("exit", () => {
     try {
-      rmSync3(made, { recursive: true, force: true });
+      rmSync4(made, { recursive: true, force: true });
     } catch {
     }
   });
@@ -6317,7 +6596,7 @@ function cloneTargetAtUnguarded(opts) {
 }
 function scrubCloneSource(dest, run2) {
   run2(["remote", "remove", "origin"]);
-  rmSync3(join11(dest, ".git", "FETCH_HEAD"), { force: true });
+  rmSync4(join12(dest, ".git", "FETCH_HEAD"), { force: true });
 }
 function publishableTarget(url) {
   if (separatorInTarget(url) !== null)
@@ -6688,9 +6967,9 @@ async function runVerification(req, ctx) {
       venueIdentity: null
     };
   }
-  const stage = join11(req.scratchRoot, runId);
-  const cloneDir = join11(stage, "clone");
-  const scratch = join11(stage, "scratch");
+  const stage = join12(req.scratchRoot, runId);
+  const cloneDir = join12(stage, "clone");
+  const scratch = join12(stage, "scratch");
   mkdirSync4(scratch, { recursive: true });
   assertSafeTargetSha(req.targetSha);
   progress("clone", `${publishableTarget(req.targetRepo)} @ ${req.targetSha.slice(0, 12)}`);
@@ -6756,7 +7035,7 @@ async function runVerification(req, ctx) {
     const venuePaths = await lease.stage({
       cloneDir,
       scratchRoot: scratch,
-      previewDir: join11(stage, "preview"),
+      previewDir: join12(stage, "preview"),
       // On a dispatched run the commit is the statement of what was tested, so
       // it rides with the tree and the venue seam refuses a tree that is not
       // that commit (design §6 item 4, TERM-892 — the guard lives in
@@ -6866,6 +7145,7 @@ var init_thrun = __esm({
     init_dist3();
     init_attestation2();
     init_boundary();
+    init_emptyGitConfig();
     init_labels();
     init_execute();
     init_placement();
@@ -7901,9 +8181,9 @@ var init_dist4 = __esm({
 
 // bin/jpi-run.js
 import { existsSync as existsSync7, readFileSync as readFileSync5 } from "fs";
-import { join as join12, resolve } from "path";
-import { tmpdir as tmpdir4 } from "os";
-import { mkdtempSync as mkdtempSync4, rmSync as rmSync4 } from "fs";
+import { join as join13, resolve } from "path";
+import { tmpdir as tmpdir5 } from "os";
+import { mkdtempSync as mkdtempSync5, rmSync as rmSync5 } from "fs";
 
 // bin/recall-check.js
 import {
@@ -8249,7 +8529,7 @@ function parseArgs(argv) {
 function runScratchRoot() {
   let root;
   try {
-    root = mkdtempSync4(join12(tmpdir4(), "th-run-"));
+    root = mkdtempSync5(join13(tmpdir5(), "th-run-"));
   } catch (err) {
     process.stderr.write(
       `terminalhire: could not create the temporary directory this run works in, so nothing was cloned and nothing was executed. That is our environment failing, not your tests: check that the temp directory is writable. (${String(err?.message ?? err)})
@@ -8262,7 +8542,7 @@ function runScratchRoot() {
     if (cleaned) return;
     cleaned = true;
     try {
-      rmSync4(root, { recursive: true, force: true });
+      rmSync5(root, { recursive: true, force: true });
     } catch {
     }
   };
@@ -8286,7 +8566,7 @@ async function loadEngine() {
   }
 }
 function readConfig(localDir) {
-  const file = join12(localDir, ".th-run.json");
+  const file = join13(localDir, ".th-run.json");
   if (!existsSync7(file)) return {};
   try {
     const parsed = JSON.parse(readFileSync5(file, "utf8"));

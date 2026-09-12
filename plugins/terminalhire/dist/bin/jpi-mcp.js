@@ -293,19 +293,83 @@ var init_api_base = __esm({
   }
 });
 
-// src/test-race-barrier.ts
-import { closeSync as closeSync2, constants as constants2, existsSync, lstatSync, openSync as openSync2 } from "fs";
+// src/web-session.ts
+import { chmodSync, existsSync, readFileSync as readFileSync3, rmSync, writeFileSync as writeFileSync3 } from "fs";
+import { homedir as homedir4 } from "os";
 import { join as join4 } from "path";
+function terminalhireDir() {
+  return process.env.TERMINALHIRE_DIR || join4(homedir4(), ".terminalhire");
+}
+function webSessionFilePath() {
+  return join4(terminalhireDir(), "web-session");
+}
+function parseWebSessionFile(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const rec = parsed;
+    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
+    const host = typeof rec.host === "string" ? rec.host.trim() : "";
+    return { token: rec.token, host: host === "" ? null : host };
+  } catch {
+    return null;
+  }
+}
+function readWebSessionRecord() {
+  try {
+    const path5 = webSessionFilePath();
+    if (!existsSync(path5)) return null;
+    return parseWebSessionFile(readFileSync3(path5, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function webSessionForHost(apiBase) {
+  assertBase(apiBase, "webSessionForHost");
+  const record3 = readWebSessionRecord();
+  if (!record3) return { cookie: null, mismatch: null };
+  if (record3.host !== null && record3.host !== apiBase) {
+    return { cookie: null, mismatch: { linkedHost: record3.host, currentHost: apiBase } };
+  }
+  return { cookie: record3.token, mismatch: null };
+}
+function webSessionCookieForHost(apiBase) {
+  const fromFile = webSessionForHost(apiBase);
+  if (fromFile.cookie || fromFile.mismatch) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return { cookie: typeof env === "string" && env.length > 0 ? env : null, mismatch: null };
+}
+function assertBase(apiBase, fn) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `${fn}(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+}
+var init_web_session = __esm({
+  "src/web-session.ts"() {
+    "use strict";
+    init_api_base();
+    init_state_dir();
+  }
+});
+
+// src/test-race-barrier.ts
+import { closeSync as closeSync2, constants as constants2, existsSync as existsSync2, lstatSync, openSync as openSync2 } from "fs";
+import { join as join5 } from "path";
 function syncSleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 function waitForTestRaceBarrier(phase) {
   const root = process.env[ENV_VAR];
   if (!root) return;
-  const phaseDir = join4(root, phase);
-  if (!existsSync(phaseDir)) return;
-  const readyFile = join4(phaseDir, `ready-${process.pid}`);
-  const goFile = join4(phaseDir, "go");
+  const phaseDir = join5(root, phase);
+  if (!existsSync2(phaseDir)) return;
+  const readyFile = join5(phaseDir, `ready-${process.pid}`);
+  const goFile = join5(phaseDir, "go");
   const noFollow = constants2.O_NOFOLLOW ?? 0;
   if (lstatSync(readyFile, { throwIfNoEntry: false })) {
     throw new Error(
@@ -325,7 +389,7 @@ function waitForTestRaceBarrier(phase) {
   }
   closeSync2(readyFd);
   const deadline = Date.now() + 3e4;
-  while (!existsSync(goFile)) {
+  while (!existsSync2(goFile)) {
     if (Date.now() > deadline) {
       throw new Error(
         `terminalhire: test race barrier "${phase}" timed out waiting for ${goFile} (the test process never released it \u2014 this only fires under ${ENV_VAR}, never in production).`
@@ -344,14 +408,14 @@ var init_test_race_barrier = __esm({
 
 // src/shared-key.ts
 import { randomBytes } from "crypto";
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, existsSync as existsSync2, linkSync, unlinkSync } from "fs";
-import { join as join5 } from "path";
-import { homedir as homedir4 } from "os";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync4, existsSync as existsSync3, linkSync, unlinkSync } from "fs";
+import { join as join6 } from "path";
+import { homedir as homedir5 } from "os";
 function isValidKeyHex(value) {
   return KEY_HEX_RE.test(value);
 }
 function readKeyFileOrThrow() {
-  const raw = readFileSync3(KEY_FILE, "utf8").trim();
+  const raw = readFileSync4(KEY_FILE, "utf8").trim();
   if (!isValidKeyHex(raw)) {
     throw new Error(
       `terminalhire: the shared encryption key at ${KEY_FILE} is not in the expected format (expected exactly ${KEY_BYTES * 2} lowercase-hex characters \u2014 a ${KEY_BYTES}-byte key).
@@ -365,7 +429,7 @@ Recovery: if you intend to reset it, delete the file yourself (this INVALIDATES 
 function publishKeyBlob(key) {
   const tmpFile = `${KEY_FILE}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
   try {
-    writeFileSync3(tmpFile, key.toString("hex"), { encoding: "utf8", mode: 384, flag: "wx" });
+    writeFileSync4(tmpFile, key.toString("hex"), { encoding: "utf8", mode: 384, flag: "wx" });
     try {
       linkSync(tmpFile, KEY_FILE);
       return true;
@@ -384,7 +448,7 @@ function publishKeyBlob(key) {
 }
 function loadOrCreateSharedKey() {
   ensureStateDirForSecret(TERMINALHIRE_DIR2);
-  if (existsSync2(KEY_FILE)) {
+  if (existsSync3(KEY_FILE)) {
     return readKeyFileOrThrow();
   }
   waitForTestRaceBarrier("key");
@@ -403,8 +467,8 @@ var init_shared_key = __esm({
     "use strict";
     init_state_dir();
     init_test_race_barrier();
-    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
-    KEY_FILE = join5(TERMINALHIRE_DIR2, "key");
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join6(homedir5(), ".terminalhire");
+    KEY_FILE = join6(TERMINALHIRE_DIR2, "key");
     KEY_BYTES = 32;
     KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
   }
@@ -427,9 +491,9 @@ __export(github_auth_exports, {
   writeGitHubToken: () => writeGitHubToken
 });
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync4, existsSync as existsSync3, rmSync, renameSync as renameSync3 } from "fs";
-import { join as join6 } from "path";
-import { homedir as homedir5 } from "os";
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync5, existsSync as existsSync4, rmSync as rmSync2, renameSync as renameSync3 } from "fs";
+import { join as join7 } from "path";
+import { homedir as homedir6 } from "os";
 async function loadKey() {
   return loadOrCreateSharedKey();
 }
@@ -450,10 +514,10 @@ function decrypt(blob, key) {
   return plain.toString("utf8");
 }
 async function readGitHubToken() {
-  if (!existsSync3(TOKEN_FILE)) return void 0;
+  if (!existsSync4(TOKEN_FILE)) return void 0;
   try {
     const key = await loadKey();
-    const raw = readFileSync4(TOKEN_FILE, "utf8");
+    const raw = readFileSync5(TOKEN_FILE, "utf8");
     const blob = JSON.parse(raw);
     return decrypt(blob, key);
   } catch {
@@ -466,7 +530,7 @@ async function writeGitHubToken(token) {
   const blob = encrypt(token, key);
   const tmpFile = `${TOKEN_FILE}.${process.pid}.${randomBytes2(6).toString("hex")}.tmp`;
   try {
-    writeFileSync4(tmpFile, JSON.stringify(blob, null, 2), {
+    writeFileSync5(tmpFile, JSON.stringify(blob, null, 2), {
       encoding: "utf8",
       mode: 384,
       flag: "wx"
@@ -474,7 +538,7 @@ async function writeGitHubToken(token) {
     renameSync3(tmpFile, TOKEN_FILE);
   } catch (err) {
     try {
-      rmSync(tmpFile, { force: true });
+      rmSync2(tmpFile, { force: true });
     } catch {
     }
     throw err;
@@ -482,12 +546,12 @@ async function writeGitHubToken(token) {
 }
 async function deleteGitHubToken() {
   try {
-    rmSync(TOKEN_FILE);
+    rmSync2(TOKEN_FILE);
   } catch {
   }
 }
 async function hasGitHubToken() {
-  return existsSync3(TOKEN_FILE);
+  return existsSync4(TOKEN_FILE);
 }
 async function runDeviceFlow() {
   if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
@@ -627,8 +691,8 @@ var init_github_auth = __esm({
     init_state_dir();
     init_shared_key();
     init_shared_key();
-    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join6(homedir5(), ".terminalhire");
-    TOKEN_FILE = join6(TERMINALHIRE_DIR3, "github-token.enc");
+    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join7(homedir6(), ".terminalhire");
+    TOKEN_FILE = join7(TERMINALHIRE_DIR3, "github-token.enc");
     ALGO = "aes-256-gcm";
     IV_BYTES = 12;
     GITHUB_SCOPE = "read:user";
@@ -5486,21 +5550,21 @@ var init_feeds = __esm({
 });
 
 // ../../packages/core/src/partners.ts
-import { readFileSync as readFileSync5 } from "fs";
-import { join as join7 } from "path";
+import { readFileSync as readFileSync6 } from "fs";
+import { join as join8 } from "path";
 import { fileURLToPath } from "url";
 function resolveDataPath() {
   try {
     const dir = fileURLToPath(new URL("../../../data", import.meta.url));
-    return join7(dir, "partner-roles.json");
+    return join8(dir, "partner-roles.json");
   } catch {
-    return join7(process.cwd(), "data", "partner-roles.json");
+    return join8(process.cwd(), "data", "partner-roles.json");
   }
 }
 function loadPartnerRoles() {
   const filePath = resolveDataPath();
   try {
-    const raw = readFileSync5(filePath, "utf-8");
+    const raw = readFileSync6(filePath, "utf-8");
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
       console.warn("[partners] partner-roles.json is not an array \u2014 skipping");
@@ -11144,9 +11208,9 @@ __export(policy_acks_exports, {
   findPolicyAck: () => findPolicyAck,
   rememberPolicyAck: () => rememberPolicyAck
 });
-import { lstatSync as lstatSync2, readFileSync as readFileSync6, writeFileSync as writeFileSync5 } from "fs";
-import { join as join8 } from "path";
-import { homedir as homedir6 } from "os";
+import { lstatSync as lstatSync2, readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "fs";
+import { join as join9 } from "path";
+import { homedir as homedir7 } from "os";
 function isSymlink(path5) {
   try {
     return lstatSync2(path5).isSymbolicLink();
@@ -11167,7 +11231,7 @@ function isValidAck(value, repoKey2) {
 function readAcks() {
   if (storeIsRedirected()) return {};
   try {
-    const parsed = JSON.parse(readFileSync6(ACKS_FILE, "utf8"));
+    const parsed = JSON.parse(readFileSync7(ACKS_FILE, "utf8"));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     return parsed;
   } catch {
@@ -11190,7 +11254,7 @@ function rememberPolicyAck(ack) {
     ensureStateDir(TERMINALHIRE_DIR4);
     const all = readAcks();
     all[ack.repo] = ack;
-    writeFileSync5(ACKS_FILE, `${JSON.stringify(all, null, 2)}
+    writeFileSync6(ACKS_FILE, `${JSON.stringify(all, null, 2)}
 `, { mode: 384 });
   } catch {
   }
@@ -11200,8 +11264,8 @@ var init_policy_acks = __esm({
   "src/policy-acks.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join8(homedir6(), ".terminalhire");
-    ACKS_FILE = join8(TERMINALHIRE_DIR4, "policy-acks.json");
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join9(homedir7(), ".terminalhire");
+    ACKS_FILE = join9(TERMINALHIRE_DIR4, "policy-acks.json");
     REMEMBERABLE_VERDICTS = /* @__PURE__ */ new Set(["ai-mentioned", "disclosure-required"]);
     HEX64 = /^[0-9a-f]{64}$/;
     POLICY_ACKS_FILE = ACKS_FILE;
@@ -11231,17 +11295,17 @@ __export(claims_exports, {
   updateClaim: () => updateClaim
 });
 import {
-  readFileSync as readFileSync7,
-  writeFileSync as writeFileSync6,
+  readFileSync as readFileSync8,
+  writeFileSync as writeFileSync7,
   mkdirSync as mkdirSync2,
   renameSync as renameSync4,
-  existsSync as existsSync4,
-  rmSync as rmSync2,
+  existsSync as existsSync5,
+  rmSync as rmSync3,
   statSync
 } from "fs";
 import { randomBytes as randomBytes5 } from "crypto";
-import { join as join9 } from "path";
-import { homedir as homedir7 } from "os";
+import { join as join10 } from "path";
+import { homedir as homedir8 } from "os";
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -11255,7 +11319,7 @@ function withClaimsLock(fn) {
     } catch {
       try {
         if (Date.now() - statSync(LOCK_DIR).mtimeMs > LOCK_STALE_MS) {
-          rmSync2(LOCK_DIR, { recursive: true, force: true });
+          rmSync3(LOCK_DIR, { recursive: true, force: true });
           continue;
         }
       } catch {
@@ -11271,7 +11335,7 @@ function withClaimsLock(fn) {
   try {
     return fn();
   } finally {
-    rmSync2(LOCK_DIR, { recursive: true, force: true });
+    rmSync3(LOCK_DIR, { recursive: true, force: true });
   }
 }
 function claimTurn(state) {
@@ -11318,8 +11382,8 @@ function normalizeClaim(c) {
 }
 function readClaims() {
   try {
-    if (!existsSync4(CLAIMS_FILE)) return [];
-    const data = JSON.parse(readFileSync7(CLAIMS_FILE, "utf8"));
+    if (!existsSync5(CLAIMS_FILE)) return [];
+    const data = JSON.parse(readFileSync8(CLAIMS_FILE, "utf8"));
     const claims = Array.isArray(data?.claims) ? data.claims : [];
     return claims.map(normalizeClaim);
   } catch {
@@ -11331,7 +11395,7 @@ function writeClaims(claims) {
   const tmp = `${CLAIMS_FILE}.${process.pid}.${randomBytes5(6).toString("hex")}.tmp`;
   const payload = { claims };
   try {
-    writeFileSync6(tmp, JSON.stringify(payload, null, 2), {
+    writeFileSync7(tmp, JSON.stringify(payload, null, 2), {
       encoding: "utf8",
       mode: 384,
       flag: "wx"
@@ -11339,7 +11403,7 @@ function writeClaims(claims) {
     renameSync4(tmp, CLAIMS_FILE);
   } catch (err) {
     try {
-      rmSync2(tmp, { force: true });
+      rmSync3(tmp, { force: true });
     } catch {
     }
     throw err;
@@ -11450,8 +11514,8 @@ var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join9(homedir7(), ".terminalhire");
-    CLAIMS_FILE = join9(TERMINALHIRE_DIR5, "claims.json");
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join10(homedir8(), ".terminalhire");
+    CLAIMS_FILE = join10(TERMINALHIRE_DIR5, "claims.json");
     LOCK_DIR = `${CLAIMS_FILE}.lock`;
     LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
     LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
@@ -11522,61 +11586,6 @@ var init_claims = __esm({
     WHITESPACE_CONTROLS2 = /[\t\n\v\f\r]+/g;
     CONTROL_CHARS2 = /[\x00-\x1f\x7f-\x9f]/g;
     DECIDED_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
-  }
-});
-
-// src/web-session.ts
-import { chmodSync, existsSync as existsSync5, readFileSync as readFileSync8, rmSync as rmSync3, writeFileSync as writeFileSync7 } from "fs";
-import { homedir as homedir8 } from "os";
-import { join as join10 } from "path";
-function terminalhireDir() {
-  return process.env.TERMINALHIRE_DIR || join10(homedir8(), ".terminalhire");
-}
-function webSessionFilePath() {
-  return join10(terminalhireDir(), "web-session");
-}
-function parseWebSessionFile(raw) {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return null;
-  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const rec = parsed;
-    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
-    const host = typeof rec.host === "string" ? rec.host.trim() : "";
-    return { token: rec.token, host: host === "" ? null : host };
-  } catch {
-    return null;
-  }
-}
-function readWebSessionRecord() {
-  try {
-    const path5 = webSessionFilePath();
-    if (!existsSync5(path5)) return null;
-    return parseWebSessionFile(readFileSync8(path5, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function webSessionForHost(apiBase) {
-  const record3 = readWebSessionRecord();
-  if (!record3) return { cookie: null, mismatch: null };
-  if (record3.host !== null && record3.host !== apiBase) {
-    return { cookie: null, mismatch: { linkedHost: record3.host, currentHost: apiBase } };
-  }
-  return { cookie: record3.token, mismatch: null };
-}
-function webSessionCookieForHost(apiBase) {
-  const fromFile = webSessionForHost(apiBase);
-  if (fromFile.cookie || fromFile.mismatch) return fromFile;
-  const env = process.env["TERMINALHIRE_WEB_SESSION"];
-  return { cookie: typeof env === "string" && env.length > 0 ? env : null, mismatch: null };
-}
-var init_web_session = __esm({
-  "src/web-session.ts"() {
-    "use strict";
-    init_state_dir();
   }
 });
 
@@ -11846,7 +11855,7 @@ async function syncFounderVerdicts({
     const applied = [];
     for (const t of plan) {
       try {
-        claimsModule.updateClaim(t.id, { state: t.to });
+        claimsModule.updateClaim(t.id, { state: t.to, posterVerdict: t.verdict });
         applied.push(t);
         const line = buildVerdictNotice(t);
         if (line) log(line);
@@ -26529,6 +26538,14 @@ ${stderr}`;
   }
   return null;
 }
+function coverageThresholdUnmet(facts, counts) {
+  if (counts === null || counts.runner !== "node-tap")
+    return false;
+  if (counts.tests_failed > 0 || facts.exitCode === 0)
+    return false;
+  return COVERAGE_TABLE.test(`${facts.stdout}
+${facts.stderr}`);
+}
 function resourceExhaustion(facts, counts) {
   if (counts !== null && counts.tests_failed > 0)
     return null;
@@ -26587,6 +26604,13 @@ function classifyVerification(facts) {
       };
     }
     if (facts.exitCode !== 0) {
+      if (coverageThresholdUnmet(facts, counts)) {
+        return {
+          outcome: "tests-failed",
+          counts,
+          reason: `${String(counts.tests_passed)} test(s) passed and none failed (${counts.runner}), but the command exited ${String(facts.exitCode)} because its COVERAGE THRESHOLD was not met \u2014 node-tap defaults that threshold to 100% and prints the coverage table only when it is unmet. No assertion failed, so this is a coverage shortfall in the repository, not a failing suite.`
+        };
+      }
       return {
         outcome: "tests-failed",
         counts,
@@ -26625,7 +26649,7 @@ function isGreen(outcome) {
 function isOurFault(outcome) {
   return outcome === "test-command-unavailable" || outcome === "counts-unparsed";
 }
-var int, withSuiteFailures, READERS, SUPPORTED_RUNNERS, EXEC_FAILURE, SUITE_REPORTED_FAILURE;
+var int, withSuiteFailures, READERS, SUPPORTED_RUNNERS, COVERAGE_TABLE, EXEC_FAILURE, SUITE_REPORTED_FAILURE;
 var init_classify2 = __esm({
   "../../packages/envrun/dist/classify.js"() {
     "use strict";
@@ -26646,6 +26670,33 @@ var init_classify2 = __esm({
           if (!pass || !fail)
             return null;
           return { tests_passed: int(pass), tests_failed: int(fail) };
+        }
+      },
+      {
+        // node-tap's runner summary, which is NOT the `# pass N` / `# fail N` pair
+        // above. tap closes a run with one comment carrying a brace-wrapped tally:
+        //
+        //     # { total: 4, pass: 3, fail: 1 }
+        //
+        // The `fail` key is OMITTED when nothing failed (`# { total: 4, pass: 4 }`),
+        // which is why this cannot be folded into the reader above — that one
+        // requires BOTH `# pass` and `# fail` and returns null when either is
+        // missing, so a node-tap run read as "unknown" however many tests passed.
+        // Measured against tap@21.8.0, not taken from the docs, which do not
+        // describe this line at all.
+        //
+        // Anchored and brace-delimited, so it is a protocol match rather than a
+        // phrase match. `total` is required for the same reason: a bare `# {` is
+        // something a repo's own log could print.
+        runner: "node-tap",
+        read: (out) => {
+          const line = /^# \{ (total: \d+[^}\n]*) \}$/m.exec(out);
+          if (!line)
+            return null;
+          return {
+            tests_passed: int(/\bpass: (\d+)/.exec(line[1])),
+            tests_failed: int(/\bfail: (\d+)/.exec(line[1]))
+          };
         }
       },
       {
@@ -26738,6 +26789,7 @@ var init_classify2 = __esm({
       }
     ];
     SUPPORTED_RUNNERS = READERS.map((r) => r.runner);
+    COVERAGE_TABLE = /^\s*File\s*\|\s*% Stmts\s*\|/m;
     EXEC_FAILURE = /(?:command not found|: not found|No such file or directory|ENOENT)/;
     SUITE_REPORTED_FAILURE = new RegExp([
       "---\\s*FAIL:",
@@ -27238,6 +27290,35 @@ function guestUserFlag(spec) {
   }
   return hostUserFlag();
 }
+function validateVolumeName(name, label) {
+  if (!VOLUME_NAME.test(name) || name.length > VOLUME_NAME_MAX) {
+    throw new FenceError(`${label} must be a Docker volume name (${VOLUME_NAME.source}, at most ${String(VOLUME_NAME_MAX)} characters), got ${JSON.stringify(name)}`);
+  }
+  return name;
+}
+function stageMounts(spec) {
+  const domain = pathDomainOf(spec);
+  const resolve4 = resolverFor(domain);
+  const volumes = spec.stageVolumes;
+  if (domain === "venue") {
+    if (volumes === void 0) {
+      throw new FenceError("a venue-domain spec must declare stageVolumes: every writable host path on the venue is mounted noexec, so a bind mount of the staged clone cannot run the binaries an install step downloads (esbuild, swc, sharp, node-gyp \u2014 EACCES). The venue that staged the tree names the volumes it populated; a spec without them would reproduce that EACCES and report it as the developer\u2019s suite failing.");
+    }
+    resolve4(spec.clone, "clone");
+    resolve4(spec.jail, "jail");
+    return [
+      `--volume=${validateVolumeName(volumes.clone, "the clone volume")}:${GUEST.clone}:rw`,
+      `--volume=${validateVolumeName(volumes.jail, "the jail volume")}:${GUEST.jail}:rw`
+    ];
+  }
+  if (volumes !== void 0) {
+    throw new FenceError("a local-domain spec must not declare stageVolumes: the paths are on this machine and ARE the mount sources, and nothing on the local path populates a volume \u2014 honouring the field would mount an empty clone. Volumes exist for the venue\u2019s noexec host only.");
+  }
+  return [
+    `--volume=${resolve4(spec.clone, "clone")}:${GUEST.clone}:rw`,
+    `--volume=${resolve4(spec.jail, "jail")}:${GUEST.jail}:rw`
+  ];
+}
 function guestIdentityMounts(spec) {
   if (guestUserFlag(spec).length === 0)
     return [];
@@ -27286,8 +27367,9 @@ function containerArgs(spec, env, opts) {
     // Matching the owner is the narrower fix and it also drops the guest out of
     // root. `getuid`/`getgid` do not exist on Windows; omit the flag there.
     ...guestUserFlag(spec),
-    `--volume=${resolveSpecPath(spec.clone, "clone")}:${GUEST.clone}:rw`,
-    `--volume=${resolveSpecPath(spec.jail, "jail")}:${GUEST.jail}:rw`,
+    // Bind mounts of the resolved paths on a local spec; the venue's named
+    // volumes on a venue spec (TERM-913). `stageMounts` carries the reasoning.
+    ...stageMounts(spec),
     // TMP IS A TMPFS, NOT A BIND MOUNT (TERM-644), and the reason is two lines
     // above: Docker Desktop's `fakeowner` synthesizes ownership for the guest, so
     // a bind-mounted path does not enforce POSIX permission bits at all.
@@ -27673,7 +27755,7 @@ function containerContainmentOn(d) {
     run: (spec, env, opts = {}) => runContainedOn(d, spec, env, opts)
   };
 }
-var DEFAULT_CONTAINER_IMAGE, GUEST, TMPFS_SIZE_MB, DOCKER_TIMEOUT_MS, SIDECAR_PROXY_PORT, SIDECAR_CODE_GUEST, PROXY_ENV_KEYS, WINDOWS_DRIVE_ROOT, IMAGE_HOST, IMAGE_NAME, IMAGE_PATH, IMAGE_TAG, IMAGE_DIGEST, IMAGE_REF, LABEL_KEY, probed, PROXY_FILES, leaveToTheLease;
+var DEFAULT_CONTAINER_IMAGE, GUEST, TMPFS_SIZE_MB, DOCKER_TIMEOUT_MS, SIDECAR_PROXY_PORT, SIDECAR_CODE_GUEST, PROXY_ENV_KEYS, WINDOWS_DRIVE_ROOT, IMAGE_HOST, IMAGE_NAME, IMAGE_PATH, IMAGE_TAG, IMAGE_DIGEST, IMAGE_REF, LABEL_KEY, VOLUME_NAME, VOLUME_NAME_MAX, probed, PROXY_FILES, leaveToTheLease;
 var init_container = __esm({
   "../../packages/containment/dist/container.js"() {
     "use strict";
@@ -27702,6 +27784,8 @@ var init_container = __esm({
     IMAGE_DIGEST = "[a-z0-9]+(?:[+._-][a-z0-9]+)*:[a-fA-F0-9]{32,}";
     IMAGE_REF = new RegExp(`^(?:${IMAGE_HOST}/)?${IMAGE_PATH}(?::${IMAGE_TAG})?(?:@${IMAGE_DIGEST})?$`);
     LABEL_KEY = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+    VOLUME_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
+    VOLUME_NAME_MAX = 128;
     probed = /* @__PURE__ */ new WeakMap();
     PROXY_FILES = ["proxyEntry.js", "egressProxy.js"];
     leaveToTheLease = () => {
@@ -28549,6 +28633,9 @@ async function runEnvironmentSpec(req) {
         // TERM-729: travels WITH pathDomain, because it answers the same
         // question about the same machine. Undefined on a local lease.
         guestUser: req.lease.guestUser,
+        // TERM-913: the third answer about that machine — which volumes the
+        // fence mounts in place of the noexec stage. Undefined on a local lease.
+        stageVolumes: req.lease.stageVolumes,
         env,
         image,
         labels,
@@ -28579,6 +28666,9 @@ async function runEnvironmentSpec(req) {
         // TERM-729: travels WITH pathDomain, because it answers the same
         // question about the same machine. Undefined on a local lease.
         guestUser: req.lease.guestUser,
+        // TERM-913: the third answer about that machine — which volumes the
+        // fence mounts in place of the noexec stage. Undefined on a local lease.
+        stageVolumes: req.lease.stageVolumes,
         env,
         image,
         labels,
@@ -28633,6 +28723,7 @@ async function runStep(containment, r) {
     // the one party that knows, and it is the lease this value came from.
     pathDomain: r.pathDomain,
     guestUser: r.guestUser,
+    stageVolumes: r.stageVolumes,
     program: "/bin/sh",
     args: ["-c", withUserScriptPath(r.command)]
   };
@@ -28673,7 +28764,14 @@ var init_execute = __esm({
     RUNTIME_IMAGES = {
       node: {
         repository: "node",
-        suffix: "-bookworm-slim",
+        // NOT `-bookworm-slim`, and the reason is `git`. The slim variant ships none,
+        // and npm resolves a GitHub-shorthand dependency by spawning it: measured
+        // 2026-08-26 on `gang-jiffy/th-globby`, `npm install` exited 254 with
+        // `syscall spawn git / errno -2` before the suite was ever invoked, and the
+        // developer read "our environment could not run your tests" for a repository
+        // that was fine. `image-tooling-live.test.mjs` opens the image and checks,
+        // because a tag cannot tell you what is inside it.
+        suffix: "-bookworm",
         defaultVersion: "22",
         declaredIsFloor: false
       },
@@ -30053,11 +30151,44 @@ var init_gcpPlacement = __esm({
   }
 });
 
+// ../../packages/envrun/dist/emptyGitConfig.js
+import { mkdtempSync as mkdtempSync2, rmSync as rmSync7, writeFileSync as writeFileSync14 } from "fs";
+import { tmpdir as tmpdir2 } from "os";
+import { join as join25 } from "path";
+function emptyGitConfig() {
+  if (emptyGitConfigFile !== void 0)
+    return emptyGitConfigFile;
+  let dir;
+  let file;
+  try {
+    dir = mkdtempSync2(join25(tmpdir2(), "th-run-nogitconfig-"));
+    file = join25(dir, "config");
+    writeFileSync14(file, "", { mode: 384 });
+  } catch (err) {
+    throw new RunRefusalError("could not create the empty git config this run points GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM at, so git would read the configuration \u2014 and the credential helpers \u2014 on this machine instead. That is our environment failing, not your tests: check that the temp directory is writable.", { cause: err });
+  }
+  emptyGitConfigFile = file;
+  process.once("exit", () => {
+    try {
+      rmSync7(dir, { recursive: true, force: true });
+    } catch {
+    }
+  });
+  return file;
+}
+var emptyGitConfigFile;
+var init_emptyGitConfig = __esm({
+  "../../packages/envrun/dist/emptyGitConfig.js"() {
+    "use strict";
+    init_execute();
+  }
+});
+
 // ../../packages/envrun/dist/hostedVenue.js
 import { spawn as spawn5, spawnSync as spawnSync5 } from "child_process";
-import { chmodSync as chmodSync3, existsSync as existsSync11, mkdtempSync as mkdtempSync2, readFileSync as readFileSync13, rmSync as rmSync7 } from "fs";
-import { join as join25 } from "path";
-import { devNull, tmpdir as tmpdir2 } from "os";
+import { chmodSync as chmodSync3, existsSync as existsSync11, mkdtempSync as mkdtempSync3, readFileSync as readFileSync13, rmSync as rmSync8 } from "fs";
+import { join as join26 } from "path";
+import { tmpdir as tmpdir3 } from "os";
 function credentialInGitConfig(text) {
   for (const match2 of text.matchAll(/\b([a-z][a-z0-9+.-]*):\/\/(\S+)/gi)) {
     const scheme = (match2[1] ?? "").toLowerCase();
@@ -30099,18 +30230,23 @@ function dispatchedGitBinary() {
   return "git";
 }
 function dispatchedProbeEnv(cloneDir, base) {
-  const gitDir = join25(cloneDir, ".git");
+  const gitDir = join26(cloneDir, ".git");
   return {
     ...base,
     GIT_DIR: gitDir,
     GIT_WORK_TREE: cloneDir,
-    GIT_INDEX_FILE: join25(gitDir, "index"),
-    GIT_OBJECT_DIRECTORY: join25(gitDir, "objects"),
+    GIT_INDEX_FILE: join26(gitDir, "index"),
+    GIT_OBJECT_DIRECTORY: join26(gitDir, "objects"),
     GIT_ALTERNATE_OBJECT_DIRECTORIES: "",
     GIT_COMMON_DIR: gitDir,
     GIT_NAMESPACE: "",
-    GIT_CONFIG_GLOBAL: devNull,
-    GIT_CONFIG_SYSTEM: devNull,
+    // `emptyGitConfig()`, not `os.devNull`: this probe runs a HOST-side git against
+    // `local.cloneDir`, so it carried the same defect `gitCloneEnv` did — git cannot
+    // open Node's Windows devNull as a config path. Fixed by type rather than at the
+    // one seam that happened to be red, because the seam a later fix forgets is the
+    // one that keeps failing (TERM-653's rule, a package further down).
+    GIT_CONFIG_GLOBAL: emptyGitConfig(),
+    GIT_CONFIG_SYSTEM: emptyGitConfig(),
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_CONFIG_COUNT: "0",
     GIT_CONFIG_PARAMETERS: ""
@@ -30335,6 +30471,59 @@ function venueProxyDir(stageBase) {
 function stageMkdirArgv(vm, project, zone, stageBase) {
   const dirs = Object.values(venueStagePaths(stageBase)).map(quoteForRemoteShell);
   return iapSshArgv(vm, project, zone, `mkdir -p ${dirs.join(" ")}`);
+}
+function stageProofFile(volume) {
+  return `${STAGE_PROOF_PREFIX}${validateVolumeName(volume, "the proved volume")}`;
+}
+function stageVolumeNames(vm) {
+  return {
+    clone: validateVolumeName(`${vm}-clone`, "the clone volume"),
+    jail: validateVolumeName(`${vm}-jail`, "the jail volume")
+  };
+}
+function volumeCreateArgv(name, runId) {
+  return ["volume", "create", `--label=${STAGE_VOLUME_LABEL_KEY}=${runId}`, "--", name];
+}
+function execProbeArgv(volume) {
+  const file = `/probe/${stageProofFile(volume)}`;
+  return [
+    "run",
+    "--rm",
+    "--network=none",
+    `--volume=${validateVolumeName(volume, "the probe volume")}:/probe:rw`,
+    "--",
+    STAGE_HELPER_IMAGE,
+    "sh",
+    "-c",
+    `printf '#!/bin/sh\\nexit 0\\n' > ${file} && chmod 0755 ${file} && ${file}`
+  ];
+}
+function populateVolumeArgv(from, volume, owner) {
+  const proof = `/dst/${stageProofFile(volume)}`;
+  return [
+    "run",
+    "--rm",
+    "--network=none",
+    `--volume=${from}:/src:ro`,
+    `--volume=${validateVolumeName(volume, "the stage volume")}:/dst:rw`,
+    "--",
+    STAGE_HELPER_IMAGE,
+    "sh",
+    "-c",
+    `if [ ! -x ${proof} ]; then echo "no proof ${stageProofFile(volume)} in /dst: this volume was not proved here" >&2; exit 90; fi && ${proof} && rm ${proof} && cp -a /src/. /dst/ && chown ${String(owner.uid)}:${String(owner.gid)} /dst`
+  ];
+}
+function stagedOwnerOrThrow(owner, vm) {
+  if (owner === void 0) {
+    throw new Error(`the staged tree's owner on ${vm} is unknown when the stage volumes are being filled: acquire reads it before any lease exists, so stage() ran against a lease that was never acquired here. This is a defect in hostedVenue.ts, not something the venue did.`);
+  }
+  return owner;
+}
+function dockerDetail(res) {
+  if (res.error)
+    return `docker did not run: ${res.error.message}`;
+  const said = res.stderr.trim();
+  return `exit ${String(res.status)}${said === "" ? "" : ` \u2014 ${said}`}`;
 }
 function iapUntarProxyArgv(vm, project, zone, dir) {
   const d = quoteForRemoteShell(dir);
@@ -30626,7 +30815,7 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
           throw new HostedVenueError(`the tunnel socket directory ${socketDir} could not be removed and is left behind: ${describeErr(err)}`);
         }
       });
-      const socketPath = join25(socketDir, VENUE_SOCKET_NAME);
+      const socketPath = join26(socketDir, VENUE_SOCKET_NAME);
       if (io.exists(socketPath)) {
         throw new HostedVenueError(`something already exists at ${socketPath}, inside a directory created seconds ago for this run alone. Refusing rather than clearing it: the tunnel would carry the whole run over a path we cannot account for`, "ours");
       }
@@ -30661,12 +30850,34 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
       if (!prepared.ok) {
         throw new HostedVenueError(`could not prepare the stage on ${vm}: ${execDetail(prepared).slice(0, 300)}`);
       }
+      const stageVolumes = stageVolumeNames(vm);
+      for (const name of [stageVolumes.clone, stageVolumes.jail]) {
+        const created = docker3.sync(volumeCreateArgv(name, runId), {
+          timeoutMs: VOLUME_CREATE_TIMEOUT_MS
+        });
+        if (created.error || created.status !== 0) {
+          throw new HostedVenueError(`could not create the stage volume ${name} on ${vm}: ${dockerDetail(created).slice(0, 300)}`);
+        }
+      }
+      for (const name of [stageVolumes.clone, stageVolumes.jail]) {
+        const probe = docker3.sync(execProbeArgv(name), {
+          timeoutMs: EXEC_PROBE_TIMEOUT_MS
+        });
+        if (probe.error || probe.status !== 0) {
+          throw new HostedVenueError(`${vm} cannot execute a file written to its own Docker volume ${name}, so no install step with a native postinstall could run there. Refusing before staging anything: ${dockerDetail(probe).slice(0, 300)}`);
+        }
+      }
+      const after = io.classifyDaemon(docker3);
+      if (!after.distinct || after.venueDaemonId !== venueDaemonId) {
+        throw new HostedVenueError(`the daemon at ${socketPath} changed while the stage volumes were being created and proved: it now answers as ${after.distinct ? `daemon ${after.venueDaemonId}` : describeVenueDaemon(after)}, not ${venueDaemonId}. Refusing to hand out a lease whose proof was made elsewhere.`);
+      }
       return makeLease({
         runId,
         vm,
         project,
         zone,
         stageBase,
+        stageVolumes,
         docker: docker3,
         tunnel,
         socketDir,
@@ -30774,6 +30985,9 @@ function makeLease(p) {
     get guestUser() {
       return stagedOwner;
     },
+    // The third field about the same machine (TERM-913): WHICH volumes back
+    // the paths `stage()` returns. Names only; the contents arrive in `stage()`.
+    stageVolumes: p.stageVolumes,
     // Verified at acquire, before anything was staged; carried so the caller
     // can hand PR 5's intake the evidence. The lease is the only holder of
     // the raw token — `VenueLease.venueIdentity` says why it is not a result
@@ -30813,14 +31027,14 @@ function makeLease(p) {
       const { jail: localJail, tmp: localTmp } = localJailPaths(local.scratchRoot);
       const required2 = [
         localTmp,
-        join25(localJail, JAIL_PASSWD_FILE),
-        join25(localJail, JAIL_GROUP_FILE)
+        join26(localJail, JAIL_PASSWD_FILE),
+        join26(localJail, JAIL_GROUP_FILE)
       ];
       const missing = required2.filter((path5) => !p.io.exists(path5));
       if (missing.length > 0) {
         throw new HostedVenueError(`refusing to stage ${local.scratchRoot} onto ${p.vm}: the jail at ${localJail} is incomplete \u2014 missing ${missing.join(", ")}. buildJail must run to completion before stage(), or the venue mounts a directory with no identity database.`);
       }
-      const gitConfigPath = join25(local.cloneDir, ".git", "config");
+      const gitConfigPath = join26(local.cloneDir, ".git", "config");
       let gitConfig;
       try {
         gitConfig = p.io.readTextIfPresent(gitConfigPath);
@@ -30873,6 +31087,21 @@ function makeLease(p) {
       }
       await push(local.cloneDir, paths.cloneDir);
       await push(local.scratchRoot, paths.scratchRoot);
+      const owner = stagedOwnerOrThrow(stagedOwner, p.vm);
+      const fills = [
+        ["clone", paths.cloneDir, p.stageVolumes.clone],
+        ["jail", paths.jail, p.stageVolumes.jail]
+      ];
+      for (const [what, from, volume] of fills) {
+        check(`filling the ${what} volume`);
+        const filled = p.docker.sync(populateVolumeArgv(from, volume, owner), {
+          timeoutMs: POPULATE_TIMEOUT_MS
+        });
+        if (filled.error || filled.status !== 0) {
+          throw new HostedVenueError(`could not copy the staged ${what} into its volume ${volume} on ${p.vm} (the copy runs only after the volume presents the proof acquire left in it): ${dockerDetail(filled).slice(0, 300)}`);
+        }
+        check(`confirming the ${what} volume fill`);
+      }
       return paths;
     },
     census(label) {
@@ -30948,7 +31177,7 @@ function makeLease(p) {
     }
   };
 }
-var SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING;
+var SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, STAGE_HELPER_IMAGE, VOLUME_CREATE_TIMEOUT_MS, EXEC_PROBE_TIMEOUT_MS, POPULATE_TIMEOUT_MS, STAGE_VOLUME_LABEL_KEY, STAGE_PROOF_PREFIX, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING;
 var init_hostedVenue = __esm({
   "../../packages/envrun/dist/hostedVenue.js"() {
     "use strict";
@@ -30956,6 +31185,7 @@ var init_hostedVenue = __esm({
     init_dist2();
     init_gcpPlacement();
     init_execute();
+    init_emptyGitConfig();
     init_labels();
     init_venueProof();
     init_venue();
@@ -31046,12 +31276,12 @@ var init_hostedVenue = __esm({
       now: () => Date.now(),
       exists: (path5) => existsSync11(path5),
       makePrivateDir: () => {
-        const dir = mkdtempSync2(join25(tmpdir2(), SOCKET_DIR_PREFIX));
+        const dir = mkdtempSync3(join26(tmpdir3(), SOCKET_DIR_PREFIX));
         chmodSync3(dir, 448);
         return dir;
       },
       removeTree: (path5) => {
-        rmSync7(path5, { recursive: true, force: true });
+        rmSync8(path5, { recursive: true, force: true });
       },
       dockerFor: (socketPath) => remoteDockerClient(`unix://${socketPath}`),
       classifyDaemon: (docker3) => classifyVenueDaemon(docker3),
@@ -31073,6 +31303,12 @@ var init_hostedVenue = __esm({
     VENUE_SSH_USER = "th-runner";
     GCE_METADATA_IDENTITY_URL = "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/identity";
     COMPACT_JWT = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+    STAGE_HELPER_IMAGE = "busybox:1.37.0";
+    VOLUME_CREATE_TIMEOUT_MS = 3e4;
+    EXEC_PROBE_TIMEOUT_MS = 12e4;
+    POPULATE_TIMEOUT_MS = STAGE_PUSH_TIMEOUT_MS;
+    STAGE_VOLUME_LABEL_KEY = "terminalhire.stage";
+    STAGE_PROOF_PREFIX = ".th-proven-";
     IAP_NOT_READY = /\b4047\s*[:\]]/;
     IAP_BACKEND_UNREACHABLE = /\b4003\s*[:\]]/;
     IAP_DENIED = /PERMISSION_DENIED|Required '[^']+' permission/;
@@ -31746,7 +31982,58 @@ function pythonTestCommand(repo) {
   }
   return null;
 }
+function toxTestenvDeps(repo) {
+  const text = repo.readText("tox.ini");
+  if (text === null)
+    return [];
+  const deps = [];
+  let inTestenv = false;
+  let inDeps = false;
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    const trimmed = line.trim();
+    if (trimmed.startsWith("[")) {
+      inTestenv = trimmed === "[testenv]";
+      inDeps = false;
+      continue;
+    }
+    if (!inTestenv)
+      continue;
+    const assignment = /^([A-Za-z0-9_]+)\s*=\s*(.*)$/.exec(trimmed);
+    if (assignment !== null && !/^\s/.test(line)) {
+      inDeps = assignment[1] === "deps";
+      if (inDeps && assignment[2] !== "")
+        deps.push(assignment[2]);
+      continue;
+    }
+    if (inDeps && trimmed !== "")
+      deps.push(trimmed);
+  }
+  return deps.filter((d) => REQUIREMENT_SPECIFIER.test(d));
+}
+function pytestIsDeclaredForInstall(repo) {
+  const names = /(?:^|[\s"'[])pytest(?:[\s"'\]<>=~!,]|$)/m;
+  if (names.test(repo.readText("pyproject.toml") ?? ""))
+    return true;
+  for (const name of ["requirements.txt", "requirements-dev.txt", "requirements/dev.txt"]) {
+    const text = repo.readText(name);
+    if (text !== null && names.test(text))
+      return true;
+  }
+  return false;
+}
 function pythonInstallCommand(repo) {
+  const base = basePythonInstallCommand(repo);
+  if (base === null || !base.startsWith("pip install "))
+    return base;
+  if (pythonTestCommand(repo) !== "pytest" || pytestIsDeclaredForInstall(repo))
+    return base;
+  const deps = toxTestenvDeps(repo);
+  if (deps.length === 0)
+    return base;
+  return `${base} && pip install ${deps.map((d) => `'${d}'`).join(" ")}`;
+}
+function basePythonInstallCommand(repo) {
   if (repo.exists("poetry.lock"))
     return "poetry install";
   if (repo.exists("uv.lock"))
@@ -31842,7 +32129,7 @@ function matchFirst(text, pattern) {
   const match2 = pattern.exec(text);
   return match2 === null ? null : match2[1];
 }
-var RUNTIME_MANIFESTS, MANIFEST_FILENAMES, NPM_PLACEHOLDER_TEST, EXACT_VERSION;
+var RUNTIME_MANIFESTS, MANIFEST_FILENAMES, NPM_PLACEHOLDER_TEST, REQUIREMENT_SPECIFIER, EXACT_VERSION;
 var init_manifest2 = __esm({
   "../../packages/envspec/dist/manifest.js"() {
     "use strict";
@@ -31857,6 +32144,7 @@ var init_manifest2 = __esm({
     ];
     MANIFEST_FILENAMES = RUNTIME_MANIFESTS.flatMap((m) => m.files).concat(["*.csproj", "*.fsproj", "*.sln"]).sort();
     NPM_PLACEHOLDER_TEST = /^echo\s+["']?Error:\s*no test specified["']?\s*&&\s*exit\s+1$/;
+    REQUIREMENT_SPECIFIER = /^[A-Za-z0-9._-]+(\[[A-Za-z0-9._,-]+\])?([<>=!~]=?[A-Za-z0-9._*+-]+(,[<>=!~]=?[A-Za-z0-9._*+-]+)*)?$/;
     EXACT_VERSION = /^v?(\d+(?:\.\d+){0,2})$/;
   }
 });
@@ -31930,9 +32218,9 @@ var init_references = __esm({
 
 // ../../packages/envspec/dist/repo.js
 import { readdirSync as readdirSync2, readFileSync as readFileSync14, statSync as statSync3 } from "fs";
-import { join as join26, relative as relative2, sep as sep4 } from "path";
+import { join as join27, relative as relative2, sep as sep4 } from "path";
 function createRepoReader(repoPath) {
-  const resolveIn = (relativePath) => relativePath === "" ? repoPath : join26(repoPath, relativePath);
+  const resolveIn = (relativePath) => relativePath === "" ? repoPath : join27(repoPath, relativePath);
   const toPosix = (absolute) => relative2(repoPath, absolute).split(sep4).join("/");
   const readText = (relativePath) => {
     try {
@@ -31962,7 +32250,7 @@ function createRepoReader(repoPath) {
       for (const name of names.slice().sort()) {
         if (SKIP_DIRECTORIES.has(name))
           continue;
-        const child = join26(dir, name);
+        const child = join27(dir, name);
         const st = statOf(toPosix(child));
         if (st === null)
           continue;
@@ -32559,10 +32847,10 @@ var init_dist3 = __esm({
 
 // ../../packages/envrun/dist/thrun.js
 import { execFileSync, spawnSync as spawnSync6 } from "child_process";
-import { existsSync as existsSync12, mkdirSync as mkdirSync5, mkdtempSync as mkdtempSync3, rmSync as rmSync8 } from "fs";
+import { existsSync as existsSync12, mkdirSync as mkdirSync5, mkdtempSync as mkdtempSync4, rmSync as rmSync9 } from "fs";
 import { randomUUID as randomUUID3 } from "crypto";
-import { devNull as devNull2, tmpdir as tmpdir3 } from "os";
-import { join as join27 } from "path";
+import { tmpdir as tmpdir4 } from "os";
+import { join as join28 } from "path";
 function git(repoDir, args, allowNonZero = false) {
   const res = spawnSync6("git", [...args], {
     cwd: repoDir,
@@ -32577,7 +32865,7 @@ function git(repoDir, args, allowNonZero = false) {
   return res.stdout ?? "";
 }
 function collectWorkingDiff(repoDir) {
-  if (!existsSync12(join27(repoDir, ".git"))) {
+  if (!existsSync12(join28(repoDir, ".git"))) {
     throw new ThRunError(`${repoDir} is not a git checkout (no .git). \`th run\` ships the working diff, so it needs a repository to read one from.`);
   }
   const headSha = git(repoDir, ["rev-parse", "HEAD"]).trim();
@@ -32692,8 +32980,8 @@ function gitCloneEnv(auth) {
     if (value !== void 0)
       env[name] = value;
   }
-  env["GIT_CONFIG_GLOBAL"] = devNull2;
-  env["GIT_CONFIG_SYSTEM"] = devNull2;
+  env["GIT_CONFIG_GLOBAL"] = emptyGitConfig();
+  env["GIT_CONFIG_SYSTEM"] = emptyGitConfig();
   env["GIT_CONFIG_NOSYSTEM"] = "1";
   env["GIT_TERMINAL_PROMPT"] = "0";
   for (const name of ["HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"]) {
@@ -32712,14 +33000,14 @@ function credentialFreeHome() {
     return credentialFreeHomeDir;
   let made;
   try {
-    made = mkdtempSync3(join27(tmpdir3(), "th-run-nohome-"));
+    made = mkdtempSync4(join28(tmpdir4(), "th-run-nohome-"));
   } catch (err) {
     throw new RunRefusalError("could not create the empty directory this clone uses as its home, so the clone would read the credentials on this machine instead. That is our environment failing, not your tests: check that the temp directory is writable.", { cause: err });
   }
   credentialFreeHomeDir = made;
   process.once("exit", () => {
     try {
-      rmSync8(made, { recursive: true, force: true });
+      rmSync9(made, { recursive: true, force: true });
     } catch {
     }
   });
@@ -32826,7 +33114,7 @@ function cloneTargetAtUnguarded(opts) {
 }
 function scrubCloneSource(dest, run3) {
   run3(["remote", "remove", "origin"]);
-  rmSync8(join27(dest, ".git", "FETCH_HEAD"), { force: true });
+  rmSync9(join28(dest, ".git", "FETCH_HEAD"), { force: true });
 }
 function publishableTarget(url) {
   if (separatorInTarget(url) !== null)
@@ -33197,9 +33485,9 @@ async function runVerification(req, ctx) {
       venueIdentity: null
     };
   }
-  const stage = join27(req.scratchRoot, runId);
-  const cloneDir = join27(stage, "clone");
-  const scratch = join27(stage, "scratch");
+  const stage = join28(req.scratchRoot, runId);
+  const cloneDir = join28(stage, "clone");
+  const scratch = join28(stage, "scratch");
   mkdirSync5(scratch, { recursive: true });
   assertSafeTargetSha(req.targetSha);
   progress("clone", `${publishableTarget(req.targetRepo)} @ ${req.targetSha.slice(0, 12)}`);
@@ -33265,7 +33553,7 @@ async function runVerification(req, ctx) {
     const venuePaths = await lease.stage({
       cloneDir,
       scratchRoot: scratch,
-      previewDir: join27(stage, "preview"),
+      previewDir: join28(stage, "preview"),
       // On a dispatched run the commit is the statement of what was tested, so
       // it rides with the tree and the venue seam refuses a tree that is not
       // that commit (design §6 item 4, TERM-892 — the guard lives in
@@ -33375,6 +33663,7 @@ var init_thrun = __esm({
     init_dist3();
     init_attestation2();
     init_boundary();
+    init_emptyGitConfig();
     init_labels();
     init_execute();
     init_placement();
@@ -34642,6 +34931,7 @@ __export(jpi_claim_exports, {
   BRIEF_REL_PATH: () => BRIEF_REL_PATH,
   CLAIM_CONSENT_VERSION: () => CLAIM_CONSENT_VERSION,
   CLAIM_RESOLUTION_REASONS: () => CLAIM_RESOLUTION_REASONS,
+  CLAIM_SYNC_WRITE_TIMEOUT_MS: () => CLAIM_SYNC_WRITE_TIMEOUT_MS,
   CLOSED_STATES: () => CLOSED_STATES,
   OPENABLE_AGENTS: () => OPENABLE_AGENTS,
   POSTING_LEVEL_RESOLUTION_REASONS: () => POSTING_LEVEL_RESOLUTION_REASONS,
@@ -34661,6 +34951,7 @@ __export(jpi_claim_exports, {
   buildSubmitBody: () => buildSubmitBody,
   claimUpdatePatch: () => claimUpdatePatch,
   cloneFullTierRepo: () => cloneFullTierRepo,
+  cmdNote: () => cmdNote,
   cmdPush: () => cmdPush,
   cmdRecord: () => cmdRecord,
   cmdRelease: () => cmdRelease,
@@ -34728,6 +35019,7 @@ __export(jpi_claim_exports, {
   sliceWorkDirFor: () => sliceWorkDirFor,
   stakeDecision: () => stakeDecision,
   startBranchFor: () => startBranchFor,
+  submitConsentMode: () => submitConsentMode,
   submitRecoveryCommand: () => submitRecoveryCommand,
   submitRefusalFor: () => submitRefusalFor,
   syncFounderApprovals: () => syncFounderApprovals,
@@ -34742,17 +35034,17 @@ __export(jpi_claim_exports, {
 });
 import {
   readFileSync as readFileSync15,
-  writeFileSync as writeFileSync14,
+  writeFileSync as writeFileSync15,
   mkdirSync as mkdirSync7,
-  mkdtempSync as mkdtempSync4,
+  mkdtempSync as mkdtempSync5,
   renameSync as renameSync7,
   existsSync as existsSync13,
   lstatSync as lstatSync3,
   realpathSync as realpathSync2,
-  rmSync as rmSync9,
+  rmSync as rmSync10,
   readdirSync as readdirSync3
 } from "fs";
-import { join as join28, dirname as dirname9, isAbsolute as isAbsolute4, resolve as pathResolve } from "path";
+import { join as join29, dirname as dirname9, isAbsolute as isAbsolute4, resolve as pathResolve } from "path";
 import { createHash as createHash8 } from "crypto";
 import { homedir as homedir15, hostname as osHostname } from "os";
 import { execFile as execFile3, execFileSync as execFileSync2, spawnSync as spawnSync8 } from "child_process";
@@ -34771,7 +35063,7 @@ function markClaimNudged(id) {
     const ids2 = readNudgedClaimIds();
     ids2.add(id);
     ensureStateDir(TERMINALHIRE_DIR11);
-    writeFileSync14(REPO_CONTINUITY_NUDGE_MARKER, JSON.stringify({ claimIds: [...ids2] }), "utf8");
+    writeFileSync15(REPO_CONTINUITY_NUDGE_MARKER, JSON.stringify({ claimIds: [...ids2] }), "utf8");
   } catch {
   }
 }
@@ -34882,6 +35174,28 @@ async function confirm(question) {
   } finally {
     rl.close();
   }
+}
+function submitConsentMode({ yes, isTTY, unattendedAllowed = true }) {
+  if (!unattendedAllowed) return isTTY ? "ask" : "refuse";
+  if (yes) return "flag";
+  if (!isTTY) return "non-interactive";
+  return "ask";
+}
+async function confirmSubmit(flags, question, { unattendedAllowed = true, refusal: refusal2 = "" } = {}) {
+  const mode = submitConsentMode({
+    yes: Boolean(flags.yes),
+    isTTY: Boolean(process.stdin.isTTY),
+    unattendedAllowed
+  });
+  if (mode === "ask") return confirm(question);
+  if (mode === "refuse") {
+    console.error(refusal2 || "terminalhire claim: cannot submit unattended in this state.");
+    process.exit(1);
+  }
+  console.log(
+    mode === "flag" ? "\n  --yes supplied \u2014 skipping interactive confirm." : "\n  Non-interactive session \u2014 proceeding. The card above is what is being sent."
+  );
+  return true;
 }
 async function ask(question) {
   const rl = createInterface2({ input: process.stdin, output: process.stdout });
@@ -35475,6 +35789,10 @@ function submitRefusalFor(claim) {
   if (!SUBMIT_ACCEPTS.includes(claim.state)) {
     const command = submitRecoveryCommand(claim);
     if (command === null) {
+      if (claim.posterVerdict === "rejected") {
+        return `terminalhire claim: ${claim.id} \u2014 the poster rejected this claim, and their decision is final. Nothing here can be submitted again. Find another posting:
+  ${nextStep("terminalhire bounties")}`;
+      }
       return `terminalhire claim: ${claim.id} is '${claim.state}' \u2014 that claim is closed, so there is nothing left to submit.`;
     }
     const reviewer = claim.approval ? "the poster" : "a maintainer";
@@ -35813,7 +36131,7 @@ function fmtContestedWarning(b) {
   }
   return `  \u26A0 This issue looks taken: ${parts.join(" / ")}. A merged PR here is unlikely.`;
 }
-async function mintRegistrationProof() {
+async function mintRegistrationProof({ claimRef } = {}) {
   console.log("\n  This posting registers your claim with terminalhire, so your");
   console.log("  GitHub identity has to be verified once in the browser.");
   let oauthBase;
@@ -35847,10 +36165,19 @@ async function mintRegistrationProof() {
     console.error("  Could not start verification: malformed begin response.");
     return null;
   }
+  let openUrl = verifyUrl;
+  if (claimRef) {
+    try {
+      const u = new URL(verifyUrl);
+      u.searchParams.set("claim", claimRef);
+      openUrl = u.toString();
+    } catch {
+    }
+  }
   console.log("\n  Open this URL to authorize (sign in with GitHub, then Confirm):");
-  console.log(`    ${verifyUrl}`);
+  console.log(`    ${openUrl}`);
   console.log("\n  (Attempting to open it automatically...)");
-  openInBrowser(verifyUrl);
+  openInBrowser(openUrl);
   console.log("  Waiting for browser verification...");
   const deadline = Date.now() + CLAIM_POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
@@ -35947,7 +36274,9 @@ terminalhire claim: refusing to record \u2014 ${reason}
   signed in as. A browser signed into a different GitHub account would bind
   this claim, and any payment for it, to that other account.`
     );
-    const proofToken = await mintRegistrationProof();
+    const proofToken = await mintRegistrationProof({
+      claimRef: opportunityShortToken(b.bountyId)
+    });
     if (!proofToken) {
       refuse3("could not verify your GitHub identity with terminalhire (see above).");
     }
@@ -35976,7 +36305,7 @@ terminalhire claim: refusing to record \u2014 ${reason}
       ...auth,
       ...includeExpectation && expectLogin ? { expectLogin } : {}
     }),
-    signal: AbortSignal.timeout(1e4)
+    signal: AbortSignal.timeout(CLAIM_SYNC_WRITE_TIMEOUT_MS)
   });
   const readRefusal = async (r) => {
     if (r.ok) return null;
@@ -36999,7 +37328,7 @@ async function cmdAttach(id, worktree, branch) {
 function workDirFor(repoFullName, issueNumber) {
   const [owner, repo] = String(repoFullName).split("/");
   const suffix = issueNumber ? `-${issueNumber}` : "";
-  return join28(homedir15(), "terminalhire", "work", `${owner}-${repo}${suffix}`);
+  return join29(homedir15(), "terminalhire", "work", `${owner}-${repo}${suffix}`);
 }
 function startBranchFor(repoFullName, issueNumber) {
   const repo = String(repoFullName).split("/")[1] || "claim";
@@ -37255,7 +37584,7 @@ terminalhire claim: not started \u2014 starting forks ${claim.repoFullName} to y
     );
     process.exit(1);
   }
-  mkdirSync7(join28(homedir15(), "terminalhire", "work"), { recursive: true });
+  mkdirSync7(join29(homedir15(), "terminalhire", "work"), { recursive: true });
   const { createProgress: createProgress2, parseGitProgress: parseGitProgress2, splitProgressChunk: splitProgressChunk2, shStream: shStream2 } = await Promise.resolve().then(() => (init_progress(), progress_exports));
   const progress = createProgress2();
   let forkFullName;
@@ -37285,7 +37614,7 @@ terminalhire claim: not started \u2014 starting forks ${claim.repoFullName} to y
   } catch (err) {
     progress.fail();
     try {
-      rmSync9(destDir, { recursive: true, force: true });
+      rmSync10(destDir, { recursive: true, force: true });
     } catch {
     }
     console.error(
@@ -37381,7 +37710,7 @@ function founderPostingIdOf(claim) {
 }
 function sliceWorkDirFor(claimLocalId) {
   const safe = String(claimLocalId).replace(/[^A-Za-z0-9._-]/g, "-");
-  return join28(homedir15(), "terminalhire", "work", `slice-${safe}`);
+  return join29(homedir15(), "terminalhire", "work", `slice-${safe}`);
 }
 function assertNoBooleanPath(dest, flagName) {
   const last = String(dest).split(/[\\/]/).filter(Boolean).pop();
@@ -37498,9 +37827,9 @@ function writeSliceFiles(destDir, files) {
   const unavailable = [];
   for (const f of files) {
     if (typeof f.content === "string") {
-      const abs = join28(destDir, f.path);
+      const abs = join29(destDir, f.path);
       mkdirSync7(dirname9(abs), { recursive: true });
-      writeFileSync14(abs, f.content, "utf8");
+      writeFileSync15(abs, f.content, "utf8");
       written.push(f.path);
     } else {
       unavailable.push({ path: f.path, reason: f.unavailableReason || "(no reason given)" });
@@ -37518,18 +37847,18 @@ function ownedPackPaths(claim) {
 }
 function writeDeliveredBrief(destDir, spec) {
   if (typeof spec !== "string" || spec.trim() === "") {
-    return { written: false, reason: "the server sent no brief for this posting" };
+    return { written: false, reason: "the server sent no task for this posting" };
   }
   const gate = ensureExcludedPackDir(destDir);
   if (!gate.ok) {
     return { written: false, reason: gate.reason };
   }
-  return writePackFile(destDir, BRIEF_REL_PATH, spec, "brief");
+  return writePackFile(destDir, BRIEF_REL_PATH, spec, "task");
 }
 function ensureExcludedPackDir(destDir) {
   let occupant = null;
   try {
-    occupant = lstatSync3(join28(destDir, BRIEF_DIR));
+    occupant = lstatSync3(join29(destDir, BRIEF_DIR));
   } catch (err) {
     if (err?.code !== "ENOENT") {
       return {
@@ -37544,12 +37873,12 @@ function ensureExcludedPackDir(destDir) {
       reason: `${BRIEF_DIR}/ already exists in the delivered tree, and excluding it would hide that content from your patch`
     };
   }
-  const excludeFile = join28(destDir, ".git", "info", "exclude");
+  const excludeFile = join29(destDir, ".git", "info", "exclude");
   try {
     const existing = existsSync13(excludeFile) ? readFileSync15(excludeFile, "utf8") : "";
     if (!existing.split("\n").includes(BRIEF_EXCLUDE_LINE)) {
       mkdirSync7(dirname9(excludeFile), { recursive: true });
-      writeFileSync14(
+      writeFileSync15(
         excludeFile,
         `${existing}${existing === "" || existing.endsWith("\n") ? "" : "\n"}${BRIEF_EXCLUDE_LINE}
 `,
@@ -37563,9 +37892,9 @@ function ensureExcludedPackDir(destDir) {
 }
 function writePackFile(destDir, relPath, content, what) {
   try {
-    const abs = join28(destDir, relPath);
+    const abs = join29(destDir, relPath);
     mkdirSync7(dirname9(abs), { recursive: true });
-    writeFileSync14(abs, content, { encoding: "utf8", flag: "wx" });
+    writeFileSync15(abs, content, { encoding: "utf8", flag: "wx" });
   } catch (err) {
     return { written: false, reason: `the ${what} could not be written (${err.message})` };
   }
@@ -37580,7 +37909,7 @@ function writeWorkspacePack(destDir, spec, claim) {
     const refused = { written: false, reason: gate.reason };
     return { brief: refused, verify: refused, agents: refused };
   }
-  const brief = typeof spec !== "string" || spec.trim() === "" ? { written: false, reason: "the server sent no brief for this posting" } : writePackFile(destDir, BRIEF_REL_PATH, spec, "brief");
+  const brief = typeof spec !== "string" || spec.trim() === "" ? { written: false, reason: "the server sent no task for this posting" } : writePackFile(destDir, BRIEF_REL_PATH, spec, "task");
   const verify = writePackFile(destDir, VERIFY_REL_PATH, renderVerifyDoc(claim), "verify note");
   const agents = writePackFile(
     destDir,
@@ -37603,14 +37932,14 @@ judged on the diff: the submitted patch is the change from the delivered
 baseline (this repo's root commit) to HEAD, so only committed, tracked changes
 count.
 
-1. Read the poster's brief first, when there is one: ${BRIEF_REL_PATH}
+1. Read the poster's task first, when there is one: ${BRIEF_REL_PATH}
 2. Work on the claim branch this delivery checked out, committing as you go.
 3. To verify locally in terminalhire's sandboxed runner, from this directory:
 
        terminalhire run
 
-4. Submit \u2014 run by the human at the keyboard, and the only step that sends
-   anything off this machine:
+4. Submit \u2014 the only step that sends anything off this machine. It prints what it
+   is about to send first, and asks y/N only at an interactive terminal:
 
        ${nextStep(`terminalhire claim submit ${id}`)}
 
@@ -37634,8 +37963,10 @@ rules below.
 Ground rules for an agent working here:
 
 - Never \`git push\`, and never open a pull request from here. Work leaves this
-  machine one way only: \`${nextStep(`terminalhire claim submit ${id}`)}\`, run by the human at
-  the keyboard. Agents must never pass \`--yes\`.
+  machine one way only: \`${nextStep(`terminalhire claim submit ${id}`)}\`. Run it once
+  the work is committed and reviewed; it prints what it is about to send, and for a
+  posting the developer's identity is confirmed once in the browser before anything
+  goes out.
 - Commit as you go. The submitted patch is the diff from the delivered baseline
   to HEAD \u2014 tracked, committed changes only.
 - Leave the files terminalhire delivered in \`${BRIEF_DIR}/\` alone (this one
@@ -37648,10 +37979,10 @@ function printDeliveredBrief(result) {
   if (!result) return;
   if (result.written) {
     console.log(
-      `  brief:    ${BRIEF_REL_PATH} \u2014 the poster's write-up, excluded from your commits`
+      `  task:     ${BRIEF_REL_PATH} \u2014 the poster's write-up, excluded from your commits`
     );
   } else {
-    console.log(`  brief:    not delivered \u2014 ${result.reason}`);
+    console.log(`  task:     not delivered \u2014 ${result.reason}`);
   }
 }
 function printWorkspacePack(pack) {
@@ -38125,7 +38456,7 @@ async function attemptSliceDelivery(id, flags = {}) {
     console.log(`terminalhire claim: the usual directory has content \u2014 using ${finalDest}`);
   }
   mkdirSync7(dirname9(finalDest), { recursive: true });
-  let dest = mkdtempSync4(`${finalDest}.tmp-`);
+  let dest = mkdtempSync5(`${finalDest}.tmp-`);
   const { written, unavailable } = writeSliceFiles(dest, body.files);
   const branch = `claim/${String(claim.id).replace(/[^A-Za-z0-9._-]/g, "-")}`;
   let pack;
@@ -38351,24 +38682,18 @@ async function submitFounderPatch({ claims, claim, id, wt, flags }) {
   console.log(
     `  author:   ${authorName} <${authorEmail}> (from your HEAD commit; sent as patch authorship)`
   );
-  let ok;
-  if (flags.yes) {
-    console.log("\n  --yes supplied \u2014 skipping interactive confirm.");
-    ok = true;
-  } else if (!process.stdin.isTTY) {
-    console.error(
-      "\nterminalhire claim: stdin is not a TTY \u2014 cannot ask for confirmation.\n  Re-run with --yes to confirm non-interactively (a human must type it;\n  agents/skills must never pass --yes)."
-    );
-    process.exit(1);
-  } else {
-    ok = await confirm(`
-  Submit this patch to the poster via terminalhire? (y/N) `);
-  }
+  const ok = await confirmSubmit(
+    flags,
+    `
+  Submit this patch to the poster via terminalhire? (y/N) `
+  );
   if (!ok) {
     console.log("Aborted \u2014 nothing submitted.");
     return;
   }
-  const proofToken = await mintRegistrationProof();
+  const proofToken = await mintRegistrationProof({
+    claimRef: opportunityShortToken(claim.bountyId)
+  });
   if (!proofToken) {
     console.error(
       "terminalhire claim: could not verify your GitHub identity with terminalhire (see above) \u2014 nothing was submitted."
@@ -38398,7 +38723,7 @@ async function submitFounderPatch({ claims, claim, id, wt, flags }) {
       body: JSON.stringify(submission),
       // The server applies the patch and pushes the branch inside this request —
       // give it more room than a plain read.
-      signal: AbortSignal.timeout(6e4)
+      signal: AbortSignal.timeout(CLAIM_SYNC_WRITE_TIMEOUT_MS)
     });
   } catch (err) {
     console.error(
@@ -38666,7 +38991,7 @@ async function cmdSubmit(id, flags = {}) {
   const head = `${ghUser}:${claim.branch}`;
   const title = flags.title || claim.title;
   const noBody = Boolean(flags["no-body"]);
-  const prBodyPath = join28(wt, "PR-BODY.md");
+  const prBodyPath = join29(wt, "PR-BODY.md");
   const bodySource = pickBodySource({
     bodyFileFlag: flags["body-file"],
     noBody,
@@ -38727,21 +39052,19 @@ terminalhire claim: refusing to submit \u2014 ${competing.length} open PR(s) by 
       }
     }
   }
-  let ok;
-  if (flags.yes) {
-    console.log("\n  --yes supplied \u2014 skipping interactive confirm.");
-    ok = true;
-  } else if (!process.stdin.isTTY) {
-    console.error(
-      "\nterminalhire claim: stdin is not a TTY \u2014 cannot ask for confirmation.\n  Re-run with --yes to confirm non-interactively (a human must type it;\n  agents/skills must never pass --yes)."
-    );
-    process.exit(1);
-  } else {
-    ok = await confirm(
-      `
-  Push '${claim.branch}' to ${originRepo} and open a PR against ${upstream}? (y/N) `
-    );
-  }
+  const ok = await confirmSubmit(
+    flags,
+    `
+  Push '${claim.branch}' to ${originRepo} and open a PR against ${upstream}? (y/N) `,
+    {
+      unattendedAllowed: claim.state === "ready",
+      refusal: `terminalhire claim: ${claim.id} is '${claim.state}' and this session has no terminal to ask y/N.
+  Pushing a branch and opening a PR unattended takes the explicit attestation that the diff
+  passed review. Mark it, then submit again:
+  ${reviseRecoveryCommand(claim.id)}
+  (At an interactive terminal, submit asks y/N from '${claim.state}' instead.)`
+    }
+  );
   if (!ok) {
     console.log("Aborted \u2014 nothing pushed.");
     return;
@@ -38908,11 +39231,11 @@ function readClaimPushMarker() {
 }
 function writeClaimPushMarker(marker) {
   ensureStateDir(TERMINALHIRE_DIR11);
-  writeFileSync14(CLAIM_PUSH_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  writeFileSync15(CLAIM_PUSH_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearClaimPushMarker() {
   try {
-    rmSync9(CLAIM_PUSH_MARKER);
+    rmSync10(CLAIM_PUSH_MARKER);
   } catch {
   }
 }
@@ -39461,6 +39784,133 @@ function resolutionReasonHelpLines() {
   }
   return lines;
 }
+function noteUsageLines() {
+  return [
+    'Usage: terminalhire claim note <id> --body "..."      draft a note to the poster',
+    "",
+    "  Tell the poster something about a claim you hold. Needs `terminalhire link`.",
+    "",
+    "  This DRAFTS. It stores the text, prints it back with a digest, and sends",
+    "  nothing. It then prints a link to your dashboard, and the note is sent from",
+    "  there \u2014 there is no approve command any more.",
+    "",
+    "  Why the send moved to the browser: a note is drafted by an agent that has just",
+    "  read a repository nobody vetted, and that repository can carry text aimed at",
+    "  the agent. An approve command took a digest this tool could compute itself, so",
+    "  one script could draft and send with nobody reading anything.",
+    "",
+    "  This CLI cannot send a note at all. `terminalhire link` gave it its own",
+    "  session, separate from your browser one, and the send refuses it \u2014 so there",
+    "  is no flag, no digest and no scripted path from here to a sent note.",
+    "",
+    "  It does not prove a person read it: anything driving your BROWSER session can",
+    "  open the page and send from it. What it proves is narrower \u2014 the approval came",
+    "  from a browser session, which this terminal login never issues."
+  ];
+}
+async function cmdNote(id, flags = {}, deps = {}) {
+  const log = deps.log ?? console.log;
+  const err = deps.err ?? console.error;
+  const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+  if (flags.help) {
+    for (const line of noteUsageLines()) log(line);
+    return 0;
+  }
+  if (!id) {
+    for (const line of noteUsageLines()) err(line);
+    return 1;
+  }
+  const claims = deps.claimsModule ?? await Promise.resolve().then(() => (init_claims(), claims_exports));
+  const claim = claims.findClaim(id);
+  if (!claim) {
+    err(`terminalhire claim note: no claim with id '${id}'.`);
+    return 1;
+  }
+  const claimId = claim.approval?.claimId ?? null;
+  if (!claimId) {
+    err(`terminalhire claim note: '${id}' is not a terminalhire posting, so there is`);
+    err("  no poster to tell.");
+    return 1;
+  }
+  const body = typeof flags.body === "string" ? flags.body : "";
+  if (!body.trim()) {
+    err("terminalhire claim note: --body is required. A note with no words says nothing.");
+    return 1;
+  }
+  const linked = linkedSessionFor(err, "note", deps);
+  if (!linked) return 1;
+  const res = await postJson(
+    fetchImpl,
+    `${CLAIM_SYNC_BASE4}/api/claim/note/draft`,
+    { bountyId: founderPostingIdOf(claim), claimId, body },
+    linked
+  );
+  if (!res.ok) {
+    err(`terminalhire claim note: ${res.message}`);
+    for (const f of res.findings ?? []) {
+      err(`  line ${f.line}: ${f.label}`);
+    }
+    return 1;
+  }
+  log("");
+  log("  Draft stored. Nothing has been sent.");
+  log("");
+  for (const line of String(res.body.body).split("\n")) log(`  \u2502 ${line}`);
+  log("");
+  log(`  draft: ${res.body.draftId}`);
+  log(`  sha:   ${res.body.bodySha256}`);
+  log("");
+  log("  Read it. If it says what you mean and carries nothing private, send it here:");
+  log(`    ${CLAIM_SYNC_BASE4}/dashboard/notes/${res.body.draftId}`);
+  log("");
+  log("  There is no approve command. The page needs a value only it can issue, which");
+  log("  is what stops this tool from sending a note it just wrote.");
+  log("");
+  return 0;
+}
+function linkedSessionFor(err, verb, deps = {}) {
+  const linked = deps.cookie ? { cookie: deps.cookie, mismatch: null } : webSessionCookieForHost(CLAIM_SYNC_BASE4);
+  if (linked.mismatch) {
+    err(
+      `terminalhire claim ${verb}: your session was minted by ${linked.mismatch.linkedHost}, and this is ${linked.mismatch.currentHost}. Run \`terminalhire link\` against this one.`
+    );
+    return null;
+  }
+  if (!linked.cookie) {
+    err(`terminalhire claim ${verb}: needs a linked session. Run \`terminalhire link\` first.`);
+    return null;
+  }
+  return linked;
+}
+async function postJson(fetchImpl, url, body, linked) {
+  let res;
+  try {
+    res = await fetchImpl(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${GH_SESSION_COOKIE}=${linked.cookie}`
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15e3)
+    });
+  } catch {
+    return { ok: false, message: "could not reach terminalhire just now. Nothing changed." };
+  }
+  let answer = null;
+  try {
+    answer = await res.json();
+  } catch {
+  }
+  if (!res.ok) {
+    return {
+      ok: false,
+      message: typeof answer?.error === "string" && answer.error ? answer.error : `terminalhire answered ${res.status}`,
+      findings: Array.isArray(answer?.findings) ? answer.findings : []
+    };
+  }
+  return { ok: true, body: answer ?? {} };
+}
 function resolveUsageLines() {
   return [
     'Usage: terminalhire claim resolve <id> --reason <reason> [--note "..."]',
@@ -39652,9 +40102,26 @@ async function run() {
       case "notes":
         await cmdNotes(flags);
         break;
+      // SINGULAR `note` WRITES, plural `notes` READS, and the two are one letter apart.
+      // Named for what the developer is doing rather than renamed for distance: `notes`
+      // is three years of muscle memory and `note` is what you leave.
+      case "note": {
+        if (positional[0] === "approve") {
+          console.error(
+            "terminalhire claim note approve: removed. Notes are sent from your dashboard."
+          );
+          console.error(
+            '  Draft with `terminalhire claim note <id> --body "..."` \u2014 it prints the link.'
+          );
+          process.exit(1);
+        }
+        const code = await cmdNote(positional[0], flags);
+        if (code !== 0) process.exit(code);
+        break;
+      }
       default:
         console.error(
-          `terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | slice | list | status | update | submit | runs | notes | audit | release | resolve`
+          `terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | slice | list | status | update | submit | runs | note | notes | audit | release | resolve`
         );
         process.exit(1);
     }
@@ -39663,7 +40130,7 @@ async function run() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR11, INDEX_CACHE_FILE2, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, GH_API2, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, CLOSED_STATES, GH_SESSION_COOKIE, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, OPENABLE_AGENTS, BRIEF_DIR, BRIEF_REL_PATH, VERIFY_REL_PATH, AGENTS_REL_PATH, BRIEF_EXCLUDE_LINE, PACK_SAFE_ID, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3, CLAIM_RESOLUTION_REASONS, POSTING_LEVEL_RESOLUTION_REASONS, RESOLUTION_REASON_BLURB;
+var TERMINALHIRE_DIR11, INDEX_CACHE_FILE2, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, CLAIM_SYNC_WRITE_TIMEOUT_MS, GH_API2, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, CLOSED_STATES, GH_SESSION_COOKIE, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, OPENABLE_AGENTS, BRIEF_DIR, BRIEF_REL_PATH, VERIFY_REL_PATH, AGENTS_REL_PATH, BRIEF_EXCLUDE_LINE, PACK_SAFE_ID, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3, CLAIM_RESOLUTION_REASONS, POSTING_LEVEL_RESOLUTION_REASONS, RESOLUTION_REASON_BLURB;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
@@ -39678,15 +40145,16 @@ var init_jpi_claim = __esm({
     init_claim_push_bg();
     init_founder_verdict_sync();
     init_founder_note_sync();
-    TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join28(homedir15(), ".terminalhire");
-    INDEX_CACHE_FILE2 = join28(TERMINALHIRE_DIR11, "index-cache.json");
-    CLAIM_PUSH_MARKER = join28(TERMINALHIRE_DIR11, "claim-push.json");
-    REPO_CONTINUITY_NUDGE_MARKER = join28(TERMINALHIRE_DIR11, "repo-continuity-nudged.json");
+    TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join29(homedir15(), ".terminalhire");
+    INDEX_CACHE_FILE2 = join29(TERMINALHIRE_DIR11, "index-cache.json");
+    CLAIM_PUSH_MARKER = join29(TERMINALHIRE_DIR11, "claim-push.json");
+    REPO_CONTINUITY_NUDGE_MARKER = join29(TERMINALHIRE_DIR11, "repo-continuity-nudged.json");
     API_URL = resolveApiBase();
     CLAIM_SYNC_BASE4 = API_URL;
     CLAIM_CONSENT_VERSION = 1;
     CLAIM_POLL_INTERVAL_MS = 2e3;
     CLAIM_POLL_TIMEOUT_MS = 10 * 60 * 1e3;
+    CLAIM_SYNC_WRITE_TIMEOUT_MS = 6e4;
     GH_API2 = "https://api.github.com";
     GH_HEADERS2 = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
     CONTENTION_HINT = "    tip: if scopes overlap, comment on the ISSUE comparing scope \u2014 generous + compatible wins triage.";
@@ -39702,7 +40170,15 @@ var init_jpi_claim = __esm({
       "dir",
       "open",
       "reason",
-      "note"
+      "note",
+      // TERM-1044. `--body` carries a draft note's text and takes the next token. `--note`
+      // above is already taken by `claim resolve`, where it means something different, so
+      // this does NOT reuse it.
+      //
+      // `--sha` was here for `claim note approve` and went with it: the send moved to the
+      // dashboard, so no CLI verb names a digest any more. Left in place it would parse a
+      // flag nothing reads, which is how a removed feature looks half-removed.
+      "body"
     ]);
     ASSIGNMENT_MARKER = "<!-- terminalhire:assignment-request -->";
     STAKE_MARKER = "<!-- terminalhire:claim-stake -->";
@@ -39787,7 +40263,7 @@ var init_jpi_claim = __esm({
       "out-of-time": "you ran out of time for it",
       "already-implemented": "the repo already has this",
       "repo-does-not-build": "the repo will not build, so nobody can finish it",
-      "brief-insufficient": "the brief does not say enough to do the work"
+      "brief-insufficient": "the task does not say enough to do the work"
     };
   }
 });
@@ -61873,8 +62349,8 @@ __export(config_exports, {
   readConfig: () => readConfig,
   writeConfig: () => writeConfig
 });
-import { readFileSync as readFileSync16, writeFileSync as writeFileSync15, existsSync as existsSync14 } from "fs";
-import { join as join29 } from "path";
+import { readFileSync as readFileSync16, writeFileSync as writeFileSync16, existsSync as existsSync14 } from "fs";
+import { join as join30 } from "path";
 import { homedir as homedir16 } from "os";
 function readConfig() {
   try {
@@ -61896,7 +62372,7 @@ function writeConfig(config2) {
     }
     delete merged.contributePrompted;
   }
-  writeFileSync15(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  writeFileSync16(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function parseNudgeMode(raw) {
   if (raw === "session" || raw === "always") return raw;
@@ -61957,8 +62433,8 @@ var init_config = __esm({
   "src/config.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR12 = process.env.TERMINALHIRE_DIR || join29(homedir16(), ".terminalhire");
-    CONFIG_FILE = join29(TERMINALHIRE_DIR12, "config.json");
+    TERMINALHIRE_DIR12 = process.env.TERMINALHIRE_DIR || join30(homedir16(), ".terminalhire");
+    CONFIG_FILE = join30(TERMINALHIRE_DIR12, "config.json");
     DEFAULT_CONFIG = {
       nudge: "session",
       peerConnect: false,
@@ -62073,6 +62549,21 @@ function partitionFreshMatches(matches, history, getId = defaultGetId) {
 
 // bin/jpi-mcp.js
 init_api_base();
+init_web_session();
+
+// bin/session-case.js
+function sessionCase(entry, { stale }) {
+  const m = entry && entry.sessionHostMismatch;
+  if (m && typeof m.linkedHost === "string" && typeof m.currentHost === "string") {
+    return { kind: "mismatch", linkedHost: m.linkedHost, currentHost: m.currentHost };
+  }
+  if (!stale) return null;
+  const host = entry && entry.staleHost;
+  if (typeof host === "string" && host.length > 0) return { kind: "refused", host };
+  return { kind: "expired" };
+}
+
+// bin/jpi-mcp.js
 var TOOL_NAMES = [
   "jobs",
   "bounties",
@@ -62153,16 +62644,62 @@ function contributeResult(entry, limit2, contributeEnabled, order = {}) {
   }));
   return { status: "ok", count: cards.length, matches: cards };
 }
+function currentShellHostDiffersFromLink() {
+  try {
+    const record3 = readWebSessionRecord();
+    if (!record3 || typeof record3.host !== "string") return false;
+    return record3.host !== resolveApiBase();
+  } catch {
+    return false;
+  }
+}
+function sessionDiagnostic(entry, hostDiffers) {
+  if (hostDiffers) {
+    return {
+      state: "host-mismatch",
+      detail: "This shell resolves a different host from the one the session was linked to, so the credential was withheld rather than presented to a server that did not mint it, and the counts above are empty. Run `terminalhire link` in this shell, or point it back at the host the session belongs to. No request went out, so nothing was refused."
+    };
+  }
+  const c = sessionCase({ ...entry, sessionHostMismatch: null }, {
+    stale: entry.sessionStale === true
+  });
+  if (c === null) return { state: "ok" };
+  if (c.kind === "refused") {
+    return {
+      state: "refused",
+      detail: "The host this session was sent to refused it. Run `terminalhire link` to reconnect this terminal, then ask again."
+    };
+  }
+  return {
+    state: "expired",
+    detail: "The linked session was refused and the refusing host was not recorded. Run `terminalhire link` to reconnect this terminal, then ask again."
+  };
+}
 function inboxResult(entry) {
   if (!entry) return notOnboarded();
   const unreadCount = Number(entry.unreadChat?.count) || 0;
   const pendingIntros = Number(entry.incomingPending?.count) || 0;
+  const refreshedAt = typeof entry.ts === "number" ? new Date(entry.ts).toISOString() : null;
   return {
     status: "ok",
     unreadCount,
     pendingIntros,
+    // KEPT, and no longer the only thing said (TERM-1026). `sessionStale` alone is
+    // FALSE on a host mismatch — the producer sends no cookie, so no 401 comes back
+    // — and this tool answered "healthy, empty" when the truth was "your session is
+    // for another host". Zero counts and a clear flag are indistinguishable from a
+    // quiet inbox, and an agent reading that has no way to reach the real state.
+    // The field stays for callers that already read it; `session` is what carries
+    // the case.
     sessionStale: entry.sessionStale === true,
-    lastRefresh: typeof entry.ts === "number" ? new Date(entry.ts).toISOString() : null
+    session: sessionDiagnostic(entry, currentShellHostDiffersFromLink()),
+    lastRefresh: refreshedAt,
+    // THE SAME INSTANT, NAMED FOR WHAT IT QUALIFIES. This result now mixes two
+    // clocks: `session` is read live at tool execution, the counts are whatever
+    // the last background refresh left behind. An agent that reads a live
+    // `state: 'ok'` and treats the counts as equally current is reading a claim
+    // nothing here makes. `lastRefresh` stays for callers that already parse it.
+    countsAsOf: refreshedAt
   };
 }
 function publicPolicy(policy) {
@@ -62401,7 +62938,7 @@ async function claimWorkspaceResult(args = {}) {
   try {
     const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
     const { existsSync: existsSync15, readFileSync: readFileSync17, lstatSync: lstatSync4 } = await import("fs");
-    const { join: join30 } = await import("path");
+    const { join: join31 } = await import("path");
     const { BRIEF_REL_PATH: BRIEF_REL_PATH2, VERIFY_REL_PATH: VERIFY_REL_PATH2, AGENTS_REL_PATH: AGENTS_REL_PATH2, sha256OfUtf8: sha256OfUtf82 } = await Promise.resolve().then(() => (init_jpi_claim(), jpi_claim_exports));
     const packPaths = (c) => {
       const p = {};
@@ -62414,7 +62951,7 @@ async function claimWorkspaceResult(args = {}) {
         if (c.workspacePack?.[member] !== true) continue;
         const digest = c.packDigests?.[member];
         if (typeof digest !== "string" || digest === "") continue;
-        const abs = join30(c.worktreePath, rel);
+        const abs = join31(c.worktreePath, rel);
         try {
           const st = lstatSync4(abs);
           if (!st.isFile() || st.size > 1024 * 1024) continue;
@@ -62433,7 +62970,7 @@ async function claimWorkspaceResult(args = {}) {
           hint: `No workspace has been delivered for this claim yet. A human runs: terminalhire claim start ${c.id} --watch`
         };
       }
-      if (!existsSync15(c.worktreePath) || !existsSync15(join30(c.worktreePath, ".git"))) {
+      if (!existsSync15(c.worktreePath) || !existsSync15(join31(c.worktreePath, ".git"))) {
         return {
           status: "not_ready",
           claimId: c.id,
@@ -62639,10 +63176,10 @@ async function run2() {
   let version2 = "0.0.0";
   try {
     const { readFileSync: readFileSync17, existsSync: existsSync15 } = await import("fs");
-    const { join: join30 } = await import("path");
+    const { join: join31 } = await import("path");
     const { fileURLToPath: fileURLToPath4 } = await import("url");
     const here = fileURLToPath4(new URL(".", import.meta.url));
-    for (const p of [join30(here, "..", "..", "package.json"), join30(here, "..", "package.json")]) {
+    for (const p of [join31(here, "..", "..", "package.json"), join31(here, "..", "package.json")]) {
       if (existsSync15(p)) {
         const pkg = JSON.parse(readFileSync17(p, "utf8"));
         if (pkg.version) {

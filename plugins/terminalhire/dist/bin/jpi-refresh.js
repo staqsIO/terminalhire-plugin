@@ -14058,6 +14058,7 @@ function suppressEngaged(results, statusMap) {
 init_config();
 
 // src/web-session.ts
+init_api_base();
 init_state_dir();
 import { chmodSync, existsSync as existsSync2, readFileSync as readFileSync4, rmSync, writeFileSync as writeFileSync4 } from "fs";
 import { homedir as homedir5 } from "os";
@@ -14093,12 +14094,20 @@ function readWebSessionRecord() {
   }
 }
 function webSessionForHost(apiBase) {
+  assertBase(apiBase, "webSessionForHost");
   const record = readWebSessionRecord();
   if (!record) return { cookie: null, mismatch: null };
   if (record.host !== null && record.host !== apiBase) {
     return { cookie: null, mismatch: { linkedHost: record.host, currentHost: apiBase } };
   }
   return { cookie: record.token, mismatch: null };
+}
+function assertBase(apiBase, fn) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `${fn}(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
 }
 
 // bin/jpi-refresh.js

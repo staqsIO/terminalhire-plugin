@@ -11850,59 +11850,9 @@ var init_chat_keystore = __esm({
   }
 });
 
-// src/web-session.ts
-import { chmodSync, existsSync as existsSync8, readFileSync as readFileSync8, rmSync as rmSync5, writeFileSync as writeFileSync7 } from "fs";
+// src/api-base.ts
 import { homedir as homedir7 } from "os";
 import { join as join10 } from "path";
-function terminalhireDir() {
-  return process.env.TERMINALHIRE_DIR || join10(homedir7(), ".terminalhire");
-}
-function webSessionFilePath() {
-  return join10(terminalhireDir(), "web-session");
-}
-function parseWebSessionFile(raw) {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return null;
-  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const rec = parsed;
-    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
-    const host = typeof rec.host === "string" ? rec.host.trim() : "";
-    return { token: rec.token, host: host === "" ? null : host };
-  } catch {
-    return null;
-  }
-}
-function readWebSessionRecord() {
-  try {
-    const path = webSessionFilePath();
-    if (!existsSync8(path)) return null;
-    return parseWebSessionFile(readFileSync8(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function readWebSessionFile() {
-  return readWebSessionRecord()?.token ?? null;
-}
-function readWebSessionCookie() {
-  const fromFile = readWebSessionFile();
-  if (fromFile) return fromFile;
-  const env = process.env["TERMINALHIRE_WEB_SESSION"];
-  return typeof env === "string" && env.length > 0 ? env : null;
-}
-var init_web_session = __esm({
-  "src/web-session.ts"() {
-    "use strict";
-    init_state_dir();
-  }
-});
-
-// src/api-base.ts
-import { homedir as homedir8 } from "os";
-import { join as join11 } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -12000,6 +11950,108 @@ var init_api_base = __esm({
   }
 });
 
+// src/web-session.ts
+import { chmodSync, existsSync as existsSync8, readFileSync as readFileSync8, rmSync as rmSync5, writeFileSync as writeFileSync7 } from "fs";
+import { homedir as homedir8 } from "os";
+import { join as join11 } from "path";
+function terminalhireDir() {
+  return process.env.TERMINALHIRE_DIR || join11(homedir8(), ".terminalhire");
+}
+function webSessionFilePath() {
+  return join11(terminalhireDir(), "web-session");
+}
+function parseWebSessionFile(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const rec = parsed;
+    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
+    const host = typeof rec.host === "string" ? rec.host.trim() : "";
+    return { token: rec.token, host: host === "" ? null : host };
+  } catch {
+    return null;
+  }
+}
+function readWebSessionRecord() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync8(path)) return null;
+    return parseWebSessionFile(readFileSync8(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function webSessionForHost(apiBase) {
+  assertBase(apiBase, "webSessionForHost");
+  const record = readWebSessionRecord();
+  if (!record) return { cookie: null, mismatch: null };
+  if (record.host !== null && record.host !== apiBase) {
+    return { cookie: null, mismatch: { linkedHost: record.host, currentHost: apiBase } };
+  }
+  return { cookie: record.token, mismatch: null };
+}
+function webSessionCookieForHost(apiBase) {
+  const fromFile = webSessionForHost(apiBase);
+  if (fromFile.cookie || fromFile.mismatch) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return { cookie: typeof env === "string" && env.length > 0 ? env : null, mismatch: null };
+}
+function assertBase(apiBase, fn) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `${fn}(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+}
+function hostLabel(base) {
+  return String(base ?? "").replace(/^https?:\/\//, "");
+}
+function missingSessionLines(mismatch) {
+  if (!mismatch) {
+    return [
+      "No linked web session found on this machine.",
+      "Run `terminalhire link` to connect this terminal to your account, then re-run."
+    ];
+  }
+  const linked = hostLabel(mismatch.linkedHost);
+  const current = hostLabel(mismatch.currentHost);
+  const reach = mismatch.linkedHost === PROD_API_BASE ? `unset TERMINALHIRE_API_URL to reach ${linked}` : isLoopbackOrigin(mismatch.linkedHost) ? `set TERMINALHIRE_ALLOW_LOCAL_API=1 TERMINALHIRE_API_URL=${mismatch.linkedHost} to reach ${linked}` : `set TERMINALHIRE_API_URL=${mismatch.linkedHost} to reach ${linked}`;
+  const link = isLoopbackOrigin(mismatch.currentHost) ? "`TERMINALHIRE_ALLOW_LOCAL_OAUTH=1 terminalhire link`" : "`terminalhire link`";
+  return [
+    `This terminal is on ${current}, but your linked session belongs to ${linked}. Nothing was sent.`,
+    `Either ${reach}, or run ${link} to link this terminal to ${current} instead.`
+  ];
+}
+function withSessionDeps(defaults, overrides) {
+  const merged = { ...defaults, ...overrides };
+  if (overrides?.sessionCookie && !overrides.sessionMismatch) merged.sessionMismatch = () => null;
+  return merged;
+}
+function refusedSessionLines(apiBase) {
+  return [
+    `${hostLabel(apiBase)} refused your linked session.`,
+    "Run `terminalhire link` to link this terminal again, then re-run."
+  ];
+}
+function readWebSessionCookie(apiBase) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `readWebSessionCookie(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+  return webSessionCookieForHost(apiBase).cookie;
+}
+var init_web_session = __esm({
+  "src/web-session.ts"() {
+    "use strict";
+    init_api_base();
+    init_state_dir();
+  }
+});
+
 // src/chat-client.ts
 import { existsSync as existsSync9, readFileSync as readFileSync9, writeFileSync as writeFileSync8 } from "fs";
 import { homedir as homedir9 } from "os";
@@ -12027,17 +12079,21 @@ function defaultChatClientDeps() {
     fetchImpl: (...args4) => globalThis.fetch(...args4),
     // Session source priority: persisted file (`terminalhire link`) FIRST, then the
     // legacy TERMINALHIRE_WEB_SESSION env, then none.
-    sessionCookie: () => readWebSessionCookie(),
+    sessionCookie: () => readWebSessionCookie(CHAT_BASE),
+    sessionMismatch: () => webSessionCookieForHost(CHAT_BASE).mismatch,
     loadIdentity: () => loadOrCreateIdentity(),
     readPeerPins: defaultReadPeerPins,
     writePeerPins: defaultWritePeerPins
   };
 }
 function createChatClient(overrides) {
-  const deps = { ...defaultChatClientDeps(), ...overrides };
+  const deps = withSessionDeps(defaultChatClientDeps(), overrides);
   function requireCookie() {
     const cookie = deps.sessionCookie();
-    if (!cookie) throw new ChatNotLinkedError();
+    if (!cookie) {
+      const mismatch = deps.sessionMismatch();
+      throw mismatch ? new ChatSessionElsewhereError(mismatch) : new ChatNotLinkedError();
+    }
     return cookie;
   }
   async function authedFetch(path, init) {
@@ -12197,7 +12253,7 @@ function createChatClient(overrides) {
     getSafetyNumber
   };
 }
-var CHAT_BASE, GH_SESSION_COOKIE, TERMINALHIRE_DIR7, PEERS_FILE, REQUEST_TIMEOUT_MS, ChatNotLinkedError, ChatSessionExpiredError, SafetyNumberChangedError, ChatRequestError;
+var CHAT_BASE, GH_SESSION_COOKIE, TERMINALHIRE_DIR7, PEERS_FILE, REQUEST_TIMEOUT_MS, ChatNotLinkedError, ChatSessionElsewhereError, ChatSessionExpiredError, SafetyNumberChangedError, ChatRequestError;
 var init_chat_client = __esm({
   "src/chat-client.ts"() {
     "use strict";
@@ -12212,18 +12268,24 @@ var init_chat_client = __esm({
     PEERS_FILE = join12(TERMINALHIRE_DIR7, "chat-peers.json");
     REQUEST_TIMEOUT_MS = 1e4;
     ChatNotLinkedError = class extends Error {
-      constructor() {
-        super(
-          "No linked web session found on this machine. Run `terminalhire link` to connect this terminal to your account, then re-run."
-        );
+      constructor(message = missingSessionLines(null).join(" ")) {
+        super(message);
         this.name = "ChatNotLinkedError";
+      }
+    };
+    ChatSessionElsewhereError = class extends ChatNotLinkedError {
+      linkedHost;
+      currentHost;
+      constructor(mismatch) {
+        super(missingSessionLines(mismatch).join(" "));
+        this.name = "ChatSessionElsewhereError";
+        this.linkedHost = mismatch.linkedHost;
+        this.currentHost = mismatch.currentHost;
       }
     };
     ChatSessionExpiredError = class extends Error {
       constructor() {
-        super(
-          "Your linked web session expired. Run `terminalhire link` to reconnect this terminal, then re-run."
-        );
+        super(refusedSessionLines(CHAT_BASE).join(" "));
         this.name = "ChatSessionExpiredError";
       }
     };
@@ -12265,13 +12327,22 @@ import { existsSync as existsSync10, readFileSync as readFileSync10 } from "fs";
 import { homedir as homedir10 } from "os";
 import { join as join13 } from "path";
 function defaultSessionCookie() {
-  return readWebSessionCookie();
+  return readWebSessionCookie(CHAT_BASE2);
+}
+function defaultSessionMismatch() {
+  return webSessionCookieForHost(CHAT_BASE2).mismatch;
 }
 async function fetchIntroList(deps = {}) {
   const fetchImpl = deps.fetchImpl ?? ((...a) => globalThis.fetch(...a));
-  const sessionCookie = deps.sessionCookie ?? defaultSessionCookie;
+  const { sessionCookie, sessionMismatch } = withSessionDeps(
+    { sessionCookie: defaultSessionCookie, sessionMismatch: defaultSessionMismatch },
+    deps
+  );
   const cookie = sessionCookie();
-  if (!cookie) return { status: "not-linked" };
+  if (!cookie) {
+    const mismatch = sessionMismatch();
+    return mismatch ? { status: "linked-elsewhere", ...mismatch } : { status: "not-linked" };
+  }
   let res;
   try {
     res = await fetchImpl(`${CHAT_BASE2}/api/intro/list`, {
@@ -12282,7 +12353,7 @@ async function fetchIntroList(deps = {}) {
   } catch (err) {
     return { status: "error", message: err instanceof Error ? err.message : String(err) };
   }
-  if (res.status === 401) return { status: "expired" };
+  if (res.status === 401) return { status: "expired", host: CHAT_BASE2 };
   if (!res.ok) return { status: "error", message: `/api/intro/list returned ${res.status}` };
   let data = {};
   try {
@@ -12765,17 +12836,19 @@ function defaultIntroDeps() {
     },
     // Session source priority: persisted file (`terminalhire link`) FIRST, then the
     // legacy TERMINALHIRE_WEB_SESSION env, then none.
-    sessionCookie: () => readWebSessionCookie(),
+    sessionCookie: () => readWebSessionCookie(LINK_BASE),
+    sessionMismatch: () => webSessionCookieForHost(LINK_BASE).mismatch,
     log: (msg) => console.log(msg),
     errorLog: (msg) => console.error(msg),
     exit: (code) => process.exit(code)
   };
 }
 async function getIntros(overrides) {
-  const deps = { ...defaultIntroDeps(), ...overrides };
+  const deps = withSessionDeps(defaultIntroDeps(), overrides);
   const cookie = deps.sessionCookie();
   if (!cookie) {
-    return { status: "no-session" };
+    const mismatch = deps.sessionMismatch();
+    return mismatch ? { status: "linked-elsewhere", ...mismatch } : { status: "no-session" };
   }
   let res;
   try {
@@ -12788,7 +12861,7 @@ async function getIntros(overrides) {
     return { status: "request-failed", message: err instanceof Error ? err.message : String(err) };
   }
   if (res.status === 401) {
-    return { status: "expired" };
+    return { status: "expired", host: LINK_BASE };
   }
   if (!res.ok) {
     return { status: "error", httpStatus: res.status };
@@ -13385,6 +13458,7 @@ async function getDevs({ quiet = false, offline = false } = {}) {
 
 // bin/jpi-hub.js
 init_intro2();
+init_web_session();
 init_open_url();
 var KEY_CTRL_K = "\v";
 var KEY_SHIFT_TAB = "\x1B[Z";
@@ -13648,9 +13722,9 @@ function runHubTui({
             };
           } else {
             inboxState = {
+              ...built,
               loaded: true,
               loading: false,
-              status: built.status,
               items: null,
               message: null
             };
@@ -13702,8 +13776,12 @@ function runHubTui({
           ];
         case "not-linked":
           return ["Not linked \u2014 run `terminalhire link` to connect your web session."];
+        case "linked-elsewhere":
+          return [missingSessionLines(st).join(" ")];
         case "expired":
-          return ["Session expired \u2014 run `terminalhire link` again."];
+          return [
+            st.host ? refusedSessionLines(st.host).join(" ") : "Your linked session was refused \u2014 run `terminalhire link` again."
+          ];
         case "not-connected":
           return ["No connections yet."];
         case "error":
@@ -13788,8 +13866,10 @@ function runHubTui({
       switch (result.status) {
         case "no-session":
           return ["Not linked \u2014 run `terminalhire link` to connect this terminal to your account."];
+        case "linked-elsewhere":
+          return [missingSessionLines(result).join(" ")];
         case "expired":
-          return ["Your linked web session expired \u2014 run `terminalhire link` again."];
+          return [refusedSessionLines(result.host).join(" ")];
         case "request-failed":
           return ["Could not reach terminalhire \u2014 " + (result.message || "request failed")];
         case "error":

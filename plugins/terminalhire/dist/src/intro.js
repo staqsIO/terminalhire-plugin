@@ -1840,53 +1840,13 @@ var init_open_url = __esm({
 init_src();
 
 // src/web-session.ts
-init_state_dir();
 import { chmodSync, existsSync, readFileSync as readFileSync2, rmSync, writeFileSync } from "fs";
-import { homedir } from "os";
-import { join as join2 } from "path";
-function terminalhireDir() {
-  return process.env.TERMINALHIRE_DIR || join2(homedir(), ".terminalhire");
-}
-function webSessionFilePath() {
-  return join2(terminalhireDir(), "web-session");
-}
-function parseWebSessionFile(raw) {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return null;
-  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const rec = parsed;
-    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
-    const host = typeof rec.host === "string" ? rec.host.trim() : "";
-    return { token: rec.token, host: host === "" ? null : host };
-  } catch {
-    return null;
-  }
-}
-function readWebSessionRecord() {
-  try {
-    const path = webSessionFilePath();
-    if (!existsSync(path)) return null;
-    return parseWebSessionFile(readFileSync2(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function readWebSessionFile() {
-  return readWebSessionRecord()?.token ?? null;
-}
-function readWebSessionCookie() {
-  const fromFile = readWebSessionFile();
-  if (fromFile) return fromFile;
-  const env = process.env["TERMINALHIRE_WEB_SESSION"];
-  return typeof env === "string" && env.length > 0 ? env : null;
-}
-
-// src/api-base.ts
 import { homedir as homedir2 } from "os";
 import { join as join3 } from "path";
+
+// src/api-base.ts
+import { homedir } from "os";
+import { join as join2 } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {
@@ -1978,6 +1938,99 @@ function normalizeOverride(raw) {
   return url.origin;
 }
 
+// src/web-session.ts
+init_state_dir();
+function terminalhireDir() {
+  return process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
+}
+function webSessionFilePath() {
+  return join3(terminalhireDir(), "web-session");
+}
+function parseWebSessionFile(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const rec = parsed;
+    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
+    const host = typeof rec.host === "string" ? rec.host.trim() : "";
+    return { token: rec.token, host: host === "" ? null : host };
+  } catch {
+    return null;
+  }
+}
+function readWebSessionRecord() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync(path)) return null;
+    return parseWebSessionFile(readFileSync2(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function webSessionForHost(apiBase) {
+  assertBase(apiBase, "webSessionForHost");
+  const record = readWebSessionRecord();
+  if (!record) return { cookie: null, mismatch: null };
+  if (record.host !== null && record.host !== apiBase) {
+    return { cookie: null, mismatch: { linkedHost: record.host, currentHost: apiBase } };
+  }
+  return { cookie: record.token, mismatch: null };
+}
+function webSessionCookieForHost(apiBase) {
+  const fromFile = webSessionForHost(apiBase);
+  if (fromFile.cookie || fromFile.mismatch) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return { cookie: typeof env === "string" && env.length > 0 ? env : null, mismatch: null };
+}
+function assertBase(apiBase, fn) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `${fn}(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+}
+function hostLabel(base) {
+  return String(base ?? "").replace(/^https?:\/\//, "");
+}
+function missingSessionLines(mismatch) {
+  if (!mismatch) {
+    return [
+      "No linked web session found on this machine.",
+      "Run `terminalhire link` to connect this terminal to your account, then re-run."
+    ];
+  }
+  const linked = hostLabel(mismatch.linkedHost);
+  const current = hostLabel(mismatch.currentHost);
+  const reach = mismatch.linkedHost === PROD_API_BASE ? `unset TERMINALHIRE_API_URL to reach ${linked}` : isLoopbackOrigin(mismatch.linkedHost) ? `set TERMINALHIRE_ALLOW_LOCAL_API=1 TERMINALHIRE_API_URL=${mismatch.linkedHost} to reach ${linked}` : `set TERMINALHIRE_API_URL=${mismatch.linkedHost} to reach ${linked}`;
+  const link = isLoopbackOrigin(mismatch.currentHost) ? "`TERMINALHIRE_ALLOW_LOCAL_OAUTH=1 terminalhire link`" : "`terminalhire link`";
+  return [
+    `This terminal is on ${current}, but your linked session belongs to ${linked}. Nothing was sent.`,
+    `Either ${reach}, or run ${link} to link this terminal to ${current} instead.`
+  ];
+}
+function withSessionDeps(defaults, overrides) {
+  const merged = { ...defaults, ...overrides };
+  if (overrides?.sessionCookie && !overrides.sessionMismatch) merged.sessionMismatch = () => null;
+  return merged;
+}
+function refusedSessionLines(apiBase) {
+  return [
+    `${hostLabel(apiBase)} refused your linked session.`,
+    "Run `terminalhire link` to link this terminal again, then re-run."
+  ];
+}
+function readWebSessionCookie(apiBase) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `readWebSessionCookie(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+  return webSessionCookieForHost(apiBase).cookie;
+}
+
 // src/intro.ts
 var LINK_BASE = resolveApiBase();
 var GH_SESSION_COOKIE = "__jpi_gh_session";
@@ -2019,11 +2072,19 @@ function defaultIntroDeps() {
     },
     // Session source priority: persisted file (`terminalhire link`) FIRST, then the
     // legacy TERMINALHIRE_WEB_SESSION env, then none.
-    sessionCookie: () => readWebSessionCookie(),
+    sessionCookie: () => readWebSessionCookie(LINK_BASE),
+    sessionMismatch: () => webSessionCookieForHost(LINK_BASE).mismatch,
     log: (msg) => console.log(msg),
     errorLog: (msg) => console.error(msg),
     exit: (code) => process.exit(code)
   };
+}
+function logBlock(deps, lines) {
+  lines.forEach((line, i) => {
+    const lead = i === 0 ? "\n" : "";
+    const tail = i === lines.length - 1 ? "\n" : "";
+    deps.log(`${lead}  ${line}${tail}`);
+  });
 }
 function renderConsentCard(payload, deps) {
   const { log } = deps;
@@ -2047,7 +2108,7 @@ function renderConsentCard(payload, deps) {
   log("");
 }
 async function runIntroRequest(args, overrides) {
-  const deps = { ...defaultIntroDeps(), ...overrides };
+  const deps = withSessionDeps(defaultIntroDeps(), overrides);
   const targetLogin = args.targetLogin?.trim().replace(/^@/, "");
   if (!targetLogin) {
     deps.errorLog(
@@ -2096,8 +2157,7 @@ async function runIntroRequest(args, overrides) {
   }
   const cookie = deps.sessionCookie();
   if (!cookie) {
-    deps.log("\n  No linked web session found on this machine.");
-    deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
+    logBlock(deps, missingSessionLines(deps.sessionMismatch()));
     deps.exit(0);
     return;
   }
@@ -2117,8 +2177,7 @@ async function runIntroRequest(args, overrides) {
     return;
   }
   if (res.status === 401) {
-    deps.log("\n  Your linked web session expired.");
-    deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
+    logBlock(deps, refusedSessionLines(LINK_BASE));
     deps.exit(1);
     return;
   }
@@ -2188,7 +2247,7 @@ async function fetchIntros(deps, cookie) {
   return data.intros ?? [];
 }
 async function runIntroDecision(args, overrides) {
-  const deps = { ...defaultIntroDeps(), ...overrides };
+  const deps = withSessionDeps(defaultIntroDeps(), overrides);
   let id = args.id?.trim() ?? "";
   if (!id) {
     deps.errorLog("\n  Usage: terminalhire intro --accept <@handle|id> | --decline <@handle|id>\n");
@@ -2197,8 +2256,7 @@ async function runIntroDecision(args, overrides) {
   }
   const cookie = deps.sessionCookie();
   if (!cookie) {
-    deps.log("\n  No linked web session found on this machine.");
-    deps.log("  Run `terminalhire link` to connect this terminal to your account, then re-run.\n");
+    logBlock(deps, missingSessionLines(deps.sessionMismatch()));
     deps.exit(0);
     return;
   }
@@ -2285,8 +2343,7 @@ async function runIntroDecision(args, overrides) {
     return;
   }
   if (res.status === 401) {
-    deps.log("\n  Your linked web session expired.");
-    deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
+    logBlock(deps, refusedSessionLines(LINK_BASE));
     deps.exit(1);
     return;
   }
@@ -2324,10 +2381,11 @@ async function runIntroDecision(args, overrides) {
   deps.log("");
 }
 async function getIntros(overrides) {
-  const deps = { ...defaultIntroDeps(), ...overrides };
+  const deps = withSessionDeps(defaultIntroDeps(), overrides);
   const cookie = deps.sessionCookie();
   if (!cookie) {
-    return { status: "no-session" };
+    const mismatch = deps.sessionMismatch();
+    return mismatch ? { status: "linked-elsewhere", ...mismatch } : { status: "no-session" };
   }
   let res;
   try {
@@ -2340,7 +2398,7 @@ async function getIntros(overrides) {
     return { status: "request-failed", message: err instanceof Error ? err.message : String(err) };
   }
   if (res.status === 401) {
-    return { status: "expired" };
+    return { status: "expired", host: LINK_BASE };
   }
   if (!res.ok) {
     return { status: "error", httpStatus: res.status };
@@ -2353,19 +2411,19 @@ async function getIntros(overrides) {
   return { status: "ok", intros: data.intros ?? [] };
 }
 async function runIntroList(overrides) {
-  const deps = { ...defaultIntroDeps(), ...overrides };
+  const deps = withSessionDeps(defaultIntroDeps(), overrides);
   const result = await getIntros(deps);
   switch (result.status) {
     case "no-session":
-      deps.log("\n  No linked web session found on this machine.");
-      deps.log(
-        "  Run `terminalhire link` to connect this terminal to your account, then re-run.\n"
-      );
+      logBlock(deps, missingSessionLines(null));
+      deps.exit(0);
+      return;
+    case "linked-elsewhere":
+      logBlock(deps, missingSessionLines(result));
       deps.exit(0);
       return;
     case "expired":
-      deps.log("\n  Your linked web session expired.");
-      deps.log("  Run `terminalhire link` to reconnect this terminal, then re-run.\n");
+      logBlock(deps, refusedSessionLines(result.host));
       deps.exit(1);
       return;
     case "request-failed":

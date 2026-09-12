@@ -4608,59 +4608,9 @@ var init_chat_keystore = __esm({
   }
 });
 
-// src/web-session.ts
-import { chmodSync, existsSync as existsSync5, readFileSync as readFileSync5, rmSync as rmSync3, writeFileSync as writeFileSync4 } from "fs";
+// src/api-base.ts
 import { homedir as homedir4 } from "os";
 import { join as join6 } from "path";
-function terminalhireDir() {
-  return process.env.TERMINALHIRE_DIR || join6(homedir4(), ".terminalhire");
-}
-function webSessionFilePath() {
-  return join6(terminalhireDir(), "web-session");
-}
-function parseWebSessionFile(raw) {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return null;
-  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const rec = parsed;
-    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
-    const host = typeof rec.host === "string" ? rec.host.trim() : "";
-    return { token: rec.token, host: host === "" ? null : host };
-  } catch {
-    return null;
-  }
-}
-function readWebSessionRecord() {
-  try {
-    const path = webSessionFilePath();
-    if (!existsSync5(path)) return null;
-    return parseWebSessionFile(readFileSync5(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function readWebSessionFile() {
-  return readWebSessionRecord()?.token ?? null;
-}
-function readWebSessionCookie() {
-  const fromFile = readWebSessionFile();
-  if (fromFile) return fromFile;
-  const env = process.env["TERMINALHIRE_WEB_SESSION"];
-  return typeof env === "string" && env.length > 0 ? env : null;
-}
-var init_web_session = __esm({
-  "src/web-session.ts"() {
-    "use strict";
-    init_state_dir();
-  }
-});
-
-// src/api-base.ts
-import { homedir as homedir5 } from "os";
-import { join as join7 } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -4768,6 +4718,108 @@ var init_api_base = __esm({
   }
 });
 
+// src/web-session.ts
+import { chmodSync, existsSync as existsSync5, readFileSync as readFileSync5, rmSync as rmSync3, writeFileSync as writeFileSync4 } from "fs";
+import { homedir as homedir5 } from "os";
+import { join as join7 } from "path";
+function terminalhireDir() {
+  return process.env.TERMINALHIRE_DIR || join7(homedir5(), ".terminalhire");
+}
+function webSessionFilePath() {
+  return join7(terminalhireDir(), "web-session");
+}
+function parseWebSessionFile(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (!trimmed.startsWith("{")) return { token: trimmed, host: null };
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const rec = parsed;
+    if (typeof rec.token !== "string" || rec.token.length === 0) return null;
+    const host = typeof rec.host === "string" ? rec.host.trim() : "";
+    return { token: rec.token, host: host === "" ? null : host };
+  } catch {
+    return null;
+  }
+}
+function readWebSessionRecord() {
+  try {
+    const path = webSessionFilePath();
+    if (!existsSync5(path)) return null;
+    return parseWebSessionFile(readFileSync5(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function webSessionForHost(apiBase) {
+  assertBase(apiBase, "webSessionForHost");
+  const record2 = readWebSessionRecord();
+  if (!record2) return { cookie: null, mismatch: null };
+  if (record2.host !== null && record2.host !== apiBase) {
+    return { cookie: null, mismatch: { linkedHost: record2.host, currentHost: apiBase } };
+  }
+  return { cookie: record2.token, mismatch: null };
+}
+function webSessionCookieForHost(apiBase) {
+  const fromFile = webSessionForHost(apiBase);
+  if (fromFile.cookie || fromFile.mismatch) return fromFile;
+  const env = process.env["TERMINALHIRE_WEB_SESSION"];
+  return { cookie: typeof env === "string" && env.length > 0 ? env : null, mismatch: null };
+}
+function assertBase(apiBase, fn) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `${fn}(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+}
+function hostLabel(base) {
+  return String(base ?? "").replace(/^https?:\/\//, "");
+}
+function missingSessionLines(mismatch) {
+  if (!mismatch) {
+    return [
+      "No linked web session found on this machine.",
+      "Run `terminalhire link` to connect this terminal to your account, then re-run."
+    ];
+  }
+  const linked = hostLabel(mismatch.linkedHost);
+  const current = hostLabel(mismatch.currentHost);
+  const reach = mismatch.linkedHost === PROD_API_BASE ? `unset TERMINALHIRE_API_URL to reach ${linked}` : isLoopbackOrigin(mismatch.linkedHost) ? `set TERMINALHIRE_ALLOW_LOCAL_API=1 TERMINALHIRE_API_URL=${mismatch.linkedHost} to reach ${linked}` : `set TERMINALHIRE_API_URL=${mismatch.linkedHost} to reach ${linked}`;
+  const link = isLoopbackOrigin(mismatch.currentHost) ? "`TERMINALHIRE_ALLOW_LOCAL_OAUTH=1 terminalhire link`" : "`terminalhire link`";
+  return [
+    `This terminal is on ${current}, but your linked session belongs to ${linked}. Nothing was sent.`,
+    `Either ${reach}, or run ${link} to link this terminal to ${current} instead.`
+  ];
+}
+function withSessionDeps(defaults, overrides) {
+  const merged = { ...defaults, ...overrides };
+  if (overrides?.sessionCookie && !overrides.sessionMismatch) merged.sessionMismatch = () => null;
+  return merged;
+}
+function refusedSessionLines(apiBase) {
+  return [
+    `${hostLabel(apiBase)} refused your linked session.`,
+    "Run `terminalhire link` to link this terminal again, then re-run."
+  ];
+}
+function readWebSessionCookie(apiBase) {
+  if (typeof apiBase !== "string" || apiBase.length === 0) {
+    throw new TypeError(
+      `readWebSessionCookie(apiBase) requires the destination base as a non-empty string; received ${apiBase === "" ? "''" : String(apiBase)}. This is a wiring bug in the calling command, not a developer misconfiguration: pass the same resolveApiBase() value the request is sent to, so the session's host affinity can be checked (TERM-991).`
+    );
+  }
+  return webSessionCookieForHost(apiBase).cookie;
+}
+var init_web_session = __esm({
+  "src/web-session.ts"() {
+    "use strict";
+    init_api_base();
+    init_state_dir();
+  }
+});
+
 // src/chat-client.ts
 import { existsSync as existsSync6, readFileSync as readFileSync6, writeFileSync as writeFileSync5 } from "fs";
 import { homedir as homedir6 } from "os";
@@ -4795,17 +4847,21 @@ function defaultChatClientDeps() {
     fetchImpl: (...args) => globalThis.fetch(...args),
     // Session source priority: persisted file (`terminalhire link`) FIRST, then the
     // legacy TERMINALHIRE_WEB_SESSION env, then none.
-    sessionCookie: () => readWebSessionCookie(),
+    sessionCookie: () => readWebSessionCookie(CHAT_BASE),
+    sessionMismatch: () => webSessionCookieForHost(CHAT_BASE).mismatch,
     loadIdentity: () => loadOrCreateIdentity(),
     readPeerPins: defaultReadPeerPins,
     writePeerPins: defaultWritePeerPins
   };
 }
 function createChatClient(overrides) {
-  const deps = { ...defaultChatClientDeps(), ...overrides };
+  const deps = withSessionDeps(defaultChatClientDeps(), overrides);
   function requireCookie() {
     const cookie = deps.sessionCookie();
-    if (!cookie) throw new ChatNotLinkedError();
+    if (!cookie) {
+      const mismatch = deps.sessionMismatch();
+      throw mismatch ? new ChatSessionElsewhereError(mismatch) : new ChatNotLinkedError();
+    }
     return cookie;
   }
   async function authedFetch(path, init) {
@@ -4965,7 +5021,7 @@ function createChatClient(overrides) {
     getSafetyNumber
   };
 }
-var CHAT_BASE, GH_SESSION_COOKIE, TERMINALHIRE_DIR4, PEERS_FILE, REQUEST_TIMEOUT_MS, ChatNotLinkedError, ChatSessionExpiredError, SafetyNumberChangedError, ChatRequestError;
+var CHAT_BASE, GH_SESSION_COOKIE, TERMINALHIRE_DIR4, PEERS_FILE, REQUEST_TIMEOUT_MS, ChatNotLinkedError, ChatSessionElsewhereError, ChatSessionExpiredError, SafetyNumberChangedError, ChatRequestError;
 var init_chat_client = __esm({
   "src/chat-client.ts"() {
     "use strict";
@@ -4980,18 +5036,24 @@ var init_chat_client = __esm({
     PEERS_FILE = join8(TERMINALHIRE_DIR4, "chat-peers.json");
     REQUEST_TIMEOUT_MS = 1e4;
     ChatNotLinkedError = class extends Error {
-      constructor() {
-        super(
-          "No linked web session found on this machine. Run `terminalhire link` to connect this terminal to your account, then re-run."
-        );
+      constructor(message = missingSessionLines(null).join(" ")) {
+        super(message);
         this.name = "ChatNotLinkedError";
+      }
+    };
+    ChatSessionElsewhereError = class extends ChatNotLinkedError {
+      linkedHost;
+      currentHost;
+      constructor(mismatch) {
+        super(missingSessionLines(mismatch).join(" "));
+        this.name = "ChatSessionElsewhereError";
+        this.linkedHost = mismatch.linkedHost;
+        this.currentHost = mismatch.currentHost;
       }
     };
     ChatSessionExpiredError = class extends Error {
       constructor() {
-        super(
-          "Your linked web session expired. Run `terminalhire link` to reconnect this terminal, then re-run."
-        );
+        super(refusedSessionLines(CHAT_BASE).join(" "));
         this.name = "ChatSessionExpiredError";
       }
     };
@@ -5176,13 +5238,22 @@ async function ensureChatDisclosure(opts = {}) {
   return { shown: true, acknowledged: true };
 }
 function defaultSessionCookie() {
-  return readWebSessionCookie();
+  return readWebSessionCookie(CHAT_BASE2);
+}
+function defaultSessionMismatch() {
+  return webSessionCookieForHost(CHAT_BASE2).mismatch;
 }
 async function fetchIntroList(deps = {}) {
   const fetchImpl = deps.fetchImpl ?? ((...a) => globalThis.fetch(...a));
-  const sessionCookie = deps.sessionCookie ?? defaultSessionCookie;
+  const { sessionCookie, sessionMismatch } = withSessionDeps(
+    { sessionCookie: defaultSessionCookie, sessionMismatch: defaultSessionMismatch },
+    deps
+  );
   const cookie = sessionCookie();
-  if (!cookie) return { status: "not-linked" };
+  if (!cookie) {
+    const mismatch = sessionMismatch();
+    return mismatch ? { status: "linked-elsewhere", ...mismatch } : { status: "not-linked" };
+  }
   let res;
   try {
     res = await fetchImpl(`${CHAT_BASE2}/api/intro/list`, {
@@ -5193,7 +5264,7 @@ async function fetchIntroList(deps = {}) {
   } catch (err) {
     return { status: "error", message: err instanceof Error ? err.message : String(err) };
   }
-  if (res.status === 401) return { status: "expired" };
+  if (res.status === 401) return { status: "expired", host: CHAT_BASE2 };
   if (!res.ok) return { status: "error", message: `/api/intro/list returned ${res.status}` };
   let data = {};
   try {
@@ -5242,7 +5313,7 @@ async function syncUnreadBadge(deps = {}) {
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   const cacheFile = deps.cacheFile ?? INDEX_CACHE_FILE;
   try {
-    const cookie = readCookie();
+    const cookie = readCookie(CHAT_BASE3);
     if (!cookie || !existsSync9(cacheFile)) return;
     const res = await fetchImpl(`${CHAT_BASE3}/api/chat/inbox`, {
       method: "GET",
@@ -5287,7 +5358,7 @@ function writeReadCursor(login, iso, deps = {}) {
 }
 async function postReadCursor(peerLogin, lastReadAt, deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
-  const cookie = readCookie();
+  const cookie = readCookie(CHAT_BASE3);
   if (!cookie) return;
   try {
     await fetch(`${CHAT_BASE3}/api/chat/read-cursor`, {
@@ -5304,17 +5375,22 @@ async function postReadCursor(peerLogin, lastReadAt, deps = {}) {
 function writeProblem(output, result, target) {
   switch (result.status) {
     case "not-linked":
-      output.write(
-        "\n  No linked web session found on this machine.\n  Run `terminalhire link` to connect this terminal to your account, then re-run.\n\n"
-      );
-      return "not-linked";
-    case "expired":
-      output.write(
-        `
-  Your web session expired \u2014 sign in again at ${CHAT_BASE3}/dashboard and re-bridge your session, then re-run.
+      output.write(`
+  ${missingSessionLines(null).join("\n  ")}
 
-`
-      );
+`);
+      return "not-linked";
+    case "linked-elsewhere":
+      output.write(`
+  ${missingSessionLines(result).join("\n  ")}
+
+`);
+      return "linked-elsewhere";
+    case "expired":
+      output.write(`
+  ${refusedSessionLines(CHAT_BASE3).join("\n  ")}
+
+`);
       return "expired";
     case "not-connected":
       output.write(
@@ -27569,6 +27645,7 @@ async function runReply(opts = {}) {
     const s = resolved && resolved.status ? resolved.status : "error";
     if (s === "not-connected") return { status: "not_connected" };
     if (s === "not-linked") return { status: "not_linked" };
+    if (s === "linked-elsewhere") return { status: "linked_elsewhere" };
     if (s === "expired") return { status: "expired" };
     return { status: "error" };
   }
