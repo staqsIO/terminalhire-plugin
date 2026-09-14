@@ -29075,6 +29075,18 @@ var init_gceIdentity = __esm({
   }
 });
 
+// ../../packages/attest/dist/confidentialSpace.js
+import { createHash as createHash7, createPublicKey as createPublicKey3, verify as cryptoVerify3 } from "crypto";
+var CONFIDENTIAL_SPACE_ISSUER, CONFIDENTIAL_SPACE_OIDC_DISCOVERY_URL;
+var init_confidentialSpace = __esm({
+  "../../packages/attest/dist/confidentialSpace.js"() {
+    "use strict";
+    init_gceIdentity();
+    CONFIDENTIAL_SPACE_ISSUER = "https://confidentialcomputing.googleapis.com";
+    CONFIDENTIAL_SPACE_OIDC_DISCOVERY_URL = `${CONFIDENTIAL_SPACE_ISSUER}/.well-known/openid-configuration`;
+  }
+});
+
 // ../../packages/attest/dist/venueInstanceName.js
 function venueInstanceName(runId) {
   return `th-run-${runId}`.replace(/_/g, "-").toLowerCase().slice(0, 62);
@@ -29109,6 +29121,7 @@ var init_dist2 = __esm({
     init_attestation();
     init_nonce();
     init_gceIdentity();
+    init_confidentialSpace();
     init_venueInstanceName();
     init_verify();
   }
@@ -29359,7 +29372,7 @@ var init_result = __esm({
 });
 
 // ../../packages/envrun/dist/attestation.js
-import { createHash as createHash7, randomBytes as randomBytes10 } from "crypto";
+import { createHash as createHash8, randomBytes as randomBytes10 } from "crypto";
 function contradicts(outcome, counts, exitCode) {
   const budget = OUTCOME_TO_BUDGET[outcome];
   if (budget === null)
@@ -29401,7 +29414,7 @@ function imageDigestOf(ref) {
   return at === -1 ? null : ref.slice(at + 1);
 }
 function sha256Hex(data) {
-  return createHash7("sha256").update(typeof data === "string" ? Buffer.from(data, "utf8") : data).digest("hex");
+  return createHash8("sha256").update(typeof data === "string" ? Buffer.from(data, "utf8") : data).digest("hex");
 }
 function toTestRunResult(result, outputSha256) {
   return {
@@ -30024,6 +30037,49 @@ var init_boundary = __esm({
 });
 
 // ../../packages/envrun/dist/gcpPlacement.js
+function assertWorkloadImage(fn, value) {
+  if (typeof value !== "string" || !WORKLOAD_IMAGE_REFERENCE.test(value)) {
+    throw new GcpPlacementError(`${fn}: the workload image is missing or is not one plain image reference (${String(WORKLOAD_IMAGE_REFERENCE)}). It lands inside a comma-separated --metadata= list, so anything that could start a second key is refused.`);
+  }
+}
+function venueImageFromEnv(env) {
+  const image = env["VENUE_IMAGE"] ?? "";
+  if (image === "" || image === "cos-stable")
+    return { venueImage: "cos-stable" };
+  if (image !== "confidential-space") {
+    throw new GcpPlacementError("VENUE_IMAGE is set to something other than cos-stable or confidential-space. An unknown value is refused rather than booted as the default.");
+  }
+  const workloadImage = env["VENUE_WORKLOAD_IMAGE"] ?? "";
+  if (workloadImage === "") {
+    throw new GcpPlacementError("VENUE_IMAGE=confidential-space needs VENUE_WORKLOAD_IMAGE, the image reference the Confidential Space launcher runs. Nothing boots without one.");
+  }
+  assertWorkloadImage("venueImageFromEnv", workloadImage);
+  return { venueImage: "confidential-space", workloadImage };
+}
+function bootImageFlags(p) {
+  const image = p.venueImage ?? "cos-stable";
+  if (image === "cos-stable")
+    return ["--image-family=cos-stable", "--image-project=cos-cloud"];
+  if (image !== "confidential-space") {
+    throw new GcpPlacementError("gcpBootArgv: venueImage is not one of cos-stable, confidential-space. An unknown image is refused rather than booted as the default.");
+  }
+  const workloadImage = p.workloadImage;
+  assertWorkloadImage("gcpBootArgv", workloadImage);
+  return [
+    // The production family. The debug family reports `dbgstat: enabled`, which the
+    // intake's verifier refuses, so a debug boot could never produce a run we record.
+    "--image-family=confidential-space",
+    "--image-project=confidential-space-images",
+    "--confidential-compute-type=SEV",
+    // The deploy-workloads page says N2D with SEV may set MIGRATE for live migration,
+    // and every other machine type needs TERMINATE. The spec chose TERMINATE: a
+    // maintenance event ends the VM instead of moving it, which for a VM that lives at
+    // most GCP_MAX_RUN_DURATION_SECONDS costs one run. Whether GCE boots this exact
+    // combination is phase 5's measurement.
+    "--maintenance-policy=TERMINATE",
+    `--metadata=tee-image-reference=${workloadImage},tee-container-log-redirect=true`
+  ];
+}
 function assertInstanceIdentity(fn, id) {
   const fields = [
     ["vmName", id.vmName, GCE_INSTANCE_NAME],
@@ -30049,8 +30105,8 @@ function gcpBootArgv(p) {
     `--project=${p.project}`,
     `--zone=${p.zone}`,
     `--machine-type=${p.machineType}`,
-    "--image-family=cos-stable",
-    "--image-project=cos-cloud",
+    // What the VM boots, and the one part of this argv the two images do not share.
+    ...bootImageFlags(p),
     // ── THE OUTER REAP. This, not the `finally` below, is what bounds the bill. ──
     //
     // An in-process `finally` is a best effort, not a reap. SIGKILL, a crashed
@@ -30128,7 +30184,7 @@ function gcpDeleteArgv(p) {
     "--quiet"
   ];
 }
-var DEFAULT_GCP_PROJECT, DEFAULT_GCP_ZONE, DEFAULT_GCP_MACHINE_TYPE, GcpPlacementError, GCP_MAX_RUN_DURATION_SECONDS, GCP_MANAGED_LABEL_KEY, GCP_RUN_LABEL_KEY, GCP_LABEL_VALUE, GCE_INSTANCE_NAME, GCP_RESOURCE_ID;
+var DEFAULT_GCP_PROJECT, DEFAULT_GCP_ZONE, DEFAULT_GCP_MACHINE_TYPE, GcpPlacementError, GCP_MAX_RUN_DURATION_SECONDS, GCP_MANAGED_LABEL_KEY, GCP_RUN_LABEL_KEY, CONFIDENTIAL_SPACE_MACHINE_TYPE, WORKLOAD_IMAGE_REFERENCE, GCP_LABEL_VALUE, GCE_INSTANCE_NAME, GCP_RESOURCE_ID;
 var init_gcpPlacement = __esm({
   "../../packages/envrun/dist/gcpPlacement.js"() {
     "use strict";
@@ -30145,6 +30201,8 @@ var init_gcpPlacement = __esm({
     GCP_MAX_RUN_DURATION_SECONDS = 3600;
     GCP_MANAGED_LABEL_KEY = "th-managed";
     GCP_RUN_LABEL_KEY = "th-run";
+    CONFIDENTIAL_SPACE_MACHINE_TYPE = "n2d-standard-2";
+    WORKLOAD_IMAGE_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,511}$/;
     GCP_LABEL_VALUE = /^[a-z0-9_-]{1,63}$/;
     GCE_INSTANCE_NAME = /^[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?$/;
     GCP_RESOURCE_ID = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -30727,6 +30785,7 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
   const zone = opts.zone ?? DEFAULT_GCP_ZONE;
   const gcloudConfig = opts.gcloudConfig ?? VENUE_GCLOUD_CONFIG;
   const keyFile = resolveServiceAccountKeyFile(opts);
+  const image = venueImageFromEnv(process.env);
   const env = venueGcloudEnv(gcloudConfig);
   return {
     kind: "hosted-pool",
@@ -30738,7 +30797,8 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
         project,
         zone,
         runId,
-        machineType: opts.machineType ?? DEFAULT_GCP_MACHINE_TYPE
+        machineType: opts.machineType ?? (image.venueImage === "confidential-space" ? CONFIDENTIAL_SPACE_MACHINE_TYPE : DEFAULT_GCP_MACHINE_TYPE),
+        ...image
       });
       ensureVenueServiceCredentials(gcloudConfig, keyFile, io);
       const boot = io.exec("gcloud", bootArgv, BOOT_TIMEOUT_MS, env);
@@ -32864,13 +32924,16 @@ function git(repoDir, args, allowNonZero = false) {
   }
   return res.stdout ?? "";
 }
-function collectWorkingDiff(repoDir) {
+function collectWorkingDiff(repoDir, opts = {}) {
   if (!existsSync12(join28(repoDir, ".git"))) {
     throw new ThRunError(`${repoDir} is not a git checkout (no .git). \`th run\` ships the working diff, so it needs a repository to read one from.`);
   }
   const headSha = git(repoDir, ["rev-parse", "HEAD"]).trim();
-  const tracked = git(repoDir, ["diff", "HEAD", "--binary"]);
-  const trackedChanged = git(repoDir, ["diff", "HEAD", "--name-only"]).split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
+  const diffBase = opts.base === void 0 ? headSha : assertDiffBase(repoDir, opts.base);
+  const trackedArgs = opts.base === void 0 ? ["diff", "HEAD"] : ["diff", diffBase];
+  const pathsEnd = opts.base === void 0 ? [] : ["--"];
+  const tracked = git(repoDir, [...trackedArgs, "--binary", ...pathsEnd]);
+  const trackedChanged = git(repoDir, [...trackedArgs, "--name-only", ...pathsEnd]).split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
   const untracked = git(repoDir, ["ls-files", "--others", "--exclude-standard"]).split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
   const parts = [];
   if (tracked.trim() !== "")
@@ -32880,7 +32943,17 @@ function collectWorkingDiff(repoDir) {
     if (one.trim() !== "")
       parts.push(one.replace(/\n*$/, "\n"));
   }
-  return { patch: parts.join(""), headSha, trackedChanged, untracked };
+  return { patch: parts.join(""), headSha, diffBase, trackedChanged, untracked };
+}
+function assertDiffBase(repoDir, base) {
+  if (!FULL_COMMIT_ID.test(base)) {
+    throw new ThRunError(`the diff base must be a full 40-character commit id, got ${JSON.stringify(base)}.`);
+  }
+  const resolved = git(repoDir, ["rev-parse", "--verify", "--quiet", `${base}^{commit}`], true);
+  if (resolved.trim() !== base) {
+    throw new ThRunError(`the diff base ${base} is not a commit in ${repoDir}.`);
+  }
+  return base;
 }
 function isLocalPath(p) {
   return !UNC_PATH.test(p) && (p.startsWith("/") || WINDOWS_ABSOLUTE.test(p));
@@ -33452,8 +33525,9 @@ async function runVerification(req, ctx) {
   let diff = null;
   if (source.kind === "working-diff") {
     progress("collect", `reading the working diff from ${source.localRepoDir}`);
-    diff = collectWorkingDiff(source.localRepoDir);
-    progress("collect", `${String(diff.trackedChanged.length)} tracked, ${String(diff.untracked.length)} untracked, ${String(diff.patch.length)} bytes`);
+    diff = collectWorkingDiff(source.localRepoDir, source.diffBase === void 0 ? {} : { base: source.diffBase });
+    const from = source.diffBase === void 0 ? "" : `, from delivered baseline ${diff.diffBase.slice(0, 12)}`;
+    progress("collect", `${String(diff.trackedChanged.length)} tracked, ${String(diff.untracked.length)} untracked, ${String(diff.patch.length)} bytes${from}`);
   } else {
     progress("collect", "dispatched run: the tree is the stored commit itself");
   }
@@ -33655,7 +33729,7 @@ async function runVerification(req, ctx) {
     await releaseWithoutThrowing(lease, progress);
   }
 }
-var ThRunError, OUTPUT_TAIL_BYTES, ALLOWED_URL_SCHEMES, SCP_STYLE, URL_SCHEME, WINDOWS_ABSOLUTE, UNC_PATH, TRANSPORT_REASON, SHA_REASON, FULL_SHA, MIN_GIT_VERSION_FOR_END_OF_OPTIONS, CloneUnavailableError, GIT_ENV_ALLOWLIST, credentialFreeHomeDir, SSH_ISOLATION_ARGS, WITHHELD_SEGMENT, UNPARSEABLE_TARGET, FAILURE_LINE, REDACTED_TARGET_REPO, REDACTED_TARGET_SHA;
+var ThRunError, OUTPUT_TAIL_BYTES, FULL_COMMIT_ID, ALLOWED_URL_SCHEMES, SCP_STYLE, URL_SCHEME, WINDOWS_ABSOLUTE, UNC_PATH, TRANSPORT_REASON, SHA_REASON, FULL_SHA, MIN_GIT_VERSION_FOR_END_OF_OPTIONS, CloneUnavailableError, GIT_ENV_ALLOWLIST, credentialFreeHomeDir, SSH_ISOLATION_ARGS, WITHHELD_SEGMENT, UNPARSEABLE_TARGET, FAILURE_LINE, REDACTED_TARGET_REPO, REDACTED_TARGET_SHA;
 var init_thrun = __esm({
   "../../packages/envrun/dist/thrun.js"() {
     "use strict";
@@ -33673,6 +33747,7 @@ var init_thrun = __esm({
     ThRunError = class extends Error {
     };
     OUTPUT_TAIL_BYTES = 4e3;
+    FULL_COMMIT_ID = /^[0-9a-f]{40}$/;
     ALLOWED_URL_SCHEMES = /* @__PURE__ */ new Set(["https", "http", "ssh", "git"]);
     SCP_STYLE = /^[A-Za-z0-9._~+-]+@[A-Za-z0-9._-]+:[^:]/;
     URL_SCHEME = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//;
@@ -34531,6 +34606,7 @@ __export(dist_exports, {
   ALEMBIC_IMAGE: () => ALEMBIC_IMAGE,
   ATTEST_REFUSAL_REASONS: () => ATTEST_REFUSAL_REASONS,
   BOOKKEEPING_TABLES: () => BOOKKEEPING_TABLES,
+  CONFIDENTIAL_SPACE_MACHINE_TYPE: () => CONFIDENTIAL_SPACE_MACHINE_TYPE,
   CONTAINMENT_UNAVAILABLE_PREFIX: () => CONTAINMENT_UNAVAILABLE_PREFIX,
   CloneUnavailableError: () => CloneUnavailableError,
   DAEMON_FACTS_FORMAT: () => DAEMON_FACTS_FORMAT,
@@ -34672,6 +34748,7 @@ __export(dist_exports, {
   toolingImageFor: () => toolingImageFor,
   unquoteDiffPath: () => unquoteDiffPath,
   venueGcloudEnv: () => venueGcloudEnv,
+  venueImageFromEnv: () => venueImageFromEnv,
   venueStagePaths: () => venueStagePaths,
   verifyWorkingDiff: () => verifyWorkingDiff
 });
@@ -35045,7 +35122,7 @@ import {
   readdirSync as readdirSync3
 } from "fs";
 import { join as join29, dirname as dirname9, isAbsolute as isAbsolute4, resolve as pathResolve } from "path";
-import { createHash as createHash8 } from "crypto";
+import { createHash as createHash9 } from "crypto";
 import { homedir as homedir15, hostname as osHostname } from "os";
 import { execFile as execFile3, execFileSync as execFileSync2, spawnSync as spawnSync8 } from "child_process";
 import { promisify as promisify3 } from "util";
@@ -37901,16 +37978,26 @@ function writePackFile(destDir, relPath, content, what) {
   return { written: true, reason: null, sha256: sha256OfUtf8(content) };
 }
 function sha256OfUtf8(content) {
-  return createHash8("sha256").update(content, "utf8").digest("hex");
+  return createHash9("sha256").update(content, "utf8").digest("hex");
 }
-function writeWorkspacePack(destDir, spec, claim) {
+function writeWorkspacePack(destDir, spec, claim, delivery) {
+  if (delivery !== "full" && delivery !== "sparse") {
+    throw new TypeError(
+      `writeWorkspacePack: delivery must be 'full' or 'sparse', got ${String(delivery)}`
+    );
+  }
   const gate = ensureExcludedPackDir(destDir);
   if (!gate.ok) {
     const refused = { written: false, reason: gate.reason };
     return { brief: refused, verify: refused, agents: refused };
   }
   const brief = typeof spec !== "string" || spec.trim() === "" ? { written: false, reason: "the server sent no task for this posting" } : writePackFile(destDir, BRIEF_REL_PATH, spec, "task");
-  const verify = writePackFile(destDir, VERIFY_REL_PATH, renderVerifyDoc(claim), "verify note");
+  const verify = writePackFile(
+    destDir,
+    VERIFY_REL_PATH,
+    renderVerifyDoc(claim, delivery),
+    "verify note"
+  );
   const agents = writePackFile(
     destDir,
     AGENTS_REL_PATH,
@@ -37923,20 +38010,30 @@ function packSafeId(claim) {
   const id = String(claim?.id ?? "");
   return PACK_SAFE_ID.test(id) ? id : "<your claim id \u2014 see: terminalhire claim list>";
 }
-function renderVerifyDoc(claim) {
+function renderVerifyDoc(claim, delivery) {
   const id = packSafeId(claim);
+  const runStep2 = delivery === "full" ? `       ${nextStep("terminalhire run")}
+
+   It tests every change since the delivered baseline, committed or not, which
+   is what submit sends once it is all committed.` : `       ${nextStep("terminalhire run --target <clone URL of the full repository>")}
+
+   It tests every change since the delivered baseline, committed or not, which
+   is what submit sends once it is all committed. This delivery contains only the
+   files you were granted, so the local run needs the whole repository; if you
+   don't have access to it, skip to step 4, because the poster-side run in step 5
+   is the verdict that counts.`;
   return `# Verifying claim ${id}
 
 This workspace was delivered by terminalhire for a posting. "Done" is
 judged on the diff: the submitted patch is the change from the delivered
 baseline (this repo's root commit) to HEAD, so only committed, tracked changes
-count.
+count. Submit needs a clean tree; run does not.
 
 1. Read the poster's task first, when there is one: ${BRIEF_REL_PATH}
 2. Work on the claim branch this delivery checked out, committing as you go.
 3. To verify locally in terminalhire's sandboxed runner, from this directory:
 
-       terminalhire run
+${runStep2}
 
 4. Submit \u2014 the only step that sends anything off this machine. It prints what it
    is about to send first, and asks y/N only at an interactive terminal:
@@ -38302,11 +38399,13 @@ async function cmdSliceFullTier(claims, id, local, fullTierBody, flags, cloneRep
     );
     process.exit(1);
   }
-  const pack = writeWorkspacePack(dest, body.spec, claim);
+  const pack = writeWorkspacePack(dest, body.spec, claim, "full");
   const working = claims.updateClaim(claim.id, {
     worktreePath: dest,
     branch,
     state: "working",
+    // `terminalhire run` clones this commit when run from the workspace (TERM-1098).
+    baseSha,
     workspacePack: {
       brief: pack.brief.written === true,
       verify: pack.verify.written === true,
@@ -38462,7 +38561,7 @@ async function attemptSliceDelivery(id, flags = {}) {
   let pack;
   try {
     await sh("git", ["-C", dest, "init"]);
-    pack = writeWorkspacePack(dest, body.spec, claim);
+    pack = writeWorkspacePack(dest, body.spec, claim, "sparse");
     await sh("git", ["-C", dest, "add", "-A"]);
     await sh("git", [
       "-C",
@@ -38499,6 +38598,11 @@ async function attemptSliceDelivery(id, flags = {}) {
     worktreePath: dest,
     branch,
     state: "working",
+    // The commit these files were cut from, so `terminalhire run` can clone it unasked
+    // (TERM-1098). Recorded only when it is a full sha: a slice confirmed before the
+    // server kept one answers null, and a value of any other shape is not a commit we
+    // could clone, so neither is written and `run` asks for `--sha` instead.
+    ...typeof body.baseSha === "string" && /^[0-9a-f]{40}$/.test(body.baseSha) ? { baseSha: body.baseSha } : {},
     workspacePack: {
       brief: pack.brief.written === true,
       verify: pack.verify.written === true,

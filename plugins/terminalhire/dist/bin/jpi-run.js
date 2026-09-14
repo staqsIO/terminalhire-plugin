@@ -293,7 +293,7 @@ var init_classify = __esm({
 });
 
 // ../../packages/containment/dist/env.js
-import { homedir as homedir3 } from "os";
+import { homedir as homedir4 } from "os";
 import { posix } from "path";
 function realHomeCandidates(source) {
   const candidates = [];
@@ -302,7 +302,7 @@ function realHomeCandidates(source) {
     candidates.push(fromEnv);
   let fromOs;
   try {
-    fromOs = homedir3();
+    fromOs = homedir4();
   } catch {
     fromOs = void 0;
   }
@@ -336,24 +336,24 @@ function scrubEnv(source, opts) {
   env["PATH"] = [...opts.toolPaths ?? [], ...BASE_PATH].join(":");
   env["HOME"] = jailHome;
   env["TMPDIR"] = tmpDir;
-  env["XDG_CONFIG_HOME"] = join4(jailHome, ".config");
-  env["XDG_CACHE_HOME"] = join4(jailHome, ".cache");
-  env["XDG_DATA_HOME"] = join4(jailHome, ".local", "share");
-  env["GIT_CONFIG_GLOBAL"] = join4(jailHome, ".gitconfig");
+  env["XDG_CONFIG_HOME"] = join5(jailHome, ".config");
+  env["XDG_CACHE_HOME"] = join5(jailHome, ".cache");
+  env["XDG_DATA_HOME"] = join5(jailHome, ".local", "share");
+  env["GIT_CONFIG_GLOBAL"] = join5(jailHome, ".gitconfig");
   env["GIT_CONFIG_SYSTEM"] = "/dev/null";
   env["GIT_TERMINAL_PROMPT"] = "0";
   env["GIT_ASKPASS"] = "/usr/bin/false";
   env["SSH_ASKPASS"] = "/usr/bin/false";
-  env["npm_config_userconfig"] = join4(jailHome, ".npmrc");
-  env["npm_config_cache"] = join4(jailHome, ".npm");
+  env["npm_config_userconfig"] = join5(jailHome, ".npmrc");
+  env["npm_config_cache"] = join5(jailHome, ".npm");
   env["npm_config_update_notifier"] = "false";
   env["npm_config_fund"] = "false";
   env["npm_config_audit"] = "false";
-  env["GOPATH"] = join4(jailHome, "go");
-  env["GOMODCACHE"] = join4(jailHome, "go", "pkg", "mod");
-  env["GOCACHE"] = join4(jailHome, ".cache", "go-build");
+  env["GOPATH"] = join5(jailHome, "go");
+  env["GOMODCACHE"] = join5(jailHome, "go", "pkg", "mod");
+  env["GOCACHE"] = join5(jailHome, ".cache", "go-build");
   env["GOFLAGS"] = "-modcacherw";
-  env["CARGO_HOME"] = join4(jailHome, ".cargo");
+  env["CARGO_HOME"] = join5(jailHome, ".cargo");
   const proxy = opts.proxyUrl ?? DEAD_PROXY;
   env["HTTP_PROXY"] = proxy;
   env["HTTPS_PROXY"] = proxy;
@@ -381,11 +381,11 @@ function auditEnv(env) {
   }
   return leaks;
 }
-var join4, ENV_ALLOWLIST, BASE_PATH, DEAD_PROXY, SandboxEnvError, FORBIDDEN_EXTRA;
+var join5, ENV_ALLOWLIST, BASE_PATH, DEAD_PROXY, SandboxEnvError, FORBIDDEN_EXTRA;
 var init_env = __esm({
   "../../packages/containment/dist/env.js"() {
     "use strict";
-    join4 = posix.join;
+    join5 = posix.join;
     ENV_ALLOWLIST = ["LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM"];
     BASE_PATH = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
     DEAD_PROXY = "http://127.0.0.1:1";
@@ -405,8 +405,8 @@ var init_reap = __esm({
 
 // ../../packages/containment/dist/fence.js
 import { spawn, spawnSync as spawnSync2 } from "child_process";
-import { existsSync as existsSync3, mkdirSync as mkdirSync2, realpathSync, writeFileSync as writeFileSync2 } from "fs";
-import { dirname as dirname2, isAbsolute, join as join5, posix as posix2 } from "path";
+import { existsSync as existsSync4, mkdirSync as mkdirSync4, realpathSync, writeFileSync as writeFileSync3 } from "fs";
+import { dirname as dirname2, isAbsolute, join as join6, posix as posix2 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 function canonical(path, label) {
   if (!isAbsolute(path)) {
@@ -455,15 +455,15 @@ function idOrNull(fn) {
   return typeof f === "function" ? f.call(process) : null;
 }
 function buildJail(root, guestUser) {
-  const jail = join5(root, JAIL_SEGMENT);
-  const tmp = join5(root, JAIL_TMP_SEGMENT);
-  for (const dir of [jail, tmp, join5(jail, ".config"), join5(jail, ".cache"), join5(jail, ".npm")]) {
-    mkdirSync2(dir, { recursive: true });
+  const jail = join6(root, JAIL_SEGMENT);
+  const tmp = join6(root, JAIL_TMP_SEGMENT);
+  for (const dir of [jail, tmp, join6(jail, ".config"), join6(jail, ".cache"), join6(jail, ".npm")]) {
+    mkdirSync4(dir, { recursive: true });
   }
-  writeFileSync2(join5(jail, ".npmrc"), "", "utf8");
-  writeFileSync2(join5(jail, JAIL_PASSWD_FILE), guestUser ? jailPasswd(guestUser.uid, guestUser.gid) : jailPasswd(), "utf8");
-  writeFileSync2(join5(jail, JAIL_GROUP_FILE), guestUser ? jailGroup(guestUser.gid) : jailGroup(), "utf8");
-  writeFileSync2(join5(jail, ".gitconfig"), '[user]\n	name = sandbox\n	email = sandbox@localhost\n[safe]\n	directory = *\n[url "https://github.com/"]\n	insteadOf = ssh://git@github.com/\n	insteadOf = git@github.com:\n', "utf8");
+  writeFileSync3(join6(jail, ".npmrc"), "", "utf8");
+  writeFileSync3(join6(jail, JAIL_PASSWD_FILE), guestUser ? jailPasswd(guestUser.uid, guestUser.gid) : jailPasswd(), "utf8");
+  writeFileSync3(join6(jail, JAIL_GROUP_FILE), guestUser ? jailGroup(guestUser.gid) : jailGroup(), "utf8");
+  writeFileSync3(join6(jail, ".gitconfig"), '[user]\n	name = sandbox\n	email = sandbox@localhost\n[safe]\n	directory = *\n[url "https://github.com/"]\n	insteadOf = ssh://git@github.com/\n	insteadOf = git@github.com:\n', "utf8");
   return { jail, tmp };
 }
 var FenceError, ContainmentError, ContainmentRefusalError, JAIL_PASSWD_FILE, JAIL_GROUP_FILE, GUEST_JAIL, FENCE_USER, JAIL_SEGMENT, JAIL_TMP_SEGMENT;
@@ -657,8 +657,8 @@ var init_egressProxy = __esm({
 
 // ../../packages/containment/dist/container.js
 import { fileURLToPath as fileURLToPath3 } from "url";
-import { dirname as dirname3, join as join6 } from "path";
-import { chmodSync, copyFileSync, existsSync as existsSync4, mkdtempSync, rmSync } from "fs";
+import { dirname as dirname3, join as join7 } from "path";
+import { chmodSync, copyFileSync, existsSync as existsSync5, mkdtempSync, rmSync as rmSync2 } from "fs";
 import { tmpdir } from "os";
 function scrubEnvPathsFor(containmentKind, host) {
   return containmentKind === "container" ? { jailHome: GUEST.jail, tmpDir: GUEST.tmp } : { jailHome: host.jail, tmpDir: host.tmp };
@@ -806,7 +806,7 @@ function guestIdentityMounts(spec) {
     return [];
   const domain = pathDomainOf(spec);
   const resolve2 = resolverFor(domain);
-  const under = domain === "venue" ? venueJoin : join6;
+  const under = domain === "venue" ? venueJoin : join7;
   const jail = resolve2(spec.jail, "jail");
   const passwd = resolve2(under(jail, JAIL_PASSWD_FILE), "the jail passwd file");
   const group = resolve2(under(jail, JAIL_GROUP_FILE), "the jail group file");
@@ -992,8 +992,8 @@ function dockerSync(d, args, timeoutMs = DOCKER_TIMEOUT_MS) {
   };
 }
 function pickProxyDir(baseDir) {
-  const scoped = join6(baseDir, "proxy");
-  if (existsSync4(join6(scoped, "proxyEntry.js")))
+  const scoped = join7(baseDir, "proxy");
+  if (existsSync5(join7(scoped, "proxyEntry.js")))
     return scoped;
   return baseDir;
 }
@@ -1001,22 +1001,22 @@ function resolveProxyCodeSource() {
   return pickProxyDir(dirname3(fileURLToPath3(import.meta.url)));
 }
 function stageProxyCode(source = resolveProxyCodeSource()) {
-  const missing = PROXY_FILES.map((f) => join6(source, f)).filter((p) => !existsSync4(p));
+  const missing = PROXY_FILES.map((f) => join7(source, f)).filter((p) => !existsSync5(p));
   if (missing.length > 0) {
     throw new FenceError(`the egress proxy is missing from this install: ${missing.join(", ")} not found. Reinstall the CLI, or update the Claude Code plugin.`);
   }
-  const dir = mkdtempSync(join6(tmpdir(), "th-proxy-"));
+  const dir = mkdtempSync(join7(tmpdir(), "th-proxy-"));
   try {
     for (const file of PROXY_FILES) {
-      copyFileSync(join6(source, file), join6(dir, file));
+      copyFileSync(join7(source, file), join7(dir, file));
     }
     for (const file of PROXY_FILES) {
-      chmodSync(join6(dir, file), 420);
+      chmodSync(join7(dir, file), 420);
     }
     chmodSync(dir, 493);
   } catch (err) {
     try {
-      rmSync(dir, { recursive: true, force: true });
+      rmSync2(dir, { recursive: true, force: true });
     } catch {
     }
     throw err;
@@ -1025,7 +1025,7 @@ function stageProxyCode(source = resolveProxyCodeSource()) {
     dir,
     cleanup: () => {
       try {
-        rmSync(dir, { recursive: true, force: true });
+        rmSync2(dir, { recursive: true, force: true });
       } catch {
       }
     }
@@ -1438,9 +1438,9 @@ var init_previewRegistry = __esm({
 });
 
 // ../../packages/envrun/dist/preview.js
-import { randomBytes } from "crypto";
-import { mkdirSync as mkdirSync3, writeFileSync as writeFileSync3 } from "fs";
-import { join as join7 } from "path";
+import { randomBytes as randomBytes2 } from "crypto";
+import { mkdirSync as mkdirSync5, writeFileSync as writeFileSync4 } from "fs";
+import { join as join8 } from "path";
 function docker(client, args, timeoutMs = 6e4) {
   const res = client.sync([...args], { timeoutMs });
   return {
@@ -1498,13 +1498,13 @@ async function startPreview(req) {
   if (!LOOPBACK_BINDS.has(bindAddress) && req.authToken === void 0) {
     throw new PreviewError(`refusing to publish the preview on ${bindAddress} without an explicit authToken: a bind wider than loopback puts this run \u2014 the test output tail included \u2014 on the developer's local network`);
   }
-  const authToken = req.authToken ?? randomBytes(24).toString("base64url");
+  const authToken = req.authToken ?? randomBytes2(24).toString("base64url");
   const envArgs = ["--env", `PREVIEW_AUTH_TOKEN=${authToken}`];
   const probeHost = WILDCARD_BINDS.has(bindAddress) ? "127.0.0.1" : bindAddress;
   const probeAuthority = probeHost.includes(":") ? `[${probeHost}]` : probeHost;
-  mkdirSync3(req.scratchDir, { recursive: true });
-  const docPath = join7(req.scratchDir, "preview-run.json");
-  writeFileSync3(docPath, JSON.stringify(req.document, null, 2), "utf8");
+  mkdirSync5(req.scratchDir, { recursive: true });
+  const docPath = join8(req.scratchDir, "preview-run.json");
+  writeFileSync4(docPath, JSON.stringify(req.document, null, 2), "utf8");
   const teardown = () => {
     livePreviews.deregister(client, container);
     for (let i = 0; i < 3; i += 1) {
@@ -1693,11 +1693,11 @@ http
 });
 
 // ../../packages/envrun/dist/venue.js
-import { join as join8 } from "path";
+import { join as join9 } from "path";
 function localJailPaths(scratchRoot) {
   return {
-    jail: join8(scratchRoot, JAIL_SEGMENT),
-    tmp: join8(scratchRoot, JAIL_TMP_SEGMENT)
+    jail: join9(scratchRoot, JAIL_SEGMENT),
+    tmp: join9(scratchRoot, JAIL_TMP_SEGMENT)
   };
 }
 function localVenue() {
@@ -2352,7 +2352,7 @@ var init_dsse = __esm({
 });
 
 // ../../packages/attest/dist/sealedbox.js
-import { createCipheriv, createDecipheriv, diffieHellman, generateKeyPairSync as generateKeyPairSync2, hkdfSync, randomBytes as randomBytes2 } from "crypto";
+import { createCipheriv, createDecipheriv, diffieHellman, generateKeyPairSync as generateKeyPairSync2, hkdfSync, randomBytes as randomBytes3 } from "crypto";
 var init_sealedbox = __esm({
   "../../packages/attest/dist/sealedbox.js"() {
     "use strict";
@@ -2362,7 +2362,7 @@ var init_sealedbox = __esm({
 });
 
 // ../../packages/attest/dist/aead.js
-import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes3 } from "crypto";
+import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes4 } from "crypto";
 var init_aead = __esm({
   "../../packages/attest/dist/aead.js"() {
     "use strict";
@@ -2557,6 +2557,18 @@ var init_gceIdentity = __esm({
   }
 });
 
+// ../../packages/attest/dist/confidentialSpace.js
+import { createHash as createHash2, createPublicKey as createPublicKey3, verify as cryptoVerify3 } from "crypto";
+var CONFIDENTIAL_SPACE_ISSUER, CONFIDENTIAL_SPACE_OIDC_DISCOVERY_URL;
+var init_confidentialSpace = __esm({
+  "../../packages/attest/dist/confidentialSpace.js"() {
+    "use strict";
+    init_gceIdentity();
+    CONFIDENTIAL_SPACE_ISSUER = "https://confidentialcomputing.googleapis.com";
+    CONFIDENTIAL_SPACE_OIDC_DISCOVERY_URL = `${CONFIDENTIAL_SPACE_ISSUER}/.well-known/openid-configuration`;
+  }
+});
+
 // ../../packages/attest/dist/venueInstanceName.js
 function venueInstanceName(runId) {
   return `th-run-${runId}`.replace(/_/g, "-").toLowerCase().slice(0, 62);
@@ -2591,6 +2603,7 @@ var init_dist2 = __esm({
     init_attestation();
     init_nonce();
     init_gceIdentity();
+    init_confidentialSpace();
     init_venueInstanceName();
     init_verify();
   }
@@ -2841,7 +2854,7 @@ var init_result = __esm({
 });
 
 // ../../packages/envrun/dist/attestation.js
-import { createHash as createHash2, randomBytes as randomBytes4 } from "crypto";
+import { createHash as createHash3, randomBytes as randomBytes5 } from "crypto";
 function contradicts(outcome, counts, exitCode) {
   const budget = OUTCOME_TO_BUDGET[outcome];
   if (budget === null)
@@ -2883,7 +2896,7 @@ function imageDigestOf(ref) {
   return at === -1 ? null : ref.slice(at + 1);
 }
 function sha256Hex(data) {
-  return createHash2("sha256").update(typeof data === "string" ? Buffer.from(data, "utf8") : data).digest("hex");
+  return createHash3("sha256").update(typeof data === "string" ? Buffer.from(data, "utf8") : data).digest("hex");
 }
 function toTestRunResult(result, outputSha256) {
   return {
@@ -3010,7 +3023,7 @@ function toAcceptancePredicate(pair, opts = {}) {
       // RepoDigest (`repo@sha256:…`) carries the repo name and the content hash, and the
       // tag it drops is the part a registry can re-point (TERM-893).
       enclave_measurement: localMeasurement(patched.containerImageDigest),
-      nonce: opts.nonce ?? randomBytes4(16).toString("hex"),
+      nonce: opts.nonce ?? randomBytes5(16).toString("hex"),
       run_policy: { max_attempts: opts.maxAttempts ?? 1, budget_outcome: budget }
     }
   };
@@ -3506,6 +3519,49 @@ var init_boundary = __esm({
 });
 
 // ../../packages/envrun/dist/gcpPlacement.js
+function assertWorkloadImage(fn, value) {
+  if (typeof value !== "string" || !WORKLOAD_IMAGE_REFERENCE.test(value)) {
+    throw new GcpPlacementError(`${fn}: the workload image is missing or is not one plain image reference (${String(WORKLOAD_IMAGE_REFERENCE)}). It lands inside a comma-separated --metadata= list, so anything that could start a second key is refused.`);
+  }
+}
+function venueImageFromEnv(env) {
+  const image = env["VENUE_IMAGE"] ?? "";
+  if (image === "" || image === "cos-stable")
+    return { venueImage: "cos-stable" };
+  if (image !== "confidential-space") {
+    throw new GcpPlacementError("VENUE_IMAGE is set to something other than cos-stable or confidential-space. An unknown value is refused rather than booted as the default.");
+  }
+  const workloadImage = env["VENUE_WORKLOAD_IMAGE"] ?? "";
+  if (workloadImage === "") {
+    throw new GcpPlacementError("VENUE_IMAGE=confidential-space needs VENUE_WORKLOAD_IMAGE, the image reference the Confidential Space launcher runs. Nothing boots without one.");
+  }
+  assertWorkloadImage("venueImageFromEnv", workloadImage);
+  return { venueImage: "confidential-space", workloadImage };
+}
+function bootImageFlags(p) {
+  const image = p.venueImage ?? "cos-stable";
+  if (image === "cos-stable")
+    return ["--image-family=cos-stable", "--image-project=cos-cloud"];
+  if (image !== "confidential-space") {
+    throw new GcpPlacementError("gcpBootArgv: venueImage is not one of cos-stable, confidential-space. An unknown image is refused rather than booted as the default.");
+  }
+  const workloadImage = p.workloadImage;
+  assertWorkloadImage("gcpBootArgv", workloadImage);
+  return [
+    // The production family. The debug family reports `dbgstat: enabled`, which the
+    // intake's verifier refuses, so a debug boot could never produce a run we record.
+    "--image-family=confidential-space",
+    "--image-project=confidential-space-images",
+    "--confidential-compute-type=SEV",
+    // The deploy-workloads page says N2D with SEV may set MIGRATE for live migration,
+    // and every other machine type needs TERMINATE. The spec chose TERMINATE: a
+    // maintenance event ends the VM instead of moving it, which for a VM that lives at
+    // most GCP_MAX_RUN_DURATION_SECONDS costs one run. Whether GCE boots this exact
+    // combination is phase 5's measurement.
+    "--maintenance-policy=TERMINATE",
+    `--metadata=tee-image-reference=${workloadImage},tee-container-log-redirect=true`
+  ];
+}
 function assertInstanceIdentity(fn, id) {
   const fields = [
     ["vmName", id.vmName, GCE_INSTANCE_NAME],
@@ -3531,8 +3587,8 @@ function gcpBootArgv(p) {
     `--project=${p.project}`,
     `--zone=${p.zone}`,
     `--machine-type=${p.machineType}`,
-    "--image-family=cos-stable",
-    "--image-project=cos-cloud",
+    // What the VM boots, and the one part of this argv the two images do not share.
+    ...bootImageFlags(p),
     // ── THE OUTER REAP. This, not the `finally` below, is what bounds the bill. ──
     //
     // An in-process `finally` is a best effort, not a reap. SIGKILL, a crashed
@@ -3610,7 +3666,7 @@ function gcpDeleteArgv(p) {
     "--quiet"
   ];
 }
-var DEFAULT_GCP_PROJECT, DEFAULT_GCP_ZONE, DEFAULT_GCP_MACHINE_TYPE, GcpPlacementError, GCP_MAX_RUN_DURATION_SECONDS, GCP_MANAGED_LABEL_KEY, GCP_RUN_LABEL_KEY, GCP_LABEL_VALUE, GCE_INSTANCE_NAME, GCP_RESOURCE_ID;
+var DEFAULT_GCP_PROJECT, DEFAULT_GCP_ZONE, DEFAULT_GCP_MACHINE_TYPE, GcpPlacementError, GCP_MAX_RUN_DURATION_SECONDS, GCP_MANAGED_LABEL_KEY, GCP_RUN_LABEL_KEY, CONFIDENTIAL_SPACE_MACHINE_TYPE, WORKLOAD_IMAGE_REFERENCE, GCP_LABEL_VALUE, GCE_INSTANCE_NAME, GCP_RESOURCE_ID;
 var init_gcpPlacement = __esm({
   "../../packages/envrun/dist/gcpPlacement.js"() {
     "use strict";
@@ -3627,6 +3683,8 @@ var init_gcpPlacement = __esm({
     GCP_MAX_RUN_DURATION_SECONDS = 3600;
     GCP_MANAGED_LABEL_KEY = "th-managed";
     GCP_RUN_LABEL_KEY = "th-run";
+    CONFIDENTIAL_SPACE_MACHINE_TYPE = "n2d-standard-2";
+    WORKLOAD_IMAGE_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,511}$/;
     GCP_LABEL_VALUE = /^[a-z0-9_-]{1,63}$/;
     GCE_INSTANCE_NAME = /^[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?$/;
     GCP_RESOURCE_ID = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -3634,25 +3692,25 @@ var init_gcpPlacement = __esm({
 });
 
 // ../../packages/envrun/dist/emptyGitConfig.js
-import { mkdtempSync as mkdtempSync2, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "fs";
+import { mkdtempSync as mkdtempSync2, rmSync as rmSync3, writeFileSync as writeFileSync5 } from "fs";
 import { tmpdir as tmpdir2 } from "os";
-import { join as join9 } from "path";
+import { join as join10 } from "path";
 function emptyGitConfig() {
   if (emptyGitConfigFile !== void 0)
     return emptyGitConfigFile;
   let dir;
   let file;
   try {
-    dir = mkdtempSync2(join9(tmpdir2(), "th-run-nogitconfig-"));
-    file = join9(dir, "config");
-    writeFileSync4(file, "", { mode: 384 });
+    dir = mkdtempSync2(join10(tmpdir2(), "th-run-nogitconfig-"));
+    file = join10(dir, "config");
+    writeFileSync5(file, "", { mode: 384 });
   } catch (err) {
     throw new RunRefusalError("could not create the empty git config this run points GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM at, so git would read the configuration \u2014 and the credential helpers \u2014 on this machine instead. That is our environment failing, not your tests: check that the temp directory is writable.", { cause: err });
   }
   emptyGitConfigFile = file;
   process.once("exit", () => {
     try {
-      rmSync2(dir, { recursive: true, force: true });
+      rmSync3(dir, { recursive: true, force: true });
     } catch {
     }
   });
@@ -3668,8 +3726,8 @@ var init_emptyGitConfig = __esm({
 
 // ../../packages/envrun/dist/hostedVenue.js
 import { spawn as spawn3, spawnSync as spawnSync5 } from "child_process";
-import { chmodSync as chmodSync2, existsSync as existsSync5, mkdtempSync as mkdtempSync3, readFileSync as readFileSync3, rmSync as rmSync3 } from "fs";
-import { join as join10 } from "path";
+import { chmodSync as chmodSync2, existsSync as existsSync6, mkdtempSync as mkdtempSync3, readFileSync as readFileSync4, rmSync as rmSync4 } from "fs";
+import { join as join11 } from "path";
 import { tmpdir as tmpdir3 } from "os";
 function credentialInGitConfig(text) {
   for (const match of text.matchAll(/\b([a-z][a-z0-9+.-]*):\/\/(\S+)/gi)) {
@@ -3706,19 +3764,19 @@ function decodeMaybe(url) {
 }
 function dispatchedGitBinary() {
   for (const candidate of DISPATCHED_GIT_CANDIDATES) {
-    if (existsSync5(candidate))
+    if (existsSync6(candidate))
       return candidate;
   }
   return "git";
 }
 function dispatchedProbeEnv(cloneDir, base) {
-  const gitDir = join10(cloneDir, ".git");
+  const gitDir = join11(cloneDir, ".git");
   return {
     ...base,
     GIT_DIR: gitDir,
     GIT_WORK_TREE: cloneDir,
-    GIT_INDEX_FILE: join10(gitDir, "index"),
-    GIT_OBJECT_DIRECTORY: join10(gitDir, "objects"),
+    GIT_INDEX_FILE: join11(gitDir, "index"),
+    GIT_OBJECT_DIRECTORY: join11(gitDir, "objects"),
     GIT_ALTERNATE_OBJECT_DIRECTORIES: "",
     GIT_COMMON_DIR: gitDir,
     GIT_NAMESPACE: "",
@@ -4209,6 +4267,7 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
   const zone = opts.zone ?? DEFAULT_GCP_ZONE;
   const gcloudConfig = opts.gcloudConfig ?? VENUE_GCLOUD_CONFIG;
   const keyFile = resolveServiceAccountKeyFile(opts);
+  const image = venueImageFromEnv(process.env);
   const env = venueGcloudEnv(gcloudConfig);
   return {
     kind: "hosted-pool",
@@ -4220,7 +4279,8 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
         project,
         zone,
         runId,
-        machineType: opts.machineType ?? DEFAULT_GCP_MACHINE_TYPE
+        machineType: opts.machineType ?? (image.venueImage === "confidential-space" ? CONFIDENTIAL_SPACE_MACHINE_TYPE : DEFAULT_GCP_MACHINE_TYPE),
+        ...image
       });
       ensureVenueServiceCredentials(gcloudConfig, keyFile, io);
       const boot = io.exec("gcloud", bootArgv, BOOT_TIMEOUT_MS, env);
@@ -4297,7 +4357,7 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
           throw new HostedVenueError(`the tunnel socket directory ${socketDir} could not be removed and is left behind: ${describeErr(err)}`);
         }
       });
-      const socketPath = join10(socketDir, VENUE_SOCKET_NAME);
+      const socketPath = join11(socketDir, VENUE_SOCKET_NAME);
       if (io.exists(socketPath)) {
         throw new HostedVenueError(`something already exists at ${socketPath}, inside a directory created seconds ago for this run alone. Refusing rather than clearing it: the tunnel would carry the whole run over a path we cannot account for`, "ours");
       }
@@ -4509,14 +4569,14 @@ function makeLease(p) {
       const { jail: localJail, tmp: localTmp } = localJailPaths(local.scratchRoot);
       const required = [
         localTmp,
-        join10(localJail, JAIL_PASSWD_FILE),
-        join10(localJail, JAIL_GROUP_FILE)
+        join11(localJail, JAIL_PASSWD_FILE),
+        join11(localJail, JAIL_GROUP_FILE)
       ];
       const missing = required.filter((path) => !p.io.exists(path));
       if (missing.length > 0) {
         throw new HostedVenueError(`refusing to stage ${local.scratchRoot} onto ${p.vm}: the jail at ${localJail} is incomplete \u2014 missing ${missing.join(", ")}. buildJail must run to completion before stage(), or the venue mounts a directory with no identity database.`);
       }
-      const gitConfigPath = join10(local.cloneDir, ".git", "config");
+      const gitConfigPath = join11(local.cloneDir, ".git", "config");
       let gitConfig;
       try {
         gitConfig = p.io.readTextIfPresent(gitConfigPath);
@@ -4724,7 +4784,7 @@ var init_hostedVenue = __esm({
       pushTree: pushTreeWithTar,
       readTextIfPresent: (path) => {
         try {
-          return readFileSync3(path, "utf8");
+          return readFileSync4(path, "utf8");
         } catch (err) {
           if (err.code === "ENOENT")
             return null;
@@ -4756,14 +4816,14 @@ var init_hostedVenue = __esm({
       },
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
       now: () => Date.now(),
-      exists: (path) => existsSync5(path),
+      exists: (path) => existsSync6(path),
       makePrivateDir: () => {
-        const dir = mkdtempSync3(join10(tmpdir3(), SOCKET_DIR_PREFIX));
+        const dir = mkdtempSync3(join11(tmpdir3(), SOCKET_DIR_PREFIX));
         chmodSync2(dir, 448);
         return dir;
       },
       removeTree: (path) => {
-        rmSync3(path, { recursive: true, force: true });
+        rmSync4(path, { recursive: true, force: true });
       },
       dockerFor: (socketPath) => remoteDockerClient(`unix://${socketPath}`),
       classifyDaemon: (docker3) => classifyVenueDaemon(docker3),
@@ -5699,21 +5759,21 @@ var init_references = __esm({
 });
 
 // ../../packages/envspec/dist/repo.js
-import { readdirSync as readdirSync2, readFileSync as readFileSync4, statSync as statSync2 } from "fs";
-import { join as join11, relative, sep } from "path";
+import { readdirSync as readdirSync2, readFileSync as readFileSync5, statSync as statSync3 } from "fs";
+import { join as join12, relative, sep } from "path";
 function createRepoReader(repoPath) {
-  const resolveIn = (relativePath) => relativePath === "" ? repoPath : join11(repoPath, relativePath);
+  const resolveIn = (relativePath) => relativePath === "" ? repoPath : join12(repoPath, relativePath);
   const toPosix = (absolute) => relative(repoPath, absolute).split(sep).join("/");
   const readText = (relativePath) => {
     try {
-      return readFileSync4(resolveIn(relativePath), "utf8");
+      return readFileSync5(resolveIn(relativePath), "utf8");
     } catch {
       return null;
     }
   };
   const statOf = (relativePath) => {
     try {
-      return statSync2(resolveIn(relativePath));
+      return statSync3(resolveIn(relativePath));
     } catch {
       return null;
     }
@@ -5732,7 +5792,7 @@ function createRepoReader(repoPath) {
       for (const name of names.slice().sort()) {
         if (SKIP_DIRECTORIES.has(name))
           continue;
-        const child = join11(dir, name);
+        const child = join12(dir, name);
         const st = statOf(toPosix(child));
         if (st === null)
           continue;
@@ -6328,11 +6388,11 @@ var init_dist3 = __esm({
 });
 
 // ../../packages/envrun/dist/thrun.js
-import { execFileSync, spawnSync as spawnSync6 } from "child_process";
-import { existsSync as existsSync6, mkdirSync as mkdirSync4, mkdtempSync as mkdtempSync4, rmSync as rmSync4 } from "fs";
+import { execFileSync as execFileSync2, spawnSync as spawnSync6 } from "child_process";
+import { existsSync as existsSync7, mkdirSync as mkdirSync6, mkdtempSync as mkdtempSync4, rmSync as rmSync5 } from "fs";
 import { randomUUID } from "crypto";
 import { tmpdir as tmpdir4 } from "os";
-import { join as join12 } from "path";
+import { join as join13 } from "path";
 function git(repoDir, args, allowNonZero = false) {
   const res = spawnSync6("git", [...args], {
     cwd: repoDir,
@@ -6346,13 +6406,16 @@ function git(repoDir, args, allowNonZero = false) {
   }
   return res.stdout ?? "";
 }
-function collectWorkingDiff(repoDir) {
-  if (!existsSync6(join12(repoDir, ".git"))) {
+function collectWorkingDiff(repoDir, opts = {}) {
+  if (!existsSync7(join13(repoDir, ".git"))) {
     throw new ThRunError(`${repoDir} is not a git checkout (no .git). \`th run\` ships the working diff, so it needs a repository to read one from.`);
   }
   const headSha = git(repoDir, ["rev-parse", "HEAD"]).trim();
-  const tracked = git(repoDir, ["diff", "HEAD", "--binary"]);
-  const trackedChanged = git(repoDir, ["diff", "HEAD", "--name-only"]).split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
+  const diffBase = opts.base === void 0 ? headSha : assertDiffBase(repoDir, opts.base);
+  const trackedArgs = opts.base === void 0 ? ["diff", "HEAD"] : ["diff", diffBase];
+  const pathsEnd = opts.base === void 0 ? [] : ["--"];
+  const tracked = git(repoDir, [...trackedArgs, "--binary", ...pathsEnd]);
+  const trackedChanged = git(repoDir, [...trackedArgs, "--name-only", ...pathsEnd]).split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
   const untracked = git(repoDir, ["ls-files", "--others", "--exclude-standard"]).split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
   const parts = [];
   if (tracked.trim() !== "")
@@ -6362,7 +6425,17 @@ function collectWorkingDiff(repoDir) {
     if (one.trim() !== "")
       parts.push(one.replace(/\n*$/, "\n"));
   }
-  return { patch: parts.join(""), headSha, trackedChanged, untracked };
+  return { patch: parts.join(""), headSha, diffBase, trackedChanged, untracked };
+}
+function assertDiffBase(repoDir, base) {
+  if (!FULL_COMMIT_ID.test(base)) {
+    throw new ThRunError(`the diff base must be a full 40-character commit id, got ${JSON.stringify(base)}.`);
+  }
+  const resolved = git(repoDir, ["rev-parse", "--verify", "--quiet", `${base}^{commit}`], true);
+  if (resolved.trim() !== base) {
+    throw new ThRunError(`the diff base ${base} is not a commit in ${repoDir}.`);
+  }
+  return base;
 }
 function isLocalPath(p) {
   return !UNC_PATH.test(p) && (p.startsWith("/") || WINDOWS_ABSOLUTE.test(p));
@@ -6482,14 +6555,14 @@ function credentialFreeHome() {
     return credentialFreeHomeDir;
   let made;
   try {
-    made = mkdtempSync4(join12(tmpdir4(), "th-run-nohome-"));
+    made = mkdtempSync4(join13(tmpdir4(), "th-run-nohome-"));
   } catch (err) {
     throw new RunRefusalError("could not create the empty directory this clone uses as its home, so the clone would read the credentials on this machine instead. That is our environment failing, not your tests: check that the temp directory is writable.", { cause: err });
   }
   credentialFreeHomeDir = made;
   process.once("exit", () => {
     try {
-      rmSync4(made, { recursive: true, force: true });
+      rmSync5(made, { recursive: true, force: true });
     } catch {
     }
   });
@@ -6557,8 +6630,8 @@ function cloneTargetAtUnguarded(opts) {
   if (persisted !== null) {
     throw new RunRefusalError(`refusing to clone from a URL carrying ${persisted}: \`git remote add\` writes the source verbatim into .git/config, which is mounted where the repo\u2019s own test command runs. Fetch with the credential out of band so it is never written to disk \u2014 this runner takes one as an HTTP header, which is never persisted.`);
   }
-  mkdirSync4(opts.dest, { recursive: true });
-  const runOut = (args) => execFileSync("git", [...gitConfigArgs(), ...args], {
+  mkdirSync6(opts.dest, { recursive: true });
+  const runOut = (args) => execFileSync2("git", [...gitConfigArgs(), ...args], {
     cwd: opts.dest,
     encoding: "utf8",
     stdio: "pipe",
@@ -6596,7 +6669,7 @@ function cloneTargetAtUnguarded(opts) {
 }
 function scrubCloneSource(dest, run2) {
   run2(["remote", "remove", "origin"]);
-  rmSync4(join12(dest, ".git", "FETCH_HEAD"), { force: true });
+  rmSync5(join13(dest, ".git", "FETCH_HEAD"), { force: true });
 }
 function publishableTarget(url) {
   if (separatorInTarget(url) !== null)
@@ -6676,8 +6749,8 @@ function targetCarriesCredential(url) {
   }
 }
 function patchedTreeDigest(repoDir) {
-  execFileSync("git", ["-C", repoDir, "add", "-A", "-f"], { stdio: "pipe" });
-  const treeOid = execFileSync("git", ["-C", repoDir, "write-tree"], {
+  execFileSync2("git", ["-C", repoDir, "add", "-A", "-f"], { stdio: "pipe" });
+  const treeOid = execFileSync2("git", ["-C", repoDir, "write-tree"], {
     encoding: "utf8"
   }).trim();
   return sha256Hex(treeOid);
@@ -6934,8 +7007,9 @@ async function runVerification(req, ctx) {
   let diff = null;
   if (source.kind === "working-diff") {
     progress("collect", `reading the working diff from ${source.localRepoDir}`);
-    diff = collectWorkingDiff(source.localRepoDir);
-    progress("collect", `${String(diff.trackedChanged.length)} tracked, ${String(diff.untracked.length)} untracked, ${String(diff.patch.length)} bytes`);
+    diff = collectWorkingDiff(source.localRepoDir, source.diffBase === void 0 ? {} : { base: source.diffBase });
+    const from = source.diffBase === void 0 ? "" : `, from delivered baseline ${diff.diffBase.slice(0, 12)}`;
+    progress("collect", `${String(diff.trackedChanged.length)} tracked, ${String(diff.untracked.length)} untracked, ${String(diff.patch.length)} bytes${from}`);
   } else {
     progress("collect", "dispatched run: the tree is the stored commit itself");
   }
@@ -6967,10 +7041,10 @@ async function runVerification(req, ctx) {
       venueIdentity: null
     };
   }
-  const stage = join12(req.scratchRoot, runId);
-  const cloneDir = join12(stage, "clone");
-  const scratch = join12(stage, "scratch");
-  mkdirSync4(scratch, { recursive: true });
+  const stage = join13(req.scratchRoot, runId);
+  const cloneDir = join13(stage, "clone");
+  const scratch = join13(stage, "scratch");
+  mkdirSync6(scratch, { recursive: true });
   assertSafeTargetSha(req.targetSha);
   progress("clone", `${publishableTarget(req.targetRepo)} @ ${req.targetSha.slice(0, 12)}`);
   cloneTargetAt({
@@ -7035,7 +7109,7 @@ async function runVerification(req, ctx) {
     const venuePaths = await lease.stage({
       cloneDir,
       scratchRoot: scratch,
-      previewDir: join12(stage, "preview"),
+      previewDir: join13(stage, "preview"),
       // On a dispatched run the commit is the statement of what was tested, so
       // it rides with the tree and the venue seam refuses a tree that is not
       // that commit (design §6 item 4, TERM-892 — the guard lives in
@@ -7137,7 +7211,7 @@ async function runVerification(req, ctx) {
     await releaseWithoutThrowing(lease, progress);
   }
 }
-var ThRunError, OUTPUT_TAIL_BYTES, ALLOWED_URL_SCHEMES, SCP_STYLE, URL_SCHEME, WINDOWS_ABSOLUTE, UNC_PATH, TRANSPORT_REASON, SHA_REASON, FULL_SHA, MIN_GIT_VERSION_FOR_END_OF_OPTIONS, CloneUnavailableError, GIT_ENV_ALLOWLIST, credentialFreeHomeDir, SSH_ISOLATION_ARGS, WITHHELD_SEGMENT, UNPARSEABLE_TARGET, FAILURE_LINE, REDACTED_TARGET_REPO, REDACTED_TARGET_SHA;
+var ThRunError, OUTPUT_TAIL_BYTES, FULL_COMMIT_ID, ALLOWED_URL_SCHEMES, SCP_STYLE, URL_SCHEME, WINDOWS_ABSOLUTE, UNC_PATH, TRANSPORT_REASON, SHA_REASON, FULL_SHA, MIN_GIT_VERSION_FOR_END_OF_OPTIONS, CloneUnavailableError, GIT_ENV_ALLOWLIST, credentialFreeHomeDir, SSH_ISOLATION_ARGS, WITHHELD_SEGMENT, UNPARSEABLE_TARGET, FAILURE_LINE, REDACTED_TARGET_REPO, REDACTED_TARGET_SHA;
 var init_thrun = __esm({
   "../../packages/envrun/dist/thrun.js"() {
     "use strict";
@@ -7155,6 +7229,7 @@ var init_thrun = __esm({
     ThRunError = class extends Error {
     };
     OUTPUT_TAIL_BYTES = 4e3;
+    FULL_COMMIT_ID = /^[0-9a-f]{40}$/;
     ALLOWED_URL_SCHEMES = /* @__PURE__ */ new Set(["https", "http", "ssh", "git"]);
     SCP_STYLE = /^[A-Za-z0-9._~+-]+@[A-Za-z0-9._-]+:[^:]/;
     URL_SCHEME = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//;
@@ -7391,8 +7466,8 @@ var init_dbplan = __esm({
 
 // ../../packages/envrun/dist/dbstack.js
 import { spawnSync as spawnSync7 } from "child_process";
-import { randomBytes as randomBytes5 } from "crypto";
-import { mkdirSync as mkdirSync5 } from "fs";
+import { randomBytes as randomBytes6 } from "crypto";
+import { mkdirSync as mkdirSync7 } from "fs";
 function installCommandFor(runner) {
   switch (runner) {
     case "sql":
@@ -7427,7 +7502,7 @@ function docker2(args, timeoutMs = DOCKER_TIMEOUT_MS2) {
 function generateCredentials(host) {
   return {
     user: "thverify",
-    password: randomBytes5(24).toString("base64url"),
+    password: randomBytes6(24).toString("base64url"),
     database: "thverify",
     host,
     port: 5432
@@ -7734,8 +7809,8 @@ async function installLocalMigrationTooling(opts) {
     };
   }
   const { jail, tmp } = buildJail(opts.scratchRoot);
-  mkdirSync5(jail, { recursive: true });
-  mkdirSync5(tmp, { recursive: true });
+  mkdirSync7(jail, { recursive: true });
+  mkdirSync7(tmp, { recursive: true });
   const spec = {
     profile: "install",
     clone: opts.repoDir,
@@ -8013,6 +8088,7 @@ __export(dist_exports, {
   ALEMBIC_IMAGE: () => ALEMBIC_IMAGE,
   ATTEST_REFUSAL_REASONS: () => ATTEST_REFUSAL_REASONS,
   BOOKKEEPING_TABLES: () => BOOKKEEPING_TABLES,
+  CONFIDENTIAL_SPACE_MACHINE_TYPE: () => CONFIDENTIAL_SPACE_MACHINE_TYPE,
   CONTAINMENT_UNAVAILABLE_PREFIX: () => CONTAINMENT_UNAVAILABLE_PREFIX,
   CloneUnavailableError: () => CloneUnavailableError,
   DAEMON_FACTS_FORMAT: () => DAEMON_FACTS_FORMAT,
@@ -8154,6 +8230,7 @@ __export(dist_exports, {
   toolingImageFor: () => toolingImageFor,
   unquoteDiffPath: () => unquoteDiffPath,
   venueGcloudEnv: () => venueGcloudEnv,
+  venueImageFromEnv: () => venueImageFromEnv,
   venueStagePaths: () => venueStagePaths,
   verifyWorkingDiff: () => verifyWorkingDiff
 });
@@ -8180,10 +8257,11 @@ var init_dist4 = __esm({
 });
 
 // bin/jpi-run.js
-import { existsSync as existsSync7, readFileSync as readFileSync5 } from "fs";
-import { join as join13, resolve } from "path";
+import { existsSync as existsSync8, readFileSync as readFileSync6, realpathSync as realpathSync2 } from "fs";
+import { execFileSync as execFileSync3 } from "child_process";
+import { join as join14, resolve } from "path";
 import { tmpdir as tmpdir5 } from "os";
-import { mkdtempSync as mkdtempSync5, rmSync as rmSync5 } from "fs";
+import { mkdtempSync as mkdtempSync5, rmSync as rmSync6 } from "fs";
 
 // bin/recall-check.js
 import {
@@ -8478,6 +8556,107 @@ function readPackageVersion() {
   return "0.1.1";
 }
 
+// src/claims.ts
+import {
+  readFileSync as readFileSync3,
+  writeFileSync as writeFileSync2,
+  mkdirSync as mkdirSync3,
+  renameSync as renameSync2,
+  existsSync as existsSync3,
+  rmSync,
+  statSync as statSync2
+} from "fs";
+import { randomBytes } from "crypto";
+import { join as join4 } from "path";
+import { homedir as homedir3 } from "os";
+
+// src/state-dir.ts
+import { closeSync as closeSync2, constants, fchmodSync, fstatSync, mkdirSync as mkdirSync2, openSync as openSync2 } from "fs";
+
+// src/claims.ts
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
+var CLAIMS_FILE = join4(TERMINALHIRE_DIR, "claims.json");
+var LOCK_DIR = `${CLAIMS_FILE}.lock`;
+var LOCK_STALE_MS = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
+var LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
+var LOCK_TIMEOUT_MS = Number(process.env.TERMINALHIRE_LOCK_TIMEOUT_MS) || 5e3;
+var CLAIM_STATES = Object.freeze([
+  "claimed",
+  // recorded, not started
+  "working",
+  // background executor running / work in progress
+  "in-review",
+  // gate ran / dev reviewing the diff
+  "ready",
+  // passed review, cleared to submit
+  "submitted",
+  // PR opened on the source platform (awaiting maintainer)
+  "merged",
+  // PR merged — accepted; counts toward the metric
+  "abandoned"
+  // released, or PR closed unmerged
+]);
+var CLAIM_TURN_BY_STATE = Object.freeze({
+  claimed: "you",
+  working: "you",
+  "in-review": "you",
+  ready: "you",
+  submitted: "poster",
+  merged: "merged",
+  abandoned: "closed"
+});
+var CLAIM_TURN_LABEL = Object.freeze({
+  you: "waiting on you",
+  poster: "waiting on poster",
+  merged: "merged",
+  closed: "closed"
+});
+var CLAIM_TURN_LABEL_WIDTH = Math.max(
+  ...Object.values(CLAIM_TURN_LABEL).map((label) => label.length)
+);
+var WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
+var CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
+function defangText(s) {
+  return typeof s === "string" ? s.replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "") : s;
+}
+function finiteAmount(a) {
+  if (typeof a === "number") return Number.isFinite(a) ? a : null;
+  if (typeof a !== "string" || a.trim() === "") return null;
+  const n = Number(a);
+  return Number.isFinite(n) ? n : null;
+}
+function normalizeClaim(c) {
+  return {
+    ...c,
+    kind: c.kind ?? "bounty",
+    policy: c.policy ?? null,
+    title: defangText(c.title),
+    repoFullName: defangText(c.repoFullName),
+    amountUSD: finiteAmount(c.amountUSD)
+  };
+}
+function readClaims() {
+  try {
+    if (!existsSync3(CLAIMS_FILE)) return [];
+    const data = JSON.parse(readFileSync3(CLAIMS_FILE, "utf8"));
+    const claims = Array.isArray(data?.claims) ? data.claims : [];
+    return claims.map(normalizeClaim);
+  } catch {
+    return [];
+  }
+}
+
+// src/delivered-baseline.ts
+import { execFileSync } from "child_process";
+function deliveredBaseline(worktree) {
+  const roots = execFileSync("git", ["-C", worktree, "rev-list", "--max-parents=0", "HEAD"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  }).split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
+  const [only] = roots;
+  return roots.length === 1 && only !== void 0 ? { kind: "baseline", sha: only } : { kind: "ambiguous", rootCount: roots.length };
+}
+
 // bin/jpi-run.js
 var KEEP_MAX_SECONDS = Math.floor((2 ** 31 - 1) / 1e3);
 var USAGE = `terminalhire run \u2014 verify your working diff in a fresh container
@@ -8506,7 +8685,13 @@ Options:
 Defaults are read from .th-run.json in the local checkout when present, so a
 claim you run repeatedly needs no flags. Every flag overrides the file.
 
-Needs Docker running. Needs network for the first clone of the target.`;
+Run from inside a delivered claim workspace, the claim ledger supplies --claim and
+--sha. The diff is then taken from the delivered baseline, so committed work is tested
+as \`claim submit\` would send it. A full-repository delivery is its own --target: the
+delivered commit is cloned out of the workspace by path, so a private repository needs
+no credential. A delivery of only the files you were granted needs --target.
+
+Needs Docker running. Needs network for the first clone of a remote target.`;
 function parseArgs(argv) {
   const out = { flags: {}, bools: /* @__PURE__ */ new Set() };
   for (let i = 0; i < argv.length; i += 1) {
@@ -8529,7 +8714,7 @@ function parseArgs(argv) {
 function runScratchRoot() {
   let root;
   try {
-    root = mkdtempSync5(join13(tmpdir5(), "th-run-"));
+    root = mkdtempSync5(join14(tmpdir5(), "th-run-"));
   } catch (err) {
     process.stderr.write(
       `terminalhire: could not create the temporary directory this run works in, so nothing was cloned and nothing was executed. That is our environment failing, not your tests: check that the temp directory is writable. (${String(err?.message ?? err)})
@@ -8542,7 +8727,7 @@ function runScratchRoot() {
     if (cleaned) return;
     cleaned = true;
     try {
-      rmSync5(root, { recursive: true, force: true });
+      rmSync6(root, { recursive: true, force: true });
     } catch {
     }
   };
@@ -8566,10 +8751,10 @@ async function loadEngine() {
   }
 }
 function readConfig(localDir) {
-  const file = join13(localDir, ".th-run.json");
-  if (!existsSync7(file)) return {};
+  const file = join14(localDir, ".th-run.json");
+  if (!existsSync8(file)) return {};
   try {
-    const parsed = JSON.parse(readFileSync5(file, "utf8"));
+    const parsed = JSON.parse(readFileSync6(file, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch (err) {
     throw new Error(
@@ -8581,9 +8766,80 @@ function requireField(value, name, hint) {
   if (typeof value === "string" && value.trim() !== "") return value.trim();
   throw new Error(`terminalhire: run needs ${name}. ${hint}`);
 }
+var given = (value) => typeof value === "string" && value.trim() !== "";
+function realToplevel(dir) {
+  try {
+    const top = execFileSync3("git", ["-C", dir, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    }).trim();
+    return top === "" ? null : realpathSync2(top);
+  } catch {
+    return null;
+  }
+}
+function realpathOrNull(path) {
+  try {
+    return realpathSync2(path);
+  } catch {
+    return null;
+  }
+}
+function resolveClaimContext({ localDir, flags, claims }) {
+  const here = realToplevel(localDir);
+  if (here === null) return null;
+  const recordedHere = claims.filter(
+    (c) => c.approval != null && typeof c.worktreePath === "string" && realpathOrNull(c.worktreePath) === here
+  );
+  const matches = given(flags.claim) ? recordedHere.filter((c) => c.id === flags.claim.trim()) : recordedHere;
+  if (matches.length === 0) return null;
+  if (matches.length > 1) {
+    throw new Error(
+      `terminalhire: ${String(matches.length)} claims are recorded against this workspace (${matches.map((c) => c.id).join(", ")}), so run cannot tell which one this is. Name it with --claim <id>.`
+    );
+  }
+  const [claim] = matches;
+  let sha = given(flags.sha) ? flags.sha.trim() : null;
+  if (sha === null) {
+    if (typeof claim.baseSha !== "string" || !/^[0-9a-f]{40}$/.test(claim.baseSha)) {
+      throw new Error(
+        `terminalhire: claim ${claim.id} has no recorded base commit: it was delivered before terminalhire kept one. Pass --sha <40-hex>, the commit the workspace was delivered from.`
+      );
+    }
+    sha = claim.baseSha;
+  }
+  let baseline;
+  try {
+    baseline = deliveredBaseline(here);
+  } catch (err) {
+    throw new Error(
+      `terminalhire: could not read the delivered baseline in ${here} (${String(err?.stderr || err?.message || err).trim()}).`
+    );
+  }
+  if (baseline.kind !== "baseline") {
+    throw new Error(
+      `terminalhire: ${here} has ${String(baseline.rootCount)} root commits \u2014 cannot determine the delivered baseline to diff against. Re-fetch the slice into a fresh directory: terminalhire claim slice ${claim.id} --dir <path>`
+    );
+  }
+  const diffBase = baseline.sha;
+  const target = given(flags.target) ? flags.target.trim() : diffBase === sha ? here : null;
+  if (target === null) {
+    const sparse = typeof claim.baseSha === "string" && diffBase !== claim.baseSha;
+    throw new Error(
+      sparse ? "terminalhire: run needs --target. This delivery holds only the files you were granted, so a local run needs the clone URL of the full repository: --target <url>." : `terminalhire: run needs --target. --sha ${sha.slice(0, 12)} is not the commit this workspace was delivered as (${diffBase.slice(0, 12)}), so the workspace cannot stand in for the repository: pass --target <clone URL of the repository at that commit>.`
+    );
+  }
+  return { claimId: claim.id, target, sha, diffBase, workspaceRoot: here };
+}
 async function once(engine, opts) {
   const { root } = opts.scratch;
   const started = Date.now();
+  if (opts.deliveredCommit && !opts.json) {
+    process.stderr.write(
+      `  ${"tested".padEnd(8)} against the delivered commit ${opts.deliveredCommit.slice(0, 12)}; the poster-side run puts your change on top of the repository's current default branch, so its result can differ if that branch has moved since delivery.
+`
+    );
+  }
   const outcome = await engine.verifyWorkingDiff({
     claimId: opts.claimId,
     // `th run` is the developer's own loop, and this is the variant that says so: it tests
@@ -8591,7 +8847,10 @@ async function once(engine, opts) {
     source: {
       kind: "working-diff",
       localRepoDir: opts.localDir,
-      sliceFiles: opts.slice
+      sliceFiles: opts.slice,
+      // From a claim workspace, the delivered baseline: committed work is then tested,
+      // exactly as `claim submit` would send it (TERM-1098). Absent means HEAD.
+      ...opts.diffBase ? { diffBase: opts.diffBase } : {}
     },
     targetRepo: opts.target,
     targetSha: opts.sha,
@@ -8679,12 +8938,35 @@ async function run() {
       `terminalhire: --keep must be at most ${String(KEEP_MAX_SECONDS)} seconds, got ${JSON.stringify(String(keepRaw))}. Past that the timer overflows its int32 of milliseconds and the wait collapses to 1ms, so asking for a longer hold would give you no hold at all and the URL printed above it would be dead before anyone could open it. Refused rather than clamped, because a preview that died on the way to you looks exactly like one that worked.`
     );
   }
-  const opts = {
-    claimId: requireField(pick("claim"), "--claim", "It is the id the result is filed under."),
-    target: requireField(pick("target"), "--target", "e.g. https://github.com/koajs/koa.git"),
-    sha: requireField(pick("sha"), "--sha", "The full 40-character commit your diff applies to."),
-    slice,
+  const claimContext = resolveClaimContext({
     localDir,
+    flags: { claim: pick("claim"), target: pick("target"), sha: pick("sha") },
+    claims: readClaims()
+  });
+  const opts = {
+    claimId: requireField(
+      claimContext?.claimId ?? pick("claim"),
+      "--claim",
+      "It is the id the result is filed under."
+    ),
+    // With a claim context the target is always set: `resolveClaimContext` refuses, and
+    // says why, when it cannot name one.
+    target: requireField(
+      claimContext?.target ?? pick("target"),
+      "--target",
+      "e.g. https://github.com/koajs/koa.git"
+    ),
+    sha: requireField(
+      claimContext?.sha ?? pick("sha"),
+      "--sha",
+      "The full 40-character commit your diff applies to."
+    ),
+    diffBase: claimContext?.diffBase ?? null,
+    deliveredCommit: claimContext?.sha ?? null,
+    slice,
+    // From a claim workspace, its root and not the directory run started in: the diff
+    // collector reads `.git` there, and --watch watches the same tree (TERM-1098).
+    localDir: claimContext?.workspaceRoot ?? localDir,
     preview: !parsed.bools.has("no-preview"),
     watch: parsed.bools.has("watch"),
     json: parsed.bools.has("json"),
@@ -8746,5 +9028,6 @@ if (process.argv[1] && process.argv[1].endsWith("jpi-run.js")) {
 }
 export {
   once,
+  resolveClaimContext,
   run
 };
