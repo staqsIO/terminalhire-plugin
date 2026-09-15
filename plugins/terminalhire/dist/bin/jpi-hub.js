@@ -11732,7 +11732,7 @@ var init_config = __esm({
 // src/github-auth.ts
 import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes6 } from "crypto";
 import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, existsSync as existsSync6, rmSync as rmSync3, renameSync as renameSync3 } from "fs";
-import { join as join8 } from "path";
+import { join as join8, sep } from "path";
 import { homedir as homedir5 } from "os";
 async function loadKey() {
   return loadOrCreateSharedKey();

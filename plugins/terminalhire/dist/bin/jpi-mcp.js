@@ -482,6 +482,7 @@ __export(github_auth_exports, {
   decrypt: () => decrypt,
   deleteGitHubToken: () => deleteGitHubToken,
   encrypt: () => encrypt,
+  githubTokenDisplayPath: () => githubTokenDisplayPath,
   hasGitHubToken: () => hasGitHubToken,
   loadKey: () => loadKey,
   readGitHubToken: () => readGitHubToken,
@@ -492,8 +493,12 @@ __export(github_auth_exports, {
 });
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
 import { readFileSync as readFileSync5, writeFileSync as writeFileSync5, existsSync as existsSync4, rmSync as rmSync2, renameSync as renameSync3 } from "fs";
-import { join as join7 } from "path";
+import { join as join7, sep } from "path";
 import { homedir as homedir6 } from "os";
+function githubTokenDisplayPath() {
+  const home = homedir6();
+  return TOKEN_FILE.startsWith(home + sep) ? `~${TOKEN_FILE.slice(home.length)}` : TOKEN_FILE;
+}
 async function loadKey() {
   return loadOrCreateSharedKey();
 }
@@ -27069,12 +27074,33 @@ function scrubEndpointEnv(env) {
   }
   return out;
 }
-function remoteDockerClient(endpoint) {
+function containerFlagsAt(args) {
+  if (args[0] === "run" || args[0] === "create")
+    return 1;
+  if (args[0] === "container" && (args[1] === "run" || args[1] === "create"))
+    return 2;
+  return -1;
+}
+function remoteDockerClient(endpoint, opts = {}) {
   if (endpoint.trim().length === 0) {
     throw new Error("remoteDockerClient: endpoint must be a non-empty docker host");
   }
   const target = endpoint.trim();
-  const argv = (args) => ["--host", target, ...args];
+  const tlsFlags = [];
+  if (opts.tls) {
+    for (const key of ["caPath", "certPath", "keyPath"]) {
+      if (opts.tls[key].trim().length === 0) {
+        throw new Error(`remoteDockerClient: tls.${key} must name a file`);
+      }
+    }
+    tlsFlags.push("--tlsverify", "--tlscacert", opts.tls.caPath, "--tlscert", opts.tls.certPath, "--tlskey", opts.tls.keyPath);
+  }
+  const runArgs = opts.runArgs ?? [];
+  const argv = (args) => {
+    const at = runArgs.length > 0 ? containerFlagsAt(args) : -1;
+    const sub = at < 0 ? [...args] : [...args.slice(0, at), ...runArgs, ...args.slice(at)];
+    return ["--host", target, ...tlsFlags, ...sub];
+  };
   return {
     endpoint: target,
     // Always empty, and it is a fact about this client rather than about the
@@ -27091,10 +27117,10 @@ function remoteDockerClient(endpoint) {
         env: scrubEndpointEnv(process.env)
       });
     },
-    sync(args, opts) {
+    sync(args, opts2) {
       return syncResult(spawnSync3(DOCKER_BIN, argv(args), {
         encoding: "utf8",
-        timeout: opts?.timeoutMs,
+        timeout: opts2?.timeoutMs,
         env: scrubEndpointEnv(process.env)
       }));
     },
@@ -29077,13 +29103,192 @@ var init_gceIdentity = __esm({
 
 // ../../packages/attest/dist/confidentialSpace.js
 import { createHash as createHash7, createPublicKey as createPublicKey3, verify as cryptoVerify3 } from "crypto";
-var CONFIDENTIAL_SPACE_ISSUER, CONFIDENTIAL_SPACE_OIDC_DISCOVERY_URL;
+function refuse2(reason, detail) {
+  return { ok: false, reason, detail };
+}
+function isPlainObject(v) {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+function assertExpectationsComplete2(expectations) {
+  const required2 = [
+    ["audience", expectations.audience],
+    ["nonce", expectations.nonce],
+    ["instanceName", expectations.instanceName],
+    ["projectId", expectations.projectId],
+    ...(expectations.additionalNonces ?? []).map((n) => [
+      "additionalNonces[]",
+      n
+    ]),
+    ...Object.entries(expectations.containerEnv ?? {}).flatMap(([name, value]) => [
+      ["containerEnv name", name],
+      [`containerEnv.${name}`, value]
+    ])
+  ];
+  for (const [name, value] of required2) {
+    if (value === "") {
+      throw new TypeError(`verifyConfidentialSpaceToken: expectations.${name} is empty`);
+    }
+  }
+}
+function nonceList(v) {
+  if (typeof v === "string")
+    return [v];
+  if (!Array.isArray(v) || v.length === 0)
+    return null;
+  if (!v.every((n) => typeof n === "string"))
+    return null;
+  return v;
+}
+async function verifyConfidentialSpaceToken(token, expectations, deps) {
+  assertExpectationsComplete2(expectations);
+  if (!Number.isFinite(deps.now)) {
+    throw new TypeError("verifyConfidentialSpaceToken: deps.now is not a finite number");
+  }
+  if (expectations.allowedImageDigests.length === 0) {
+    return refuse2("image-digest-allowlist-unset", "no workload image digest is allowlisted, so no attestation can be accepted");
+  }
+  if (token.length > MAX_TOKEN_LENGTH) {
+    return refuse2("token-malformed", "longer than any attestation token");
+  }
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    return refuse2("token-malformed", "not a three-segment compact JWT");
+  }
+  const [headerB64, payloadB64, signatureB64] = parts;
+  const header = decodeJsonSegment(headerB64);
+  if (header === null) {
+    return refuse2("token-malformed", "header segment is not base64url-encoded JSON");
+  }
+  if (header.alg !== "RS256") {
+    return refuse2("algorithm-not-rs256", "token names an unsupported algorithm");
+  }
+  if (typeof header.kid !== "string" || header.kid === "") {
+    return refuse2("unknown-key", "token header names no key id");
+  }
+  const jwks = await deps.fetchJwks();
+  const jwk = jwks.keys.find((k) => k.kid === header.kid && k.kty === "RSA");
+  if (jwk === void 0) {
+    return refuse2("unknown-key", "token key id is not in the published key set");
+  }
+  const signature = strictBase64UrlDecode(signatureB64);
+  if (signature === null) {
+    return refuse2("token-malformed", "signature segment is not base64url");
+  }
+  let signatureValid = false;
+  try {
+    const publicKey = createPublicKey3({ key: jwk, format: "jwk" });
+    signatureValid = cryptoVerify3("sha256", Buffer.from(`${headerB64}.${payloadB64}`, "utf8"), publicKey, signature);
+  } catch {
+    signatureValid = false;
+  }
+  if (!signatureValid) {
+    return refuse2("signature-invalid", "signature does not verify under the named key");
+  }
+  const payload = decodeJsonSegment(payloadB64);
+  if (payload === null) {
+    return refuse2("token-malformed", "payload segment is not base64url-encoded JSON");
+  }
+  if (payload.iss !== CONFIDENTIAL_SPACE_ISSUER) {
+    return refuse2("wrong-issuer", "issuer is not the Confidential Computing attestation service");
+  }
+  if (payload.aud !== expectations.audience) {
+    return refuse2("wrong-audience", "audience is not the one this run expects");
+  }
+  const nowSeconds = deps.now / 1e3;
+  const exp = payload.exp;
+  if (typeof exp !== "number" || !Number.isFinite(exp) || exp <= nowSeconds) {
+    return refuse2("expired", "exp is missing, malformed, or in the past");
+  }
+  const iat = payload.iat;
+  if (typeof iat !== "number" || !Number.isFinite(iat) || iat > nowSeconds + IAT_FUTURE_SKEW_MS / 1e3) {
+    return refuse2("iat-in-future", "iat is missing, malformed, or too far in the future");
+  }
+  const nonces = nonceList(payload.eat_nonce);
+  if (nonces === null) {
+    return refuse2("nonce-missing", "eat_nonce is absent or not a string or array of strings");
+  }
+  if (!nonces.includes(expectations.nonce)) {
+    return refuse2("nonce-mismatch", "eat_nonce does not carry the nonce this run was dispatched with");
+  }
+  for (const extra of expectations.additionalNonces ?? []) {
+    if (!nonces.includes(extra)) {
+      return refuse2("nonce-mismatch", "eat_nonce does not carry every nonce this caller requires");
+    }
+  }
+  if (payload.swname !== CONFIDENTIAL_SPACE_SWNAME) {
+    return refuse2("swname-not-confidential-space", "the VM is not running a Confidential Space image");
+  }
+  if (payload.dbgstat !== CONFIDENTIAL_SPACE_DBGSTAT_PRODUCTION) {
+    return refuse2("debug-enabled", "the image is not a production image with debug disabled");
+  }
+  if (payload.secboot !== true) {
+    return refuse2("secure-boot-off", "Secure Boot is not reported as enabled");
+  }
+  if (typeof payload.hwmodel !== "string" || !payload.hwmodel.startsWith("GCP_")) {
+    return refuse2("hwmodel-not-gcp", "hardware model is not a Google Cloud confidential model");
+  }
+  const hwmodel = payload.hwmodel;
+  const submods = payload.submods;
+  const gce = isPlainObject(submods) ? submods.gce : void 0;
+  if (!isPlainObject(gce)) {
+    return refuse2("submods-gce-missing", "no submods.gce block names the instance");
+  }
+  if (gce.project_id !== expectations.projectId) {
+    return refuse2("project-mismatch", "token names an instance in a different project");
+  }
+  if (gce.instance_name !== expectations.instanceName) {
+    return refuse2("instance-name-mismatch", "token names a different instance than this run booted");
+  }
+  if (typeof gce.instance_id !== "string" || gce.instance_id === "") {
+    return refuse2("instance-id-missing", "instance id is absent or not a string");
+  }
+  const instanceId = gce.instance_id;
+  if (typeof gce.zone !== "string" || !expectations.allowedZones.includes(gce.zone)) {
+    return refuse2("zone-not-allowed", "zone is not one the pool is configured to use");
+  }
+  const zone = gce.zone;
+  const container = isPlainObject(submods) ? submods.container : void 0;
+  if (!isPlainObject(container)) {
+    return refuse2("submods-container-missing", "no submods.container block names the workload");
+  }
+  if (typeof container.image_reference !== "string" || container.image_reference === "") {
+    return refuse2("image-reference-missing", "the workload image reference is absent");
+  }
+  const imageReference = container.image_reference;
+  if (typeof container.image_digest !== "string" || !expectations.allowedImageDigests.includes(container.image_digest)) {
+    return refuse2("image-digest-not-allowed", "the workload image digest is not on the allowlist");
+  }
+  const env = container.env;
+  for (const [name, value] of Object.entries(expectations.containerEnv ?? {})) {
+    if (!isPlainObject(env) || !Object.prototype.hasOwnProperty.call(env, name) || env[name] !== value) {
+      return refuse2("container-env-mismatch", `the signed container environment does not carry the ${name} this caller booted with`);
+    }
+  }
+  return {
+    ok: true,
+    value: {
+      instanceId,
+      instanceName: expectations.instanceName,
+      zone,
+      projectId: expectations.projectId,
+      imageDigest: container.image_digest,
+      imageReference,
+      hwmodel,
+      iat,
+      exp,
+      tokenSha256: createHash7("sha256").update(token, "utf8").digest("hex")
+    }
+  };
+}
+var CONFIDENTIAL_SPACE_ISSUER, CONFIDENTIAL_SPACE_OIDC_DISCOVERY_URL, CONFIDENTIAL_SPACE_SWNAME, CONFIDENTIAL_SPACE_DBGSTAT_PRODUCTION;
 var init_confidentialSpace = __esm({
   "../../packages/attest/dist/confidentialSpace.js"() {
     "use strict";
     init_gceIdentity();
     CONFIDENTIAL_SPACE_ISSUER = "https://confidentialcomputing.googleapis.com";
     CONFIDENTIAL_SPACE_OIDC_DISCOVERY_URL = `${CONFIDENTIAL_SPACE_ISSUER}/.well-known/openid-configuration`;
+    CONFIDENTIAL_SPACE_SWNAME = "CONFIDENTIAL_SPACE";
+    CONFIDENTIAL_SPACE_DBGSTAT_PRODUCTION = "disabled-since-boot";
   }
 });
 
@@ -29426,50 +29631,50 @@ function toTestRunResult(result, outputSha256) {
 function toAcceptancePredicate(pair, opts = {}) {
   const { baseline, patched } = pair;
   if (baseline.runId === patched.runId) {
-    return refuse2("pair-is-the-same-run", `both sides are run ${patched.runId}. A baseline and a patched result that are the same execution prove nothing about the patch, and every field of the pair would be equal by construction.`);
+    return refuse3("pair-is-the-same-run", `both sides are run ${patched.runId}. A baseline and a patched result that are the same execution prove nothing about the patch, and every field of the pair would be equal by construction.`);
   }
   if (patched.status === "refused") {
-    return refuse2("run-was-refused", `the patched run was refused before executing (${patched.boundaryRefusals.length} boundary refusal(s)), so there is no result to attest`);
+    return refuse3("run-was-refused", `the patched run was refused before executing (${patched.boundaryRefusals.length} boundary refusal(s)), so there is no result to attest`);
   }
   if (patched.outcome === null) {
-    return refuse2("no-outcome-recorded", "the patched run recorded no outcome");
+    return refuse3("no-outcome-recorded", "the patched run recorded no outcome");
   }
   if (baseline.status === "refused") {
-    return refuse2("baseline-was-refused", `the baseline run was refused before executing (${baseline.boundaryRefusals.length} boundary refusal(s)), so there is no "before" to compare against`);
+    return refuse3("baseline-was-refused", `the baseline run was refused before executing (${baseline.boundaryRefusals.length} boundary refusal(s)), so there is no "before" to compare against`);
   }
   if (baseline.outcome === null) {
-    return refuse2("baseline-no-outcome", "the baseline run recorded no outcome");
+    return refuse3("baseline-no-outcome", "the baseline run recorded no outcome");
   }
   if (!BASELINE_IS_A_VERDICT[baseline.outcome]) {
-    return refuse2("baseline-environment-failed", `the baseline ended ${baseline.outcome}, which is not an observed verdict about the unpatched tree. Signing it would let a baseline we could not read stand in for one that failed, and a broken baseline flatters every patch.`);
+    return refuse3("baseline-environment-failed", `the baseline ended ${baseline.outcome}, which is not an observed verdict about the unpatched tree. Signing it would let a baseline we could not read stand in for one that failed, and a broken baseline flatters every patch.`);
   }
   const budget = OUTCOME_TO_BUDGET[patched.outcome];
   if (budget === null) {
-    return refuse2("our-environment-failed", `the patched run ended ${patched.outcome}: the test command could not be invoked, which is our environment failing and not a verdict about the work. No statement is emitted, because every possible value would be a claim we cannot support.`);
+    return refuse3("our-environment-failed", `the patched run ended ${patched.outcome}: the test command could not be invoked, which is our environment failing and not a verdict about the work. No statement is emitted, because every possible value would be a claim we cannot support.`);
   }
   if (patched.testCommand === null) {
-    return refuse2("no-test-command", "no test command was recorded, so none can be attested");
+    return refuse3("no-test-command", "no test command was recorded, so none can be attested");
   }
   if (baseline.testCommand !== patched.testCommand) {
-    return refuse2("pair-disagrees-on-harness", `baseline ran ${JSON.stringify(baseline.testCommand)} and patched ran ${JSON.stringify(patched.testCommand)}. Opposite verdicts from different harnesses say nothing about the patch.`);
+    return refuse3("pair-disagrees-on-harness", `baseline ran ${JSON.stringify(baseline.testCommand)} and patched ran ${JSON.stringify(patched.testCommand)}. Opposite verdicts from different harnesses say nothing about the patch.`);
   }
   if (baseline.targetSha !== patched.targetSha) {
-    return refuse2("pair-disagrees-on-base", `baseline is at ${baseline.targetSha} and patched at ${patched.targetSha}`);
+    return refuse3("pair-disagrees-on-base", `baseline is at ${baseline.targetSha} and patched at ${patched.targetSha}`);
   }
   if (patched.treeDigest === null || patched.treeDigest === "") {
-    return refuse2("missing-tree-digest", "the patched run recorded no tree digest to bind to");
+    return refuse3("missing-tree-digest", "the patched run recorded no tree digest to bind to");
   }
   if (patched.patchSha256 === null || patched.patchSha256 === "") {
-    return refuse2("missing-patch-digest", "the patched run recorded no patch digest");
+    return refuse3("missing-patch-digest", "the patched run recorded no patch digest");
   }
   if (baseline.treeDigest === null || baseline.treeDigest === "") {
-    return refuse2("missing-tree-digest", "the baseline recorded no tree digest, so the two halves cannot be shown to differ");
+    return refuse3("missing-tree-digest", "the baseline recorded no tree digest, so the two halves cannot be shown to differ");
   }
   if (baseline.treeDigest === patched.treeDigest) {
-    return refuse2("pair-has-identical-tree", `both sides are tree ${String(patched.treeDigest).slice(0, 12)}\u2026, so whatever the two runs disagree about, it is not the patch`);
+    return refuse3("pair-has-identical-tree", `both sides are tree ${String(patched.treeDigest).slice(0, 12)}\u2026, so whatever the two runs disagree about, it is not the patch`);
   }
   if (patched.baselinePatchSha256 !== null || baseline.baselinePatchSha256 !== null) {
-    return refuse2("patch-binding-incomplete", `a baseline patch shaped the ${patched.baselinePatchSha256 !== null ? "patched" : "baseline"} tree, so it cannot be reproduced from (base_commit_oid, patch_sha256) alone. Fold it into the binding before signing; do not sign a triple a verifier cannot follow.`);
+    return refuse3("patch-binding-incomplete", `a baseline patch shaped the ${patched.baselinePatchSha256 !== null ? "patched" : "baseline"} tree, so it cannot be reproduced from (base_commit_oid, patch_sha256) alone. Fold it into the binding before signing; do not sign a triple a verifier cannot follow.`);
   }
   for (const [side, outcome, counts, exitCode] of [
     ["patched", patched.outcome, patched.counts, patched.exitCode],
@@ -29477,7 +29682,7 @@ function toAcceptancePredicate(pair, opts = {}) {
   ]) {
     const why = contradicts(outcome, counts, exitCode);
     if (why !== null) {
-      return refuse2("outcome-contradicts-counts", `the ${side} run is ${why}`);
+      return refuse3("outcome-contradicts-counts", `the ${side} run is ${why}`);
     }
   }
   for (const [side, source] of [
@@ -29486,44 +29691,44 @@ function toAcceptancePredicate(pair, opts = {}) {
   ]) {
     const why = SOURCE_IS_SIGNABLE[source](patched.testCommand);
     if (why !== null)
-      return refuse2("test-command-origin-unattested", `the ${side} run ${why}`);
+      return refuse3("test-command-origin-unattested", `the ${side} run ${why}`);
   }
   if (patched.testCommandSource === "developer-declared") {
-    return refuse2("test-command-origin-unattested", "the developer supplied the test command (unreachable \u2014 the source rules above cover it)");
+    return refuse3("test-command-origin-unattested", "the developer supplied the test command (unreachable \u2014 the source rules above cover it)");
   }
   if (baseline.testCommandSource !== patched.testCommandSource) {
-    return refuse2("test-command-origin-unattested", `the pair disagrees on where the command came from: baseline ${baseline.testCommandSource}, patched ${patched.testCommandSource}. One signed value cannot describe both.`);
+    return refuse3("test-command-origin-unattested", `the pair disagrees on where the command came from: baseline ${baseline.testCommandSource}, patched ${patched.testCommandSource}. One signed value cannot describe both.`);
   }
   if (baseline.containerImage !== patched.containerImage) {
-    return refuse2("pair-disagrees-on-image", `baseline ran in ${String(baseline.containerImage)} and patched in ${String(patched.containerImage)}. The signed measurement names one image, so a pair from two environments would attribute to the patch whatever the image changed.`);
+    return refuse3("pair-disagrees-on-image", `baseline ran in ${String(baseline.containerImage)} and patched in ${String(patched.containerImage)}. The signed measurement names one image, so a pair from two environments would attribute to the patch whatever the image changed.`);
   }
   if (patched.containerImage === null || patched.containerImage === "") {
-    return refuse2("missing-container-image", "no container image was recorded, so the measurement would name a stand-in rather than the environment the suite actually ran in");
+    return refuse3("missing-container-image", "no container image was recorded, so the measurement would name a stand-in rather than the environment the suite actually ran in");
   }
   if (patched.containerImageDigest == null || patched.containerImageDigest === "") {
-    return refuse2("missing-image-digest", "no image digest was recorded for the patched half, so the measurement would name the mutable tag rather than the bytes the suite actually ran in. A run without the digest is recordable but not attestable \u2014 the `missing-patch-digest` split.");
+    return refuse3("missing-image-digest", "no image digest was recorded for the patched half, so the measurement would name the mutable tag rather than the bytes the suite actually ran in. A run without the digest is recordable but not attestable \u2014 the `missing-patch-digest` split.");
   }
   if (typeof patched.containerImageDigest !== "string" || !isCanonicalRepoDigest(patched.containerImageDigest)) {
-    return refuse2("malformed-image-digest", `the patched half carries ${JSON.stringify(patched.containerImageDigest).slice(0, 120)} where a RepoDigest (\`repo@sha256:<64 hex>\`) belongs. A tag or a stand-in string here would be signed as if it were content-addressed, which is the lie the digest axis exists to refuse.`);
+    return refuse3("malformed-image-digest", `the patched half carries ${JSON.stringify(patched.containerImageDigest).slice(0, 120)} where a RepoDigest (\`repo@sha256:<64 hex>\`) belongs. A tag or a stand-in string here would be signed as if it were content-addressed, which is the lie the digest axis exists to refuse.`);
   }
   if (imageRepo(patched.containerImageDigest) !== imageRepo(patched.containerImage)) {
-    return refuse2("image-digest-repo-mismatch", `the patched half's digest names repository ${imageRepo(patched.containerImageDigest)} but the pair ran ${patched.containerImage}. An image can carry digests for several repositories; signing one the pair did not name would attribute these bytes to a different name.`);
+    return refuse3("image-digest-repo-mismatch", `the patched half's digest names repository ${imageRepo(patched.containerImageDigest)} but the pair ran ${patched.containerImage}. An image can carry digests for several repositories; signing one the pair did not name would attribute these bytes to a different name.`);
   }
   if (baseline.containerImageDigest == null || baseline.containerImageDigest === "") {
-    return refuse2("missing-image-digest", "no image digest was recorded for the baseline half, so the measurement would name the mutable tag rather than the bytes the suite actually ran in. A run without the digest is recordable but not attestable \u2014 the `missing-patch-digest` split.");
+    return refuse3("missing-image-digest", "no image digest was recorded for the baseline half, so the measurement would name the mutable tag rather than the bytes the suite actually ran in. A run without the digest is recordable but not attestable \u2014 the `missing-patch-digest` split.");
   }
   if (typeof baseline.containerImageDigest !== "string" || !isCanonicalRepoDigest(baseline.containerImageDigest)) {
-    return refuse2("malformed-image-digest", `the baseline half carries ${JSON.stringify(baseline.containerImageDigest).slice(0, 120)} where a RepoDigest (\`repo@sha256:<64 hex>\`) belongs. A tag or a stand-in string here would be signed as if it were content-addressed, which is the lie the digest axis exists to refuse.`);
+    return refuse3("malformed-image-digest", `the baseline half carries ${JSON.stringify(baseline.containerImageDigest).slice(0, 120)} where a RepoDigest (\`repo@sha256:<64 hex>\`) belongs. A tag or a stand-in string here would be signed as if it were content-addressed, which is the lie the digest axis exists to refuse.`);
   }
   if (imageRepo(baseline.containerImageDigest) !== imageRepo(patched.containerImage)) {
-    return refuse2("image-digest-repo-mismatch", `the baseline half's digest names repository ${imageRepo(baseline.containerImageDigest)} but the pair ran ${patched.containerImage}. An image can carry digests for several repositories; signing one the pair did not name would attribute these bytes to a different name.`);
+    return refuse3("image-digest-repo-mismatch", `the baseline half's digest names repository ${imageRepo(baseline.containerImageDigest)} but the pair ran ${patched.containerImage}. An image can carry digests for several repositories; signing one the pair did not name would attribute these bytes to a different name.`);
   }
   if (baseline.containerImageDigest !== patched.containerImageDigest) {
-    return refuse2("pair-disagrees-on-image-digest", `baseline ran image digest ${String(baseline.containerImageDigest)} and patched ${String(patched.containerImageDigest)} under one tag. The tag agreeing is the trap: a re-pointed tag is two environments wearing one name.`);
+    return refuse3("pair-disagrees-on-image-digest", `baseline ran image digest ${String(baseline.containerImageDigest)} and patched ${String(patched.containerImageDigest)} under one tag. The tag agreeing is the trap: a re-pointed tag is two environments wearing one name.`);
   }
   const claimedDigest = imageDigestOf(patched.containerImage);
   if (claimedDigest !== null && claimedDigest !== imageDigestOf(patched.containerImageDigest)) {
-    return refuse2("image-digest-contradicts-image", `the pair ran ${patched.containerImage}, whose reference pins digest ${claimedDigest}, but the digest field says ${String(imageDigestOf(patched.containerImageDigest))}. A measurement must not sign one digest while the record names another.`);
+    return refuse3("image-digest-contradicts-image", `the pair ran ${patched.containerImage}, whose reference pins digest ${claimedDigest}, but the digest field says ${String(imageDigestOf(patched.containerImageDigest))}. A measurement must not sign one digest while the record names another.`);
   }
   return {
     ok: true,
@@ -29550,7 +29755,7 @@ function signRunStatement(predicate, privateKey, keyid) {
   const statement = createAcceptanceStatement(predicate);
   return { statement, envelope: signStatement(statement, privateKey, keyid) };
 }
-var OUTCOME_TO_BUDGET, BASELINE_IS_A_VERDICT, CONTRADICTS_COUNTS, SOURCE_IS_SIGNABLE, ATTEST_REFUSAL_REASONS, refuse2, LOCAL_MEASUREMENT_PREFIX, REFERENCE_DOMAIN_COMPONENT, REFERENCE_DOMAIN_NAME, REFERENCE_IPV6, REFERENCE_DOMAIN, REFERENCE_PATH_COMPONENT, REPO_DIGEST_RE;
+var OUTCOME_TO_BUDGET, BASELINE_IS_A_VERDICT, CONTRADICTS_COUNTS, SOURCE_IS_SIGNABLE, ATTEST_REFUSAL_REASONS, refuse3, LOCAL_MEASUREMENT_PREFIX, REFERENCE_DOMAIN_COMPONENT, REFERENCE_DOMAIN_NAME, REFERENCE_IPV6, REFERENCE_DOMAIN, REFERENCE_PATH_COMPONENT, REPO_DIGEST_RE;
 var init_attestation2 = __esm({
   "../../packages/envrun/dist/attestation.js"() {
     "use strict";
@@ -29654,7 +29859,7 @@ var init_attestation2 = __esm({
       "outcome-contradicts-counts",
       "test-command-origin-unattested"
     ];
-    refuse2 = (reason, detail) => ({
+    refuse3 = (reason, detail) => ({
       ok: false,
       reason,
       detail
@@ -30065,6 +30270,22 @@ function bootImageFlags(p) {
   }
   const workloadImage = p.workloadImage;
   assertWorkloadImage("gcpBootArgv", workloadImage);
+  const clientCert = p.clientCert;
+  if (typeof clientCert !== "string" || !CLIENT_CERT_BASE64URL.test(clientCert)) {
+    throw new GcpPlacementError(`gcpBootArgv: the client certificate is missing or is not one base64url value (${String(CLIENT_CERT_BASE64URL)}). It lands inside the --metadata value, so anything that could start a second key is refused.`);
+  }
+  if (p.runId.length < MIN_NONCE_BYTES) {
+    throw new GcpPlacementError(`gcpBootArgv: a Confidential Space run id must be at least ${String(MIN_NONCE_BYTES)} characters, because it is the attestation token's nonce and the launcher refuses a shorter one. Refused here, before a VM is billed for a token it cannot mint.`);
+  }
+  const metadata = [
+    `tee-image-reference=${workloadImage}`,
+    "tee-container-log-redirect=true",
+    'tee-added-capabilities=["CAP_SYS_ADMIN","CAP_NET_ADMIN"]',
+    "tee-cgroup-ns=true",
+    `tee-env-TH_AUDIENCE=${expectedAudience(p.runId)}`,
+    `tee-env-TH_NONCE=${p.runId}`,
+    `tee-env-TH_CLIENT_CERT=${clientCert}`
+  ];
   return [
     // The production family. The debug family reports `dbgstat: enabled`, which the
     // intake's verifier refuses, so a debug boot could never produce a run we record.
@@ -30077,7 +30298,15 @@ function bootImageFlags(p) {
     // most GCP_MAX_RUN_DURATION_SECONDS costs one run. Whether GCE boots this exact
     // combination is phase 5's measurement.
     "--maintenance-policy=TERMINATE",
-    `--metadata=tee-image-reference=${workloadImage},tee-container-log-redirect=true`
+    `--metadata=^;^${metadata.join(";")}`,
+    // What the standing firewall rule for IAP's range matches, so the tunnels to the
+    // workload's dockerd and attest ports open on these VMs and no others.
+    "--tags=th-cs-venue",
+    // The family's 11 GB default leaves the workload a 7.7 GB root, and dockerd there
+    // runs vfs, which copies every layer and every container's rootfs in full. Pulling
+    // node:20-bookworm left 992 MB, and the next container create failed ENOSPC
+    // (measured, TERM-1094). COS runs overlay2 on its own disk and keeps the default.
+    "--boot-disk-size=50GB"
   ];
 }
 function assertInstanceIdentity(fn, id) {
@@ -30151,7 +30380,13 @@ function gcpBootArgv(p) {
     // expectation uses (TERM-832): two inline spellings of one value is how
     // the boot path and the verifier drift apart silently.
     `--service-account=${venueIdentityEmail(p.project)}`,
-    "--no-scopes",
+    // A Confidential Space VM takes `cloud-platform` instead (TERM-1094): the launcher
+    // pulls the workload image and mints the attestation token with this account, and
+    // under `--no-scopes` it can do neither. What bounds a lifted token there is the
+    // account's two grants — `confidentialcomputing.workloadUser` and a reader on the
+    // one venue image repository — plus point 2 above, which is unchanged: the fence
+    // still denies untrusted code the metadata server.
+    ...p.venueImage === "confidential-space" ? ["--scopes=cloud-platform"] : ["--no-scopes"],
     "--shielded-secure-boot",
     "--shielded-vtpm",
     "--shielded-integrity-monitoring",
@@ -30184,7 +30419,7 @@ function gcpDeleteArgv(p) {
     "--quiet"
   ];
 }
-var DEFAULT_GCP_PROJECT, DEFAULT_GCP_ZONE, DEFAULT_GCP_MACHINE_TYPE, GcpPlacementError, GCP_MAX_RUN_DURATION_SECONDS, GCP_MANAGED_LABEL_KEY, GCP_RUN_LABEL_KEY, CONFIDENTIAL_SPACE_MACHINE_TYPE, WORKLOAD_IMAGE_REFERENCE, GCP_LABEL_VALUE, GCE_INSTANCE_NAME, GCP_RESOURCE_ID;
+var DEFAULT_GCP_PROJECT, DEFAULT_GCP_ZONE, DEFAULT_GCP_MACHINE_TYPE, GcpPlacementError, GCP_MAX_RUN_DURATION_SECONDS, GCP_MANAGED_LABEL_KEY, GCP_RUN_LABEL_KEY, CONFIDENTIAL_SPACE_MACHINE_TYPE, WORKLOAD_IMAGE_REFERENCE, CLIENT_CERT_BASE64URL, MIN_NONCE_BYTES, GCP_LABEL_VALUE, GCE_INSTANCE_NAME, GCP_RESOURCE_ID;
 var init_gcpPlacement = __esm({
   "../../packages/envrun/dist/gcpPlacement.js"() {
     "use strict";
@@ -30203,6 +30438,8 @@ var init_gcpPlacement = __esm({
     GCP_RUN_LABEL_KEY = "th-run";
     CONFIDENTIAL_SPACE_MACHINE_TYPE = "n2d-standard-2";
     WORKLOAD_IMAGE_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,511}$/;
+    CLIENT_CERT_BASE64URL = /^[A-Za-z0-9_-]{16,8192}$/;
+    MIN_NONCE_BYTES = 10;
     GCP_LABEL_VALUE = /^[a-z0-9_-]{1,63}$/;
     GCE_INSTANCE_NAME = /^[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?$/;
     GCP_RESOURCE_ID = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -30244,7 +30481,10 @@ var init_emptyGitConfig = __esm({
 
 // ../../packages/envrun/dist/hostedVenue.js
 import { spawn as spawn5, spawnSync as spawnSync5 } from "child_process";
-import { chmodSync as chmodSync3, existsSync as existsSync11, mkdtempSync as mkdtempSync3, readFileSync as readFileSync13, rmSync as rmSync8 } from "fs";
+import { createHash as createHash9, X509Certificate } from "crypto";
+import { chmodSync as chmodSync3, existsSync as existsSync11, mkdtempSync as mkdtempSync3, readFileSync as readFileSync13, rmSync as rmSync8, writeFileSync as writeFileSync15 } from "fs";
+import { request as httpsRequest } from "https";
+import { createServer } from "net";
 import { join as join26 } from "path";
 import { tmpdir as tmpdir3 } from "os";
 function credentialInGitConfig(text) {
@@ -30444,6 +30684,89 @@ timed out after ${String(timeoutMs)}ms` : stderr,
         source.kill("SIGTERM");
       finish();
     });
+  });
+}
+function socketErrorReason(err) {
+  if (err.message !== "")
+    return err.message;
+  const code = err.code;
+  if (code !== void 0)
+    return code;
+  const inner = err.errors;
+  if (Array.isArray(inner) && inner[0] instanceof Error && inner[0].message !== "") {
+    return inner[0].message;
+  }
+  return err.name;
+}
+function fetchAttestationOverTls(req) {
+  return new Promise((resolve4) => {
+    let whole;
+    const settle = (reading) => {
+      if (whole !== void 0)
+        clearTimeout(whole);
+      resolve4(reading);
+    };
+    let cert;
+    let key;
+    try {
+      cert = readFileSync13(req.certPath);
+      key = readFileSync13(req.keyPath);
+    } catch (err) {
+      settle({ ok: false, reason: `the client key could not be read: ${describeErr(err)}` });
+      return;
+    }
+    const call = httpsRequest({
+      host: "localhost",
+      port: req.port,
+      path: "/attest",
+      method: "GET",
+      servername: "localhost",
+      cert,
+      key,
+      rejectUnauthorized: false,
+      agent: false,
+      timeout: req.timeoutMs
+    }, (res) => {
+      const peer = res.socket.getPeerCertificate();
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        body += chunk;
+        if (body.length > MAX_TOKEN_LENGTH) {
+          settle({ ok: false, reason: "the answer is longer than any attestation token" });
+          res.destroy();
+        }
+      });
+      res.on("end", () => {
+        if (res.statusCode !== 200) {
+          settle({
+            ok: false,
+            reason: `the attest endpoint answered HTTP ${String(res.statusCode)}`
+          });
+          return;
+        }
+        const raw = peer.raw;
+        if (raw === void 0 || raw.length === 0) {
+          settle({ ok: false, reason: "the attest endpoint presented no certificate" });
+          return;
+        }
+        settle({ ok: true, token: body.trim(), peerCertDer: new Uint8Array(raw) });
+      });
+      res.on("error", (err) => {
+        settle({ ok: false, reason: socketErrorReason(err) });
+      });
+    });
+    whole = setTimeout(() => {
+      settle({ ok: false, reason: `no complete answer within ${String(req.timeoutMs)}ms` });
+      call.destroy();
+    }, req.timeoutMs);
+    call.on("timeout", () => {
+      call.destroy(new Error(`no answer within ${String(req.timeoutMs)}ms`));
+    });
+    call.on("error", (err) => {
+      settle({ ok: false, reason: socketErrorReason(err) });
+    });
+    call.end();
   });
 }
 function quoteForRemoteShell(arg) {
@@ -30780,27 +31103,370 @@ ${res.stderr}`);
 function manualDeleteCommand(vm, project, zone) {
   return `gcloud compute instances delete ${vm} --project=${project} --zone=${zone} --quiet`;
 }
+function clientCertArgv(keyPath, certPath) {
+  return [
+    "req",
+    "-x509",
+    "-newkey",
+    "ec",
+    "-pkeyopt",
+    "ec_paramgen_curve:P-256",
+    "-nodes",
+    "-keyout",
+    keyPath,
+    "-out",
+    certPath,
+    "-subj",
+    "/CN=terminalhire-worker",
+    "-days",
+    "1",
+    "-addext",
+    "extendedKeyUsage=clientAuth"
+  ];
+}
+function iapPortTunnelArgv(vm, project, zone, remotePort, localPort) {
+  return [
+    "compute",
+    "start-iap-tunnel",
+    vm,
+    String(remotePort),
+    `--local-host-port=localhost:${String(localPort)}`,
+    `--project=${project}`,
+    `--zone=${zone}`,
+    "--iap-tunnel-disable-connection-check"
+  ];
+}
+function spkiSha256Hex(certDer) {
+  const spki = new X509Certificate(certDer).publicKey.export({ type: "spki", format: "der" });
+  return createHash9("sha256").update(spki).digest("hex");
+}
+function certMetadataValue(pem) {
+  return new X509Certificate(pem).raw.toString("base64url");
+}
+function requireWorkloadDigest(reference) {
+  const named = /@(sha256:[0-9a-f]{64})$/.exec(reference);
+  if (named === null) {
+    throw new GcpPlacementError("VENUE_WORKLOAD_IMAGE must name its image by digest (\u2026@sha256:<64 hex>) for a Confidential Space venue: the attestation is checked against that digest, and a tag names whatever was pushed last.");
+  }
+  return named[1];
+}
+function underStageRoot(path5) {
+  if (!path5.startsWith(`${CS_STAGE_ROOT}/`)) {
+    throw new Error(`${path5} is outside ${CS_STAGE_ROOT}, the only directory the stage helpers mount`);
+  }
+  return path5;
+}
+function userFlag(owner) {
+  return `--user=${String(owner.uid)}:${String(owner.gid)}`;
+}
+function csStagePrepareArgv(stageBase, owner) {
+  const dirs = Object.values(venueStagePaths(underStageRoot(stageBase))).map(quoteForRemoteShell);
+  return [
+    "run",
+    "--rm",
+    "--network=none",
+    `--volume=${CS_STAGE_ROOT}:${CS_STAGE_ROOT}:rw`,
+    "--",
+    STAGE_HELPER_IMAGE,
+    "sh",
+    "-c",
+    `mkdir -p ${dirs.join(" ")} && chown -R ${String(owner.uid)}:${String(owner.gid)} ` + quoteForRemoteShell(stageBase)
+  ];
+}
+function csUntarArgv(dir, owner) {
+  return [
+    "run",
+    "-i",
+    "--rm",
+    "--network=none",
+    userFlag(owner),
+    `--volume=${underStageRoot(dir)}:/dst:rw`,
+    "--",
+    STAGE_HELPER_IMAGE,
+    "tar",
+    "-xf",
+    "-",
+    "-C",
+    "/dst"
+  ];
+}
+function csUntarProxyArgv(dir, owner) {
+  const d = quoteForRemoteShell(underStageRoot(dir));
+  return [
+    "run",
+    "-i",
+    "--rm",
+    "--network=none",
+    userFlag(owner),
+    `--volume=${CS_STAGE_ROOT}:${CS_STAGE_ROOT}:rw`,
+    "--",
+    STAGE_HELPER_IMAGE,
+    "sh",
+    "-c",
+    `mkdir -p ${d} && tar -C ${d} -xf - && chmod 0644 ${d}/*.js && chmod 0755 ${d}`
+  ];
+}
+function csRemoveArgv(dir, owner) {
+  return [
+    "run",
+    "--rm",
+    "--network=none",
+    userFlag(owner),
+    `--volume=${CS_STAGE_ROOT}:${CS_STAGE_ROOT}:rw`,
+    "--",
+    STAGE_HELPER_IMAGE,
+    "rm",
+    "-rf",
+    "--",
+    underStageRoot(dir)
+  ];
+}
+function sshStageTransport(vm, project, zone, env, io) {
+  return {
+    /**
+     * `id -u` / `id -g` on the venue, as the account that untarred the tree.
+     *
+     * That account is the owner BY CONSTRUCTION — the untar runs as the ssh user,
+     * so asking it who it is answers exactly the question the mount needs, without
+     * a chown and without assuming a uid. One ssh round trip, once per run.
+     *
+     * Both ids come from ONE invocation. Two calls could straddle a reconnect and
+     * pair a uid with another session's gid — a third wrong answer rather than a
+     * half-right one, which is the reason `GuestUser` is a pair in the first place.
+     */
+    readOwner: () => {
+      const res = io.exec(
+        "gcloud",
+        iapSshArgv(vm, project, zone, "id -u && id -g"),
+        OWNER_PROBE_TIMEOUT_MS,
+        // `env`, like every other gcloud call here. TERM-724 made the venue boot under the
+        // SERVICE configuration rather than whoever is at the terminal, and a probe that
+        // omitted this would ssh under the person's own credential — then report an owner
+        // measured against a session the run does not use.
+        env
+      );
+      if (!res.ok) {
+        throw new HostedVenueError(`could not read the staged tree's owner on ${vm}: ${execDetail(res).slice(0, 300)}. Refusing rather than falling back to this machine\u2019s uid, which would hand the guest an id with no write access to its own clone.`);
+      }
+      const lines = res.stdout.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+      const ids2 = lines.slice(-2).map((l) => Number(l));
+      if (ids2.length !== 2 || !ids2.every((n) => Number.isInteger(n) && n > 0)) {
+        throw new HostedVenueError(`the venue ${vm} answered 'id -u && id -g' with ${JSON.stringify(res.stdout.slice(0, 120))}, which is not a uid/gid pair. Refusing rather than guessing an owner.`);
+      }
+      return { uid: ids2[0], gid: ids2[1] };
+    },
+    push: (from, to) => io.pushTree(from, "gcloud", iapUntarArgv(vm, project, zone, to), STAGE_PUSH_TIMEOUT_MS, env),
+    pushProxy: (from, dir) => io.pushTree(from, "gcloud", iapUntarProxyArgv(vm, project, zone, dir), STAGE_PUSH_TIMEOUT_MS, env),
+    removeProxy: (dir) => {
+      io.exec("gcloud", iapSshArgv(vm, project, zone, `rm -rf ${quoteForRemoteShell(dir)}`), PROXY_CLEANUP_TIMEOUT_MS, env);
+    }
+  };
+}
+function dockerStageTransport(docker3, env, io) {
+  const pushVia = (from, args) => {
+    const [file, ...rest] = docker3.commandLine(args);
+    if (file === void 0)
+      throw new Error("the docker client returned an empty command line");
+    return io.pushTree(from, file, rest, STAGE_PUSH_TIMEOUT_MS, env);
+  };
+  return {
+    // Fixed rather than probed: the helpers unpack as this account, so it owns the tree.
+    readOwner: () => CS_GUEST_USER,
+    push: (from, to) => pushVia(from, csUntarArgv(to, CS_GUEST_USER)),
+    pushProxy: (from, dir) => pushVia(from, csUntarProxyArgv(dir, CS_GUEST_USER)),
+    removeProxy: (dir) => {
+      docker3.sync(csRemoveArgv(dir, CS_GUEST_USER), { timeoutMs: PROXY_CLEANUP_TIMEOUT_MS });
+    }
+  };
+}
+function bothTunnels(a, b) {
+  return {
+    kill: (signal) => {
+      let failed = false;
+      let error2;
+      for (const t of [a, b]) {
+        try {
+          t.kill(signal);
+        } catch (err) {
+          if (!failed)
+            error2 = err;
+          failed = true;
+        }
+      }
+      if (failed)
+        throw error2;
+    },
+    failure: () => a.failure() ?? b.failure()
+  };
+}
+function makeClientTls(io, allocated, vm) {
+  let dir;
+  try {
+    dir = io.makePrivateDir();
+  } catch (err) {
+    throw new HostedVenueError(`could not create a private directory for ${vm}'s client key: ${describeErr(err)}`, "ours");
+  }
+  allocated.onRollback(() => {
+    try {
+      io.removeTree(dir);
+    } catch (err) {
+      throw new HostedVenueError(`the directory ${dir} holding ${vm}'s client key could not be removed and is left behind: ${describeErr(err)}`);
+    }
+  });
+  const certPath = join26(dir, "client.pem");
+  const keyPath = join26(dir, "client-key.pem");
+  const made = io.exec("openssl", clientCertArgv(keyPath, certPath), OPENSSL_TIMEOUT_MS, {});
+  if (!made.ok) {
+    throw new HostedVenueError(`could not make ${vm}'s client certificate with openssl: ${execDetail(made).slice(0, 300)}`, "ours");
+  }
+  let metadataValue;
+  try {
+    const pem = io.readTextIfPresent(certPath);
+    if (pem === null)
+      throw new Error(`openssl wrote nothing to ${certPath}`);
+    metadataValue = certMetadataValue(pem);
+  } catch (err) {
+    throw new HostedVenueError(`could not read back ${vm}'s client certificate: ${describeErr(err)}`, "ours");
+  }
+  return { dir, certPath, keyPath, metadataValue };
+}
+async function reachConfidentialSpace(a) {
+  const { io, vm } = a;
+  let ports;
+  try {
+    ports = await io.freeLocalPorts(2);
+  } catch (err) {
+    throw new HostedVenueError(`could not find two free local ports for ${vm}'s forwards: ${describeErr(err)}`, "ours");
+  }
+  const [attestPort, dockerPort] = ports;
+  if (attestPort === void 0 || dockerPort === void 0 || attestPort === dockerPort) {
+    throw new HostedVenueError(`could not find two distinct free local ports for ${vm}'s forwards`, "ours");
+  }
+  const forward = (remote, local) => {
+    const t = io.spawnTunnel("gcloud", iapPortTunnelArgv(vm, a.project, a.zone, remote, local), a.env);
+    a.allocated.onRollback(() => {
+      try {
+        t.kill("SIGTERM");
+      } catch {
+      }
+    });
+    return t;
+  };
+  const tunnel = bothTunnels(forward(CS_ATTEST_PORT, attestPort), forward(CS_DOCKER_PORT, dockerPort));
+  const deadline = io.now() + CS_READY_BUDGET_MS;
+  let reading = { ok: false, reason: "no request was made" };
+  while (io.now() < deadline) {
+    const dead = tunnel.failure();
+    if (dead !== null) {
+      throw new HostedVenueError(`the IAP port forward to ${vm} could not be kept up \u2014 ${dead}`);
+    }
+    reading = await io.fetchAttestation({
+      port: attestPort,
+      certPath: a.tls.certPath,
+      keyPath: a.tls.keyPath,
+      timeoutMs: CS_ATTEST_TIMEOUT_MS
+    });
+    if (reading.ok)
+      break;
+    await io.sleep(CS_ATTEST_INTERVAL_MS);
+  }
+  if (!reading.ok) {
+    throw new HostedVenueError(`${vm}'s attest endpoint did not answer within ${String(CS_READY_BUDGET_MS / 1e3)}s \u2014 last reason: ${reading.reason}`);
+  }
+  let spki;
+  let venuePem;
+  try {
+    spki = spkiSha256Hex(reading.peerCertDer);
+    venuePem = new X509Certificate(reading.peerCertDer).toString();
+  } catch (err) {
+    throw new HostedVenueError(`${vm}'s attest endpoint presented a certificate that does not parse: ${describeErr(err)}`);
+  }
+  let jwks;
+  try {
+    jwks = await io.fetchConfidentialSpaceJwks();
+  } catch (err) {
+    throw new HostedVenueError(`could not reach the Confidential Space key set to check ${vm}'s attestation \u2014 ` + describeErr(err), "ours", { cause: err });
+  }
+  const verdict = await verifyConfidentialSpaceToken(reading.token, {
+    audience: expectedAudience(a.runId),
+    nonce: a.runId,
+    additionalNonces: [spki],
+    instanceName: vm,
+    allowedZones: [a.zone],
+    projectId: a.project,
+    allowedImageDigests: [a.imageDigest],
+    containerEnv: { TH_CLIENT_CERT: a.tls.metadataValue }
+  }, { fetchJwks: () => Promise.resolve(jwks), now: io.now() });
+  if (!verdict.ok) {
+    throw new HostedVenueError(`${vm} presented an attestation this lease refuses (${verdict.reason}): ${verdict.detail}`);
+  }
+  const caPath = join26(a.tls.dir, "venue.pem");
+  try {
+    io.writeFile(caPath, venuePem);
+  } catch (err) {
+    throw new HostedVenueError(`could not write ${vm}'s attested certificate to ${caPath}: ${describeErr(err)}`, "ours");
+  }
+  const dockerAt = `tcp://localhost:${String(dockerPort)}`;
+  const docker3 = io.dockerOverTls(dockerAt, { caPath, certPath: a.tls.certPath, keyPath: a.tls.keyPath }, CS_RUN_ARGS);
+  const daemon = io.classifyDaemon(docker3);
+  if (!daemon.distinct) {
+    throw new HostedVenueError(`refusing to hand out a hosted lease: ${describeVenueDaemon(daemon)}`);
+  }
+  const prepared = docker3.sync(csStagePrepareArgv(a.stageBase, CS_GUEST_USER), {
+    timeoutMs: MKDIR_TIMEOUT_MS
+  });
+  if (prepared.error || prepared.status !== 0) {
+    throw new HostedVenueError(`could not prepare the stage on ${vm}: ${dockerDetail(prepared).slice(0, 300)}`);
+  }
+  const pulled = docker3.sync(["pull", DEFAULT_CONTAINER_IMAGE], { timeoutMs: CS_PULL_TIMEOUT_MS });
+  if (pulled.error || pulled.status !== 0) {
+    throw new HostedVenueError(`could not pull ${DEFAULT_CONTAINER_IMAGE} on ${vm}: ${dockerDetail(pulled).slice(0, 300)}`);
+  }
+  return {
+    docker: docker3,
+    tunnel,
+    socketDir: a.tls.dir,
+    socketPath: dockerAt,
+    venueDaemonId: daemon.venueDaemonId,
+    venueIdentity: { kind: "confidential-space", token: reading.token, claims: verdict.value },
+    transport: dockerStageTransport(docker3, a.env, io)
+  };
+}
 function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
   const project = opts.project ?? DEFAULT_GCP_PROJECT;
   const zone = opts.zone ?? DEFAULT_GCP_ZONE;
   const gcloudConfig = opts.gcloudConfig ?? VENUE_GCLOUD_CONFIG;
   const keyFile = resolveServiceAccountKeyFile(opts);
   const image = venueImageFromEnv(process.env);
+  const csImageDigest = image.venueImage === "confidential-space" ? requireWorkloadDigest(image.workloadImage) : null;
   const env = venueGcloudEnv(gcloudConfig);
   return {
     kind: "hosted-pool",
     acquire: (runId) => acquireTransactionally(async (allocated) => {
       const vm = venueInstanceName(runId);
       const stageBase = `/tmp/th-stage-${runId}`;
-      const bootArgv = gcpBootArgv({
+      const bootParams = (clientCert) => image.venueImage === "confidential-space" ? {
         vmName: vm,
         project,
         zone,
         runId,
-        machineType: opts.machineType ?? (image.venueImage === "confidential-space" ? CONFIDENTIAL_SPACE_MACHINE_TYPE : DEFAULT_GCP_MACHINE_TYPE),
+        machineType: opts.machineType ?? CONFIDENTIAL_SPACE_MACHINE_TYPE,
+        venueImage: "confidential-space",
+        workloadImage: image.workloadImage,
+        clientCert
+      } : {
+        vmName: vm,
+        project,
+        zone,
+        runId,
+        machineType: opts.machineType ?? DEFAULT_GCP_MACHINE_TYPE,
         ...image
-      });
+      };
+      let bootArgv = gcpBootArgv(bootParams(CLIENT_CERT_STAND_IN));
       ensureVenueServiceCredentials(gcloudConfig, keyFile, io);
+      const clientTls = csImageDigest === null ? null : { ...makeClientTls(io, allocated, vm), imageDigest: csImageDigest };
+      if (clientTls !== null)
+        bootArgv = gcpBootArgv(bootParams(clientTls.metadataValue));
       const boot = io.exec("gcloud", bootArgv, BOOT_TIMEOUT_MS, env);
       let instanceState = "unknown";
       allocated.onRollback(() => {
@@ -30816,6 +31482,20 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
         throw new HostedVenueError(`could not boot ${vm}: ${verdict2.reason.slice(0, 400)}`, verdict2.source);
       }
       instanceState = "exists";
+      if (clientTls !== null) {
+        return finishAcquire(await reachConfidentialSpace({
+          vm,
+          project,
+          zone,
+          runId,
+          stageBase,
+          env,
+          io,
+          allocated,
+          tls: clientTls,
+          imageDigest: clientTls.imageDigest
+        }));
+      }
       const deadline = io.now() + SSH_READY_BUDGET_MS;
       let last = { retryable: true, reason: "no probe ran" };
       let identity = null;
@@ -30910,43 +31590,56 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
       if (!prepared.ok) {
         throw new HostedVenueError(`could not prepare the stage on ${vm}: ${execDetail(prepared).slice(0, 300)}`);
       }
-      const stageVolumes = stageVolumeNames(vm);
-      for (const name of [stageVolumes.clone, stageVolumes.jail]) {
-        const created = docker3.sync(volumeCreateArgv(name, runId), {
-          timeoutMs: VOLUME_CREATE_TIMEOUT_MS
-        });
-        if (created.error || created.status !== 0) {
-          throw new HostedVenueError(`could not create the stage volume ${name} on ${vm}: ${dockerDetail(created).slice(0, 300)}`);
-        }
-      }
-      for (const name of [stageVolumes.clone, stageVolumes.jail]) {
-        const probe = docker3.sync(execProbeArgv(name), {
-          timeoutMs: EXEC_PROBE_TIMEOUT_MS
-        });
-        if (probe.error || probe.status !== 0) {
-          throw new HostedVenueError(`${vm} cannot execute a file written to its own Docker volume ${name}, so no install step with a native postinstall could run there. Refusing before staging anything: ${dockerDetail(probe).slice(0, 300)}`);
-        }
-      }
-      const after = io.classifyDaemon(docker3);
-      if (!after.distinct || after.venueDaemonId !== venueDaemonId) {
-        throw new HostedVenueError(`the daemon at ${socketPath} changed while the stage volumes were being created and proved: it now answers as ${after.distinct ? `daemon ${after.venueDaemonId}` : describeVenueDaemon(after)}, not ${venueDaemonId}. Refusing to hand out a lease whose proof was made elsewhere.`);
-      }
-      return makeLease({
-        runId,
-        vm,
-        project,
-        zone,
-        stageBase,
-        stageVolumes,
+      return finishAcquire({
         docker: docker3,
         tunnel,
         socketDir,
         socketPath,
         venueDaemonId,
         venueIdentity,
-        env,
-        io
+        transport: sshStageTransport(vm, project, zone, env, io)
       });
+      function finishAcquire(r) {
+        const { docker: docker4, socketPath: socketPath2, venueDaemonId: venueDaemonId2 } = r;
+        const stageVolumes = stageVolumeNames(vm);
+        for (const name of [stageVolumes.clone, stageVolumes.jail]) {
+          const created = docker4.sync(volumeCreateArgv(name, runId), {
+            timeoutMs: VOLUME_CREATE_TIMEOUT_MS
+          });
+          if (created.error || created.status !== 0) {
+            throw new HostedVenueError(`could not create the stage volume ${name} on ${vm}: ${dockerDetail(created).slice(0, 300)}`);
+          }
+        }
+        for (const name of [stageVolumes.clone, stageVolumes.jail]) {
+          const probe = docker4.sync(execProbeArgv(name), {
+            timeoutMs: EXEC_PROBE_TIMEOUT_MS
+          });
+          if (probe.error || probe.status !== 0) {
+            throw new HostedVenueError(`${vm} cannot execute a file written to its own Docker volume ${name}, so no install step with a native postinstall could run there. Refusing before staging anything: ${dockerDetail(probe).slice(0, 300)}`);
+          }
+        }
+        const after = io.classifyDaemon(docker4);
+        if (!after.distinct || after.venueDaemonId !== venueDaemonId2) {
+          throw new HostedVenueError(`the daemon at ${socketPath2} changed while the stage volumes were being created and proved: it now answers as ${after.distinct ? `daemon ${after.venueDaemonId}` : describeVenueDaemon(after)}, not ${venueDaemonId2}. Refusing to hand out a lease whose proof was made elsewhere.`);
+        }
+        return makeLease({
+          runId,
+          vm,
+          project,
+          zone,
+          stageBase,
+          stageVolumes,
+          docker: docker4,
+          tunnel: r.tunnel,
+          socketDir: r.socketDir,
+          socketPath: socketPath2,
+          venueDaemonId: venueDaemonId2,
+          venueIdentity: r.venueIdentity,
+          transport: r.transport,
+          env,
+          io
+        });
+      }
     })
   };
 }
@@ -31005,28 +31698,7 @@ function makeLease(p) {
     return null;
   };
   let stagedOwner;
-  const readStagedOwner = () => {
-    const res = p.io.exec(
-      "gcloud",
-      iapSshArgv(p.vm, p.project, p.zone, "id -u && id -g"),
-      OWNER_PROBE_TIMEOUT_MS,
-      // `p.env`, like every other gcloud call here. TERM-724 made the venue boot under the
-      // SERVICE configuration rather than whoever is at the terminal, and a probe that
-      // omitted this would ssh under the person's own credential — then report an owner
-      // measured against a session the run does not use.
-      p.env
-    );
-    if (!res.ok) {
-      throw new HostedVenueError(`could not read the staged tree's owner on ${p.vm}: ${execDetail(res).slice(0, 300)}. Refusing rather than falling back to this machine\u2019s uid, which would hand the guest an id with no write access to its own clone.`);
-    }
-    const lines = res.stdout.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
-    const ids2 = lines.slice(-2).map((l) => Number(l));
-    if (ids2.length !== 2 || !ids2.every((n) => Number.isInteger(n) && n > 0)) {
-      throw new HostedVenueError(`the venue ${p.vm} answered 'id -u && id -g' with ${JSON.stringify(res.stdout.slice(0, 120))}, which is not a uid/gid pair. Refusing rather than guessing an owner.`);
-    }
-    return { uid: ids2[0], gid: ids2[1] };
-  };
-  stagedOwner = readStagedOwner();
+  stagedOwner = p.transport.readOwner();
   return {
     kind: "hosted-pool",
     runId: p.runId,
@@ -31061,7 +31733,7 @@ function makeLease(p) {
       const dir = venueProxyDir(p.stageBase);
       const buffer = stageProxyCode();
       try {
-        const res = await p.io.pushTree(buffer.dir, "gcloud", iapUntarProxyArgv(p.vm, p.project, p.zone, dir), STAGE_PUSH_TIMEOUT_MS, p.env);
+        const res = await p.transport.pushProxy(buffer.dir, dir);
         if (!res.ok) {
           throw new HostedVenueError(`could not stage the egress proxy onto ${p.vm}: ${execDetail(res).slice(0, 300)}`);
         }
@@ -31071,7 +31743,7 @@ function makeLease(p) {
       return {
         dir,
         cleanup: () => {
-          p.io.exec("gcloud", iapSshArgv(p.vm, p.project, p.zone, `rm -rf ${quoteForRemoteShell(dir)}`), PROXY_CLEANUP_TIMEOUT_MS, p.env);
+          p.transport.removeProxy(dir);
         }
       };
     },
@@ -31079,7 +31751,7 @@ function makeLease(p) {
       check("staging the tree");
       const paths = venueStagePaths(p.stageBase);
       const push = async (from, to) => {
-        const res = await p.io.pushTree(from, "gcloud", iapUntarArgv(p.vm, p.project, p.zone, to), STAGE_PUSH_TIMEOUT_MS, p.env);
+        const res = await p.transport.push(from, to);
         if (!res.ok) {
           throw new HostedVenueError(`could not stage ${from} onto ${p.vm}: ${execDetail(res).slice(0, 300)}`);
         }
@@ -31237,7 +31909,7 @@ function makeLease(p) {
     }
   };
 }
-var SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, STAGE_HELPER_IMAGE, VOLUME_CREATE_TIMEOUT_MS, EXEC_PROBE_TIMEOUT_MS, POPULATE_TIMEOUT_MS, STAGE_VOLUME_LABEL_KEY, STAGE_PROOF_PREFIX, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING;
+var SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, STAGE_HELPER_IMAGE, VOLUME_CREATE_TIMEOUT_MS, EXEC_PROBE_TIMEOUT_MS, POPULATE_TIMEOUT_MS, STAGE_VOLUME_LABEL_KEY, STAGE_PROOF_PREFIX, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING, CS_ATTEST_PORT, CS_DOCKER_PORT, CS_READY_BUDGET_MS, CS_ATTEST_TIMEOUT_MS, CS_PULL_TIMEOUT_MS, CS_ATTEST_INTERVAL_MS, OPENSSL_TIMEOUT_MS, CS_RUN_ARGS, CS_GUEST_USER, CS_STAGE_ROOT, CLIENT_CERT_STAND_IN;
 var init_hostedVenue = __esm({
   "../../packages/envrun/dist/hostedVenue.js"() {
     "use strict";
@@ -31358,7 +32030,55 @@ var init_hostedVenue = __esm({
           throw new Error("JWKS fetch returned a body with no keys array");
         }
         return body;
-      }
+      },
+      fetchConfidentialSpaceJwks: async () => {
+        const getJson = async (url, what) => {
+          const res = await globalThis.fetch(url, {
+            signal: AbortSignal.timeout(JWKS_FETCH_TIMEOUT_MS)
+          });
+          if (!res.ok) {
+            throw new Error(`Confidential Space ${what} returned HTTP ${String(res.status)}`);
+          }
+          return res.json();
+        };
+        const discovery = await getJson(CONFIDENTIAL_SPACE_OIDC_DISCOVERY_URL, "discovery");
+        const jwksUri = typeof discovery === "object" && discovery !== null ? discovery.jwks_uri : void 0;
+        if (typeof jwksUri !== "string" || !jwksUri.startsWith("https://")) {
+          throw new Error("Confidential Space discovery names no https jwks_uri");
+        }
+        const body = await getJson(jwksUri, "key set");
+        if (typeof body !== "object" || body === null || !Array.isArray(body.keys)) {
+          throw new Error("Confidential Space key set has no keys array");
+        }
+        return body;
+      },
+      freeLocalPorts: async (n) => {
+        const servers = [];
+        try {
+          for (let i = 0; i < n; i += 1) {
+            const server = createServer();
+            servers.push(server);
+            await new Promise((resolve4, reject) => {
+              server.once("error", reject);
+              server.listen(0, "localhost", () => {
+                resolve4();
+              });
+            });
+          }
+          return servers.map((s) => s.address().port);
+        } finally {
+          await Promise.all(servers.map((s) => new Promise((resolve4) => {
+            s.close(() => {
+              resolve4();
+            });
+          })));
+        }
+      },
+      writeFile: (path5, text) => {
+        writeFileSync15(path5, text, { mode: 384, flag: "wx" });
+      },
+      fetchAttestation: (req) => fetchAttestationOverTls(req),
+      dockerOverTls: (endpoint, tls, runArgs) => remoteDockerClient(endpoint, { tls, runArgs })
     };
     VENUE_SSH_USER = "th-runner";
     GCE_METADATA_IDENTITY_URL = "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/identity";
@@ -31379,6 +32099,17 @@ var init_hostedVenue = __esm({
     SSH_KEY_NOT_READY = /Permission denied \(publickey/;
     DAEMON_NOT_READY = /Cannot connect to the Docker daemon/;
     SSH_NOT_ANSWERING = /Connection refused|Connection reset|Connection closed by|kex_exchange_identification|Operation timed out/;
+    CS_ATTEST_PORT = 8443;
+    CS_DOCKER_PORT = 2376;
+    CS_READY_BUDGET_MS = 48e4;
+    CS_ATTEST_TIMEOUT_MS = 15e3;
+    CS_PULL_TIMEOUT_MS = 6e5;
+    CS_ATTEST_INTERVAL_MS = 5e3;
+    OPENSSL_TIMEOUT_MS = 3e4;
+    CS_RUN_ARGS = ["--oom-score-adj", "1000"];
+    CS_GUEST_USER = { uid: 1e3, gid: 1e3 };
+    CS_STAGE_ROOT = "/tmp";
+    CLIENT_CERT_STAND_IN = "stand-in-certificate";
   }
 });
 
@@ -32278,10 +33009,10 @@ var init_references = __esm({
 
 // ../../packages/envspec/dist/repo.js
 import { readdirSync as readdirSync2, readFileSync as readFileSync14, statSync as statSync3 } from "fs";
-import { join as join27, relative as relative2, sep as sep4 } from "path";
+import { join as join27, relative as relative2, sep as sep5 } from "path";
 function createRepoReader(repoPath) {
   const resolveIn = (relativePath) => relativePath === "" ? repoPath : join27(repoPath, relativePath);
-  const toPosix = (absolute) => relative2(repoPath, absolute).split(sep4).join("/");
+  const toPosix = (absolute) => relative2(repoPath, absolute).split(sep5).join("/");
   const readText = (relativePath) => {
     try {
       return readFileSync14(resolveIn(relativePath), "utf8");
@@ -35111,7 +35842,7 @@ __export(jpi_claim_exports, {
 });
 import {
   readFileSync as readFileSync15,
-  writeFileSync as writeFileSync15,
+  writeFileSync as writeFileSync16,
   mkdirSync as mkdirSync7,
   mkdtempSync as mkdtempSync5,
   renameSync as renameSync7,
@@ -35122,7 +35853,7 @@ import {
   readdirSync as readdirSync3
 } from "fs";
 import { join as join29, dirname as dirname9, isAbsolute as isAbsolute4, resolve as pathResolve } from "path";
-import { createHash as createHash9 } from "crypto";
+import { createHash as createHash10 } from "crypto";
 import { homedir as homedir15, hostname as osHostname } from "os";
 import { execFile as execFile3, execFileSync as execFileSync2, spawnSync as spawnSync8 } from "child_process";
 import { promisify as promisify3 } from "util";
@@ -35140,7 +35871,7 @@ function markClaimNudged(id) {
     const ids2 = readNudgedClaimIds();
     ids2.add(id);
     ensureStateDir(TERMINALHIRE_DIR11);
-    writeFileSync15(REPO_CONTINUITY_NUDGE_MARKER, JSON.stringify({ claimIds: [...ids2] }), "utf8");
+    writeFileSync16(REPO_CONTINUITY_NUDGE_MARKER, JSON.stringify({ claimIds: [...ids2] }), "utf8");
   } catch {
   }
 }
@@ -36314,7 +37045,7 @@ async function registerFounderClaim(b) {
   let clearedLocalCredential = false;
   let refusedForPurpose = false;
   let preserveBackgroundToken = false;
-  const refuse3 = (reason) => {
+  const refuse4 = (reason) => {
     console.error(
       `
 terminalhire claim: refusing to record \u2014 ${reason}
@@ -36339,7 +37070,7 @@ terminalhire claim: refusing to record \u2014 ${reason}
     try {
       expectLogin = await localLoginForPaidBrowserClaim();
     } catch (err) {
-      refuse3(
+      refuse4(
         `could not verify which GitHub account this machine is signed in as: ${err instanceof Error ? err.message : String(err)}.
   Run \`terminalhire login\`, then retry this claim. Browser verification was
   not opened and no claim was sent.`
@@ -36355,16 +37086,16 @@ terminalhire claim: refusing to record \u2014 ${reason}
       claimRef: opportunityShortToken(b.bountyId)
     });
     if (!proofToken) {
-      refuse3("could not verify your GitHub identity with terminalhire (see above).");
+      refuse4("could not verify your GitHub identity with terminalhire (see above).");
     }
     const verifiedLogin = proofTokenLogin(proofToken);
     if (!verifiedLogin) {
-      refuse3(
+      refuse4(
         "the browser verification response did not name a GitHub account, so it could not be compared with this machine\u2019s sign-in. Nothing was sent; retry the claim."
       );
     }
     if (verifiedLogin.toLowerCase() !== expectLogin.toLowerCase()) {
-      refuse3(
+      refuse4(
         `you verified in the browser as @${verifiedLogin}, but this machine is signed in as @${expectLogin}.
   Nothing was sent. Sign the browser into @${expectLogin} and run this again, or
   run \`terminalhire login\` if you meant to work as @${verifiedLogin}.`
@@ -36396,7 +37127,7 @@ terminalhire claim: refusing to record \u2014 ${reason}
   try {
     res = await sendRegistration(true);
   } catch (err) {
-    refuse3(
+    refuse4(
       `terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}), so the posting could not be revalidated.`
     );
   }
@@ -36447,7 +37178,7 @@ terminalhire claim: refusing to record \u2014 ${reason}
     try {
       res = await sendRegistration(true);
     } catch (err) {
-      refuse3(
+      refuse4(
         `terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}), so the posting could not be revalidated.`
       );
     }
@@ -36458,14 +37189,14 @@ terminalhire claim: refusing to record \u2014 ${reason}
       res = await sendRegistration(false);
       refusalBody = await readRefusal(res);
     } catch (err) {
-      refuse3(
+      refuse4(
         `terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}), so the posting could not be revalidated.`
       );
     }
   }
   if (!res.ok) {
     const detail = refusalBody?.message || refusalBody?.error || "";
-    refuse3(
+    refuse4(
       detail ? `the server refused this claim (${res.status}): ${detail}` : `the server refused this claim (${res.status}).`
     );
   }
@@ -36476,7 +37207,7 @@ terminalhire claim: refusing to record \u2014 ${reason}
     body = null;
   }
   if (!body || body.ok !== true) {
-    refuse3("malformed registration response from the server.");
+    refuse4("malformed registration response from the server.");
   }
   const mintedToken = typeof body.pushToken === "string" && body.pushToken.length > 0 ? body.pushToken : null;
   if (refusedForPurpose && mintedToken && !preserveBackgroundToken) {
@@ -37906,7 +38637,7 @@ function writeSliceFiles(destDir, files) {
     if (typeof f.content === "string") {
       const abs = join29(destDir, f.path);
       mkdirSync7(dirname9(abs), { recursive: true });
-      writeFileSync15(abs, f.content, "utf8");
+      writeFileSync16(abs, f.content, "utf8");
       written.push(f.path);
     } else {
       unavailable.push({ path: f.path, reason: f.unavailableReason || "(no reason given)" });
@@ -37955,7 +38686,7 @@ function ensureExcludedPackDir(destDir) {
     const existing = existsSync13(excludeFile) ? readFileSync15(excludeFile, "utf8") : "";
     if (!existing.split("\n").includes(BRIEF_EXCLUDE_LINE)) {
       mkdirSync7(dirname9(excludeFile), { recursive: true });
-      writeFileSync15(
+      writeFileSync16(
         excludeFile,
         `${existing}${existing === "" || existing.endsWith("\n") ? "" : "\n"}${BRIEF_EXCLUDE_LINE}
 `,
@@ -37971,14 +38702,14 @@ function writePackFile(destDir, relPath, content, what) {
   try {
     const abs = join29(destDir, relPath);
     mkdirSync7(dirname9(abs), { recursive: true });
-    writeFileSync15(abs, content, { encoding: "utf8", flag: "wx" });
+    writeFileSync16(abs, content, { encoding: "utf8", flag: "wx" });
   } catch (err) {
     return { written: false, reason: `the ${what} could not be written (${err.message})` };
   }
   return { written: true, reason: null, sha256: sha256OfUtf8(content) };
 }
 function sha256OfUtf8(content) {
-  return createHash9("sha256").update(content, "utf8").digest("hex");
+  return createHash10("sha256").update(content, "utf8").digest("hex");
 }
 function writeWorkspacePack(destDir, spec, claim, delivery) {
   if (delivery !== "full" && delivery !== "sparse") {
@@ -39335,7 +40066,7 @@ function readClaimPushMarker() {
 }
 function writeClaimPushMarker(marker) {
   ensureStateDir(TERMINALHIRE_DIR11);
-  writeFileSync15(CLAIM_PUSH_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  writeFileSync16(CLAIM_PUSH_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearClaimPushMarker() {
   try {
@@ -40487,7 +41218,7 @@ __export(util_exports, {
   getSizableOrigin: () => getSizableOrigin,
   hexToUint8Array: () => hexToUint8Array,
   isObject: () => isObject,
-  isPlainObject: () => isPlainObject,
+  isPlainObject: () => isPlainObject2,
   issue: () => issue,
   joinValues: () => joinValues,
   jsonStringifyReplacer: () => jsonStringifyReplacer,
@@ -40649,7 +41380,7 @@ function slugify(input) {
 function isObject(data) {
   return typeof data === "object" && data !== null && !Array.isArray(data);
 }
-function isPlainObject(o) {
+function isPlainObject2(o) {
   if (isObject(o) === false)
     return false;
   const ctor = o.constructor;
@@ -40666,7 +41397,7 @@ function isPlainObject(o) {
   return true;
 }
 function shallowClone(o) {
-  if (isPlainObject(o))
+  if (isPlainObject2(o))
     return { ...o };
   if (Array.isArray(o))
     return [...o];
@@ -40806,7 +41537,7 @@ function omit(schema, mask) {
   return clone(schema, def);
 }
 function extend(schema, shape) {
-  if (!isPlainObject(shape)) {
+  if (!isPlainObject2(shape)) {
     throw new Error("Invalid input to extend: expected a plain object");
   }
   const checks = schema._zod.def.checks;
@@ -40829,7 +41560,7 @@ function extend(schema, shape) {
   return clone(schema, def);
 }
 function safeExtend(schema, shape) {
-  if (!isPlainObject(shape)) {
+  if (!isPlainObject2(shape)) {
     throw new Error("Invalid input to safeExtend: expected a plain object");
   }
   const def = mergeDefs(schema._zod.def, {
@@ -41990,7 +42721,7 @@ function mergeValues(a, b) {
   if (a instanceof Date && b instanceof Date && +a === +b) {
     return { valid: true, data: a };
   }
-  if (isPlainObject(a) && isPlainObject(b)) {
+  if (isPlainObject2(a) && isPlainObject2(b)) {
     const bKeys = Object.keys(b);
     const sharedKeys = Object.keys(a).filter((key) => bKeys.indexOf(key) !== -1);
     const newObj = { ...a, ...b };
@@ -42942,7 +43673,7 @@ var init_schemas = __esm({
       $ZodType.init(inst, def);
       inst._zod.parse = (payload, ctx) => {
         const input = payload.value;
-        if (!isPlainObject(input)) {
+        if (!isPlainObject2(input)) {
           payload.issues.push({
             expected: "record",
             code: "invalid_type",
@@ -48084,7 +48815,7 @@ var init_zod_json_schema_compat = __esm({
 });
 
 // ../../node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
-function isPlainObject2(value) {
+function isPlainObject3(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 function mergeCapabilities(base, additional) {
@@ -48095,7 +48826,7 @@ function mergeCapabilities(base, additional) {
     if (addValue === void 0)
       continue;
     const baseValue = result[k];
-    if (isPlainObject2(baseValue) && isPlainObject2(addValue)) {
+    if (isPlainObject3(baseValue) && isPlainObject3(addValue)) {
       result[k] = { ...baseValue, ...addValue };
     } else {
       result[k] = addValue;
@@ -62453,7 +63184,7 @@ __export(config_exports, {
   readConfig: () => readConfig,
   writeConfig: () => writeConfig
 });
-import { readFileSync as readFileSync16, writeFileSync as writeFileSync16, existsSync as existsSync14 } from "fs";
+import { readFileSync as readFileSync16, writeFileSync as writeFileSync17, existsSync as existsSync14 } from "fs";
 import { join as join30 } from "path";
 import { homedir as homedir16 } from "os";
 function readConfig() {
@@ -62476,7 +63207,7 @@ function writeConfig(config2) {
     }
     delete merged.contributePrompted;
   }
-  writeFileSync16(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  writeFileSync17(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function parseNudgeMode(raw) {
   if (raw === "session" || raw === "always") return raw;

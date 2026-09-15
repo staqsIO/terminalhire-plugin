@@ -1,7 +1,7 @@
 // src/github-auth.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
 import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync3, rmSync, renameSync } from "fs";
-import { join as join3 } from "path";
+import { join as join3, sep } from "path";
 import { homedir as homedir2 } from "os";
 
 // src/state-dir.ts
@@ -185,6 +185,10 @@ function __publishKeyBlobForTests(key) {
 // src/github-auth.ts
 var TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join3(homedir2(), ".terminalhire");
 var TOKEN_FILE = join3(TERMINALHIRE_DIR2, "github-token.enc");
+function githubTokenDisplayPath() {
+  const home = homedir2();
+  return TOKEN_FILE.startsWith(home + sep) ? `~${TOKEN_FILE.slice(home.length)}` : TOKEN_FILE;
+}
 var ALGO = "aes-256-gcm";
 var IV_BYTES = 12;
 var GITHUB_SCOPE = "read:user";
@@ -389,6 +393,7 @@ export {
   decrypt,
   deleteGitHubToken,
   encrypt,
+  githubTokenDisplayPath,
   hasGitHubToken,
   loadKey,
   readGitHubToken,

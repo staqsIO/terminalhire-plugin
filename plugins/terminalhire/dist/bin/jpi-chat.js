@@ -4491,7 +4491,7 @@ var init_shared_key = __esm({
 // src/github-auth.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes4 } from "crypto";
 import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, existsSync as existsSync3, rmSync, renameSync } from "fs";
-import { join as join4 } from "path";
+import { join as join4, sep } from "path";
 import { homedir as homedir2 } from "os";
 async function loadKey() {
   return loadOrCreateSharedKey();

@@ -414,7 +414,7 @@ import { homedir as homedir5 } from "os";
 init_state_dir();
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
 import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync3, rmSync, renameSync } from "fs";
-import { join as join3 } from "path";
+import { join as join3, sep } from "path";
 import { homedir as homedir2 } from "os";
 
 // src/shared-key.ts

@@ -12688,7 +12688,7 @@ var init_spinner = __esm({
 // src/github-auth.ts
 import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes5 } from "crypto";
 import { readFileSync as readFileSync12, writeFileSync as writeFileSync10, existsSync as existsSync8, rmSync as rmSync3, renameSync as renameSync7 } from "fs";
-import { join as join16 } from "path";
+import { join as join16, sep } from "path";
 import { homedir as homedir11 } from "os";
 async function loadKey() {
   return loadOrCreateSharedKey();

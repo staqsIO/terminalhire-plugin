@@ -3276,6 +3276,7 @@ __export(github_auth_exports, {
   decrypt: () => decrypt2,
   deleteGitHubToken: () => deleteGitHubToken,
   encrypt: () => encrypt2,
+  githubTokenDisplayPath: () => githubTokenDisplayPath,
   hasGitHubToken: () => hasGitHubToken,
   loadKey: () => loadKey,
   readGitHubToken: () => readGitHubToken,
@@ -3286,8 +3287,12 @@ __export(github_auth_exports, {
 });
 import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes4 } from "crypto";
 import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, existsSync as existsSync6, rmSync as rmSync3, renameSync as renameSync3 } from "fs";
-import { join as join10 } from "path";
+import { join as join10, sep } from "path";
 import { homedir as homedir7 } from "os";
+function githubTokenDisplayPath() {
+  const home = homedir7();
+  return TOKEN_FILE.startsWith(home + sep) ? `~${TOKEN_FILE.slice(home.length)}` : TOKEN_FILE;
+}
 async function loadKey() {
   return loadOrCreateSharedKey();
 }

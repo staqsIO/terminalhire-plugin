@@ -352,6 +352,7 @@ __export(github_auth_exports, {
   decrypt: () => decrypt,
   deleteGitHubToken: () => deleteGitHubToken,
   encrypt: () => encrypt,
+  githubTokenDisplayPath: () => githubTokenDisplayPath,
   hasGitHubToken: () => hasGitHubToken,
   loadKey: () => loadKey,
   readGitHubToken: () => readGitHubToken,
@@ -362,8 +363,12 @@ __export(github_auth_exports, {
 });
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
 import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync3, rmSync, renameSync } from "fs";
-import { join as join4 } from "path";
+import { join as join4, sep } from "path";
 import { homedir as homedir3 } from "os";
+function githubTokenDisplayPath() {
+  const home = homedir3();
+  return TOKEN_FILE.startsWith(home + sep) ? `~${TOKEN_FILE.slice(home.length)}` : TOKEN_FILE;
+}
 async function loadKey() {
   return loadOrCreateSharedKey();
 }
@@ -11548,14 +11553,14 @@ async function run() {
   }
 }
 async function runLogin() {
-  const { runDeviceFlow: runDeviceFlow2, readGitHubToken: readGitHubToken2 } = await Promise.resolve().then(() => (init_github_auth(), github_auth_exports));
+  const { runDeviceFlow: runDeviceFlow2, readGitHubToken: readGitHubToken2, githubTokenDisplayPath: githubTokenDisplayPath2 } = await Promise.resolve().then(() => (init_github_auth(), github_auth_exports));
   const { fetchGitHubProfile: fetchGitHubProfile2, githubToFingerprint: githubToFingerprint2, computeAcceptanceCredential: computeAcceptanceCredential2 } = await Promise.resolve().then(() => (init_src(), src_exports));
   const { readProfile: readProfile2, writeProfile: writeProfile2, accumulateGitHubTags: accumulateGitHubTags2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
   console.log("");
   console.log("  terminalhire \u2014 Sign in with GitHub");
   console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
   console.log("  Scope: read:user  (public profile + public repos only)");
-  console.log("  Your token is encrypted and stored at ~/.terminalhire/github-token.enc");
+  console.log(`  Your token is encrypted and stored at ${githubTokenDisplayPath2()}`);
   console.log("  GitHub data enriches your LOCAL profile \u2014 no data leaves your machine.");
   console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
   try {
@@ -11680,7 +11685,7 @@ async function runLogin() {
   }
 }
 async function runLogout() {
-  const { deleteGitHubToken: deleteGitHubToken2, hasGitHubToken: hasGitHubToken2 } = await Promise.resolve().then(() => (init_github_auth(), github_auth_exports));
+  const { deleteGitHubToken: deleteGitHubToken2, hasGitHubToken: hasGitHubToken2, githubTokenDisplayPath: githubTokenDisplayPath2 } = await Promise.resolve().then(() => (init_github_auth(), github_auth_exports));
   const { readProfile: readProfile2, writeProfile: writeProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
   const hasToken = await hasGitHubToken2();
   if (!hasToken) {
@@ -11702,7 +11707,7 @@ async function runLogout() {
     await writeProfile2(profile);
     console.log("\n  GitHub identity + proof-of-work credential cleared from local profile.");
   }
-  console.log("  GitHub token deleted from ~/.terminalhire/github-token.enc");
+  console.log(`  GitHub token deleted from ${githubTokenDisplayPath2()}`);
   console.log("  Skill tags accumulated from GitHub remain in your profile.");
   console.log("  To also delete those: terminalhire profile --delete\n");
 }
