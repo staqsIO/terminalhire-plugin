@@ -186,7 +186,19 @@ node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim submit <id>   # runs
 
 ## Doing the work (executor guardrails)
 
-If the user asks you to actually DO a claimed bounty, work it in an **isolated git worktree**, and enforce these guardrails (a slop PR under the user's GitHub identity is permanent and damages their reputation):
+How the developer does the work is theirs. What follows are the terms the hand-back is held to, and the limits on what you may do on the developer's behalf (a slop PR under the user's GitHub identity is permanent and damages their reputation):
+
+### Open-source claims only: the contribution policy
+
+This subsection applies only when `preview` returned a `policy` key. A founder posting has no policy step: skip to **On every claim** below.
+
+On an open-source claim the repo's contribution policy is part of the deal. `claim record` already ran a bounded, deterministic audit (`src/repo-policy.ts`) and printed `POLICY` + `REQUIREMENTS` sections; if it showed excerpts (any non-clean verdict) or said the docs couldn't be read (`unavailable`), read the repo's actual CONTRIBUTING.md / PR template / AGENTS.md before any code is written. The audit is a deterministic pattern match, not comprehension; you are the judgment layer it can't be (it can miss a prohibition phrased unusually, or in a doc it doesn't fetch):
+
+- If the repo's policy **prohibits AI-generated/AI-assisted contributions** (e.g. Gentoo/NetBSD-style "tainted code" language, an outright ban on LLM-authored PRs), **HARD-STOP**. Do not clone, do not write a patch, do not open a worktree for it. Tell the user plainly that this repo doesn't accept AI-assisted work and the claim isn't mergeable as-is — do not attempt to route around it (e.g. "write it as if you wrote it yourself"). Suggest they either work it by hand or run `node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim release <id>`.
+- If the policy is silent, permissive, or merely asks for **disclosure**, proceed — and follow whatever disclosure format the repo asks for (see the submit step above; the CLI's baseline note may need to sit alongside a repo-specific tag/section, not replace it).
+- If you can't find or read the policy docs at all, say so and let the user decide whether to proceed — don't silently treat "couldn't check" as "no policy."
+
+### On every claim
 
 **Always pass an explicit `<id>` to `start`.** Bare `claim start` picks a claim rather than starting one (TERM-380). At a human's terminal it lists what's ready and asks which; run without a terminal — as you run it — it prints that list with a `claim start <id>` under each row and exits 0 **having started nothing**. If you called it bare, read the id out of the list and run it again with that id; don't report the list as a started claim.
 
@@ -198,19 +210,18 @@ If the user asks you to actually DO a claimed bounty, work it in an **isolated g
 
 If the dev wants to request assignment outside these branches anyway, they can pass `--assign`. If you provisioned the worktree some other way (not via `claim start`) on a repo that expects assignment, request it on the issue yourself before writing code. `claim release` offers a "standing down" follow-up comment when a stake (branch 2) was left on an issue, so an abandoned claim doesn't keep reading as taken.
 
-**Before writing any code — read the repo's contribution policy.** `claim record` already ran a bounded, deterministic audit (`src/repo-policy.ts`) and printed `POLICY` + `REQUIREMENTS` sections; if it showed excerpts (any non-clean verdict) or said the docs couldn't be read (`unavailable`), read the actual CONTRIBUTING.md / PR template / AGENTS.md yourself — fetch them from the repo if you don't already have them — before doing anything else. The audit is a deterministic pattern match, not comprehension; you are the judgment layer it can't be (it can miss a prohibition phrased unusually, or in a doc it doesn't fetch):
+These rules hold on every claim, founder posting or open-source:
 
-- If the repo's policy **prohibits AI-generated/AI-assisted contributions** (e.g. Gentoo/NetBSD-style "tainted code" language, an outright ban on LLM-authored PRs), **HARD-STOP**. Do not clone, do not write a patch, do not open a worktree for it. Tell the user plainly that this repo doesn't accept AI-assisted work and the claim isn't mergeable as-is — do not attempt to route around it (e.g. "write it as if you wrote it yourself"). Suggest they either work it by hand or run `node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim release <id>`.
-- If the policy is silent, permissive, or merely asks for **disclosure**, proceed — and follow whatever disclosure format the repo asks for (see the submit step below; the CLI's baseline note may need to sit alongside a repo-specific tag/section, not replace it).
-- If you can't find or read the policy docs at all, say so and let the user decide whether to proceed — don't silently treat "couldn't check" as "no policy."
-
+- **Never work in the user's live checkout.** The work happens in a separate worktree, the one `claim start` provisions or the one you record with `claim attach` below.
 - **Record the worktree so `submit` can verify it later** — right after you create the worktree + branch, run:
   ```bash
   node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" claim attach <id> --worktree <absPath> --branch <branchName>
   ```
   Some remote in that worktree must point at the user's **fork** of the bounty repo — `submit` refuses to push to the upstream itself. `origin` pointing at the upstream is fine as long as a fork remote exists too; if none does, `submit` offers to create the fork and add a `fork` remote at confirm time (interactive terminal only).
 - **Never `git push` or `gh pr`** — the user reviews the diff first, then `claim submit` pushes deliberately.
-- Clone + read the issue + write a patch. **Do not run the repo's tests/build** without the user's explicit go-ahead (it is arbitrary third-party code).
+- **Do not run the repo's tests/build** without the user's explicit go-ahead (it is arbitrary third-party code).
 - Never read or pass `~/.terminalhire/*` or the user's tokens into the work — the bounty work never needs the profile.
+
+### Invoking the engine
 
 > Invoke the plugin-bundled engine via `${CLAUDE_PLUGIN_ROOT}` so a plugin update is the only update needed. If `$CLAUDE_PLUGIN_ROOT` is unset (running outside Claude Code), fall back to `terminalhire claim …`.

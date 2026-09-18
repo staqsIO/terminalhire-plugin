@@ -131,10 +131,19 @@ function isGreen(outcome) {
 function isOurFault(outcome) {
   return outcome === "test-command-unavailable" || outcome === "counts-unparsed";
 }
-var int, withSuiteFailures, READERS, SUPPORTED_RUNNERS, COVERAGE_TABLE, EXEC_FAILURE, SUITE_REPORTED_FAILURE;
+var VERIFICATION_OUTCOMES, int, withSuiteFailures, READERS, SUPPORTED_RUNNERS, COVERAGE_TABLE, EXEC_FAILURE, SUITE_REPORTED_FAILURE;
 var init_classify = __esm({
   "../../packages/envrun/dist/classify.js"() {
     "use strict";
+    VERIFICATION_OUTCOMES = [
+      "completed",
+      "tests-failed",
+      "no-tests-observed",
+      "counts-unparsed",
+      "test-command-unavailable",
+      "environment-exhausted",
+      "budget-exceeded"
+    ];
     int = (m, i = 1) => m ? Number(m[i]) : 0;
     withSuiteFailures = (counts, suiteLine) => {
       if (counts.tests_failed > 0 || !suiteLine)
@@ -1417,11 +1426,17 @@ var init_dist = __esm({
 function censusTotal(c) {
   return c.containers.length + c.volumes.length + c.networks.length;
 }
-function ids(docker3, args) {
+function query(docker3, args) {
   const res = docker3.sync([...args], { timeoutMs: 15e3 });
-  if (res.error || res.status !== 0)
-    return [];
-  return res.stdout.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
+  if (res.error || res.status !== 0) {
+    const why = res.error?.message ?? (res.stderr.trim() || `exit ${String(res.status)}`);
+    return { ids: [], failure: `docker ${args.slice(0, 2).join(" ")}: ${why}` };
+  }
+  const ids2 = res.stdout.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
+  return { ids: ids2, failure: null };
+}
+function ids(docker3, args) {
+  return query(docker3, args).ids;
 }
 function census(docker3, label) {
   const filter = `label=${label}`;
@@ -1431,25 +1446,67 @@ function census(docker3, label) {
     networks: ids(docker3, ["network", "ls", "-q", "--filter", filter])
   };
 }
+function censusReport(docker3, label) {
+  const filter = `label=${label}`;
+  const failures = [];
+  const ask = (args) => {
+    const q = query(docker3, args);
+    if (q.failure !== null)
+      failures.push(q.failure);
+    return q.ids;
+  };
+  const taken = {
+    containers: ask(["ps", "-aq", "--filter", filter]),
+    volumes: ask(["volume", "ls", "-q", "--filter", filter]),
+    networks: ask(["network", "ls", "-q", "--filter", filter])
+  };
+  return failures.length === 0 ? { observed: true, census: taken, unobservedReason: null } : { observed: false, census: taken, unobservedReason: failures.join("; ") };
+}
 function localCensus(label) {
   return census(localDockerClient(), label);
 }
-function judgeLeaks(peak, after) {
+function judgeLeaks(peak, after, observation) {
   const labelObserved = peak.containers.length > 0;
+  if (!observation.observed) {
+    return {
+      labelObserved,
+      reaped: false,
+      observed: false,
+      clean: false,
+      state: "unobserved",
+      peak,
+      after,
+      note: `UNOBSERVED, not clean: we could not look at what survived teardown (${observation.unobservedReason ?? "no reason given"}), so nothing is known about leaks on this run, in either direction.`
+    };
+  }
   const reaped = censusTotal(after) === 0;
   let note;
+  let state;
   if (!labelObserved && reaped) {
+    state = "inconclusive";
     note = "INCONCLUSIVE, not clean: nothing labelled was ever seen alive, so an empty final census is equally consistent with the label never being applied. The control failed, so the denial proves nothing.";
   } else if (!labelObserved) {
+    state = "leak";
     note = "no labelled container was observed alive AND objects remain \u2014 the label wiring is wrong.";
   } else if (!reaped) {
+    state = "leak";
     note = `LEAK: ${String(censusTotal(after))} labelled object(s) survived teardown (containers=${String(after.containers.length)} volumes=${String(after.volumes.length)} networks=${String(after.networks.length)}).`;
   } else {
+    state = "clean";
     note = `clean: peak ${String(peak.containers.length)} labelled container(s) observed alive, 0 labelled objects remain after teardown.`;
   }
-  return { labelObserved, reaped, clean: labelObserved && reaped, peak, after, note };
+  return {
+    labelObserved,
+    reaped,
+    observed: true,
+    clean: labelObserved && reaped,
+    state,
+    peak,
+    after,
+    note
+  };
 }
-var RUN_LABEL_KEY, LabelWatch;
+var RUN_LABEL_KEY, LabelWatch, LEAK_STATES;
 var init_labels = __esm({
   "../../packages/envrun/dist/labels.js"() {
     "use strict";
@@ -1504,6 +1561,7 @@ var init_labels = __esm({
         return this.#samples;
       }
     };
+    LEAK_STATES = ["clean", "leak", "inconclusive", "unobserved"];
   }
 });
 
@@ -1988,7 +2046,7 @@ function acquireLocalLease(runId) {
       observed: false,
       census: { containers: [], volumes: [], networks: [] },
       unobservedReason: RELEASED_LEASE_CENSUS_REASON
-    } : { observed: true, census: census(docker3, label), unobservedReason: null }),
+    } : censusReport(docker3, label)),
     publishPreview: (req) => startPreview({ ...req, docker: docker3 }),
     release: () => {
       if (released) {
@@ -2281,6 +2339,10 @@ async function runEnvironmentSpec(req) {
     volumes: [],
     networks: []
   };
+  const observation = afterReport ?? {
+    observed: false,
+    unobservedReason: "the run carried no label, so there was nothing to count by"
+  };
   return {
     outcome: result.outcome,
     tier: "container",
@@ -2289,7 +2351,7 @@ async function runEnvironmentSpec(req) {
     test,
     installOk: result.installOk,
     counts: test ? readCounts(test.stdout, test.stderr) : null,
-    leaks: judgeLeaks(peak, after),
+    leaks: judgeLeaks(peak, after, observation),
     note: result.note,
     wallMs: Date.now() - startedAt
   };
@@ -3100,7 +3162,14 @@ function answerDidItPass(r) {
   const passed = r.status === "verified" && r.outcome !== null && isGreen(r.outcome);
   return { passed, summary: renderVerdictLine(r), lookAt: r.preview?.url ?? null };
 }
-var RUN_TEST_COMMAND_SOURCES, RUN_IMAGE_SOURCES, RUN_RESULT_SCHEMA, RUN_RESULT_FIELDS, RENDER_NONE, FIELD_VIEWS;
+function exitCodeFor(r) {
+  if (r.status === "refused")
+    return 2;
+  if (r.outcome === null)
+    return 2;
+  return OUTCOME_EXIT_CODES[r.outcome];
+}
+var RUN_TEST_COMMAND_SOURCES, RUN_IMAGE_SOURCES, RUN_RESULT_SCHEMA, RUN_RESULT_FIELDS, RENDER_NONE, FIELD_VIEWS, OUTCOME_EXIT_CODES;
 var init_result = __esm({
   "../../packages/envrun/dist/result.js"() {
     "use strict";
@@ -3144,6 +3213,7 @@ var init_result = __esm({
       "containerImageDigest",
       "imageSource",
       "leaksClean",
+      "leakState",
       "venue"
     ];
     RENDER_NONE = null;
@@ -3178,11 +3248,38 @@ var init_result = __esm({
       // Shown only when a human chose the environment. `detected` is the ordinary case and
       // saying so on every run would train the reader to skip the line that matters.
       imageSource: (r) => r.imageSource === "detected" || r.imageSource === "none" ? null : `image source ${r.imageSource} (not signed)`,
-      leaksClean: (r) => r.leaksClean === null ? null : r.leaksClean ? null : "WARNING      labelled Docker objects survived teardown",
+      // Printed through `leakState` below, which knows WHY a false is false. Rendering both would
+      // print the leak warning on a run where we merely could not look (TERM-1144).
+      leaksClean: RENDER_NONE,
+      // Silent when clean and when refused, as the boolean's line was. The two not-a-leak states
+      // get their own sentence, because "we could not check" read as "we found a leak" is the
+      // exact confusion this field exists to end.
+      leakState: (r) => {
+        switch (r.leakState) {
+          case null:
+          case "clean":
+            return null;
+          case "leak":
+            return "WARNING      labelled Docker objects survived teardown";
+          case "inconclusive":
+            return "leak check   inconclusive \u2014 no labelled container was seen while the run was live, so finding nothing afterwards proves nothing";
+          case "unobserved":
+            return "leak check   not taken \u2014 we could not check what was left after teardown";
+        }
+      },
       // Absent on most runs, so it prints only when there is something to say. Silence
       // here is the honest rendering of "no venue answered": a placeholder line would
       // invite a reader to treat an unanswered probe as a described venue.
       venue: (r) => r.venue === null ? null : renderVenueLine(r.venue)
+    };
+    OUTCOME_EXIT_CODES = {
+      completed: 0,
+      "tests-failed": 1,
+      "no-tests-observed": 1,
+      "budget-exceeded": 1,
+      "counts-unparsed": 2,
+      "test-command-unavailable": 2,
+      "environment-exhausted": 2
     };
   }
 });
@@ -5494,11 +5591,7 @@ function makeLease(p) {
       }
       try {
         check("counting what the run left behind");
-        return Promise.resolve({
-          observed: true,
-          census: census(p.docker, label),
-          unobservedReason: null
-        });
+        return Promise.resolve(censusReport(p.docker, label));
       } catch (err) {
         return Promise.resolve({
           observed: false,
@@ -7713,6 +7806,9 @@ function refusedRun(fields) {
     containerImage: null,
     containerImageDigest: null,
     leaksClean: null,
+    // Null for the same reason, and never `unobserved`: that word says we tried to take a
+    // census and could not, and here there was nothing to take one of (TERM-1144).
+    leakState: null,
     // A refused run never held a lease, so there is no venue to describe. Same
     // reasoning as `leaksClean` above: null because nothing happened, and it must
     // not read as a venue we looked at and could not name.
@@ -8072,6 +8168,7 @@ async function runVerification(req, ctx) {
       // the operator would sign our name onto their choice.
       imageSource: req.image === void 0 ? "detected" : req.imageOrigin === "operator" ? "operator-declared" : "developer-declared",
       leaksClean: verdict.leaks.clean,
+      leakState: verdict.leaks.state,
       // Built from the LEASE, over the client that ran the steps — never from
       // `req.placement`, which is a request. `venueDescriptor.ts` carries the
       // reasoning and the #735 failure that makes the distinction load-bearing.
@@ -8603,7 +8700,7 @@ function startDatabase(req) {
     if (!ready.ok) {
       throw new DbStackError(`INFRASTRUCTURE/INCONCLUSIVE: Postgres never accepted queries at 127.0.0.1:${String(creds.port)} within the readiness window: ${ready.detail}`);
     }
-    const query = (sql) => {
+    const query2 = (sql) => {
       const res = docker2([
         "exec",
         `--env=PGPASSWORD=${creds.password}`,
@@ -8651,7 +8748,7 @@ function startDatabase(req) {
       credentials: creds,
       image,
       readyMs: ready.ms,
-      query,
+      query: query2,
       runOnNetwork,
       teardown
     };
@@ -9010,6 +9107,7 @@ __export(dist_exports, {
   GOOGLE_JWKS_URL: () => GOOGLE_JWKS_URL,
   HostedVenueError: () => HostedVenueError,
   JWKS_FETCH_TIMEOUT_MS: () => JWKS_FETCH_TIMEOUT_MS,
+  LEAK_STATES: () => LEAK_STATES,
   LOCAL_MEASUREMENT_PREFIX: () => LOCAL_MEASUREMENT_PREFIX,
   LabelWatch: () => LabelWatch,
   MIN_GIT_VERSION_FOR_END_OF_OPTIONS: () => MIN_GIT_VERSION_FOR_END_OF_OPTIONS,
@@ -9043,6 +9141,7 @@ __export(dist_exports, {
   VENUE_GCLOUD_CONFIG: () => VENUE_GCLOUD_CONFIG,
   VENUE_SSH_USER: () => VENUE_SSH_USER,
   VENV_DIR: () => VENV_DIR,
+  VERIFICATION_OUTCOMES: () => VERIFICATION_OUTCOMES,
   VenueRollbackError: () => VenueRollbackError,
   acquireTransactionally: () => acquireTransactionally,
   alembicChainPosition: () => alembicChainPosition,
@@ -9056,6 +9155,7 @@ __export(dist_exports, {
   assertVenueOwnerDeclared: () => assertVenueOwnerDeclared,
   bookkeepingFor: () => bookkeepingFor,
   census: () => census,
+  censusReport: () => censusReport,
   censusTotal: () => censusTotal,
   classifyBootFailure: () => classifyBootFailure,
   classifyProbeFailure: () => classifyProbeFailure,
@@ -9075,6 +9175,7 @@ __export(dist_exports, {
   detectRunner: () => detectRunner,
   endOfOptionsUnsupported: () => endOfOptionsUnsupported,
   ensureVenueServiceCredentials: () => ensureVenueServiceCredentials,
+  exitCodeFor: () => exitCodeFor,
   failureSourceOf: () => failureSourceOf,
   findRunRefusal: () => findRunRefusal,
   gcpBootArgv: () => gcpBootArgv,
@@ -9817,8 +9918,7 @@ Expiry and revocation are not built yet (TERM-350 phase 5); Ctrl-C is the only s
     process.stderr.write(`  total    ${String(Date.now() - started)}ms
 `);
   }
-  if (result.status === "refused") return 2;
-  return result.outcome === "completed" ? 0 : 1;
+  return engine.exitCodeFor(result);
 }
 async function run() {
   const argv = process.argv.slice(2);

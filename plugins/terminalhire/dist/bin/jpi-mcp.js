@@ -2570,11 +2570,11 @@ function parseGitHubRef(url) {
     kind: m[3] === "pull" ? "pull" : "issue"
   };
 }
-async function ghGraphQL(query, variables, token, signal, governor) {
+async function ghGraphQL(query2, variables, token, signal, governor) {
   const init = {
     method: "POST",
     headers: { ...ghHeaders(token), "Content-Type": "application/json" },
-    body: JSON.stringify({ query, variables }),
+    body: JSON.stringify({ query: query2, variables }),
     signal
   };
   if (governor) {
@@ -12926,8 +12926,8 @@ var init_stringify = __esm({
 });
 
 // ../../node_modules/@anthropic-ai/sdk/internal/utils/query.mjs
-function stringifyQuery(query) {
-  return stringify(query, { arrayFormat: "brackets" });
+function stringifyQuery(query2) {
+  return stringify(query2, { arrayFormat: "brackets" });
 }
 var init_query = __esm({
   "../../node_modules/@anthropic-ai/sdk/internal/utils/query.mjs"() {
@@ -15011,9 +15011,9 @@ var init_deployment_runs = __esm({
        * ```
        */
       list(params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList("/v1/deployment_runs?beta=true", PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "managed-agents-2026-04-01"].toString() },
@@ -15125,9 +15125,9 @@ var init_deployments = __esm({
        * ```
        */
       list(params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList("/v1/deployments?beta=true", PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "managed-agents-2026-04-01"].toString() },
@@ -15287,9 +15287,9 @@ var init_dreams = __esm({
        * ```
        */
       list(params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList("/v1/dreams?beta=true", PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "dreaming-2026-04-21"].toString() },
@@ -15420,9 +15420,9 @@ var init_files = __esm({
        * ```
        */
       list(params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList("/v1/files?beta=true", Page, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "files-api-2025-04-14"].toString() },
@@ -15570,9 +15570,9 @@ var init_models = __esm({
        * ```
        */
       list(params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList("/v1/models?beta=true", Page, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { ...betas?.toString() != null ? { "anthropic-beta": betas?.toString() } : void 0 },
@@ -15669,9 +15669,9 @@ var init_user_profiles = __esm({
        * ```
        */
       list(params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList("/v1/user_profiles?beta=true", PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "user-profiles-2026-03-24"].toString() },
@@ -16530,9 +16530,9 @@ var init_versions = __esm({
        * ```
        */
       list(agentID, params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList(path`/v1/agents/${agentID}/versions?beta=true`, PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "managed-agents-2026-04-01"].toString() },
@@ -16595,9 +16595,9 @@ var init_agents = __esm({
        * ```
        */
       retrieve(agentID, params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.get(path`/v1/agents/${agentID}?beta=true`, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "managed-agents-2026-04-01"].toString() },
@@ -16640,9 +16640,9 @@ var init_agents = __esm({
        * ```
        */
       list(params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList("/v1/agents?beta=true", PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "managed-agents-2026-04-01"].toString() },
@@ -18732,9 +18732,9 @@ var init_work = __esm({
        * ```
        */
       list(environmentID, params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList(path`/v1/environments/${environmentID}/work?beta=true`, PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "managed-agents-2026-04-01"].toString() },
@@ -18813,9 +18813,9 @@ var init_work = __esm({
        * ```
        */
       poll(environmentID, params = {}, options) {
-        const { betas, "Anthropic-Worker-ID": anthropicWorkerID, ...query } = params ?? {};
+        const { betas, "Anthropic-Worker-ID": anthropicWorkerID, ...query2 } = params ?? {};
         return this._client.get(path`/v1/environments/${environmentID}/work/poll?beta=true`, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             {
@@ -19012,9 +19012,9 @@ var init_environments = __esm({
        * ```
        */
       list(params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList("/v1/environments?beta=true", PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "managed-agents-2026-04-01"].toString() },
@@ -19117,9 +19117,9 @@ var init_memories = __esm({
        * ```
        */
       retrieve(memoryID, params, options) {
-        const { memory_store_id, betas, ...query } = params;
+        const { memory_store_id, betas, ...query2 } = params;
         return this._client.get(path`/v1/memory_stores/${memory_store_id}/memories/${memoryID}?beta=true`, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "agent-memory-2026-07-22"].toString() },
@@ -19165,9 +19165,9 @@ var init_memories = __esm({
        * ```
        */
       list(memoryStoreID, params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList(path`/v1/memory_stores/${memoryStoreID}/memories?beta=true`, PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "agent-memory-2026-07-22"].toString() },
@@ -19225,9 +19225,9 @@ var init_memory_versions = __esm({
        * ```
        */
       retrieve(memoryVersionID, params, options) {
-        const { memory_store_id, betas, ...query } = params;
+        const { memory_store_id, betas, ...query2 } = params;
         return this._client.get(path`/v1/memory_stores/${memory_store_id}/memory_versions/${memoryVersionID}?beta=true`, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "agent-memory-2026-07-22"].toString() },
@@ -19249,9 +19249,9 @@ var init_memory_versions = __esm({
        * ```
        */
       list(memoryStoreID, params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList(path`/v1/memory_stores/${memoryStoreID}/memory_versions?beta=true`, PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "agent-memory-2026-07-22"].toString() },
@@ -19377,9 +19377,9 @@ var init_memory_stores = __esm({
        * ```
        */
       list(params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList("/v1/memory_stores?beta=true", PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "agent-memory-2026-07-22"].toString() },
@@ -19577,9 +19577,9 @@ var init_batches = __esm({
        * ```
        */
       list(params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList("/v1/messages/batches?beta=true", Page, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "message-batches-2024-09-24"].toString() },
@@ -21252,9 +21252,9 @@ var init_events = __esm({
        * ```
        */
       list(sessionID, params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList(path`/v1/sessions/${sessionID}/events?beta=true`, PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "managed-agents-2026-04-01"].toString() },
@@ -21309,9 +21309,9 @@ var init_events = __esm({
        * ```
        */
       stream(sessionID, params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.get(path`/v1/sessions/${sessionID}/events/stream?beta=true`, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "managed-agents-2026-04-01"].toString() },
@@ -21419,9 +21419,9 @@ var init_resources = __esm({
        * ```
        */
       list(sessionID, params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList(path`/v1/sessions/${sessionID}/resources?beta=true`, PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "managed-agents-2026-04-01"].toString() },
@@ -21506,9 +21506,9 @@ var init_events2 = __esm({
        * ```
        */
       list(threadID, params, options) {
-        const { session_id, betas, ...query } = params;
+        const { session_id, betas, ...query2 } = params;
         return this._client.getAPIList(path`/v1/sessions/${session_id}/threads/${threadID}/events?beta=true`, PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "managed-agents-2026-04-01"].toString() },
@@ -21595,9 +21595,9 @@ var init_threads = __esm({
        * ```
        */
       list(sessionID, params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList(path`/v1/sessions/${sessionID}/threads?beta=true`, PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "managed-agents-2026-04-01"].toString() },
@@ -21732,9 +21732,9 @@ var init_sessions = __esm({
        * ```
        */
       list(params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList("/v1/sessions?beta=true", BidirectionalPageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "managed-agents-2026-04-01"].toString() },
@@ -21859,9 +21859,9 @@ var init_versions2 = __esm({
        * ```
        */
       list(skillID, params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList(path`/v1/skills/${skillID}/versions?beta=true`, PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "skills-2025-10-02"].toString() },
@@ -21990,9 +21990,9 @@ var init_skills2 = __esm({
        * ```
        */
       list(params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList("/v1/skills?beta=true", PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "skills-2025-10-02"].toString() },
@@ -22110,9 +22110,9 @@ var init_certificates = __esm({
        * ```
        */
       list(tunnelID, params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList(path`/v1/tunnels/${tunnelID}/certificates?beta=true`, PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "mcp-tunnels-2026-06-22"].toString() },
@@ -22239,9 +22239,9 @@ var init_tunnels = __esm({
        * ```
        */
       list(params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList("/v1/tunnels?beta=true", PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "mcp-tunnels-2026-06-22"].toString() },
@@ -22435,9 +22435,9 @@ var init_credentials2 = __esm({
        * ```
        */
       list(vaultID, params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList(path`/v1/vaults/${vaultID}/credentials?beta=true`, PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "managed-agents-2026-04-01"].toString() },
@@ -22608,9 +22608,9 @@ var init_vaults = __esm({
        * ```
        */
       list(params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList("/v1/vaults?beta=true", PageCursor, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { "anthropic-beta": [...betas ?? [], "managed-agents-2026-04-01"].toString() },
@@ -23496,8 +23496,8 @@ var init_batches2 = __esm({
        * }
        * ```
        */
-      list(query = {}, options) {
-        return this._client.getAPIList("/v1/messages/batches", Page, { query, ...options });
+      list(query2 = {}, options) {
+        return this._client.getAPIList("/v1/messages/batches", Page, { query: query2, ...options });
       }
       /**
        * Delete a Message Batch.
@@ -23753,9 +23753,9 @@ var init_models2 = __esm({
        * use in the API. More recently released models are listed first.
        */
       list(params = {}, options) {
-        const { betas, ...query } = params ?? {};
+        const { betas, ...query2 } = params ?? {};
         return this._client.getAPIList("/v1/models", Page, {
-          query,
+          query: query2,
           ...options,
           headers: buildHeaders([
             { ...betas?.toString() != null ? { "anthropic-beta": betas?.toString() } : void 0 },
@@ -24104,8 +24104,8 @@ var init_client = __esm({
         }
         return buildHeaders([{ Authorization: `Bearer ${this.authToken}` }]);
       }
-      stringifyQuery(query) {
-        return stringifyQuery(query);
+      stringifyQuery(query2) {
+        return stringifyQuery(query2);
       }
       getUserAgent() {
         return `${this.constructor.name}/JS ${VERSION}`;
@@ -24116,16 +24116,16 @@ var init_client = __esm({
       makeStatusError(status, error2, message, headers) {
         return APIError.generate(status, error2, message, headers);
       }
-      buildURL(path5, query, defaultBaseURL) {
+      buildURL(path5, query2, defaultBaseURL) {
         const baseURL = !__classPrivateFieldGet(this, _BaseAnthropic_instances, "m", _BaseAnthropic_baseURLOverridden).call(this) && defaultBaseURL || this.baseURL;
         const url = isAbsoluteURL(path5) ? new URL(path5) : new URL(baseURL + (baseURL.endsWith("/") && path5.startsWith("/") ? path5.slice(1) : path5));
         const defaultQuery = this.defaultQuery();
         const pathQuery = Object.fromEntries(url.searchParams);
         if (!isEmptyObj(defaultQuery) || !isEmptyObj(pathQuery)) {
-          query = { ...pathQuery, ...defaultQuery, ...query };
+          query2 = { ...pathQuery, ...defaultQuery, ...query2 };
         }
-        if (typeof query === "object" && query && !Array.isArray(query)) {
-          url.search = this.stringifyQuery(query);
+        if (typeof query2 === "object" && query2 && !Array.isArray(query2)) {
+          url.search = this.stringifyQuery(query2);
         }
         return url.toString();
       }
@@ -24438,14 +24438,14 @@ var init_client = __esm({
       }
       async buildRequest(inputOptions, { retryCount = 0 } = {}) {
         const options = { ...inputOptions };
-        const { method, path: path5, query, defaultBaseURL } = options;
+        const { method, path: path5, query: query2, defaultBaseURL } = options;
         if (this._authState.resolution) {
           await this._authState.resolution;
         }
         if (!this._baseURLIsExplicit && this._authState.baseURL && this.baseURL !== this._authState.baseURL) {
           this.baseURL = this._authState.baseURL;
         }
-        const url = this.buildURL(path5, query, defaultBaseURL);
+        const url = this.buildURL(path5, query2, defaultBaseURL);
         if ("timeout" in options)
           validatePositiveInteger("timeout", options.timeout);
         options.timeout = options.timeout ?? this.timeout;
@@ -24563,8 +24563,8 @@ function stripFallbackBlocks(body) {
 function betaRefusalFallbackMiddleware(fallbacks, options = {}) {
   let warnedMissingState = false;
   return async (request, next, ctx) => {
-    const [path5, query] = (ctx.options?.path ?? "").split("?");
-    if (fallbacks.length === 0 || ctx.options?.method !== "post" || path5 !== "/v1/messages" || new URLSearchParams(query).get("beta") !== "true" || typeof ctx.options.body !== "object" || ctx.options.body == null) {
+    const [path5, query2] = (ctx.options?.path ?? "").split("?");
+    if (fallbacks.length === 0 || ctx.options?.method !== "post" || path5 !== "/v1/messages" || new URLSearchParams(query2).get("beta") !== "true" || typeof ctx.options.body !== "object" || ctx.options.body == null) {
       return next(request);
     }
     if (ctx.options.body.fallbacks != null) {
@@ -26654,10 +26654,19 @@ function isGreen(outcome) {
 function isOurFault(outcome) {
   return outcome === "test-command-unavailable" || outcome === "counts-unparsed";
 }
-var int, withSuiteFailures, READERS, SUPPORTED_RUNNERS, COVERAGE_TABLE, EXEC_FAILURE, SUITE_REPORTED_FAILURE;
+var VERIFICATION_OUTCOMES, int, withSuiteFailures, READERS, SUPPORTED_RUNNERS, COVERAGE_TABLE, EXEC_FAILURE, SUITE_REPORTED_FAILURE;
 var init_classify2 = __esm({
   "../../packages/envrun/dist/classify.js"() {
     "use strict";
+    VERIFICATION_OUTCOMES = [
+      "completed",
+      "tests-failed",
+      "no-tests-observed",
+      "counts-unparsed",
+      "test-command-unavailable",
+      "environment-exhausted",
+      "budget-exceeded"
+    ];
     int = (m, i = 1) => m ? Number(m[i]) : 0;
     withSuiteFailures = (counts, suiteLine) => {
       if (counts.tests_failed > 0 || !suiteLine)
@@ -27940,11 +27949,17 @@ var init_dist = __esm({
 function censusTotal(c) {
   return c.containers.length + c.volumes.length + c.networks.length;
 }
-function ids(docker3, args) {
+function query(docker3, args) {
   const res = docker3.sync([...args], { timeoutMs: 15e3 });
-  if (res.error || res.status !== 0)
-    return [];
-  return res.stdout.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
+  if (res.error || res.status !== 0) {
+    const why = res.error?.message ?? (res.stderr.trim() || `exit ${String(res.status)}`);
+    return { ids: [], failure: `docker ${args.slice(0, 2).join(" ")}: ${why}` };
+  }
+  const ids2 = res.stdout.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
+  return { ids: ids2, failure: null };
+}
+function ids(docker3, args) {
+  return query(docker3, args).ids;
 }
 function census(docker3, label) {
   const filter = `label=${label}`;
@@ -27954,25 +27969,67 @@ function census(docker3, label) {
     networks: ids(docker3, ["network", "ls", "-q", "--filter", filter])
   };
 }
+function censusReport(docker3, label) {
+  const filter = `label=${label}`;
+  const failures = [];
+  const ask2 = (args) => {
+    const q = query(docker3, args);
+    if (q.failure !== null)
+      failures.push(q.failure);
+    return q.ids;
+  };
+  const taken = {
+    containers: ask2(["ps", "-aq", "--filter", filter]),
+    volumes: ask2(["volume", "ls", "-q", "--filter", filter]),
+    networks: ask2(["network", "ls", "-q", "--filter", filter])
+  };
+  return failures.length === 0 ? { observed: true, census: taken, unobservedReason: null } : { observed: false, census: taken, unobservedReason: failures.join("; ") };
+}
 function localCensus(label) {
   return census(localDockerClient(), label);
 }
-function judgeLeaks(peak, after) {
+function judgeLeaks(peak, after, observation) {
   const labelObserved = peak.containers.length > 0;
+  if (!observation.observed) {
+    return {
+      labelObserved,
+      reaped: false,
+      observed: false,
+      clean: false,
+      state: "unobserved",
+      peak,
+      after,
+      note: `UNOBSERVED, not clean: we could not look at what survived teardown (${observation.unobservedReason ?? "no reason given"}), so nothing is known about leaks on this run, in either direction.`
+    };
+  }
   const reaped = censusTotal(after) === 0;
   let note;
+  let state;
   if (!labelObserved && reaped) {
+    state = "inconclusive";
     note = "INCONCLUSIVE, not clean: nothing labelled was ever seen alive, so an empty final census is equally consistent with the label never being applied. The control failed, so the denial proves nothing.";
   } else if (!labelObserved) {
+    state = "leak";
     note = "no labelled container was observed alive AND objects remain \u2014 the label wiring is wrong.";
   } else if (!reaped) {
+    state = "leak";
     note = `LEAK: ${String(censusTotal(after))} labelled object(s) survived teardown (containers=${String(after.containers.length)} volumes=${String(after.volumes.length)} networks=${String(after.networks.length)}).`;
   } else {
+    state = "clean";
     note = `clean: peak ${String(peak.containers.length)} labelled container(s) observed alive, 0 labelled objects remain after teardown.`;
   }
-  return { labelObserved, reaped, clean: labelObserved && reaped, peak, after, note };
+  return {
+    labelObserved,
+    reaped,
+    observed: true,
+    clean: labelObserved && reaped,
+    state,
+    peak,
+    after,
+    note
+  };
 }
-var RUN_LABEL_KEY, LabelWatch;
+var RUN_LABEL_KEY, LabelWatch, LEAK_STATES;
 var init_labels = __esm({
   "../../packages/envrun/dist/labels.js"() {
     "use strict";
@@ -28027,6 +28084,7 @@ var init_labels = __esm({
         return this.#samples;
       }
     };
+    LEAK_STATES = ["clean", "leak", "inconclusive", "unobserved"];
   }
 });
 
@@ -28511,7 +28569,7 @@ function acquireLocalLease(runId) {
       observed: false,
       census: { containers: [], volumes: [], networks: [] },
       unobservedReason: RELEASED_LEASE_CENSUS_REASON
-    } : { observed: true, census: census(docker3, label), unobservedReason: null }),
+    } : censusReport(docker3, label)),
     publishPreview: (req) => startPreview({ ...req, docker: docker3 }),
     release: () => {
       if (released) {
@@ -28804,6 +28862,10 @@ async function runEnvironmentSpec(req) {
     volumes: [],
     networks: []
   };
+  const observation = afterReport ?? {
+    observed: false,
+    unobservedReason: "the run carried no label, so there was nothing to count by"
+  };
   return {
     outcome: result.outcome,
     tier: "container",
@@ -28812,7 +28874,7 @@ async function runEnvironmentSpec(req) {
     test,
     installOk: result.installOk,
     counts: test ? readCounts(test.stdout, test.stderr) : null,
-    leaks: judgeLeaks(peak, after),
+    leaks: judgeLeaks(peak, after, observation),
     note: result.note,
     wallMs: Date.now() - startedAt
   };
@@ -29623,7 +29685,14 @@ function answerDidItPass(r) {
   const passed = r.status === "verified" && r.outcome !== null && isGreen(r.outcome);
   return { passed, summary: renderVerdictLine(r), lookAt: r.preview?.url ?? null };
 }
-var RUN_TEST_COMMAND_SOURCES, RUN_IMAGE_SOURCES, RUN_RESULT_SCHEMA, RUN_RESULT_FIELDS, RENDER_NONE, FIELD_VIEWS;
+function exitCodeFor(r) {
+  if (r.status === "refused")
+    return 2;
+  if (r.outcome === null)
+    return 2;
+  return OUTCOME_EXIT_CODES[r.outcome];
+}
+var RUN_TEST_COMMAND_SOURCES, RUN_IMAGE_SOURCES, RUN_RESULT_SCHEMA, RUN_RESULT_FIELDS, RENDER_NONE, FIELD_VIEWS, OUTCOME_EXIT_CODES;
 var init_result = __esm({
   "../../packages/envrun/dist/result.js"() {
     "use strict";
@@ -29667,6 +29736,7 @@ var init_result = __esm({
       "containerImageDigest",
       "imageSource",
       "leaksClean",
+      "leakState",
       "venue"
     ];
     RENDER_NONE = null;
@@ -29701,11 +29771,38 @@ var init_result = __esm({
       // Shown only when a human chose the environment. `detected` is the ordinary case and
       // saying so on every run would train the reader to skip the line that matters.
       imageSource: (r) => r.imageSource === "detected" || r.imageSource === "none" ? null : `image source ${r.imageSource} (not signed)`,
-      leaksClean: (r) => r.leaksClean === null ? null : r.leaksClean ? null : "WARNING      labelled Docker objects survived teardown",
+      // Printed through `leakState` below, which knows WHY a false is false. Rendering both would
+      // print the leak warning on a run where we merely could not look (TERM-1144).
+      leaksClean: RENDER_NONE,
+      // Silent when clean and when refused, as the boolean's line was. The two not-a-leak states
+      // get their own sentence, because "we could not check" read as "we found a leak" is the
+      // exact confusion this field exists to end.
+      leakState: (r) => {
+        switch (r.leakState) {
+          case null:
+          case "clean":
+            return null;
+          case "leak":
+            return "WARNING      labelled Docker objects survived teardown";
+          case "inconclusive":
+            return "leak check   inconclusive \u2014 no labelled container was seen while the run was live, so finding nothing afterwards proves nothing";
+          case "unobserved":
+            return "leak check   not taken \u2014 we could not check what was left after teardown";
+        }
+      },
       // Absent on most runs, so it prints only when there is something to say. Silence
       // here is the honest rendering of "no venue answered": a placeholder line would
       // invite a reader to treat an unanswered probe as a described venue.
       venue: (r) => r.venue === null ? null : renderVenueLine(r.venue)
+    };
+    OUTCOME_EXIT_CODES = {
+      completed: 0,
+      "tests-failed": 1,
+      "no-tests-observed": 1,
+      "budget-exceeded": 1,
+      "counts-unparsed": 2,
+      "test-command-unavailable": 2,
+      "environment-exhausted": 2
     };
   }
 });
@@ -32017,11 +32114,7 @@ function makeLease(p) {
       }
       try {
         check("counting what the run left behind");
-        return Promise.resolve({
-          observed: true,
-          census: census(p.docker, label),
-          unobservedReason: null
-        });
+        return Promise.resolve(censusReport(p.docker, label));
       } catch (err) {
         return Promise.resolve({
           observed: false,
@@ -34236,6 +34329,9 @@ function refusedRun(fields) {
     containerImage: null,
     containerImageDigest: null,
     leaksClean: null,
+    // Null for the same reason, and never `unobserved`: that word says we tried to take a
+    // census and could not, and here there was nothing to take one of (TERM-1144).
+    leakState: null,
     // A refused run never held a lease, so there is no venue to describe. Same
     // reasoning as `leaksClean` above: null because nothing happened, and it must
     // not read as a venue we looked at and could not name.
@@ -34595,6 +34691,7 @@ async function runVerification(req, ctx) {
       // the operator would sign our name onto their choice.
       imageSource: req.image === void 0 ? "detected" : req.imageOrigin === "operator" ? "operator-declared" : "developer-declared",
       leaksClean: verdict.leaks.clean,
+      leakState: verdict.leaks.state,
       // Built from the LEASE, over the client that ran the steps — never from
       // `req.placement`, which is a request. `venueDescriptor.ts` carries the
       // reasoning and the #735 failure that makes the distinction load-bearing.
@@ -35126,7 +35223,7 @@ function startDatabase(req) {
     if (!ready.ok) {
       throw new DbStackError(`INFRASTRUCTURE/INCONCLUSIVE: Postgres never accepted queries at 127.0.0.1:${String(creds.port)} within the readiness window: ${ready.detail}`);
     }
-    const query = (sql) => {
+    const query2 = (sql) => {
       const res = docker2([
         "exec",
         `--env=PGPASSWORD=${creds.password}`,
@@ -35174,7 +35271,7 @@ function startDatabase(req) {
       credentials: creds,
       image,
       readyMs: ready.ms,
-      query,
+      query: query2,
       runOnNetwork,
       teardown
     };
@@ -35533,6 +35630,7 @@ __export(dist_exports, {
   GOOGLE_JWKS_URL: () => GOOGLE_JWKS_URL,
   HostedVenueError: () => HostedVenueError,
   JWKS_FETCH_TIMEOUT_MS: () => JWKS_FETCH_TIMEOUT_MS,
+  LEAK_STATES: () => LEAK_STATES,
   LOCAL_MEASUREMENT_PREFIX: () => LOCAL_MEASUREMENT_PREFIX,
   LabelWatch: () => LabelWatch,
   MIN_GIT_VERSION_FOR_END_OF_OPTIONS: () => MIN_GIT_VERSION_FOR_END_OF_OPTIONS,
@@ -35566,6 +35664,7 @@ __export(dist_exports, {
   VENUE_GCLOUD_CONFIG: () => VENUE_GCLOUD_CONFIG,
   VENUE_SSH_USER: () => VENUE_SSH_USER,
   VENV_DIR: () => VENV_DIR,
+  VERIFICATION_OUTCOMES: () => VERIFICATION_OUTCOMES,
   VenueRollbackError: () => VenueRollbackError,
   acquireTransactionally: () => acquireTransactionally,
   alembicChainPosition: () => alembicChainPosition,
@@ -35579,6 +35678,7 @@ __export(dist_exports, {
   assertVenueOwnerDeclared: () => assertVenueOwnerDeclared,
   bookkeepingFor: () => bookkeepingFor,
   census: () => census,
+  censusReport: () => censusReport,
   censusTotal: () => censusTotal,
   classifyBootFailure: () => classifyBootFailure,
   classifyProbeFailure: () => classifyProbeFailure,
@@ -35598,6 +35698,7 @@ __export(dist_exports, {
   detectRunner: () => detectRunner,
   endOfOptionsUnsupported: () => endOfOptionsUnsupported,
   ensureVenueServiceCredentials: () => ensureVenueServiceCredentials,
+  exitCodeFor: () => exitCodeFor,
   failureSourceOf: () => failureSourceOf,
   findRunRefusal: () => findRunRefusal,
   gcpBootArgv: () => gcpBootArgv,
@@ -53407,9 +53508,9 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path5, query] = wsComponent.resourceName.split("?");
+        const [path5, query2] = wsComponent.resourceName.split("?");
         wsComponent.path = path5 && path5 !== "/" ? path5 : void 0;
-        wsComponent.query = query;
+        wsComponent.query = query2;
         wsComponent.resourceName = void 0;
       }
       wsComponent.fragment = void 0;
