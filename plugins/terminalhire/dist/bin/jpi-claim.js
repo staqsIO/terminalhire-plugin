@@ -26050,7 +26050,7 @@ ${facts.stderr}`))
   return null;
 }
 function isCommandUnavailable(facts, countsRead) {
-  if (facts.exitCode === 127 || facts.exitCode === 126)
+  if (facts.exitCode === 127 || facts.exitCode === 126 || facts.exitCode === 125)
     return true;
   if (countsRead)
     return false;
@@ -26273,6 +26273,79 @@ var init_classify2 = __esm({
           const p = int(passed);
           return { tests_passed: p, tests_failed: Math.max(0, t - p) };
         }
+      },
+      {
+        /**
+         * BARE TAP — assertion lines with no plan and no summary comment (TERM-1138).
+         *
+         * LAST ON PURPOSE. It is the loosest reader here, so anything that a more specific
+         * one can read must reach that one first: `node --test` and node-tap both emit `ok`
+         * lines AND a closing summary, and their readers are ordered above for that reason.
+         * Moving this up would have it answer for both.
+         *
+         * A hand-rolled harness prints neither summary — it emits its assertions and stops.
+         * That is what morebetterltd/wheelhouse does: thirty `ok N - …` lines, exit 0, and
+         * before this every one of those runs reported `counts-unparsed`, which the claim
+         * page renders as "RESULT UNREADABLE — THE SUITE EXITED 0" over a suite that passed.
+         *
+         * ON THE MISSING PLAN LINE. TAP requires `1..N` so a reader can tell a finished
+         * stream from a truncated one, and there is none here, so this cannot prove the
+         * suite reached its end. That is a real limit and it is NOT a reason to refuse,
+         * because it holds this format to a standard no reader in this file meets — the
+         * jest reader greps a line out of stdout that a repository could `echo` without
+         * running anything. These are format adapters, not a trust boundary; the boundary
+         * is that the command is the repository's own or is refused a signature.
+         *
+         * CONTIGUOUS FROM 1, which buys self-consistency rather than security:
+         *
+         *   - starting at 1 rejects a TRUNCATION. `testOutputTail` keeps the last lines, so
+         *     a stream beginning `ok 47` is the middle of a longer run and counting it would
+         *     report three tests for a suite that ran fifty.
+         *   - no gaps rejects prose that happens to carry the word, and a stream interleaved
+         *     with another's.
+         *   - anchored with no leading space rejects TAP SUBTESTS, which indent. Counting
+         *     those would double them against their parent.
+         */
+        runner: "bare TAP",
+        read: (out) => {
+          let n = 0;
+          let failed = 0;
+          let passed = 0;
+          let plan = null;
+          for (const line of out.split("\n")) {
+            if (/^Bail out!/.test(line))
+              return null;
+            const p = /^(\d+)\.\.(\d+)\s*$/.exec(line);
+            if (p) {
+              const declared = Number(p[2]) - Number(p[1]) + 1;
+              if (plan !== null && plan !== declared)
+                return null;
+              plan = declared;
+              continue;
+            }
+            const m = /^(not )?ok (\d+)(?:\s|$)/.exec(line);
+            if (!m)
+              continue;
+            if (Number(m[2]) !== n + 1)
+              return null;
+            n += 1;
+            const directive = /#\s*(skip|todo)\b/i.exec(line);
+            const kind = directive?.[1]?.toLowerCase();
+            if (kind === "skip")
+              continue;
+            if (m[1] !== void 0) {
+              if (kind !== "todo")
+                failed += 1;
+              continue;
+            }
+            passed += 1;
+          }
+          if (n === 0)
+            return null;
+          if (plan !== null && plan !== n)
+            return null;
+          return { tests_passed: passed, tests_failed: failed };
+        }
       }
     ];
     SUPPORTED_RUNNERS = READERS.map((r) => r.runner);
@@ -26359,6 +26432,10 @@ function scrubEnv(source, opts) {
   env["GOCACHE"] = join18(jailHome, ".cache", "go-build");
   env["GOFLAGS"] = "-modcacherw";
   env["CARGO_HOME"] = join18(jailHome, ".cargo");
+  const bundle = join18(jailHome, ".bundle");
+  env["GEM_HOME"] = bundle;
+  env["BUNDLE_PATH"] = bundle;
+  env["BUNDLE_APP_CONFIG"] = bundle;
   const proxy = opts.proxyUrl ?? DEAD_PROXY;
   env["HTTP_PROXY"] = proxy;
   env["HTTPS_PROXY"] = proxy;
@@ -26659,6 +26736,19 @@ var init_egressProxy = __esm({
       "static.crates.io",
       "index.crates.io",
       "crates.io",
+      // TERM-1139. `ruby` has had an image since the mapping existed and `bundle install`
+      // as its derived command, and this host was missing — so every ruby repo could start
+      // and could never install. Install is the ONLY step with a network grant at all, so a
+      // denial here is terminal, not a slow path.
+      //
+      // One entry, not two: `hostAllowed` is dot-anchored SUFFIX matching, so this covers
+      // `index.rubygems.org` as well. Listing that separately would advertise the grant as
+      // narrower than it is, which the `github.com` note below rejects for the same reason.
+      "rubygems.org",
+      // TERM-1139, added with the `dotnet` image mapping. `dotnet restore` fetches from
+      // NuGet; the coupling test refuses a mapped runtime whose registry is unreachable, and
+      // it caught this one the moment the image landed.
+      "api.nuget.org",
       // Git dependencies. Approved by Eric 2026-07-22 after a live run measured the
       // chokepoint working under load (20 events, 16 allowed / 4 denied by host).
       //
@@ -28040,7 +28130,7 @@ function imageForRuntime(runtime, override, version) {
     return override;
   const shape = RUNTIME_IMAGES[runtime];
   if (!shape) {
-    throw new RunRefusalError(`no container image is mapped for runtime ${JSON.stringify(runtime)}. Refusing to run it in the Node image: a missing interpreter surfaces as "command not found", which the classifier reads as tests-failed \u2014 a false red blamed on the repo.`);
+    throw new RunRefusalError(`no container image is mapped for runtime ${JSON.stringify(runtime)}. Refusing to run it in the Node image: a bare "command not found" exits 127, which classifyVerification already owns as ours \u2014 but a test script that RUNS and fails inside on the missing tool exits with its own status and prints to stdout, and that falls through to tests-failed \u2014 a false red blamed on the repo.`);
   }
   if (version === void 0 || version === null)
     return unversionedImage(shape);
@@ -28291,7 +28381,37 @@ var init_execute = __esm({
       },
       go: { repository: "golang", suffix: "-bookworm", defaultVersion: "1.23", declaredIsFloor: true },
       ruby: { repository: "ruby", suffix: "-bookworm", defaultVersion: "3.3", declaredIsFloor: false },
-      rust: { repository: "rust", suffix: "-bookworm", defaultVersion: "1", declaredIsFloor: true }
+      rust: { repository: "rust", suffix: "-bookworm", defaultVersion: "1", declaredIsFloor: true },
+      /**
+       * TERM-1139. `dotnet` was unmapped alongside `jvm`, and the recorded reason was that
+       * neither had "a single obvious base image (gradle vs maven, sdk vs runtime)". That
+       * reason holds for jvm and it does NOT hold here, which is why only this half moved.
+       *
+       * "sdk vs runtime" answers itself: the derived commands are `dotnet restore` and
+       * `dotnet test`, and neither exists on the runtime image. There is no second build
+       * tool competing for the slot the way maven and gradle compete for jvm's — and since
+       * no official image carries both of those, jvm genuinely cannot be served by one key.
+       *
+       * MEASURED, not chosen by tag: `mcr.microsoft.com/dotnet/sdk:8.0` carries `git` and
+       * `dotnet` (881MB). `git` is the property the whole `image-tooling-live` test exists
+       * for, and `eclipse-temurin:21-jdk` was rejected here for lacking it.
+       *
+       * The tag shape fits without touching the builder: the SDK publishes a tag per
+       * version, so `repository:VERSION` is a real image at every version envspec can
+       * derive, with no suffix. That is NOT true of the maven images, where the leading
+       * tag component is maven's version and Java's sits in the suffix.
+       *
+       * `declaredIsFloor` is true on the same reasoning as go and rust: an SDK builds
+       * older target frameworks, so booting 8.0 for a repo asking 6.0 is the supported
+       * case rather than a substitution. A repo asking for something NEWER than our
+       * default still refuses, which is where TERM-643 put that line.
+       */
+      dotnet: {
+        repository: "mcr.microsoft.com/dotnet/sdk",
+        suffix: "",
+        defaultVersion: "8.0",
+        declaredIsFloor: true
+      }
     };
     unversionedImage = (shape) => `${shape.repository}:${shape.defaultVersion}${shape.suffix}`;
     TAG_VERSION = /^\d+(?:\.\d+){0,2}$/;
@@ -28985,14 +29105,24 @@ function answerDidItPass(r) {
   const passed = r.status === "verified" && r.outcome !== null && isGreen(r.outcome);
   return { passed, summary: renderVerdictLine(r), lookAt: r.preview?.url ?? null };
 }
-var RUN_TEST_COMMAND_SOURCES, RUN_RESULT_SCHEMA, RUN_RESULT_FIELDS, RENDER_NONE, FIELD_VIEWS;
+var RUN_TEST_COMMAND_SOURCES, RUN_IMAGE_SOURCES, RUN_RESULT_SCHEMA, RUN_RESULT_FIELDS, RENDER_NONE, FIELD_VIEWS;
 var init_result = __esm({
   "../../packages/envrun/dist/result.js"() {
     "use strict";
     init_dist2();
     init_classify2();
     init_venueDescriptor();
-    RUN_TEST_COMMAND_SOURCES = [...TEST_COMMAND_SOURCES, "developer-declared"];
+    RUN_TEST_COMMAND_SOURCES = [
+      ...TEST_COMMAND_SOURCES,
+      "developer-declared",
+      "operator-declared"
+    ];
+    RUN_IMAGE_SOURCES = [
+      "detected",
+      "none",
+      "operator-declared",
+      "developer-declared"
+    ];
     RUN_RESULT_SCHEMA = "terminalhire.verification-run/1";
     RUN_RESULT_FIELDS = [
       "schema",
@@ -29017,6 +29147,7 @@ var init_result = __esm({
       "preview",
       "containerImage",
       "containerImageDigest",
+      "imageSource",
       "leaksClean",
       "venue"
     ];
@@ -29049,6 +29180,9 @@ var init_result = __esm({
       preview: (r) => r.preview === null ? null : `preview      ${r.preview.url}`,
       containerImage: (r) => r.containerImage === null ? null : `image        ${r.containerImage}`,
       containerImageDigest: (r) => r.containerImageDigest === null ? null : `image digest ${r.containerImageDigest}`,
+      // Shown only when a human chose the environment. `detected` is the ordinary case and
+      // saying so on every run would train the reader to skip the line that matters.
+      imageSource: (r) => r.imageSource === "detected" || r.imageSource === "none" ? null : `image source ${r.imageSource} (not signed)`,
       leaksClean: (r) => r.leaksClean === null ? null : r.leaksClean ? null : "WARNING      labelled Docker objects survived teardown",
       // Absent on most runs, so it prints only when there is something to say. Silence
       // here is the honest rendering of "no venue answered": a placeholder line would
@@ -29175,11 +29309,22 @@ function toAcceptancePredicate(pair, opts = {}) {
     if (why !== null)
       return refuse3("test-command-origin-unattested", `the ${side} run ${why}`);
   }
-  if (patched.testCommandSource === "developer-declared") {
-    return refuse3("test-command-origin-unattested", "the developer supplied the test command (unreachable \u2014 the source rules above cover it)");
+  if (patched.testCommandSource === "developer-declared" || patched.testCommandSource === "operator-declared") {
+    return refuse3("test-command-origin-unattested", `${patched.testCommandSource === "developer-declared" ? "the developer" : "an operator"} supplied the test command (unreachable \u2014 the source rules above cover it)`);
   }
   if (baseline.testCommandSource !== patched.testCommandSource) {
     return refuse3("test-command-origin-unattested", `the pair disagrees on where the command came from: baseline ${baseline.testCommandSource}, patched ${patched.testCommandSource}. One signed value cannot describe both.`);
+  }
+  for (const [side, source, image] of [
+    ["patched", patched.imageSource, patched.containerImage],
+    ["baseline", baseline.imageSource, baseline.containerImage]
+  ]) {
+    const why = IMAGE_SOURCE_IS_SIGNABLE[source](image);
+    if (why !== null)
+      return refuse3("image-origin-unattested", `the ${side} run ${why}`);
+  }
+  if (baseline.imageSource !== patched.imageSource) {
+    return refuse3("image-origin-unattested", `the pair disagrees on where the image came from: baseline ${baseline.imageSource}, patched ${patched.imageSource}. The environment is part of what the statement says was held constant.`);
   }
   if (baseline.containerImage !== patched.containerImage) {
     return refuse3("pair-disagrees-on-image", `baseline ran in ${String(baseline.containerImage)} and patched in ${String(patched.containerImage)}. The signed measurement names one image, so a pair from two environments would attribute to the patch whatever the image changed.`);
@@ -29237,7 +29382,7 @@ function signRunStatement(predicate, privateKey, keyid) {
   const statement = createAcceptanceStatement(predicate);
   return { statement, envelope: signStatement(statement, privateKey, keyid) };
 }
-var OUTCOME_TO_BUDGET, BASELINE_IS_A_VERDICT, CONTRADICTS_COUNTS, SOURCE_IS_SIGNABLE, ATTEST_REFUSAL_REASONS, refuse3, LOCAL_MEASUREMENT_PREFIX, REFERENCE_DOMAIN_COMPONENT, REFERENCE_DOMAIN_NAME, REFERENCE_IPV6, REFERENCE_DOMAIN, REFERENCE_PATH_COMPONENT, REPO_DIGEST_RE;
+var OUTCOME_TO_BUDGET, BASELINE_IS_A_VERDICT, CONTRADICTS_COUNTS, SOURCE_IS_SIGNABLE, IMAGE_SOURCE_IS_SIGNABLE, ATTEST_REFUSAL_REASONS, refuse3, LOCAL_MEASUREMENT_PREFIX, REFERENCE_DOMAIN_COMPONENT, REFERENCE_DOMAIN_NAME, REFERENCE_IPV6, REFERENCE_DOMAIN, REFERENCE_PATH_COMPONENT, REPO_DIGEST_RE;
 var init_attestation2 = __esm({
   "../../packages/envrun/dist/attestation.js"() {
     "use strict";
@@ -29293,10 +29438,24 @@ var init_attestation2 = __esm({
       // The party under verification chose it, and no signed member can say so. Per ADR-005
       // Decision 2, emit nothing rather than pick the closest word.
       "developer-declared": () => "had its test command supplied by the developer whose work is under verification, and the signed vocabulary has no member for that. `founder-declared` would attribute the choice to the other party; `detected` would claim the repo chose it. Both are false.",
+      // US, out of band, per posting — the twin of `IMAGE_SOURCE_IS_SIGNABLE['operator-declared']`
+      // and refusing for the same reason. `founder-declared` is the nearest signed member and it
+      // is still false: the poster did not choose this, we did, and signing our own choice under
+      // the counterparty's name is the specific false attribution the `developer-declared` entry
+      // above exists to refuse. Decision 2 — emit nothing rather than pick the closest word.
+      "operator-declared": () => "had its test command chosen by an operator out of band, and the signed vocabulary has no member for that. Signing it would present a hand-picked command as one the repository chose for itself.",
       // `none` means nobody chose a command, so a command beside it is a contradiction. Shadowed
       // today — `thrun.ts` sets `none` only when the derived command is null, and `no-test-command`
       // fires first — but that coupling runs through `runEnvironmentSpec` and lives in no type.
       none: (command) => command === null ? null : `records its command source as \`none\` \u2014 nobody chose one \u2014 beside the command ${JSON.stringify(command)}`
+    };
+    IMAGE_SOURCE_IS_SIGNABLE = {
+      detected: () => null,
+      "operator-declared": () => "had its container image chosen by an operator out of band, and the signed vocabulary has no member for that. Signing it would present a hand-picked environment as the one the runtime mapping selected.",
+      "developer-declared": () => "had its container image supplied by the developer whose work is under verification. A chosen interpreter turns a red suite green as surely as a chosen test command.",
+      // `none` means no image was booted, so an image name beside it is a contradiction — the
+      // `SOURCE_IS_SIGNABLE.none` argument, applied to the other field.
+      none: (image) => image === null ? null : `records its image source as \`none\` \u2014 nothing was booted \u2014 beside the image ${JSON.stringify(image)}`
     };
     ATTEST_REFUSAL_REASONS = [
       "our-environment-failed",
@@ -29339,7 +29498,11 @@ var init_attestation2 = __esm({
       // The signed triple must be reproducible from what it names — see the guard.
       "patch-binding-incomplete",
       "outcome-contradicts-counts",
-      "test-command-origin-unattested"
+      "test-command-origin-unattested",
+      // The environment half of the pair above. `pair-disagrees-on-image` compares image NAMES;
+      // this one asks who CHOSE the name, which no comparison of the two halves can reveal when
+      // both were handed the same override.
+      "image-origin-unattested"
     ];
     refuse3 = (reason, detail) => ({
       ok: false,
@@ -29843,13 +30006,20 @@ function gcpBootArgv(p) {
     // steal". Attaching an account removes that, so the safety now rests on two things,
     // and this change MUST land together with proof #2 — never ahead of it:
     //
-    //   1. `--no-scopes` + ZERO project roles bound the BLAST RADIUS of a lifted token.
-    //      No scopes → the OAuth access-token endpoint serves nothing (measured,
-    //      TERM-706); zero roles → the token authorizes no GCP API. But it is NOT
-    //      valueless: it is the attestation evidence itself, so a lifted token still
-    //      authorizes a false claim about WHERE a run happened (the steal-a-true-token
-    //      attack in the item-2 spike). `--no-scopes` stays because it removes lateral
-    //      GCP access; it does not make losing the identity token cheap.
+    //   1. `--no-scopes` and a NARROW grant set bound the BLAST RADIUS of a lifted
+    //      token. No scopes → the OAuth access-token endpoint serves nothing
+    //      (measured, TERM-706). This said "ZERO project roles" until 2026-09-18, and
+    //      that was never true of the account we ship: measured live, `venue-identity@`
+    //      holds `roles/confidentialcomputing.workloadUser` on the project and
+    //      `roles/artifactregistry.reader` on the `venue-images` repository alone —
+    //      the same two grants the Confidential Space note below already named, so this
+    //      file contradicted itself. Neither reaches a second repository, a bucket or
+    //      another VM, which is the property "zero roles" was reaching for. But the
+    //      token is NOT valueless: it is the attestation evidence itself, so a lifted
+    //      token still authorizes a false claim about WHERE a run happened (the
+    //      steal-a-true-token attack in the item-2 spike). `--no-scopes` stays because
+    //      it removes lateral GCP access; it does not make losing the identity token
+    //      cheap.
     //   2. The untrusted code cannot reach the metadata server to lift the token at all.
     //      The test step runs `--network=none`; the install step runs on an `--internal`
     //      network whose only egress is a CONNECT-only, registry-allowlisted proxy that
@@ -33539,6 +33709,9 @@ function refusedRun(fields) {
     treeDigest: null,
     baselinePatchSha256: null,
     testCommandSource: "none",
+    // Nothing was booted, so nobody chose an image. Same reasoning as `containerImage: null`
+    // below: it must not read as an image we picked and cannot name.
+    imageSource: "none",
     boundaryRefusals: fields.boundaryRefusals,
     touchedPaths: fields.touchedPaths,
     preview: null,
@@ -33887,7 +34060,7 @@ async function runVerification(req, ctx) {
       // that `founder-declared` (as this did for one review round) signs the counterparty's
       // name onto the developer's choice, which is worse than laundering it as `detected`:
       // it is a specific false attribution inside a field a reviewer trusts.
-      testCommandSource: req.testCommandOverride !== void 0 ? req.testCommandOverrideOrigin === "founder" ? "founder-declared" : "developer-declared" : derived.testCommand === null ? "none" : "detected",
+      testCommandSource: req.testCommandOverride !== void 0 ? req.testCommandOverrideOrigin === "founder" ? "founder-declared" : req.testCommandOverrideOrigin === "operator" ? "operator-declared" : "developer-declared" : derived.testCommand === null ? "none" : "detected",
       boundaryRefusals: [],
       touchedPaths: pre.touchedPaths,
       preview: null,
@@ -33897,6 +34070,12 @@ async function runVerification(req, ctx) {
       // that measures one; a run without it is recordable but not attestable —
       // `toAcceptancePredicate` refuses `missing-image-digest` (TERM-893).
       containerImageDigest: null,
+      // The image half of the provenance pair above. `detected` means the runtime mapping
+      // chose the environment; an override names the human. Defaulting an unstated origin to
+      // `developer-declared` is deliberate and matches `testCommandSource`: `th run --image`
+      // runs on the developer's machine, judging the developer's work, so attributing it to
+      // the operator would sign our name onto their choice.
+      imageSource: req.image === void 0 ? "detected" : req.imageOrigin === "operator" ? "operator-declared" : "developer-declared",
       leaksClean: verdict.leaks.clean,
       // Built from the LEASE, over the client that ran the steps — never from
       // `req.placement`, which is a request. `venueDescriptor.ts` carries the
@@ -34852,6 +35031,7 @@ __export(dist_exports, {
   REDACTED_TARGET_SHA: () => REDACTED_TARGET_SHA,
   RELEASED_LEASE_CENSUS_REASON: () => RELEASED_LEASE_CENSUS_REASON,
   REPO_DIGEST_RE: () => REPO_DIGEST_RE,
+  RUN_IMAGE_SOURCES: () => RUN_IMAGE_SOURCES,
   RUN_LABEL_KEY: () => RUN_LABEL_KEY,
   RUN_RESULT_FIELDS: () => RUN_RESULT_FIELDS,
   RUN_RESULT_SCHEMA: () => RUN_RESULT_SCHEMA,

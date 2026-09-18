@@ -27,6 +27,19 @@ export const DEFAULT_INSTALL_ALLOWLIST = [
     'static.crates.io',
     'index.crates.io',
     'crates.io',
+    // TERM-1139. `ruby` has had an image since the mapping existed and `bundle install`
+    // as its derived command, and this host was missing — so every ruby repo could start
+    // and could never install. Install is the ONLY step with a network grant at all, so a
+    // denial here is terminal, not a slow path.
+    //
+    // One entry, not two: `hostAllowed` is dot-anchored SUFFIX matching, so this covers
+    // `index.rubygems.org` as well. Listing that separately would advertise the grant as
+    // narrower than it is, which the `github.com` note below rejects for the same reason.
+    'rubygems.org',
+    // TERM-1139, added with the `dotnet` image mapping. `dotnet restore` fetches from
+    // NuGet; the coupling test refuses a mapped runtime whose registry is unreachable, and
+    // it caught this one the moment the image landed.
+    'api.nuget.org',
     // Git dependencies. Approved by Eric 2026-07-22 after a live run measured the
     // chokepoint working under load (20 events, 16 allowed / 4 denied by host).
     //
