@@ -40,6 +40,18 @@ export const DEFAULT_INSTALL_ALLOWLIST = [
     // NuGet; the coupling test refuses a mapped runtime whose registry is unreachable, and
     // it caught this one the moment the image landed.
     'api.nuget.org',
+    // TERM-1122, added with the `jvm` image mapping, each from a MEASURED denial
+    // through `th run` (the proxy's 403 in the build's own output), not a guess:
+    //   - Maven Central, where both `mvn` and Gradle's `mavenCentral()` resolve.
+    //   - `services.gradle.org`, where a Gradle wrapper fetches its distribution.
+    //   - `release-assets.githubusercontent.com`, where that fetch LANDS. Measured
+    //     chain: services.gradle.org 307 -> github.com 302 -> this host 200. The
+    //     `github.com` note below keeps `githubusercontent.com` denied until a real
+    //     install needs it; this is that install. Only this one host: raw blobs and
+    //     `objects.githubusercontent.com` stay denied.
+    'repo.maven.apache.org',
+    'services.gradle.org',
+    'release-assets.githubusercontent.com',
     // Git dependencies. Approved by Eric 2026-07-22 after a live run measured the
     // chokepoint working under load (20 events, 16 allowed / 4 denied by host).
     //
@@ -51,12 +63,33 @@ export const DEFAULT_INSTALL_ALLOWLIST = [
     // allowlist than breadth.
     //
     // What it does NOT grant: `githubusercontent.com` is a DIFFERENT domain, so
-    // release assets and raw blobs stay denied. If a real install needs them,
-    // that should arrive as a measured egress denial, not a pre-emptive guess.
+    // raw blobs and `objects.githubusercontent.com` stay denied; only
+    // `release-assets.githubusercontent.com` is listed, above, for the Gradle
+    // wrapper. If a real install needs more, that should arrive as a measured
+    // egress denial, not a pre-emptive guess.
     //
-    // Proportionality: install already runs with `--ignore-scripts`, and the
-    // fenced environment carries no GitHub token, so the added capability is
-    // "fetch a public tarball or ref", not "act as us".
+    // WHO RUNS INSTALL SCRIPTS THROUGH THIS GRANT (TERM-1157). This comment used
+    // to say install "already runs with `--ignore-scripts`". That is true of
+    // `apps/merge-agent` (`src/sandbox/plan.ts` adds the flag on every branch)
+    // and false of `th run`: `packages/envspec/src/manifest.ts` derives a plain
+    // `npm ci`, so there every dependency's `preinstall`/`install`/`postinstall`
+    // executes behind this proxy. TERM-1157 chose to keep them running.
+    //
+    // For `th run`, then, the grant reaches code the repo's dependencies chose,
+    // not only the package manager. What bounds it:
+    //   - no credential of ours is in the fence: `auditEnv` (`env.ts`) refuses to
+    //     spawn when a variable's name or a GitHub-token-shaped value says
+    //     otherwise, so a script cannot act on GitHub as us;
+    //   - the fence holds the repo's tree and its dependencies, nothing else of
+    //     ours;
+    //   - every step after install runs with no network at all.
+    // What it does NOT bound: a script can download and run any public GitHub
+    // content, and one that brings its author's own token can push what the
+    // fence holds to its author's account. `registry.npmjs.org` above gives the
+    // same script the same reach (download anything, publish with its own
+    // token), so this entry adds a second address for a capability the install
+    // already has rather than a new one. That is the case for keeping it; it is
+    // not a claim that GitHub is read-only from here.
     'github.com',
 ];
 /**
@@ -73,6 +106,49 @@ export function hostAllowed(host, allow) {
         return h === e || h.endsWith(`.${e}`);
     });
 }
+/**
+ * The sidecar's record of one refusal, one line on stdout (TERM-1157).
+ *
+ * Defined here rather than in `container.ts` because the sidecar mounts only
+ * this file and `proxyEntry.js`, so the writer and `parseDeniedHosts` must live
+ * where both ends can import them.
+ */
+const DENIAL_PREFIX = 'proxy-denied ';
+export function formatDenialLine(e) {
+    return `${DENIAL_PREFIX}${JSON.stringify({ host: e.host, port: e.port })}`;
+}
+/** A DNS name: letters, digits, dots and hyphens, at most 253 characters. */
+const HOSTNAME = /^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/;
+/**
+ * The refused hosts in a sidecar's output, lowercased, deduplicated, first seen
+ * first.
+ *
+ * The workload chooses what it CONNECTs to, so each host is repo-controlled text
+ * that ends up in a sentence a poster reads. Anything that is not a hostname is
+ * dropped rather than escaped: a name we cannot print as-is tells the reader
+ * nothing a package author could act on.
+ */
+export function parseDeniedHosts(output) {
+    const seen = new Set();
+    for (const line of output.split(/\r?\n/)) {
+        if (!line.startsWith(DENIAL_PREFIX))
+            continue;
+        let parsed;
+        try {
+            parsed = JSON.parse(line.slice(DENIAL_PREFIX.length));
+        }
+        catch {
+            continue;
+        }
+        const host = parsed?.host;
+        if (typeof host !== 'string')
+            continue;
+        const h = host.toLowerCase().replace(/\.$/, '');
+        if (HOSTNAME.test(h))
+            seen.add(h);
+    }
+    return [...seen];
+}
 export function startEgressProxy(opts = {}) {
     const allow = opts.allow ?? DEFAULT_INSTALL_ALLOWLIST;
     const log = [];
@@ -86,8 +162,15 @@ export function startEgressProxy(opts = {}) {
         const [host, portRaw] = String(req.url ?? '').split(':');
         const port = Number(portRaw || 443);
         const permitted = !opts.denyAll && !!host && hostAllowed(host, allow);
-        log.push({ host: host ?? '', port, allowed: permitted, at: new Date().toISOString() });
+        const event = {
+            host: host ?? '',
+            port,
+            allowed: permitted,
+            at: new Date().toISOString(),
+        };
+        log.push(event);
         if (!permitted) {
+            opts.onDenied?.(event);
             clientSocket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
             clientSocket.destroy();
             return;

@@ -1671,7 +1671,7 @@ async function requireStoredLogin() {
   }
 }
 function sleep(ms) {
-  return new Promise((resolve7) => setTimeout(resolve7, ms));
+  return new Promise((resolve8) => setTimeout(resolve8, ms));
 }
 var TERMINALHIRE_DIR3, TOKEN_FILE, ALGO, IV_BYTES, GITHUB_SCOPE, DEVICE_CODE_URL, ACCESS_TOKEN_URL, BAKED_IN_CLIENT_ID, MOCK_TOKEN, MOCK_LOGIN;
 var init_github_auth = __esm({
@@ -2738,8 +2738,8 @@ function makeGitHubGovernor(fetchImpl, cfg) {
     try {
       const res = bound == null ? await fetchP : await Promise.race([
         fetchP,
-        new Promise((resolve7) => {
-          timer = setTimeout(() => resolve7(null), bound);
+        new Promise((resolve8) => {
+          timer = setTimeout(() => resolve8(null), bound);
         })
       ]);
       if (!res || !res.ok) return null;
@@ -6797,8 +6797,8 @@ async function getWithTimeout(governor, url, token, timeoutMs) {
   try {
     const res = await Promise.race([
       getP,
-      new Promise((resolve7) => {
-        timer = setTimeout(() => resolve7(null), timeoutMs);
+      new Promise((resolve8) => {
+        timer = setTimeout(() => resolve8(null), timeoutMs);
       })
     ]);
     if (res === null) controller.abort();
@@ -8595,7 +8595,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   });
   const { prehash } = eddsaOpts;
   const { BASE, Fp: Fp2, Fn: Fn2 } = Point;
-  const randomBytes15 = eddsaOpts.randomBytes || randomBytes3;
+  const randomBytes16 = eddsaOpts.randomBytes || randomBytes3;
   const adjustScalarBytes2 = eddsaOpts.adjustScalarBytes || ((bytes) => bytes);
   const domain = eddsaOpts.domain || ((data, ctx, phflag) => {
     _abool2(phflag, "phflag");
@@ -8677,7 +8677,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
     signature: 2 * _size2,
     seed: _size2
   };
-  function randomSecretKey(seed = randomBytes15(lengths.seed)) {
+  function randomSecretKey(seed = randomBytes16(lengths.seed)) {
     return _abytes2(seed, lengths.seed, "seed");
   }
   function keygen(seed) {
@@ -10295,10 +10295,10 @@ var init_node_model = __esm({
 // ../../packages/core/src/episodes/derivers/signals.ts
 function mcpToolSignal(name) {
   const rest = name.slice("mcp__".length);
-  const sep6 = rest.indexOf("__");
-  if (sep6 <= 0) return "mcp:custom";
-  const server = rest.slice(0, sep6).toLowerCase();
-  const leaf = rest.slice(sep6 + 2);
+  const sep7 = rest.indexOf("__");
+  if (sep7 <= 0) return "mcp:custom";
+  const server = rest.slice(0, sep7).toLowerCase();
+  const leaf = rest.slice(sep7 + 2);
   if (leaf.length === 0) return "mcp:custom";
   if (MCP_SERVER_CAPABILITY.has(server)) return MCP_SERVER_CAPABILITY.get(server) ?? null;
   return "mcp:custom";
@@ -12797,10 +12797,10 @@ async function maybePromptPeerConnect({
 } = {}) {
   const promptOnce = ask5 ? async (q) => String(await ask5(q) ?? "").trim().toLowerCase() : async (q) => {
     const rl = createInterface({ input, output });
-    const a = await new Promise((resolve7) => {
+    const a = await new Promise((resolve8) => {
       rl.question(q, (x) => {
         rl.close();
-        resolve7(x);
+        resolve8(x);
       });
     });
     return String(a).trim().toLowerCase();
@@ -12927,9 +12927,9 @@ async function runLogin() {
     let ghProfile;
     if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
       const { fileURLToPath: fileURLToPath15 } = await import("url");
-      const { join: join62 } = await import("path");
+      const { join: join63 } = await import("path");
       const __dirname10 = fileURLToPath15(new URL(".", import.meta.url));
-      const fixturePath = join62(__dirname10, "../../fixtures/github-sample.json");
+      const fixturePath = join63(__dirname10, "../../fixtures/github-sample.json");
       const { readFileSync: readFileSync43 } = await import("fs");
       ghProfile = JSON.parse(readFileSync43(fixturePath, "utf8"));
     } else {
@@ -14462,12 +14462,12 @@ async function maybeAskPulse() {
   }
   writeConfig({ lastPulseAskAt: (/* @__PURE__ */ new Date()).toISOString() });
   const rl = createInterface2({ input: process.stdin, output: process.stdout });
-  const ask5 = (question) => new Promise((resolve7) => {
-    const onClose = () => resolve7(null);
+  const ask5 = (question) => new Promise((resolve8) => {
+    const onClose = () => resolve8(null);
     rl.once("close", onClose);
     rl.question(question, (answer2) => {
       rl.removeListener("close", onClose);
-      resolve7((answer2 || "").trim());
+      resolve8((answer2 || "").trim());
     });
   });
   const answer = await ask5(
@@ -14610,10 +14610,10 @@ async function fetchIndex(quiet = false) {
 }
 function prompt(question) {
   const rl = createInterface3({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve7) => {
+  return new Promise((resolve8) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve7(answer.trim().toLowerCase());
+      resolve8(answer.trim().toLowerCase());
     });
   });
 }
@@ -15253,10 +15253,10 @@ __export(jpi_devs_exports, {
 import { createInterface as createInterface4 } from "readline";
 function prompt2(question) {
   const rl = createInterface4({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve7) => {
+  return new Promise((resolve8) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve7(answer.trim().toLowerCase());
+      resolve8(answer.trim().toLowerCase());
     });
   });
 }
@@ -15400,10 +15400,10 @@ function readProject2() {
 }
 function promptRaw(question) {
   const rl = createInterface5({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve7) => {
+  return new Promise((resolve8) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve7(answer.trim());
+      resolve8(answer.trim());
     });
   });
 }
@@ -16202,10 +16202,10 @@ function consentNotice(bountyId, reason) {
 }
 function prompt3(question) {
   const rl = createInterface6({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve7) => {
+  return new Promise((resolve8) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve7(String(answer ?? "").trim());
+      resolve8(String(answer ?? "").trim());
     });
   });
 }
@@ -16357,10 +16357,10 @@ async function fetchIndex2(quiet = false) {
 }
 function prompt4(question) {
   const rl = createInterface7({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve7) => {
+  return new Promise((resolve8) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve7(answer.trim().toLowerCase());
+      resolve8(answer.trim().toLowerCase());
     });
   });
 }
@@ -18232,16 +18232,16 @@ var sleep2;
 var init_sleep = __esm({
   "../../node_modules/@anthropic-ai/sdk/internal/utils/sleep.mjs"() {
     "use strict";
-    sleep2 = (ms, signal) => new Promise((resolve7) => {
+    sleep2 = (ms, signal) => new Promise((resolve8) => {
       if (signal?.aborted)
-        return resolve7();
+        return resolve8();
       const onAbort = () => {
         clearTimeout(timer);
-        resolve7();
+        resolve8();
       };
       const timer = setTimeout(() => {
         signal?.removeEventListener("abort", onAbort);
-        resolve7();
+        resolve8();
       }, ms);
       signal?.addEventListener("abort", onAbort, { once: true });
     });
@@ -20370,8 +20370,8 @@ var init_api_promise = __esm({
     init_parse();
     APIPromise = class _APIPromise extends Promise {
       constructor(client, responsePromise, parseResponse = defaultParseResponse) {
-        super((resolve7) => {
-          resolve7(null);
+        super((resolve8) => {
+          resolve8(null);
         });
         this.responsePromise = responsePromise;
         this.parseResponse = parseResponse;
@@ -22891,16 +22891,16 @@ var init_async_queue = __esm({
         if (__classPrivateFieldGet(this, _AsyncQueue_closed, "f") || signal?.aborted) {
           return Promise.resolve({ done: true, value: void 0 });
         }
-        return new Promise((resolve7) => {
+        return new Promise((resolve8) => {
           const waiter = (r) => {
             signal?.removeEventListener("abort", onAbort);
-            resolve7(r);
+            resolve8(r);
           };
           const onAbort = () => {
             const idx = __classPrivateFieldGet(this, _AsyncQueue_waiters, "f").indexOf(waiter);
             if (idx >= 0)
               __classPrivateFieldGet(this, _AsyncQueue_waiters, "f").splice(idx, 1);
-            resolve7({ done: true, value: void 0 });
+            resolve8({ done: true, value: void 0 });
           };
           __classPrivateFieldGet(this, _AsyncQueue_waiters, "f").push(waiter);
           signal?.addEventListener("abort", onAbort, { once: true });
@@ -23500,13 +23500,13 @@ var init_json_schema = __esm({
 
 // ../../node_modules/@anthropic-ai/sdk/internal/utils/promise.mjs
 function promiseWithResolvers() {
-  let resolve7;
+  let resolve8;
   let reject;
   const promise = new Promise((res, rej) => {
-    resolve7 = res;
+    resolve8 = res;
     reject = rej;
   });
-  return { promise, resolve: resolve7, reject };
+  return { promise, resolve: resolve8, reject };
 }
 var init_promise = __esm({
   "../../node_modules/@anthropic-ai/sdk/internal/utils/promise.mjs"() {
@@ -24108,7 +24108,7 @@ function betaGrepTool(ctx) {
   });
 }
 function runRipgrep(rg, pattern, searchPath, signal) {
-  return new Promise((resolve7, reject) => {
+  return new Promise((resolve8, reject) => {
     const proc = cp.spawn(rg, ["-n", "--no-heading", "-e", pattern, "--", searchPath], {
       ...signal ? { signal } : {}
     });
@@ -24130,12 +24130,12 @@ function runRipgrep(rg, pattern, searchPath, signal) {
       if (signal?.aborted)
         return reject(new ToolError("grep: aborted"));
       if (truncated)
-        return resolve7(out + `
+        return resolve8(out + `
 [output truncated at ${GREP_OUTPUT_LIMIT} bytes]`);
       if (code === 0)
-        return resolve7(out);
+        return resolve8(out);
       if (code === 1)
-        return resolve7("no matches");
+        return resolve8("no matches");
       reject(new ToolError(`grep: rg failed: ${errOut || `exit ${code}`}`));
     });
     proc.on("error", (e) => {
@@ -24313,8 +24313,8 @@ var init_node = __esm({
 `;
         __classPrivateFieldGet(this, _BashSession_proc, "f").stdin.write(wrapped);
         if (__classPrivateFieldGet(this, _BashSession_buf, "f").indexOf(sentinel2) < 0) {
-          const { promise: sentinelSeen, resolve: resolve7 } = promiseWithResolvers();
-          __classPrivateFieldSet(this, _BashSession_waiting, { sentinel: sentinel2, resolve: resolve7 }, "f");
+          const { promise: sentinelSeen, resolve: resolve8 } = promiseWithResolvers();
+          __classPrivateFieldSet(this, _BashSession_waiting, { sentinel: sentinel2, resolve: resolve8 }, "f");
           let timer;
           let onAbort;
           try {
@@ -26069,12 +26069,12 @@ var init_BetaMessageStream = __esm({
           }
           return this._emit("error", new AnthropicError(String(error2)));
         });
-        __classPrivateFieldSet(this, _BetaMessageStream_connectedPromise, new Promise((resolve7, reject) => {
-          __classPrivateFieldSet(this, _BetaMessageStream_resolveConnectedPromise, resolve7, "f");
+        __classPrivateFieldSet(this, _BetaMessageStream_connectedPromise, new Promise((resolve8, reject) => {
+          __classPrivateFieldSet(this, _BetaMessageStream_resolveConnectedPromise, resolve8, "f");
           __classPrivateFieldSet(this, _BetaMessageStream_rejectConnectedPromise, reject, "f");
         }), "f");
-        __classPrivateFieldSet(this, _BetaMessageStream_endPromise, new Promise((resolve7, reject) => {
-          __classPrivateFieldSet(this, _BetaMessageStream_resolveEndPromise, resolve7, "f");
+        __classPrivateFieldSet(this, _BetaMessageStream_endPromise, new Promise((resolve8, reject) => {
+          __classPrivateFieldSet(this, _BetaMessageStream_resolveEndPromise, resolve8, "f");
           __classPrivateFieldSet(this, _BetaMessageStream_rejectEndPromise, reject, "f");
         }), "f");
         __classPrivateFieldGet(this, _BetaMessageStream_connectedPromise, "f").catch(() => {
@@ -26244,11 +26244,11 @@ var init_BetaMessageStream = __esm({
        *   const message = await stream.emitted('message') // rejects if the stream errors
        */
       emitted(event) {
-        return new Promise((resolve7, reject) => {
+        return new Promise((resolve8, reject) => {
           __classPrivateFieldSet(this, _BetaMessageStream_catchingPromiseCreated, true, "f");
           if (event !== "error")
             this.once("error", reject);
-          this.once(event, resolve7);
+          this.once(event, resolve8);
         });
       }
       async done() {
@@ -26610,7 +26610,7 @@ var init_BetaMessageStream = __esm({
               if (done) {
                 return { value: void 0, done: true };
               }
-              return new Promise((resolve7, reject) => readQueue.push({ resolve: resolve7, reject })).then((chunk2) => chunk2 ? { value: chunk2, done: false } : { value: void 0, done: true });
+              return new Promise((resolve8, reject) => readQueue.push({ resolve: resolve8, reject })).then((chunk2) => chunk2 ? { value: chunk2, done: false } : { value: void 0, done: true });
             }
             const chunk = pushQueue.shift();
             return { value: chunk, done: false };
@@ -28848,12 +28848,12 @@ var init_MessageStream = __esm({
           }
           return this._emit("error", new AnthropicError(String(error2)));
         });
-        __classPrivateFieldSet(this, _MessageStream_connectedPromise, new Promise((resolve7, reject) => {
-          __classPrivateFieldSet(this, _MessageStream_resolveConnectedPromise, resolve7, "f");
+        __classPrivateFieldSet(this, _MessageStream_connectedPromise, new Promise((resolve8, reject) => {
+          __classPrivateFieldSet(this, _MessageStream_resolveConnectedPromise, resolve8, "f");
           __classPrivateFieldSet(this, _MessageStream_rejectConnectedPromise, reject, "f");
         }), "f");
-        __classPrivateFieldSet(this, _MessageStream_endPromise, new Promise((resolve7, reject) => {
-          __classPrivateFieldSet(this, _MessageStream_resolveEndPromise, resolve7, "f");
+        __classPrivateFieldSet(this, _MessageStream_endPromise, new Promise((resolve8, reject) => {
+          __classPrivateFieldSet(this, _MessageStream_resolveEndPromise, resolve8, "f");
           __classPrivateFieldSet(this, _MessageStream_rejectEndPromise, reject, "f");
         }), "f");
         __classPrivateFieldGet(this, _MessageStream_connectedPromise, "f").catch(() => {
@@ -29023,11 +29023,11 @@ var init_MessageStream = __esm({
        *   const message = await stream.emitted('message') // rejects if the stream errors
        */
       emitted(event) {
-        return new Promise((resolve7, reject) => {
+        return new Promise((resolve8, reject) => {
           __classPrivateFieldSet(this, _MessageStream_catchingPromiseCreated, true, "f");
           if (event !== "error")
             this.once("error", reject);
-          this.once(event, resolve7);
+          this.once(event, resolve8);
         });
       }
       async done() {
@@ -29348,7 +29348,7 @@ var init_MessageStream = __esm({
               if (done) {
                 return { value: void 0, done: true };
               }
-              return new Promise((resolve7, reject) => readQueue.push({ resolve: resolve7, reject })).then((chunk2) => chunk2 ? { value: chunk2, done: false } : { value: void 0, done: true });
+              return new Promise((resolve8, reject) => readQueue.push({ resolve: resolve8, reject })).then((chunk2) => chunk2 ? { value: chunk2, done: false } : { value: void 0, done: true });
             }
             const chunk = pushQueue.shift();
             return { value: chunk, done: false };
@@ -31710,7 +31710,7 @@ function splitProgressChunk(chunk) {
 }
 function shStream(cmd, args5, opts = {}) {
   const cap = opts.maxStderrBytes ?? 64 * 1024;
-  return new Promise((resolve7, reject) => {
+  return new Promise((resolve8, reject) => {
     void (async () => {
       const spawn8 = opts.spawnFn ?? (await import("child_process")).spawn;
       const child = spawn8(cmd, args5, { shell: false, stdio: ["ignore", "pipe", "pipe"] });
@@ -31728,7 +31728,7 @@ function shStream(cmd, args5, opts = {}) {
       child.on("error", (err) => reject(err));
       child.on("close", (code, signal) => {
         if (code === 0) {
-          resolve7({ stdout: stdout.trim(), stderr });
+          resolve8({ stdout: stdout.trim(), stderr });
           return;
         }
         const err = new Error(
@@ -31795,6 +31795,36 @@ function isCommandUnavailable(facts, countsRead) {
     return false;
   return facts.stdout.trim().length === 0 && EXEC_FAILURE.test(facts.stderr);
 }
+function isMissingSystemDependency(facts, countsRead) {
+  if (countsRead)
+    return null;
+  if (facts.exitCode === 0 || facts.exitCode === null)
+    return null;
+  const out = `${facts.stdout}
+${facts.stderr}`;
+  for (const pattern of MISSING_SYSTEM_DEPENDENCY) {
+    const hit = pattern.exec(out);
+    if (hit)
+      return hit[0];
+  }
+  return null;
+}
+function isOfflineBuildGap(facts, counts) {
+  if (facts.runtime !== "jvm")
+    return null;
+  if (counts !== null && counts.tests_failed > 0)
+    return null;
+  if (facts.exitCode === 0 || facts.exitCode === null)
+    return null;
+  const out = `${facts.stdout}
+${facts.stderr}`;
+  for (const pattern of OFFLINE_BUILD_GAP) {
+    const hit = pattern.exec(out);
+    if (hit)
+      return hit[0];
+  }
+  return null;
+}
 function classifyVerification(facts) {
   if (facts.timedOut) {
     return {
@@ -31817,6 +31847,22 @@ function classifyVerification(facts) {
       outcome: "test-command-unavailable",
       counts,
       reason: `the test command could not be invoked (exit ${String(facts.exitCode)}). This is an environment failure on our side \u2014 a missing interpreter, a binary outside PATH, or a dependency installed somewhere the command cannot see it. The repo has not been judged.`
+    };
+  }
+  const missing = isMissingSystemDependency(facts, counts !== null);
+  if (missing !== null) {
+    return {
+      outcome: "test-command-unavailable",
+      counts,
+      reason: `the build needs a system library or header our image does not carry (${missing}). This is a gap in our environment, not a failure in the repo. The repo has not been judged.`
+    };
+  }
+  const gap = isOfflineBuildGap(facts, counts);
+  if (gap !== null) {
+    return {
+      outcome: "test-command-unavailable",
+      counts,
+      reason: `the build stopped on something our install step did not fetch (${gap}). The test step has no network, so this is a gap in our environment, not a failure in the repo. The repo has not been judged.`
     };
   }
   if (counts !== null) {
@@ -31871,9 +31917,9 @@ function isGreen(outcome) {
   return outcome === "completed";
 }
 function isOurFault(outcome) {
-  return outcome === "test-command-unavailable" || outcome === "counts-unparsed";
+  return OUR_FAULT[outcome];
 }
-var VERIFICATION_OUTCOMES, int, withSuiteFailures, READERS, SUPPORTED_RUNNERS, COVERAGE_TABLE, EXEC_FAILURE, SUITE_REPORTED_FAILURE;
+var VERIFICATION_OUTCOMES, int, withSuiteFailures, READERS, SUPPORTED_RUNNERS, COVERAGE_TABLE, EXEC_FAILURE, SUITE_REPORTED_FAILURE, MISSING_SYSTEM_DEPENDENCY, OFFLINE_BUILD_GAP, OUR_FAULT;
 var init_classify2 = __esm({
   "../../packages/envrun/dist/classify.js"() {
     "use strict";
@@ -31983,6 +32029,68 @@ var init_classify2 = __esm({
           if (!passed && !failed && !errors)
             return null;
           return { tests_passed: int(passed), tests_failed: int(failed) + int(errors) };
+        }
+      },
+      {
+        // Maven surefire's per-module summary (TERM-1122), measured against surefire
+        // 3.2.5 through `th run`:
+        //
+        //     [INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0
+        //
+        // The per-CLASS lines carry the same counts followed by `, Time elapsed: …`, so
+        // the end anchor after `Skipped` is what keeps them out; counting both would
+        // double every test. One summary prints per module, so they are SUMMED. An
+        // error is a test that could not run to an assertion, counted as failed so a
+        // green verdict is impossible while one is outstanding, as pytest's are.
+        runner: "maven surefire",
+        read: (out) => {
+          const lines = [
+            ...out.matchAll(/^(?:\[(?:INFO|WARNING|ERROR)\] )?Tests run: (\d+), Failures: (\d+), Errors: (\d+), Skipped: (\d+)(?:, Flakes: \d+)?\s*$/gm)
+          ];
+          if (lines.length === 0)
+            return null;
+          let passed = 0;
+          let failed = 0;
+          for (const m of lines) {
+            const [run32, failures, errors, skipped] = [m[1], m[2], m[3], m[4]].map(Number);
+            failed += failures + errors;
+            passed += Math.max(0, run32 - failures - errors - skipped);
+          }
+          return { tests_passed: passed, tests_failed: failed };
+        }
+      },
+      {
+        // Gradle prints no test counts when every test passes, so envrun installs an
+        // init script that prints one line per Test task (`gradleTestSummary.ts`,
+        // TERM-1122). The marker is ours; its format is fixed there.
+        runner: "gradle",
+        read: (out) => {
+          const lines = [
+            ...out.matchAll(/^terminalhire-gradle-tests: task=\S+ total=(\d+) passed=(\d+) failed=(\d+) skipped=(\d+)\s*$/gm)
+          ];
+          if (lines.length === 0)
+            return null;
+          return {
+            tests_passed: lines.reduce((sum, m) => sum + Number(m[2]), 0),
+            tests_failed: lines.reduce((sum, m) => sum + Number(m[3]), 0)
+          };
+        }
+      },
+      {
+        // CTest's closing summary: `50% tests passed, 1 tests failed out of 2`. Measured
+        // on cmake 3.25 in the cpp image (TERM-1123); the singular `1 test failed` is
+        // CTest's own form for one. Anchored at line start, so a log line quoting it
+        // is not read as the summary. Meson and a bare `make test` print no summary we
+        // can trust and stay unparsed.
+        runner: "ctest",
+        read: (out) => {
+          if (/^No tests were found!!!$/m.test(out))
+            return { tests_passed: 0, tests_failed: 0 };
+          const m = /^\d+% tests passed, (\d+) tests? failed out of (\d+)$/m.exec(out);
+          if (!m)
+            return null;
+          const failed = Number(m[1]);
+          return { tests_passed: Number(m[2]) - failed, tests_failed: failed };
         }
       },
       {
@@ -32113,6 +32221,35 @@ var init_classify2 = __esm({
       "\\d+\\s+examples?,\\s+(?!0\\b)\\d+\\s+failures?"
       // rspec's summary line
     ].join("|"), "m");
+    MISSING_SYSTEM_DEPENDENCY = [
+      /^(?:\S*\/)?ld(?:\.\w+)?: cannot find -l[\w.+-]+/m,
+      /^\S+:\d+(?::\d+)?: fatal error: [\w./+-]+\.(?:h|hh|hpp|hxx): No such file or directory$/m,
+      /^\S+: error while loading shared libraries: lib[\w.+-]*: cannot open shared object file/m
+    ];
+    OFFLINE_BUILD_GAP = [
+      // Maven, `-o`: `Cannot access central (…) in offline mode and the artifact … has
+      // not been downloaded from it before.`
+      /in offline mode and the artifact \S+ has not been downloaded from it before/,
+      // Maven without `-o`, as a CI-derived `mvn test` runs: it tries the network.
+      /Could not transfer artifact \S+ from\/to /,
+      /Plugin \S+ or one of its dependencies could not be resolved/,
+      // Gradle, `--offline`.
+      /No cached version (?:listing )?(?:of|for) \S+ available for offline mode/,
+      // Gradle without `--offline`, and the wrapper fetching its own distribution.
+      /Could not GET 'https?:\/\//,
+      /^Downloading https:\/\/services\.gradle\.org\/distributions\//m,
+      /No matching toolchains found for requested specification/,
+      /Cannot find a Java installation on your machine matching/
+    ];
+    OUR_FAULT = {
+      completed: false,
+      "tests-failed": false,
+      "no-tests-observed": false,
+      "budget-exceeded": false,
+      "counts-unparsed": true,
+      "test-command-unavailable": true,
+      "environment-exhausted": true
+    };
   }
 });
 
@@ -32146,7 +32283,8 @@ function scrubEnv(source, opts) {
   if (!tmpDir.startsWith("/")) {
     throw new SandboxEnvError(`tmpDir must be an absolute path, got ${JSON.stringify(tmpDir)}`);
   }
-  for (const realHome of realHomeCandidates(source)) {
+  const homesToCompare = opts.jailHomeNamespace === "guest" ? [] : realHomeCandidates(source);
+  for (const realHome of homesToCompare) {
     if (jailHome === realHome || jailHome === `${realHome}/`) {
       throw new SandboxEnvError("jailHome is the real HOME \u2014 the sandbox would read the user profile");
     }
@@ -32178,6 +32316,8 @@ function scrubEnv(source, opts) {
   env["GOCACHE"] = join34(jailHome, ".cache", "go-build");
   env["GOFLAGS"] = "-modcacherw";
   env["CARGO_HOME"] = join34(jailHome, ".cargo");
+  env["MAVEN_OPTS"] = `-Dmaven.repo.local=${join34(jailHome, ".m2", "repository")}`;
+  env["GRADLE_USER_HOME"] = join34(jailHome, ".gradle");
   const bundle = join34(jailHome, ".bundle");
   env["GEM_HOME"] = bundle;
   env["BUNDLE_PATH"] = bundle;
@@ -32233,8 +32373,8 @@ var init_reap = __esm({
 
 // ../../packages/containment/dist/fence.js
 import { spawn as spawn4, spawnSync as spawnSync3 } from "child_process";
-import { existsSync as existsSync16, mkdirSync as mkdirSync5, realpathSync as realpathSync2, writeFileSync as writeFileSync19 } from "fs";
-import { dirname as dirname8, isAbsolute as isAbsolute4, join as join35, posix as posix2 } from "path";
+import { existsSync as existsSync16, lchownSync, lstatSync as lstatSync4, mkdirSync as mkdirSync5, readdirSync as readdirSync2, realpathSync as realpathSync2, statSync as statSync4, writeFileSync as writeFileSync19 } from "fs";
+import { basename as basename5, dirname as dirname8, isAbsolute as isAbsolute4, join as join35, posix as posix2, resolve as resolve5, sep as sep5 } from "path";
 import { fileURLToPath as fileURLToPath7 } from "url";
 function canonical(path6, label) {
   if (!isAbsolute4(path6)) {
@@ -32261,7 +32401,7 @@ function resolverFor(domain) {
 function pathDomainOf(spec) {
   return spec.pathDomain ?? "local";
 }
-function jailPasswd(uid = idOrNull("getuid"), gid = idOrNull("getgid")) {
+function jailPasswd(uid = localGuestUser()?.uid ?? null, gid = localGuestUser()?.gid ?? null) {
   const rows = ["root:x:0:0:root:/root:/usr/sbin/nologin"];
   if (uid !== null && gid !== null && uid !== 0) {
     rows.push(`${FENCE_USER}:x:${uid}:${gid}:fenced build user:${GUEST_JAIL}:/usr/sbin/nologin`);
@@ -32270,7 +32410,7 @@ function jailPasswd(uid = idOrNull("getuid"), gid = idOrNull("getgid")) {
   return `${rows.join("\n")}
 `;
 }
-function jailGroup(gid = idOrNull("getgid")) {
+function jailGroup(gid = localGuestUser()?.gid ?? null) {
   const rows = ["root:x:0:"];
   if (gid !== null && gid !== 0)
     rows.push(`${FENCE_USER}:x:${gid}:`);
@@ -32282,19 +32422,139 @@ function idOrNull(fn) {
   const f = process[fn];
   return typeof f === "function" ? f.call(process) : null;
 }
-function buildJail(root, guestUser) {
+function hostIds() {
+  const uid = idOrNull("getuid");
+  const gid = idOrNull("getgid");
+  return uid === null || gid === null ? null : { uid, gid };
+}
+function localGuestUser(ids2 = hostIds()) {
+  if (ids2 === null)
+    return null;
+  return ids2.uid === 0 ? REMAPPED_GUEST_USER : ids2;
+}
+function chownTree(dir, user) {
+  const stack = [dir];
+  for (let p = stack.pop(); p !== void 0; p = stack.pop()) {
+    lchownSync(p, user.uid, user.gid);
+    if (lstatSync4(p).isDirectory()) {
+      for (const entry of readdirSync2(p))
+        stack.push(join35(p, entry));
+    }
+  }
+}
+function canonicalPath(p) {
+  let head = resolve5(p);
+  const tail2 = [];
+  for (; ; ) {
+    try {
+      return join35(realpathSync2.native(head), ...tail2.reverse());
+    } catch {
+      const up = dirname8(head);
+      if (up === head)
+        return resolve5(p);
+      tail2.push(basename5(head));
+      head = up;
+    }
+  }
+}
+function statOrAbsent(p, fn) {
+  try {
+    return fn();
+  } catch (err) {
+    const code = err.code;
+    if (code === "ENOENT" || code === "ENOTDIR")
+      return void 0;
+    throw new FenceError(`cannot stat ${JSON.stringify(p)}: ${err.message}`, {
+      cause: err
+    });
+  }
+}
+function fileIdentity(p) {
+  const st = statOrAbsent(p, () => statSync4(p, { bigint: true }));
+  return st === void 0 ? null : { dev: st.dev, ino: st.ino };
+}
+function isOrContains(outer, inner) {
+  const fold = process.platform === "win32" ? (s) => s.toLowerCase() : (s) => s;
+  const o = fold(canonicalPath(outer));
+  const i = fold(canonicalPath(inner));
+  const prefix = o.endsWith(sep5) ? o : o + sep5;
+  if (i === o || i.startsWith(prefix))
+    return true;
+  const target = fileIdentity(outer);
+  if (target === null || target.ino === 0n)
+    return false;
+  for (const start of physicalSpellings(canonicalPath(inner))) {
+    for (let a = start; ; a = dirname8(a)) {
+      const id = fileIdentity(a);
+      if (id !== null && id.ino !== 0n && id.dev === target.dev && id.ino === target.ino) {
+        return true;
+      }
+      if (dirname8(a) === a)
+        break;
+    }
+  }
+  return false;
+}
+function physicalSpellings(p) {
+  if (process.platform !== "darwin" || p.startsWith(DARWIN_DATA_VOLUME + sep5))
+    return [p];
+  const onData = DARWIN_DATA_VOLUME + p;
+  const logical = fileIdentity(p);
+  const physical = fileIdentity(onData);
+  const same = logical !== null && physical !== null && logical.dev === physical.dev && logical.ino === physical.ino;
+  return same ? [p, onData] : [p];
+}
+function realHomes(who) {
+  try {
+    return realHomeCandidates(process.env);
+  } catch (err) {
+    throw new FenceError(`${who}: ${err.message}`, { cause: err });
+  }
+}
+function assertHoldsNoRealHome(path6, what, who) {
+  for (const home of realHomes(who)) {
+    if (isOrContains(path6, home)) {
+      throw new FenceError(`${who}: ${what} ${JSON.stringify(path6)} is or contains the real home ${JSON.stringify(home)} \u2014 the jail would expose the developer's profile`);
+    }
+  }
+}
+function assertNoForeignLinks(paths) {
+  for (const p of paths) {
+    const st = statOrAbsent(p, () => lstatSync4(p));
+    if (st?.isSymbolicLink() === true) {
+      throw new FenceError(`buildJail: ${JSON.stringify(p)} is a pre-existing symlink \u2014 buildJail would write through it, and a jail directory is never a link`);
+    }
+    if (st?.isFile() === true && st.nlink > 1) {
+      throw new FenceError(`buildJail: ${JSON.stringify(p)} is a pre-existing file with ${String(st.nlink)} hard links \u2014 buildJail would overwrite an inode another path shares`);
+    }
+  }
+}
+function buildJail(root, guestUser, io = {}) {
+  const ids2 = io.ids === void 0 ? hostIds() : io.ids;
+  const guest = guestUser ?? localGuestUser(ids2);
   const jail = join35(root, JAIL_SEGMENT);
   const tmp = join35(root, JAIL_TMP_SEGMENT);
-  for (const dir of [jail, tmp, join35(jail, ".config"), join35(jail, ".cache"), join35(jail, ".npm")]) {
+  const dirs = [jail, tmp, join35(jail, ".config"), join35(jail, ".cache"), join35(jail, ".npm")];
+  const files = [".npmrc", JAIL_PASSWD_FILE, JAIL_GROUP_FILE, ".gitconfig"].map((f) => join35(jail, f));
+  assertHoldsNoRealHome(root, "the jail root", "buildJail");
+  assertNoForeignLinks([...dirs, ...files]);
+  assertHoldsNoRealHome(jail, "the jail directory", "buildJail");
+  assertHoldsNoRealHome(tmp, "the jail tmp directory", "buildJail");
+  for (const dir of dirs) {
     mkdirSync5(dir, { recursive: true });
   }
   writeFileSync19(join35(jail, ".npmrc"), "", "utf8");
-  writeFileSync19(join35(jail, JAIL_PASSWD_FILE), guestUser ? jailPasswd(guestUser.uid, guestUser.gid) : jailPasswd(), "utf8");
-  writeFileSync19(join35(jail, JAIL_GROUP_FILE), guestUser ? jailGroup(guestUser.gid) : jailGroup(), "utf8");
+  writeFileSync19(join35(jail, JAIL_PASSWD_FILE), guest ? jailPasswd(guest.uid, guest.gid) : jailPasswd(null, null), "utf8");
+  writeFileSync19(join35(jail, JAIL_GROUP_FILE), guest ? jailGroup(guest.gid) : jailGroup(null), "utf8");
   writeFileSync19(join35(jail, ".gitconfig"), '[user]\n	name = sandbox\n	email = sandbox@localhost\n[safe]\n	directory = *\n[url "https://github.com/"]\n	insteadOf = ssh://git@github.com/\n	insteadOf = git@github.com:\n', "utf8");
+  if (ids2?.uid === 0 && guest && guest.uid !== 0) {
+    const chown = io.chown ?? chownTree;
+    chown(jail, guest);
+    chown(tmp, guest);
+  }
   return { jail, tmp };
 }
-var FenceError, ContainmentError, ContainmentRefusalError, JAIL_PASSWD_FILE, JAIL_GROUP_FILE, GUEST_JAIL, FENCE_USER, JAIL_SEGMENT, JAIL_TMP_SEGMENT;
+var FenceError, ContainmentError, ContainmentRefusalError, JAIL_PASSWD_FILE, JAIL_GROUP_FILE, GUEST_JAIL, FENCE_USER, REMAPPED_GUEST_USER, JAIL_SEGMENT, JAIL_TMP_SEGMENT, DARWIN_DATA_VOLUME;
 var init_fence = __esm({
   "../../packages/containment/dist/fence.js"() {
     "use strict";
@@ -32315,8 +32575,10 @@ var init_fence = __esm({
     JAIL_GROUP_FILE = ".fence-group";
     GUEST_JAIL = "/fenced/jail";
     FENCE_USER = "fenced";
+    REMAPPED_GUEST_USER = { uid: 1e3, gid: 1e3 };
     JAIL_SEGMENT = "jail";
     JAIL_TMP_SEGMENT = "tmp";
+    DARWIN_DATA_VOLUME = "/System/Volumes/Data";
   }
 });
 
@@ -32469,7 +32731,27 @@ var init_dockerClient = __esm({
 // ../../packages/containment/dist/egressProxy.js
 import net from "net";
 import http from "http";
-var DEFAULT_INSTALL_ALLOWLIST;
+function parseDeniedHosts(output) {
+  const seen = /* @__PURE__ */ new Set();
+  for (const line of output.split(/\r?\n/)) {
+    if (!line.startsWith(DENIAL_PREFIX))
+      continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(line.slice(DENIAL_PREFIX.length));
+    } catch {
+      continue;
+    }
+    const host = parsed?.host;
+    if (typeof host !== "string")
+      continue;
+    const h = host.toLowerCase().replace(/\.$/, "");
+    if (HOSTNAME.test(h))
+      seen.add(h);
+  }
+  return [...seen];
+}
+var DEFAULT_INSTALL_ALLOWLIST, DENIAL_PREFIX, HOSTNAME;
 var init_egressProxy = __esm({
   "../../packages/containment/dist/egressProxy.js"() {
     "use strict";
@@ -32495,6 +32777,18 @@ var init_egressProxy = __esm({
       // NuGet; the coupling test refuses a mapped runtime whose registry is unreachable, and
       // it caught this one the moment the image landed.
       "api.nuget.org",
+      // TERM-1122, added with the `jvm` image mapping, each from a MEASURED denial
+      // through `th run` (the proxy's 403 in the build's own output), not a guess:
+      //   - Maven Central, where both `mvn` and Gradle's `mavenCentral()` resolve.
+      //   - `services.gradle.org`, where a Gradle wrapper fetches its distribution.
+      //   - `release-assets.githubusercontent.com`, where that fetch LANDS. Measured
+      //     chain: services.gradle.org 307 -> github.com 302 -> this host 200. The
+      //     `github.com` note below keeps `githubusercontent.com` denied until a real
+      //     install needs it; this is that install. Only this one host: raw blobs and
+      //     `objects.githubusercontent.com` stay denied.
+      "repo.maven.apache.org",
+      "services.gradle.org",
+      "release-assets.githubusercontent.com",
       // Git dependencies. Approved by Eric 2026-07-22 after a live run measured the
       // chokepoint working under load (20 events, 16 allowed / 4 denied by host).
       //
@@ -32506,24 +32800,47 @@ var init_egressProxy = __esm({
       // allowlist than breadth.
       //
       // What it does NOT grant: `githubusercontent.com` is a DIFFERENT domain, so
-      // release assets and raw blobs stay denied. If a real install needs them,
-      // that should arrive as a measured egress denial, not a pre-emptive guess.
+      // raw blobs and `objects.githubusercontent.com` stay denied; only
+      // `release-assets.githubusercontent.com` is listed, above, for the Gradle
+      // wrapper. If a real install needs more, that should arrive as a measured
+      // egress denial, not a pre-emptive guess.
       //
-      // Proportionality: install already runs with `--ignore-scripts`, and the
-      // fenced environment carries no GitHub token, so the added capability is
-      // "fetch a public tarball or ref", not "act as us".
+      // WHO RUNS INSTALL SCRIPTS THROUGH THIS GRANT (TERM-1157). This comment used
+      // to say install "already runs with `--ignore-scripts`". That is true of
+      // `apps/merge-agent` (`src/sandbox/plan.ts` adds the flag on every branch)
+      // and false of `th run`: `packages/envspec/src/manifest.ts` derives a plain
+      // `npm ci`, so there every dependency's `preinstall`/`install`/`postinstall`
+      // executes behind this proxy. TERM-1157 chose to keep them running.
+      //
+      // For `th run`, then, the grant reaches code the repo's dependencies chose,
+      // not only the package manager. What bounds it:
+      //   - no credential of ours is in the fence: `auditEnv` (`env.ts`) refuses to
+      //     spawn when a variable's name or a GitHub-token-shaped value says
+      //     otherwise, so a script cannot act on GitHub as us;
+      //   - the fence holds the repo's tree and its dependencies, nothing else of
+      //     ours;
+      //   - every step after install runs with no network at all.
+      // What it does NOT bound: a script can download and run any public GitHub
+      // content, and one that brings its author's own token can push what the
+      // fence holds to its author's account. `registry.npmjs.org` above gives the
+      // same script the same reach (download anything, publish with its own
+      // token), so this entry adds a second address for a capability the install
+      // already has rather than a new one. That is the case for keeping it; it is
+      // not a claim that GitHub is read-only from here.
       "github.com"
     ];
+    DENIAL_PREFIX = "proxy-denied ";
+    HOSTNAME = /^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/;
   }
 });
 
 // ../../packages/containment/dist/container.js
 import { fileURLToPath as fileURLToPath8 } from "url";
 import { dirname as dirname9, join as join36 } from "path";
-import { chmodSync as chmodSync2, copyFileSync as copyFileSync2, existsSync as existsSync17, mkdtempSync, rmSync as rmSync8 } from "fs";
+import { chmodSync as chmodSync2, copyFileSync as copyFileSync2, existsSync as existsSync17, mkdtempSync, rmSync as rmSync8, statSync as statSync5 } from "fs";
 import { tmpdir } from "os";
 function scrubEnvPathsFor(containmentKind, host) {
-  return containmentKind === "container" ? { jailHome: GUEST.jail, tmpDir: GUEST.tmp } : { jailHome: host.jail, tmpDir: host.tmp };
+  return containmentKind === "container" ? { jailHome: GUEST.jail, tmpDir: GUEST.tmp, jailHomeNamespace: "guest" } : { jailHome: host.jail, tmpDir: host.tmp, jailHomeNamespace: "host" };
 }
 function buildTranslation(spec) {
   const roots = [
@@ -32531,11 +32848,11 @@ function buildTranslation(spec) {
     { raw: spec.jail, guest: GUEST.jail, label: "jail" },
     { raw: spec.tmp, guest: GUEST.tmp, label: "tmp" }
   ];
-  const resolve7 = resolverFor(pathDomainOf(spec));
+  const resolve8 = resolverFor(pathDomainOf(spec));
   const pairs = [];
   const seen = /* @__PURE__ */ new Set();
   for (const { raw, guest, label } of roots) {
-    for (const host of [raw, resolve7(raw, label)]) {
+    for (const host of [raw, resolve8(raw, label)]) {
       if (seen.has(host))
         continue;
       seen.add(host);
@@ -32618,21 +32935,36 @@ function labelArgs(labels) {
   }
   return out;
 }
-function hostUserFlag() {
-  const uid = typeof process.getuid === "function" ? process.getuid() : null;
-  const gid = typeof process.getgid === "function" ? process.getgid() : null;
-  if (uid === null || gid === null)
+function hostUserFlag(ids2 = hostIds()) {
+  const guest = localGuestUser(ids2);
+  if (guest === null)
     return [];
-  return [`--user=${uid}:${gid}`];
+  return [`--user=${String(guest.uid)}:${String(guest.gid)}`];
 }
-function guestUserFlag(spec) {
+function guestUserFlag(spec, ids2 = hostIds()) {
   const declared = spec.guestUser;
   if (declared)
     return [`--user=${declared.uid}:${declared.gid}`];
   if (pathDomainOf(spec) === "venue") {
     throw new FenceError("a venue-domain spec must declare guestUser: the tree is owned by the account that staged it on the venue, and this process\u2019s uid is a fact about a different machine. Handing the guest the local id gives it no write access to its own clone, and that EACCES reaches the classifier as the developer\u2019s suite failing.");
   }
-  return hostUserFlag();
+  return hostUserFlag(ids2);
+}
+function assertTreeHandedToGuest(spec, ids2 = hostIds(), ownerOf2 = (path6) => statSync5(path6).uid) {
+  if (pathDomainOf(spec) !== "local" || ids2?.uid !== 0)
+    return;
+  const guest = spec.guestUser ?? localGuestUser(ids2);
+  if (guest === null || guest.uid === 0)
+    return;
+  for (const [label, path6] of [
+    ["clone", spec.clone],
+    ["jail", spec.jail]
+  ]) {
+    const owner = ownerOf2(path6);
+    if (owner !== guest.uid) {
+      throw new FenceError(`refusing to run: this process is root, so the guest runs as uid ${String(guest.uid)}, but the ${label} at ${path6} is owned by uid ${String(owner)}. The guest could not write its own tree and the EACCES would read as the developer\u2019s suite failing. Hand it over first (chownTree, or buildJail for the jail).`);
+    }
+  }
 }
 function validateVolumeName(name, label) {
   if (!VOLUME_NAME.test(name) || name.length > VOLUME_NAME_MAX) {
@@ -32642,14 +32974,17 @@ function validateVolumeName(name, label) {
 }
 function stageMounts(spec) {
   const domain = pathDomainOf(spec);
-  const resolve7 = resolverFor(domain);
+  const resolve8 = resolverFor(domain);
   const volumes = spec.stageVolumes;
   if (domain === "venue") {
+    if (spec.cloneVolume !== void 0) {
+      throw new FenceError("a venue-domain spec must not declare cloneVolume: the venue names both of its volumes in stageVolumes, and a second name for the clone would leave two answers to which one is mounted.");
+    }
     if (volumes === void 0) {
       throw new FenceError("a venue-domain spec must declare stageVolumes: every writable host path on the venue is mounted noexec, so a bind mount of the staged clone cannot run the binaries an install step downloads (esbuild, swc, sharp, node-gyp \u2014 EACCES). The venue that staged the tree names the volumes it populated; a spec without them would reproduce that EACCES and report it as the developer\u2019s suite failing.");
     }
-    resolve7(spec.clone, "clone");
-    resolve7(spec.jail, "jail");
+    resolve8(spec.clone, "clone");
+    resolve8(spec.jail, "jail");
     return [
       `--volume=${validateVolumeName(volumes.clone, "the clone volume")}:${GUEST.clone}:rw`,
       `--volume=${validateVolumeName(volumes.jail, "the jail volume")}:${GUEST.jail}:rw`
@@ -32658,20 +32993,24 @@ function stageMounts(spec) {
   if (volumes !== void 0) {
     throw new FenceError("a local-domain spec must not declare stageVolumes: the paths are on this machine and ARE the mount sources, and nothing on the local path populates a volume \u2014 honouring the field would mount an empty clone. Volumes exist for the venue\u2019s noexec host only.");
   }
+  const clone2 = resolve8(spec.clone, "clone");
+  const cloneSource = spec.cloneVolume === void 0 ? clone2 : validateVolumeName(spec.cloneVolume, "the clone volume");
+  const jail = resolve8(spec.jail, "jail");
+  assertHoldsNoRealHome(jail, "the jail bind source", "stageMounts");
   return [
-    `--volume=${resolve7(spec.clone, "clone")}:${GUEST.clone}:rw`,
-    `--volume=${resolve7(spec.jail, "jail")}:${GUEST.jail}:rw`
+    `--volume=${cloneSource}:${GUEST.clone}:rw`,
+    `--volume=${jail}:${GUEST.jail}:rw`
   ];
 }
 function guestIdentityMounts(spec) {
   if (guestUserFlag(spec).length === 0)
     return [];
   const domain = pathDomainOf(spec);
-  const resolve7 = resolverFor(domain);
+  const resolve8 = resolverFor(domain);
   const under = domain === "venue" ? venueJoin : join36;
-  const jail = resolve7(spec.jail, "jail");
-  const passwd = resolve7(under(jail, JAIL_PASSWD_FILE), "the jail passwd file");
-  const group = resolve7(under(jail, JAIL_GROUP_FILE), "the jail group file");
+  const jail = resolve8(spec.jail, "jail");
+  const passwd = resolve8(under(jail, JAIL_PASSWD_FILE), "the jail passwd file");
+  const group = resolve8(under(jail, JAIL_GROUP_FILE), "the jail group file");
   return [`--volume=${passwd}:/etc/passwd:ro`, `--volume=${group}:/etc/group:ro`];
 }
 function containerArgs(spec, env, opts) {
@@ -32786,6 +33125,9 @@ function containerArgs(spec, env, opts) {
       args5.push(`--env=${k}=${url}`);
     }
     args5.push("--env=NO_PROXY=", "--env=no_proxy=");
+    const host = opts.net.proxyHost;
+    const port = String(opts.net.proxyPort);
+    args5.push(`--env=JAVA_TOOL_OPTIONS=-Dhttp.proxyHost=${host} -Dhttp.proxyPort=${port} -Dhttps.proxyHost=${host} -Dhttps.proxyPort=${port} -Daether.connector.http.useSystemProperties=true`);
   }
   args5.push("--");
   args5.push(validateImage(opts.image ?? DEFAULT_CONTAINER_IMAGE));
@@ -33001,7 +33343,14 @@ async function startProxySidecar(d, allow, idBase, staged, labels) {
     await waitForProxyReady(d, proxyName);
     return {
       net: { network: netInt, proxyHost: proxyName, proxyPort: SIDECAR_PROXY_PORT },
-      teardown
+      teardown,
+      // A `docker logs` that fails yields no hosts. That loses the hint and
+      // changes nothing else: the list only ever adds words to a reason.
+      deniedHosts: () => {
+        const logs = dockerSync(d, ["logs", proxyName]);
+        return logs.ok ? parseDeniedHosts(`${logs.stdout}
+${logs.stderr}`) : [];
+      }
     };
   } catch (err) {
     teardown();
@@ -33067,6 +33416,7 @@ async function runContainedOn(d, spec, env, opts = {}) {
   assertDomainDeclared(d, spec);
   assertNotAmbientlySteered(d, spec);
   assertProxyStagedForVenue(spec, opts.proxyCode);
+  assertTreeHandedToGuest(spec);
   const leaks = auditEnv(env);
   if (leaks.length > 0) {
     throw new FenceError(`refusing to spawn: environment carries credential material (${leaks.join(", ")})`);
@@ -33087,7 +33437,8 @@ async function runContainedOn(d, spec, env, opts = {}) {
       net: sidecar?.net,
       labels: opts.labels
     });
-    return await spawnWorkload(d, idBase, argv, opts.timeoutMs ?? 9e5);
+    const result = await spawnWorkload(d, idBase, argv, opts.timeoutMs ?? 9e5);
+    return sidecar ? { ...result, egressDenied: sidecar.deniedHosts() } : result;
   } finally {
     sidecar?.teardown();
   }
@@ -33118,7 +33469,10 @@ var init_container = __esm({
       "http_proxy",
       "https_proxy",
       "NO_PROXY",
-      "no_proxy"
+      "no_proxy",
+      // Carries the JVM's copy of the proxy (below), so an inherited value is dropped
+      // for the same reason as the rest.
+      "JAVA_TOOL_OPTIONS"
     ]);
     WINDOWS_DRIVE_ROOT = /^[A-Za-z]:[\\/]/;
     IMAGE_HOST = "(?:[a-zA-Z0-9-]+(?:\\.[a-zA-Z0-9-]+)+(?::[0-9]+)?|localhost(?::[0-9]+)?)";
@@ -33165,6 +33519,9 @@ var init_dist = __esm({
 });
 
 // ../../packages/envrun/dist/labels.js
+function runLabels(runId, callerLabels) {
+  return { ...callerLabels ?? {}, [RUN_ID_LABEL_KEY]: runId, [RUN_LABEL_KEY]: "term-350" };
+}
 function censusTotal(c) {
   return c.containers.length + c.volumes.length + c.networks.length;
 }
@@ -33248,12 +33605,13 @@ function judgeLeaks(peak, after, observation) {
     note
   };
 }
-var RUN_LABEL_KEY, LabelWatch, LEAK_STATES;
+var RUN_LABEL_KEY, RUN_ID_LABEL_KEY, LabelWatch, LEAK_STATES;
 var init_labels = __esm({
   "../../packages/envrun/dist/labels.js"() {
     "use strict";
     init_dist();
     RUN_LABEL_KEY = "supergoal.run";
+    RUN_ID_LABEL_KEY = "supergoal.run-id";
     LabelWatch = class {
       label;
       docker;
@@ -33604,6 +33962,7 @@ http
 });
 
 // ../../packages/envrun/dist/venue.js
+import { randomBytes as randomBytes9 } from "crypto";
 import { join as join38 } from "path";
 function localJailPaths(scratchRoot) {
   return {
@@ -33699,11 +34058,62 @@ function coerceToString(thrown) {
     return UNCOERCIBLE_THROWN;
   }
 }
+function localTreeOwner(ids2 = hostIds()) {
+  if (ids2?.uid !== 0)
+    return void 0;
+  return localGuestUser(ids2) ?? void 0;
+}
+function handLocalTreeToGuest(local, owner, chown = chownTree) {
+  if (owner === void 0)
+    return;
+  chown(local.cloneDir, owner);
+  chown(local.scratchRoot, owner);
+}
+function localCloneVolumeName(runId, suffix = randomBytes9(4).toString("hex")) {
+  const tail2 = `-${suffix}`;
+  const safe = runId.replace(/[^a-zA-Z0-9_.-]/g, "-");
+  const head = `th-clone-${safe}`.slice(0, VOLUME_NAME_MAX2 - tail2.length);
+  return validateVolumeName(`${head}${tail2}`, "the local clone volume");
+}
+function localCloneFillArgv(from, volume, owner) {
+  const chown = owner === null ? "" : ` && chown -R ${String(owner.uid)}:${String(owner.gid)} /dst`;
+  return [
+    "run",
+    "--rm",
+    "--network=none",
+    `--volume=${from}:/src:ro`,
+    `--volume=${validateVolumeName(volume, "the local clone volume")}:/dst:rw`,
+    "--",
+    STAGE_HELPER_IMAGE,
+    "sh",
+    "-c",
+    `cp -a /src/. /dst/${chown}`
+  ];
+}
 function acquireLocalLease(runId) {
   const docker3 = localDockerClient();
   const containment = selectContainment([containerContainmentOn(docker3)]);
   let released = false;
   const stagedProxies = [];
+  const owner = localTreeOwner();
+  let cloneVolume;
+  const createdVolumes = [];
+  const fillCloneVolume = (cloneDir) => {
+    const name = localCloneVolumeName(runId);
+    const created = docker3.sync(["volume", "create", `--label=${STAGE_VOLUME_LABEL_KEY}=${runId}`, "--", name], { timeoutMs: LOCAL_VOLUME_CREATE_TIMEOUT_MS });
+    if (created.error || created.status !== 0) {
+      throw new ContainmentRefusalError(`could not create the clone volume ${name} on the local daemon: ${(created.error?.message ?? created.stderr).trim().slice(0, 300)}`);
+    }
+    createdVolumes.push(name);
+    const from = resolverFor("local")(cloneDir, "clone");
+    const filled = docker3.sync(localCloneFillArgv(from, name, localGuestUser()), {
+      timeoutMs: LOCAL_CLONE_FILL_TIMEOUT_MS
+    });
+    if (filled.error || filled.status !== 0) {
+      throw new ContainmentRefusalError(`could not copy the clone into its volume ${name}: ${(filled.error?.message ?? filled.stderr).trim().slice(0, 300)}`);
+    }
+    return name;
+  };
   const lease = {
     kind: "local",
     runId,
@@ -33713,28 +34123,32 @@ function acquireLocalLease(runId) {
     // the paths are on this machine AND `canonical()` is what should resolve
     // them, which is the behaviour every local run has always had.
     pathDomain: "local",
+    // Spread rather than `guestUser: owner`, so a non-root lease has no such key
+    // at all — the same object every local run has always had.
+    ...owner === void 0 ? {} : { guestUser: owner },
     get released() {
       return released;
     },
-    stage: (local) => (
-      // The local venue IS the developer's machine, so staging is the identity
-      // and the paths are already canonical here. This is not a stub: it is the
-      // one venue for which the answer is "nothing to copy", and having it go
-      // through the same method as a hosted venue is what stops `thrun.ts` from
-      // ever holding a path it did not get from a venue.
-      //
-      // `jail` and `tmp` are DERIVED here rather than carried in on `LocalTree`,
-      // because the join differs by side and the venue owns the spelling of its
-      // own paths: the host's `join` here, `venueJoin` on a hosted venue. The
-      // segments are one constant in `fence.ts`, so the tree `buildJail` wrote
-      // and the tree a venue mounts cannot drift apart.
-      Promise.resolve({
+    get cloneVolume() {
+      return cloneVolume;
+    },
+    stage: (local) => {
+      if (released) {
+        return Promise.reject(new LeaseReleasedError("this lease was already released, so a clone volume made now would never be removed."));
+      }
+      try {
+        handLocalTreeToGuest(local, owner);
+        cloneVolume = fillCloneVolume(local.cloneDir);
+      } catch (err) {
+        return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+      }
+      return Promise.resolve({
         cloneDir: local.cloneDir,
         scratchRoot: local.scratchRoot,
         previewDir: local.previewDir,
         ...localJailPaths(local.scratchRoot)
-      })
-    ),
+      });
+    },
     // The containment function verbatim, which is the point of the barrel
     // re-export rather than a copy here: this venue's daemon and this process
     // share a filesystem, so the directory it makes under `tmpdir()` is already
@@ -33804,6 +34218,25 @@ function acquireLocalLease(runId) {
       const staged = stagedProxies.splice(0, stagedProxies.length);
       for (const s of staged)
         s.cleanup();
+      const volumeFailures = [];
+      for (const name of createdVolumes.splice(0, createdVolumes.length)) {
+        const removed = docker3.sync(["volume", "rm", "-f", "--", name], {
+          timeoutMs: LOCAL_VOLUME_CREATE_TIMEOUT_MS
+        });
+        if (removed.error || removed.status !== 0) {
+          volumeFailures.push(`${name}: ${(removed.error?.message ?? removed.stderr).trim().slice(0, 200)}`);
+        }
+      }
+      cloneVolume = void 0;
+      if (volumeFailures.length > 0) {
+        return Promise.resolve({
+          kind: "local",
+          released: true,
+          alreadyReleased: false,
+          error: `could not remove the clone volume: ${volumeFailures.join("; ")}`,
+          detail: `the lease is closed, but a clone volume remains (label ${STAGE_VOLUME_LABEL_KEY})`
+        });
+      }
       return Promise.resolve({
         kind: "local",
         released: true,
@@ -33815,7 +34248,7 @@ function acquireLocalLease(runId) {
   };
   return lease;
 }
-var VenueRollbackError, UNREADABLE_MESSAGE, UNREADABLE_NAME, UNCOERCIBLE_THROWN, UNDESCRIBABLE_THROWN, UNLISTABLE_ROLLBACK_FAILURES, RELEASED_LEASE_CENSUS_REASON, LeaseReleasedError;
+var VenueRollbackError, UNREADABLE_MESSAGE, UNREADABLE_NAME, UNCOERCIBLE_THROWN, UNDESCRIBABLE_THROWN, UNLISTABLE_ROLLBACK_FAILURES, RELEASED_LEASE_CENSUS_REASON, LeaseReleasedError, STAGE_HELPER_IMAGE, STAGE_VOLUME_LABEL_KEY, VOLUME_NAME_MAX2, LOCAL_VOLUME_CREATE_TIMEOUT_MS, LOCAL_CLONE_FILL_TIMEOUT_MS;
 var init_venue = __esm({
   "../../packages/envrun/dist/venue.js"() {
     "use strict";
@@ -33840,6 +34273,11 @@ var init_venue = __esm({
     LeaseReleasedError = class extends Error {
       name = "LeaseReleasedError";
     };
+    STAGE_HELPER_IMAGE = "busybox:1.37.0";
+    STAGE_VOLUME_LABEL_KEY = "terminalhire.stage";
+    VOLUME_NAME_MAX2 = 128;
+    LOCAL_VOLUME_CREATE_TIMEOUT_MS = 3e4;
+    LOCAL_CLONE_FILL_TIMEOUT_MS = 6e5;
   }
 });
 
@@ -33908,6 +34346,17 @@ caused by: ${frame}`;
   }
   return frames === 0 ? null : out;
 }
+function imageVariantFor(spec) {
+  if (spec.runtime !== "jvm")
+    return void 0;
+  const callsGradle = /(?:^|[\s;&|(])gradle(?=\s|$)/;
+  return [spec.installCommand, spec.testCommand].some((c) => c != null && callsGradle.test(c)) ? "gradle" : void 0;
+}
+function shapeFor(runtime, variant) {
+  if (runtime === "jvm" && variant === "gradle")
+    return JVM_GRADLE_IMAGE;
+  return RUNTIME_IMAGES[runtime];
+}
 function atLeast(a, b) {
   const left = a.split(".").map(Number);
   const right = b.split(".").map(Number);
@@ -33920,19 +34369,19 @@ function atLeast(a, b) {
   }
   return true;
 }
-function imageForRuntime(runtime, override, version2) {
+function imageForRuntime(runtime, override, version2, variant) {
   if (override)
     return override;
-  const shape = RUNTIME_IMAGES[runtime];
+  const shape = shapeFor(runtime, variant);
   if (!shape) {
     throw new RunRefusalError(`no container image is mapped for runtime ${JSON.stringify(runtime)}. Refusing to run it in the Node image: a bare "command not found" exits 127, which classifyVerification already owns as ours \u2014 but a test script that RUNS and fails inside on the missing tool exits with its own status and prints to stdout, and that falls through to tests-failed \u2014 a false red blamed on the repo.`);
   }
-  if (version2 === void 0 || version2 === null)
+  if (version2 === void 0 || version2 === null || shape.fixed)
     return unversionedImage(shape);
   if (!TAG_VERSION.test(version2)) {
     throw new RunRefusalError(`runtime version ${JSON.stringify(version2)} is not a bare version, so no image tag can be built from it. Refusing rather than booting the default: the repo asked for a version, and supplying a different one silently is what TERM-643 fixed.`);
   }
-  return `${shape.repository}:${version2}${shape.suffix}`;
+  return `${shape.repository}:${shape.prefix ?? ""}${version2}${shape.suffix}`;
 }
 function setManifestProbe(probe) {
   const previous = manifestProbe;
@@ -33945,38 +34394,46 @@ function imageDefinitelyAbsent(image) {
     return false;
   return /manifest unknown|no such manifest/i.test(res.output);
 }
-function resolvePublishedImage(image, runtime, version2) {
+function resolvePublishedImage(image, runtime, version2, variant) {
   if (!imageDefinitelyAbsent(image))
     return image;
-  const shape = RUNTIME_IMAGES[runtime];
+  const shape = shapeFor(runtime, variant);
   if (shape && shape.declaredIsFloor && atLeast(shape.defaultVersion, version2)) {
     return unversionedImage(shape);
   }
   throw new RunRefusalError(`the repo declares ${runtime} ${version2}, and no image is published at ${image}` + (shape && shape.declaredIsFloor ? `. Our default is ${shape.defaultVersion}, which is OLDER than that, so falling back would run the repo under a toolchain it says it cannot use` : `. ${runtime} treats a declared version as an exact pin, not a minimum, so a different one is a different environment`) + ". Refusing rather than booting a version the repo did not ask for \u2014 that substitution is what made this class of failure unattributable (TERM-643). Pass an explicit image to override.");
 }
 function resolveImageForSpec(spec, override) {
-  const declared = spec.runtimeVersion;
-  const image = imageForRuntime(spec.runtime, override, declared);
+  const variant = imageVariantFor(spec);
+  const declared = shapeFor(spec.runtime, variant)?.fixed ? null : spec.runtimeVersion;
+  const image = imageForRuntime(spec.runtime, override, declared, variant);
   const constructed = (() => {
     if (declared === null)
       return null;
     try {
-      return imageForRuntime(spec.runtime, void 0, declared);
+      return imageForRuntime(spec.runtime, void 0, declared, variant);
     } catch {
       return null;
     }
   })();
   if (constructed !== null && image === constructed && declared !== null) {
-    return resolvePublishedImage(image, spec.runtime, declared);
+    return resolvePublishedImage(image, spec.runtime, declared, variant);
   }
   return image;
 }
 function installEnvironmentFailureNote(install, image) {
-  const base = `the install step exited ${String(install.exitCode)}, so the test command was never invoked. The repo has not been judged; this is an environment failure.`;
+  const base = `the install step exited ${String(install.exitCode)}, so the test command was never invoked. The repo has not been judged; this is an environment failure.` + refusedHostsSentence(install.egressDenied ?? []);
   if (!MISSING_IMAGE_SHAPE.test(`${install.stdout}
 ${install.stderr}`))
     return base;
   return `${base} The container image ${image} is not present on this machine \u2014 run \`docker pull ${image}\` and try again.`;
+}
+function refusedHostsSentence(hosts) {
+  if (hosts.length === 0)
+    return "";
+  const named = hosts.slice(0, MAX_NAMED_REFUSED_HOSTS).join(", ");
+  const rest = hosts.length - MAX_NAMED_REFUSED_HOSTS;
+  return ` During install the network proxy refused ${named}` + (rest > 0 ? ` and ${String(rest)} more` : "") + ". Install reaches only the hosts on its allowlist, so a dependency whose install script downloads from any other host cannot get what it asked for.";
 }
 function classifySingleRun(run32) {
   return classifyVerification(run32).outcome;
@@ -33994,12 +34451,22 @@ function assertVenueOwnerDeclared(lease) {
     return;
   throw new RunRefusalError("this venue did not say which account owns the tree it staged, so the guest would run under this machine's uid and could not write its own clone. We refuse rather than report that permission error as the repo's tests failing.");
 }
+function refuseUnbuildableSpec(spec) {
+  if (spec.runtime !== "jvm" || spec.installCommand !== null || spec.testCommand !== null)
+    return;
+  const why = spec.unresolved.find((r) => r.kind === "no-test-command")?.detail;
+  if (why === void 0) {
+    throw new EnvRunError("internal: a jvm spec with no test command carries no no-test-command reason");
+  }
+  throw new RunRefusalError(`refusing to run this repository: ${why}.`);
+}
 async function runEnvironmentSpec(req) {
   const startedAt = Date.now();
   const containment = req.lease.containment;
   if (containment.kind !== "container") {
     throw new EnvRunError(`phase 2 requires the container tier, got ${containment.kind}. Refusing: a container phase that silently ran under seatbelt would make every container claim vacuous.`);
   }
+  refuseUnbuildableSpec(req.spec);
   assertVenueOwnerDeclared(req.lease);
   const image = resolveImageForSpec(req.spec, req.image);
   const { jail, tmp } = req;
@@ -34029,6 +34496,8 @@ async function runEnvironmentSpec(req) {
         // TERM-913: the third answer about that machine — which volumes the
         // fence mounts in place of the noexec stage. Undefined on a local lease.
         stageVolumes: req.lease.stageVolumes,
+        // TERM-1106: the local venue's copy of the clone. Undefined on a hosted lease.
+        cloneVolume: req.lease.cloneVolume,
         env,
         image,
         labels,
@@ -34042,9 +34511,10 @@ async function runEnvironmentSpec(req) {
         installOk: false
       };
     } else if (req.spec.testCommand === null) {
+      const why = req.spec.unresolved.find((r) => r.kind === "no-test-command")?.detail;
       result = {
         outcome: "no-tests-observed",
-        note: "the spec derived no test command, so nothing was executed: nothing failed and nothing ran. Certain, not inferred \u2014 no command was ever invoked.",
+        note: "the spec derived no test command, so nothing was executed: nothing failed and nothing ran. Certain, not inferred \u2014 no command was ever invoked." + (why === void 0 ? "" : ` Why: ${why}.`),
         installOk: true
       };
     } else {
@@ -34062,12 +34532,14 @@ async function runEnvironmentSpec(req) {
         // TERM-913: the third answer about that machine — which volumes the
         // fence mounts in place of the noexec stage. Undefined on a local lease.
         stageVolumes: req.lease.stageVolumes,
+        // TERM-1106: the local venue's copy of the clone. Undefined on a hosted lease.
+        cloneVolume: req.lease.cloneVolume,
         env,
         image,
         labels,
         timeoutMs: req.testTimeoutMs ?? 9e5
       });
-      const verdict = classifyVerification(toExecution(test));
+      const verdict = classifyVerification({ ...toExecution(test), runtime: req.spec.runtime });
       result = { outcome: verdict.outcome, note: verdict.reason, installOk: true };
     }
   } finally {
@@ -34121,6 +34593,7 @@ async function runStep(containment, r) {
     pathDomain: r.pathDomain,
     guestUser: r.guestUser,
     stageVolumes: r.stageVolumes,
+    cloneVolume: r.cloneVolume,
     program: "/bin/sh",
     args: ["-c", withUserScriptPath(r.command)]
   };
@@ -34140,10 +34613,11 @@ async function runStep(containment, r) {
     stdout: res.stdout,
     stderr: res.stderr,
     timedOut: res.timedOut,
-    wallMs: Date.now() - startedAt
+    wallMs: Date.now() - startedAt,
+    ...res.egressDenied && res.egressDenied.length > 0 ? { egressDenied: [...new Set(res.egressDenied)] } : {}
   };
 }
-var EnvRunError, RunRefusalError, MAX_CAUSE_FRAMES, CHAIN_UNREADABLE, CHAIN_TOO_DEEP, RUNTIME_IMAGES, unversionedImage, TAG_VERSION, dockerManifestProbe, manifestProbe, MISSING_IMAGE_SHAPE;
+var EnvRunError, RunRefusalError, MAX_CAUSE_FRAMES, CHAIN_UNREADABLE, CHAIN_TOO_DEEP, RUNTIME_IMAGES, JVM_GRADLE_IMAGE, unversionedImage, TAG_VERSION, dockerManifestProbe, manifestProbe, MISSING_IMAGE_SHAPE, MAX_NAMED_REFUSED_HOSTS;
 var init_execute = __esm({
   "../../packages/envrun/dist/execute.js"() {
     "use strict";
@@ -34210,9 +34684,56 @@ var init_execute = __esm({
         suffix: "",
         defaultVersion: "8.0",
         declaredIsFloor: true
+      },
+      /**
+       * TERM-1122. Maven's image, and the one a Gradle WRAPPER repo gets too: the wrapper
+       * downloads its own Gradle, so it needs a JDK and nothing else. MEASURED
+       * 2026-09-18: `maven:3.9-eclipse-temurin-21` carries `git`, `mvn` and JDK 21 on
+       * Ubuntu 24.04, which is why this is not `eclipse-temurin` (no `git`, rejected
+       * under TERM-1139). The JDK sits AFTER maven's own version in the tag, hence
+       * `prefix`, and the major is all envspec derives (`javaMajor`).
+       *
+       * `declaredIsFloor`: a JDK builds for older `--release` targets, so a repo asking
+       * for 16, which has no image, runs on 21. A Gradle toolchain is stricter than a
+       * floor and asks for its exact JDK; Gradle's refusal on the wrong one reads as
+       * ours (`classify.ts`, `isOfflineBuildGap`), never as the repo's.
+       */
+      jvm: {
+        repository: "maven",
+        prefix: "3.9-eclipse-temurin-",
+        suffix: "",
+        defaultVersion: "21",
+        declaredIsFloor: true
+      },
+      /**
+       * TERM-1123. OUR image (`packages/envrun/images/cpp/Dockerfile`): Debian bookworm
+       * with the C/C++ toolchain, CMake, Meson and the common -dev libraries baked in.
+       * No official image carries that set. Libraries are baked rather than installed per
+       * run because the install step has network only through the allowlist, and apt is
+       * not on it; a repo needing a library the image lacks gets `test-command-unavailable`
+       * (`isMissingSystemDependency`), never a red.
+       *
+       * `fixed`: a C/C++ repo declares no compiler version envspec can read, so there is
+       * nothing to derive and nothing to probe. The tag moves only when the Dockerfile
+       * does. It lives in a PUBLIC repository, apart from the private venue images, so a
+       * developer's own Docker can pull it with no credential.
+       */
+      cpp: {
+        repository: "us-east1-docker.pkg.dev/terminalhire-pool/runtime-images/cpp",
+        suffix: "",
+        defaultVersion: "1",
+        declaredIsFloor: false,
+        fixed: true
       }
     };
-    unversionedImage = (shape) => `${shape.repository}:${shape.defaultVersion}${shape.suffix}`;
+    JVM_GRADLE_IMAGE = {
+      repository: "gradle",
+      prefix: "jdk",
+      suffix: "",
+      defaultVersion: "21",
+      declaredIsFloor: true
+    };
+    unversionedImage = (shape) => `${shape.repository}:${shape.prefix ?? ""}${shape.defaultVersion}${shape.suffix}`;
     TAG_VERSION = /^\d+(?:\.\d+){0,2}$/;
     dockerManifestProbe = (image) => {
       const res = spawnSync5("docker", ["manifest", "inspect", image], {
@@ -34223,6 +34744,7 @@ var init_execute = __esm({
     };
     manifestProbe = dockerManifestProbe;
     MISSING_IMAGE_SHAPE = /Unable to find image ['"][^'"]*['"] locally/i;
+    MAX_NAMED_REFUSED_HOSTS = 5;
   }
 });
 
@@ -34297,7 +34819,7 @@ var init_dsse = __esm({
 });
 
 // ../../packages/attest/dist/sealedbox.js
-import { createCipheriv as createCipheriv3, createDecipheriv as createDecipheriv3, diffieHellman, generateKeyPairSync as generateKeyPairSync2, hkdfSync as hkdfSync2, randomBytes as randomBytes9 } from "crypto";
+import { createCipheriv as createCipheriv3, createDecipheriv as createDecipheriv3, diffieHellman, generateKeyPairSync as generateKeyPairSync2, hkdfSync as hkdfSync2, randomBytes as randomBytes10 } from "crypto";
 var init_sealedbox = __esm({
   "../../packages/attest/dist/sealedbox.js"() {
     "use strict";
@@ -34307,7 +34829,7 @@ var init_sealedbox = __esm({
 });
 
 // ../../packages/attest/dist/aead.js
-import { createCipheriv as createCipheriv4, createDecipheriv as createDecipheriv4, randomBytes as randomBytes10 } from "crypto";
+import { createCipheriv as createCipheriv4, createDecipheriv as createDecipheriv4, randomBytes as randomBytes11 } from "crypto";
 var init_aead = __esm({
   "../../packages/attest/dist/aead.js"() {
     "use strict";
@@ -35027,7 +35549,7 @@ var init_result = __esm({
 });
 
 // ../../packages/envrun/dist/attestation.js
-import { createHash as createHash9, randomBytes as randomBytes11 } from "crypto";
+import { createHash as createHash9, randomBytes as randomBytes12 } from "crypto";
 function contradicts(outcome, counts, exitCode) {
   const budget = OUTCOME_TO_BUDGET[outcome];
   if (budget === null)
@@ -35207,7 +35729,7 @@ function toAcceptancePredicate(pair, opts = {}) {
       // RepoDigest (`repo@sha256:…`) carries the repo name and the content hash, and the
       // tag it drops is the part a registry can re-point (TERM-893).
       enclave_measurement: localMeasurement(patched.containerImageDigest),
-      nonce: opts.nonce ?? randomBytes11(16).toString("hex"),
+      nonce: opts.nonce ?? randomBytes12(16).toString("hex"),
       run_policy: { max_attempts: opts.maxAttempts ?? 1, budget_outcome: budget }
     }
   };
@@ -36185,12 +36707,12 @@ function socketErrorReason(err) {
   return err.name;
 }
 function fetchAttestationOverTls(req) {
-  return new Promise((resolve7) => {
+  return new Promise((resolve8) => {
     let whole;
     const settle = (reading) => {
       if (whole !== void 0)
         clearTimeout(whole);
-      resolve7(reading);
+      resolve8(reading);
     };
     let cert;
     let key;
@@ -37391,7 +37913,7 @@ function makeLease(p) {
     }
   };
 }
-var SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, STAGE_HELPER_IMAGE, VOLUME_CREATE_TIMEOUT_MS, EXEC_PROBE_TIMEOUT_MS, POPULATE_TIMEOUT_MS, STAGE_VOLUME_LABEL_KEY, STAGE_PROOF_PREFIX, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING, CS_ATTEST_PORT, CS_DOCKER_PORT, CS_READY_BUDGET_MS, CS_ATTEST_TIMEOUT_MS, CS_PULL_TIMEOUT_MS, CS_ATTEST_INTERVAL_MS, OPENSSL_TIMEOUT_MS, CS_RUN_ARGS, CS_GUEST_USER, CS_STAGE_ROOT, CLIENT_CERT_STAND_IN;
+var SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, VOLUME_CREATE_TIMEOUT_MS, EXEC_PROBE_TIMEOUT_MS, POPULATE_TIMEOUT_MS, STAGE_PROOF_PREFIX, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING, CS_ATTEST_PORT, CS_DOCKER_PORT, CS_READY_BUDGET_MS, CS_ATTEST_TIMEOUT_MS, CS_PULL_TIMEOUT_MS, CS_ATTEST_INTERVAL_MS, OPENSSL_TIMEOUT_MS, CS_RUN_ARGS, CS_GUEST_USER, CS_STAGE_ROOT, CLIENT_CERT_STAND_IN;
 var init_hostedVenue = __esm({
   "../../packages/envrun/dist/hostedVenue.js"() {
     "use strict";
@@ -37540,18 +38062,18 @@ var init_hostedVenue = __esm({
           for (let i = 0; i < n; i += 1) {
             const server = createServer();
             servers.push(server);
-            await new Promise((resolve7, reject) => {
+            await new Promise((resolve8, reject) => {
               server.once("error", reject);
               server.listen(0, "localhost", () => {
-                resolve7();
+                resolve8();
               });
             });
           }
           return servers.map((s) => s.address().port);
         } finally {
-          await Promise.all(servers.map((s) => new Promise((resolve7) => {
+          await Promise.all(servers.map((s) => new Promise((resolve8) => {
             s.close(() => {
-              resolve7();
+              resolve8();
             });
           })));
         }
@@ -37565,11 +38087,9 @@ var init_hostedVenue = __esm({
     VENUE_SSH_USER = "th-runner";
     GCE_METADATA_IDENTITY_URL = "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/identity";
     COMPACT_JWT = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
-    STAGE_HELPER_IMAGE = "busybox:1.37.0";
     VOLUME_CREATE_TIMEOUT_MS = 3e4;
     EXEC_PROBE_TIMEOUT_MS = 12e4;
     POPULATE_TIMEOUT_MS = STAGE_PUSH_TIMEOUT_MS;
-    STAGE_VOLUME_LABEL_KEY = "terminalhire.stage";
     STAGE_PROOF_PREFIX = ".th-proven-";
     IAP_NOT_READY = /\b4047\s*[:\]]/;
     IAP_BACKEND_UNREACHABLE = /\b4003\s*[:\]]/;
@@ -37601,7 +38121,7 @@ function localDockerPlacement() {
     kind: "local-docker",
     refusal: null,
     venue: () => localVenue(),
-    imageFor: (runtime, override, version2) => imageForRuntime(runtime, override, version2)
+    imageFor: (runtime, override, version2, variant) => imageForRuntime(runtime, override, version2, variant)
   };
 }
 function hostedPoolPlacement() {
@@ -37609,7 +38129,7 @@ function hostedPoolPlacement() {
     kind: "hosted-pool",
     refusal: null,
     venue: () => hostedVenue(),
-    imageFor: (runtime, override, version2) => imageForRuntime(runtime, override, version2)
+    imageFor: (runtime, override, version2, variant) => imageForRuntime(runtime, override, version2, variant)
   };
 }
 function placementFor(kind) {
@@ -38174,6 +38694,12 @@ function detectRuntime(repo) {
   if (repo.listNames("").some((name) => /\.(?:csproj|fsproj|sln)$/.test(name))) {
     candidates.push("dotnet");
   }
+  if (candidates.length === 0 && repo.listFiles("").some((f) => f.endsWith(".java"))) {
+    candidates.push("jvm");
+  }
+  if (!candidates.includes("cpp") && MAKEFILE_NAMES.some((file) => repo.exists(file)) && repo.listFiles("").some((f) => C_FAMILY_SOURCE.test(f))) {
+    candidates.push("cpp");
+  }
   return { runtime: candidates[0] ?? "unknown", candidates };
 }
 function readJsonObject(repo, path6) {
@@ -38321,6 +38847,49 @@ function basePythonInstallCommand(repo) {
   }
   return null;
 }
+function rehearse(command) {
+  const copy = '"$R/.terminalhire-rehearsal"';
+  const home = '"$R/.terminalhire-rehearsal-home"';
+  return `{ R="$HOME"; rm -rf ${copy} ${home}; mkdir -p ${home} && cp -R . ${copy} && (cd ${copy} && HOME=${home} GRADLE_USER_HOME="$R/.gradle" JAVA_TOOL_OPTIONS="$JAVA_TOOL_OPTIONS -Duser.home=$R/.terminalhire-rehearsal-home" ${command}); rm -rf ${copy} ${home}; true; }`;
+}
+function cmakeCode(text) {
+  return text.replace(/#\[(=*)\[[\s\S]*?\]\1\]/g, "").replace(/#.*$/gm, "");
+}
+function makeTargets(text) {
+  const targets = /* @__PURE__ */ new Set();
+  for (const line of text.split("\n")) {
+    if (line.startsWith("	"))
+      continue;
+    const rule = /^([^:=#\t][^:=#]*?)[ \t]*::?(?!:?=)/.exec(line);
+    if (rule)
+      for (const name of rule[1].trim().split(/\s+/))
+        targets.add(name);
+  }
+  return targets;
+}
+function cppCommands(repo) {
+  const cmake = repo.readText("CMakeLists.txt");
+  if (cmake !== null) {
+    return CMAKE_DECLARES_TESTS.test(cmakeCode(cmake)) ? {
+      install: "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON",
+      test: "cmake --build build --parallel && ctest --test-dir build --output-on-failure"
+    } : { install: null, test: null };
+  }
+  const meson = repo.readText("meson.build");
+  if (meson !== null) {
+    return /\btest\s*\(/.test(meson) ? { install: "meson setup build", test: "meson test -C build" } : { install: null, test: null };
+  }
+  const name = repo.listNames("").find((file) => MAKEFILE_NAMES.includes(file));
+  const makefile = name === void 0 ? null : repo.readText(name);
+  if (makefile !== null) {
+    const targets = makeTargets(makefile);
+    if (targets.has("test"))
+      return { install: null, test: "make test" };
+    if (targets.has("check"))
+      return { install: null, test: "make check" };
+  }
+  return { install: null, test: null };
+}
 function otherRuntimeCommands(repo, runtime) {
   switch (runtime) {
     case "go":
@@ -38348,11 +38917,24 @@ function otherRuntimeCommands(repo, runtime) {
     case "dotnet":
       return { install: "dotnet restore", test: "dotnet test" };
     case "jvm": {
-      if (repo.exists("pom.xml"))
-        return { install: "mvn -B dependency:go-offline", test: "mvn -B test" };
+      if (!JVM_BUILD_FILES.some((file) => repo.exists(file)))
+        return { install: null, test: null };
+      if (repo.exists("pom.xml")) {
+        return {
+          install: `mvn -B dependency:go-offline && ${rehearse('mvn -B test -Dmaven.test.failure.ignore=true -Dmaven.repo.local="$R/.m2/repository"')}`,
+          test: "mvn -B -o test"
+        };
+      }
       const wrapper = repo.exists("gradlew") ? "./gradlew" : "gradle";
-      return { install: `${wrapper} dependencies`, test: `${wrapper} test` };
+      return {
+        install: `${wrapper} dependencies && ${rehearse(`${wrapper} test --continue`)}`,
+        // `--no-build-cache`: the rehearsal above can fill Gradle's build cache, and a
+        // test task restored FROM-CACHE runs nothing and prints no count.
+        test: `${wrapper} test --offline --no-build-cache`
+      };
     }
+    case "cpp":
+      return cppCommands(repo);
     default:
       return { install: null, test: null };
   }
@@ -38383,6 +38965,15 @@ function searchRuntimeVersion(repo, runtime) {
     push(".ruby-version", repo.readText(".ruby-version"));
   } else if (runtime === "dotnet") {
     push("global.json sdk.version", readStringField(readObjectField(readJsonObject(repo, "global.json"), "sdk"), "version"));
+  } else if (runtime === "jvm") {
+    const pom = repo.readText("pom.xml");
+    const gradle = repo.readText("build.gradle") ?? repo.readText("build.gradle.kts");
+    push("build.gradle toolchain languageVersion", javaMajor(matchFirst(gradle, /JavaLanguageVersion\.of\(\s*["']?(\d+)["']?\s*\)/) ?? matchFirst(gradle, /jvmToolchain\(\s*(\d+)\s*\)/)));
+    push(".java-version", javaMajor(repo.readText(".java-version")));
+    push("pom.xml maven.compiler.release", javaMajor(matchFirst(pom, /<maven\.compiler\.release>\s*([^<\s]+)\s*</)));
+    push("pom.xml java.version", javaMajor(matchFirst(pom, /<java\.version>\s*([^<\s]+)\s*</)));
+    push("pom.xml maven.compiler.source", javaMajor(matchFirst(pom, /<maven\.compiler\.source>\s*([^<\s]+)\s*</)));
+    push("build.gradle sourceCompatibility", javaMajor(matchFirst(gradle, /sourceCompatibility\s*=\s*JavaVersion\.VERSION_([\d_]+)/)?.replace("_", ".") ?? matchFirst(gradle, /sourceCompatibility\s*=\s*["']?([\d.]+)["']?/)));
   }
   let rangeFound = null;
   for (const source of sources) {
@@ -38396,13 +38987,21 @@ function searchRuntimeVersion(repo, runtime) {
   }
   return { version: null, searched: sources.map((s) => s.label), rangeFound };
 }
+function javaMajor(text) {
+  if (text === null)
+    return null;
+  const match2 = /^(?:1\.(\d+)|(\d+))(?:[._][\d_.]*)?$/.exec(text.trim());
+  if (match2 === null)
+    return null;
+  return match2[1] ?? match2[2] ?? null;
+}
 function matchFirst(text, pattern) {
   if (text === null)
     return null;
   const match2 = pattern.exec(text);
   return match2 === null ? null : match2[1];
 }
-var RUNTIME_MANIFESTS, MANIFEST_FILENAMES, NPM_PLACEHOLDER_TEST, REQUIREMENT_SPECIFIER, EXACT_VERSION;
+var RUNTIME_MANIFESTS, MAKEFILE_NAMES, C_FAMILY_SOURCE, MANIFEST_FILENAMES, JVM_BUILD_FILES, NPM_PLACEHOLDER_TEST, REQUIREMENT_SPECIFIER, CPP_BUILD_FILES, CMAKE_DECLARES_TESTS, EXACT_VERSION;
 var init_manifest2 = __esm({
   "../../packages/envspec/dist/manifest.js"() {
     "use strict";
@@ -38413,11 +39012,19 @@ var init_manifest2 = __esm({
       { runtime: "rust", files: ["Cargo.toml"] },
       { runtime: "jvm", files: ["pom.xml", "build.gradle", "build.gradle.kts"] },
       { runtime: "ruby", files: ["Gemfile"] },
-      { runtime: "dotnet", files: [] }
+      { runtime: "dotnet", files: [] },
+      // Last, so an earlier runtime keeps precedence: a Python package with a C
+      // extension built by CMake is still a Python repo, with cpp recorded second.
+      { runtime: "cpp", files: ["CMakeLists.txt", "meson.build"] }
     ];
-    MANIFEST_FILENAMES = RUNTIME_MANIFESTS.flatMap((m) => m.files).concat(["*.csproj", "*.fsproj", "*.sln"]).sort();
+    MAKEFILE_NAMES = ["GNUmakefile", "Makefile", "makefile"];
+    C_FAMILY_SOURCE = /\.(?:c|cc|cpp|cxx|h|hpp|hh)$/i;
+    MANIFEST_FILENAMES = RUNTIME_MANIFESTS.flatMap((m) => m.files).concat(["*.csproj", "*.fsproj", "*.sln"], MAKEFILE_NAMES).sort();
+    JVM_BUILD_FILES = ["build.gradle", "build.gradle.kts", "pom.xml"];
     NPM_PLACEHOLDER_TEST = /^echo\s+["']?Error:\s*no test specified["']?\s*&&\s*exit\s+1$/;
     REQUIREMENT_SPECIFIER = /^[A-Za-z0-9._-]+(\[[A-Za-z0-9._,-]+\])?([<>=!~]=?[A-Za-z0-9._*+-]+(,[<>=!~]=?[A-Za-z0-9._*+-]+)*)?$/;
+    CPP_BUILD_FILES = ["CMakeLists.txt", "meson.build", ...MAKEFILE_NAMES];
+    CMAKE_DECLARES_TESTS = /\benable_testing\s*\(|\binclude\s*\(\s*CTest\s*\)|\badd_test\s*\(/;
     EXACT_VERSION = /^v?(\d+(?:\.\d+){0,2})$/;
   }
 });
@@ -38490,11 +39097,11 @@ var init_references = __esm({
 });
 
 // ../../packages/envspec/dist/repo.js
-import { readdirSync as readdirSync2, readFileSync as readFileSync26, statSync as statSync4 } from "fs";
-import { join as join41, relative as relative2, sep as sep5 } from "path";
+import { readdirSync as readdirSync3, readFileSync as readFileSync26, statSync as statSync6 } from "fs";
+import { join as join41, relative as relative2, sep as sep6 } from "path";
 function createRepoReader(repoPath) {
   const resolveIn = (relativePath) => relativePath === "" ? repoPath : join41(repoPath, relativePath);
-  const toPosix = (absolute) => relative2(repoPath, absolute).split(sep5).join("/");
+  const toPosix = (absolute) => relative2(repoPath, absolute).split(sep6).join("/");
   const readText = (relativePath) => {
     try {
       return readFileSync26(resolveIn(relativePath), "utf8");
@@ -38504,7 +39111,7 @@ function createRepoReader(repoPath) {
   };
   const statOf = (relativePath) => {
     try {
-      return statSync4(resolveIn(relativePath));
+      return statSync6(resolveIn(relativePath));
     } catch {
       return null;
     }
@@ -38516,7 +39123,7 @@ function createRepoReader(repoPath) {
         return;
       let names;
       try {
-        names = readdirSync2(dir);
+        names = readdirSync3(dir);
       } catch {
         return;
       }
@@ -38551,7 +39158,7 @@ function createRepoReader(repoPath) {
       if (st === null || !st.isDirectory())
         return [];
       try {
-        return readdirSync2(resolveIn(relativeDir)).slice().sort();
+        return readdirSync3(resolveIn(relativeDir)).slice().sort();
       } catch {
         return [];
       }
@@ -38812,7 +39419,7 @@ function deriveFromReader(repo) {
       searched: MANIFEST_FILENAMES,
       detail: `no ecosystem manifest was found at the repo root (looked for ${MANIFEST_FILENAMES.join(", ")}), so the language runtime could not be identified`
     });
-  } else {
+  } else if (runtime !== "jvm" || JVM_BUILD_FILES.some((file) => repo.exists(file))) {
     derivedFrom.add("manifest");
   }
   if (detection.candidates.length > 1) {
@@ -38876,7 +39483,7 @@ function deriveFromReader(repo) {
     });
   }
   const version2 = deriveRuntimeVersion(repo, runtime, job);
-  if (version2.value === null && runtime !== "unknown") {
+  if (version2.value === null && runtime !== "unknown" && runtime !== "cpp") {
     unresolved.push({
       kind: "runtime-version-undeclared",
       runtime,
@@ -38976,12 +39583,13 @@ function deriveRuntimeVersion(repo, runtime, job) {
   const setup = SETUP_ACTIONS[runtime];
   const searched = [];
   let rangeFound = null;
+  const pin = (raw) => runtime === "jvm" ? javaMajor(raw) : exactVersion(raw);
   if (job !== null && setup !== void 0) {
     const direct = findActionInput(job, setup.action, setup.input);
     if (direct !== null) {
       searched.push(`${job.file} ${setup.action} ${setup.input}`);
       const reduced = reduceExpression(direct.command, job.singletons);
-      const exact = exactVersion(reduced);
+      const exact = pin(reduced);
       if (exact !== null)
         return { value: exact, searched, rangeFound: null };
       if (reduced !== null)
@@ -38990,7 +39598,7 @@ function deriveRuntimeVersion(repo, runtime, job) {
     const viaFile = findActionInput(job, setup.action, setup.fileInput);
     if (viaFile !== null) {
       searched.push(`${job.file} ${setup.action} ${setup.fileInput} -> ${viaFile.command}`);
-      const exact = exactVersion(repo.readText(viaFile.command));
+      const exact = pin(repo.readText(viaFile.command));
       if (exact !== null)
         return { value: exact, searched, rangeFound: null };
     }
@@ -39015,6 +39623,10 @@ function testSearchPaths(runtime, workflowFiles) {
     paths.push("**/*_test.go");
   if (runtime === "ruby")
     paths.push("Gemfile", "Rakefile");
+  if (runtime === "jvm")
+    paths.push(...JVM_BUILD_FILES);
+  if (runtime === "cpp")
+    paths.push(...CPP_BUILD_FILES);
   if (runtime === "unknown")
     paths.push(...MANIFEST_FILENAMES);
   return [...new Set(paths)].sort();
@@ -39032,7 +39644,26 @@ function describeTestSearch(repo, runtime, workflowFiles) {
   if (runtime === "python") {
     return `${ciPart}, and nothing in the repo names a test runner \u2014 no \`[tool.pytest.ini_options]\`, no \`pytest.ini\`, and no pytest dependency in \`pyproject.toml\` or a requirements file`;
   }
+  if (runtime === "jvm" && !JVM_BUILD_FILES.some((file) => repo.exists(file))) {
+    return `${ciPart}, and the repo has Java sources but no build file (${JVM_BUILD_FILES.join(", ")}), so there is no build to run tests with. Compiling the sources with \`javac\` alone would run no tests`;
+  }
+  if (runtime === "cpp")
+    return `${ciPart}, and ${describeCppSearch(repo)}`;
   return `${ciPart}, and no ${runtime} test convention applies to this tree`;
+}
+function describeCppSearch(repo) {
+  const cmake = repo.readText("CMakeLists.txt");
+  if (cmake !== null && !CMAKE_DECLARES_TESTS.test(cmakeCode(cmake))) {
+    return "`CMakeLists.txt` registers no tests: no `enable_testing()`, `include(CTest)` or `add_test()`";
+  }
+  if (cmake === null && repo.exists("meson.build")) {
+    return "`meson.build` declares no `test()`";
+  }
+  const makefile = repo.listNames("").find((name) => MAKEFILE_NAMES.includes(name));
+  if (cmake === null && makefile !== void 0) {
+    return `\`${makefile}\` has no \`test\` or \`check\` target`;
+  }
+  return `no C/C++ test convention applies to this tree (looked in ${CPP_BUILD_FILES.join(", ")})`;
 }
 function installSearchPaths(runtime, workflowFiles) {
   const paths = [...workflowFiles];
@@ -39040,6 +39671,10 @@ function installSearchPaths(runtime, workflowFiles) {
     paths.push("package-lock.json", "pnpm-lock.yaml", "yarn.lock");
   if (runtime === "python")
     paths.push("poetry.lock", "pyproject.toml", "requirements.txt", "uv.lock");
+  if (runtime === "jvm")
+    paths.push(...JVM_BUILD_FILES);
+  if (runtime === "cpp")
+    paths.push(...CPP_BUILD_FILES);
   if (runtime === "unknown")
     paths.push(...MANIFEST_FILENAMES);
   return [...new Set(paths)].sort();
@@ -39118,12 +39753,46 @@ var init_dist3 = __esm({
   }
 });
 
+// ../../packages/envrun/dist/gradleTestSummary.js
+import { mkdirSync as mkdirSync7, writeFileSync as writeFileSync23 } from "fs";
+import { join as join42 } from "path";
+function stageGradleTestSummary(jailHome, guestUser, io = {}) {
+  const dir = join42(jailHome, ".gradle", "init.d");
+  mkdirSync7(dir, { recursive: true });
+  writeFileSync23(join42(dir, "terminalhire-test-summary.gradle"), GRADLE_TEST_SUMMARY_INIT);
+  const ids2 = io.ids === void 0 ? hostIds() : io.ids;
+  if (ids2?.uid === 0 && guestUser && guestUser.uid !== 0) {
+    (io.chown ?? chownTree)(join42(jailHome, ".gradle"), guestUser);
+  }
+}
+var GRADLE_TEST_MARKER, GRADLE_TEST_SUMMARY_INIT;
+var init_gradleTestSummary = __esm({
+  "../../packages/envrun/dist/gradleTestSummary.js"() {
+    "use strict";
+    init_dist();
+    GRADLE_TEST_MARKER = "terminalhire-gradle-tests:";
+    GRADLE_TEST_SUMMARY_INIT = `// Written by terminalhire (TERM-1122): prints each Test task's counts, because
+// Gradle prints none when every test passes.
+allprojects {
+  tasks.withType(Test).configureEach { task ->
+    def label = task.path
+    task.afterSuite { desc, result ->
+      if (desc.parent == null) {
+        println "${GRADLE_TEST_MARKER} task=\${label} total=\${result.testCount} passed=\${result.successfulTestCount} failed=\${result.failedTestCount} skipped=\${result.skippedTestCount}"
+      }
+    }
+  }
+}
+`;
+  }
+});
+
 // ../../packages/envrun/dist/thrun.js
 import { execFileSync, spawnSync as spawnSync7 } from "child_process";
-import { existsSync as existsSync19, mkdirSync as mkdirSync7, mkdtempSync as mkdtempSync4, rmSync as rmSync11 } from "fs";
+import { existsSync as existsSync19, mkdirSync as mkdirSync8, mkdtempSync as mkdtempSync4, rmSync as rmSync11 } from "fs";
 import { randomUUID as randomUUID3 } from "crypto";
 import { tmpdir as tmpdir4 } from "os";
-import { join as join42 } from "path";
+import { join as join43 } from "path";
 function git(repoDir, args5, allowNonZero = false) {
   const res = spawnSync7("git", [...args5], {
     cwd: repoDir,
@@ -39138,7 +39807,7 @@ function git(repoDir, args5, allowNonZero = false) {
   return res.stdout ?? "";
 }
 function collectWorkingDiff(repoDir, opts = {}) {
-  if (!existsSync19(join42(repoDir, ".git"))) {
+  if (!existsSync19(join43(repoDir, ".git"))) {
     throw new ThRunError(`${repoDir} is not a git checkout (no .git). \`th run\` ships the working diff, so it needs a repository to read one from.`);
   }
   const headSha = git(repoDir, ["rev-parse", "HEAD"]).trim();
@@ -39286,7 +39955,7 @@ function credentialFreeHome() {
     return credentialFreeHomeDir;
   let made;
   try {
-    made = mkdtempSync4(join42(tmpdir4(), "th-run-nohome-"));
+    made = mkdtempSync4(join43(tmpdir4(), "th-run-nohome-"));
   } catch (err) {
     throw new RunRefusalError("could not create the empty directory this clone uses as its home, so the clone would read the credentials on this machine instead. That is our environment failing, not your tests: check that the temp directory is writable.", { cause: err });
   }
@@ -39361,7 +40030,7 @@ function cloneTargetAtUnguarded(opts) {
   if (persisted !== null) {
     throw new RunRefusalError(`refusing to clone from a URL carrying ${persisted}: \`git remote add\` writes the source verbatim into .git/config, which is mounted where the repo\u2019s own test command runs. Fetch with the credential out of band so it is never written to disk \u2014 this runner takes one as an HTTP header, which is never persisted.`);
   }
-  mkdirSync7(opts.dest, { recursive: true });
+  mkdirSync8(opts.dest, { recursive: true });
   const runOut = (args5) => execFileSync("git", [...gitConfigArgs(), ...args5], {
     cwd: opts.dest,
     encoding: "utf8",
@@ -39400,7 +40069,7 @@ function cloneTargetAtUnguarded(opts) {
 }
 function scrubCloneSource(dest, run32) {
   run32(["remote", "remove", "origin"]);
-  rmSync11(join42(dest, ".git", "FETCH_HEAD"), { force: true });
+  rmSync11(join43(dest, ".git", "FETCH_HEAD"), { force: true });
 }
 function publishableTarget(url) {
   if (separatorInTarget(url) !== null)
@@ -39688,7 +40357,7 @@ async function verifyWorkingDiff(req) {
 }
 async function runVerification(req, ctx) {
   const { runId, startedAt } = ctx;
-  const labels = { ...req.labels ?? {}, [RUN_LABEL_KEY]: "term-350" };
+  const labels = runLabels(runId, req.labels);
   const progress = req.onProgress ?? (() => {
   });
   const badTarget = unacceptableTarget(req);
@@ -39778,10 +40447,10 @@ async function runVerification(req, ctx) {
       venueIdentity: null
     };
   }
-  const stage = join42(req.scratchRoot, runId);
-  const cloneDir = join42(stage, "clone");
-  const scratch = join42(stage, "scratch");
-  mkdirSync7(scratch, { recursive: true });
+  const stage = join43(req.scratchRoot, runId);
+  const cloneDir = join43(stage, "clone");
+  const scratch = join43(stage, "scratch");
+  mkdirSync8(scratch, { recursive: true });
   assertSafeTargetSha(req.targetSha);
   progress("clone", `${publishableTarget(req.targetRepo)} @ ${req.targetSha.slice(0, 12)}`);
   cloneTargetAt({
@@ -39808,7 +40477,8 @@ async function runVerification(req, ctx) {
   const derived = deriveEnvironmentSpec(cloneDir);
   const spec = req.testCommandOverride === void 0 ? derived : { ...derived, testCommand: req.testCommandOverride };
   progress("derive", `runtime=${spec.runtime} install=${String(spec.installCommand)} test=${String(spec.testCommand)}`);
-  const image = placement.imageFor(spec.runtime, req.image, spec.runtimeVersion);
+  refuseUnbuildableSpec(spec);
+  const image = placement.imageFor(spec.runtime, req.image, spec.runtimeVersion, imageVariantFor(spec));
   const resolved = await resolveLease(placement, runId);
   if (!resolved.ok) {
     return {
@@ -39842,11 +40512,13 @@ async function runVerification(req, ctx) {
   }
   const lease = resolved.lease;
   try {
-    buildJail(scratch);
+    buildJail(scratch, lease.guestUser);
+    if (spec.runtime === "jvm")
+      stageGradleTestSummary(localJailPaths(scratch).jail, lease.guestUser);
     const venuePaths = await lease.stage({
       cloneDir,
       scratchRoot: scratch,
-      previewDir: join42(stage, "preview"),
+      previewDir: join43(stage, "preview"),
       // On a dispatched run the commit is the statement of what was tested, so
       // it rides with the tree and the venue seam refuses a tree that is not
       // that commit (design §6 item 4, TERM-892 — the guard lives in
@@ -39968,6 +40640,7 @@ var init_thrun = __esm({
     init_execute();
     init_placement();
     init_venue();
+    init_gradleTestSummary();
     init_venueDescriptor();
     init_result();
     ThRunError = class extends Error {
@@ -40105,14 +40778,14 @@ function migrationUnits(runner, migrations) {
       return [...byDir.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([id, path6]) => ({ id, path: path6 }));
     }
     case "alembic":
-      return migrations.filter((p) => /^alembic\/versions\/[^/]+\.py$/.test(p) && !p.endsWith("/__init__.py")).sort().map((path6) => ({ id: basename5(path6).replace(/\.py$/, ""), path: path6 }));
+      return migrations.filter((p) => /^alembic\/versions\/[^/]+\.py$/.test(p) && !p.endsWith("/__init__.py")).sort().map((path6) => ({ id: basename6(path6).replace(/\.py$/, ""), path: path6 }));
     case "rails":
-      return migrations.filter((p) => /^db\/migrate\/[^/]+\.rb$/.test(p)).sort().map((path6) => ({ id: /^(\d+)/.exec(basename5(path6))?.[1] ?? basename5(path6), path: path6 }));
+      return migrations.filter((p) => /^db\/migrate\/[^/]+\.rb$/.test(p)).sort().map((path6) => ({ id: /^(\d+)/.exec(basename6(path6))?.[1] ?? basename6(path6), path: path6 }));
     case "sql":
       return migrations.filter((p) => p.endsWith(".sql") && !p.startsWith("prisma/migrations/")).sort().map((path6) => ({ id: path6, path: path6 }));
   }
 }
-function basename5(path6) {
+function basename6(path6) {
   const at = path6.lastIndexOf("/");
   return at === -1 ? path6 : path6.slice(at + 1);
 }
@@ -40210,8 +40883,8 @@ var init_dbplan = __esm({
 
 // ../../packages/envrun/dist/dbstack.js
 import { spawnSync as spawnSync8 } from "child_process";
-import { randomBytes as randomBytes12 } from "crypto";
-import { mkdirSync as mkdirSync8 } from "fs";
+import { randomBytes as randomBytes13 } from "crypto";
+import { mkdirSync as mkdirSync9 } from "fs";
 function installCommandFor(runner) {
   switch (runner) {
     case "sql":
@@ -40246,7 +40919,7 @@ function docker2(args5, timeoutMs = DOCKER_TIMEOUT_MS2) {
 function generateCredentials(host) {
   return {
     user: "thverify",
-    password: randomBytes12(24).toString("base64url"),
+    password: randomBytes13(24).toString("base64url"),
     database: "thverify",
     host,
     port: 5432
@@ -40553,8 +41226,8 @@ async function installLocalMigrationTooling(opts) {
     };
   }
   const { jail, tmp } = buildJail(opts.scratchRoot);
-  mkdirSync8(jail, { recursive: true });
-  mkdirSync8(tmp, { recursive: true });
+  mkdirSync9(jail, { recursive: true });
+  mkdirSync9(tmp, { recursive: true });
   const spec = {
     profile: "install",
     clone: opts.repoDir,
@@ -40866,6 +41539,7 @@ __export(dist_exports, {
   REDACTED_TARGET_SHA: () => REDACTED_TARGET_SHA,
   RELEASED_LEASE_CENSUS_REASON: () => RELEASED_LEASE_CENSUS_REASON,
   REPO_DIGEST_RE: () => REPO_DIGEST_RE,
+  RUN_ID_LABEL_KEY: () => RUN_ID_LABEL_KEY,
   RUN_IMAGE_SOURCES: () => RUN_IMAGE_SOURCES,
   RUN_LABEL_KEY: () => RUN_LABEL_KEY,
   RUN_RESULT_FIELDS: () => RUN_RESULT_FIELDS,
@@ -40932,11 +41606,13 @@ __export(dist_exports, {
   identityProbeCommand: () => identityProbeCommand,
   imageForRuntime: () => imageForRuntime,
   imageRepo: () => imageRepo,
+  imageVariantFor: () => imageVariantFor,
   installCommandFor: () => installCommandFor,
   installLocalMigrationTooling: () => installLocalMigrationTooling,
   isBookkeepingTable: () => isBookkeepingTable,
   isCommandUnavailable: () => isCommandUnavailable,
   isGreen: () => isGreen,
+  isMissingSystemDependency: () => isMissingSystemDependency,
   isOurFault: () => isOurFault,
   judgeCompleteness: () => judgeCompleteness,
   judgeLeaks: () => judgeLeaks,
@@ -40961,12 +41637,14 @@ __export(dist_exports, {
   readSchema: () => readSchema,
   recordedApplied: () => recordedApplied,
   refuseSshTransport: () => refuseSshTransport,
+  refuseUnbuildableSpec: () => refuseUnbuildableSpec,
   renderRunReport: () => renderRunReport,
   renderVenueLine: () => renderVenueLine,
   renderVerdictLine: () => renderVerdictLine,
   resolveImageForSpec: () => resolveImageForSpec,
   resolveLease: () => resolveLease,
   runEnvironmentSpec: () => runEnvironmentSpec,
+  runLabels: () => runLabels,
   setManifestProbe: () => setManifestProbe,
   sha256Hex: () => sha256Hex,
   signRunStatement: () => signRunStatement,
@@ -41342,17 +42020,17 @@ __export(jpi_claim_exports, {
 });
 import {
   readFileSync as readFileSync27,
-  writeFileSync as writeFileSync23,
-  mkdirSync as mkdirSync9,
+  writeFileSync as writeFileSync24,
+  mkdirSync as mkdirSync10,
   mkdtempSync as mkdtempSync5,
   renameSync as renameSync11,
   existsSync as existsSync20,
-  lstatSync as lstatSync4,
+  lstatSync as lstatSync5,
   realpathSync as realpathSync3,
   rmSync as rmSync12,
-  readdirSync as readdirSync3
+  readdirSync as readdirSync4
 } from "fs";
-import { join as join43, dirname as dirname10, isAbsolute as isAbsolute5, resolve as pathResolve } from "path";
+import { join as join44, dirname as dirname10, isAbsolute as isAbsolute5, resolve as pathResolve } from "path";
 import { createHash as createHash11 } from "crypto";
 import { homedir as homedir26, hostname as osHostname } from "os";
 import { execFile as execFile3, execFileSync as execFileSync2, spawnSync as spawnSync9 } from "child_process";
@@ -41371,7 +42049,7 @@ function markClaimNudged(id) {
     const ids2 = readNudgedClaimIds();
     ids2.add(id);
     ensureStateDir(TERMINALHIRE_DIR17);
-    writeFileSync23(REPO_CONTINUITY_NUDGE_MARKER, JSON.stringify({ claimIds: [...ids2] }), "utf8");
+    writeFileSync24(REPO_CONTINUITY_NUDGE_MARKER, JSON.stringify({ claimIds: [...ids2] }), "utf8");
   } catch {
   }
 }
@@ -41477,7 +42155,7 @@ async function sh(cmd, args5, opts = {}) {
 async function confirm(question) {
   const rl = createInterface9({ input: process.stdin, output: process.stdout });
   try {
-    const ans = await new Promise((resolve7) => rl.question(question, resolve7));
+    const ans = await new Promise((resolve8) => rl.question(question, resolve8));
     return /^y(es)?$/i.test(String(ans).trim());
   } finally {
     rl.close();
@@ -41508,7 +42186,7 @@ async function confirmSubmit(flags, question, { unattendedAllowed = true, refusa
 async function ask(question) {
   const rl = createInterface9({ input: process.stdin, output: process.stdout });
   try {
-    const ans = await new Promise((resolve7) => rl.question(question, resolve7));
+    const ans = await new Promise((resolve8) => rl.question(question, resolve8));
     return String(ans).trim();
   } finally {
     rl.close();
@@ -41602,7 +42280,7 @@ function inferSubmitClaim({
   }
   return { candidates: [] };
 }
-function canonicalPath(p) {
+function canonicalPath2(p) {
   if (typeof p !== "string" || p === "") return p;
   const resolved = pathResolve(p);
   try {
@@ -43636,7 +44314,7 @@ async function cmdAttach(id, worktree, branch) {
 function workDirFor(repoFullName, issueNumber) {
   const [owner, repo] = String(repoFullName).split("/");
   const suffix = issueNumber ? `-${issueNumber}` : "";
-  return join43(homedir26(), "terminalhire", "work", `${owner}-${repo}${suffix}`);
+  return join44(homedir26(), "terminalhire", "work", `${owner}-${repo}${suffix}`);
 }
 function startBranchFor(repoFullName, issueNumber) {
   const repo = String(repoFullName).split("/")[1] || "claim";
@@ -43892,7 +44570,7 @@ terminalhire claim: not started \u2014 starting forks ${claim.repoFullName} to y
     );
     process.exit(1);
   }
-  mkdirSync9(join43(homedir26(), "terminalhire", "work"), { recursive: true });
+  mkdirSync10(join44(homedir26(), "terminalhire", "work"), { recursive: true });
   const { createProgress: createProgress2, parseGitProgress: parseGitProgress2, splitProgressChunk: splitProgressChunk2, shStream: shStream2 } = await Promise.resolve().then(() => (init_progress(), progress_exports));
   const progress = createProgress2();
   let forkFullName;
@@ -44018,7 +44696,7 @@ function founderPostingIdOf(claim) {
 }
 function sliceWorkDirFor(claimLocalId) {
   const safe = String(claimLocalId).replace(/[^A-Za-z0-9._-]/g, "-");
-  return join43(homedir26(), "terminalhire", "work", `slice-${safe}`);
+  return join44(homedir26(), "terminalhire", "work", `slice-${safe}`);
 }
 function assertNoBooleanPath(dest, flagName) {
   const last = String(dest).split(/[\\/]/).filter(Boolean).pop();
@@ -44031,7 +44709,7 @@ function assertNoBooleanPath(dest, flagName) {
 }
 function resolveDeliveryDir(flags, claimLocalId, { existsFn, readdirFn } = {}) {
   const exists = existsFn ?? existsSync20;
-  const readdir3 = readdirFn ?? readdirSync3;
+  const readdir3 = readdirFn ?? readdirSync4;
   let probing = null;
   try {
     const base = flags?.dir ? assertNoBooleanPath(pathResolve(String(flags.dir)), "dir") : sliceWorkDirFor(claimLocalId);
@@ -44135,9 +44813,9 @@ function writeSliceFiles(destDir, files) {
   const unavailable = [];
   for (const f of files) {
     if (typeof f.content === "string") {
-      const abs = join43(destDir, f.path);
-      mkdirSync9(dirname10(abs), { recursive: true });
-      writeFileSync23(abs, f.content, "utf8");
+      const abs = join44(destDir, f.path);
+      mkdirSync10(dirname10(abs), { recursive: true });
+      writeFileSync24(abs, f.content, "utf8");
       written.push(f.path);
     } else {
       unavailable.push({ path: f.path, reason: f.unavailableReason || "(no reason given)" });
@@ -44166,7 +44844,7 @@ function writeDeliveredBrief(destDir, spec) {
 function ensureExcludedPackDir(destDir) {
   let occupant = null;
   try {
-    occupant = lstatSync4(join43(destDir, BRIEF_DIR));
+    occupant = lstatSync5(join44(destDir, BRIEF_DIR));
   } catch (err) {
     if (err?.code !== "ENOENT") {
       return {
@@ -44181,12 +44859,12 @@ function ensureExcludedPackDir(destDir) {
       reason: `${BRIEF_DIR}/ already exists in the delivered tree, and excluding it would hide that content from your patch`
     };
   }
-  const excludeFile = join43(destDir, ".git", "info", "exclude");
+  const excludeFile = join44(destDir, ".git", "info", "exclude");
   try {
     const existing = existsSync20(excludeFile) ? readFileSync27(excludeFile, "utf8") : "";
     if (!existing.split("\n").includes(BRIEF_EXCLUDE_LINE)) {
-      mkdirSync9(dirname10(excludeFile), { recursive: true });
-      writeFileSync23(
+      mkdirSync10(dirname10(excludeFile), { recursive: true });
+      writeFileSync24(
         excludeFile,
         `${existing}${existing === "" || existing.endsWith("\n") ? "" : "\n"}${BRIEF_EXCLUDE_LINE}
 `,
@@ -44200,9 +44878,9 @@ function ensureExcludedPackDir(destDir) {
 }
 function writePackFile(destDir, relPath, content, what) {
   try {
-    const abs = join43(destDir, relPath);
-    mkdirSync9(dirname10(abs), { recursive: true });
-    writeFileSync23(abs, content, { encoding: "utf8", flag: "wx" });
+    const abs = join44(destDir, relPath);
+    mkdirSync10(dirname10(abs), { recursive: true });
+    writeFileSync24(abs, content, { encoding: "utf8", flag: "wx" });
   } catch (err) {
     return { written: false, reason: `the ${what} could not be written (${err.message})` };
   }
@@ -44603,7 +45281,7 @@ async function cmdSliceFullTier(claims, id, local, fullTierBody, flags, cloneRep
   if (resolvedDir.suffixed) {
     console.log(`terminalhire claim: the usual directory has content \u2014 using ${dest}`);
   }
-  mkdirSync9(dest, { recursive: true });
+  mkdirSync10(dest, { recursive: true });
   const branch = `claim/${String(claim.id).replace(/[^A-Za-z0-9._-]/g, "-")}`;
   let engine;
   try {
@@ -44785,7 +45463,7 @@ async function attemptSliceDelivery(id, flags = {}) {
   if (resolvedDir.suffixed) {
     console.log(`terminalhire claim: the usual directory has content \u2014 using ${finalDest}`);
   }
-  mkdirSync9(dirname10(finalDest), { recursive: true });
+  mkdirSync10(dirname10(finalDest), { recursive: true });
   let dest = mkdtempSync5(`${finalDest}.tmp-`);
   const { written, unavailable } = writeSliceFiles(dest, body.files);
   const branch = `claim/${String(claim.id).replace(/[^A-Za-z0-9._-]/g, "-")}`;
@@ -45108,7 +45786,7 @@ async function cmdSubmit(id, flags = {}) {
       cwdToplevel: cwdToplevel2,
       cwd: pathResolve(dir),
       branch,
-      canonicalize: canonicalPath
+      canonicalize: canonicalPath2
     });
     if (inferred.claim) {
       id = inferred.claim.id;
@@ -45326,7 +46004,7 @@ async function cmdSubmit(id, flags = {}) {
   const head = `${ghUser}:${claim.branch}`;
   const title = flags.title || claim.title;
   const noBody = Boolean(flags["no-body"]);
-  const prBodyPath = join43(wt, "PR-BODY.md");
+  const prBodyPath = join44(wt, "PR-BODY.md");
   const bodySource = pickBodySource({
     bodyFileFlag: flags["body-file"],
     noBody,
@@ -45566,7 +46244,7 @@ function readClaimPushMarker() {
 }
 function writeClaimPushMarker(marker) {
   ensureStateDir(TERMINALHIRE_DIR17);
-  writeFileSync23(CLAIM_PUSH_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  writeFileSync24(CLAIM_PUSH_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearClaimPushMarker() {
   try {
@@ -46480,10 +47158,10 @@ var init_jpi_claim = __esm({
     init_claim_push_bg();
     init_founder_verdict_sync();
     init_founder_note_sync();
-    TERMINALHIRE_DIR17 = process.env.TERMINALHIRE_DIR || join43(homedir26(), ".terminalhire");
-    INDEX_CACHE_FILE5 = join43(TERMINALHIRE_DIR17, "index-cache.json");
-    CLAIM_PUSH_MARKER = join43(TERMINALHIRE_DIR17, "claim-push.json");
-    REPO_CONTINUITY_NUDGE_MARKER = join43(TERMINALHIRE_DIR17, "repo-continuity-nudged.json");
+    TERMINALHIRE_DIR17 = process.env.TERMINALHIRE_DIR || join44(homedir26(), ".terminalhire");
+    INDEX_CACHE_FILE5 = join44(TERMINALHIRE_DIR17, "index-cache.json");
+    CLAIM_PUSH_MARKER = join44(TERMINALHIRE_DIR17, "claim-push.json");
+    REPO_CONTINUITY_NUDGE_MARKER = join44(TERMINALHIRE_DIR17, "repo-continuity-nudged.json");
     API_URL6 = resolveApiBase();
     CLAIM_SYNC_BASE4 = API_URL6;
     CLAIM_CONSENT_VERSION = 1;
@@ -46753,16 +47431,16 @@ import {
   readFileSync as readFileSync28,
   renameSync as renameSync12,
   rmSync as rmSync13,
-  writeFileSync as writeFileSync24
+  writeFileSync as writeFileSync25
 } from "fs";
 import { homedir as homedir27 } from "os";
-import { join as join44 } from "path";
+import { join as join45 } from "path";
 import { randomUUID as randomUUID4 } from "crypto";
 function stateDir3() {
-  return process.env["TERMINALHIRE_DIR"] || join44(homedir27(), ".terminalhire");
+  return process.env["TERMINALHIRE_DIR"] || join45(homedir27(), ".terminalhire");
 }
 function postingDraftFilePath() {
-  return join44(stateDir3(), "posting-drafts.json");
+  return join45(stateDir3(), "posting-drafts.json");
 }
 function blankFile2() {
   return { version: 1, drafts: [] };
@@ -46789,7 +47467,7 @@ function writeFile(file) {
   const path6 = postingDraftFilePath();
   const tmp = `${path6}.${process.pid}.${randomUUID4()}.tmp`;
   try {
-    writeFileSync24(tmp, `${JSON.stringify(file, null, 2)}
+    writeFileSync25(tmp, `${JSON.stringify(file, null, 2)}
 `, {
       encoding: "utf8",
       mode: 384,
@@ -47072,7 +47750,7 @@ __export(jpi_post_exports, {
 import { existsSync as existsSync22, readFileSync as readFileSync29 } from "fs";
 import { spawnSync as spawnSync10 } from "child_process";
 import { createInterface as createInterface10 } from "readline";
-import { basename as basename6, join as join45 } from "path";
+import { basename as basename7, join as join46 } from "path";
 function parsePostArgs(argv) {
   const flags = {};
   const positional = [];
@@ -47114,15 +47792,15 @@ function ownerRepo(remote) {
 }
 function detectStack(cwd) {
   const stack = [];
-  if (existsSync22(join45(cwd, "package.json"))) stack.push("node");
-  if (existsSync22(join45(cwd, "next.config.js")) || existsSync22(join45(cwd, "next.config.mjs"))) {
+  if (existsSync22(join46(cwd, "package.json"))) stack.push("node");
+  if (existsSync22(join46(cwd, "next.config.js")) || existsSync22(join46(cwd, "next.config.mjs"))) {
     stack.push("next.js");
   }
-  if (existsSync22(join45(cwd, "pyproject.toml")) || existsSync22(join45(cwd, "requirements.txt"))) {
+  if (existsSync22(join46(cwd, "pyproject.toml")) || existsSync22(join46(cwd, "requirements.txt"))) {
     stack.push("python");
   }
-  if (existsSync22(join45(cwd, "Cargo.toml"))) stack.push("rust");
-  if (existsSync22(join45(cwd, "go.mod"))) stack.push("go");
+  if (existsSync22(join46(cwd, "Cargo.toml"))) stack.push("rust");
+  if (existsSync22(join46(cwd, "go.mod"))) stack.push("go");
   return stack;
 }
 function captureRepository(cwd = process.cwd()) {
@@ -47167,7 +47845,7 @@ function readFlagOrFile(flags, valueKey, fileKey) {
     try {
       return { value: readFileSync29(flags[fileKey], "utf8"), failure: null };
     } catch {
-      return { value: null, failure: `could not read ${basename6(flags[fileKey])}` };
+      return { value: null, failure: `could not read ${basename7(flags[fileKey])}` };
     }
   }
   return { value: typeof flags[valueKey] === "string" ? flags[valueKey] : null, failure: null };
@@ -47215,7 +47893,7 @@ an interactive terminal and creates an unowned web draft; the browser publishes 
 async function ask2(question) {
   const rl = createInterface10({ input: process.stdin, output: process.stdout });
   try {
-    return await new Promise((resolve7) => rl.question(question, (answer) => resolve7(answer.trim())));
+    return await new Promise((resolve8) => rl.question(question, (answer) => resolve8(answer.trim())));
   } finally {
     rl.close();
   }
@@ -47542,25 +48220,25 @@ var init_jpi_repo = __esm({
 import {
   closeSync as closeSync5,
   existsSync as existsSync23,
-  mkdirSync as mkdirSync10,
+  mkdirSync as mkdirSync11,
   openSync as openSync5,
   readFileSync as readFileSync30,
-  readdirSync as readdirSync4,
+  readdirSync as readdirSync5,
   renameSync as renameSync13,
-  statSync as statSync5,
+  statSync as statSync7,
   unlinkSync as unlinkSync4,
-  writeFileSync as writeFileSync25
+  writeFileSync as writeFileSync26
 } from "fs";
 import { homedir as homedir28 } from "os";
-import { basename as basename7, dirname as dirname11, join as join46 } from "path";
+import { basename as basename8, dirname as dirname11, join as join47 } from "path";
 function defaultUrl() {
   return process.env["TERMINALHIRE_RECALL_URL"] || RECALL_URL;
 }
 function stateDir4() {
-  return process.env["TERMINALHIRE_DIR"] || join46(homedir28(), ".terminalhire");
+  return process.env["TERMINALHIRE_DIR"] || join47(homedir28(), ".terminalhire");
 }
 function recallCachePath() {
-  return join46(stateDir4(), "recall.json");
+  return join47(stateDir4(), "recall.json");
 }
 async function fetchRecalls(url = defaultUrl()) {
   try {
@@ -47588,7 +48266,7 @@ function mutateCache(path6, mutate) {
   const lock = `${path6}.lock`;
   let held = false;
   try {
-    mkdirSync10(dirname11(path6), { recursive: true, mode: 448 });
+    mkdirSync11(dirname11(path6), { recursive: true, mode: 448 });
     const deadline = Date.now() + LOCK_WAIT_MS;
     while (!held && Date.now() < deadline) {
       try {
@@ -47597,7 +48275,7 @@ function mutateCache(path6, mutate) {
       } catch (err) {
         if (err?.code !== "EEXIST") return false;
         try {
-          if (Date.now() - statSync5(lock).mtimeMs > STALE_LOCK_MS) unlinkSync4(lock);
+          if (Date.now() - statSync7(lock).mtimeMs > STALE_LOCK_MS) unlinkSync4(lock);
         } catch {
         }
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2);
@@ -47612,7 +48290,7 @@ function mutateCache(path6, mutate) {
     if (mutate(existing) === false) return false;
     const tmp = `${path6}.${process.pid}.${tmpCounter3 += 1}.tmp`;
     try {
-      writeFileSync25(tmp, `${JSON.stringify(existing, null, 2)}
+      writeFileSync26(tmp, `${JSON.stringify(existing, null, 2)}
 `, { mode: 384 });
       renameSync13(tmp, path6);
     } catch {
@@ -47637,12 +48315,12 @@ function mutateCache(path6, mutate) {
 function sweepTempFiles(path6) {
   try {
     const dir = dirname11(path6);
-    const prefix = `${basename7(path6)}.`;
-    for (const name of readdirSync4(dir)) {
+    const prefix = `${basename8(path6)}.`;
+    for (const name of readdirSync5(dir)) {
       if (!name.startsWith(prefix) || !name.endsWith(".tmp")) continue;
-      const full = join46(dir, name);
+      const full = join47(dir, name);
       try {
-        if (Date.now() - statSync5(full).mtimeMs > 6e4) unlinkSync4(full);
+        if (Date.now() - statSync7(full).mtimeMs > 6e4) unlinkSync4(full);
       } catch {
       }
     }
@@ -47745,7 +48423,7 @@ __export(jpi_run_exports, {
 });
 import { existsSync as existsSync24, readFileSync as readFileSync31, realpathSync as realpathSync4 } from "fs";
 import { execFileSync as execFileSync4 } from "child_process";
-import { join as join47, resolve as resolve5 } from "path";
+import { join as join48, resolve as resolve6 } from "path";
 import { tmpdir as tmpdir5 } from "os";
 import { mkdtempSync as mkdtempSync6, rmSync as rmSync14 } from "fs";
 function parseArgs2(argv) {
@@ -47770,7 +48448,7 @@ function parseArgs2(argv) {
 function runScratchRoot() {
   let root;
   try {
-    root = mkdtempSync6(join47(tmpdir5(), "th-run-"));
+    root = mkdtempSync6(join48(tmpdir5(), "th-run-"));
   } catch (err) {
     process.stderr.write(
       `terminalhire: could not create the temporary directory this run works in, so nothing was cloned and nothing was executed. That is our environment failing, not your tests: check that the temp directory is writable. (${String(err?.message ?? err)})
@@ -47807,7 +48485,7 @@ async function loadEngine() {
   }
 }
 function readConfig2(localDir) {
-  const file = join47(localDir, ".th-run.json");
+  const file = join48(localDir, ".th-run.json");
   if (!existsSync24(file)) return {};
   try {
     const parsed = JSON.parse(readFileSync31(file, "utf8"));
@@ -47973,7 +48651,7 @@ async function run10() {
 `);
     return 0;
   }
-  const localDir = resolve5(parsed.flags["local"] ?? process.cwd());
+  const localDir = resolve6(parsed.flags["local"] ?? process.cwd());
   const config2 = readConfig2(localDir);
   const pick2 = (name) => parsed.flags[name] ?? config2[name];
   const sliceRaw = pick2("slice");
@@ -48419,7 +49097,7 @@ function finalize(build) {
   };
 }
 function reconstruct(files, opts = {}) {
-  const join62 = opts.joinSidechains !== false;
+  const join63 = opts.joinSidechains !== false;
   const mains = [];
   const sidechains = [];
   for (const file of files) {
@@ -48444,7 +49122,7 @@ function reconstruct(files, opts = {}) {
   }
   const orphanedSidechainPaths = [];
   const joinedPaths = /* @__PURE__ */ new Set();
-  if (join62) {
+  if (join63) {
     const sidechainsBySession = /* @__PURE__ */ new Map();
     for (const sc of sidechains) {
       const acc = sidechainsBySession.get(sc.sessionId) ?? [];
@@ -48780,9 +49458,9 @@ __export(trajectory_exports, {
   runTrajectory: () => runTrajectory,
   runTrajectoryPush: () => runTrajectoryPush
 });
-import { existsSync as existsSync25, readFileSync as readFileSync32, readdirSync as readdirSync5, writeFileSync as writeFileSync26 } from "fs";
+import { existsSync as existsSync25, readFileSync as readFileSync32, readdirSync as readdirSync6, writeFileSync as writeFileSync27 } from "fs";
 import { homedir as homedir29 } from "os";
-import { join as join48 } from "path";
+import { join as join49 } from "path";
 function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -48809,12 +49487,12 @@ function findJsonlFiles(dir) {
   const out = [];
   let entries;
   try {
-    entries = readdirSync5(dir, { withFileTypes: true, encoding: "utf8" });
+    entries = readdirSync6(dir, { withFileTypes: true, encoding: "utf8" });
   } catch {
     return out;
   }
   for (const entry of entries) {
-    const full = join48(dir, entry.name);
+    const full = join49(dir, entry.name);
     if (entry.isDirectory()) {
       out.push(...findJsonlFiles(full));
     } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
@@ -48935,12 +49613,12 @@ function renderMarkdown(view) {
   return lines.join("\n");
 }
 function writeExportArtifacts(score, markdown) {
-  const dir = process.env.TERMINALHIRE_DIR || join48(homedir29(), ".terminalhire");
+  const dir = process.env.TERMINALHIRE_DIR || join49(homedir29(), ".terminalhire");
   ensureStateDir(dir);
-  const jsonPath = join48(dir, "trajectory-export.json");
-  const mdPath = join48(dir, "trajectory-export.md");
-  writeFileSync26(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
-  writeFileSync26(mdPath, markdown, "utf8");
+  const jsonPath = join49(dir, "trajectory-export.json");
+  const mdPath = join49(dir, "trajectory-export.md");
+  writeFileSync27(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
+  writeFileSync27(mdPath, markdown, "utf8");
   return { jsonPath, mdPath };
 }
 function renderInward(allNodes, view, files) {
@@ -48959,7 +49637,7 @@ function renderInward(allNodes, view, files) {
   console.log("");
 }
 function buildTrajectory() {
-  const projectsDir = join48(homedir29(), ".claude", "projects");
+  const projectsDir = join49(homedir29(), ".claude", "projects");
   if (!existsSync25(projectsDir)) return null;
   const paths = findJsonlFiles(projectsDir);
   if (paths.length === 0) return null;
@@ -49773,10 +50451,10 @@ var init_jpi_intro = __esm({
 });
 
 // src/chat-keystore.ts
-import { existsSync as existsSync26, linkSync as linkSync2, readFileSync as readFileSync33, rmSync as rmSync15, unlinkSync as unlinkSync5, writeFileSync as writeFileSync27 } from "fs";
-import { randomBytes as randomBytes13 } from "crypto";
+import { existsSync as existsSync26, linkSync as linkSync2, readFileSync as readFileSync33, rmSync as rmSync15, unlinkSync as unlinkSync5, writeFileSync as writeFileSync28 } from "fs";
+import { randomBytes as randomBytes14 } from "crypto";
 import { homedir as homedir30 } from "os";
-import { join as join49 } from "path";
+import { join as join50 } from "path";
 async function loadOrCreateIdentity() {
   const key = await loadKey();
   if (existsSync26(IDENTITY_FILE)) {
@@ -49818,9 +50496,9 @@ Recovery: if you intend to reset your chat identity, delete the file yourself an
   }
 }
 function publishIdentityBlob(blob) {
-  const tmpFile = `${IDENTITY_FILE}.${process.pid}.${randomBytes13(6).toString("hex")}.tmp`;
+  const tmpFile = `${IDENTITY_FILE}.${process.pid}.${randomBytes14(6).toString("hex")}.tmp`;
   try {
-    writeFileSync27(tmpFile, JSON.stringify(blob, null, 2), {
+    writeFileSync28(tmpFile, JSON.stringify(blob, null, 2), {
       encoding: "utf8",
       mode: 384,
       flag: "wx"
@@ -49849,16 +50527,16 @@ var init_chat_keystore = __esm({
     init_src();
     init_github_auth();
     init_state_dir();
-    TERMINALHIRE_DIR18 = process.env.TERMINALHIRE_DIR || join49(homedir30(), ".terminalhire");
-    IDENTITY_FILE = join49(TERMINALHIRE_DIR18, "chat-identity.enc");
+    TERMINALHIRE_DIR18 = process.env.TERMINALHIRE_DIR || join50(homedir30(), ".terminalhire");
+    IDENTITY_FILE = join50(TERMINALHIRE_DIR18, "chat-identity.enc");
     HEX64_RE = /^[0-9a-f]{64}$/;
   }
 });
 
 // src/chat-client.ts
-import { existsSync as existsSync27, readFileSync as readFileSync34, writeFileSync as writeFileSync28 } from "fs";
+import { existsSync as existsSync27, readFileSync as readFileSync34, writeFileSync as writeFileSync29 } from "fs";
 import { homedir as homedir31 } from "os";
-import { join as join50 } from "path";
+import { join as join51 } from "path";
 function defaultReadPeerPins() {
   try {
     if (!existsSync27(PEERS_FILE)) return {};
@@ -49875,7 +50553,7 @@ function defaultReadPeerPins() {
 }
 function defaultWritePeerPins(pins) {
   ensureStateDir(TERMINALHIRE_DIR19);
-  writeFileSync28(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
+  writeFileSync29(PEERS_FILE, JSON.stringify(pins, null, 2), { mode: 384, encoding: "utf8" });
 }
 function defaultChatClientDeps() {
   return {
@@ -50067,8 +50745,8 @@ var init_chat_client = __esm({
     init_api_base();
     CHAT_BASE = resolveApiBase();
     GH_SESSION_COOKIE7 = "__jpi_gh_session";
-    TERMINALHIRE_DIR19 = process.env.TERMINALHIRE_DIR || join50(homedir31(), ".terminalhire");
-    PEERS_FILE = join50(TERMINALHIRE_DIR19, "chat-peers.json");
+    TERMINALHIRE_DIR19 = process.env.TERMINALHIRE_DIR || join51(homedir31(), ".terminalhire");
+    PEERS_FILE = join51(TERMINALHIRE_DIR19, "chat-peers.json");
     REQUEST_TIMEOUT_MS2 = 1e4;
     ChatNotLinkedError = class extends Error {
       constructor(message = missingSessionLines(null).join(" ")) {
@@ -50504,9 +51182,9 @@ __export(jpi_chat_read_exports, {
   syncUnreadBadge: () => syncUnreadBadge,
   writeReadCursor: () => writeReadCursor
 });
-import { existsSync as existsSync28, readFileSync as readFileSync35, writeFileSync as writeFileSync29 } from "fs";
+import { existsSync as existsSync28, readFileSync as readFileSync35, writeFileSync as writeFileSync30 } from "fs";
 import { homedir as homedir32 } from "os";
-import { join as join51 } from "path";
+import { join as join52 } from "path";
 async function syncUnreadBadge(deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
@@ -50528,7 +51206,7 @@ async function syncUnreadBadge(deps = {}) {
     );
     const entry = JSON.parse(readFileSync35(cacheFile, "utf8"));
     entry.unreadChat = { count: total };
-    writeFileSync29(cacheFile, JSON.stringify(entry), "utf8");
+    writeFileSync30(cacheFile, JSON.stringify(entry), "utf8");
   } catch {
   }
 }
@@ -50553,7 +51231,7 @@ function writeReadCursor(login, iso, deps = {}) {
   if (prev && iso <= prev) return;
   cursors[login] = iso;
   ensureStateDir(TERMINALHIRE_DIR20);
-  writeFileSync29(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
+  writeFileSync30(READS_FILE, JSON.stringify(cursors, null, 2), { mode: 384, encoding: "utf8" });
 }
 async function postReadCursor(peerLogin, lastReadAt, deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
@@ -50918,9 +51596,9 @@ var init_jpi_chat_read = __esm({
     init_api_base();
     CHAT_BASE2 = resolveApiBase();
     GH_SESSION_COOKIE8 = "__jpi_gh_session";
-    TERMINALHIRE_DIR20 = process.env.TERMINALHIRE_DIR || join51(homedir32(), ".terminalhire");
-    READS_FILE = join51(TERMINALHIRE_DIR20, "chat-reads.json");
-    INDEX_CACHE_FILE6 = join51(TERMINALHIRE_DIR20, "index-cache.json");
+    TERMINALHIRE_DIR20 = process.env.TERMINALHIRE_DIR || join52(homedir32(), ".terminalhire");
+    READS_FILE = join52(TERMINALHIRE_DIR20, "chat-reads.json");
+    INDEX_CACHE_FILE6 = join52(TERMINALHIRE_DIR20, "index-cache.json");
     REACHABLE_DISPLAY = { shareActivity: false, optin: false, lastSeen: null };
   }
 });
@@ -51055,7 +51733,7 @@ async function runInboxPane(opts = {}) {
     clearTimer = (t) => clearInterval(t),
     refreshMs = DEFAULT_REFRESH_MS
   } = opts;
-  return await new Promise((resolve7) => {
+  return await new Promise((resolve8) => {
     let rows = [];
     let inviteCount = 0;
     let selected = 0;
@@ -51323,7 +52001,7 @@ async function runInboxPane(opts = {}) {
     function finish(result) {
       if (cleaned) return;
       cleanup();
-      resolve7(result);
+      resolve8(result);
     }
     function onSignal() {
       finish({ action: "quit" });
@@ -51361,7 +52039,7 @@ async function runInboxPane(opts = {}) {
   Inbox error: ${err instanceof Error ? err.message : String(err)}
 
 `);
-      resolve7({ action: "quit" });
+      resolve8({ action: "quit" });
     }
   });
 }
@@ -51461,14 +52139,14 @@ __export(jpi_chat_exports, {
 import { createInterface as createInterface11 } from "readline";
 import { existsSync as existsSync29, readFileSync as readFileSync36 } from "fs";
 import { homedir as homedir33 } from "os";
-import { join as join52 } from "path";
+import { join as join53 } from "path";
 function defaultPromptAck({ input = process.stdin, output = process.stdout } = {}) {
   if (!input || input.isTTY !== true) return Promise.resolve(false);
   const rl = createInterface11({ input, output });
-  return new Promise((resolve7) => {
+  return new Promise((resolve8) => {
     rl.question("  Press Enter to acknowledge and continue (Ctrl-C to cancel): ", () => {
       rl.close();
-      resolve7(true);
+      resolve8(true);
     });
   });
 }
@@ -51645,8 +52323,8 @@ function mergeMessages(existing, incoming) {
 }
 function readCachedSessionCase() {
   try {
-    const p = join52(
-      process.env.TERMINALHIRE_DIR || join52(homedir33(), ".terminalhire"),
+    const p = join53(
+      process.env.TERMINALHIRE_DIR || join53(homedir33(), ".terminalhire"),
       "index-cache.json"
     );
     if (!existsSync29(p)) return null;
@@ -51672,7 +52350,7 @@ function runNoticePane(opts = {}) {
     output = process.stdout,
     signals = process
   } = opts;
-  return new Promise((resolve7) => {
+  return new Promise((resolve8) => {
     let cleaned = false;
     const body = String(message ?? "").replace(/^\n+/, "").replace(/\n+$/, "");
     function render() {
@@ -51711,7 +52389,7 @@ function runNoticePane(opts = {}) {
     function onDismiss() {
       if (cleaned) return;
       cleanup();
-      resolve7();
+      resolve8();
     }
     function onUncaught(err) {
       cleanup();
@@ -51750,7 +52428,7 @@ function runNoticePane(opts = {}) {
   ${err instanceof Error ? err.message : String(err)}
 
 `);
-      resolve7();
+      resolve8();
     }
   });
 }
@@ -51897,7 +52575,7 @@ async function runChatPane(opts = {}) {
     selfShareActivity = readConfig().chatShareActivity === true;
   } catch {
   }
-  return await new Promise((resolve7) => {
+  return await new Promise((resolve8) => {
     let messages = [];
     let inputBuffer = "";
     let presence = null;
@@ -51966,7 +52644,7 @@ async function runChatPane(opts = {}) {
       exitReason = reason;
       cleanup();
       output.write(DEPOSIT_CTA);
-      resolve7({ entered: true, reason });
+      resolve8({ entered: true, reason });
     }
     async function doPoll() {
       if (polling || cleaned) return;
@@ -52007,7 +52685,7 @@ async function runChatPane(opts = {}) {
   ${err.message}
 
 `);
-            resolve7({ entered: true, reason: "session-expired" });
+            resolve8({ entered: true, reason: "session-expired" });
           }
           return;
         }
@@ -52061,7 +52739,7 @@ async function runChatPane(opts = {}) {
   ${err.message}
 
 `);
-              resolve7({ entered: true, reason: "session-expired" });
+              resolve8({ entered: true, reason: "session-expired" });
             }
             return;
           }
@@ -52079,7 +52757,7 @@ async function runChatPane(opts = {}) {
 
 `
           );
-          resolve7({ entered: true, reason: "blocked" });
+          resolve8({ entered: true, reason: "blocked" });
         }
         return;
       }
@@ -52095,7 +52773,7 @@ async function runChatPane(opts = {}) {
   ${err.message}
 
 `);
-            resolve7({ entered: true, reason: "session-expired" });
+            resolve8({ entered: true, reason: "session-expired" });
           }
           return;
         }
@@ -52182,7 +52860,7 @@ async function runChatPane(opts = {}) {
   Chat pane error: ${err instanceof Error ? err.message : String(err)}
 
 `);
-      resolve7({ entered: true, reason: "error" });
+      resolve8({ entered: true, reason: "error" });
     }
   });
 }
@@ -52449,7 +53127,7 @@ function runHubTui({
     // tests override with a tiny value to exercise auto-dismiss without a real wait.
     splashMs: _splashMs = DEFAULT_SPLASH_MS
   } = deps;
-  return new Promise((resolve7) => {
+  return new Promise((resolve8) => {
     const level = detectColorLevel(
       typeof process !== "undefined" ? process.env : {},
       output && output.isTTY
@@ -53342,7 +54020,7 @@ function runHubTui({
       } catch {
       }
       runtime.cleanup();
-      resolve7({ ok: true, lastVerb });
+      resolve8({ ok: true, lastVerb });
     }
     runtime.enter();
     splashTimer = setTimeout(() => {
@@ -53462,15 +54140,15 @@ __export(mcp_config_exports, {
   writeServerToFile: () => writeServerToFile
 });
 import { homedir as homedir34 } from "os";
-import { join as join53 } from "path";
-import { existsSync as existsSync30, readFileSync as readFileSync37, copyFileSync as copyFileSync3, writeFileSync as writeFileSync30, mkdirSync as mkdirSync11 } from "fs";
+import { join as join54 } from "path";
+import { existsSync as existsSync30, readFileSync as readFileSync37, copyFileSync as copyFileSync3, writeFileSync as writeFileSync31, mkdirSync as mkdirSync12 } from "fs";
 import { dirname as dirname12 } from "path";
 function serverEntry() {
   return { command: SERVER_COMMAND, args: [...SERVER_ARGS] };
 }
 function hostConfigPath(host, home = homedir34()) {
   if (!host || !Array.isArray(host.relPath)) return null;
-  return join53(home, ...host.relPath);
+  return join54(home, ...host.relPath);
 }
 function jsonSnippet(host) {
   const entry = serverEntry();
@@ -53566,9 +54244,9 @@ function writeServerToFile(configPath, serversKey, entry = serverEntry()) {
     backupPath = `${configPath}.terminalhire-backup-${ts}`;
     copyFileSync3(configPath, backupPath);
   } else {
-    mkdirSync11(dirname12(configPath), { recursive: true });
+    mkdirSync12(dirname12(configPath), { recursive: true });
   }
-  writeFileSync30(configPath, merged.text, "utf8");
+  writeFileSync31(configPath, merged.text, "utf8");
   return { status: "written", backupPath, added: merged.added };
 }
 async function initMcpStep({
@@ -61929,7 +62607,7 @@ var init_protocol2 = __esm({
               return;
             }
             const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-            await new Promise((resolve7) => setTimeout(resolve7, pollInterval));
+            await new Promise((resolve8) => setTimeout(resolve8, pollInterval));
             options?.signal?.throwIfAborted();
           }
         } catch (error2) {
@@ -61946,7 +62624,7 @@ var init_protocol2 = __esm({
        */
       request(request, resultSchema, options) {
         const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-        return new Promise((resolve7, reject) => {
+        return new Promise((resolve8, reject) => {
           const earlyReject = (error2) => {
             reject(error2);
           };
@@ -62024,7 +62702,7 @@ var init_protocol2 = __esm({
               if (!parseResult.success) {
                 reject(parseResult.error);
               } else {
-                resolve7(parseResult.data);
+                resolve8(parseResult.data);
               }
             } catch (error2) {
               reject(error2);
@@ -62285,12 +62963,12 @@ var init_protocol2 = __esm({
           }
         } catch {
         }
-        return new Promise((resolve7, reject) => {
+        return new Promise((resolve8, reject) => {
           if (signal.aborted) {
             reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
             return;
           }
-          const timeoutId = setTimeout(resolve7, interval);
+          const timeoutId = setTimeout(resolve8, interval);
           signal.addEventListener("abort", () => {
             clearTimeout(timeoutId);
             reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -65317,7 +65995,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve7.call(this, root, ref);
+      let _sch = resolve8.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a4 = root.localRefs) === null || _a4 === void 0 ? void 0 : _a4[ref];
         const { schemaId } = this.opts;
@@ -65344,7 +66022,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve7(root, ref) {
+    function resolve8(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -65975,7 +66653,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve7(baseURI, relativeURI, options) {
+    function resolve8(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse4(baseURI, schemelessOptions), parse4(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -66233,7 +66911,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize: normalize3,
-      resolve: resolve7,
+      resolve: resolve8,
       resolveComponent,
       equal,
       serialize,
@@ -72024,7 +72702,7 @@ var require_compile2 = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve7.call(this, root, ref);
+      let _sch = resolve8.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a4 = root.localRefs) === null || _a4 === void 0 ? void 0 : _a4[ref];
         const { schemaId } = this.opts;
@@ -72051,7 +72729,7 @@ var require_compile2 = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve7(root, ref) {
+    function resolve8(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -75742,12 +76420,12 @@ var init_stdio2 = __esm({
         this.onclose?.();
       }
       send(message) {
-        return new Promise((resolve7) => {
+        return new Promise((resolve8) => {
           const json = serializeMessage(message);
           if (this._stdout.write(json)) {
-            resolve7();
+            resolve8();
           } else {
-            this._stdout.once("drain", resolve7);
+            this._stdout.once("drain", resolve8);
           }
         });
       }
@@ -76123,8 +76801,8 @@ async function claimRecordResult(args5 = {}) {
 async function claimWorkspaceResult(args5 = {}) {
   try {
     const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
-    const { existsSync: existsSync37, readFileSync: readFileSync43, lstatSync: lstatSync5 } = await import("fs");
-    const { join: join62 } = await import("path");
+    const { existsSync: existsSync37, readFileSync: readFileSync43, lstatSync: lstatSync6 } = await import("fs");
+    const { join: join63 } = await import("path");
     const { BRIEF_REL_PATH: BRIEF_REL_PATH2, VERIFY_REL_PATH: VERIFY_REL_PATH2, AGENTS_REL_PATH: AGENTS_REL_PATH2, sha256OfUtf8: sha256OfUtf82 } = await Promise.resolve().then(() => (init_jpi_claim(), jpi_claim_exports));
     const packPaths = (c) => {
       const p = {};
@@ -76137,9 +76815,9 @@ async function claimWorkspaceResult(args5 = {}) {
         if (c.workspacePack?.[member] !== true) continue;
         const digest = c.packDigests?.[member];
         if (typeof digest !== "string" || digest === "") continue;
-        const abs = join62(c.worktreePath, rel);
+        const abs = join63(c.worktreePath, rel);
         try {
-          const st = lstatSync5(abs);
+          const st = lstatSync6(abs);
           if (!st.isFile() || st.size > 1024 * 1024) continue;
           if (sha256OfUtf82(readFileSync43(abs, "utf8")) === digest) p[key] = abs;
         } catch {
@@ -76156,7 +76834,7 @@ async function claimWorkspaceResult(args5 = {}) {
           hint: `No workspace has been delivered for this claim yet. A human runs: terminalhire claim start ${c.id} --watch`
         };
       }
-      if (!existsSync37(c.worktreePath) || !existsSync37(join62(c.worktreePath, ".git"))) {
+      if (!existsSync37(c.worktreePath) || !existsSync37(join63(c.worktreePath, ".git"))) {
         return {
           status: "not_ready",
           claimId: c.id,
@@ -76274,10 +76952,10 @@ async function run17() {
   let version2 = "0.0.0";
   try {
     const { readFileSync: readFileSync43, existsSync: existsSync37 } = await import("fs");
-    const { join: join62 } = await import("path");
+    const { join: join63 } = await import("path");
     const { fileURLToPath: fileURLToPath15 } = await import("url");
     const here = fileURLToPath15(new URL(".", import.meta.url));
-    for (const p of [join62(here, "..", "..", "package.json"), join62(here, "..", "package.json")]) {
+    for (const p of [join63(here, "..", "..", "package.json"), join63(here, "..", "package.json")]) {
       if (existsSync37(p)) {
         const pkg = JSON.parse(readFileSync43(p, "utf8"));
         if (pkg.version) {
@@ -76578,10 +77256,10 @@ async function run18() {
   let version2 = "0.0.0";
   try {
     const { readFileSync: readFileSync43, existsSync: existsSync37 } = await import("fs");
-    const { join: join62 } = await import("path");
+    const { join: join63 } = await import("path");
     const { fileURLToPath: fileURLToPath15 } = await import("url");
     const here = fileURLToPath15(new URL(".", import.meta.url));
-    for (const p of [join62(here, "..", "..", "package.json"), join62(here, "..", "package.json")]) {
+    for (const p of [join63(here, "..", "..", "package.json"), join63(here, "..", "package.json")]) {
       if (existsSync37(p)) {
         const pkg = JSON.parse(readFileSync43(p, "utf8"));
         if (pkg.version) {
@@ -76714,7 +77392,7 @@ __export(link_exports, {
   runLinkLogout: () => runLinkLogout
 });
 import { createServer as createServer2 } from "http";
-import { randomBytes as randomBytes14 } from "crypto";
+import { randomBytes as randomBytes15 } from "crypto";
 function resolveLoopbackRequest(rawUrl, expectedNonce) {
   let u;
   try {
@@ -76779,7 +77457,7 @@ function defaultLinkDeps() {
       void Promise.resolve().then(() => (init_open_url(), open_url_exports)).then((m) => m.openInBrowser(url)).catch(() => {
       });
     },
-    generateNonce: () => randomBytes14(16).toString("hex"),
+    generateNonce: () => randomBytes15(16).toString("hex"),
     // LINK_BASE, not a re-resolve: the session must record the host this link
     // actually ran against, and re-reading the environment here could name a
     // different one if it changed mid-flow (TERM-970).
@@ -77040,10 +77718,10 @@ __export(jpi_profile_exports, {
 import { createInterface as createInterface12 } from "readline";
 function prompt5(question) {
   const rl = createInterface12({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve7) => {
+  return new Promise((resolve8) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve7(answer.trim());
+      resolve8(answer.trim());
     });
   });
 }
@@ -77140,9 +77818,9 @@ var signal_exports = {};
 __export(signal_exports, {
   extractFingerprint: () => extractFingerprint
 });
-import { readFileSync as readFileSync38, readdirSync as readdirSync6 } from "fs";
+import { readFileSync as readFileSync38, readdirSync as readdirSync7 } from "fs";
 import { execFileSync as execFileSync5 } from "child_process";
-import { join as join54 } from "path";
+import { join as join55 } from "path";
 function safeGit(args5, cwd) {
   try {
     return execFileSync5("git", ["-C", cwd, ...args5], {
@@ -77183,7 +77861,7 @@ function readFileSafe(path6) {
   }
 }
 function tokensFromPackageJson(cwd) {
-  const pkg = readJsonSafe(join54(cwd, "package.json"));
+  const pkg = readJsonSafe(join55(cwd, "package.json"));
   if (!pkg || typeof pkg !== "object") return [];
   const p = pkg;
   const deps = {
@@ -77197,9 +77875,9 @@ function workspaceMemberDirs(cwd) {
   const dirs = [cwd];
   for (const group of ["apps", "packages"]) {
     try {
-      const groupDir = join54(cwd, group);
-      for (const e of readdirSync6(groupDir, { withFileTypes: true })) {
-        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join54(groupDir, e.name));
+      const groupDir = join55(cwd, group);
+      for (const e of readdirSync7(groupDir, { withFileTypes: true })) {
+        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join55(groupDir, e.name));
       }
     } catch {
     }
@@ -77207,18 +77885,18 @@ function workspaceMemberDirs(cwd) {
   return dirs;
 }
 function tokensFromRequirementsTxt(cwd) {
-  const content = readFileSafe(join54(cwd, "requirements.txt"));
+  const content = readFileSafe(join55(cwd, "requirements.txt"));
   if (!content) return [];
   return content.split("\n").map((l) => l.trim().split(/[>=<!\[;]/)[0].trim().toLowerCase()).filter(Boolean);
 }
 function tokensFromGoMod(cwd) {
-  const content = readFileSafe(join54(cwd, "go.mod"));
+  const content = readFileSafe(join55(cwd, "go.mod"));
   if (!content) return [];
   const requires = Array.from(content.matchAll(/^\s+([^\s]+)\s+v/gm)).map((m) => m[1].split("/").pop() ?? "").filter(Boolean);
   return ["go", ...requires];
 }
 function tokensFromCargoToml(cwd) {
-  const content = readFileSafe(join54(cwd, "Cargo.toml"));
+  const content = readFileSafe(join55(cwd, "Cargo.toml"));
   if (!content) return [];
   const deps = [];
   let inDeps = false;
@@ -77239,14 +77917,14 @@ function tokensFromFileExtensions(cwd) {
   const tokens = [];
   const scanDirs = [cwd];
   try {
-    const srcDir = join54(cwd, "src");
-    readdirSync6(srcDir);
+    const srcDir = join55(cwd, "src");
+    readdirSync7(srcDir);
     scanDirs.push(srcDir);
   } catch {
   }
   for (const dir of scanDirs) {
     try {
-      const entries = readdirSync6(dir, { withFileTypes: true });
+      const entries = readdirSync7(dir, { withFileTypes: true });
       for (const e of entries) {
         if (!e.isFile()) continue;
         const dotIdx = e.name.lastIndexOf(".");
@@ -77439,7 +78117,7 @@ var jpi_config_exports = {};
 __export(jpi_config_exports, {
   run: () => run24
 });
-import { join as join55 } from "path";
+import { join as join56 } from "path";
 import { homedir as homedir35 } from "os";
 function parseNudgeMode2(raw) {
   if (raw === "session" || raw === "always") return raw;
@@ -77627,8 +78305,8 @@ var init_jpi_config = __esm({
   "bin/jpi-config.js"() {
     "use strict";
     init_config();
-    TERMINALHIRE_DIR21 = process.env.TERMINALHIRE_DIR || join55(homedir35(), ".terminalhire");
-    CONFIG_FILE2 = join55(TERMINALHIRE_DIR21, "config.json");
+    TERMINALHIRE_DIR21 = process.env.TERMINALHIRE_DIR || join56(homedir35(), ".terminalhire");
+    CONFIG_FILE2 = join56(TERMINALHIRE_DIR21, "config.json");
   }
 });
 
@@ -77637,8 +78315,8 @@ var jpi_spinner_exports = {};
 __export(jpi_spinner_exports, {
   run: () => run25
 });
-import { readFileSync as readFileSync39, writeFileSync as writeFileSync31, copyFileSync as copyFileSync4, existsSync as existsSync31 } from "fs";
-import { join as join56 } from "path";
+import { readFileSync as readFileSync39, writeFileSync as writeFileSync32, copyFileSync as copyFileSync4, existsSync as existsSync31 } from "fs";
+import { join as join57 } from "path";
 import { homedir as homedir36 } from "os";
 import { createInterface as createInterface13 } from "readline";
 function readConfig3() {
@@ -77651,7 +78329,7 @@ function readConfig3() {
 function writeConfig2(patch) {
   ensureStateDir(TH_DIR);
   const merged = { ...readConfig3(), ...patch };
-  writeFileSync31(CONFIG_FILE3, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  writeFileSync32(CONFIG_FILE3, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function backupSettings() {
   if (!existsSync31(SETTINGS_PATH)) return null;
@@ -77885,10 +78563,10 @@ var init_jpi_spinner = __esm({
     "use strict";
     init_spinner();
     init_state_dir();
-    TH_DIR = process.env["TERMINALHIRE_DIR"] || join56(homedir36(), ".terminalhire");
-    CONFIG_FILE3 = join56(TH_DIR, "config.json");
-    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join56(homedir36(), ".claude", "settings.json");
-    CACHE_FILE2 = join56(TH_DIR, "index-cache.json");
+    TH_DIR = process.env["TERMINALHIRE_DIR"] || join57(homedir36(), ".terminalhire");
+    CONFIG_FILE3 = join57(TH_DIR, "config.json");
+    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join57(homedir36(), ".claude", "settings.json");
+    CACHE_FILE2 = join57(TH_DIR, "index-cache.json");
   }
 });
 
@@ -77897,8 +78575,8 @@ var jpi_sync_exports = {};
 __export(jpi_sync_exports, {
   run: () => run26
 });
-import { readFileSync as readFileSync40, writeFileSync as writeFileSync32, existsSync as existsSync32, rmSync as rmSync16 } from "fs";
-import { join as join57 } from "path";
+import { readFileSync as readFileSync40, writeFileSync as writeFileSync33, existsSync as existsSync32, rmSync as rmSync16 } from "fs";
+import { join as join58 } from "path";
 import { homedir as homedir37, hostname as osHostname2 } from "os";
 import { createInterface as createInterface14 } from "readline";
 function oauthSyncBase() {
@@ -77922,7 +78600,7 @@ function readMarker() {
 }
 function writeMarker(marker) {
   ensureStateDir(TH_DIR2);
-  writeFileSync32(TIER1_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  writeFileSync33(TIER1_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearMarker() {
   try {
@@ -77987,13 +78665,13 @@ async function runPush() {
   }
   const fields = buildConsentFields(profile);
   renderPreview(fields);
-  await new Promise((resolve7) => {
+  await new Promise((resolve8) => {
     const rl = createInterface14({ input: process.stdin, output: process.stdout });
     rl.question(
       "  Press Enter to open your browser to authorize + consent (or Ctrl-C to cancel)... ",
       () => {
         rl.close();
-        resolve7();
+        resolve8();
       }
     );
   });
@@ -78251,8 +78929,8 @@ var init_jpi_sync = __esm({
     init_open_url();
     init_state_dir();
     init_api_base();
-    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join57(homedir37(), ".terminalhire");
-    TIER1_MARKER = join57(TH_DIR2, "tier1.json");
+    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join58(homedir37(), ".terminalhire");
+    TIER1_MARKER = join58(TH_DIR2, "tier1.json");
     API_URL8 = resolveApiBase();
     warnSharedCredentialsIfNonProd(API_URL8);
     POLL_INTERVAL_MS = 2e3;
@@ -78267,30 +78945,30 @@ __export(jpi_init_exports, {
   run: () => run27
 });
 import { existsSync as existsSync33 } from "fs";
-import { join as join58, resolve as resolve6 } from "path";
+import { join as join59, resolve as resolve7 } from "path";
 import { fileURLToPath as fileURLToPath10, pathToFileURL } from "url";
 import { createInterface as createInterface15 } from "readline";
 import { spawnSync as spawnSync12 } from "child_process";
 function resolveScript(name) {
-  const distPath = resolve6(join58(__dirname5, "..", "..", "dist", "bin", `${name}.js`));
-  const legacyPath = resolve6(join58(__dirname5, `${name}.js`));
+  const distPath = resolve7(join59(__dirname5, "..", "..", "dist", "bin", `${name}.js`));
+  const legacyPath = resolve7(join59(__dirname5, `${name}.js`));
   return existsSync33(distPath) ? distPath : legacyPath;
 }
 function resolveSrc(name) {
-  const distPath = resolve6(join58(__dirname5, "..", "..", "dist", "src", `${name}.js`));
-  const legacyPath = resolve6(join58(__dirname5, "..", "src", `${name}.js`));
+  const distPath = resolve7(join59(__dirname5, "..", "..", "dist", "src", `${name}.js`));
+  const legacyPath = resolve7(join59(__dirname5, "..", "src", `${name}.js`));
   return existsSync33(distPath) ? distPath : legacyPath;
 }
 function resolveInstallJs() {
-  const fromDist = resolve6(join58(__dirname5, "..", "..", "install.js"));
-  const fromBin = resolve6(join58(__dirname5, "..", "install.js"));
+  const fromDist = resolve7(join59(__dirname5, "..", "..", "install.js"));
+  const fromBin = resolve7(join59(__dirname5, "..", "install.js"));
   if (existsSync33(fromDist)) return fromDist;
   if (existsSync33(fromBin)) return fromBin;
   return fromBin;
 }
 function resolveStatuslineInstallJs() {
-  const fromDist = resolve6(join58(__dirname5, "..", "..", "statusline-install.js"));
-  const fromBin = resolve6(join58(__dirname5, "..", "statusline-install.js"));
+  const fromDist = resolve7(join59(__dirname5, "..", "..", "statusline-install.js"));
+  const fromBin = resolve7(join59(__dirname5, "..", "statusline-install.js"));
   if (existsSync33(fromDist)) return fromDist;
   if (existsSync33(fromBin)) return fromBin;
   return fromBin;
@@ -78300,14 +78978,14 @@ function tokenizeInterest(raw) {
 }
 async function run27() {
   const rl = createInterface15({ input: process.stdin, output: process.stdout });
-  const ask5 = (question) => new Promise((resolve7) => {
+  const ask5 = (question) => new Promise((resolve8) => {
     let answered = false;
     rl.question(question, (answer) => {
       answered = true;
-      resolve7((answer || "").trim().toLowerCase());
+      resolve8((answer || "").trim().toLowerCase());
     });
     rl.once("close", () => {
-      if (!answered) resolve7(null);
+      if (!answered) resolve8(null);
     });
   });
   console.log("");
@@ -79295,7 +79973,7 @@ __export(jpi_save_exports, {
   run: () => run29
 });
 import { readFileSync as readFileSync41, existsSync as existsSync34 } from "fs";
-import { join as join59 } from "path";
+import { join as join60 } from "path";
 import { homedir as homedir38 } from "os";
 import { fileURLToPath as fileURLToPath12 } from "url";
 function findJobInCache(jobId) {
@@ -79394,8 +80072,8 @@ var init_jpi_save = __esm({
   "bin/jpi-save.js"() {
     "use strict";
     __dirname7 = fileURLToPath12(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR22 = process.env.TERMINALHIRE_DIR || join59(homedir38(), ".terminalhire");
-    INDEX_CACHE_FILE7 = join59(TERMINALHIRE_DIR22, "index-cache.json");
+    TERMINALHIRE_DIR22 = process.env.TERMINALHIRE_DIR || join60(homedir38(), ".terminalhire");
+    INDEX_CACHE_FILE7 = join60(TERMINALHIRE_DIR22, "index-cache.json");
   }
 });
 
@@ -79407,12 +80085,12 @@ __export(jpi_beta_exports, {
 import { createInterface as createInterface16 } from "readline";
 async function run30() {
   const rl = createInterface16({ input: process.stdin, output: process.stdout });
-  const ask5 = (question) => new Promise((resolve7) => {
-    const onClose = () => resolve7(null);
+  const ask5 = (question) => new Promise((resolve8) => {
+    const onClose = () => resolve8(null);
     rl.once("close", onClose);
     rl.question(question, (answer) => {
       rl.removeListener("close", onClose);
-      resolve7((answer || "").trim());
+      resolve8((answer || "").trim());
     });
   });
   const alreadyActed = readConfig().betaOptIn === true;
@@ -79445,10 +80123,10 @@ async function run30() {
     console.log("      rough edges you find.");
     console.log("    \u2022 A spot on the founding-contributors wall.");
     console.log("");
-    const join62 = await ask5(
+    const join63 = await ask5(
       '  Type "yes" to join the beta as a Founding Contributor (anything else cancels): '
     );
-    if ((join62 || "").toLowerCase() !== "yes") {
+    if ((join63 || "").toLowerCase() !== "yes") {
       console.log("\n  No problem \u2014 nothing was sent. Run `terminalhire beta` any time.\n");
       rl.close();
       return;
@@ -79539,13 +80217,13 @@ __export(jpi_feedback_exports, {
 });
 import { createInterface as createInterface17 } from "readline";
 import { readFileSync as readFileSync42, existsSync as existsSync35 } from "fs";
-import { join as join60 } from "path";
+import { join as join61 } from "path";
 import { fileURLToPath as fileURLToPath13 } from "url";
 function readLocalVersion3() {
   try {
     for (const p of [
-      join60(__dirname8, "..", "..", "package.json"),
-      join60(__dirname8, "..", "package.json")
+      join61(__dirname8, "..", "..", "package.json"),
+      join61(__dirname8, "..", "package.json")
     ]) {
       if (existsSync35(p)) {
         const pkg = JSON.parse(readFileSync42(p, "utf8"));
@@ -79558,12 +80236,12 @@ function readLocalVersion3() {
 }
 async function run31() {
   const rl = createInterface17({ input: process.stdin, output: process.stdout });
-  const ask5 = (question) => new Promise((resolve7) => {
-    const onClose = () => resolve7(null);
+  const ask5 = (question) => new Promise((resolve8) => {
+    const onClose = () => resolve8(null);
     rl.once("close", onClose);
     rl.question(question, (answer) => {
       rl.removeListener("close", onClose);
-      resolve7((answer || "").trim());
+      resolve8((answer || "").trim());
     });
   });
   const lastFull = readConfig().lastFullFeedbackAt;
@@ -79688,7 +80366,7 @@ var init_jpi_feedback = __esm({
 init_package_version();
 init_api_base();
 import { fileURLToPath as fileURLToPath14 } from "url";
-import { join as join61 } from "path";
+import { join as join62 } from "path";
 import { existsSync as existsSync36 } from "fs";
 
 // src/state-dir-pin.ts
@@ -79788,7 +80466,7 @@ var SUBCOMMANDS = [
 var firstArg = process.argv[2];
 if (!firstArg && !process.stdin.isTTY) {
   const { default: childProcess } = await import("child_process");
-  const nudgeScript = join61(__dirname9, "jpi.js");
+  const nudgeScript = join62(__dirname9, "jpi.js");
   const child = childProcess.spawnSync(process.execPath, [nudgeScript], {
     stdio: ["inherit", "inherit", "inherit"]
   });
@@ -80310,8 +80988,8 @@ if (firstArg === "statusline") {
     console.error("Usage: terminalhire statusline --on | --off");
     process.exit(1);
   }
-  const fromDist = join61(__dirname9, "..", "..", "statusline-install.js");
-  const fromBin = join61(__dirname9, "..", "statusline-install.js");
+  const fromDist = join62(__dirname9, "..", "..", "statusline-install.js");
+  const fromBin = join62(__dirname9, "..", "statusline-install.js");
   const installer = existsSync36(fromDist) ? fromDist : fromBin;
   const { spawnSync: spawnSync13 } = await import("child_process");
   const child = spawnSync13(process.execPath, uninstall ? [installer, "--uninstall"] : [installer], {

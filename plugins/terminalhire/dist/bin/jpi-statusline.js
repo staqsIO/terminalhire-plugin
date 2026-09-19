@@ -128,7 +128,7 @@ function render() {
     }
     if (founderNeedsYou > 0) {
       segments.push(
-        `\u{1F9ED} ${founderNeedsYou} claim${founderNeedsYou === 1 ? "" : "s"} await your decision \u2014 run: th bounties`
+        `\u{1F9ED} ${founderNeedsYou} claim${founderNeedsYou === 1 ? "" : "s"} await your decision \u2014 run: /approvals or th bounties`
       );
     } else if (founderOpen > 0) {
       segments.push(

@@ -34,21 +34,26 @@ Call these two, in this order:
 - `pending_count()` — how many postings wait on a decision, how many are open. Counts
   and a timestamp only.
 - `claim_progress()` — one row per posting that is waiting on the poster: `postingId`,
-  `title`, `needsYou`, `waitingOn`, `attempts`, `latestCheck`, plus `dashboardUrl`.
-  `waitingOn` is `approval` when a developer has asked to take the work and cannot start
-  until the poster says yes, and `verdict` when work is in and waiting to be accepted or
-  sent back. Postings nobody is blocked on do not appear here.
+  `claimId`, `title`, `needsYou`, `waitingOn`, `attempts`, `latestCheck`, plus
+  `dashboardUrl`. `claimId` is the claim that posting is waiting on, and it is what the
+  per-claim tools below take. `waitingOn` is `approval` when a developer has asked to
+  take the work and cannot start until the poster says yes, and `verdict` when work is
+  in and waiting to be accepted or sent back. Postings nobody is blocked on do not
+  appear here.
 
 If `pending_count` says nothing is waiting, tell the poster that in one line and stop.
 
 ## 2. The claim id
 
-Neither tool above returns a claim id, and the three per-claim tools below need one.
-It is the last segment of the claim's review link,
-`…/dashboard/postings/<postingId>/claims/<claimId>` — the "review claim" button on the
-posting page opens it, and an email about a specific claim links to it. Ask the poster
-to paste that link for the claim they want to open, then read `postingId` and `claimId`
-out of it. Never guess or build a claim id.
+Use the `claimId` from the `claim_progress` row the poster picks. Never guess or build
+one.
+
+`claim_progress` returns one claim per posting: the one waiting on the poster. If the
+poster asks about a different claim — another claim on the same posting, or a posting
+that is not waiting on them — no tool returns its id. Only then, ask them to paste that
+claim's review link, `…/dashboard/postings/<postingId>/claims/<claimId>` (the "review
+claim" button on the posting page, or the link in an email about that claim), and read
+`postingId` and `claimId` out of it.
 
 ## 3. One list
 

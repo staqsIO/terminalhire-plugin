@@ -21,7 +21,7 @@
  * It binds 0.0.0.0 by construction (see ProxyOptions.host): only ever correct
  * inside a container whose networks hold nothing but our own containers.
  */
-import { startEgressProxy } from './egressProxy.js';
+import { formatDenialLine, startEgressProxy } from './egressProxy.js';
 async function main() {
     const port = Number(process.env.PROXY_PORT);
     if (!Number.isInteger(port) || port <= 0 || port > 65535) {
@@ -36,7 +36,15 @@ async function main() {
             .filter(Boolean)
         : [];
     const denyAll = allow.length === 0;
-    await startEgressProxy({ host: '0.0.0.0', port, allow, denyAll });
+    // One line per refusal, read back by the launcher through `docker logs` before
+    // teardown (TERM-1157): this container's in-memory log never leaves it.
+    await startEgressProxy({
+        host: '0.0.0.0',
+        port,
+        allow,
+        denyAll,
+        onDenied: (e) => console.log(formatDenialLine(e)),
+    });
     // Announce readiness on a line the launcher waits for before starting the
     // workload — a proxy the workload races ahead of is a spurious egress failure.
     console.log(`proxy-ready port=${port} allow=${allow.length} denyAll=${denyAll}`);
