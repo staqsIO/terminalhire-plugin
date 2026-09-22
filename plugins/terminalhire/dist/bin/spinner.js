@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // bin/spinner-config.js
-import { join as join2 } from "path";
+import { join as join3 } from "path";
 
 // bin/spinner-io.js
 import {
@@ -20,8 +20,8 @@ import {
   readlinkSync,
   unlinkSync
 } from "fs";
-import { join, dirname, basename, resolve, isAbsolute } from "path";
-import { homedir } from "os";
+import { join as join2, dirname, basename as basename2, resolve, isAbsolute } from "path";
+import { homedir as homedir2 } from "os";
 
 // src/state-dir.ts
 import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
@@ -71,16 +71,37 @@ function ensureStateDir(dir) {
   }
 }
 
+// src/api-base.ts
+import { homedir } from "os";
+import { basename, join, normalize } from "path";
+var PROD_API_BASE = "https://terminalhire.com";
+var DEV_API_BASE = "https://dev.terminalhire.com";
+var DEV_STATE_DIR_NAME = ".terminalhire-dev";
+var ALLOW_LOCAL_API_KEY = "TERMINALHIRE_ALLOW_LOCAL_API";
+var ALLOWED_DESCRIPTION = [
+  PROD_API_BASE,
+  DEV_API_BASE,
+  `http://localhost:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`,
+  `http://127.0.0.1:<port> (requires ${ALLOW_LOCAL_API_KEY}=1)`
+].join(", ");
+function isDevStateDir(dir) {
+  if (dir === void 0 || dir === "") return false;
+  return basename(normalize(dir)) === DEV_STATE_DIR_NAME;
+}
+
 // bin/spinner-io.js
 function thDir() {
-  const raw = process.env["TERMINALHIRE_DIR"] || join(homedir(), ".terminalhire");
+  const raw = process.env["TERMINALHIRE_DIR"] || join2(homedir2(), ".terminalhire");
   return resolve(raw);
 }
 function claudeSettingsPath() {
-  return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join(homedir(), ".claude", "settings.json");
+  return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join2(homedir2(), ".claude", "settings.json");
 }
 function spinnerStateFilePath() {
-  return join(thDir(), "spinner-state.json");
+  return join2(thDir(), "spinner-state.json");
+}
+function writingFromDevStateDir() {
+  return isDevStateDir(process.env["TERMINALHIRE_DIR"]);
 }
 function readJson(path, fallback) {
   try {
@@ -124,7 +145,7 @@ function resolveTarget(path) {
         break;
       }
       const dest = readlinkSync(cur);
-      next = isAbsolute(dest) ? dest : join(dirname(cur), dest);
+      next = isAbsolute(dest) ? dest : join2(dirname(cur), dest);
     } catch {
       settled = true;
       break;
@@ -134,7 +155,7 @@ function resolveTarget(path) {
   if (!settled) return null;
   if (cur !== path) return cur;
   try {
-    return join(realpathSync(dirname(path)), basename(path));
+    return join2(realpathSync(dirname(path)), basename2(path));
   } catch {
     return path;
   }
@@ -182,6 +203,7 @@ function atomicWriteJson(path, obj) {
   writeFileAtomic(path, JSON.stringify(obj, null, 2) + "\n");
 }
 function writeSettingsJson(path, obj, expectedRaw) {
+  if (writingFromDevStateDir()) return { ok: false, reason: "dev-scoped-state-dir" };
   const target = resolveTarget(path);
   if (target === null) return { ok: false, reason: "unresolvable-symlink-chain" };
   let currentRaw = null;
@@ -368,7 +390,7 @@ function clearSpinnerTips() {
 
 // bin/spinner-config.js
 function configFilePath() {
-  return join2(thDir(), "config.json");
+  return join3(thDir(), "config.json");
 }
 var SPINNER_DEFAULTS = { enabled: false, mode: "append", max: 6, frequency: "sometimes" };
 function readSpinnerConfig() {
@@ -387,15 +409,15 @@ function readSpinnerConfig() {
 
 // bin/spinner-seen.js
 import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, renameSync as renameSync2 } from "fs";
-import { join as join3, dirname as dirname2 } from "path";
-import { homedir as homedir2 } from "os";
+import { join as join4, dirname as dirname2 } from "path";
+import { homedir as homedir3 } from "os";
 var SEEN_WINDOW_SURFACES = 10;
 var SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
 var SEEN_MAX_ENTRIES = 1500;
 var SEEN_MAX_WIDTHS = 200;
 function seenFilePath() {
-  const dir = process.env["TERMINALHIRE_DIR"] || join3(homedir2(), ".terminalhire");
-  return join3(dir, "seen-history.json");
+  const dir = process.env["TERMINALHIRE_DIR"] || join4(homedir3(), ".terminalhire");
+  return join4(dir, "seen-history.json");
 }
 function atomicWriteJson2(path, obj) {
   ensureStateDir(dirname2(path));
@@ -1258,7 +1280,7 @@ var BIGCO_SLUGS_BY_SOURCE = {
 
 // ../../packages/core/src/partners.ts
 import { readFileSync as readFileSync3 } from "fs";
-import { join as join4 } from "path";
+import { join as join5 } from "path";
 import { fileURLToPath } from "url";
 var EXAMPLE_BUYER = {
   id: "northstar",

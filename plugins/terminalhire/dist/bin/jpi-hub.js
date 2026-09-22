@@ -11852,7 +11852,7 @@ var init_chat_keystore = __esm({
 
 // src/api-base.ts
 import { homedir as homedir7 } from "os";
-import { join as join10 } from "path";
+import { basename as basename2, join as join10, normalize as normalize2 } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);

@@ -480,9 +480,9 @@ var init_classify = __esm({
       // rspec's summary line
     ].join("|"), "m");
     MISSING_SYSTEM_DEPENDENCY = [
-      /^(?:\S*\/)?ld(?:\.\w+)?: cannot find -l[\w.+-]+/m,
-      /^\S+:\d+(?::\d+)?: fatal error: [\w./+-]+\.(?:h|hh|hpp|hxx): No such file or directory$/m,
-      /^\S+: error while loading shared libraries: lib[\w.+-]*: cannot open shared object file/m
+      /^[ \t|>]*(?:\S*\/)?ld(?:\.\w+)?: cannot find -l[\w.+-]+/m,
+      /^[ \t|>]*[\w./~]\S*:\d+(?::\d+)?: fatal error: [\w./+-]+\.(?:h|hh|hpp|hxx): No such file or directory$/m,
+      /^[ \t|>]*[\w./~]\S*: error while loading shared libraries: lib[\w.+-]*: cannot open shared object file/m
     ];
     OFFLINE_BUILD_GAP = [
       // Maven, `-o`: `Cannot access central (…) in offline mode and the artifact … has
@@ -632,7 +632,7 @@ var init_reap = __esm({
 // ../../packages/containment/dist/fence.js
 import { spawn, spawnSync as spawnSync2 } from "child_process";
 import { existsSync as existsSync4, lchownSync, lstatSync, mkdirSync as mkdirSync4, readdirSync as readdirSync2, realpathSync, statSync as statSync3, writeFileSync as writeFileSync3 } from "fs";
-import { basename as basename2, dirname as dirname2, isAbsolute, join as join6, posix as posix2, resolve, sep } from "path";
+import { basename as basename3, dirname as dirname2, isAbsolute, join as join6, posix as posix2, resolve, sep } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 function canonical(path, label) {
   if (!isAbsolute(path)) {
@@ -710,7 +710,7 @@ function canonicalPath(p) {
       const up = dirname2(head);
       if (up === head)
         return resolve(p);
-      tail2.push(basename2(head));
+      tail2.push(basename3(head));
       head = up;
     }
   }
@@ -9036,14 +9036,14 @@ function migrationUnits(runner, migrations) {
       return [...byDir.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([id, path]) => ({ id, path }));
     }
     case "alembic":
-      return migrations.filter((p) => /^alembic\/versions\/[^/]+\.py$/.test(p) && !p.endsWith("/__init__.py")).sort().map((path) => ({ id: basename3(path).replace(/\.py$/, ""), path }));
+      return migrations.filter((p) => /^alembic\/versions\/[^/]+\.py$/.test(p) && !p.endsWith("/__init__.py")).sort().map((path) => ({ id: basename4(path).replace(/\.py$/, ""), path }));
     case "rails":
-      return migrations.filter((p) => /^db\/migrate\/[^/]+\.rb$/.test(p)).sort().map((path) => ({ id: /^(\d+)/.exec(basename3(path))?.[1] ?? basename3(path), path }));
+      return migrations.filter((p) => /^db\/migrate\/[^/]+\.rb$/.test(p)).sort().map((path) => ({ id: /^(\d+)/.exec(basename4(path))?.[1] ?? basename4(path), path }));
     case "sql":
       return migrations.filter((p) => p.endsWith(".sql") && !p.startsWith("prisma/migrations/")).sort().map((path) => ({ id: path, path }));
   }
 }
-function basename3(path) {
+function basename4(path) {
   const at = path.lastIndexOf("/");
   return at === -1 ? path : path.slice(at + 1);
 }
@@ -9962,11 +9962,11 @@ import {
   writeFileSync
 } from "fs";
 import { homedir as homedir2 } from "os";
-import { basename, dirname, join as join2 } from "path";
+import { basename as basename2, dirname, join as join2 } from "path";
 
 // src/api-base.ts
 import { homedir } from "os";
-import { join } from "path";
+import { basename, join, normalize } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {
@@ -10148,7 +10148,7 @@ function mutateCache(path, mutate) {
 function sweepTempFiles(path) {
   try {
     const dir = dirname(path);
-    const prefix = `${basename(path)}.`;
+    const prefix = `${basename2(path)}.`;
     for (const name of readdirSync(dir)) {
       if (!name.startsWith(prefix) || !name.endsWith(".tmp")) continue;
       const full = join2(dir, name);
@@ -10353,10 +10353,11 @@ Options:
   --claim <id>          The claim this work belongs to.
   --target <git-url>    Repository the work is verified against.
   --sha <40-hex>        The commit your diff applies on top of.
-  --slice <a,b,c>       Optional. Comma-separated files this claim shares; give it
-                        and a diff touching anything else is refused locally,
-                        before any container. Omit it and scoping happens at
-                        submission, where the server derives the slice itself.
+  --slice <a,b,c>       Optional local guard rail. Comma-separated files you mean to
+                        touch; give it and a diff touching anything else is refused
+                        locally, before any container. Omit it and no file LIST is
+                        checked anywhere \u2014 submission still refuses a patch, but on
+                        what a file IS and what it WRITES, never on a list.
   --local <dir>         Checkout to read the working diff from (default: cwd).
   --placement <kind>    WHERE to run: local-docker or hosted (default: local-docker).
   --watch               Re-run when a file in the checkout changes.
@@ -10613,7 +10614,7 @@ async function run() {
   const slice = Array.isArray(sliceRaw) ? sliceRaw : typeof sliceRaw === "string" ? sliceRaw.split(",").map((s) => s.trim()).filter((s) => s.length > 0) : [];
   if (slice.length === 0) {
     process.stderr.write(
-      "terminalhire: no --slice given, so the local pre-check is off and every file in your diff will be sent. Scoping still happens at submission, where the server derives the slice from the bounty.\n"
+      "terminalhire: no --slice given, so the local file-list check is off and every file in your diff will be sent. Nothing re-derives that list at submission. The server still refuses a patch on what a file is (CI config, git internals, lockfiles, install scripts, binary, unparseable) and on what it writes (network calls, obfuscation, dependency and manifest changes) \u2014 never on a list of files.\n"
     );
   }
   const placementRaw = pick("placement");

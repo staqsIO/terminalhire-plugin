@@ -2580,7 +2580,7 @@ var init_state_dir = __esm({
 
 // src/api-base.ts
 import { homedir as homedir3 } from "os";
-import { join as join4 } from "path";
+import { basename, join as join4, normalize as normalize2 } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -2798,7 +2798,7 @@ var init_shared_key = __esm({
 // src/crypto-store.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes3 } from "crypto";
 import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, existsSync as existsSync4, renameSync as renameSync2, rmSync, readdirSync } from "fs";
-import { join as join7, dirname, basename } from "path";
+import { join as join7, dirname, basename as basename2 } from "path";
 import { createRequire } from "module";
 function encrypt(plaintext, key) {
   const iv = randomBytes3(IV_BYTES);
@@ -2855,7 +2855,7 @@ function atomicWriteFileSync(filePath, content) {
   ensureStateDirForSecret(dir);
   const tmp = join7(
     dir,
-    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes3(6).toString("hex")}`
+    `.${basename2(filePath)}.tmp-${process.pid}-${randomBytes3(6).toString("hex")}`
   );
   writeFileSync4(tmp, content, { encoding: "utf8", mode: 384, flag: "wx" });
   renameSync2(tmp, filePath);

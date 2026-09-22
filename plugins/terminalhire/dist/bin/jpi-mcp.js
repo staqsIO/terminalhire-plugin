@@ -159,7 +159,7 @@ var init_cache_store = __esm({
 
 // src/api-base.ts
 import { homedir as homedir3 } from "os";
-import { join as join3 } from "path";
+import { basename, join as join3, normalize } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -252,10 +252,12 @@ function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
   } catch {
   }
 }
-function usingSeparateStateDir(env = process.env) {
-  const dir = env["TERMINALHIRE_DIR"];
+function isDevStateDir(dir) {
   if (dir === void 0 || dir === "") return false;
-  return dir.endsWith(DEV_STATE_DIR_NAME);
+  return basename(normalize(dir)) === DEV_STATE_DIR_NAME;
+}
+function usingSeparateStateDir(env = process.env) {
+  return isDevStateDir(env["TERMINALHIRE_DIR"]);
 }
 var PROD_API_BASE, DEV_API_BASE, DEV_STATE_DIR_NAME, ApiBaseError, ALLOWED_HOSTS, OAUTH_ALLOWED_ORIGINS, ALLOW_LOCAL_OAUTH_KEY, ALLOW_LOCAL_API_KEY, ALLOWED_DESCRIPTION, CANONICAL_REWRITES, ENV_KEYS;
 var init_api_base = __esm({
@@ -1325,7 +1327,7 @@ var init_classify = __esm({
 });
 
 // ../../packages/core/src/vocab/index.ts
-function normalize(tokens) {
+function normalize2(tokens) {
   const result = /* @__PURE__ */ new Set();
   for (const raw of tokens) {
     const lower = raw.toLowerCase().trim();
@@ -1883,7 +1885,7 @@ function githubToFingerprint(p) {
     ...p.topics
     // recentPRorgs intentionally excluded — org names are not skill tags
   ];
-  const skillTags = normalize(rawTokens);
+  const skillTags = normalize2(rawTokens);
   const seniorityBand = inferSeniority(p);
   return { skillTags, seniorityBand };
 }
@@ -2166,7 +2168,7 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
     distinctOrgSet.add(ownerLc);
     const mergedAt = item.pull_request?.merged_at ?? item.closed_at ?? item.created_at;
     const rawDomains = [meta2.language ?? "", ...meta2.topics].filter(Boolean);
-    const domainTags = [...new Set(normalize(rawDomains))];
+    const domainTags = [...new Set(normalize2(rawDomains))];
     qualifyingPRs.push({
       url: item.html_url,
       title: item.title,
@@ -2534,7 +2536,7 @@ function deriveResumeTrend(cred, repoRecency, now = Date.now()) {
     }
   }
   for (const r of repoRecency) {
-    for (const domain of new Set(normalize([r.language ?? "", ...r.topics].filter(Boolean)))) {
+    for (const domain of new Set(normalize2([r.language ?? "", ...r.topics].filter(Boolean)))) {
       bump(domain, r.pushedAt, 1, 0);
     }
   }
@@ -3924,7 +3926,7 @@ async function fetchRepoBounties(repoFullName) {
     const body = issue2.body ? decodeEntities(issue2.body) : "";
     const amountUSD = parseAmountUSD(title) ?? parseAmountUSD(body) ?? await fetchCommentAmount(repoFullName, issue2.number);
     const labels = labelNames(issue2);
-    const tags = normalize(tokenize2([title, labels.join(" "), body.slice(0, 2e3)].join(" ")));
+    const tags = normalize2(tokenize2([title, labels.join(" "), body.slice(0, 2e3)].join(" ")));
     return {
       id: `bounty:${repoFullName}#${issue2.number}`,
       source: "bounty",
@@ -4061,7 +4063,7 @@ async function fetchSearchBounties() {
     }
     if (amountUSD == null) continue;
     if (!passesAntiFarm(amountUSD, repo.stargazers_count)) continue;
-    const tags = normalize(
+    const tags = normalize2(
       tokenize2([title, labels.join(" "), body.slice(0, 2e3)].join(" "))
     );
     perRepo.set(fullName, (perRepo.get(fullName) ?? 0) + 1);
@@ -4208,7 +4210,7 @@ var init_opire = __esm({
           if (amountUSD == null || amountUSD < MIN_USD || amountUSD > MAX_USD) continue;
           const title = (r.title ?? "").trim();
           if (title.length < 4) continue;
-          const tags = normalize([...r.programmingLanguages ?? [], ...tokenize3(title)]);
+          const tags = normalize2([...r.programmingLanguages ?? [], ...tokenize3(title)]);
           const bounty = {
             amountUSD,
             estimatedEffort: effortFromAmount(amountUSD),
@@ -4771,7 +4773,7 @@ async function aggregateContributions(opts = {}) {
     const prRefs = await repoPRRefs(fullName);
     if (prRefs === null) prRefsNull++;
     const openPRsAtDiscovery = prRefs ? prRefs.has(issue2.number) ? 1 : 0 : void 0;
-    const tags = normalize(
+    const tags = normalize2(
       tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
     );
     seen.add(id);
@@ -4908,7 +4910,7 @@ async function aggregateContributions(opts = {}) {
         const prRefs = await repoPRRefs(fullName);
         if (prRefs === null) prRefsNull++;
         const openPRsAtDiscovery = prRefs ? prRefs.has(issue2.number) ? 1 : 0 : void 0;
-        const tags = normalize(
+        const tags = normalize2(
           tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
         );
         seen.add(id);
@@ -5177,7 +5179,7 @@ function curateProjects(issues, opts = {}) {
     const repoLanguageRaw = firstNonEmptyString(
       winnableIssues.map((i) => i.contribution.language ?? "")
     );
-    const languageIds = new Set(repoLanguageRaw ? normalize(tokenize(repoLanguageRaw)) : []);
+    const languageIds = new Set(repoLanguageRaw ? normalize2(tokenize(repoLanguageRaw)) : []);
     const skillTagUnion = /* @__PURE__ */ new Set();
     for (const iss of winnableIssues) for (const t of iss.tags ?? []) skillTagUnion.add(t);
     let distinctNonLanguageSkillTags = 0;
@@ -9197,7 +9199,7 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
   const ok = credential.status === "ok";
   const domains = ok ? credential.byDomain : {};
   const chips = Object.entries(domains).map(([rawDomain, d]) => {
-    const canon = normalize([rawDomain])[0];
+    const canon = normalize2([rawDomain])[0];
     return canon ? { domain: canon, mergedPRs: d.mergedPRs } : null;
   }).filter((c) => c !== null).sort((a, b) => b.mergedPRs - a.mergedPRs || (a.domain < b.domain ? -1 : 1));
   const dominant = chips.length > 0 ? chips[0].domain : void 0;
@@ -10693,7 +10695,7 @@ async function runAcceptanceAuditBatch(opts) {
   const appendQualifying = (cand, meta2) => {
     const on = parseRepoUrl(cand.repoUrl);
     const rawDomains = [meta2.language ?? "", ...meta2.topics].filter(Boolean);
-    const domains = [...new Set(normalize(rawDomains))];
+    const domains = [...new Set(normalize2(rawDomains))];
     const entry = {
       url: cand.url,
       title: cand.title,
@@ -11075,7 +11077,7 @@ __export(src_exports, {
   mergeLedger: () => mergeLedger,
   mergeProbability: () => mergeProbability,
   mmrRerank: () => mmrRerank,
-  normalize: () => normalize,
+  normalize: () => normalize2,
   openPRClosingRefs: () => openPRClosingRefs,
   opire: () => opire,
   opportunityShortToken: () => opportunityShortToken,
@@ -25107,9 +25109,9 @@ import { homedir as homedir10 } from "os";
 import { join as join15 } from "path";
 import { readFileSync as readFileSync10, writeFileSync as writeFileSync9 } from "fs";
 function quoteFound(quote, content) {
-  const q = normalize2(quote);
+  const q = normalize3(quote);
   if (q.length < MIN_QUOTE_CHARS) return false;
-  return normalize2(content).includes(q);
+  return normalize3(content).includes(q);
 }
 function quoteSource(quote, files) {
   for (const { file, content } of [...files].sort((a, b) => a.file.localeCompare(b.file))) {
@@ -25362,7 +25364,7 @@ function unusable(policy, detail) {
     semantic: { status: "unusable", detail }
   };
 }
-var TERMINALHIRE_DIR7, CACHE_FILE, MIN_QUOTE_CHARS, normalize2, SemanticAuditUnavailableError, CACHED_VERDICT_KEYS, SEMANTIC_POLICY_CACHE_FILE;
+var TERMINALHIRE_DIR7, CACHE_FILE, MIN_QUOTE_CHARS, normalize3, SemanticAuditUnavailableError, CACHED_VERDICT_KEYS, SEMANTIC_POLICY_CACHE_FILE;
 var init_repo_policy_semantic = __esm({
   "src/repo-policy-semantic.ts"() {
     "use strict";
@@ -25371,7 +25373,7 @@ var init_repo_policy_semantic = __esm({
     TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join15(homedir10(), ".terminalhire");
     CACHE_FILE = join15(TERMINALHIRE_DIR7, "semantic-policy-cache.json");
     MIN_QUOTE_CHARS = 16;
-    normalize2 = (s) => s.toLowerCase().replace(/\s+/g, " ").trim();
+    normalize3 = (s) => s.toLowerCase().replace(/\s+/g, " ").trim();
     SemanticAuditUnavailableError = class extends Error {
       constructor(message) {
         super(message);
@@ -25692,7 +25694,7 @@ var init_repo_policy = __esm({
 // src/crypto-store.ts
 import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes6 } from "crypto";
 import { readFileSync as readFileSync11, writeFileSync as writeFileSync10, existsSync as existsSync7, renameSync as renameSync5, rmSync as rmSync5, readdirSync } from "fs";
-import { join as join16, dirname as dirname5, basename as basename3 } from "path";
+import { join as join16, dirname as dirname5, basename as basename4 } from "path";
 import { createRequire } from "module";
 function encrypt2(plaintext, key) {
   const iv = randomBytes6(IV_BYTES2);
@@ -25749,7 +25751,7 @@ function atomicWriteFileSync(filePath, content) {
   ensureStateDirForSecret(dir);
   const tmp = join16(
     dir,
-    `.${basename3(filePath)}.tmp-${process.pid}-${randomBytes6(6).toString("hex")}`
+    `.${basename4(filePath)}.tmp-${process.pid}-${randomBytes6(6).toString("hex")}`
   );
   writeFileSync10(tmp, content, { encoding: "utf8", mode: 384, flag: "wx" });
   renameSync5(tmp, filePath);
@@ -25912,7 +25914,7 @@ async function writeProfile(profile) {
 }
 function accumulateSession(profile, tags, isEmployerContext, inferredSeniority, seniorityIsAuthoritative = false) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  let filtered = normalize(tags);
+  let filtered = normalize2(tags);
   if (isEmployerContext) {
     filtered = filtered.filter((t) => LANGUAGE_TAGS.has(t));
     profile.hasEmployerSessions = true;
@@ -27003,9 +27005,9 @@ var init_classify2 = __esm({
       // rspec's summary line
     ].join("|"), "m");
     MISSING_SYSTEM_DEPENDENCY = [
-      /^(?:\S*\/)?ld(?:\.\w+)?: cannot find -l[\w.+-]+/m,
-      /^\S+:\d+(?::\d+)?: fatal error: [\w./+-]+\.(?:h|hh|hpp|hxx): No such file or directory$/m,
-      /^\S+: error while loading shared libraries: lib[\w.+-]*: cannot open shared object file/m
+      /^[ \t|>]*(?:\S*\/)?ld(?:\.\w+)?: cannot find -l[\w.+-]+/m,
+      /^[ \t|>]*[\w./~]\S*:\d+(?::\d+)?: fatal error: [\w./+-]+\.(?:h|hh|hpp|hxx): No such file or directory$/m,
+      /^[ \t|>]*[\w./~]\S*: error while loading shared libraries: lib[\w.+-]*: cannot open shared object file/m
     ];
     OFFLINE_BUILD_GAP = [
       // Maven, `-o`: `Cannot access central (…) in offline mode and the artifact … has
@@ -27155,7 +27157,7 @@ var init_reap = __esm({
 // ../../packages/containment/dist/fence.js
 import { spawn as spawn3, spawnSync as spawnSync2 } from "child_process";
 import { existsSync as existsSync9, lchownSync, lstatSync as lstatSync3, mkdirSync as mkdirSync3, readdirSync as readdirSync2, realpathSync, statSync as statSync3, writeFileSync as writeFileSync12 } from "fs";
-import { basename as basename4, dirname as dirname7, isAbsolute as isAbsolute3, join as join21, posix as posix2, resolve as resolve4, sep as sep5 } from "path";
+import { basename as basename5, dirname as dirname7, isAbsolute as isAbsolute3, join as join21, posix as posix2, resolve as resolve4, sep as sep5 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 function canonical(path5, label) {
   if (!isAbsolute3(path5)) {
@@ -27233,7 +27235,7 @@ function canonicalPath(p) {
       const up = dirname7(head);
       if (up === head)
         return resolve4(p);
-      tail2.push(basename4(head));
+      tail2.push(basename5(head));
       head = up;
     }
   }
@@ -35559,14 +35561,14 @@ function migrationUnits(runner, migrations) {
       return [...byDir.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([id, path5]) => ({ id, path: path5 }));
     }
     case "alembic":
-      return migrations.filter((p) => /^alembic\/versions\/[^/]+\.py$/.test(p) && !p.endsWith("/__init__.py")).sort().map((path5) => ({ id: basename5(path5).replace(/\.py$/, ""), path: path5 }));
+      return migrations.filter((p) => /^alembic\/versions\/[^/]+\.py$/.test(p) && !p.endsWith("/__init__.py")).sort().map((path5) => ({ id: basename6(path5).replace(/\.py$/, ""), path: path5 }));
     case "rails":
-      return migrations.filter((p) => /^db\/migrate\/[^/]+\.rb$/.test(p)).sort().map((path5) => ({ id: /^(\d+)/.exec(basename5(path5))?.[1] ?? basename5(path5), path: path5 }));
+      return migrations.filter((p) => /^db\/migrate\/[^/]+\.rb$/.test(p)).sort().map((path5) => ({ id: /^(\d+)/.exec(basename6(path5))?.[1] ?? basename6(path5), path: path5 }));
     case "sql":
       return migrations.filter((p) => p.endsWith(".sql") && !p.startsWith("prisma/migrations/")).sort().map((path5) => ({ id: path5, path: path5 }));
   }
 }
-function basename5(path5) {
+function basename6(path5) {
   const at = path5.lastIndexOf("/");
   return at === -1 ? path5 : path5.slice(at + 1);
 }
@@ -52939,8 +52941,8 @@ var require_resolve = __commonJS({
       }
       return count;
     }
-    function getFullPath(resolver, id = "", normalize3) {
-      if (normalize3 !== false)
+    function getFullPath(resolver, id = "", normalize4) {
+      if (normalize4 !== false)
         id = normalizeId(id);
       const p = resolver.parse(id);
       return _getFullPath(resolver, p);
@@ -54336,7 +54338,7 @@ var require_fast_uri = __commonJS({
     "use strict";
     var { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizePercentEncoding, normalizePathEncoding, escapePreservingEscapes, reescapeHostDelimiters, isIPv4, nonSimpleDomain } = require_utils();
     var { SCHEMES, getSchemeHandler } = require_schemes();
-    function normalize3(uri, options) {
+    function normalize4(uri, options) {
       if (typeof uri === "string") {
         uri = /** @type {T} */
         normalizeString(uri, options);
@@ -54603,7 +54605,7 @@ var require_fast_uri = __commonJS({
     }
     var fastUri = {
       SCHEMES,
-      normalize: normalize3,
+      normalize: normalize4,
       resolve: resolve5,
       resolveComponent,
       equal,
@@ -59646,8 +59648,8 @@ var require_resolve2 = __commonJS({
       }
       return count;
     }
-    function getFullPath(resolver, id = "", normalize3) {
-      if (normalize3 !== false)
+    function getFullPath(resolver, id = "", normalize4) {
+      if (normalize4 !== false)
         id = normalizeId(id);
       const p = resolver.parse(id);
       return _getFullPath(resolver, p);

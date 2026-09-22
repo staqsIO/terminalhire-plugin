@@ -10582,7 +10582,7 @@ var init_sanitize = __esm({
 
 // src/api-base.ts
 import { homedir as homedir3 } from "os";
-import { join as join4 } from "path";
+import { basename, join as join4, normalize as normalize2 } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -10647,12 +10647,17 @@ function normalizeOverride(raw) {
   if (rewrite !== void 0) return rewrite;
   return url.origin;
 }
-var PROD_API_BASE, DEV_API_BASE, ApiBaseError, ALLOWED_HOSTS, ALLOW_LOCAL_API_KEY, ALLOWED_DESCRIPTION, CANONICAL_REWRITES, ENV_KEYS;
+function isDevStateDir(dir) {
+  if (dir === void 0 || dir === "") return false;
+  return basename(normalize2(dir)) === DEV_STATE_DIR_NAME;
+}
+var PROD_API_BASE, DEV_API_BASE, DEV_STATE_DIR_NAME, ApiBaseError, ALLOWED_HOSTS, ALLOW_LOCAL_API_KEY, ALLOWED_DESCRIPTION, CANONICAL_REWRITES, ENV_KEYS;
 var init_api_base = __esm({
   "src/api-base.ts"() {
     "use strict";
     PROD_API_BASE = "https://terminalhire.com";
     DEV_API_BASE = "https://dev.terminalhire.com";
+    DEV_STATE_DIR_NAME = ".terminalhire-dev";
     ApiBaseError = class extends Error {
       constructor(message) {
         super(message);
@@ -10697,7 +10702,7 @@ import {
   readlinkSync,
   unlinkSync as unlinkSync2
 } from "fs";
-import { join as join5, dirname as dirname2, basename, resolve, isAbsolute } from "path";
+import { join as join5, dirname as dirname2, basename as basename2, resolve, isAbsolute } from "path";
 import { homedir as homedir4 } from "os";
 function thDir() {
   const raw = process.env["TERMINALHIRE_DIR"] || join5(homedir4(), ".terminalhire");
@@ -10708,6 +10713,9 @@ function claudeSettingsPath() {
 }
 function spinnerStateFilePath() {
   return join5(thDir(), "spinner-state.json");
+}
+function writingFromDevStateDir() {
+  return isDevStateDir(process.env["TERMINALHIRE_DIR"]);
 }
 function readJson(path, fallback) {
   try {
@@ -10761,7 +10769,7 @@ function resolveTarget(path) {
   if (!settled) return null;
   if (cur !== path) return cur;
   try {
-    return join5(realpathSync(dirname2(path)), basename(path));
+    return join5(realpathSync(dirname2(path)), basename2(path));
   } catch {
     return path;
   }
@@ -10807,6 +10815,7 @@ function atomicWriteJson2(path, obj) {
   writeFileAtomic(path, JSON.stringify(obj, null, 2) + "\n");
 }
 function writeSettingsJson(path, obj, expectedRaw) {
+  if (writingFromDevStateDir()) return { ok: false, reason: "dev-scoped-state-dir" };
   const target = resolveTarget(path);
   if (target === null) return { ok: false, reason: "unresolvable-symlink-chain" };
   let currentRaw = null;
@@ -10995,6 +11004,7 @@ var init_spinner_io = __esm({
   "bin/spinner-io.js"() {
     "use strict";
     init_state_dir();
+    init_api_base();
     MAX_LINK_HOPS = 32;
     tmpCounter2 = 0;
   }
@@ -11701,7 +11711,7 @@ var init_shared_key = __esm({
 // src/crypto-store.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes4 } from "crypto";
 import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, existsSync as existsSync5, renameSync as renameSync5, rmSync, readdirSync } from "fs";
-import { join as join10, dirname as dirname4, basename as basename2 } from "path";
+import { join as join10, dirname as dirname4, basename as basename3 } from "path";
 import { createRequire } from "module";
 function encrypt(plaintext, key) {
   const iv = randomBytes4(IV_BYTES);
@@ -11758,7 +11768,7 @@ function atomicWriteFileSync(filePath, content) {
   ensureStateDirForSecret(dir);
   const tmp = join10(
     dir,
-    `.${basename2(filePath)}.tmp-${process.pid}-${randomBytes4(6).toString("hex")}`
+    `.${basename3(filePath)}.tmp-${process.pid}-${randomBytes4(6).toString("hex")}`
   );
   writeFileSync6(tmp, content, { encoding: "utf8", mode: 384, flag: "wx" });
   renameSync5(tmp, filePath);

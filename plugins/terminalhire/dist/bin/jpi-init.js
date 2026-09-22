@@ -625,7 +625,7 @@ var init_classify = __esm({
 });
 
 // ../../packages/core/src/vocab/index.ts
-function normalize(tokens) {
+function normalize2(tokens) {
   const result = /* @__PURE__ */ new Set();
   for (const raw of tokens) {
     const lower = raw.toLowerCase().trim();
@@ -1183,7 +1183,7 @@ function githubToFingerprint(p) {
     ...p.topics
     // recentPRorgs intentionally excluded — org names are not skill tags
   ];
-  const skillTags = normalize(rawTokens);
+  const skillTags = normalize2(rawTokens);
   const seniorityBand = inferSeniority(p);
   return { skillTags, seniorityBand };
 }
@@ -1466,7 +1466,7 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
     distinctOrgSet.add(ownerLc);
     const mergedAt = item.pull_request?.merged_at ?? item.closed_at ?? item.created_at;
     const rawDomains = [meta.language ?? "", ...meta.topics].filter(Boolean);
-    const domainTags = [...new Set(normalize(rawDomains))];
+    const domainTags = [...new Set(normalize2(rawDomains))];
     qualifyingPRs.push({
       url: item.html_url,
       title: item.title,
@@ -1834,7 +1834,7 @@ function deriveResumeTrend(cred, repoRecency, now = Date.now()) {
     }
   }
   for (const r of repoRecency) {
-    for (const domain of new Set(normalize([r.language ?? "", ...r.topics].filter(Boolean)))) {
+    for (const domain of new Set(normalize2([r.language ?? "", ...r.topics].filter(Boolean)))) {
       bump(domain, r.pushedAt, 1, 0);
     }
   }
@@ -3224,7 +3224,7 @@ async function fetchRepoBounties(repoFullName) {
     const body = issue.body ? decodeEntities(issue.body) : "";
     const amountUSD = parseAmountUSD(title) ?? parseAmountUSD(body) ?? await fetchCommentAmount(repoFullName, issue.number);
     const labels = labelNames(issue);
-    const tags = normalize(tokenize2([title, labels.join(" "), body.slice(0, 2e3)].join(" ")));
+    const tags = normalize2(tokenize2([title, labels.join(" "), body.slice(0, 2e3)].join(" ")));
     return {
       id: `bounty:${repoFullName}#${issue.number}`,
       source: "bounty",
@@ -3361,7 +3361,7 @@ async function fetchSearchBounties() {
     }
     if (amountUSD == null) continue;
     if (!passesAntiFarm(amountUSD, repo.stargazers_count)) continue;
-    const tags = normalize(
+    const tags = normalize2(
       tokenize2([title, labels.join(" "), body.slice(0, 2e3)].join(" "))
     );
     perRepo.set(fullName, (perRepo.get(fullName) ?? 0) + 1);
@@ -3508,7 +3508,7 @@ var init_opire = __esm({
           if (amountUSD == null || amountUSD < MIN_USD || amountUSD > MAX_USD) continue;
           const title = (r.title ?? "").trim();
           if (title.length < 4) continue;
-          const tags = normalize([...r.programmingLanguages ?? [], ...tokenize3(title)]);
+          const tags = normalize2([...r.programmingLanguages ?? [], ...tokenize3(title)]);
           const bounty = {
             amountUSD,
             estimatedEffort: effortFromAmount(amountUSD),
@@ -4071,7 +4071,7 @@ async function aggregateContributions(opts = {}) {
     const prRefs = await repoPRRefs(fullName);
     if (prRefs === null) prRefsNull++;
     const openPRsAtDiscovery = prRefs ? prRefs.has(issue.number) ? 1 : 0 : void 0;
-    const tags = normalize(
+    const tags = normalize2(
       tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
     );
     seen.add(id);
@@ -4208,7 +4208,7 @@ async function aggregateContributions(opts = {}) {
         const prRefs = await repoPRRefs(fullName);
         if (prRefs === null) prRefsNull++;
         const openPRsAtDiscovery = prRefs ? prRefs.has(issue.number) ? 1 : 0 : void 0;
-        const tags = normalize(
+        const tags = normalize2(
           tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
         );
         seen.add(id);
@@ -4477,7 +4477,7 @@ function curateProjects(issues, opts = {}) {
     const repoLanguageRaw = firstNonEmptyString(
       winnableIssues.map((i) => i.contribution.language ?? "")
     );
-    const languageIds = new Set(repoLanguageRaw ? normalize(tokenize(repoLanguageRaw)) : []);
+    const languageIds = new Set(repoLanguageRaw ? normalize2(tokenize(repoLanguageRaw)) : []);
     const skillTagUnion = /* @__PURE__ */ new Set();
     for (const iss of winnableIssues) for (const t of iss.tags ?? []) skillTagUnion.add(t);
     let distinctNonLanguageSkillTags = 0;
@@ -8497,7 +8497,7 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
   const ok = credential.status === "ok";
   const domains = ok ? credential.byDomain : {};
   const chips = Object.entries(domains).map(([rawDomain, d]) => {
-    const canon = normalize([rawDomain])[0];
+    const canon = normalize2([rawDomain])[0];
     return canon ? { domain: canon, mergedPRs: d.mergedPRs } : null;
   }).filter((c) => c !== null).sort((a, b) => b.mergedPRs - a.mergedPRs || (a.domain < b.domain ? -1 : 1));
   const dominant = chips.length > 0 ? chips[0].domain : void 0;
@@ -9993,7 +9993,7 @@ async function runAcceptanceAuditBatch(opts) {
   const appendQualifying = (cand, meta) => {
     const on = parseRepoUrl(cand.repoUrl);
     const rawDomains = [meta.language ?? "", ...meta.topics].filter(Boolean);
-    const domains = [...new Set(normalize(rawDomains))];
+    const domains = [...new Set(normalize2(rawDomains))];
     const entry = {
       url: cand.url,
       title: cand.title,
@@ -10375,7 +10375,7 @@ __export(src_exports, {
   mergeLedger: () => mergeLedger,
   mergeProbability: () => mergeProbability,
   mmrRerank: () => mmrRerank,
-  normalize: () => normalize,
+  normalize: () => normalize2,
   openPRClosingRefs: () => openPRClosingRefs,
   opire: () => opire,
   opportunityShortToken: () => opportunityShortToken,
@@ -10766,7 +10766,7 @@ function ensureStateDir(dir) {
 
 // src/api-base.ts
 import { homedir } from "os";
-import { join } from "path";
+import { basename, join, normalize } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {
@@ -11016,8 +11016,8 @@ async function run() {
   const interestAnswer = await ask("> ");
   if (interestAnswer) {
     try {
-      const { normalize: normalize2 } = await Promise.resolve().then(() => (init_src(), src_exports));
-      const interestTags = normalize2(tokenizeInterest(interestAnswer));
+      const { normalize: normalize3 } = await Promise.resolve().then(() => (init_src(), src_exports));
+      const interestTags = normalize3(tokenizeInterest(interestAnswer));
       if (interestTags.length > 0) {
         writeProject({ interestTags });
         console.log(`  Saved locally (never sent): ${interestTags.join(", ")}`);

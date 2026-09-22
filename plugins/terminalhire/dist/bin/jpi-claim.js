@@ -10878,7 +10878,7 @@ var init_claims = __esm({
 
 // src/api-base.ts
 import { homedir as homedir3 } from "os";
-import { join as join4 } from "path";
+import { basename, join as join4, normalize as normalize2 } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -10971,10 +10971,12 @@ function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
   } catch {
   }
 }
-function usingSeparateStateDir(env = process.env) {
-  const dir = env["TERMINALHIRE_DIR"];
+function isDevStateDir(dir) {
   if (dir === void 0 || dir === "") return false;
-  return dir.endsWith(DEV_STATE_DIR_NAME);
+  return basename(normalize2(dir)) === DEV_STATE_DIR_NAME;
+}
+function usingSeparateStateDir(env = process.env) {
+  return isDevStateDir(env["TERMINALHIRE_DIR"]);
 }
 var PROD_API_BASE, DEV_API_BASE, DEV_STATE_DIR_NAME, ApiBaseError, ALLOWED_HOSTS, OAUTH_ALLOWED_ORIGINS, ALLOW_LOCAL_OAUTH_KEY, ALLOW_LOCAL_API_KEY, ALLOWED_DESCRIPTION, CANONICAL_REWRITES, ENV_KEYS;
 var init_api_base = __esm({
@@ -24589,9 +24591,9 @@ import { homedir as homedir8 } from "os";
 import { join as join13 } from "path";
 import { readFileSync as readFileSync8, writeFileSync as writeFileSync7 } from "fs";
 function quoteFound(quote, content) {
-  const q = normalize2(quote);
+  const q = normalize3(quote);
   if (q.length < MIN_QUOTE_CHARS) return false;
-  return normalize2(content).includes(q);
+  return normalize3(content).includes(q);
 }
 function quoteSource(quote, files) {
   for (const { file, content } of [...files].sort((a, b) => a.file.localeCompare(b.file))) {
@@ -24844,7 +24846,7 @@ function unusable(policy, detail) {
     semantic: { status: "unusable", detail }
   };
 }
-var TERMINALHIRE_DIR6, CACHE_FILE, MIN_QUOTE_CHARS, normalize2, SemanticAuditUnavailableError, CACHED_VERDICT_KEYS, SEMANTIC_POLICY_CACHE_FILE;
+var TERMINALHIRE_DIR6, CACHE_FILE, MIN_QUOTE_CHARS, normalize3, SemanticAuditUnavailableError, CACHED_VERDICT_KEYS, SEMANTIC_POLICY_CACHE_FILE;
 var init_repo_policy_semantic = __esm({
   "src/repo-policy-semantic.ts"() {
     "use strict";
@@ -24853,7 +24855,7 @@ var init_repo_policy_semantic = __esm({
     TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join13(homedir8(), ".terminalhire");
     CACHE_FILE = join13(TERMINALHIRE_DIR6, "semantic-policy-cache.json");
     MIN_QUOTE_CHARS = 16;
-    normalize2 = (s) => s.toLowerCase().replace(/\s+/g, " ").trim();
+    normalize3 = (s) => s.toLowerCase().replace(/\s+/g, " ").trim();
     SemanticAuditUnavailableError = class extends Error {
       constructor(message) {
         super(message);
@@ -25174,7 +25176,7 @@ var init_repo_policy = __esm({
 // src/crypto-store.ts
 import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes6 } from "crypto";
 import { readFileSync as readFileSync9, writeFileSync as writeFileSync8, existsSync as existsSync7, renameSync as renameSync3, rmSync as rmSync5, readdirSync } from "fs";
-import { join as join14, dirname as dirname4, basename as basename3 } from "path";
+import { join as join14, dirname as dirname4, basename as basename4 } from "path";
 import { createRequire } from "module";
 function encrypt2(plaintext, key) {
   const iv = randomBytes6(IV_BYTES2);
@@ -25231,7 +25233,7 @@ function atomicWriteFileSync(filePath, content) {
   ensureStateDirForSecret(dir);
   const tmp = join14(
     dir,
-    `.${basename3(filePath)}.tmp-${process.pid}-${randomBytes6(6).toString("hex")}`
+    `.${basename4(filePath)}.tmp-${process.pid}-${randomBytes6(6).toString("hex")}`
   );
   writeFileSync8(tmp, content, { encoding: "utf8", mode: 384, flag: "wx" });
   renameSync3(tmp, filePath);
@@ -26485,9 +26487,9 @@ var init_classify2 = __esm({
       // rspec's summary line
     ].join("|"), "m");
     MISSING_SYSTEM_DEPENDENCY = [
-      /^(?:\S*\/)?ld(?:\.\w+)?: cannot find -l[\w.+-]+/m,
-      /^\S+:\d+(?::\d+)?: fatal error: [\w./+-]+\.(?:h|hh|hpp|hxx): No such file or directory$/m,
-      /^\S+: error while loading shared libraries: lib[\w.+-]*: cannot open shared object file/m
+      /^[ \t|>]*(?:\S*\/)?ld(?:\.\w+)?: cannot find -l[\w.+-]+/m,
+      /^[ \t|>]*[\w./~]\S*:\d+(?::\d+)?: fatal error: [\w./+-]+\.(?:h|hh|hpp|hxx): No such file or directory$/m,
+      /^[ \t|>]*[\w./~]\S*: error while loading shared libraries: lib[\w.+-]*: cannot open shared object file/m
     ];
     OFFLINE_BUILD_GAP = [
       // Maven, `-o`: `Cannot access central (…) in offline mode and the artifact … has
@@ -26637,7 +26639,7 @@ var init_reap = __esm({
 // ../../packages/containment/dist/fence.js
 import { spawn as spawn3, spawnSync as spawnSync2 } from "child_process";
 import { existsSync as existsSync9, lchownSync, lstatSync as lstatSync3, mkdirSync as mkdirSync3, readdirSync as readdirSync2, realpathSync, statSync as statSync3, writeFileSync as writeFileSync10 } from "fs";
-import { basename as basename4, dirname as dirname6, isAbsolute as isAbsolute3, join as join19, posix as posix2, resolve as resolve4, sep as sep5 } from "path";
+import { basename as basename5, dirname as dirname6, isAbsolute as isAbsolute3, join as join19, posix as posix2, resolve as resolve4, sep as sep5 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 function canonical(path5, label) {
   if (!isAbsolute3(path5)) {
@@ -26715,7 +26717,7 @@ function canonicalPath(p) {
       const up = dirname6(head);
       if (up === head)
         return resolve4(p);
-      tail2.push(basename4(head));
+      tail2.push(basename5(head));
       head = up;
     }
   }
@@ -35041,14 +35043,14 @@ function migrationUnits(runner, migrations) {
       return [...byDir.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([id, path5]) => ({ id, path: path5 }));
     }
     case "alembic":
-      return migrations.filter((p) => /^alembic\/versions\/[^/]+\.py$/.test(p) && !p.endsWith("/__init__.py")).sort().map((path5) => ({ id: basename5(path5).replace(/\.py$/, ""), path: path5 }));
+      return migrations.filter((p) => /^alembic\/versions\/[^/]+\.py$/.test(p) && !p.endsWith("/__init__.py")).sort().map((path5) => ({ id: basename6(path5).replace(/\.py$/, ""), path: path5 }));
     case "rails":
-      return migrations.filter((p) => /^db\/migrate\/[^/]+\.rb$/.test(p)).sort().map((path5) => ({ id: /^(\d+)/.exec(basename5(path5))?.[1] ?? basename5(path5), path: path5 }));
+      return migrations.filter((p) => /^db\/migrate\/[^/]+\.rb$/.test(p)).sort().map((path5) => ({ id: /^(\d+)/.exec(basename6(path5))?.[1] ?? basename6(path5), path: path5 }));
     case "sql":
       return migrations.filter((p) => p.endsWith(".sql") && !p.startsWith("prisma/migrations/")).sort().map((path5) => ({ id: path5, path: path5 }));
   }
 }
-function basename5(path5) {
+function basename6(path5) {
   const at = path5.lastIndexOf("/");
   return at === -1 ? path5 : path5.slice(at + 1);
 }

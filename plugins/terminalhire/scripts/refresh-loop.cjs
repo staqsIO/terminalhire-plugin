@@ -39,7 +39,7 @@
 
 const { spawnSync } = require('node:child_process');
 const { readFileSync, writeFileSync, unlinkSync } = require('node:fs');
-const { join, dirname } = require('node:path');
+const { join, dirname, basename, normalize } = require('node:path');
 const { homedir } = require('node:os');
 // The state dir holds key material, so it must be created at 0700 — a bare
 // mkdirSync here would create it at the 0755 umask default. This monitor is a
@@ -65,9 +65,73 @@ const DISPATCH = join(PLUGIN_ROOT, 'dist', 'bin', 'jpi-dispatch.js');
 // beacon work in TERM-279 lands.
 const SLEEP_SECONDS = Number(process.env.TERMINALHIRE_REFRESH_INTERVAL) || 60;
 
+// The dev store's directory NAME, a second copy of `DEV_STATE_DIR_NAME` in
+// apps/cli/src/api-base.ts. It has to be a copy: this is CommonJS and cannot
+// require the bundled ESM engine it spawns. `refresh-loop.test.js` reads that
+// file and asserts the two agree, the same way it does for API_BASE_ENV_KEYS.
+const DEV_STATE_DIR_NAME = '.terminalhire-dev';
+
+/**
+ * True when `dir` names the dev store. Mirrors `isDevStateDir` in api-base.ts,
+ * including WHY it is basename-and-normalize rather than `endsWith`: a trailing
+ * separator names the same directory, and a production store called
+ * `prod.terminalhire-dev` is not the dev store.
+ */
+function isDevStateDir(dir) {
+  if (!dir) return false;
+  return basename(normalize(dir)) === DEV_STATE_DIR_NAME;
+}
+
+/**
+ * Drop an inherited DEV store from this process's own environment, once, before
+ * anything derives a path from it.
+ *
+ * This loop is a machine-global daemon driving a machine-global surface, and it
+ * inherits the environment of whichever session spawned it.
+ *
+ * Dropping the API-base keys from the tick env does NOT undo an inherited store, and
+ * that is the whole reason this function exists (TERM-1187). `pinStateDirToApiBase`
+ * (apps/cli/src/state-dir-pin.ts) sets `TERMINALHIRE_DIR` only when it is UNSET, so an
+ * inherited value survives it by design: the child keeps the dev store and
+ * `spinner-io.js` then refuses every settings write, freezing the shimmer at a stale
+ * price rather than correcting it.
+ *
+ * SAY WHAT IS MEASURED AND WHAT IS NOT, because an earlier draft of this comment
+ * overstated it and a reviewer was right to refuse the claim. Measured on the machine
+ * that reported the bug: `ps eww` showed this loop carrying `TERMINALHIRE_API_URL` for
+ * fifteen hours and NO `TERMINALHIRE_DIR` — so the API-key strip alone would have been
+ * enough there, and it is false to say the first fix was inert on that machine.
+ * Nobody has traced a path by which the monitor, which Claude Code spawns from
+ * `monitors.json` as a sibling process rather than as a dispatch child, comes to have
+ * the variable set at all. What makes this strip worth keeping is narrower and does not
+ * need that trace: an exported `TERMINALHIRE_DIR` is a state a developer can reach on
+ * purpose, and under it the guard downstream turns a stale shimmer into a permanently
+ * frozen one. Cheap to strip, and the failure it prevents is silent.
+ *
+ * Done here rather than in `tickEnv` because THREE things derive from this variable
+ * and all three must be production's: the tick env, the store the loop reads, and
+ * `LOCK_FILE` below — a dev-scoped lock does not even contend with the production
+ * monitor, so two would run at once.
+ *
+ * A non-dev override is left alone. That is an operator who moved their store on
+ * purpose, and re-deciding it here would relocate a store somebody placed
+ * deliberately. Only the one directory we can positively identify as dev is dropped.
+ */
+function shedInheritedDevStateDir(env = process.env) {
+  if (!isDevStateDir(env.TERMINALHIRE_DIR)) return false;
+  delete env.TERMINALHIRE_DIR;
+  return true;
+}
+
+shedInheritedDevStateDir();
+
 // TERMINALHIRE_DIR override mirrors the CLI (spinner.js / jpi-refresh.js) so the
 // lock lives alongside the shared cache — and so tests can isolate it.
 const TH_DIR = process.env.TERMINALHIRE_DIR || join(homedir(), '.terminalhire');
+
+// The API-base overrides this loop refuses to pass to its children (see tickEnv).
+// Kept in step with `ENV_KEYS` in apps/cli/src/api-base.ts by refresh-loop.test.js.
+const API_BASE_ENV_KEYS = ['TERMINALHIRE_API_URL', 'JPI_API_URL'];
 const LOCK_FILE = join(TH_DIR, 'refresh-loop.pid');
 
 // One-shot hook for tests / manual single ticks. Unset in production ⇒ the loop
@@ -321,11 +385,48 @@ function releaseLock() {
   }
 }
 
+/**
+ * The env for a tick: this machine's env with the API-base overrides REMOVED.
+ *
+ * This loop is a machine-global daemon. It inherits the environment of whichever
+ * Claude Code session happened to spawn it, and the surface it drives —
+ * `~/.claude/settings.json` — is machine-global too, with links that point at
+ * production. So one session exporting `TERMINALHIRE_API_URL=<dev>` silently made
+ * every other session's shimmer dev's business. Measured 2026-09-20: this loop had
+ * carried exactly that for fifteen hours, and the shimmer was showing a price the
+ * production posting no longer had.
+ *
+ * Dropping the two API keys is what this function does, and on its own it is NOT
+ * enough — see `shedInheritedDevStateDir`, which runs once at module load and is the
+ * other half. With no dev API base AND no inherited dev store in the child's env,
+ * `pinStateDirToApiBase` (apps/cli/src/state-dir-pin.ts) resolves the production
+ * store on its own, because it sets `TERMINALHIRE_DIR` only when it is UNSET. That
+ * same "only when unset" is why an inherited pin survives this function untouched,
+ * so do not read the two as interchangeable.
+ *
+ * An operator who deliberately moved their store to some OTHER path keeps it: that
+ * override is inviolable here, and re-deciding it would relocate a store somebody
+ * placed on purpose.
+ *
+ * The key list below is a SECOND copy of the CLI's `ENV_KEYS`
+ * (apps/cli/src/api-base.ts), and it has to be: that constant is not exported, and
+ * this is CommonJS, which cannot require the bundled ESM engine it spawns. So the
+ * copy is held honest by `refresh-loop.test.js`, which reads the CLI's source and
+ * asserts the two lists match. Without that test a third key would be added there,
+ * this loop would keep inheriting it, and nothing would look wrong.
+ */
+function tickEnv(base = process.env) {
+  const env = { ...base };
+  for (const key of API_BASE_ENV_KEYS) delete env[key];
+  return env;
+}
+
 /** One refresh tick — fail-closed (never throws, never blocks the loop). */
 function runTick() {
   try {
     spawnSync(process.execPath, [DISPATCH, 'refresh'], {
       stdio: 'ignore',
+      env: tickEnv(),
     });
   } catch {
     /* fail-closed — ignore and keep looping */
@@ -382,6 +483,16 @@ module.exports = {
   // Exported so a test can assert the SHIPPED cadence and the env override against the
   // value the module actually computes, rather than against its source text.
   SLEEP_SECONDS,
+  // TERM-1187: exported so a test can assert the child env drops the API-base
+  // overrides, and that this list still matches the CLI's own.
+  API_BASE_ENV_KEYS,
+  tickEnv,
+  // TERM-1187 round 2: the inherited-dev-store half. Exported so a test can drive
+  // it on an env object of its own — it runs at module load against the real
+  // process.env, which a test cannot observe after the fact.
+  DEV_STATE_DIR_NAME,
+  isDevStateDir,
+  shedInheritedDevStateDir,
   acquireLock,
   releaseLock,
   ownerIsLive,

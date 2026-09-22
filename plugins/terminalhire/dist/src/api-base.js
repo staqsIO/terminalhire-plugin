@@ -1,6 +1,6 @@
 // src/api-base.ts
 import { homedir } from "os";
-import { join } from "path";
+import { basename, join, normalize } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var DEV_STATE_DIR_NAME = ".terminalhire-dev";
@@ -151,10 +151,12 @@ function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
   } catch {
   }
 }
-function usingSeparateStateDir(env = process.env) {
-  const dir = env["TERMINALHIRE_DIR"];
+function isDevStateDir(dir) {
   if (dir === void 0 || dir === "") return false;
-  return dir.endsWith(DEV_STATE_DIR_NAME);
+  return basename(normalize(dir)) === DEV_STATE_DIR_NAME;
+}
+function usingSeparateStateDir(env = process.env) {
+  return isDevStateDir(env["TERMINALHIRE_DIR"]);
 }
 export {
   ApiBaseError,
@@ -163,6 +165,7 @@ export {
   PROD_API_BASE,
   __resetDevMarkerLatchForTests,
   formatDevMarker,
+  isDevStateDir,
   isLoopbackOrigin,
   isNonProdApiBase,
   pinToDevApiBase,

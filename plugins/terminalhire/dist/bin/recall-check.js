@@ -12,11 +12,11 @@ import {
   writeFileSync
 } from "fs";
 import { homedir as homedir2 } from "os";
-import { basename, dirname, join as join2 } from "path";
+import { basename as basename2, dirname, join as join2 } from "path";
 
 // src/api-base.ts
 import { homedir } from "os";
-import { join } from "path";
+import { basename, join, normalize } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {
@@ -198,7 +198,7 @@ function mutateCache(path, mutate) {
 function sweepTempFiles(path) {
   try {
     const dir = dirname(path);
-    const prefix = `${basename(path)}.`;
+    const prefix = `${basename2(path)}.`;
     for (const name of readdirSync(dir)) {
       if (!name.startsWith(prefix) || !name.endsWith(".tmp")) continue;
       const full = join2(dir, name);

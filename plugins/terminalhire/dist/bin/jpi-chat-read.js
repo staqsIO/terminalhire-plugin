@@ -4582,7 +4582,7 @@ var init_chat_keystore = __esm({
 
 // src/api-base.ts
 import { homedir as homedir4 } from "os";
-import { join as join6 } from "path";
+import { basename, join as join6, normalize as normalize2 } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);

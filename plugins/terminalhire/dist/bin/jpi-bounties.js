@@ -10559,6 +10559,7 @@ __export(api_base_exports, {
   PROD_API_BASE: () => PROD_API_BASE,
   __resetDevMarkerLatchForTests: () => __resetDevMarkerLatchForTests,
   formatDevMarker: () => formatDevMarker,
+  isDevStateDir: () => isDevStateDir,
   isLoopbackOrigin: () => isLoopbackOrigin,
   isNonProdApiBase: () => isNonProdApiBase,
   pinToDevApiBase: () => pinToDevApiBase,
@@ -10568,7 +10569,7 @@ __export(api_base_exports, {
   warnSharedCredentialsIfNonProd: () => warnSharedCredentialsIfNonProd
 });
 import { homedir as homedir2 } from "os";
-import { join as join3 } from "path";
+import { basename, join as join3, normalize as normalize2 } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -10689,10 +10690,12 @@ function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
   } catch {
   }
 }
-function usingSeparateStateDir(env = process.env) {
-  const dir = env["TERMINALHIRE_DIR"];
+function isDevStateDir(dir) {
   if (dir === void 0 || dir === "") return false;
-  return dir.endsWith(DEV_STATE_DIR_NAME);
+  return basename(normalize2(dir)) === DEV_STATE_DIR_NAME;
+}
+function usingSeparateStateDir(env = process.env) {
+  return isDevStateDir(env["TERMINALHIRE_DIR"]);
 }
 var PROD_API_BASE, DEV_API_BASE, DEV_STATE_DIR_NAME, ApiBaseError, ALLOWED_HOSTS, OAUTH_ALLOWED_ORIGINS, ALLOW_LOCAL_OAUTH_KEY, ALLOW_LOCAL_API_KEY, ALLOWED_DESCRIPTION, CANONICAL_REWRITES, ENV_KEYS, markerPrinted;
 var init_api_base = __esm({
@@ -10858,7 +10861,7 @@ var init_shared_key = __esm({
 // src/crypto-store.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes4 } from "crypto";
 import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, existsSync as existsSync3, renameSync as renameSync2, rmSync, readdirSync } from "fs";
-import { join as join6, dirname, basename } from "path";
+import { join as join6, dirname, basename as basename2 } from "path";
 import { createRequire } from "module";
 function encrypt(plaintext, key) {
   const iv = randomBytes4(IV_BYTES);
@@ -10915,7 +10918,7 @@ function atomicWriteFileSync(filePath, content) {
   ensureStateDirForSecret(dir);
   const tmp = join6(
     dir,
-    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes4(6).toString("hex")}`
+    `.${basename2(filePath)}.tmp-${process.pid}-${randomBytes4(6).toString("hex")}`
   );
   writeFileSync3(tmp, content, { encoding: "utf8", mode: 384, flag: "wx" });
   renameSync2(tmp, filePath);

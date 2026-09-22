@@ -110,6 +110,7 @@ __export(api_base_exports, {
   PROD_API_BASE: () => PROD_API_BASE,
   __resetDevMarkerLatchForTests: () => __resetDevMarkerLatchForTests,
   formatDevMarker: () => formatDevMarker,
+  isDevStateDir: () => isDevStateDir,
   isLoopbackOrigin: () => isLoopbackOrigin,
   isNonProdApiBase: () => isNonProdApiBase,
   pinToDevApiBase: () => pinToDevApiBase,
@@ -119,7 +120,7 @@ __export(api_base_exports, {
   warnSharedCredentialsIfNonProd: () => warnSharedCredentialsIfNonProd
 });
 import { homedir } from "os";
-import { join } from "path";
+import { basename, join, normalize } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -240,10 +241,12 @@ function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
   } catch {
   }
 }
-function usingSeparateStateDir(env = process.env) {
-  const dir = env["TERMINALHIRE_DIR"];
+function isDevStateDir(dir) {
   if (dir === void 0 || dir === "") return false;
-  return dir.endsWith(DEV_STATE_DIR_NAME);
+  return basename(normalize(dir)) === DEV_STATE_DIR_NAME;
+}
+function usingSeparateStateDir(env = process.env) {
+  return isDevStateDir(env["TERMINALHIRE_DIR"]);
 }
 var PROD_API_BASE, DEV_API_BASE, DEV_STATE_DIR_NAME, ApiBaseError, ALLOWED_HOSTS, OAUTH_ALLOWED_ORIGINS, ALLOW_LOCAL_OAUTH_KEY, ALLOW_LOCAL_API_KEY, ALLOWED_DESCRIPTION, CANONICAL_REWRITES, ENV_KEYS, markerPrinted;
 var init_api_base = __esm({

@@ -459,7 +459,7 @@ var init_classify = __esm({
 });
 
 // ../../packages/core/src/vocab/index.ts
-function normalize(tokens) {
+function normalize2(tokens) {
   const result = /* @__PURE__ */ new Set();
   for (const raw of tokens) {
     const lower = raw.toLowerCase().trim();
@@ -1459,7 +1459,7 @@ var init_shared_key = __esm({
 // src/crypto-store.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes3 } from "crypto";
 import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, existsSync as existsSync3, renameSync, rmSync, readdirSync } from "fs";
-import { join as join5, dirname, basename } from "path";
+import { join as join5, dirname, basename as basename2 } from "path";
 import { createRequire } from "module";
 function encrypt(plaintext, key) {
   const iv = randomBytes3(IV_BYTES);
@@ -1516,7 +1516,7 @@ function atomicWriteFileSync(filePath, content) {
   ensureStateDirForSecret(dir);
   const tmp = join5(
     dir,
-    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes3(6).toString("hex")}`
+    `.${basename2(filePath)}.tmp-${process.pid}-${randomBytes3(6).toString("hex")}`
   );
   writeFileSync2(tmp, content, { encoding: "utf8", mode: 384, flag: "wx" });
   renameSync(tmp, filePath);
@@ -1679,7 +1679,7 @@ async function writeProfile(profile) {
 }
 function accumulateSession(profile, tags, isEmployerContext, inferredSeniority, seniorityIsAuthoritative = false) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  let filtered = normalize(tags);
+  let filtered = normalize2(tags);
   if (isEmployerContext) {
     filtered = filtered.filter((t) => LANGUAGE_TAGS.has(t));
     profile.hasEmployerSessions = true;
@@ -1828,7 +1828,7 @@ init_state_dir();
 
 // src/api-base.ts
 import { homedir } from "os";
-import { join } from "path";
+import { basename, join, normalize } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var DEV_STATE_DIR_NAME = ".terminalhire-dev";
@@ -1950,10 +1950,12 @@ function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
   } catch {
   }
 }
-function usingSeparateStateDir(env = process.env) {
-  const dir = env["TERMINALHIRE_DIR"];
+function isDevStateDir(dir) {
   if (dir === void 0 || dir === "") return false;
-  return dir.endsWith(DEV_STATE_DIR_NAME);
+  return basename(normalize(dir)) === DEV_STATE_DIR_NAME;
+}
+function usingSeparateStateDir(env = process.env) {
+  return isDevStateDir(env["TERMINALHIRE_DIR"]);
 }
 
 // bin/jpi-sync.js

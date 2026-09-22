@@ -69,6 +69,7 @@ __export(api_base_exports, {
   PROD_API_BASE: () => PROD_API_BASE,
   __resetDevMarkerLatchForTests: () => __resetDevMarkerLatchForTests,
   formatDevMarker: () => formatDevMarker,
+  isDevStateDir: () => isDevStateDir,
   isLoopbackOrigin: () => isLoopbackOrigin,
   isNonProdApiBase: () => isNonProdApiBase,
   pinToDevApiBase: () => pinToDevApiBase,
@@ -78,7 +79,7 @@ __export(api_base_exports, {
   warnSharedCredentialsIfNonProd: () => warnSharedCredentialsIfNonProd
 });
 import { homedir } from "os";
-import { join as join2 } from "path";
+import { basename, join as join2, normalize } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -199,10 +200,12 @@ function warnSharedCredentialsIfNonProd(base, stream = process.stderr) {
   } catch {
   }
 }
-function usingSeparateStateDir(env = process.env) {
-  const dir = env["TERMINALHIRE_DIR"];
+function isDevStateDir(dir) {
   if (dir === void 0 || dir === "") return false;
-  return dir.endsWith(DEV_STATE_DIR_NAME);
+  return basename(normalize(dir)) === DEV_STATE_DIR_NAME;
+}
+function usingSeparateStateDir(env = process.env) {
+  return isDevStateDir(env["TERMINALHIRE_DIR"]);
 }
 var PROD_API_BASE, DEV_API_BASE, DEV_STATE_DIR_NAME, ApiBaseError, ALLOWED_HOSTS, OAUTH_ALLOWED_ORIGINS, ALLOW_LOCAL_OAUTH_KEY, ALLOW_LOCAL_API_KEY, ALLOWED_DESCRIPTION, CANONICAL_REWRITES, ENV_KEYS, markerPrinted;
 var init_api_base = __esm({
@@ -2309,7 +2312,7 @@ var init_classify = __esm({
 });
 
 // ../../packages/core/src/vocab/index.ts
-function normalize(tokens) {
+function normalize2(tokens) {
   const result = /* @__PURE__ */ new Set();
   for (const raw of tokens) {
     const lower = raw.toLowerCase().trim();
@@ -2867,7 +2870,7 @@ function githubToFingerprint(p) {
     ...p.topics
     // recentPRorgs intentionally excluded — org names are not skill tags
   ];
-  const skillTags = normalize(rawTokens);
+  const skillTags = normalize2(rawTokens);
   const seniorityBand = inferSeniority(p);
   return { skillTags, seniorityBand };
 }
@@ -3150,7 +3153,7 @@ async function computeAcceptanceFromSearch(login, token, ownedOrgs, cache, gates
     distinctOrgSet.add(ownerLc);
     const mergedAt = item.pull_request?.merged_at ?? item.closed_at ?? item.created_at;
     const rawDomains = [meta2.language ?? "", ...meta2.topics].filter(Boolean);
-    const domainTags = [...new Set(normalize(rawDomains))];
+    const domainTags = [...new Set(normalize2(rawDomains))];
     qualifyingPRs.push({
       url: item.html_url,
       title: item.title,
@@ -3518,7 +3521,7 @@ function deriveResumeTrend(cred, repoRecency, now = Date.now()) {
     }
   }
   for (const r of repoRecency) {
-    for (const domain of new Set(normalize([r.language ?? "", ...r.topics].filter(Boolean)))) {
+    for (const domain of new Set(normalize2([r.language ?? "", ...r.topics].filter(Boolean)))) {
       bump(domain, r.pushedAt, 1, 0);
     }
   }
@@ -4908,7 +4911,7 @@ async function fetchRepoBounties(repoFullName) {
     const body = issue2.body ? decodeEntities(issue2.body) : "";
     const amountUSD = parseAmountUSD(title) ?? parseAmountUSD(body) ?? await fetchCommentAmount(repoFullName, issue2.number);
     const labels = labelNames(issue2);
-    const tags = normalize(tokenize2([title, labels.join(" "), body.slice(0, 2e3)].join(" ")));
+    const tags = normalize2(tokenize2([title, labels.join(" "), body.slice(0, 2e3)].join(" ")));
     return {
       id: `bounty:${repoFullName}#${issue2.number}`,
       source: "bounty",
@@ -5045,7 +5048,7 @@ async function fetchSearchBounties() {
     }
     if (amountUSD == null) continue;
     if (!passesAntiFarm(amountUSD, repo.stargazers_count)) continue;
-    const tags = normalize(
+    const tags = normalize2(
       tokenize2([title, labels.join(" "), body.slice(0, 2e3)].join(" "))
     );
     perRepo.set(fullName, (perRepo.get(fullName) ?? 0) + 1);
@@ -5192,7 +5195,7 @@ var init_opire = __esm({
           if (amountUSD == null || amountUSD < MIN_USD || amountUSD > MAX_USD) continue;
           const title = (r.title ?? "").trim();
           if (title.length < 4) continue;
-          const tags = normalize([...r.programmingLanguages ?? [], ...tokenize3(title)]);
+          const tags = normalize2([...r.programmingLanguages ?? [], ...tokenize3(title)]);
           const bounty = {
             amountUSD,
             estimatedEffort: effortFromAmount(amountUSD),
@@ -5755,7 +5758,7 @@ async function aggregateContributions(opts = {}) {
     const prRefs = await repoPRRefs(fullName);
     if (prRefs === null) prRefsNull++;
     const openPRsAtDiscovery = prRefs ? prRefs.has(issue2.number) ? 1 : 0 : void 0;
-    const tags = normalize(
+    const tags = normalize2(
       tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
     );
     seen.add(id);
@@ -5892,7 +5895,7 @@ async function aggregateContributions(opts = {}) {
         const prRefs = await repoPRRefs(fullName);
         if (prRefs === null) prRefsNull++;
         const openPRsAtDiscovery = prRefs ? prRefs.has(issue2.number) ? 1 : 0 : void 0;
-        const tags = normalize(
+        const tags = normalize2(
           tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
         );
         seen.add(id);
@@ -6161,7 +6164,7 @@ function curateProjects(issues, opts = {}) {
     const repoLanguageRaw = firstNonEmptyString(
       winnableIssues.map((i) => i.contribution.language ?? "")
     );
-    const languageIds = new Set(repoLanguageRaw ? normalize(tokenize(repoLanguageRaw)) : []);
+    const languageIds = new Set(repoLanguageRaw ? normalize2(tokenize(repoLanguageRaw)) : []);
     const skillTagUnion = /* @__PURE__ */ new Set();
     for (const iss of winnableIssues) for (const t of iss.tags ?? []) skillTagUnion.add(t);
     let distinctNonLanguageSkillTags = 0;
@@ -10473,7 +10476,7 @@ function deriveLegibleProfile(credential, recency, traction, seniorityBand) {
   const ok = credential.status === "ok";
   const domains = ok ? credential.byDomain : {};
   const chips = Object.entries(domains).map(([rawDomain, d]) => {
-    const canon = normalize([rawDomain])[0];
+    const canon = normalize2([rawDomain])[0];
     return canon ? { domain: canon, mergedPRs: d.mergedPRs } : null;
   }).filter((c) => c !== null).sort((a, b) => b.mergedPRs - a.mergedPRs || (a.domain < b.domain ? -1 : 1));
   const dominant = chips.length > 0 ? chips[0].domain : void 0;
@@ -11969,7 +11972,7 @@ async function runAcceptanceAuditBatch(opts) {
   const appendQualifying = (cand, meta2) => {
     const on = parseRepoUrl(cand.repoUrl);
     const rawDomains = [meta2.language ?? "", ...meta2.topics].filter(Boolean);
-    const domains = [...new Set(normalize(rawDomains))];
+    const domains = [...new Set(normalize2(rawDomains))];
     const entry = {
       url: cand.url,
       title: cand.title,
@@ -12351,7 +12354,7 @@ __export(src_exports, {
   mergeLedger: () => mergeLedger,
   mergeProbability: () => mergeProbability,
   mmrRerank: () => mmrRerank,
-  normalize: () => normalize,
+  normalize: () => normalize2,
   openPRClosingRefs: () => openPRClosingRefs,
   opire: () => opire,
   opportunityShortToken: () => opportunityShortToken,
@@ -12436,7 +12439,7 @@ var init_src = __esm({
 // src/crypto-store.ts
 import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes5 } from "crypto";
 import { readFileSync as readFileSync9, writeFileSync as writeFileSync7, existsSync as existsSync9, renameSync as renameSync3, rmSync as rmSync4, readdirSync } from "fs";
-import { join as join12, dirname, basename } from "path";
+import { join as join12, dirname, basename as basename2 } from "path";
 import { createRequire } from "module";
 function encrypt2(plaintext, key) {
   const iv = randomBytes5(IV_BYTES2);
@@ -12493,7 +12496,7 @@ function atomicWriteFileSync(filePath, content) {
   ensureStateDirForSecret(dir);
   const tmp = join12(
     dir,
-    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes5(6).toString("hex")}`
+    `.${basename2(filePath)}.tmp-${process.pid}-${randomBytes5(6).toString("hex")}`
   );
   writeFileSync7(tmp, content, { encoding: "utf8", mode: 384, flag: "wx" });
   renameSync3(tmp, filePath);
@@ -12656,7 +12659,7 @@ async function writeProfile(profile) {
 }
 function accumulateSession(profile, tags, isEmployerContext2, inferredSeniority, seniorityIsAuthoritative = false) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  let filtered = normalize(tags);
+  let filtered = normalize2(tags);
   if (isEmployerContext2) {
     filtered = filtered.filter((t) => LANGUAGE_TAGS.has(t));
     profile.hasEmployerSessions = true;
@@ -13479,7 +13482,7 @@ import {
   readlinkSync,
   unlinkSync as unlinkSync3
 } from "fs";
-import { join as join16, dirname as dirname3, basename as basename2, resolve, isAbsolute } from "path";
+import { join as join16, dirname as dirname3, basename as basename3, resolve, isAbsolute } from "path";
 import { homedir as homedir12 } from "os";
 function thDir() {
   const raw = process.env["TERMINALHIRE_DIR"] || join16(homedir12(), ".terminalhire");
@@ -13490,6 +13493,9 @@ function claudeSettingsPath() {
 }
 function spinnerStateFilePath() {
   return join16(thDir(), "spinner-state.json");
+}
+function writingFromDevStateDir() {
+  return isDevStateDir(process.env["TERMINALHIRE_DIR"]);
 }
 function readJson(path6, fallback) {
   try {
@@ -13543,7 +13549,7 @@ function resolveTarget(path6) {
   if (!settled) return null;
   if (cur !== path6) return cur;
   try {
-    return join16(realpathSync(dirname3(path6)), basename2(path6));
+    return join16(realpathSync(dirname3(path6)), basename3(path6));
   } catch {
     return path6;
   }
@@ -13589,6 +13595,7 @@ function atomicWriteJson2(path6, obj) {
   writeFileAtomic(path6, JSON.stringify(obj, null, 2) + "\n");
 }
 function writeSettingsJson(path6, obj, expectedRaw) {
+  if (writingFromDevStateDir()) return { ok: false, reason: "dev-scoped-state-dir" };
   const target = resolveTarget(path6);
   if (target === null) return { ok: false, reason: "unresolvable-symlink-chain" };
   let currentRaw = null;
@@ -13777,6 +13784,7 @@ var init_spinner_io = __esm({
   "bin/spinner-io.js"() {
     "use strict";
     init_state_dir();
+    init_api_base();
     MAX_LINK_HOPS = 32;
     tmpCounter2 = 0;
   }
@@ -15438,7 +15446,7 @@ async function run4() {
   Rank builders for it: terminalhire devs --as-project`);
       return;
     }
-    const { normalize: normalize3, classifyToken: classifyToken2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+    const { normalize: normalize4, classifyToken: classifyToken2 } = await Promise.resolve().then(() => (init_src(), src_exports));
     let declaration = declarationArg;
     if (!declaration) {
       if (!process.stdin.isTTY) {
@@ -15456,7 +15464,7 @@ async function run4() {
     }
     const { title, skillsRaw } = splitDeclaration(declaration);
     const tokens = tokenize5(skillsRaw);
-    const skillTags = normalize3(tokens);
+    const skillTags = normalize4(tokens);
     const classified = tokens.map((t) => classifyToken2(t));
     const allMatched = tokens.length > 0 && classified.every((c) => c.tier === "matched");
     if (!allMatched) {
@@ -16824,7 +16832,7 @@ function toContributionJobs(repo, issues) {
     // Tagged exactly as the crawl tags a discovered issue (title + language +
     // labels through the shared vocabulary), because match() scores on tags: an
     // untagged row scores zero and drops out of the ranking entirely.
-    tags: normalize(tokenizeForTags([issue2.title, repo.language ?? "", issue2.labels.join(" ")])),
+    tags: normalize2(tokenizeForTags([issue2.title, repo.language ?? "", issue2.labels.join(" ")])),
     roleType: "freelance",
     postedAt: issue2.createdAt,
     applyMode: "direct",
@@ -31062,9 +31070,9 @@ import { homedir as homedir24 } from "os";
 import { join as join33 } from "path";
 import { readFileSync as readFileSync24, writeFileSync as writeFileSync18 } from "fs";
 function quoteFound(quote, content) {
-  const q = normalize2(quote);
+  const q = normalize3(quote);
   if (q.length < MIN_QUOTE_CHARS) return false;
-  return normalize2(content).includes(q);
+  return normalize3(content).includes(q);
 }
 function quoteSource(quote, files) {
   for (const { file, content } of [...files].sort((a, b) => a.file.localeCompare(b.file))) {
@@ -31317,7 +31325,7 @@ function unusable(policy, detail) {
     semantic: { status: "unusable", detail }
   };
 }
-var TERMINALHIRE_DIR16, CACHE_FILE, MIN_QUOTE_CHARS, normalize2, SemanticAuditUnavailableError, CACHED_VERDICT_KEYS, SEMANTIC_POLICY_CACHE_FILE;
+var TERMINALHIRE_DIR16, CACHE_FILE, MIN_QUOTE_CHARS, normalize3, SemanticAuditUnavailableError, CACHED_VERDICT_KEYS, SEMANTIC_POLICY_CACHE_FILE;
 var init_repo_policy_semantic = __esm({
   "src/repo-policy-semantic.ts"() {
     "use strict";
@@ -31326,7 +31334,7 @@ var init_repo_policy_semantic = __esm({
     TERMINALHIRE_DIR16 = process.env.TERMINALHIRE_DIR || join33(homedir24(), ".terminalhire");
     CACHE_FILE = join33(TERMINALHIRE_DIR16, "semantic-policy-cache.json");
     MIN_QUOTE_CHARS = 16;
-    normalize2 = (s) => s.toLowerCase().replace(/\s+/g, " ").trim();
+    normalize3 = (s) => s.toLowerCase().replace(/\s+/g, " ").trim();
     SemanticAuditUnavailableError = class extends Error {
       constructor(message) {
         super(message);
@@ -32222,9 +32230,9 @@ var init_classify2 = __esm({
       // rspec's summary line
     ].join("|"), "m");
     MISSING_SYSTEM_DEPENDENCY = [
-      /^(?:\S*\/)?ld(?:\.\w+)?: cannot find -l[\w.+-]+/m,
-      /^\S+:\d+(?::\d+)?: fatal error: [\w./+-]+\.(?:h|hh|hpp|hxx): No such file or directory$/m,
-      /^\S+: error while loading shared libraries: lib[\w.+-]*: cannot open shared object file/m
+      /^[ \t|>]*(?:\S*\/)?ld(?:\.\w+)?: cannot find -l[\w.+-]+/m,
+      /^[ \t|>]*[\w./~]\S*:\d+(?::\d+)?: fatal error: [\w./+-]+\.(?:h|hh|hpp|hxx): No such file or directory$/m,
+      /^[ \t|>]*[\w./~]\S*: error while loading shared libraries: lib[\w.+-]*: cannot open shared object file/m
     ];
     OFFLINE_BUILD_GAP = [
       // Maven, `-o`: `Cannot access central (…) in offline mode and the artifact … has
@@ -32374,7 +32382,7 @@ var init_reap = __esm({
 // ../../packages/containment/dist/fence.js
 import { spawn as spawn4, spawnSync as spawnSync3 } from "child_process";
 import { existsSync as existsSync16, lchownSync, lstatSync as lstatSync4, mkdirSync as mkdirSync5, readdirSync as readdirSync2, realpathSync as realpathSync2, statSync as statSync4, writeFileSync as writeFileSync19 } from "fs";
-import { basename as basename5, dirname as dirname8, isAbsolute as isAbsolute4, join as join35, posix as posix2, resolve as resolve5, sep as sep5 } from "path";
+import { basename as basename6, dirname as dirname8, isAbsolute as isAbsolute4, join as join35, posix as posix2, resolve as resolve5, sep as sep5 } from "path";
 import { fileURLToPath as fileURLToPath7 } from "url";
 function canonical(path6, label) {
   if (!isAbsolute4(path6)) {
@@ -32452,7 +32460,7 @@ function canonicalPath(p) {
       const up = dirname8(head);
       if (up === head)
         return resolve5(p);
-      tail2.push(basename5(head));
+      tail2.push(basename6(head));
       head = up;
     }
   }
@@ -40778,14 +40786,14 @@ function migrationUnits(runner, migrations) {
       return [...byDir.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([id, path6]) => ({ id, path: path6 }));
     }
     case "alembic":
-      return migrations.filter((p) => /^alembic\/versions\/[^/]+\.py$/.test(p) && !p.endsWith("/__init__.py")).sort().map((path6) => ({ id: basename6(path6).replace(/\.py$/, ""), path: path6 }));
+      return migrations.filter((p) => /^alembic\/versions\/[^/]+\.py$/.test(p) && !p.endsWith("/__init__.py")).sort().map((path6) => ({ id: basename7(path6).replace(/\.py$/, ""), path: path6 }));
     case "rails":
-      return migrations.filter((p) => /^db\/migrate\/[^/]+\.rb$/.test(p)).sort().map((path6) => ({ id: /^(\d+)/.exec(basename6(path6))?.[1] ?? basename6(path6), path: path6 }));
+      return migrations.filter((p) => /^db\/migrate\/[^/]+\.rb$/.test(p)).sort().map((path6) => ({ id: /^(\d+)/.exec(basename7(path6))?.[1] ?? basename7(path6), path: path6 }));
     case "sql":
       return migrations.filter((p) => p.endsWith(".sql") && !p.startsWith("prisma/migrations/")).sort().map((path6) => ({ id: path6, path: path6 }));
   }
 }
-function basename6(path6) {
+function basename7(path6) {
   const at = path6.lastIndexOf("/");
   return at === -1 ? path6 : path6.slice(at + 1);
 }
@@ -47750,7 +47758,7 @@ __export(jpi_post_exports, {
 import { existsSync as existsSync22, readFileSync as readFileSync29 } from "fs";
 import { spawnSync as spawnSync10 } from "child_process";
 import { createInterface as createInterface10 } from "readline";
-import { basename as basename7, join as join46 } from "path";
+import { basename as basename8, join as join46 } from "path";
 function parsePostArgs(argv) {
   const flags = {};
   const positional = [];
@@ -47845,7 +47853,7 @@ function readFlagOrFile(flags, valueKey, fileKey) {
     try {
       return { value: readFileSync29(flags[fileKey], "utf8"), failure: null };
     } catch {
-      return { value: null, failure: `could not read ${basename7(flags[fileKey])}` };
+      return { value: null, failure: `could not read ${basename8(flags[fileKey])}` };
     }
   }
   return { value: typeof flags[valueKey] === "string" ? flags[valueKey] : null, failure: null };
@@ -48230,7 +48238,7 @@ import {
   writeFileSync as writeFileSync26
 } from "fs";
 import { homedir as homedir28 } from "os";
-import { basename as basename8, dirname as dirname11, join as join47 } from "path";
+import { basename as basename9, dirname as dirname11, join as join47 } from "path";
 function defaultUrl() {
   return process.env["TERMINALHIRE_RECALL_URL"] || RECALL_URL;
 }
@@ -48315,7 +48323,7 @@ function mutateCache(path6, mutate) {
 function sweepTempFiles(path6) {
   try {
     const dir = dirname11(path6);
-    const prefix = `${basename8(path6)}.`;
+    const prefix = `${basename9(path6)}.`;
     for (const name of readdirSync5(dir)) {
       if (!name.startsWith(prefix) || !name.endsWith(".tmp")) continue;
       const full = join47(dir, name);
@@ -48658,7 +48666,7 @@ async function run10() {
   const slice = Array.isArray(sliceRaw) ? sliceRaw : typeof sliceRaw === "string" ? sliceRaw.split(",").map((s) => s.trim()).filter((s) => s.length > 0) : [];
   if (slice.length === 0) {
     process.stderr.write(
-      "terminalhire: no --slice given, so the local pre-check is off and every file in your diff will be sent. Scoping still happens at submission, where the server derives the slice from the bounty.\n"
+      "terminalhire: no --slice given, so the local file-list check is off and every file in your diff will be sent. Nothing re-derives that list at submission. The server still refuses a patch on what a file is (CI config, git internals, lockfiles, install scripts, binary, unparseable) and on what it writes (network calls, obfuscation, dependency and manifest changes) \u2014 never on a list of files.\n"
     );
   }
   const placementRaw = pick2("placement");
@@ -48775,10 +48783,11 @@ Options:
   --claim <id>          The claim this work belongs to.
   --target <git-url>    Repository the work is verified against.
   --sha <40-hex>        The commit your diff applies on top of.
-  --slice <a,b,c>       Optional. Comma-separated files this claim shares; give it
-                        and a diff touching anything else is refused locally,
-                        before any container. Omit it and scoping happens at
-                        submission, where the server derives the slice itself.
+  --slice <a,b,c>       Optional local guard rail. Comma-separated files you mean to
+                        touch; give it and a diff touching anything else is refused
+                        locally, before any container. Omit it and no file LIST is
+                        checked anywhere \u2014 submission still refuses a patch, but on
+                        what a file IS and what it WRITES, never on a list.
   --local <dir>         Checkout to read the working diff from (default: cwd).
   --placement <kind>    WHERE to run: local-docker or hosted (default: local-docker).
   --watch               Re-run when a file in the checkout changes.
@@ -65246,8 +65255,8 @@ var require_resolve = __commonJS({
       }
       return count;
     }
-    function getFullPath(resolver, id = "", normalize3) {
-      if (normalize3 !== false)
+    function getFullPath(resolver, id = "", normalize4) {
+      if (normalize4 !== false)
         id = normalizeId(id);
       const p = resolver.parse(id);
       return _getFullPath(resolver, p);
@@ -66643,7 +66652,7 @@ var require_fast_uri = __commonJS({
     "use strict";
     var { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizePercentEncoding, normalizePathEncoding, escapePreservingEscapes, reescapeHostDelimiters, isIPv4, nonSimpleDomain } = require_utils();
     var { SCHEMES, getSchemeHandler } = require_schemes();
-    function normalize3(uri, options) {
+    function normalize4(uri, options) {
       if (typeof uri === "string") {
         uri = /** @type {T} */
         normalizeString(uri, options);
@@ -66910,7 +66919,7 @@ var require_fast_uri = __commonJS({
     }
     var fastUri = {
       SCHEMES,
-      normalize: normalize3,
+      normalize: normalize4,
       resolve: resolve8,
       resolveComponent,
       equal,
@@ -71953,8 +71962,8 @@ var require_resolve2 = __commonJS({
       }
       return count;
     }
-    function getFullPath(resolver, id = "", normalize3) {
-      if (normalize3 !== false)
+    function getFullPath(resolver, id = "", normalize4) {
+      if (normalize4 !== false)
         id = normalizeId(id);
       const p = resolver.parse(id);
       return _getFullPath(resolver, p);
@@ -77966,7 +77975,7 @@ function inferSeniority3(rawTokens) {
     "oauth",
     "payments"
   ]);
-  const normalized = new Set(normalize(rawTokens));
+  const normalized = new Set(normalize2(rawTokens));
   const seniorHits = [...normalized].filter((t) => seniorSignals.has(t)).length;
   const midHits = [...normalized].filter((t) => midSignals.has(t)).length;
   if (seniorHits >= 2) return "senior";
@@ -77985,7 +77994,7 @@ function extractFingerprint(cwd) {
       ...tokensFromFileExtensions(dir)
     );
   }
-  let skillTags = normalize(rawTokens);
+  let skillTags = normalize2(rawTokens);
   if (employer) {
     skillTags = skillTags.filter((t) => LANGUAGE_TAGS2.has(t));
   }
@@ -78393,7 +78402,14 @@ async function run25() {
           `  NOT written: ${s} \u2014 ${skips[s].reason}${when ? ` (last tried ${when}Z)` : ""}`
         );
       }
-      console.log("  settings.json was left exactly as it was. Fix or restore it to resume.");
+      const allScope = stuck.every((s) => skips[s].reason === "dev-scoped-state-dir");
+      if (allScope) {
+        console.log("  The spinner line is production's, and this run is pointed at dev.");
+        console.log("  Nothing is wrong with settings.json, and nothing was written to it.");
+        console.log("  Run the production spelling (`terminalhire`, not `thdev`) to change it.");
+      } else {
+        console.log("  settings.json was left exactly as it was. Fix or restore it to resume.");
+      }
     }
     console.log("");
     console.log(
@@ -79080,8 +79096,8 @@ async function run27() {
   const interestAnswer = await ask5("> ");
   if (interestAnswer) {
     try {
-      const { normalize: normalize3 } = await Promise.resolve().then(() => (init_src(), src_exports));
-      const interestTags = normalize3(tokenizeInterest(interestAnswer));
+      const { normalize: normalize4 } = await Promise.resolve().then(() => (init_src(), src_exports));
+      const interestTags = normalize4(tokenizeInterest(interestAnswer));
       if (interestTags.length > 0) {
         writeProject({ interestTags });
         console.log(`  Saved locally (never sent): ${interestTags.join(", ")}`);

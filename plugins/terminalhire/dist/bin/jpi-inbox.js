@@ -4611,7 +4611,7 @@ var init_chat_keystore = __esm({
 
 // src/api-base.ts
 import { homedir as homedir4 } from "os";
-import { join as join6 } from "path";
+import { basename, join as join6, normalize as normalize2 } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
@@ -5641,7 +5641,7 @@ var init_jpi_chat_read = __esm({
 // src/crypto-store.ts
 import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes6 } from "crypto";
 import { readFileSync as readFileSync9, writeFileSync as writeFileSync8, existsSync as existsSync9, renameSync as renameSync2, rmSync as rmSync4, readdirSync } from "fs";
-import { join as join11, dirname, basename } from "path";
+import { join as join11, dirname, basename as basename2 } from "path";
 import { createRequire } from "module";
 function encrypt2(plaintext, key) {
   const iv = randomBytes6(IV_BYTES2);
@@ -5698,7 +5698,7 @@ function atomicWriteFileSync(filePath, content) {
   ensureStateDirForSecret(dir);
   const tmp = join11(
     dir,
-    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes6(6).toString("hex")}`
+    `.${basename2(filePath)}.tmp-${process.pid}-${randomBytes6(6).toString("hex")}`
   );
   writeFileSync8(tmp, content, { encoding: "utf8", mode: 384, flag: "wx" });
   renameSync2(tmp, filePath);

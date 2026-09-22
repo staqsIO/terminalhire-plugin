@@ -1469,7 +1469,7 @@ var init_shared_key = __esm({
 // src/crypto-store.ts
 import { createCipheriv, createDecipheriv, randomBytes as randomBytes3 } from "crypto";
 import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, existsSync as existsSync4, renameSync, rmSync as rmSync2, readdirSync } from "fs";
-import { join as join6, dirname, basename } from "path";
+import { join as join6, dirname, basename as basename2 } from "path";
 import { createRequire } from "module";
 function encrypt(plaintext, key) {
   const iv = randomBytes3(IV_BYTES);
@@ -1526,7 +1526,7 @@ function atomicWriteFileSync(filePath, content) {
   ensureStateDirForSecret(dir);
   const tmp = join6(
     dir,
-    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes3(6).toString("hex")}`
+    `.${basename2(filePath)}.tmp-${process.pid}-${randomBytes3(6).toString("hex")}`
   );
   writeFileSync3(tmp, content, { encoding: "utf8", mode: 384, flag: "wx" });
   renameSync(tmp, filePath);
@@ -1846,7 +1846,7 @@ import { join as join3 } from "path";
 
 // src/api-base.ts
 import { homedir } from "os";
-import { join as join2 } from "path";
+import { basename, join as join2, normalize as normalize2 } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {

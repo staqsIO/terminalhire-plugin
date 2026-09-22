@@ -3900,7 +3900,7 @@ import { join as join7 } from "path";
 
 // src/api-base.ts
 import { homedir as homedir4 } from "os";
-import { join as join6 } from "path";
+import { basename, join as join6, normalize as normalize2 } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {

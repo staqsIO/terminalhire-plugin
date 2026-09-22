@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 
 // src/api-base.ts
 import { homedir } from "os";
-import { join } from "path";
+import { basename, join, normalize } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var DEV_STATE_DIR_NAME = ".terminalhire-dev";

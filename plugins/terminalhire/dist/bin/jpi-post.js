@@ -4,7 +4,7 @@
 import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
 import { spawnSync } from "child_process";
 import { createInterface } from "readline";
-import { basename, join as join3 } from "path";
+import { basename as basename2, join as join3 } from "path";
 
 // src/posting-drafts.ts
 import {
@@ -528,7 +528,7 @@ function preparePostingSubmission(draft, currentHome = homedir()) {
 
 // src/api-base.ts
 import { homedir as homedir2 } from "os";
-import { join as join2 } from "path";
+import { basename, join as join2, normalize } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {
@@ -726,7 +726,7 @@ function readFlagOrFile(flags, valueKey, fileKey) {
     try {
       return { value: readFileSync2(flags[fileKey], "utf8"), failure: null };
     } catch {
-      return { value: null, failure: `could not read ${basename(flags[fileKey])}` };
+      return { value: null, failure: `could not read ${basename2(flags[fileKey])}` };
     }
   }
   return { value: typeof flags[valueKey] === "string" ? flags[valueKey] : null, failure: null };

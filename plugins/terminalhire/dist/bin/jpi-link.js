@@ -11,7 +11,7 @@ var __export = (target, all) => {
 
 // src/api-base.ts
 import { homedir } from "os";
-import { join } from "path";
+import { basename, join, normalize } from "path";
 function sanitizeOverrideForError(raw) {
   try {
     const url = new URL(raw);
