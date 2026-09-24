@@ -32765,11 +32765,6 @@ var init_egressProxy = __esm({
     "use strict";
     DEFAULT_INSTALL_ALLOWLIST = [
       "registry.npmjs.org",
-      // TERM-1240. `yarn install` is derived for every repo with a yarn.lock, and yarn
-      // classic writes this host into each lockfile entry — so every yarn repo could start
-      // and could never install, the TERM-1139 shape again. It serves the same packages as
-      // the npm registry, so the grant widens where a package comes from, not what can come.
-      "registry.yarnpkg.com",
       "pypi.org",
       "files.pythonhosted.org",
       "proxy.golang.org",
@@ -38794,151 +38789,6 @@ function nodeInstallCommand(repo) {
     return { command: "npm install", from: "manifest" };
   return null;
 }
-function lockfileGaps(repo) {
-  const pkg = readJsonObject(repo, "package.json");
-  if (pkg === null)
-    return null;
-  const wanted = [];
-  for (const section2 of DEPENDENCY_SECTIONS) {
-    const deps = readObjectField(pkg, section2);
-    if (deps === null)
-      continue;
-    for (const [name, range] of Object.entries(deps)) {
-      if (typeof range === "string")
-        wanted.push([name, range]);
-    }
-  }
-  if (wanted.length === 0)
-    return null;
-  const check = (lockfile, listed) => {
-    if (listed === null)
-      return null;
-    const missing = wanted.filter(([n, r]) => !listed(n, r)).map(([n, r]) => `${n}@${r}`);
-    return missing.length === 0 ? null : { lockfile, missing };
-  };
-  for (const lockfile of ["package-lock.json", "npm-shrinkwrap.json"]) {
-    if (repo.exists(lockfile))
-      return check(lockfile, npmLockListing(repo, lockfile));
-  }
-  if (repo.exists("yarn.lock"))
-    return check("yarn.lock", yarnLockListing(repo.readText("yarn.lock")));
-  if (repo.exists("pnpm-lock.yaml")) {
-    return check("pnpm-lock.yaml", pnpmLockListing(repo.readText("pnpm-lock.yaml")));
-  }
-  return null;
-}
-function npmLockListing(repo, lockfile) {
-  const lock = readJsonObject(repo, lockfile);
-  if (lock === null)
-    return null;
-  const root = readObjectField(readObjectField(lock, "packages"), "");
-  if (root !== null) {
-    return (name, range) => DEPENDENCY_SECTIONS.some((s) => readStringField(readObjectField(root, s), name) === range);
-  }
-  const v1 = readObjectField(lock, "dependencies");
-  if (v1 === null)
-    return null;
-  return (name) => readObjectField(v1, name) !== null;
-}
-function yarnLockListing(text) {
-  if (text === null || !/^(# yarn lockfile v1|__metadata:)/m.test(text))
-    return null;
-  const specs = /* @__PURE__ */ new Set();
-  for (const line of text.split(/\r?\n/)) {
-    if (line === "" || line.startsWith(" ") || line.startsWith("#") || !line.endsWith(":"))
-      continue;
-    for (const raw of line.slice(0, -1).split(",")) {
-      const spec = raw.trim().replace(/^"|"$/g, "");
-      specs.add(spec);
-      const berry = /^(@?[^@]+)@npm:(.+)$/.exec(spec);
-      if (berry !== null)
-        specs.add(`${berry[1]}@${berry[2]}`);
-    }
-  }
-  return (name, range) => specs.has(`${name}@${range}`);
-}
-function pnpmLockListing(text) {
-  if (text === null || !/^lockfileVersion:/m.test(text))
-    return null;
-  const lines = pnpmRootLines(text.split(/\r?\n/));
-  if (lines === null)
-    return null;
-  const unquote = (s) => s.replace(/^['"]|['"]$/g, "");
-  return (name, range) => lines.some((line, i) => {
-    if (unquote(line) === `${name}:` || line === `'${name}':` || line === `"${name}":`) {
-      const next = lines[i + 1] ?? "";
-      return next.startsWith("specifier:") && unquote(next.slice(10).trim()) === range;
-    }
-    const flat = /^(['"]?)(.+)\1:\s*(.+)$/.exec(line);
-    return flat !== null && flat[2] === name && unquote(flat[3] ?? "") === range;
-  });
-}
-function pnpmRootLines(raw) {
-  const importers = raw.indexOf("importers:");
-  if (importers === -1) {
-    const end = raw.indexOf("packages:");
-    return (end === -1 ? raw : raw.slice(0, end)).map((l) => l.trim());
-  }
-  const start = raw.findIndex((l, i) => i > importers && /^ {2}(['"]?)\.\1:\s*$/.test(l));
-  if (start === -1)
-    return null;
-  const out = [];
-  for (const line of raw.slice(start + 1)) {
-    if (line.trim() === "")
-      continue;
-    if (!line.startsWith("   "))
-      break;
-    out.push(line.trim());
-  }
-  return out;
-}
-function unfrozenInstall(command) {
-  const lead = /^(?:(?:sudo|time)\s+|env(?:\s+[A-Za-z_]\w*=\S*)*\s+)*/.exec(command)?.[0] ?? "";
-  const rest = command.slice(lead.length);
-  const end = installEnd(rest);
-  const head = rest.slice(0, end);
-  const tail2 = rest.slice(end);
-  const dropped = (flag) => head.replace(new RegExp(`\\s--${flag}(=\\S*)?(?=\\s|$)`, "g"), "");
-  if (/^npm ci(\s|$)/.test(head)) {
-    return lead + head.replace(/^npm ci/, "npm install --no-audit --no-fund") + tail2;
-  }
-  if (/^pnpm\b/.test(head)) {
-    if (/\s--no-frozen-lockfile(?=\s|$)/.test(head))
-      return command;
-    const bare = dropped("frozen-lockfile");
-    const withFlag = bare.replace(/^pnpm (install-test|install|it|i)(?=\s|$)/, "$& --no-frozen-lockfile");
-    if (withFlag !== bare)
-      return lead + withFlag + tail2;
-    return bare === head ? command : `${lead}${bare} --no-frozen-lockfile${tail2}`;
-  }
-  if (/^yarn\b/.test(head)) {
-    const bare = dropped("frozen-lockfile").replace(/\s--immutable(=\S*)?(?=\s|$)/g, "");
-    const assigns = lead === "" || /(^|\s)env(\s+[A-Za-z_]\w*=\S*)*\s+$/.test(lead);
-    return `${lead}${assigns ? "" : "env "}${YARN_MUTABLE} ${bare}${tail2}`;
-  }
-  return command;
-}
-function installEnd(command) {
-  let quote = null;
-  for (let i = 0; i < command.length; i += 1) {
-    const c = command[i];
-    if (quote !== null) {
-      if (c === quote)
-        quote = null;
-      else if (c === "\\" && quote === '"')
-        i += 1;
-      continue;
-    }
-    if (c === "\\") {
-      i += 1;
-    } else if (c === '"' || c === "'") {
-      quote = c;
-    } else if (c === ";" || c === "&" && command[i + 1] === "&" || c === "|" && command[i + 1] === "|") {
-      return command.slice(0, i).trimEnd().length;
-    }
-  }
-  return command.length;
-}
 function pythonTestCommand(repo) {
   const pyproject = repo.readText("pyproject.toml") ?? "";
   if (pyproject.includes("[tool.pytest.ini_options]"))
@@ -39179,7 +39029,7 @@ function matchFirst(text, pattern) {
   const match2 = pattern.exec(text);
   return match2 === null ? null : match2[1];
 }
-var RUNTIME_MANIFESTS, MAKEFILE_NAMES, C_FAMILY_SOURCE, MANIFEST_FILENAMES, JVM_BUILD_FILES, NPM_PLACEHOLDER_TEST, DEPENDENCY_SECTIONS, YARN_MUTABLE, REQUIREMENT_SPECIFIER, CPP_BUILD_FILES, CMAKE_DECLARES_TESTS, EXACT_VERSION;
+var RUNTIME_MANIFESTS, MAKEFILE_NAMES, C_FAMILY_SOURCE, MANIFEST_FILENAMES, JVM_BUILD_FILES, NPM_PLACEHOLDER_TEST, REQUIREMENT_SPECIFIER, CPP_BUILD_FILES, CMAKE_DECLARES_TESTS, EXACT_VERSION;
 var init_manifest2 = __esm({
   "../../packages/envspec/dist/manifest.js"() {
     "use strict";
@@ -39200,19 +39050,8 @@ var init_manifest2 = __esm({
     MANIFEST_FILENAMES = RUNTIME_MANIFESTS.flatMap((m) => m.files).concat(["*.csproj", "*.fsproj", "*.sln"], MAKEFILE_NAMES).sort();
     JVM_BUILD_FILES = ["build.gradle", "build.gradle.kts", "pom.xml"];
     NPM_PLACEHOLDER_TEST = /^echo\s+["']?Error:\s*no test specified["']?\s*&&\s*exit\s+1$/;
-    DEPENDENCY_SECTIONS = [
-      "dependencies",
-      "devDependencies",
-      "optionalDependencies",
-      "peerDependencies"
-    ];
-    YARN_MUTABLE = "YARN_ENABLE_IMMUTABLE_INSTALLS=false";
     REQUIREMENT_SPECIFIER = /^[A-Za-z0-9._-]+(\[[A-Za-z0-9._,-]+\])?([<>=!~]=?[A-Za-z0-9._*+-]+(,[<>=!~]=?[A-Za-z0-9._*+-]+)*)?$/;
-    CPP_BUILD_FILES = [
-      "CMakeLists.txt",
-      "meson.build",
-      ...MAKEFILE_NAMES
-    ];
+    CPP_BUILD_FILES = ["CMakeLists.txt", "meson.build", ...MAKEFILE_NAMES];
     CMAKE_DECLARES_TESTS = /\benable_testing\s*\(|\binclude\s*\(\s*CTest\s*\)|\badd_test\s*\(/;
     EXACT_VERSION = /^v?(\d+(?:\.\d+){0,2})$/;
   }
@@ -39664,15 +39503,6 @@ function deriveFromReader(repo) {
       derivedFrom.add(fallback.from);
     }
   }
-  let installUnfrozen = null;
-  if (installCommand !== null && runtime === "node") {
-    const unfrozen = unfrozenInstall(installCommand);
-    const gaps = unfrozen === installCommand ? null : lockfileGaps(repo);
-    if (gaps !== null) {
-      installCommand = unfrozen;
-      installUnfrozen = { lockfile: gaps.lockfile, missing: gaps.missing };
-    }
-  }
   if (installCommand === null) {
     unresolved.push({
       kind: "no-install-command",
@@ -39719,7 +39549,6 @@ function deriveFromReader(repo) {
     runtime,
     runtimeVersion: version2.value,
     installCommand,
-    ...installUnfrozen === null ? {} : { installUnfrozen },
     testCommand,
     services,
     migrations,
@@ -40505,12 +40334,6 @@ function resolveRunEnvironment(derived, req) {
   ) : "detected";
   return { spec, imageSource };
 }
-function installUnfrozenNote(spec) {
-  const u = spec.installUnfrozen;
-  if (u === void 0)
-    return null;
-  return `${u.lockfile} does not list ${u.missing.join(", ")}, so the install ran as \`${String(spec.installCommand)}\` without its frozen-lockfile check. Regenerate ${u.lockfile} before merging.`;
-}
 async function verifyWorkingDiff(req) {
   const ctx = {
     startedAt: Date.now(),
@@ -40710,9 +40533,6 @@ async function runVerification(req, ctx) {
   const derived = deriveEnvironmentSpec(cloneDir);
   const { spec, imageSource } = resolveRunEnvironment(derived, req);
   progress("derive", `runtime=${spec.runtime} install=${String(spec.installCommand)} test=${String(spec.testCommand)}`);
-  const unfrozenNote = installUnfrozenNote(spec);
-  if (unfrozenNote !== null)
-    progress("derive", unfrozenNote);
   refuseUnbuildableSpec(spec);
   const image = placement.imageFor(spec.runtime, req.image, spec.runtimeVersion, imageVariantFor(spec));
   const resolved = await resolveLease(placement, runId);
@@ -41845,7 +41665,6 @@ __export(dist_exports, {
   imageVariantFor: () => imageVariantFor,
   installCommandFor: () => installCommandFor,
   installLocalMigrationTooling: () => installLocalMigrationTooling,
-  installUnfrozenNote: () => installUnfrozenNote,
   isBookkeepingTable: () => isBookkeepingTable,
   isCommandUnavailable: () => isCommandUnavailable,
   isGreen: () => isGreen,
