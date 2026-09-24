@@ -822,8 +822,8 @@ var init_fence = __esm({
     };
     ContainmentError = class extends FenceError {
       sweep;
-      constructor(message, sweep2) {
-        super(message);
+      constructor(message2, sweep2) {
+        super(message2);
         this.sweep = sweep2;
       }
     };
@@ -1766,6 +1766,145 @@ var init_containerLocal = __esm({
   }
 });
 
+// ../../packages/containment/dist/capture.js
+import { createHash } from "crypto";
+import { copyFileSync as copyFileSync2, existsSync as existsSync6, mkdirSync as mkdirSync5, readFileSync as readFileSync4, writeFileSync as writeFileSync4 } from "fs";
+import { dirname as dirname4, isAbsolute as isAbsolute2, join as join8 } from "path";
+import { fileURLToPath as fileURLToPath4 } from "url";
+function captureImageTag(recipe = CAPTURE_DOCKERFILE) {
+  return `terminalhire-capture:${createHash("sha256").update(recipe).digest("hex").slice(0, 16)}`;
+}
+function captureArgs(o) {
+  let network;
+  if (o.network === "none") {
+    network = "--network=none";
+  } else if (typeof o.network === "object" && o.network !== null) {
+    if (!CONTAINER_NAME.test(o.network.container)) {
+      throw new FenceError(`refusing to join container ${JSON.stringify(o.network.container)}: not a container name`);
+    }
+    network = `--network=container:${o.network.container}`;
+  } else {
+    throw new FenceError(`the capture container takes no network or an app container's, got ${JSON.stringify(o.network)}`);
+  }
+  if (!CONTAINER_NAME.test(o.name)) {
+    throw new FenceError(`refusing capture container name ${JSON.stringify(o.name)}`);
+  }
+  for (const [label, path] of [
+    ["capture code", o.code],
+    ["capture output", o.out],
+    ...o.site !== null && "bind" in o.site ? [["site", o.site.bind]] : []
+  ]) {
+    if (!isAbsolute2(path)) {
+      throw new FenceError(`the ${label} directory must be an absolute path, got ${JSON.stringify(path)}`);
+    }
+  }
+  const site = o.site === null ? [] : "bind" in o.site ? [`--volume=${o.site.bind}:/site:ro`] : [`--volume=${validateVolumeName(o.site.volume, "the site volume")}:/site:ro`];
+  return [
+    "run",
+    "--rm",
+    "--init",
+    `--name=${o.name}`,
+    network,
+    "--cap-drop=ALL",
+    "--security-opt=no-new-privileges",
+    "--pids-limit=512",
+    ...labelArgs(o.labels),
+    ...o.user === null ? [] : [`--user=${String(o.user.uid)}:${String(o.user.gid)}`],
+    "--env=HOME=/tmp",
+    "--tmpfs=/tmp:rw,exec,mode=1777",
+    ...site,
+    `--volume=${o.code}:/capture:ro`,
+    `--volume=${o.out}:/out:rw`,
+    o.image,
+    "node",
+    "/capture/captureEntry.js",
+    JSON.stringify(o.request)
+  ];
+}
+function resolveCaptureCodeSource() {
+  const here = dirname4(fileURLToPath4(import.meta.url));
+  const scoped = join8(here, "capture");
+  return existsSync6(join8(scoped, "captureEntry.js")) ? scoped : here;
+}
+function ensureCaptureImage(docker3, workDir, timeoutMs = 6e5) {
+  const image = captureImageTag();
+  if (docker3.sync(["image", "inspect", "--format={{.Id}}", image]).status === 0) {
+    return { image, built: false };
+  }
+  const context = join8(workDir, "capture-image");
+  mkdirSync5(context, { recursive: true });
+  writeFileSync4(join8(context, "Dockerfile"), CAPTURE_DOCKERFILE);
+  const res = docker3.sync(["build", "--quiet", `--tag=${image}`, context], { timeoutMs });
+  if (res.status !== 0) {
+    throw new Error(`could not build the screenshot image: ${(res.error?.message ?? "") + res.stderr.slice(-800)}`);
+  }
+  return { image, built: true };
+}
+function stageCaptureCode(workDir) {
+  const dir = join8(workDir, "capture-code");
+  mkdirSync5(dir, { recursive: true });
+  copyFileSync2(join8(resolveCaptureCodeSource(), "captureEntry.js"), join8(dir, "captureEntry.js"));
+  return dir;
+}
+async function runCapture(docker3, o, timeoutMs) {
+  const failed = (reason) => ({
+    status: "failed",
+    reason,
+    mode: o.request.mode,
+    basePath: null,
+    items: [],
+    failures: [],
+    notes: []
+  });
+  const child = docker3.spawn(captureArgs(o));
+  let stderr = "";
+  child.stdout.resume();
+  child.stderr.on("data", (d) => {
+    stderr = (stderr + d.toString()).slice(-4e3);
+  });
+  const code = await new Promise((resolve3) => {
+    const timer = setTimeout(() => resolve3(null), timeoutMs);
+    child.on("exit", (c) => {
+      clearTimeout(timer);
+      resolve3(c);
+    });
+    child.on("error", () => {
+      clearTimeout(timer);
+      resolve3(-1);
+    });
+  });
+  docker3.sync(["rm", "--force", o.name], { timeoutMs: 3e4 });
+  if (code === null)
+    return failed(`the screenshot step ran past ${Math.round(timeoutMs / 1e3)}s`);
+  const manifestPath = join8(o.out, "manifest.json");
+  if (!existsSync6(manifestPath)) {
+    return failed(`the screenshot container exited ${String(code)} without a manifest: ${stderr.trim().slice(-400)}`);
+  }
+  try {
+    return JSON.parse(readFileSync4(manifestPath, "utf8"));
+  } catch {
+    return failed("the screenshot manifest could not be read");
+  }
+}
+var CAPTURE_DOCKERFILE, CONTAINER_NAME;
+var init_capture = __esm({
+  "../../packages/containment/dist/capture.js"() {
+    "use strict";
+    init_container();
+    init_fence();
+    CAPTURE_DOCKERFILE = [
+      "FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c",
+      "ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright NODE_PATH=/usr/local/lib/node_modules",
+      "RUN npm install -g playwright-core@1.63.0 \\",
+      " && playwright-core install --with-deps --only-shell chromium \\",
+      " && apt-get clean \\",
+      " && chmod -R a+rX /ms-playwright",
+      ""
+    ].join("\n");
+    CONTAINER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
+  }
+});
+
 // ../../packages/containment/dist/index.js
 var init_dist = __esm({
   "../../packages/containment/dist/index.js"() {
@@ -1778,6 +1917,7 @@ var init_dist = __esm({
     init_container();
     init_reap();
     init_egressProxy();
+    init_capture();
   }
 });
 
@@ -1971,8 +2111,8 @@ var init_previewRegistry = __esm({
 
 // ../../packages/envrun/dist/preview.js
 import { randomBytes as randomBytes2 } from "crypto";
-import { mkdirSync as mkdirSync5, writeFileSync as writeFileSync4 } from "fs";
-import { join as join8 } from "path";
+import { mkdirSync as mkdirSync6, writeFileSync as writeFileSync5 } from "fs";
+import { join as join9 } from "path";
 function docker(client, args, timeoutMs = 6e4) {
   const res = client.sync([...args], { timeoutMs });
   return {
@@ -2034,9 +2174,9 @@ async function startPreview(req) {
   const envArgs = ["--env", `PREVIEW_AUTH_TOKEN=${authToken}`];
   const probeHost = WILDCARD_BINDS.has(bindAddress) ? "127.0.0.1" : bindAddress;
   const probeAuthority = probeHost.includes(":") ? `[${probeHost}]` : probeHost;
-  mkdirSync5(req.scratchDir, { recursive: true });
-  const docPath = join8(req.scratchDir, "preview-run.json");
-  writeFileSync4(docPath, JSON.stringify(req.document, null, 2), "utf8");
+  mkdirSync6(req.scratchDir, { recursive: true });
+  const docPath = join9(req.scratchDir, "preview-run.json");
+  writeFileSync5(docPath, JSON.stringify(req.document, null, 2), "utf8");
   const teardown = () => {
     livePreviews.deregister(client, container);
     for (let i = 0; i < 3; i += 1) {
@@ -2226,11 +2366,11 @@ http
 
 // ../../packages/envrun/dist/venue.js
 import { randomBytes as randomBytes3 } from "crypto";
-import { join as join9 } from "path";
+import { join as join10 } from "path";
 function localJailPaths(scratchRoot) {
   return {
-    jail: join9(scratchRoot, JAIL_SEGMENT),
-    tmp: join9(scratchRoot, JAIL_TMP_SEGMENT)
+    jail: join10(scratchRoot, JAIL_SEGMENT),
+    tmp: join10(scratchRoot, JAIL_TMP_SEGMENT)
   };
 }
 function localVenue() {
@@ -2287,11 +2427,11 @@ function rollbackMessage(cause, rollbackFailures) {
 function describeThrown(thrown, opts) {
   try {
     if (isErrorValue(thrown)) {
-      const message = readErrorField(thrown, "message", UNREADABLE_MESSAGE);
+      const message2 = readErrorField(thrown, "message", UNREADABLE_MESSAGE);
       if (!opts.includeName)
-        return message;
+        return message2;
       const name = readErrorField(thrown, "name", UNREADABLE_NAME);
-      return message === "" ? name : `${name}: ${message}`;
+      return message2 === "" ? name : `${name}: ${message2}`;
     }
     return coerceToString(thrown);
   } catch {
@@ -3011,6 +3151,32 @@ var init_execute = __esm({
   }
 });
 
+// ../../packages/envrun/dist/screenshotsResult.js
+function renderScreenshots(s) {
+  if (s === null || s === void 0)
+    return null;
+  if (s.status === "skipped")
+    return `screenshots  skipped \u2014 ${s.reason ?? "no reason recorded"}`;
+  const lines = [
+    `screenshots  ${String(s.items.length)} in ${s.dir ?? "?"} (routes ${s.routes.join(", ")}; light and dark; desktop and mobile)`
+  ];
+  for (const side of s.sides) {
+    const count = s.items.filter((i) => i.side === side.side).length;
+    lines.push(side.status === "captured" ? `${INDENT}${side.side}: ${String(count)} shots${side.reason === null ? "" : ` (${side.reason})`}` : `${INDENT}${side.side}: skipped \u2014 ${side.reason ?? "no reason recorded"}`);
+  }
+  for (const note of s.notes)
+    lines.push(`${INDENT}${note}`);
+  lines.push(`${INDENT}rendered with no network: no backend, no signed-in state`);
+  return lines.join("\n");
+}
+var INDENT;
+var init_screenshotsResult = __esm({
+  "../../packages/envrun/dist/screenshotsResult.js"() {
+    "use strict";
+    INDENT = " ".repeat(13);
+  }
+});
+
 // ../../packages/attest/dist/types.js
 var IN_TOTO_STATEMENT_TYPE, ACCEPTANCE_RUN_PREDICATE_TYPE, IN_TOTO_PAYLOAD_TYPE, TEST_COMMAND_SOURCES;
 var init_types = __esm({
@@ -3127,7 +3293,7 @@ var init_nonce = __esm({
 });
 
 // ../../packages/attest/dist/gceIdentity.js
-import { createHash, createPublicKey as createPublicKey2, verify as cryptoVerify2 } from "crypto";
+import { createHash as createHash2, createPublicKey as createPublicKey2, verify as cryptoVerify2 } from "crypto";
 function expectedAudience(dispatchId) {
   if (dispatchId === "")
     throw new TypeError("expectedAudience: dispatchId is empty");
@@ -3273,7 +3439,7 @@ async function verifyGceIdentityToken(token, expectations, deps) {
       email: expectations.serviceAccountEmail,
       iat,
       exp,
-      tokenSha256: createHash("sha256").update(token, "utf8").digest("hex")
+      tokenSha256: createHash2("sha256").update(token, "utf8").digest("hex")
     }
   };
 }
@@ -3288,7 +3454,7 @@ var init_gceIdentity = __esm({
 });
 
 // ../../packages/attest/dist/confidentialSpace.js
-import { createHash as createHash2, createPublicKey as createPublicKey3, verify as cryptoVerify3 } from "crypto";
+import { createHash as createHash3, createPublicKey as createPublicKey3, verify as cryptoVerify3 } from "crypto";
 function refuse2(reason, detail) {
   return { ok: false, reason, detail };
 }
@@ -3462,7 +3628,7 @@ async function verifyConfidentialSpaceToken(token, expectations, deps) {
       hwmodel,
       iat,
       exp,
-      tokenSha256: createHash2("sha256").update(token, "utf8").digest("hex")
+      tokenSha256: createHash3("sha256").update(token, "utf8").digest("hex")
     }
   };
 }
@@ -3700,6 +3866,7 @@ var RUN_TEST_COMMAND_SOURCES, RUN_IMAGE_SOURCES, RUN_RESULT_SCHEMA, RUN_RESULT_F
 var init_result = __esm({
   "../../packages/envrun/dist/result.js"() {
     "use strict";
+    init_screenshotsResult();
     init_dist2();
     init_classify();
     init_venueDescriptor();
@@ -3739,6 +3906,7 @@ var init_result = __esm({
       "boundaryRefusals",
       "touchedPaths",
       "preview",
+      "screenshots",
       "containerImage",
       "containerImageDigest",
       "imageSource",
@@ -3773,6 +3941,7 @@ var init_result = __esm({
       boundaryRefusals: (r) => r.boundaryRefusals.length === 0 ? null : ["refused", ...r.boundaryRefusals.map((b) => `  - ${b.detail}`)].join("\n"),
       touchedPaths: (r) => r.touchedPaths.length === 0 ? null : `files        ${String(r.touchedPaths.length)}: ${r.touchedPaths.join(", ")}`,
       preview: (r) => r.preview === null ? null : `preview      ${r.preview.url}`,
+      screenshots: (r) => renderScreenshots(r.screenshots),
       containerImage: (r) => r.containerImage === null ? null : `image        ${r.containerImage}`,
       containerImageDigest: (r) => r.containerImageDigest === null ? null : `image digest ${r.containerImageDigest}`,
       // Shown only when a human chose the environment. `detected` is the ordinary case and
@@ -3815,7 +3984,7 @@ var init_result = __esm({
 });
 
 // ../../packages/envrun/dist/attestation.js
-import { createHash as createHash3, randomBytes as randomBytes6 } from "crypto";
+import { createHash as createHash4, randomBytes as randomBytes6 } from "crypto";
 function contradicts(outcome, counts, exitCode) {
   const budget = OUTCOME_TO_BUDGET[outcome];
   if (budget === null)
@@ -3857,7 +4026,7 @@ function imageDigestOf(ref) {
   return at === -1 ? null : ref.slice(at + 1);
 }
 function sha256Hex(data) {
-  return createHash3("sha256").update(typeof data === "string" ? Buffer.from(data, "utf8") : data).digest("hex");
+  return createHash4("sha256").update(typeof data === "string" ? Buffer.from(data, "utf8") : data).digest("hex");
 }
 function toTestRunResult(result, outputSha256) {
   return {
@@ -4709,8 +4878,8 @@ var init_gcpPlacement = __esm({
     DEFAULT_GCP_ZONE = "us-east1-b";
     DEFAULT_GCP_MACHINE_TYPE = "e2-standard-2";
     GcpPlacementError = class extends Error {
-      constructor(message) {
-        super(message);
+      constructor(message2) {
+        super(message2);
         this.name = "GcpPlacementError";
       }
     };
@@ -4728,18 +4897,18 @@ var init_gcpPlacement = __esm({
 });
 
 // ../../packages/envrun/dist/emptyGitConfig.js
-import { mkdtempSync as mkdtempSync2, rmSync as rmSync3, writeFileSync as writeFileSync5 } from "fs";
+import { mkdtempSync as mkdtempSync2, rmSync as rmSync3, writeFileSync as writeFileSync6 } from "fs";
 import { tmpdir as tmpdir2 } from "os";
-import { join as join10 } from "path";
+import { join as join11 } from "path";
 function emptyGitConfig() {
   if (emptyGitConfigFile !== void 0)
     return emptyGitConfigFile;
   let dir;
   let file;
   try {
-    dir = mkdtempSync2(join10(tmpdir2(), "th-run-nogitconfig-"));
-    file = join10(dir, "config");
-    writeFileSync5(file, "", { mode: 384 });
+    dir = mkdtempSync2(join11(tmpdir2(), "th-run-nogitconfig-"));
+    file = join11(dir, "config");
+    writeFileSync6(file, "", { mode: 384 });
   } catch (err) {
     throw new RunRefusalError("could not create the empty git config this run points GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM at, so git would read the configuration \u2014 and the credential helpers \u2014 on this machine instead. That is our environment failing, not your tests: check that the temp directory is writable.", { cause: err });
   }
@@ -4762,8 +4931,8 @@ var init_emptyGitConfig = __esm({
 
 // ../../packages/envrun/dist/hostedVenue.js
 import { spawn as spawn3, spawnSync as spawnSync5 } from "child_process";
-import { createHash as createHash4, X509Certificate } from "crypto";
-import { chmodSync as chmodSync2, existsSync as existsSync6, mkdtempSync as mkdtempSync3, readFileSync as readFileSync4, rmSync as rmSync4, writeFileSync as writeFileSync6 } from "fs";
+import { createHash as createHash5, X509Certificate } from "crypto";
+import { chmodSync as chmodSync2, existsSync as existsSync7, mkdtempSync as mkdtempSync3, readFileSync as readFileSync5, rmSync as rmSync4, writeFileSync as writeFileSync7 } from "fs";
 import { request as httpsRequest } from "https";
 import { createServer } from "net";
 import { posix as posix3 } from "path";
@@ -4809,19 +4978,19 @@ function decodeMaybe(url) {
 }
 function dispatchedGitBinary() {
   for (const candidate of DISPATCHED_GIT_CANDIDATES) {
-    if (existsSync6(candidate))
+    if (existsSync7(candidate))
       return candidate;
   }
   return "git";
 }
 function dispatchedProbeEnv(cloneDir, base) {
-  const gitDir = join11(cloneDir, ".git");
+  const gitDir = join12(cloneDir, ".git");
   return {
     ...base,
     GIT_DIR: gitDir,
     GIT_WORK_TREE: cloneDir,
-    GIT_INDEX_FILE: join11(gitDir, "index"),
-    GIT_OBJECT_DIRECTORY: join11(gitDir, "objects"),
+    GIT_INDEX_FILE: join12(gitDir, "index"),
+    GIT_OBJECT_DIRECTORY: join12(gitDir, "objects"),
     GIT_ALTERNATE_OBJECT_DIRECTORIES: "",
     GIT_COMMON_DIR: gitDir,
     GIT_NAMESPACE: "",
@@ -4996,8 +5165,8 @@ function fetchAttestationOverTls(req) {
     let cert;
     let key;
     try {
-      cert = readFileSync4(req.certPath);
-      key = readFileSync4(req.keyPath);
+      cert = readFileSync5(req.certPath);
+      key = readFileSync5(req.keyPath);
     } catch (err) {
       settle({ ok: false, reason: `the client key could not be read: ${describeErr(err)}` });
       return;
@@ -5426,7 +5595,7 @@ function iapPortTunnelArgv(vm, project, zone, remotePort, localPort) {
 }
 function spkiSha256Hex(certDer) {
   const spki = new X509Certificate(certDer).publicKey.export({ type: "spki", format: "der" });
-  return createHash4("sha256").update(spki).digest("hex");
+  return createHash5("sha256").update(spki).digest("hex");
 }
 function certMetadataValue(pem) {
   return new X509Certificate(pem).raw.toString("base64url");
@@ -5601,8 +5770,8 @@ function makeClientTls(io, allocated, vm) {
       throw new HostedVenueError(`the directory ${dir} holding ${vm}'s client key could not be removed and is left behind: ${describeErr(err)}`);
     }
   });
-  const certPath = join11(dir, "client.pem");
-  const keyPath = join11(dir, "client-key.pem");
+  const certPath = join12(dir, "client.pem");
+  const keyPath = join12(dir, "client-key.pem");
   const made = io.exec("openssl", clientCertArgv(keyPath, certPath), OPENSSL_TIMEOUT_MS, {});
   if (!made.ok) {
     throw new HostedVenueError(`could not make ${vm}'s client certificate with openssl: ${execDetail(made).slice(0, 300)}`, "ours");
@@ -5688,7 +5857,7 @@ async function reachConfidentialSpace(a) {
   if (!verdict.ok) {
     throw new HostedVenueError(`${vm} presented an attestation this lease refuses (${verdict.reason}): ${verdict.detail}`);
   }
-  const caPath = join11(a.tls.dir, "venue.pem");
+  const caPath = join12(a.tls.dir, "venue.pem");
   try {
     io.writeFile(caPath, venuePem);
   } catch (err) {
@@ -5844,7 +6013,7 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
           throw new HostedVenueError(`the tunnel socket directory ${socketDir} could not be removed and is left behind: ${describeErr(err)}`);
         }
       });
-      const socketPath = join11(socketDir, VENUE_SOCKET_NAME);
+      const socketPath = join12(socketDir, VENUE_SOCKET_NAME);
       if (io.exists(socketPath)) {
         throw new HostedVenueError(`something already exists at ${socketPath}, inside a directory created seconds ago for this run alone. Refusing rather than clearing it: the tunnel would carry the whole run over a path we cannot account for`, "ours");
       }
@@ -6045,18 +6214,18 @@ function makeLease(p) {
           throw new HostedVenueError(`could not stage ${from} onto ${p.vm}: ${execDetail(res).slice(0, 300)}`);
         }
       };
-      const localJail = join11(local.scratchRoot, JAIL_SEGMENT);
-      const localTmp = join11(local.scratchRoot, JAIL_TMP_SEGMENT);
+      const localJail = join12(local.scratchRoot, JAIL_SEGMENT);
+      const localTmp = join12(local.scratchRoot, JAIL_TMP_SEGMENT);
       const required = [
         localTmp,
-        join11(localJail, JAIL_PASSWD_FILE),
-        join11(localJail, JAIL_GROUP_FILE)
+        join12(localJail, JAIL_PASSWD_FILE),
+        join12(localJail, JAIL_GROUP_FILE)
       ];
       const missing = required.filter((path) => !p.io.exists(path));
       if (missing.length > 0) {
         throw new HostedVenueError(`refusing to stage ${local.scratchRoot} onto ${p.vm}: the jail at ${localJail} is incomplete \u2014 missing ${missing.join(", ")}. buildJail must run to completion before stage(), or the venue mounts a directory with no identity database.`);
       }
-      const gitConfigPath = join11(local.cloneDir, ".git", "config");
+      const gitConfigPath = join12(local.cloneDir, ".git", "config");
       let gitConfig;
       try {
         gitConfig = p.io.readTextIfPresent(gitConfigPath);
@@ -6195,7 +6364,7 @@ function makeLease(p) {
     }
   };
 }
-var join11, SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, VOLUME_CREATE_TIMEOUT_MS, EXEC_PROBE_TIMEOUT_MS, POPULATE_TIMEOUT_MS, STAGE_PROOF_PREFIX, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING, CS_ATTEST_PORT, CS_DOCKER_PORT, CS_READY_BUDGET_MS, CS_ATTEST_TIMEOUT_MS, CS_PULL_TIMEOUT_MS, CS_ATTEST_INTERVAL_MS, OPENSSL_TIMEOUT_MS, CS_RUN_ARGS, CS_GUEST_USER, CS_STAGE_ROOT, CLIENT_CERT_STAND_IN;
+var join12, SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, VOLUME_CREATE_TIMEOUT_MS, EXEC_PROBE_TIMEOUT_MS, POPULATE_TIMEOUT_MS, STAGE_PROOF_PREFIX, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING, CS_ATTEST_PORT, CS_DOCKER_PORT, CS_READY_BUDGET_MS, CS_ATTEST_TIMEOUT_MS, CS_PULL_TIMEOUT_MS, CS_ATTEST_INTERVAL_MS, OPENSSL_TIMEOUT_MS, CS_RUN_ARGS, CS_GUEST_USER, CS_STAGE_ROOT, CLIENT_CERT_STAND_IN;
 var init_hostedVenue = __esm({
   "../../packages/envrun/dist/hostedVenue.js"() {
     "use strict";
@@ -6207,7 +6376,7 @@ var init_hostedVenue = __esm({
     init_labels();
     init_venueProof();
     init_venue();
-    ({ join: join11 } = posix3);
+    ({ join: join12 } = posix3);
     SSH_READY_BUDGET_MS = 18e4;
     SSH_PROBE_INTERVAL_MS = 5e3;
     SSH_PROBE_TIMEOUT_MS = 25e3;
@@ -6243,8 +6412,8 @@ var init_hostedVenue = __esm({
     VENUE_SOCKET_NAME = "docker.sock";
     HostedVenueError = class extends RunRefusalError {
       source;
-      constructor(message, source = "venue", options) {
-        super(message, options);
+      constructor(message2, source = "venue", options) {
+        super(message2, options);
         this.name = "HostedVenueError";
         this.source = source;
       }
@@ -6261,7 +6430,7 @@ var init_hostedVenue = __esm({
       pushTree: pushTreeWithTar,
       readTextIfPresent: (path) => {
         try {
-          return readFileSync4(path, "utf8");
+          return readFileSync5(path, "utf8");
         } catch (err) {
           if (err.code === "ENOENT")
             return null;
@@ -6293,9 +6462,9 @@ var init_hostedVenue = __esm({
       },
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
       now: () => Date.now(),
-      exists: (path) => existsSync6(path),
+      exists: (path) => existsSync7(path),
       makePrivateDir: () => {
-        const dir = mkdtempSync3(join11(tmpdir3(), SOCKET_DIR_PREFIX));
+        const dir = mkdtempSync3(join12(tmpdir3(), SOCKET_DIR_PREFIX));
         chmodSync2(dir, 448);
         return dir;
       },
@@ -6362,7 +6531,7 @@ var init_hostedVenue = __esm({
         }
       },
       writeFile: (path, text) => {
-        writeFileSync6(path, text, { mode: 384, flag: "wx" });
+        writeFileSync7(path, text, { mode: 384, flag: "wx" });
       },
       fetchAttestation: (req) => fetchAttestationOverTls(req),
       dockerOverTls: (endpoint, tls, runArgs) => remoteDockerClient(endpoint, { tls, runArgs })
@@ -7536,14 +7705,14 @@ var init_references = __esm({
 });
 
 // ../../packages/envspec/dist/repo.js
-import { readdirSync as readdirSync3, readFileSync as readFileSync5, statSync as statSync5 } from "fs";
-import { join as join12, relative, sep as sep2 } from "path";
+import { readdirSync as readdirSync3, readFileSync as readFileSync6, statSync as statSync5 } from "fs";
+import { join as join13, relative, sep as sep2 } from "path";
 function createRepoReader(repoPath) {
-  const resolveIn = (relativePath) => relativePath === "" ? repoPath : join12(repoPath, relativePath);
+  const resolveIn = (relativePath) => relativePath === "" ? repoPath : join13(repoPath, relativePath);
   const toPosix = (absolute) => relative(repoPath, absolute).split(sep2).join("/");
   const readText = (relativePath) => {
     try {
-      return readFileSync5(resolveIn(relativePath), "utf8");
+      return readFileSync6(resolveIn(relativePath), "utf8");
     } catch {
       return null;
     }
@@ -7569,7 +7738,7 @@ function createRepoReader(repoPath) {
       for (const name of names.slice().sort()) {
         if (SKIP_DIRECTORIES.has(name))
           continue;
-        const child = join12(dir, name);
+        const child = join13(dir, name);
         const st = statOf(toPosix(child));
         if (st === null)
           continue;
@@ -8192,26 +8361,410 @@ var init_derive = __esm({
   }
 });
 
+// ../../packages/envspec/dist/preview.js
+function planPreview(repo) {
+  const rootHtml = repo.exists("index.html") && !repo.isDirectory("index.html");
+  if (!repo.exists("package.json")) {
+    if (rootHtml) {
+      return {
+        previewable: true,
+        buildCommand: null,
+        serveCommand: null,
+        rootHtml: true,
+        reason: "the repository has an index.html at its root"
+      };
+    }
+    return {
+      previewable: false,
+      reason: "the repository has no package.json and no index.html at its root"
+    };
+  }
+  const pkg = readJsonObject(repo, "package.json");
+  if (pkg === null) {
+    return { previewable: false, reason: "package.json could not be read as a JSON object" };
+  }
+  if (pkg.workspaces !== void 0 || repo.exists("pnpm-workspace.yaml")) {
+    return {
+      previewable: false,
+      reason: "the repository root is a workspace, and this version previews single-package repositories only"
+    };
+  }
+  const scripts = scriptsOf(pkg);
+  const run2 = scriptRunner(repo);
+  const build = scripts.has("build") ? `${run2} build` : null;
+  const serveName = SERVE_SCRIPTS.find((name) => scripts.has(name));
+  const serve = serveName === void 0 ? null : `${run2} ${serveName}`;
+  const anyHtml = rootHtml || hasIndexHtml(repo);
+  if (serve === null && !anyHtml) {
+    return {
+      previewable: false,
+      reason: "nothing here can be served: package.json has no preview, start, serve or dev script, and the repository has no index.html"
+    };
+  }
+  if (build === null && serve === null && !rootHtml) {
+    return {
+      previewable: false,
+      reason: "the only index.html is below the root, and package.json has no build or serve script to produce a site from it"
+    };
+  }
+  return {
+    previewable: true,
+    buildCommand: build,
+    serveCommand: serve,
+    rootHtml,
+    reason: build === null ? serve === null ? "the repository has an index.html at its root" : "package.json declares a way to serve the app" : "package.json declares a build script and a way to serve the app"
+  };
+}
+function scriptsOf(pkg) {
+  const scripts = pkg.scripts;
+  const names = /* @__PURE__ */ new Set();
+  if (typeof scripts !== "object" || scripts === null || Array.isArray(scripts))
+    return names;
+  for (const [name, body] of Object.entries(scripts)) {
+    if (typeof body === "string" && body.trim() !== "")
+      names.add(name);
+  }
+  return names;
+}
+function scriptRunner(repo) {
+  if (repo.exists("yarn.lock"))
+    return "yarn run";
+  if (repo.exists("pnpm-lock.yaml"))
+    return "pnpm run";
+  return "npm run";
+}
+function hasIndexHtml(repo) {
+  return repo.listFiles("").some((path) => path === "index.html" || path.endsWith("/index.html"));
+}
+var SERVE_SCRIPTS;
+var init_preview2 = __esm({
+  "../../packages/envspec/dist/preview.js"() {
+    "use strict";
+    init_manifest2();
+    SERVE_SCRIPTS = ["preview", "start", "serve", "dev"];
+  }
+});
+
 // ../../packages/envspec/dist/index.js
 var init_dist3 = __esm({
   "../../packages/envspec/dist/index.js"() {
     "use strict";
     init_derive();
     init_repo();
+    init_preview2();
     init_yaml();
   }
 });
 
+// ../../packages/envrun/dist/screenshots.js
+import { copyFileSync as copyFileSync3, mkdirSync as mkdirSync7 } from "fs";
+import { join as join14 } from "path";
+function normalizeRoutes(routes) {
+  const out = [];
+  for (const raw of routes ?? []) {
+    const route = raw.trim() === "" ? "/" : raw.trim().startsWith("/") ? raw.trim() : `/${raw.trim()}`;
+    if (!out.includes(route))
+      out.push(route);
+  }
+  if (out.length === 0)
+    out.push("/");
+  return out.slice(0, SCREENSHOT_LIMITS.routes);
+}
+async function runScreenshots(ctx, deps = realDeps) {
+  try {
+    return await takeScreenshots(ctx, deps);
+  } catch (err) {
+    return {
+      status: "skipped",
+      reason: message(err),
+      routes: normalizeRoutes(ctx.routes),
+      dir: null,
+      sides: [],
+      items: [],
+      notes: []
+    };
+  }
+}
+async function takeScreenshots(ctx, deps) {
+  const routes = normalizeRoutes(ctx.routes);
+  const skipped = (reason, sides2 = []) => ({
+    status: "skipped",
+    reason,
+    routes,
+    dir: null,
+    sides: sides2,
+    items: [],
+    notes: []
+  });
+  let plan;
+  try {
+    plan = deps.plan(ctx.after.localRepoDir);
+  } catch (err) {
+    return skipped(`the project could not be read for a preview: ${message(err)}`);
+  }
+  if (!plan.previewable)
+    return skipped(plan.reason);
+  let image;
+  let code;
+  try {
+    ctx.progress?.("screenshots", "preparing the screenshot image");
+    image = deps.ensureImage(ctx.after.lease.docker, ctx.workDir).image;
+    code = deps.stageCode(ctx.workDir);
+  } catch (err) {
+    return skipped(message(err));
+  }
+  const sides = [];
+  const items = [];
+  const notes = [];
+  const take = async (side, tree, sidePlan) => {
+    try {
+      const got = await captureSide(ctx, deps, side, tree, sidePlan, image, code, routes);
+      sides.push(got.side);
+      for (const item of got.items) {
+        const file = `${side}/${item.file}`;
+        deps.copy(join14(got.outDir, item.file), join14(ctx.outDir, file));
+        items.push({ ...item, side, file });
+      }
+      for (const note of got.notes)
+        notes.push(`${side}: ${note}`);
+    } catch (err) {
+      sides.push({ side, status: "skipped", reason: message(err), mode: null, basePath: null });
+    }
+  };
+  ctx.progress?.("screenshots", `after: ${routes.join(", ")}`);
+  await take("after", ctx.after, plan);
+  if (ctx.before === null) {
+    sides.push({
+      side: "before",
+      status: "skipped",
+      reason: "this run has no base tree to compare with",
+      mode: null,
+      basePath: null
+    });
+  } else {
+    let base = null;
+    try {
+      ctx.progress?.("screenshots", "before: preparing the base tree");
+      base = await ctx.before();
+      if (base === null) {
+        sides.push({
+          side: "before",
+          status: "skipped",
+          reason: "the base tree could not be prepared",
+          mode: null,
+          basePath: null
+        });
+      } else {
+        let basePlan;
+        try {
+          basePlan = deps.plan(base.tree.localRepoDir);
+        } catch (err) {
+          basePlan = { previewable: false, reason: message(err) };
+        }
+        if (basePlan.previewable) {
+          await take("before", base.tree, basePlan);
+        } else {
+          sides.push({
+            side: "before",
+            status: "skipped",
+            reason: `the base tree: ${basePlan.reason}`,
+            mode: null,
+            basePath: null
+          });
+        }
+      }
+    } catch (err) {
+      sides.push({
+        side: "before",
+        status: "skipped",
+        reason: message(err),
+        mode: null,
+        basePath: null
+      });
+    } finally {
+      await base?.release().catch(() => void 0);
+    }
+  }
+  if (items.length === 0) {
+    const after = sides.find((s) => s.side === "after");
+    return skipped(after?.reason ?? "no screenshot was taken", sides);
+  }
+  return {
+    status: "captured",
+    reason: null,
+    routes,
+    dir: ctx.outDir,
+    sides,
+    items,
+    notes
+  };
+}
+async function captureSide(ctx, deps, side, tree, plan, image, code, routes) {
+  const skip = (reason) => ({
+    side: { side, status: "skipped", reason, mode: null, basePath: null },
+    items: [],
+    notes: [],
+    outDir: ""
+  });
+  const lease = tree.lease;
+  const step = (s, profile, command, timeoutMs, extra = {}) => deps.runStep(lease, {
+    step: s,
+    profile,
+    command,
+    repoDir: tree.repoDir,
+    jail: tree.jail,
+    tmp: tree.tmp,
+    pathDomain: lease.pathDomain,
+    guestUser: lease.guestUser,
+    stageVolumes: lease.stageVolumes,
+    cloneVolume: lease.cloneVolume,
+    env: deps.env(tree),
+    image: ctx.image,
+    labels: ctx.labels,
+    timeoutMs,
+    ...extra
+  });
+  if (tree.needsInstall && ctx.spec.installCommand !== null) {
+    const proxyCode = await lease.stageProxyCode();
+    try {
+      const install = await step("install", "install", ctx.spec.installCommand, SCREENSHOT_LIMITS.installTimeoutMs, { proxyCode });
+      if (install.exitCode !== 0) {
+        return skip(`installing dependencies failed (exit ${String(install.exitCode)})`);
+      }
+    } finally {
+      proxyCode.cleanup();
+    }
+  }
+  if (plan.buildCommand !== null) {
+    ctx.progress?.("screenshots", `${side}: ${plan.buildCommand}`);
+    const build = await step("build", "offline", `: > ${BUILD_MARKER} && ${plan.buildCommand}`, SCREENSHOT_LIMITS.buildTimeoutMs);
+    if (build.exitCode !== 0) {
+      const tail2 = (build.stderr.trim() || build.stdout.trim()).split("\n").slice(-3).join(" ").slice(-300);
+      return skip(build.timedOut ? `the build ran past ${SCREENSHOT_LIMITS.buildTimeoutMs / 1e3}s` : `the build failed with no network (exit ${String(build.exitCode)}): ${tail2}`);
+    }
+  }
+  const user = lease.guestUser ?? hostIds();
+  const site = lease.cloneVolume !== void 0 ? { volume: lease.cloneVolume } : { bind: tree.repoDir };
+  const staticOut = join14(ctx.workDir, side, "static");
+  deps.mkdir(staticOut);
+  const shot = await deps.runCapture(lease.docker, {
+    image,
+    name: `th-capture-${ctx.runId}-${side}`,
+    site,
+    network: "none",
+    code,
+    out: staticOut,
+    request: {
+      mode: "static",
+      routes,
+      rootHtml: plan.rootHtml,
+      ...plan.buildCommand === null ? {} : { sinceFile: BUILD_MARKER }
+    },
+    user,
+    labels: ctx.labels
+  }, SCREENSHOT_LIMITS.captureTimeoutMs);
+  if (shot.status === "captured")
+    return done(side, shot, staticOut);
+  if (shot.status !== "no-site" || plan.serveCommand === null) {
+    return skip(shot.reason ?? "the screenshot step took no screenshot");
+  }
+  const appLabel = `${ctx.runId}-${side}`;
+  const findApp = () => lease.docker.sync(["ps", "-aq", "--filter", `label=terminalhire.capture-app=${appLabel}`]).stdout.trim().split("\n")[0] || null;
+  const labels = { ...ctx.labels ?? {}, "terminalhire.capture-app": appLabel };
+  ctx.progress?.("screenshots", `${side}: ${plan.serveCommand}`);
+  const serving = step("serve", "offline", plan.serveCommand, SCREENSHOT_LIMITS.waitForPortMs + SCREENSHOT_LIMITS.captureTimeoutMs, { labels }).catch(() => null);
+  let appId = null;
+  try {
+    for (let i = 0; i < 60 && appId === null; i++) {
+      appId = findApp();
+      if (appId === null)
+        await new Promise((r) => setTimeout(r, 500));
+    }
+    if (appId === null)
+      return skip(`the serve script (${plan.serveCommand}) did not start a container`);
+    const serverOut = join14(ctx.workDir, side, "server");
+    deps.mkdir(serverOut);
+    const served = await deps.runCapture(lease.docker, {
+      image,
+      name: `th-capture-${ctx.runId}-${side}-srv`,
+      site: null,
+      network: { container: appId },
+      code,
+      out: serverOut,
+      request: { mode: "server", routes, waitForPortMs: SCREENSHOT_LIMITS.waitForPortMs },
+      user,
+      labels: ctx.labels
+    }, SCREENSHOT_LIMITS.waitForPortMs + SCREENSHOT_LIMITS.captureTimeoutMs);
+    if (served.status !== "captured")
+      return skip(served.reason ?? "the serve script produced no screenshot");
+    return done(side, served, serverOut);
+  } finally {
+    const app = appId ?? findApp();
+    if (app !== null)
+      lease.docker.sync(["rm", "--force", app]);
+    await serving;
+  }
+}
+function done(side, m, outDir) {
+  const failed = m.failures.length;
+  return {
+    side: {
+      side,
+      status: "captured",
+      reason: failed === 0 ? null : `${failed} of ${failed + m.items.length} shots failed: ${m.failures[0]?.error ?? ""}`,
+      mode: m.mode,
+      basePath: m.basePath
+    },
+    items: m.items,
+    notes: m.notes,
+    outDir
+  };
+}
+function message(err) {
+  return String(err?.message ?? err).slice(0, 500);
+}
+var SCREENSHOT_LIMITS, BUILD_MARKER, realDeps;
+var init_screenshots = __esm({
+  "../../packages/envrun/dist/screenshots.js"() {
+    "use strict";
+    init_dist();
+    init_dist3();
+    init_execute();
+    init_screenshotsResult();
+    SCREENSHOT_LIMITS = {
+      routes: 5,
+      buildTimeoutMs: 3e5,
+      installTimeoutMs: 6e5,
+      captureTimeoutMs: 18e4,
+      waitForPortMs: 6e4
+    };
+    BUILD_MARKER = ".terminalhire-build-start";
+    realDeps = {
+      runStep: (lease, r) => runStep(lease.containment, r),
+      runCapture,
+      ensureImage: (docker3, workDir) => ensureCaptureImage(docker3, workDir),
+      stageCode: stageCaptureCode,
+      plan: (dir) => planPreview(createRepoReader(dir)),
+      copy: (from, to) => {
+        mkdirSync7(join14(to, ".."), { recursive: true });
+        copyFileSync3(from, to);
+      },
+      mkdir: (dir) => mkdirSync7(dir, { recursive: true, mode: 511 }),
+      env: (tree) => scrubEnv(process.env, scrubEnvPathsFor("container", { jail: tree.jail, tmp: tree.tmp }))
+    };
+  }
+});
+
 // ../../packages/envrun/dist/gradleTestSummary.js
-import { mkdirSync as mkdirSync6, writeFileSync as writeFileSync7 } from "fs";
-import { join as join13 } from "path";
+import { mkdirSync as mkdirSync8, writeFileSync as writeFileSync8 } from "fs";
+import { join as join15 } from "path";
 function stageGradleTestSummary(jailHome, guestUser, io = {}) {
-  const dir = join13(jailHome, ".gradle", "init.d");
-  mkdirSync6(dir, { recursive: true });
-  writeFileSync7(join13(dir, "terminalhire-test-summary.gradle"), GRADLE_TEST_SUMMARY_INIT);
+  const dir = join15(jailHome, ".gradle", "init.d");
+  mkdirSync8(dir, { recursive: true });
+  writeFileSync8(join15(dir, "terminalhire-test-summary.gradle"), GRADLE_TEST_SUMMARY_INIT);
   const ids2 = io.ids === void 0 ? hostIds() : io.ids;
   if (ids2?.uid === 0 && guestUser && guestUser.uid !== 0) {
-    (io.chown ?? chownTree)(join13(jailHome, ".gradle"), guestUser);
+    (io.chown ?? chownTree)(join15(jailHome, ".gradle"), guestUser);
   }
 }
 var GRADLE_TEST_MARKER, GRADLE_TEST_SUMMARY_INIT;
@@ -8238,10 +8791,10 @@ allprojects {
 
 // ../../packages/envrun/dist/thrun.js
 import { execFileSync as execFileSync2, spawnSync as spawnSync6 } from "child_process";
-import { existsSync as existsSync7, mkdirSync as mkdirSync7, mkdtempSync as mkdtempSync4, rmSync as rmSync5 } from "fs";
+import { existsSync as existsSync8, mkdirSync as mkdirSync9, mkdtempSync as mkdtempSync4, rmSync as rmSync5 } from "fs";
 import { randomUUID } from "crypto";
 import { tmpdir as tmpdir4 } from "os";
-import { join as join14 } from "path";
+import { join as join16 } from "path";
 function git(repoDir, args, allowNonZero = false) {
   const res = spawnSync6("git", [...args], {
     cwd: repoDir,
@@ -8256,7 +8809,7 @@ function git(repoDir, args, allowNonZero = false) {
   return res.stdout ?? "";
 }
 function collectWorkingDiff(repoDir, opts = {}) {
-  if (!existsSync7(join14(repoDir, ".git"))) {
+  if (!existsSync8(join16(repoDir, ".git"))) {
     throw new ThRunError(`${repoDir} is not a git checkout (no .git). \`th run\` ships the working diff, so it needs a repository to read one from.`);
   }
   const headSha = git(repoDir, ["rev-parse", "HEAD"]).trim();
@@ -8404,7 +8957,7 @@ function credentialFreeHome() {
     return credentialFreeHomeDir;
   let made;
   try {
-    made = mkdtempSync4(join14(tmpdir4(), "th-run-nohome-"));
+    made = mkdtempSync4(join16(tmpdir4(), "th-run-nohome-"));
   } catch (err) {
     throw new RunRefusalError("could not create the empty directory this clone uses as its home, so the clone would read the credentials on this machine instead. That is our environment failing, not your tests: check that the temp directory is writable.", { cause: err });
   }
@@ -8479,7 +9032,7 @@ function cloneTargetAtUnguarded(opts) {
   if (persisted !== null) {
     throw new RunRefusalError(`refusing to clone from a URL carrying ${persisted}: \`git remote add\` writes the source verbatim into .git/config, which is mounted where the repo\u2019s own test command runs. Fetch with the credential out of band so it is never written to disk \u2014 this runner takes one as an HTTP header, which is never persisted.`);
   }
-  mkdirSync7(opts.dest, { recursive: true });
+  mkdirSync9(opts.dest, { recursive: true });
   const runOut = (args) => execFileSync2("git", [...gitConfigArgs(), ...args], {
     cwd: opts.dest,
     encoding: "utf8",
@@ -8518,7 +9071,7 @@ function cloneTargetAtUnguarded(opts) {
 }
 function scrubCloneSource(dest, run2) {
   run2(["remote", "remove", "origin"]);
-  rmSync5(join14(dest, ".git", "FETCH_HEAD"), { force: true });
+  rmSync5(join16(dest, ".git", "FETCH_HEAD"), { force: true });
 }
 function publishableTarget(url) {
   if (separatorInTarget(url) !== null)
@@ -8676,6 +9229,7 @@ function refusedRun(fields) {
     boundaryRefusals: fields.boundaryRefusals,
     touchedPaths: fields.touchedPaths,
     preview: null,
+    screenshots: null,
     containerImage: null,
     containerImageDigest: null,
     leaksClean: null,
@@ -8930,10 +9484,10 @@ async function runVerification(req, ctx) {
       venueIdentity: null
     };
   }
-  const stage = join14(req.scratchRoot, runId);
-  const cloneDir = join14(stage, "clone");
-  const scratch = join14(stage, "scratch");
-  mkdirSync7(scratch, { recursive: true });
+  const stage = join16(req.scratchRoot, runId);
+  const cloneDir = join16(stage, "clone");
+  const scratch = join16(stage, "scratch");
+  mkdirSync9(scratch, { recursive: true });
   assertSafeTargetSha(req.targetSha);
   progress("clone", `${publishableTarget(req.targetRepo)} @ ${req.targetSha.slice(0, 12)}`);
   cloneTargetAt({
@@ -9004,7 +9558,7 @@ async function runVerification(req, ctx) {
     const venuePaths = await lease.stage({
       cloneDir,
       scratchRoot: scratch,
-      previewDir: join14(stage, "preview"),
+      previewDir: join16(stage, "preview"),
       // On a dispatched run the commit is the statement of what was tested, so
       // it rides with the tree and the venue seam refuses a tree that is not
       // that commit (design §6 item 4, TERM-892 — the guard lives in
@@ -9027,7 +9581,7 @@ async function runVerification(req, ctx) {
       ...req.testTimeoutMs === void 0 ? {} : { testTimeoutMs: req.testTimeoutMs }
     });
     const outputTail = excerptOutput(verdict.test?.stdout ?? "", verdict.test?.stderr ?? "");
-    const base = {
+    let base = {
       schema: RUN_RESULT_SCHEMA,
       runId,
       claimId: req.claimId,
@@ -9055,6 +9609,7 @@ async function runVerification(req, ctx) {
       boundaryRefusals: [],
       touchedPaths: pre.touchedPaths,
       preview: null,
+      screenshots: null,
       containerImage: verdict.image,
       // The run body never inspects the image, so it records no digest rather than
       // a re-read of the name. The audit harness (`e2e-audit.mjs`) is the producer
@@ -9074,6 +9629,38 @@ async function runVerification(req, ctx) {
       // reasoning and the #735 failure that makes the distinction load-bearing.
       venue: describeVenue(lease)
     };
+    if (req.screenshots !== void 0) {
+      const shots = lease.pathDomain !== "local" ? skippedScreenshots(req.screenshots.routes, "screenshots are taken on local runs only for now") : await runScreenshots({
+        after: {
+          lease,
+          repoDir: venuePaths.cloneDir,
+          localRepoDir: cloneDir,
+          jail: venuePaths.jail,
+          tmp: venuePaths.tmp,
+          needsInstall: false
+        },
+        before: diff === null ? null : () => prepareBaseTree({
+          stage,
+          runId,
+          placement,
+          targetRepo: req.targetRepo,
+          targetSha: req.targetSha,
+          ...req.targetCacheDir ? { targetCacheDir: req.targetCacheDir } : {},
+          ...req.targetAuth ? { targetAuth: req.targetAuth } : {},
+          baselinePatch: hasBaselinePatch ? baselinePatch ?? "" : null,
+          progress
+        }),
+        spec,
+        image,
+        ...labels ? { labels } : {},
+        routes: req.screenshots.routes ?? ["/"],
+        outDir: req.screenshots.outDir,
+        workDir: join16(stage, "screenshots"),
+        runId,
+        progress
+      });
+      base = { ...base, screenshots: shots };
+    }
     if (req.preview === false)
       return {
         result: base,
@@ -9084,6 +9671,7 @@ async function runVerification(req, ctx) {
         venueIdentity: lease.venueIdentity ?? null
       };
     progress("preview", "starting one instance both parties can open");
+    const previewStartedAt = Date.now();
     const instance = await lease.publishPreview({
       labels,
       idBase: `th-${runId}`,
@@ -9099,9 +9687,11 @@ async function runVerification(req, ctx) {
       result: {
         ...base,
         preview: toPreviewHandle(instance),
-        // Re-taken AFTER the preview is reachable, so the number a developer reads
-        // is the time until they could actually open the URL.
-        wallMs: Date.now() - startedAt
+        // Extended by the preview's own start, so the number a developer reads is
+        // the time until they could open the URL. Extended from `base.wallMs`, not
+        // re-taken from `startedAt`: the screenshots ran in between, and they must
+        // not move any number in the verdict (TERM-1258).
+        wallMs: base.wallMs + (Date.now() - previewStartedAt)
       },
       preview: instance,
       spec,
@@ -9113,11 +9703,64 @@ async function runVerification(req, ctx) {
     await releaseWithoutThrowing(lease, progress);
   }
 }
+function skippedScreenshots(routes, reason) {
+  return {
+    status: "skipped",
+    reason,
+    routes: normalizeRoutes(routes),
+    dir: null,
+    sides: [],
+    items: [],
+    notes: []
+  };
+}
+async function prepareBaseTree(o) {
+  const root = join16(o.stage, "base");
+  const cloneDir = join16(root, "clone");
+  const scratch = join16(root, "scratch");
+  mkdirSync9(scratch, { recursive: true });
+  cloneTargetAt({
+    url: o.targetRepo,
+    sha: o.targetSha,
+    dest: cloneDir,
+    ...o.targetCacheDir ? { cacheDir: o.targetCacheDir } : {},
+    ...o.targetAuth ? { auth: o.targetAuth } : {}
+  });
+  if (o.baselinePatch !== null)
+    applyPatch(cloneDir, o.baselinePatch, "baseline patch");
+  const resolved = await resolveLease(o.placement, `${o.runId}-base`);
+  if (!resolved.ok)
+    throw new Error(resolved.refusal);
+  const lease = resolved.lease;
+  try {
+    buildJail(scratch, lease.guestUser);
+    const paths = await lease.stage({
+      cloneDir,
+      scratchRoot: scratch,
+      previewDir: join16(root, "preview")
+    });
+    return {
+      tree: {
+        lease,
+        repoDir: paths.cloneDir,
+        localRepoDir: cloneDir,
+        jail: paths.jail,
+        tmp: paths.tmp,
+        needsInstall: true
+      },
+      release: () => releaseWithoutThrowing(lease, o.progress)
+    };
+  } catch (err) {
+    await releaseWithoutThrowing(lease, o.progress);
+    throw err;
+  }
+}
 var ThRunError, OUTPUT_TAIL_BYTES, FULL_COMMIT_ID, ALLOWED_URL_SCHEMES, SCP_STYLE, URL_SCHEME, WINDOWS_ABSOLUTE, UNC_PATH, TRANSPORT_REASON, SHA_REASON, FULL_SHA, MIN_GIT_VERSION_FOR_END_OF_OPTIONS, CloneUnavailableError, GIT_ENV_ALLOWLIST, credentialFreeHomeDir, SSH_ISOLATION_ARGS, WITHHELD_SEGMENT, UNPARSEABLE_TARGET, FAILURE_LINE, REDACTED_TARGET_REPO, REDACTED_TARGET_SHA;
 var init_thrun = __esm({
   "../../packages/envrun/dist/thrun.js"() {
     "use strict";
     init_dist();
+    init_screenshots();
     init_dist3();
     init_attestation2();
     init_boundary();
@@ -9370,7 +10013,7 @@ var init_dbplan = __esm({
 // ../../packages/envrun/dist/dbstack.js
 import { spawnSync as spawnSync7 } from "child_process";
 import { randomBytes as randomBytes7 } from "crypto";
-import { mkdirSync as mkdirSync8 } from "fs";
+import { mkdirSync as mkdirSync10 } from "fs";
 function installCommandFor(runner) {
   switch (runner) {
     case "sql":
@@ -9712,8 +10355,8 @@ async function installLocalMigrationTooling(opts) {
     };
   }
   const { jail, tmp } = buildJail(opts.scratchRoot);
-  mkdirSync8(jail, { recursive: true });
-  mkdirSync8(tmp, { recursive: true });
+  mkdirSync10(jail, { recursive: true });
+  mkdirSync10(tmp, { recursive: true });
   const spec = {
     profile: "install",
     clone: opts.repoDir,
@@ -10172,10 +10815,10 @@ var init_dist4 = __esm({
 });
 
 // bin/jpi-run.js
-import { existsSync as existsSync8, readFileSync as readFileSync6, realpathSync as realpathSync2 } from "fs";
+import { existsSync as existsSync9, readFileSync as readFileSync7, realpathSync as realpathSync2 } from "fs";
 import { execFileSync as execFileSync3 } from "child_process";
-import { join as join15, resolve as resolve2 } from "path";
-import { tmpdir as tmpdir5 } from "os";
+import { join as join17, resolve as resolve2 } from "path";
+import { homedir as homedir5, tmpdir as tmpdir5 } from "os";
 import { mkdtempSync as mkdtempSync5, rmSync as rmSync6 } from "fs";
 
 // bin/recall-check.js
@@ -10200,8 +10843,8 @@ import { basename, join, normalize } from "path";
 var PROD_API_BASE = "https://terminalhire.com";
 var DEV_API_BASE = "https://dev.terminalhire.com";
 var ApiBaseError = class extends Error {
-  constructor(message) {
-    super(message);
+  constructor(message2) {
+    super(message2);
     this.name = "ApiBaseError";
   }
 };
@@ -10593,6 +11236,12 @@ Options:
   --watch               Re-run when a file in the checkout changes.
   --json                Print the run result as JSON instead of a report.
   --no-preview          Skip the preview URL.
+  --no-screenshots      Skip the before/after screenshots. When the repository can be
+                        built or served, a run shoots each route in light and dark, at
+                        desktop and mobile size, with no network, and saves the PNGs
+                        under ~/.terminalhire/screenshots/. The first time, this builds
+                        the screenshot image (about 900 MB). Off under --watch.
+  --preview-route <r>   Routes to shoot, comma-separated (default: /; at most 5).
   --keep <seconds>      Hold the preview open this long, at most ${String(KEEP_MAX_SECONDS)}
                         (default: until Ctrl-C).
   --test-command <cmd>  Disclosed override of the derived test command.
@@ -10611,13 +11260,19 @@ delivered commit is cloned out of the workspace by path, so a private repository
 no credential. A delivery of only the files you were granted needs --target.
 
 Needs Docker running. Needs network for the first clone of a remote target.`;
+function screenshotsOption(routeFlag, env = process.env) {
+  const base = env.TERMINALHIRE_DIR || join17(homedir5(), ".terminalhire");
+  const id = `${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}-${Math.random().toString(36).slice(2, 8)}`;
+  const routes = routeFlag === void 0 || routeFlag === null ? ["/"] : String(routeFlag).split(",").map((r) => r.trim()).filter((r) => r !== "");
+  return { routes: routes.length === 0 ? ["/"] : routes, outDir: join17(base, "screenshots", id) };
+}
 function parseArgs(argv) {
   const out = { flags: {}, bools: /* @__PURE__ */ new Set() };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (!arg.startsWith("--")) continue;
     const name = arg.slice(2);
-    if (["watch", "json", "no-preview", "help", "verbose"].includes(name)) {
+    if (["watch", "json", "no-preview", "no-screenshots", "help", "verbose"].includes(name)) {
       out.bools.add(name);
       continue;
     }
@@ -10633,7 +11288,7 @@ function parseArgs(argv) {
 function runScratchRoot() {
   let root;
   try {
-    root = mkdtempSync5(join15(tmpdir5(), "th-run-"));
+    root = mkdtempSync5(join17(tmpdir5(), "th-run-"));
   } catch (err) {
     process.stderr.write(
       `terminalhire: could not create the temporary directory this run works in, so nothing was cloned and nothing was executed. That is our environment failing, not your tests: check that the temp directory is writable. (${String(err?.message ?? err)})
@@ -10670,10 +11325,10 @@ async function loadEngine() {
   }
 }
 function readConfig(localDir) {
-  const file = join15(localDir, ".th-run.json");
-  if (!existsSync8(file)) return {};
+  const file = join17(localDir, ".th-run.json");
+  if (!existsSync9(file)) return {};
   try {
-    const parsed = JSON.parse(readFileSync6(file, "utf8"));
+    const parsed = JSON.parse(readFileSync7(file, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch (err) {
     throw new Error(
@@ -10775,6 +11430,7 @@ async function once(engine, opts) {
     targetSha: opts.sha,
     scratchRoot: root,
     preview: opts.preview,
+    ...opts.screenshots ? { screenshots: opts.screenshots } : {},
     ...opts.placement ? { placement: opts.placement } : {},
     ...opts.testCommand ? { testCommandOverride: opts.testCommand } : {},
     // No `imageOrigin` beside it, deliberately. This flag runs on the DEVELOPER's machine,
@@ -10891,6 +11547,8 @@ async function run() {
     // collector reads `.git` there, and --watch watches the same tree (TERM-1098).
     localDir: claimContext?.workspaceRoot ?? localDir,
     preview: !parsed.bools.has("no-preview"),
+    // Off under --watch: a build and a second install per save is too slow for a loop.
+    screenshots: parsed.bools.has("no-screenshots") || parsed.bools.has("watch") ? null : screenshotsOption(pick("preview-route")),
     watch: parsed.bools.has("watch"),
     json: parsed.bools.has("json"),
     testCommand: pick("test-command") ?? null,
@@ -10953,5 +11611,6 @@ if (process.argv[1] && process.argv[1].endsWith("jpi-run.js")) {
 export {
   once,
   resolveClaimContext,
-  run
+  run,
+  screenshotsOption
 };

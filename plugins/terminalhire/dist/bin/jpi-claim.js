@@ -271,15 +271,15 @@ function validateGraph(nodes) {
     }
   }
   const visiting = /* @__PURE__ */ new Set();
-  const done = /* @__PURE__ */ new Set();
+  const done2 = /* @__PURE__ */ new Set();
   const parentMap = new Map(nodes.map((n) => [n.id, n.parents ?? []]));
   const walk2 = (id, path5) => {
-    if (done.has(id)) return;
+    if (done2.has(id)) return;
     if (visiting.has(id)) throw new Error(`vocab: parent cycle ${[...path5, id].join(" \u2192 ")}`);
     visiting.add(id);
     for (const p of parentMap.get(id) ?? []) walk2(p, [...path5, id]);
     visiting.delete(id);
-    done.add(id);
+    done2.add(id);
   };
   for (const n of nodes) walk2(n.id, []);
 }
@@ -5181,7 +5181,7 @@ var init_github_issue_status = __esm({
 // ../../packages/core/src/credit.ts
 function verifyClaimCredit(claim, facts) {
   const reasons = [];
-  const fail = (code, message) => reasons.push({ code, message });
+  const fail = (code, message2) => reasons.push({ code, message: message2 });
   const norm = (r) => r.trim().toLowerCase();
   if (norm(facts.repo) !== norm(claim.repo))
     fail("repo-mismatch", `PR is in ${facts.repo}, claim is against ${claim.repo}`);
@@ -8385,13 +8385,13 @@ function encryptMessage(plaintext, myPrivateKey, peerPublicKey) {
   const ct = cipher.encrypt(new Uint8Array(Buffer.from(plaintext, "utf8")));
   return { ciphertext: bytesToB64(ct), nonce: bytesToB64(nonce) };
 }
-function decryptMessage(message, myPrivateKey, peerPublicKey) {
+function decryptMessage(message2, myPrivateKey, peerPublicKey) {
   const key = deriveSharedKey(myPrivateKey, peerPublicKey);
-  const nonce = b64ToBytes(message.nonce);
+  const nonce = b64ToBytes(message2.nonce);
   if (nonce.length !== NONCE_BYTES) {
     throw new Error(`chatCrypto: bad nonce length (expected ${NONCE_BYTES}, got ${nonce.length})`);
   }
-  const ciphertext = b64ToBytes(message.ciphertext);
+  const ciphertext = b64ToBytes(message2.ciphertext);
   if (ciphertext.length === 0) {
     throw new Error("chatCrypto: empty ciphertext");
   }
@@ -10482,11 +10482,11 @@ var init_src = __esm({
 
 // src/state-dir.ts
 import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync } from "fs";
-function warnStateDirOnce(dir, message) {
+function warnStateDirOnce(dir, message2) {
   if (warnedDirs.has(dir)) return;
   warnedDirs.add(dir);
   try {
-    process.stderr.write(message);
+    process.stderr.write(message2);
   } catch {
   }
 }
@@ -10986,8 +10986,8 @@ var init_api_base = __esm({
     DEV_API_BASE = "https://dev.terminalhire.com";
     DEV_STATE_DIR_NAME = ".terminalhire-dev";
     ApiBaseError = class extends Error {
-      constructor(message) {
-        super(message);
+      constructor(message2) {
+        super(message2);
         this.name = "ApiBaseError";
       }
     };
@@ -11612,16 +11612,16 @@ var init_error = __esm({
     AnthropicError = class extends Error {
     };
     APIError = class _APIError extends AnthropicError {
-      constructor(status, error, message, headers, type) {
-        super(`${_APIError.makeMessage(status, error, message)}`);
+      constructor(status, error, message2, headers, type) {
+        super(`${_APIError.makeMessage(status, error, message2)}`);
         this.status = status;
         this.headers = headers;
         this.requestID = headers?.get("request-id");
         this.error = error;
         this.type = type ?? null;
       }
-      static makeMessage(status, error, message) {
-        const msg = error?.message ? typeof error.message === "string" ? error.message : JSON.stringify(error.message) : error ? JSON.stringify(error) : message;
+      static makeMessage(status, error, message2) {
+        const msg = error?.message ? typeof error.message === "string" ? error.message : JSON.stringify(error.message) : error ? JSON.stringify(error) : message2;
         if (status && msg) {
           return `${status} ${msg}`;
         }
@@ -11633,59 +11633,59 @@ var init_error = __esm({
         }
         return "(no status code or body)";
       }
-      static generate(status, errorResponse, message, headers) {
+      static generate(status, errorResponse, message2, headers) {
         if (!status || !headers) {
-          return new APIConnectionError({ message, cause: castToError(errorResponse) });
+          return new APIConnectionError({ message: message2, cause: castToError(errorResponse) });
         }
         const error = errorResponse;
         const type = error?.["error"]?.["type"];
         if (status === 400) {
-          return new BadRequestError(status, error, message, headers, type);
+          return new BadRequestError(status, error, message2, headers, type);
         }
         if (status === 401) {
-          return new AuthenticationError(status, error, message, headers, type);
+          return new AuthenticationError(status, error, message2, headers, type);
         }
         if (status === 403) {
-          return new PermissionDeniedError(status, error, message, headers, type);
+          return new PermissionDeniedError(status, error, message2, headers, type);
         }
         if (status === 404) {
-          return new NotFoundError(status, error, message, headers, type);
+          return new NotFoundError(status, error, message2, headers, type);
         }
         if (status === 409) {
-          return new ConflictError(status, error, message, headers, type);
+          return new ConflictError(status, error, message2, headers, type);
         }
         if (status === 422) {
-          return new UnprocessableEntityError(status, error, message, headers, type);
+          return new UnprocessableEntityError(status, error, message2, headers, type);
         }
         if (status === 429) {
-          return new RateLimitError(status, error, message, headers, type);
+          return new RateLimitError(status, error, message2, headers, type);
         }
         if (status >= 500) {
-          return new InternalServerError(status, error, message, headers, type);
+          return new InternalServerError(status, error, message2, headers, type);
         }
-        return new _APIError(status, error, message, headers, type);
+        return new _APIError(status, error, message2, headers, type);
       }
     };
     APIUserAbortError = class extends APIError {
-      constructor({ message } = {}) {
-        super(void 0, void 0, message || "Request was aborted.", void 0);
+      constructor({ message: message2 } = {}) {
+        super(void 0, void 0, message2 || "Request was aborted.", void 0);
       }
     };
     APIConnectionError = class extends APIError {
-      constructor({ message, cause }) {
-        super(void 0, void 0, message || "Connection error.", void 0);
+      constructor({ message: message2, cause }) {
+        super(void 0, void 0, message2 || "Connection error.", void 0);
         if (cause)
           this.cause = cause;
       }
     };
     APIConnectionTimeoutError = class extends APIConnectionError {
-      constructor({ message } = {}) {
-        super({ message: message ?? "Request timed out." });
+      constructor({ message: message2 } = {}) {
+        super({ message: message2 ?? "Request timed out." });
       }
     };
     RetryableError = class extends AnthropicError {
-      constructor(message, { cause } = {}) {
-        super(message ?? "Retryable error.");
+      constructor(message2, { cause } = {}) {
+        super(message2 ?? "Retryable error.");
         if (cause !== void 0)
           this.cause = cause;
       }
@@ -11946,8 +11946,8 @@ function ReadableStreamFrom(iterable) {
     start() {
     },
     async pull(controller) {
-      const { done, value } = await iter.next();
-      if (done) {
+      const { done: done2, value } = await iter.next();
+      if (done2) {
         controller.close();
       } else {
         controller.enqueue(value);
@@ -12539,8 +12539,8 @@ async function readLimitedText(resp) {
   const chunks = [];
   let received = 0;
   for (; ; ) {
-    const { done, value } = await reader.read();
-    if (done)
+    const { done: done2, value } = await reader.read();
+    if (done2)
       break;
     if (received + value.length > MAX_TOKEN_RESPONSE_BYTES) {
       const remaining = MAX_TOKEN_RESPONSE_BYTES - received;
@@ -12582,8 +12582,8 @@ var init_types3 = __esm({
     MAX_ERROR_BODY_CHARS = 2e3;
     SAFE_ERROR_KEYS = /* @__PURE__ */ new Set(["error", "error_description", "error_uri"]);
     WorkloadIdentityError = class extends AnthropicError {
-      constructor(message, statusCode = null, body = null, requestId = null) {
-        super(message);
+      constructor(message2, statusCode = null, body = null, requestId = null) {
+        super(message2);
         this.statusCode = statusCode;
         this.body = body;
         this.requestId = requestId;
@@ -13545,7 +13545,7 @@ var init_streaming = __esm({
             throw new AnthropicError("Cannot iterate over a consumed stream, use `.tee()` to split the stream.");
           }
           consumed = true;
-          let done = false;
+          let done2 = false;
           try {
             for await (const sse of _iterSSEMessages(response, controller)) {
               if (sse.event === "completion") {
@@ -13575,13 +13575,13 @@ var init_streaming = __esm({
                 throw new APIError(void 0, body, void 0, response.headers, type);
               }
             }
-            done = true;
+            done2 = true;
           } catch (e) {
             if (isAbortError(e))
               return;
             throw e;
           } finally {
-            if (!done)
+            if (!done2)
               controller.abort();
           }
         }
@@ -13610,21 +13610,21 @@ var init_streaming = __esm({
             throw new AnthropicError("Cannot iterate over a consumed stream, use `.tee()` to split the stream.");
           }
           consumed = true;
-          let done = false;
+          let done2 = false;
           try {
             for await (const line of iterLines()) {
-              if (done)
+              if (done2)
                 continue;
               if (line)
                 yield JSON.parse(line);
             }
-            done = true;
+            done2 = true;
           } catch (e) {
             if (isAbortError(e))
               return;
             throw e;
           } finally {
-            if (!done)
+            if (!done2)
               controller.abort();
           }
         }
@@ -13672,8 +13672,8 @@ var init_streaming = __esm({
           },
           async pull(ctrl) {
             try {
-              const { value, done } = await iter.next();
-              if (done)
+              const { value, done: done2 } = await iter.next();
+              if (done2)
                 return ctrl.close();
               const bytes = encodeUTF8(JSON.stringify(value) + "\n");
               ctrl.enqueue(bytes);
@@ -14842,11 +14842,11 @@ function collectStainlessHelpers(tools, messages) {
     }
   }
   if (messages) {
-    for (const message of messages) {
-      if (wasCreatedByStainlessHelper(message)) {
-        helpers.add(message[SDK_HELPER_SYMBOL]);
+    for (const message2 of messages) {
+      if (wasCreatedByStainlessHelper(message2)) {
+        helpers.add(message2[SDK_HELPER_SYMBOL]);
       }
-      const content = message.content;
+      const content = message2.content;
       if (Array.isArray(content)) {
         for (const block of content) {
           if (wasCreatedByStainlessHelper(block)) {
@@ -15872,16 +15872,16 @@ var require_dist = __commonJS({
     var sha256 = require_sha256();
     var WEBHOOK_TOLERANCE_IN_SECONDS = 5 * 60;
     var ExtendableError = class _ExtendableError extends Error {
-      constructor(message) {
-        super(message);
+      constructor(message2) {
+        super(message2);
         Object.setPrototypeOf(this, _ExtendableError.prototype);
         this.name = "ExtendableError";
-        this.stack = new Error(message).stack;
+        this.stack = new Error(message2).stack;
       }
     };
     var WebhookVerificationError = class _WebhookVerificationError extends ExtendableError {
-      constructor(message) {
-        super(message);
+      constructor(message2) {
+        super(message2);
         Object.setPrototypeOf(this, _WebhookVerificationError.prototype);
         this.name = "WebhookVerificationError";
       }
@@ -16451,12 +16451,12 @@ var init_ToolError = __esm({
     "use strict";
     ToolError = class extends Error {
       constructor(content) {
-        const message = typeof content === "string" ? content : content.map((block) => {
+        const message2 = typeof content === "string" ? content : content.map((block) => {
           if (block.type === "text")
             return block.text;
           return `[${block.type}]`;
         }).join(" ");
-        super(message);
+        super(message2);
         this.name = "ToolError";
         this.content = content;
       }
@@ -17173,10 +17173,10 @@ async function setupSkills(ctx) {
     try {
       const versionId = await resolveSkillVersion(client, skill.skill_id, skill.version);
       const version = await client.beta.skills.versions.retrieve(versionId, { skill_id: skill.skill_id });
-      let dirname9 = path3.basename(version.name.trim());
-      if (dirname9 === "" || dirname9 === "." || dirname9 === "..")
-        dirname9 = skill.skill_id;
-      const dest = path3.resolve(skillsRoot, dirname9);
+      let dirname10 = path3.basename(version.name.trim());
+      if (dirname10 === "" || dirname10 === "." || dirname10 === "..")
+        dirname10 = skill.skill_id;
+      const dest = path3.resolve(skillsRoot, dirname10);
       if (dest !== skillsRoot && !dest.startsWith(skillsRoot + path3.sep)) {
         log.warn("skill name escapes the skills dir; skipping", {
           component: "agent-tool-context",
@@ -19193,12 +19193,12 @@ var init_constants = __esm({
 function getOutputFormat(params) {
   return params?.output_format ?? params?.output_config?.format;
 }
-function maybeParseBetaMessage(message, params, opts) {
+function maybeParseBetaMessage(message2, params, opts) {
   const outputFormat = getOutputFormat(params);
   if (!params || !("parse" in (outputFormat ?? {}))) {
     return {
-      ...message,
-      content: message.content.map((block) => {
+      ...message2,
+      content: message2.content.map((block) => {
         if (block.type === "text") {
           const parsedBlock = Object.defineProperty({ ...block }, "parsed_output", {
             value: null,
@@ -19217,11 +19217,11 @@ function maybeParseBetaMessage(message, params, opts) {
       parsed_output: null
     };
   }
-  return parseBetaMessage(message, params, opts);
+  return parseBetaMessage(message2, params, opts);
 }
-function parseBetaMessage(message, params, opts) {
+function parseBetaMessage(message2, params, opts) {
   let firstParsedOutput = null;
-  const content = message.content.map((block) => {
+  const content = message2.content.map((block) => {
     if (block.type === "text") {
       const parsedOutput = parseBetaOutputFormat(params, block.text);
       if (firstParsedOutput === null) {
@@ -19242,7 +19242,7 @@ function parseBetaMessage(message, params, opts) {
     return block;
   });
   return {
-    ...message,
+    ...message2,
     content,
     parsed_output: firstParsedOutput
   };
@@ -19655,8 +19655,8 @@ var init_BetaMessageStream = __esm({
       }
       static createMessage(messages, params, options, { logger } = {}) {
         const runner = new _BetaMessageStream(params, { logger });
-        for (const message of params.messages) {
-          runner._addMessageParam(message);
+        for (const message2 of params.messages) {
+          runner._addMessageParam(message2);
         }
         __classPrivateFieldSet(runner, _BetaMessageStream_params, { ...params, stream: true }, "f");
         runner._run(() => runner._createMessage(messages, { ...params, stream: true }, { ...options, headers: { ...options?.headers, [STAINLESS_HELPER_METHOD_HEADER]: "stream" } }));
@@ -19668,13 +19668,13 @@ var init_BetaMessageStream = __esm({
           this._emit("end");
         }, __classPrivateFieldGet(this, _BetaMessageStream_handleError, "f"));
       }
-      _addMessageParam(message) {
-        this.messages.push(message);
+      _addMessageParam(message2) {
+        this.messages.push(message2);
       }
-      _addMessage(message, emit2 = true) {
-        this.receivedMessages.push(message);
+      _addMessage(message2, emit2 = true) {
+        this.receivedMessages.push(message2);
         if (emit2) {
-          this._emit("message", message);
+          this._emit("message", message2);
         }
       }
       async _createMessage(messages, params, options) {
@@ -20103,7 +20103,7 @@ var init_BetaMessageStream = __esm({
       }, Symbol.asyncIterator)]() {
         const pushQueue = [];
         const readQueue = [];
-        let done = false;
+        let done2 = false;
         this.on("streamEvent", (event) => {
           const reader = readQueue.shift();
           if (reader) {
@@ -20113,21 +20113,21 @@ var init_BetaMessageStream = __esm({
           }
         });
         this.on("end", () => {
-          done = true;
+          done2 = true;
           for (const reader of readQueue) {
             reader.resolve(void 0);
           }
           readQueue.length = 0;
         });
         this.on("abort", (err) => {
-          done = true;
+          done2 = true;
           for (const reader of readQueue) {
             reader.reject(err);
           }
           readQueue.length = 0;
         });
         this.on("error", (err) => {
-          done = true;
+          done2 = true;
           for (const reader of readQueue) {
             reader.reject(err);
           }
@@ -20136,7 +20136,7 @@ var init_BetaMessageStream = __esm({
         return {
           next: async () => {
             if (!pushQueue.length) {
-              if (done) {
+              if (done2) {
                 return { value: void 0, done: true };
               }
               return new Promise((resolve5, reject) => readQueue.push({ resolve: resolve5, reject })).then((chunk2) => chunk2 ? { value: chunk2, done: false } : { value: void 0, done: true });
@@ -20292,9 +20292,9 @@ var init_BetaToolRunner = __esm({
         let tokensUsed = 0;
         if (__classPrivateFieldGet(this, _BetaToolRunner_message, "f") !== void 0) {
           try {
-            const message = await __classPrivateFieldGet(this, _BetaToolRunner_message, "f");
-            const totalInputTokens = message.usage.input_tokens + (message.usage.cache_creation_input_tokens ?? 0) + (message.usage.cache_read_input_tokens ?? 0);
-            tokensUsed = totalInputTokens + message.usage.output_tokens;
+            const message2 = await __classPrivateFieldGet(this, _BetaToolRunner_message, "f");
+            const totalInputTokens = message2.usage.input_tokens + (message2.usage.cache_creation_input_tokens ?? 0) + (message2.usage.cache_read_input_tokens ?? 0);
+            tokensUsed = totalInputTokens + message2.usage.output_tokens;
           } catch {
             return false;
           }
@@ -20379,9 +20379,9 @@ var init_BetaToolRunner = __esm({
               const isCompacted = await __classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_checkAndCompact).call(this);
               if (!isCompacted) {
                 if (!__classPrivateFieldGet(this, _BetaToolRunner_mutated, "f")) {
-                  const message = await __classPrivateFieldGet(this, _BetaToolRunner_message, "f");
-                  __classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.messages.push({ role: message.role, content: message.content });
-                  if (message.stop_reason === "refusal") {
+                  const message2 = await __classPrivateFieldGet(this, _BetaToolRunner_message, "f");
+                  __classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.messages.push({ role: message2.role, content: message2.content });
+                  if (message2.stop_reason === "refusal") {
                     break;
                   }
                 }
@@ -20440,11 +20440,11 @@ var init_BetaToolRunner = __esm({
        * }
        */
       async generateToolResponse(signal = __classPrivateFieldGet(this, _BetaToolRunner_options, "f").signal) {
-        const message = await __classPrivateFieldGet(this, _BetaToolRunner_message, "f") ?? this.params.messages.at(-1);
-        if (!message) {
+        const message2 = await __classPrivateFieldGet(this, _BetaToolRunner_message, "f") ?? this.params.messages.at(-1);
+        if (!message2) {
           return null;
         }
-        return __classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_generateToolResponse).call(this, message, signal);
+        return __classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_generateToolResponse).call(this, message2, signal);
       }
       /**
        * Wait for the async iterator to complete. This works even if the async iterator hasn't yet started, and
@@ -20659,7 +20659,7 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
             options?.headers
           ])
         };
-        return this.create(params, options).then((message) => parseBetaMessage(message, params, { logger: this._client.logger ?? console }));
+        return this.create(params, options).then((message2) => parseBetaMessage(message2, params, { logger: this._client.logger ?? console }));
       }
       /**
        * Create a Message stream
@@ -22252,12 +22252,12 @@ var init_completions = __esm({
 function getOutputFormat2(params) {
   return params?.output_config?.format;
 }
-function maybeParseMessage(message, params, opts) {
+function maybeParseMessage(message2, params, opts) {
   const outputFormat = getOutputFormat2(params);
   if (!params || !("parse" in (outputFormat ?? {}))) {
     return {
-      ...message,
-      content: message.content.map((block) => {
+      ...message2,
+      content: message2.content.map((block) => {
         if (block.type === "text") {
           const parsedBlock = Object.defineProperty({ ...block }, "parsed_output", {
             value: null,
@@ -22270,11 +22270,11 @@ function maybeParseMessage(message, params, opts) {
       parsed_output: null
     };
   }
-  return parseMessage(message, params, opts);
+  return parseMessage(message2, params, opts);
 }
-function parseMessage(message, params, opts) {
+function parseMessage(message2, params, opts) {
   let firstParsedOutput = null;
-  const content = message.content.map((block) => {
+  const content = message2.content.map((block) => {
     if (block.type === "text") {
       const parsedOutput = parseOutputFormat(params, block.text);
       if (firstParsedOutput === null) {
@@ -22289,7 +22289,7 @@ function parseMessage(message, params, opts) {
     return block;
   });
   return {
-    ...message,
+    ...message2,
     content,
     parsed_output: firstParsedOutput
   };
@@ -22434,8 +22434,8 @@ var init_MessageStream = __esm({
       }
       static createMessage(messages, params, options, { logger } = {}) {
         const runner = new _MessageStream(params, { logger });
-        for (const message of params.messages) {
-          runner._addMessageParam(message);
+        for (const message2 of params.messages) {
+          runner._addMessageParam(message2);
         }
         __classPrivateFieldSet(runner, _MessageStream_params, { ...params, stream: true }, "f");
         runner._run(() => runner._createMessage(messages, { ...params, stream: true }, { ...options, headers: { ...options?.headers, [STAINLESS_HELPER_METHOD_HEADER]: "stream" } }));
@@ -22447,13 +22447,13 @@ var init_MessageStream = __esm({
           this._emit("end");
         }, __classPrivateFieldGet(this, _MessageStream_handleError, "f"));
       }
-      _addMessageParam(message) {
-        this.messages.push(message);
+      _addMessageParam(message2) {
+        this.messages.push(message2);
       }
-      _addMessage(message, emit2 = true) {
-        this.receivedMessages.push(message);
+      _addMessage(message2, emit2 = true) {
+        this.receivedMessages.push(message2);
         if (emit2) {
-          this._emit("message", message);
+          this._emit("message", message2);
         }
       }
       async _createMessage(messages, params, options) {
@@ -22841,7 +22841,7 @@ var init_MessageStream = __esm({
       }, Symbol.asyncIterator)]() {
         const pushQueue = [];
         const readQueue = [];
-        let done = false;
+        let done2 = false;
         this.on("streamEvent", (event) => {
           const reader = readQueue.shift();
           if (reader) {
@@ -22851,21 +22851,21 @@ var init_MessageStream = __esm({
           }
         });
         this.on("end", () => {
-          done = true;
+          done2 = true;
           for (const reader of readQueue) {
             reader.resolve(void 0);
           }
           readQueue.length = 0;
         });
         this.on("abort", (err) => {
-          done = true;
+          done2 = true;
           for (const reader of readQueue) {
             reader.reject(err);
           }
           readQueue.length = 0;
         });
         this.on("error", (err) => {
-          done = true;
+          done2 = true;
           for (const reader of readQueue) {
             reader.reject(err);
           }
@@ -22874,7 +22874,7 @@ var init_MessageStream = __esm({
         return {
           next: async () => {
             if (!pushQueue.length) {
-              if (done) {
+              if (done2) {
                 return { value: void 0, done: true };
               }
               return new Promise((resolve5, reject) => readQueue.push({ resolve: resolve5, reject })).then((chunk2) => chunk2 ? { value: chunk2, done: false } : { value: void 0, done: true });
@@ -23121,7 +23121,7 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
        * ```
        */
       parse(params, options) {
-        return this.create(params, options).then((message) => parseMessage(message, params, { logger: this._client.logger ?? console }));
+        return this.create(params, options).then((message2) => parseMessage(message2, params, { logger: this._client.logger ?? console }));
       }
       /**
        * Create a Message stream.
@@ -23597,8 +23597,8 @@ var init_client = __esm({
       defaultIdempotencyKey() {
         return `stainless-node-retry-${uuid4()}`;
       }
-      makeStatusError(status, error, message, headers) {
-        return APIError.generate(status, error, message, headers);
+      makeStatusError(status, error, message2, headers) {
+        return APIError.generate(status, error, message2, headers);
       }
       buildURL(path5, query2, defaultBaseURL) {
         const baseURL = !__classPrivateFieldGet(this, _BaseAnthropic_instances, "m", _BaseAnthropic_baseURLOverridden).call(this) && defaultBaseURL || this.baseURL;
@@ -24041,7 +24041,7 @@ var init_client = __esm({
 
 // ../../node_modules/@anthropic-ai/sdk/lib/middleware.mjs
 function stripFallbackBlocks(body) {
-  const messages = body.messages.map((message) => Array.isArray(message.content) ? { ...message, content: message.content.filter((block) => block.type !== "fallback") } : message).filter((message) => !Array.isArray(message.content) || message.content.length > 0);
+  const messages = body.messages.map((message2) => Array.isArray(message2.content) ? { ...message2, content: message2.content.filter((block) => block.type !== "fallback") } : message2).filter((message2) => !Array.isArray(message2.content) || message2.content.length > 0);
   return { ...body, messages };
 }
 function betaRefusalFallbackMiddleware(fallbacks, options = {}) {
@@ -24099,8 +24099,8 @@ function betaRefusalFallbackMiddleware(fallbacks, options = {}) {
     let requestedModel = (startIndex === -1 ? body : { ...body, ...fallbacks[startIndex] }).model;
     const fallbackBlocks = [];
     while (index < fallbacks.length - 1) {
-      const message = await ctx.parse(res);
-      if (message?.type !== "message" || message.stop_reason !== "refusal") {
+      const message2 = await ctx.parse(res);
+      if (message2?.type !== "message" || message2.stop_reason !== "refusal") {
         break;
       }
       index += 1;
@@ -24110,9 +24110,9 @@ function betaRefusalFallbackMiddleware(fallbacks, options = {}) {
         type: "fallback",
         // `requestedModel` is always set for a typed body; the `??` defends
         // against an untyped body that carried no `model` field.
-        from: { model: requestedModel ?? message.model },
+        from: { model: requestedModel ?? message2.model },
         to: { model: entry.model },
-        trigger: { type: "refusal", category: message.stop_details?.category ?? null }
+        trigger: { type: "refusal", category: message2.stop_details?.category ?? null }
       });
       requestedModel = entry.model;
       res = await next({
@@ -24120,7 +24120,7 @@ function betaRefusalFallbackMiddleware(fallbacks, options = {}) {
         body: JSON.stringify({
           ...body,
           ...entry,
-          ...message.stop_details?.fallback_credit_token ? { fallback_credit_token: message.stop_details.fallback_credit_token } : void 0
+          ...message2.stop_details?.fallback_credit_token ? { fallback_credit_token: message2.stop_details.fallback_credit_token } : void 0
         })
       });
     }
@@ -24152,8 +24152,8 @@ function spliceFallbackStream(args) {
   const body = new ReadableStream({
     async pull(ctrl) {
       try {
-        const { value, done } = await iter.next();
-        if (done)
+        const { value, done: done2 } = await iter.next();
+        if (done2)
           return ctrl.close();
         ctrl.enqueue(value);
       } catch (err) {
@@ -24857,8 +24857,8 @@ var init_repo_policy_semantic = __esm({
     MIN_QUOTE_CHARS = 16;
     normalize3 = (s) => s.toLowerCase().replace(/\s+/g, " ").trim();
     SemanticAuditUnavailableError = class extends Error {
-      constructor(message) {
-        super(message);
+      constructor(message2) {
+        super(message2);
         this.name = "SemanticAuditUnavailableError";
       }
     };
@@ -24904,15 +24904,15 @@ async function classifyFailure(res) {
   if (res.status !== 403) return "other";
   if (res.headers.get("retry-after")) return "throttle";
   if (res.headers.get("x-ratelimit-remaining") === "0") return "throttle";
-  let message = "";
+  let message2 = "";
   try {
     const peeked = await res.clone().json();
-    message = typeof peeked?.message === "string" ? peeked.message.toLowerCase() : "";
+    message2 = typeof peeked?.message === "string" ? peeked.message.toLowerCase() : "";
   } catch {
     return "other";
   }
-  if (message.includes("secondary rate limit") || message.includes("abuse")) return "throttle";
-  if (message.includes("bad credentials") || message.includes("requires authentication") || message.includes("must authenticate") || message.includes("login attempts exceeded")) {
+  if (message2.includes("secondary rate limit") || message2.includes("abuse")) return "throttle";
+  if (message2.includes("bad credentials") || message2.includes("requires authentication") || message2.includes("must authenticate") || message2.includes("login attempts exceeded")) {
     return "credential";
   }
   return "other";
@@ -25216,16 +25216,16 @@ async function tryLoadFromKeytar() {
     return null;
   }
 }
-function warnStderr(message) {
-  process.stderr.write(`${message}
+function warnStderr(message2) {
+  process.stderr.write(`${message2}
 `);
 }
 function makeWarnOnce() {
   const seen = /* @__PURE__ */ new Set();
-  return (message) => {
-    if (seen.has(message)) return;
-    seen.add(message);
-    warnStderr(message);
+  return (message2) => {
+    if (seen.has(message2)) return;
+    seen.add(message2);
+    warnStderr(message2);
   };
 }
 function atomicWriteFileSync(filePath, content) {
@@ -26829,8 +26829,8 @@ var init_fence = __esm({
     };
     ContainmentError = class extends FenceError {
       sweep;
-      constructor(message, sweep2) {
-        super(message);
+      constructor(message2, sweep2) {
+        super(message2);
         this.sweep = sweep2;
       }
     };
@@ -27773,6 +27773,145 @@ var init_containerLocal = __esm({
   }
 });
 
+// ../../packages/containment/dist/capture.js
+import { createHash as createHash6 } from "crypto";
+import { copyFileSync as copyFileSync3, existsSync as existsSync11, mkdirSync as mkdirSync4, readFileSync as readFileSync11, writeFileSync as writeFileSync11 } from "fs";
+import { dirname as dirname8, isAbsolute as isAbsolute4, join as join21 } from "path";
+import { fileURLToPath as fileURLToPath4 } from "url";
+function captureImageTag(recipe = CAPTURE_DOCKERFILE) {
+  return `terminalhire-capture:${createHash6("sha256").update(recipe).digest("hex").slice(0, 16)}`;
+}
+function captureArgs(o) {
+  let network;
+  if (o.network === "none") {
+    network = "--network=none";
+  } else if (typeof o.network === "object" && o.network !== null) {
+    if (!CONTAINER_NAME.test(o.network.container)) {
+      throw new FenceError(`refusing to join container ${JSON.stringify(o.network.container)}: not a container name`);
+    }
+    network = `--network=container:${o.network.container}`;
+  } else {
+    throw new FenceError(`the capture container takes no network or an app container's, got ${JSON.stringify(o.network)}`);
+  }
+  if (!CONTAINER_NAME.test(o.name)) {
+    throw new FenceError(`refusing capture container name ${JSON.stringify(o.name)}`);
+  }
+  for (const [label, path5] of [
+    ["capture code", o.code],
+    ["capture output", o.out],
+    ...o.site !== null && "bind" in o.site ? [["site", o.site.bind]] : []
+  ]) {
+    if (!isAbsolute4(path5)) {
+      throw new FenceError(`the ${label} directory must be an absolute path, got ${JSON.stringify(path5)}`);
+    }
+  }
+  const site = o.site === null ? [] : "bind" in o.site ? [`--volume=${o.site.bind}:/site:ro`] : [`--volume=${validateVolumeName(o.site.volume, "the site volume")}:/site:ro`];
+  return [
+    "run",
+    "--rm",
+    "--init",
+    `--name=${o.name}`,
+    network,
+    "--cap-drop=ALL",
+    "--security-opt=no-new-privileges",
+    "--pids-limit=512",
+    ...labelArgs(o.labels),
+    ...o.user === null ? [] : [`--user=${String(o.user.uid)}:${String(o.user.gid)}`],
+    "--env=HOME=/tmp",
+    "--tmpfs=/tmp:rw,exec,mode=1777",
+    ...site,
+    `--volume=${o.code}:/capture:ro`,
+    `--volume=${o.out}:/out:rw`,
+    o.image,
+    "node",
+    "/capture/captureEntry.js",
+    JSON.stringify(o.request)
+  ];
+}
+function resolveCaptureCodeSource() {
+  const here = dirname8(fileURLToPath4(import.meta.url));
+  const scoped = join21(here, "capture");
+  return existsSync11(join21(scoped, "captureEntry.js")) ? scoped : here;
+}
+function ensureCaptureImage(docker3, workDir, timeoutMs = 6e5) {
+  const image = captureImageTag();
+  if (docker3.sync(["image", "inspect", "--format={{.Id}}", image]).status === 0) {
+    return { image, built: false };
+  }
+  const context = join21(workDir, "capture-image");
+  mkdirSync4(context, { recursive: true });
+  writeFileSync11(join21(context, "Dockerfile"), CAPTURE_DOCKERFILE);
+  const res = docker3.sync(["build", "--quiet", `--tag=${image}`, context], { timeoutMs });
+  if (res.status !== 0) {
+    throw new Error(`could not build the screenshot image: ${(res.error?.message ?? "") + res.stderr.slice(-800)}`);
+  }
+  return { image, built: true };
+}
+function stageCaptureCode(workDir) {
+  const dir = join21(workDir, "capture-code");
+  mkdirSync4(dir, { recursive: true });
+  copyFileSync3(join21(resolveCaptureCodeSource(), "captureEntry.js"), join21(dir, "captureEntry.js"));
+  return dir;
+}
+async function runCapture(docker3, o, timeoutMs) {
+  const failed = (reason) => ({
+    status: "failed",
+    reason,
+    mode: o.request.mode,
+    basePath: null,
+    items: [],
+    failures: [],
+    notes: []
+  });
+  const child = docker3.spawn(captureArgs(o));
+  let stderr = "";
+  child.stdout.resume();
+  child.stderr.on("data", (d) => {
+    stderr = (stderr + d.toString()).slice(-4e3);
+  });
+  const code = await new Promise((resolve5) => {
+    const timer = setTimeout(() => resolve5(null), timeoutMs);
+    child.on("exit", (c) => {
+      clearTimeout(timer);
+      resolve5(c);
+    });
+    child.on("error", () => {
+      clearTimeout(timer);
+      resolve5(-1);
+    });
+  });
+  docker3.sync(["rm", "--force", o.name], { timeoutMs: 3e4 });
+  if (code === null)
+    return failed(`the screenshot step ran past ${Math.round(timeoutMs / 1e3)}s`);
+  const manifestPath = join21(o.out, "manifest.json");
+  if (!existsSync11(manifestPath)) {
+    return failed(`the screenshot container exited ${String(code)} without a manifest: ${stderr.trim().slice(-400)}`);
+  }
+  try {
+    return JSON.parse(readFileSync11(manifestPath, "utf8"));
+  } catch {
+    return failed("the screenshot manifest could not be read");
+  }
+}
+var CAPTURE_DOCKERFILE, CONTAINER_NAME;
+var init_capture = __esm({
+  "../../packages/containment/dist/capture.js"() {
+    "use strict";
+    init_container();
+    init_fence();
+    CAPTURE_DOCKERFILE = [
+      "FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c",
+      "ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright NODE_PATH=/usr/local/lib/node_modules",
+      "RUN npm install -g playwright-core@1.63.0 \\",
+      " && playwright-core install --with-deps --only-shell chromium \\",
+      " && apt-get clean \\",
+      " && chmod -R a+rX /ms-playwright",
+      ""
+    ].join("\n");
+    CONTAINER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
+  }
+});
+
 // ../../packages/containment/dist/index.js
 var init_dist = __esm({
   "../../packages/containment/dist/index.js"() {
@@ -27785,6 +27924,7 @@ var init_dist = __esm({
     init_container();
     init_reap();
     init_egressProxy();
+    init_capture();
   }
 });
 
@@ -27978,8 +28118,8 @@ var init_previewRegistry = __esm({
 
 // ../../packages/envrun/dist/preview.js
 import { randomBytes as randomBytes7 } from "crypto";
-import { mkdirSync as mkdirSync4, writeFileSync as writeFileSync11 } from "fs";
-import { join as join21 } from "path";
+import { mkdirSync as mkdirSync5, writeFileSync as writeFileSync12 } from "fs";
+import { join as join22 } from "path";
 function docker(client, args, timeoutMs = 6e4) {
   const res = client.sync([...args], { timeoutMs });
   return {
@@ -28041,9 +28181,9 @@ async function startPreview(req) {
   const envArgs = ["--env", `PREVIEW_AUTH_TOKEN=${authToken}`];
   const probeHost = WILDCARD_BINDS.has(bindAddress) ? "127.0.0.1" : bindAddress;
   const probeAuthority = probeHost.includes(":") ? `[${probeHost}]` : probeHost;
-  mkdirSync4(req.scratchDir, { recursive: true });
-  const docPath = join21(req.scratchDir, "preview-run.json");
-  writeFileSync11(docPath, JSON.stringify(req.document, null, 2), "utf8");
+  mkdirSync5(req.scratchDir, { recursive: true });
+  const docPath = join22(req.scratchDir, "preview-run.json");
+  writeFileSync12(docPath, JSON.stringify(req.document, null, 2), "utf8");
   const teardown = () => {
     livePreviews.deregister(client, container);
     for (let i = 0; i < 3; i += 1) {
@@ -28233,11 +28373,11 @@ http
 
 // ../../packages/envrun/dist/venue.js
 import { randomBytes as randomBytes8 } from "crypto";
-import { join as join22 } from "path";
+import { join as join23 } from "path";
 function localJailPaths(scratchRoot) {
   return {
-    jail: join22(scratchRoot, JAIL_SEGMENT),
-    tmp: join22(scratchRoot, JAIL_TMP_SEGMENT)
+    jail: join23(scratchRoot, JAIL_SEGMENT),
+    tmp: join23(scratchRoot, JAIL_TMP_SEGMENT)
   };
 }
 function localVenue() {
@@ -28294,11 +28434,11 @@ function rollbackMessage(cause, rollbackFailures) {
 function describeThrown(thrown, opts) {
   try {
     if (isErrorValue(thrown)) {
-      const message = readErrorField(thrown, "message", UNREADABLE_MESSAGE);
+      const message2 = readErrorField(thrown, "message", UNREADABLE_MESSAGE);
       if (!opts.includeName)
-        return message;
+        return message2;
       const name = readErrorField(thrown, "name", UNREADABLE_NAME);
-      return message === "" ? name : `${name}: ${message}`;
+      return message2 === "" ? name : `${name}: ${message2}`;
     }
     return coerceToString(thrown);
   } catch {
@@ -29018,6 +29158,32 @@ var init_execute = __esm({
   }
 });
 
+// ../../packages/envrun/dist/screenshotsResult.js
+function renderScreenshots(s) {
+  if (s === null || s === void 0)
+    return null;
+  if (s.status === "skipped")
+    return `screenshots  skipped \u2014 ${s.reason ?? "no reason recorded"}`;
+  const lines = [
+    `screenshots  ${String(s.items.length)} in ${s.dir ?? "?"} (routes ${s.routes.join(", ")}; light and dark; desktop and mobile)`
+  ];
+  for (const side of s.sides) {
+    const count = s.items.filter((i) => i.side === side.side).length;
+    lines.push(side.status === "captured" ? `${INDENT}${side.side}: ${String(count)} shots${side.reason === null ? "" : ` (${side.reason})`}` : `${INDENT}${side.side}: skipped \u2014 ${side.reason ?? "no reason recorded"}`);
+  }
+  for (const note of s.notes)
+    lines.push(`${INDENT}${note}`);
+  lines.push(`${INDENT}rendered with no network: no backend, no signed-in state`);
+  return lines.join("\n");
+}
+var INDENT;
+var init_screenshotsResult = __esm({
+  "../../packages/envrun/dist/screenshotsResult.js"() {
+    "use strict";
+    INDENT = " ".repeat(13);
+  }
+});
+
 // ../../packages/attest/dist/types.js
 var IN_TOTO_STATEMENT_TYPE, ACCEPTANCE_RUN_PREDICATE_TYPE, IN_TOTO_PAYLOAD_TYPE, TEST_COMMAND_SOURCES;
 var init_types4 = __esm({
@@ -29134,7 +29300,7 @@ var init_nonce = __esm({
 });
 
 // ../../packages/attest/dist/gceIdentity.js
-import { createHash as createHash6, createPublicKey as createPublicKey2, verify as cryptoVerify2 } from "crypto";
+import { createHash as createHash7, createPublicKey as createPublicKey2, verify as cryptoVerify2 } from "crypto";
 function expectedAudience(dispatchId) {
   if (dispatchId === "")
     throw new TypeError("expectedAudience: dispatchId is empty");
@@ -29280,7 +29446,7 @@ async function verifyGceIdentityToken(token, expectations, deps) {
       email: expectations.serviceAccountEmail,
       iat,
       exp,
-      tokenSha256: createHash6("sha256").update(token, "utf8").digest("hex")
+      tokenSha256: createHash7("sha256").update(token, "utf8").digest("hex")
     }
   };
 }
@@ -29295,7 +29461,7 @@ var init_gceIdentity = __esm({
 });
 
 // ../../packages/attest/dist/confidentialSpace.js
-import { createHash as createHash7, createPublicKey as createPublicKey3, verify as cryptoVerify3 } from "crypto";
+import { createHash as createHash8, createPublicKey as createPublicKey3, verify as cryptoVerify3 } from "crypto";
 function refuse2(reason, detail) {
   return { ok: false, reason, detail };
 }
@@ -29469,7 +29635,7 @@ async function verifyConfidentialSpaceToken(token, expectations, deps) {
       hwmodel,
       iat,
       exp,
-      tokenSha256: createHash7("sha256").update(token, "utf8").digest("hex")
+      tokenSha256: createHash8("sha256").update(token, "utf8").digest("hex")
     }
   };
 }
@@ -29707,6 +29873,7 @@ var RUN_TEST_COMMAND_SOURCES, RUN_IMAGE_SOURCES, RUN_RESULT_SCHEMA, RUN_RESULT_F
 var init_result = __esm({
   "../../packages/envrun/dist/result.js"() {
     "use strict";
+    init_screenshotsResult();
     init_dist2();
     init_classify2();
     init_venueDescriptor();
@@ -29746,6 +29913,7 @@ var init_result = __esm({
       "boundaryRefusals",
       "touchedPaths",
       "preview",
+      "screenshots",
       "containerImage",
       "containerImageDigest",
       "imageSource",
@@ -29780,6 +29948,7 @@ var init_result = __esm({
       boundaryRefusals: (r) => r.boundaryRefusals.length === 0 ? null : ["refused", ...r.boundaryRefusals.map((b) => `  - ${b.detail}`)].join("\n"),
       touchedPaths: (r) => r.touchedPaths.length === 0 ? null : `files        ${String(r.touchedPaths.length)}: ${r.touchedPaths.join(", ")}`,
       preview: (r) => r.preview === null ? null : `preview      ${r.preview.url}`,
+      screenshots: (r) => renderScreenshots(r.screenshots),
       containerImage: (r) => r.containerImage === null ? null : `image        ${r.containerImage}`,
       containerImageDigest: (r) => r.containerImageDigest === null ? null : `image digest ${r.containerImageDigest}`,
       // Shown only when a human chose the environment. `detected` is the ordinary case and
@@ -29822,7 +29991,7 @@ var init_result = __esm({
 });
 
 // ../../packages/envrun/dist/attestation.js
-import { createHash as createHash8, randomBytes as randomBytes11 } from "crypto";
+import { createHash as createHash9, randomBytes as randomBytes11 } from "crypto";
 function contradicts(outcome, counts, exitCode) {
   const budget = OUTCOME_TO_BUDGET[outcome];
   if (budget === null)
@@ -29864,7 +30033,7 @@ function imageDigestOf(ref) {
   return at === -1 ? null : ref.slice(at + 1);
 }
 function sha256Hex(data) {
-  return createHash8("sha256").update(typeof data === "string" ? Buffer.from(data, "utf8") : data).digest("hex");
+  return createHash9("sha256").update(typeof data === "string" ? Buffer.from(data, "utf8") : data).digest("hex");
 }
 function toTestRunResult(result, outputSha256) {
   return {
@@ -30716,8 +30885,8 @@ var init_gcpPlacement = __esm({
     DEFAULT_GCP_ZONE = "us-east1-b";
     DEFAULT_GCP_MACHINE_TYPE = "e2-standard-2";
     GcpPlacementError = class extends Error {
-      constructor(message) {
-        super(message);
+      constructor(message2) {
+        super(message2);
         this.name = "GcpPlacementError";
       }
     };
@@ -30735,18 +30904,18 @@ var init_gcpPlacement = __esm({
 });
 
 // ../../packages/envrun/dist/emptyGitConfig.js
-import { mkdtempSync as mkdtempSync2, rmSync as rmSync7, writeFileSync as writeFileSync12 } from "fs";
+import { mkdtempSync as mkdtempSync2, rmSync as rmSync7, writeFileSync as writeFileSync13 } from "fs";
 import { tmpdir as tmpdir2 } from "os";
-import { join as join23 } from "path";
+import { join as join24 } from "path";
 function emptyGitConfig() {
   if (emptyGitConfigFile !== void 0)
     return emptyGitConfigFile;
   let dir;
   let file;
   try {
-    dir = mkdtempSync2(join23(tmpdir2(), "th-run-nogitconfig-"));
-    file = join23(dir, "config");
-    writeFileSync12(file, "", { mode: 384 });
+    dir = mkdtempSync2(join24(tmpdir2(), "th-run-nogitconfig-"));
+    file = join24(dir, "config");
+    writeFileSync13(file, "", { mode: 384 });
   } catch (err) {
     throw new RunRefusalError("could not create the empty git config this run points GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM at, so git would read the configuration \u2014 and the credential helpers \u2014 on this machine instead. That is our environment failing, not your tests: check that the temp directory is writable.", { cause: err });
   }
@@ -30769,8 +30938,8 @@ var init_emptyGitConfig = __esm({
 
 // ../../packages/envrun/dist/hostedVenue.js
 import { spawn as spawn5, spawnSync as spawnSync5 } from "child_process";
-import { createHash as createHash9, X509Certificate } from "crypto";
-import { chmodSync as chmodSync3, existsSync as existsSync11, mkdtempSync as mkdtempSync3, readFileSync as readFileSync11, rmSync as rmSync8, writeFileSync as writeFileSync13 } from "fs";
+import { createHash as createHash10, X509Certificate } from "crypto";
+import { chmodSync as chmodSync3, existsSync as existsSync12, mkdtempSync as mkdtempSync3, readFileSync as readFileSync12, rmSync as rmSync8, writeFileSync as writeFileSync14 } from "fs";
 import { request as httpsRequest } from "https";
 import { createServer } from "net";
 import { posix as posix3 } from "path";
@@ -30816,19 +30985,19 @@ function decodeMaybe(url) {
 }
 function dispatchedGitBinary() {
   for (const candidate of DISPATCHED_GIT_CANDIDATES) {
-    if (existsSync11(candidate))
+    if (existsSync12(candidate))
       return candidate;
   }
   return "git";
 }
 function dispatchedProbeEnv(cloneDir, base) {
-  const gitDir = join24(cloneDir, ".git");
+  const gitDir = join25(cloneDir, ".git");
   return {
     ...base,
     GIT_DIR: gitDir,
     GIT_WORK_TREE: cloneDir,
-    GIT_INDEX_FILE: join24(gitDir, "index"),
-    GIT_OBJECT_DIRECTORY: join24(gitDir, "objects"),
+    GIT_INDEX_FILE: join25(gitDir, "index"),
+    GIT_OBJECT_DIRECTORY: join25(gitDir, "objects"),
     GIT_ALTERNATE_OBJECT_DIRECTORIES: "",
     GIT_COMMON_DIR: gitDir,
     GIT_NAMESPACE: "",
@@ -31003,8 +31172,8 @@ function fetchAttestationOverTls(req) {
     let cert;
     let key;
     try {
-      cert = readFileSync11(req.certPath);
-      key = readFileSync11(req.keyPath);
+      cert = readFileSync12(req.certPath);
+      key = readFileSync12(req.keyPath);
     } catch (err) {
       settle({ ok: false, reason: `the client key could not be read: ${describeErr(err)}` });
       return;
@@ -31433,7 +31602,7 @@ function iapPortTunnelArgv(vm, project, zone, remotePort, localPort) {
 }
 function spkiSha256Hex(certDer) {
   const spki = new X509Certificate(certDer).publicKey.export({ type: "spki", format: "der" });
-  return createHash9("sha256").update(spki).digest("hex");
+  return createHash10("sha256").update(spki).digest("hex");
 }
 function certMetadataValue(pem) {
   return new X509Certificate(pem).raw.toString("base64url");
@@ -31608,8 +31777,8 @@ function makeClientTls(io, allocated, vm) {
       throw new HostedVenueError(`the directory ${dir} holding ${vm}'s client key could not be removed and is left behind: ${describeErr(err)}`);
     }
   });
-  const certPath = join24(dir, "client.pem");
-  const keyPath = join24(dir, "client-key.pem");
+  const certPath = join25(dir, "client.pem");
+  const keyPath = join25(dir, "client-key.pem");
   const made = io.exec("openssl", clientCertArgv(keyPath, certPath), OPENSSL_TIMEOUT_MS, {});
   if (!made.ok) {
     throw new HostedVenueError(`could not make ${vm}'s client certificate with openssl: ${execDetail(made).slice(0, 300)}`, "ours");
@@ -31695,7 +31864,7 @@ async function reachConfidentialSpace(a) {
   if (!verdict.ok) {
     throw new HostedVenueError(`${vm} presented an attestation this lease refuses (${verdict.reason}): ${verdict.detail}`);
   }
-  const caPath = join24(a.tls.dir, "venue.pem");
+  const caPath = join25(a.tls.dir, "venue.pem");
   try {
     io.writeFile(caPath, venuePem);
   } catch (err) {
@@ -31851,7 +32020,7 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
           throw new HostedVenueError(`the tunnel socket directory ${socketDir} could not be removed and is left behind: ${describeErr(err)}`);
         }
       });
-      const socketPath = join24(socketDir, VENUE_SOCKET_NAME);
+      const socketPath = join25(socketDir, VENUE_SOCKET_NAME);
       if (io.exists(socketPath)) {
         throw new HostedVenueError(`something already exists at ${socketPath}, inside a directory created seconds ago for this run alone. Refusing rather than clearing it: the tunnel would carry the whole run over a path we cannot account for`, "ours");
       }
@@ -32052,18 +32221,18 @@ function makeLease(p) {
           throw new HostedVenueError(`could not stage ${from} onto ${p.vm}: ${execDetail(res).slice(0, 300)}`);
         }
       };
-      const localJail = join24(local.scratchRoot, JAIL_SEGMENT);
-      const localTmp = join24(local.scratchRoot, JAIL_TMP_SEGMENT);
+      const localJail = join25(local.scratchRoot, JAIL_SEGMENT);
+      const localTmp = join25(local.scratchRoot, JAIL_TMP_SEGMENT);
       const required = [
         localTmp,
-        join24(localJail, JAIL_PASSWD_FILE),
-        join24(localJail, JAIL_GROUP_FILE)
+        join25(localJail, JAIL_PASSWD_FILE),
+        join25(localJail, JAIL_GROUP_FILE)
       ];
       const missing = required.filter((path5) => !p.io.exists(path5));
       if (missing.length > 0) {
         throw new HostedVenueError(`refusing to stage ${local.scratchRoot} onto ${p.vm}: the jail at ${localJail} is incomplete \u2014 missing ${missing.join(", ")}. buildJail must run to completion before stage(), or the venue mounts a directory with no identity database.`);
       }
-      const gitConfigPath = join24(local.cloneDir, ".git", "config");
+      const gitConfigPath = join25(local.cloneDir, ".git", "config");
       let gitConfig;
       try {
         gitConfig = p.io.readTextIfPresent(gitConfigPath);
@@ -32202,7 +32371,7 @@ function makeLease(p) {
     }
   };
 }
-var join24, SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, VOLUME_CREATE_TIMEOUT_MS, EXEC_PROBE_TIMEOUT_MS, POPULATE_TIMEOUT_MS, STAGE_PROOF_PREFIX, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING, CS_ATTEST_PORT, CS_DOCKER_PORT, CS_READY_BUDGET_MS, CS_ATTEST_TIMEOUT_MS, CS_PULL_TIMEOUT_MS, CS_ATTEST_INTERVAL_MS, OPENSSL_TIMEOUT_MS, CS_RUN_ARGS, CS_GUEST_USER, CS_STAGE_ROOT, CLIENT_CERT_STAND_IN;
+var join25, SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, VOLUME_CREATE_TIMEOUT_MS, EXEC_PROBE_TIMEOUT_MS, POPULATE_TIMEOUT_MS, STAGE_PROOF_PREFIX, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING, CS_ATTEST_PORT, CS_DOCKER_PORT, CS_READY_BUDGET_MS, CS_ATTEST_TIMEOUT_MS, CS_PULL_TIMEOUT_MS, CS_ATTEST_INTERVAL_MS, OPENSSL_TIMEOUT_MS, CS_RUN_ARGS, CS_GUEST_USER, CS_STAGE_ROOT, CLIENT_CERT_STAND_IN;
 var init_hostedVenue = __esm({
   "../../packages/envrun/dist/hostedVenue.js"() {
     "use strict";
@@ -32214,7 +32383,7 @@ var init_hostedVenue = __esm({
     init_labels();
     init_venueProof();
     init_venue();
-    ({ join: join24 } = posix3);
+    ({ join: join25 } = posix3);
     SSH_READY_BUDGET_MS = 18e4;
     SSH_PROBE_INTERVAL_MS = 5e3;
     SSH_PROBE_TIMEOUT_MS = 25e3;
@@ -32250,8 +32419,8 @@ var init_hostedVenue = __esm({
     VENUE_SOCKET_NAME = "docker.sock";
     HostedVenueError = class extends RunRefusalError {
       source;
-      constructor(message, source = "venue", options) {
-        super(message, options);
+      constructor(message2, source = "venue", options) {
+        super(message2, options);
         this.name = "HostedVenueError";
         this.source = source;
       }
@@ -32268,7 +32437,7 @@ var init_hostedVenue = __esm({
       pushTree: pushTreeWithTar,
       readTextIfPresent: (path5) => {
         try {
-          return readFileSync11(path5, "utf8");
+          return readFileSync12(path5, "utf8");
         } catch (err) {
           if (err.code === "ENOENT")
             return null;
@@ -32300,9 +32469,9 @@ var init_hostedVenue = __esm({
       },
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
       now: () => Date.now(),
-      exists: (path5) => existsSync11(path5),
+      exists: (path5) => existsSync12(path5),
       makePrivateDir: () => {
-        const dir = mkdtempSync3(join24(tmpdir3(), SOCKET_DIR_PREFIX));
+        const dir = mkdtempSync3(join25(tmpdir3(), SOCKET_DIR_PREFIX));
         chmodSync3(dir, 448);
         return dir;
       },
@@ -32369,7 +32538,7 @@ var init_hostedVenue = __esm({
         }
       },
       writeFile: (path5, text) => {
-        writeFileSync13(path5, text, { mode: 384, flag: "wx" });
+        writeFileSync14(path5, text, { mode: 384, flag: "wx" });
       },
       fetchAttestation: (req) => fetchAttestationOverTls(req),
       dockerOverTls: (endpoint, tls, runArgs) => remoteDockerClient(endpoint, { tls, runArgs })
@@ -33543,14 +33712,14 @@ var init_references = __esm({
 });
 
 // ../../packages/envspec/dist/repo.js
-import { readdirSync as readdirSync3, readFileSync as readFileSync12, statSync as statSync5 } from "fs";
-import { join as join25, relative as relative2, sep as sep6 } from "path";
+import { readdirSync as readdirSync3, readFileSync as readFileSync13, statSync as statSync5 } from "fs";
+import { join as join26, relative as relative2, sep as sep6 } from "path";
 function createRepoReader(repoPath) {
-  const resolveIn = (relativePath) => relativePath === "" ? repoPath : join25(repoPath, relativePath);
+  const resolveIn = (relativePath) => relativePath === "" ? repoPath : join26(repoPath, relativePath);
   const toPosix = (absolute) => relative2(repoPath, absolute).split(sep6).join("/");
   const readText = (relativePath) => {
     try {
-      return readFileSync12(resolveIn(relativePath), "utf8");
+      return readFileSync13(resolveIn(relativePath), "utf8");
     } catch {
       return null;
     }
@@ -33576,7 +33745,7 @@ function createRepoReader(repoPath) {
       for (const name of names.slice().sort()) {
         if (SKIP_DIRECTORIES.has(name))
           continue;
-        const child = join25(dir, name);
+        const child = join26(dir, name);
         const st = statOf(toPosix(child));
         if (st === null)
           continue;
@@ -34199,26 +34368,410 @@ var init_derive = __esm({
   }
 });
 
+// ../../packages/envspec/dist/preview.js
+function planPreview(repo) {
+  const rootHtml = repo.exists("index.html") && !repo.isDirectory("index.html");
+  if (!repo.exists("package.json")) {
+    if (rootHtml) {
+      return {
+        previewable: true,
+        buildCommand: null,
+        serveCommand: null,
+        rootHtml: true,
+        reason: "the repository has an index.html at its root"
+      };
+    }
+    return {
+      previewable: false,
+      reason: "the repository has no package.json and no index.html at its root"
+    };
+  }
+  const pkg = readJsonObject(repo, "package.json");
+  if (pkg === null) {
+    return { previewable: false, reason: "package.json could not be read as a JSON object" };
+  }
+  if (pkg.workspaces !== void 0 || repo.exists("pnpm-workspace.yaml")) {
+    return {
+      previewable: false,
+      reason: "the repository root is a workspace, and this version previews single-package repositories only"
+    };
+  }
+  const scripts = scriptsOf(pkg);
+  const run2 = scriptRunner(repo);
+  const build = scripts.has("build") ? `${run2} build` : null;
+  const serveName = SERVE_SCRIPTS.find((name) => scripts.has(name));
+  const serve = serveName === void 0 ? null : `${run2} ${serveName}`;
+  const anyHtml = rootHtml || hasIndexHtml(repo);
+  if (serve === null && !anyHtml) {
+    return {
+      previewable: false,
+      reason: "nothing here can be served: package.json has no preview, start, serve or dev script, and the repository has no index.html"
+    };
+  }
+  if (build === null && serve === null && !rootHtml) {
+    return {
+      previewable: false,
+      reason: "the only index.html is below the root, and package.json has no build or serve script to produce a site from it"
+    };
+  }
+  return {
+    previewable: true,
+    buildCommand: build,
+    serveCommand: serve,
+    rootHtml,
+    reason: build === null ? serve === null ? "the repository has an index.html at its root" : "package.json declares a way to serve the app" : "package.json declares a build script and a way to serve the app"
+  };
+}
+function scriptsOf(pkg) {
+  const scripts = pkg.scripts;
+  const names = /* @__PURE__ */ new Set();
+  if (typeof scripts !== "object" || scripts === null || Array.isArray(scripts))
+    return names;
+  for (const [name, body] of Object.entries(scripts)) {
+    if (typeof body === "string" && body.trim() !== "")
+      names.add(name);
+  }
+  return names;
+}
+function scriptRunner(repo) {
+  if (repo.exists("yarn.lock"))
+    return "yarn run";
+  if (repo.exists("pnpm-lock.yaml"))
+    return "pnpm run";
+  return "npm run";
+}
+function hasIndexHtml(repo) {
+  return repo.listFiles("").some((path5) => path5 === "index.html" || path5.endsWith("/index.html"));
+}
+var SERVE_SCRIPTS;
+var init_preview2 = __esm({
+  "../../packages/envspec/dist/preview.js"() {
+    "use strict";
+    init_manifest2();
+    SERVE_SCRIPTS = ["preview", "start", "serve", "dev"];
+  }
+});
+
 // ../../packages/envspec/dist/index.js
 var init_dist3 = __esm({
   "../../packages/envspec/dist/index.js"() {
     "use strict";
     init_derive();
     init_repo();
+    init_preview2();
     init_yaml();
   }
 });
 
+// ../../packages/envrun/dist/screenshots.js
+import { copyFileSync as copyFileSync4, mkdirSync as mkdirSync6 } from "fs";
+import { join as join27 } from "path";
+function normalizeRoutes(routes) {
+  const out = [];
+  for (const raw of routes ?? []) {
+    const route = raw.trim() === "" ? "/" : raw.trim().startsWith("/") ? raw.trim() : `/${raw.trim()}`;
+    if (!out.includes(route))
+      out.push(route);
+  }
+  if (out.length === 0)
+    out.push("/");
+  return out.slice(0, SCREENSHOT_LIMITS.routes);
+}
+async function runScreenshots(ctx, deps = realDeps) {
+  try {
+    return await takeScreenshots(ctx, deps);
+  } catch (err) {
+    return {
+      status: "skipped",
+      reason: message(err),
+      routes: normalizeRoutes(ctx.routes),
+      dir: null,
+      sides: [],
+      items: [],
+      notes: []
+    };
+  }
+}
+async function takeScreenshots(ctx, deps) {
+  const routes = normalizeRoutes(ctx.routes);
+  const skipped = (reason, sides2 = []) => ({
+    status: "skipped",
+    reason,
+    routes,
+    dir: null,
+    sides: sides2,
+    items: [],
+    notes: []
+  });
+  let plan;
+  try {
+    plan = deps.plan(ctx.after.localRepoDir);
+  } catch (err) {
+    return skipped(`the project could not be read for a preview: ${message(err)}`);
+  }
+  if (!plan.previewable)
+    return skipped(plan.reason);
+  let image;
+  let code;
+  try {
+    ctx.progress?.("screenshots", "preparing the screenshot image");
+    image = deps.ensureImage(ctx.after.lease.docker, ctx.workDir).image;
+    code = deps.stageCode(ctx.workDir);
+  } catch (err) {
+    return skipped(message(err));
+  }
+  const sides = [];
+  const items = [];
+  const notes = [];
+  const take = async (side, tree, sidePlan) => {
+    try {
+      const got = await captureSide(ctx, deps, side, tree, sidePlan, image, code, routes);
+      sides.push(got.side);
+      for (const item of got.items) {
+        const file = `${side}/${item.file}`;
+        deps.copy(join27(got.outDir, item.file), join27(ctx.outDir, file));
+        items.push({ ...item, side, file });
+      }
+      for (const note of got.notes)
+        notes.push(`${side}: ${note}`);
+    } catch (err) {
+      sides.push({ side, status: "skipped", reason: message(err), mode: null, basePath: null });
+    }
+  };
+  ctx.progress?.("screenshots", `after: ${routes.join(", ")}`);
+  await take("after", ctx.after, plan);
+  if (ctx.before === null) {
+    sides.push({
+      side: "before",
+      status: "skipped",
+      reason: "this run has no base tree to compare with",
+      mode: null,
+      basePath: null
+    });
+  } else {
+    let base = null;
+    try {
+      ctx.progress?.("screenshots", "before: preparing the base tree");
+      base = await ctx.before();
+      if (base === null) {
+        sides.push({
+          side: "before",
+          status: "skipped",
+          reason: "the base tree could not be prepared",
+          mode: null,
+          basePath: null
+        });
+      } else {
+        let basePlan;
+        try {
+          basePlan = deps.plan(base.tree.localRepoDir);
+        } catch (err) {
+          basePlan = { previewable: false, reason: message(err) };
+        }
+        if (basePlan.previewable) {
+          await take("before", base.tree, basePlan);
+        } else {
+          sides.push({
+            side: "before",
+            status: "skipped",
+            reason: `the base tree: ${basePlan.reason}`,
+            mode: null,
+            basePath: null
+          });
+        }
+      }
+    } catch (err) {
+      sides.push({
+        side: "before",
+        status: "skipped",
+        reason: message(err),
+        mode: null,
+        basePath: null
+      });
+    } finally {
+      await base?.release().catch(() => void 0);
+    }
+  }
+  if (items.length === 0) {
+    const after = sides.find((s) => s.side === "after");
+    return skipped(after?.reason ?? "no screenshot was taken", sides);
+  }
+  return {
+    status: "captured",
+    reason: null,
+    routes,
+    dir: ctx.outDir,
+    sides,
+    items,
+    notes
+  };
+}
+async function captureSide(ctx, deps, side, tree, plan, image, code, routes) {
+  const skip = (reason) => ({
+    side: { side, status: "skipped", reason, mode: null, basePath: null },
+    items: [],
+    notes: [],
+    outDir: ""
+  });
+  const lease = tree.lease;
+  const step = (s, profile, command, timeoutMs, extra = {}) => deps.runStep(lease, {
+    step: s,
+    profile,
+    command,
+    repoDir: tree.repoDir,
+    jail: tree.jail,
+    tmp: tree.tmp,
+    pathDomain: lease.pathDomain,
+    guestUser: lease.guestUser,
+    stageVolumes: lease.stageVolumes,
+    cloneVolume: lease.cloneVolume,
+    env: deps.env(tree),
+    image: ctx.image,
+    labels: ctx.labels,
+    timeoutMs,
+    ...extra
+  });
+  if (tree.needsInstall && ctx.spec.installCommand !== null) {
+    const proxyCode = await lease.stageProxyCode();
+    try {
+      const install = await step("install", "install", ctx.spec.installCommand, SCREENSHOT_LIMITS.installTimeoutMs, { proxyCode });
+      if (install.exitCode !== 0) {
+        return skip(`installing dependencies failed (exit ${String(install.exitCode)})`);
+      }
+    } finally {
+      proxyCode.cleanup();
+    }
+  }
+  if (plan.buildCommand !== null) {
+    ctx.progress?.("screenshots", `${side}: ${plan.buildCommand}`);
+    const build = await step("build", "offline", `: > ${BUILD_MARKER} && ${plan.buildCommand}`, SCREENSHOT_LIMITS.buildTimeoutMs);
+    if (build.exitCode !== 0) {
+      const tail2 = (build.stderr.trim() || build.stdout.trim()).split("\n").slice(-3).join(" ").slice(-300);
+      return skip(build.timedOut ? `the build ran past ${SCREENSHOT_LIMITS.buildTimeoutMs / 1e3}s` : `the build failed with no network (exit ${String(build.exitCode)}): ${tail2}`);
+    }
+  }
+  const user = lease.guestUser ?? hostIds();
+  const site = lease.cloneVolume !== void 0 ? { volume: lease.cloneVolume } : { bind: tree.repoDir };
+  const staticOut = join27(ctx.workDir, side, "static");
+  deps.mkdir(staticOut);
+  const shot = await deps.runCapture(lease.docker, {
+    image,
+    name: `th-capture-${ctx.runId}-${side}`,
+    site,
+    network: "none",
+    code,
+    out: staticOut,
+    request: {
+      mode: "static",
+      routes,
+      rootHtml: plan.rootHtml,
+      ...plan.buildCommand === null ? {} : { sinceFile: BUILD_MARKER }
+    },
+    user,
+    labels: ctx.labels
+  }, SCREENSHOT_LIMITS.captureTimeoutMs);
+  if (shot.status === "captured")
+    return done(side, shot, staticOut);
+  if (shot.status !== "no-site" || plan.serveCommand === null) {
+    return skip(shot.reason ?? "the screenshot step took no screenshot");
+  }
+  const appLabel = `${ctx.runId}-${side}`;
+  const findApp = () => lease.docker.sync(["ps", "-aq", "--filter", `label=terminalhire.capture-app=${appLabel}`]).stdout.trim().split("\n")[0] || null;
+  const labels = { ...ctx.labels ?? {}, "terminalhire.capture-app": appLabel };
+  ctx.progress?.("screenshots", `${side}: ${plan.serveCommand}`);
+  const serving = step("serve", "offline", plan.serveCommand, SCREENSHOT_LIMITS.waitForPortMs + SCREENSHOT_LIMITS.captureTimeoutMs, { labels }).catch(() => null);
+  let appId = null;
+  try {
+    for (let i = 0; i < 60 && appId === null; i++) {
+      appId = findApp();
+      if (appId === null)
+        await new Promise((r) => setTimeout(r, 500));
+    }
+    if (appId === null)
+      return skip(`the serve script (${plan.serveCommand}) did not start a container`);
+    const serverOut = join27(ctx.workDir, side, "server");
+    deps.mkdir(serverOut);
+    const served = await deps.runCapture(lease.docker, {
+      image,
+      name: `th-capture-${ctx.runId}-${side}-srv`,
+      site: null,
+      network: { container: appId },
+      code,
+      out: serverOut,
+      request: { mode: "server", routes, waitForPortMs: SCREENSHOT_LIMITS.waitForPortMs },
+      user,
+      labels: ctx.labels
+    }, SCREENSHOT_LIMITS.waitForPortMs + SCREENSHOT_LIMITS.captureTimeoutMs);
+    if (served.status !== "captured")
+      return skip(served.reason ?? "the serve script produced no screenshot");
+    return done(side, served, serverOut);
+  } finally {
+    const app = appId ?? findApp();
+    if (app !== null)
+      lease.docker.sync(["rm", "--force", app]);
+    await serving;
+  }
+}
+function done(side, m, outDir) {
+  const failed = m.failures.length;
+  return {
+    side: {
+      side,
+      status: "captured",
+      reason: failed === 0 ? null : `${failed} of ${failed + m.items.length} shots failed: ${m.failures[0]?.error ?? ""}`,
+      mode: m.mode,
+      basePath: m.basePath
+    },
+    items: m.items,
+    notes: m.notes,
+    outDir
+  };
+}
+function message(err) {
+  return String(err?.message ?? err).slice(0, 500);
+}
+var SCREENSHOT_LIMITS, BUILD_MARKER, realDeps;
+var init_screenshots = __esm({
+  "../../packages/envrun/dist/screenshots.js"() {
+    "use strict";
+    init_dist();
+    init_dist3();
+    init_execute();
+    init_screenshotsResult();
+    SCREENSHOT_LIMITS = {
+      routes: 5,
+      buildTimeoutMs: 3e5,
+      installTimeoutMs: 6e5,
+      captureTimeoutMs: 18e4,
+      waitForPortMs: 6e4
+    };
+    BUILD_MARKER = ".terminalhire-build-start";
+    realDeps = {
+      runStep: (lease, r) => runStep(lease.containment, r),
+      runCapture,
+      ensureImage: (docker3, workDir) => ensureCaptureImage(docker3, workDir),
+      stageCode: stageCaptureCode,
+      plan: (dir) => planPreview(createRepoReader(dir)),
+      copy: (from, to) => {
+        mkdirSync6(join27(to, ".."), { recursive: true });
+        copyFileSync4(from, to);
+      },
+      mkdir: (dir) => mkdirSync6(dir, { recursive: true, mode: 511 }),
+      env: (tree) => scrubEnv(process.env, scrubEnvPathsFor("container", { jail: tree.jail, tmp: tree.tmp }))
+    };
+  }
+});
+
 // ../../packages/envrun/dist/gradleTestSummary.js
-import { mkdirSync as mkdirSync5, writeFileSync as writeFileSync14 } from "fs";
-import { join as join26 } from "path";
+import { mkdirSync as mkdirSync7, writeFileSync as writeFileSync15 } from "fs";
+import { join as join28 } from "path";
 function stageGradleTestSummary(jailHome, guestUser, io = {}) {
-  const dir = join26(jailHome, ".gradle", "init.d");
-  mkdirSync5(dir, { recursive: true });
-  writeFileSync14(join26(dir, "terminalhire-test-summary.gradle"), GRADLE_TEST_SUMMARY_INIT);
+  const dir = join28(jailHome, ".gradle", "init.d");
+  mkdirSync7(dir, { recursive: true });
+  writeFileSync15(join28(dir, "terminalhire-test-summary.gradle"), GRADLE_TEST_SUMMARY_INIT);
   const ids2 = io.ids === void 0 ? hostIds() : io.ids;
   if (ids2?.uid === 0 && guestUser && guestUser.uid !== 0) {
-    (io.chown ?? chownTree)(join26(jailHome, ".gradle"), guestUser);
+    (io.chown ?? chownTree)(join28(jailHome, ".gradle"), guestUser);
   }
 }
 var GRADLE_TEST_MARKER, GRADLE_TEST_SUMMARY_INIT;
@@ -34245,10 +34798,10 @@ allprojects {
 
 // ../../packages/envrun/dist/thrun.js
 import { execFileSync, spawnSync as spawnSync6 } from "child_process";
-import { existsSync as existsSync12, mkdirSync as mkdirSync6, mkdtempSync as mkdtempSync4, rmSync as rmSync9 } from "fs";
+import { existsSync as existsSync13, mkdirSync as mkdirSync8, mkdtempSync as mkdtempSync4, rmSync as rmSync9 } from "fs";
 import { randomUUID as randomUUID3 } from "crypto";
 import { tmpdir as tmpdir4 } from "os";
-import { join as join27 } from "path";
+import { join as join29 } from "path";
 function git(repoDir, args, allowNonZero = false) {
   const res = spawnSync6("git", [...args], {
     cwd: repoDir,
@@ -34263,7 +34816,7 @@ function git(repoDir, args, allowNonZero = false) {
   return res.stdout ?? "";
 }
 function collectWorkingDiff(repoDir, opts = {}) {
-  if (!existsSync12(join27(repoDir, ".git"))) {
+  if (!existsSync13(join29(repoDir, ".git"))) {
     throw new ThRunError(`${repoDir} is not a git checkout (no .git). \`th run\` ships the working diff, so it needs a repository to read one from.`);
   }
   const headSha = git(repoDir, ["rev-parse", "HEAD"]).trim();
@@ -34411,7 +34964,7 @@ function credentialFreeHome() {
     return credentialFreeHomeDir;
   let made;
   try {
-    made = mkdtempSync4(join27(tmpdir4(), "th-run-nohome-"));
+    made = mkdtempSync4(join29(tmpdir4(), "th-run-nohome-"));
   } catch (err) {
     throw new RunRefusalError("could not create the empty directory this clone uses as its home, so the clone would read the credentials on this machine instead. That is our environment failing, not your tests: check that the temp directory is writable.", { cause: err });
   }
@@ -34486,7 +35039,7 @@ function cloneTargetAtUnguarded(opts) {
   if (persisted !== null) {
     throw new RunRefusalError(`refusing to clone from a URL carrying ${persisted}: \`git remote add\` writes the source verbatim into .git/config, which is mounted where the repo\u2019s own test command runs. Fetch with the credential out of band so it is never written to disk \u2014 this runner takes one as an HTTP header, which is never persisted.`);
   }
-  mkdirSync6(opts.dest, { recursive: true });
+  mkdirSync8(opts.dest, { recursive: true });
   const runOut = (args) => execFileSync("git", [...gitConfigArgs(), ...args], {
     cwd: opts.dest,
     encoding: "utf8",
@@ -34525,7 +35078,7 @@ function cloneTargetAtUnguarded(opts) {
 }
 function scrubCloneSource(dest, run2) {
   run2(["remote", "remove", "origin"]);
-  rmSync9(join27(dest, ".git", "FETCH_HEAD"), { force: true });
+  rmSync9(join29(dest, ".git", "FETCH_HEAD"), { force: true });
 }
 function publishableTarget(url) {
   if (separatorInTarget(url) !== null)
@@ -34683,6 +35236,7 @@ function refusedRun(fields) {
     boundaryRefusals: fields.boundaryRefusals,
     touchedPaths: fields.touchedPaths,
     preview: null,
+    screenshots: null,
     containerImage: null,
     containerImageDigest: null,
     leaksClean: null,
@@ -34937,10 +35491,10 @@ async function runVerification(req, ctx) {
       venueIdentity: null
     };
   }
-  const stage = join27(req.scratchRoot, runId);
-  const cloneDir = join27(stage, "clone");
-  const scratch = join27(stage, "scratch");
-  mkdirSync6(scratch, { recursive: true });
+  const stage = join29(req.scratchRoot, runId);
+  const cloneDir = join29(stage, "clone");
+  const scratch = join29(stage, "scratch");
+  mkdirSync8(scratch, { recursive: true });
   assertSafeTargetSha(req.targetSha);
   progress("clone", `${publishableTarget(req.targetRepo)} @ ${req.targetSha.slice(0, 12)}`);
   cloneTargetAt({
@@ -35011,7 +35565,7 @@ async function runVerification(req, ctx) {
     const venuePaths = await lease.stage({
       cloneDir,
       scratchRoot: scratch,
-      previewDir: join27(stage, "preview"),
+      previewDir: join29(stage, "preview"),
       // On a dispatched run the commit is the statement of what was tested, so
       // it rides with the tree and the venue seam refuses a tree that is not
       // that commit (design §6 item 4, TERM-892 — the guard lives in
@@ -35034,7 +35588,7 @@ async function runVerification(req, ctx) {
       ...req.testTimeoutMs === void 0 ? {} : { testTimeoutMs: req.testTimeoutMs }
     });
     const outputTail = excerptOutput(verdict.test?.stdout ?? "", verdict.test?.stderr ?? "");
-    const base = {
+    let base = {
       schema: RUN_RESULT_SCHEMA,
       runId,
       claimId: req.claimId,
@@ -35062,6 +35616,7 @@ async function runVerification(req, ctx) {
       boundaryRefusals: [],
       touchedPaths: pre.touchedPaths,
       preview: null,
+      screenshots: null,
       containerImage: verdict.image,
       // The run body never inspects the image, so it records no digest rather than
       // a re-read of the name. The audit harness (`e2e-audit.mjs`) is the producer
@@ -35081,6 +35636,38 @@ async function runVerification(req, ctx) {
       // reasoning and the #735 failure that makes the distinction load-bearing.
       venue: describeVenue(lease)
     };
+    if (req.screenshots !== void 0) {
+      const shots = lease.pathDomain !== "local" ? skippedScreenshots(req.screenshots.routes, "screenshots are taken on local runs only for now") : await runScreenshots({
+        after: {
+          lease,
+          repoDir: venuePaths.cloneDir,
+          localRepoDir: cloneDir,
+          jail: venuePaths.jail,
+          tmp: venuePaths.tmp,
+          needsInstall: false
+        },
+        before: diff === null ? null : () => prepareBaseTree({
+          stage,
+          runId,
+          placement,
+          targetRepo: req.targetRepo,
+          targetSha: req.targetSha,
+          ...req.targetCacheDir ? { targetCacheDir: req.targetCacheDir } : {},
+          ...req.targetAuth ? { targetAuth: req.targetAuth } : {},
+          baselinePatch: hasBaselinePatch ? baselinePatch ?? "" : null,
+          progress
+        }),
+        spec,
+        image,
+        ...labels ? { labels } : {},
+        routes: req.screenshots.routes ?? ["/"],
+        outDir: req.screenshots.outDir,
+        workDir: join29(stage, "screenshots"),
+        runId,
+        progress
+      });
+      base = { ...base, screenshots: shots };
+    }
     if (req.preview === false)
       return {
         result: base,
@@ -35091,6 +35678,7 @@ async function runVerification(req, ctx) {
         venueIdentity: lease.venueIdentity ?? null
       };
     progress("preview", "starting one instance both parties can open");
+    const previewStartedAt = Date.now();
     const instance = await lease.publishPreview({
       labels,
       idBase: `th-${runId}`,
@@ -35106,9 +35694,11 @@ async function runVerification(req, ctx) {
       result: {
         ...base,
         preview: toPreviewHandle(instance),
-        // Re-taken AFTER the preview is reachable, so the number a developer reads
-        // is the time until they could actually open the URL.
-        wallMs: Date.now() - startedAt
+        // Extended by the preview's own start, so the number a developer reads is
+        // the time until they could open the URL. Extended from `base.wallMs`, not
+        // re-taken from `startedAt`: the screenshots ran in between, and they must
+        // not move any number in the verdict (TERM-1258).
+        wallMs: base.wallMs + (Date.now() - previewStartedAt)
       },
       preview: instance,
       spec,
@@ -35120,11 +35710,64 @@ async function runVerification(req, ctx) {
     await releaseWithoutThrowing(lease, progress);
   }
 }
+function skippedScreenshots(routes, reason) {
+  return {
+    status: "skipped",
+    reason,
+    routes: normalizeRoutes(routes),
+    dir: null,
+    sides: [],
+    items: [],
+    notes: []
+  };
+}
+async function prepareBaseTree(o) {
+  const root = join29(o.stage, "base");
+  const cloneDir = join29(root, "clone");
+  const scratch = join29(root, "scratch");
+  mkdirSync8(scratch, { recursive: true });
+  cloneTargetAt({
+    url: o.targetRepo,
+    sha: o.targetSha,
+    dest: cloneDir,
+    ...o.targetCacheDir ? { cacheDir: o.targetCacheDir } : {},
+    ...o.targetAuth ? { auth: o.targetAuth } : {}
+  });
+  if (o.baselinePatch !== null)
+    applyPatch(cloneDir, o.baselinePatch, "baseline patch");
+  const resolved = await resolveLease(o.placement, `${o.runId}-base`);
+  if (!resolved.ok)
+    throw new Error(resolved.refusal);
+  const lease = resolved.lease;
+  try {
+    buildJail(scratch, lease.guestUser);
+    const paths = await lease.stage({
+      cloneDir,
+      scratchRoot: scratch,
+      previewDir: join29(root, "preview")
+    });
+    return {
+      tree: {
+        lease,
+        repoDir: paths.cloneDir,
+        localRepoDir: cloneDir,
+        jail: paths.jail,
+        tmp: paths.tmp,
+        needsInstall: true
+      },
+      release: () => releaseWithoutThrowing(lease, o.progress)
+    };
+  } catch (err) {
+    await releaseWithoutThrowing(lease, o.progress);
+    throw err;
+  }
+}
 var ThRunError, OUTPUT_TAIL_BYTES, FULL_COMMIT_ID, ALLOWED_URL_SCHEMES, SCP_STYLE, URL_SCHEME, WINDOWS_ABSOLUTE, UNC_PATH, TRANSPORT_REASON, SHA_REASON, FULL_SHA, MIN_GIT_VERSION_FOR_END_OF_OPTIONS, CloneUnavailableError, GIT_ENV_ALLOWLIST, credentialFreeHomeDir, SSH_ISOLATION_ARGS, WITHHELD_SEGMENT, UNPARSEABLE_TARGET, FAILURE_LINE, REDACTED_TARGET_REPO, REDACTED_TARGET_SHA;
 var init_thrun = __esm({
   "../../packages/envrun/dist/thrun.js"() {
     "use strict";
     init_dist();
+    init_screenshots();
     init_dist3();
     init_attestation2();
     init_boundary();
@@ -35377,7 +36020,7 @@ var init_dbplan = __esm({
 // ../../packages/envrun/dist/dbstack.js
 import { spawnSync as spawnSync7 } from "child_process";
 import { randomBytes as randomBytes12 } from "crypto";
-import { mkdirSync as mkdirSync7 } from "fs";
+import { mkdirSync as mkdirSync9 } from "fs";
 function installCommandFor(runner) {
   switch (runner) {
     case "sql":
@@ -35719,8 +36362,8 @@ async function installLocalMigrationTooling(opts) {
     };
   }
   const { jail, tmp } = buildJail(opts.scratchRoot);
-  mkdirSync7(jail, { recursive: true });
-  mkdirSync7(tmp, { recursive: true });
+  mkdirSync9(jail, { recursive: true });
+  mkdirSync9(tmp, { recursive: true });
   const spec = {
     profile: "install",
     clone: opts.repoDir,
@@ -36220,12 +36863,12 @@ __export(cache_store_exports, {
   updateIndexCache: () => updateIndexCache,
   writeIndexCache: () => writeIndexCache
 });
-import { readFileSync as readFileSync13, writeFileSync as writeFileSync15, renameSync as renameSync5 } from "fs";
-import { join as join28 } from "path";
+import { readFileSync as readFileSync14, writeFileSync as writeFileSync16, renameSync as renameSync5 } from "fs";
+import { join as join30 } from "path";
 import { homedir as homedir13 } from "os";
 function readCacheEntry() {
   try {
-    return JSON.parse(readFileSync13(INDEX_CACHE_FILE, "utf8"));
+    return JSON.parse(readFileSync14(INDEX_CACHE_FILE, "utf8"));
   } catch {
     return null;
   }
@@ -36240,7 +36883,7 @@ function updateIndexCache(patch) {
     ts: Date.now()
   };
   const tmp = `${INDEX_CACHE_FILE}.${process.pid}.${tmpCounter++}.tmp`;
-  writeFileSync15(tmp, JSON.stringify(entry), "utf8");
+  writeFileSync16(tmp, JSON.stringify(entry), "utf8");
   renameSync5(tmp, INDEX_CACHE_FILE);
   return entry;
 }
@@ -36252,8 +36895,8 @@ var init_cache_store = __esm({
   "bin/cache-store.js"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR10 = process.env.TERMINALHIRE_DIR || join28(homedir13(), ".terminalhire");
-    INDEX_CACHE_FILE = join28(TERMINALHIRE_DIR10, "index-cache.json");
+    TERMINALHIRE_DIR10 = process.env.TERMINALHIRE_DIR || join30(homedir13(), ".terminalhire");
+    INDEX_CACHE_FILE = join30(TERMINALHIRE_DIR10, "index-cache.json");
     SCHEMA_VERSION2 = 1;
     tmpCounter = 0;
   }
@@ -36452,19 +37095,19 @@ var init_audit2 = __esm({
 // bin/jpi-claim.js
 init_src();
 import {
-  readFileSync as readFileSync14,
-  writeFileSync as writeFileSync16,
-  mkdirSync as mkdirSync8,
+  readFileSync as readFileSync15,
+  writeFileSync as writeFileSync17,
+  mkdirSync as mkdirSync10,
   mkdtempSync as mkdtempSync5,
   renameSync as renameSync6,
-  existsSync as existsSync13,
+  existsSync as existsSync14,
   lstatSync as lstatSync4,
   realpathSync as realpathSync2,
   rmSync as rmSync10,
   readdirSync as readdirSync4
 } from "fs";
-import { join as join29, dirname as dirname8, isAbsolute as isAbsolute4, resolve as pathResolve } from "path";
-import { createHash as createHash10 } from "crypto";
+import { join as join31, dirname as dirname9, isAbsolute as isAbsolute5, resolve as pathResolve } from "path";
+import { createHash as createHash11 } from "crypto";
 import { homedir as homedir14, hostname as osHostname } from "os";
 import { execFile as execFile3, execFileSync as execFileSync2, spawnSync as spawnSync8 } from "child_process";
 import { promisify as promisify3 } from "util";
@@ -36910,13 +37553,13 @@ async function syncFounderVerdicts({
 
 // bin/jpi-claim.js
 init_founder_note_sync();
-var TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join29(homedir14(), ".terminalhire");
-var INDEX_CACHE_FILE2 = join29(TERMINALHIRE_DIR11, "index-cache.json");
-var CLAIM_PUSH_MARKER = join29(TERMINALHIRE_DIR11, "claim-push.json");
-var REPO_CONTINUITY_NUDGE_MARKER = join29(TERMINALHIRE_DIR11, "repo-continuity-nudged.json");
+var TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join31(homedir14(), ".terminalhire");
+var INDEX_CACHE_FILE2 = join31(TERMINALHIRE_DIR11, "index-cache.json");
+var CLAIM_PUSH_MARKER = join31(TERMINALHIRE_DIR11, "claim-push.json");
+var REPO_CONTINUITY_NUDGE_MARKER = join31(TERMINALHIRE_DIR11, "repo-continuity-nudged.json");
 function readNudgedClaimIds() {
   try {
-    const raw = JSON.parse(readFileSync14(REPO_CONTINUITY_NUDGE_MARKER, "utf8"));
+    const raw = JSON.parse(readFileSync15(REPO_CONTINUITY_NUDGE_MARKER, "utf8"));
     return new Set(Array.isArray(raw.claimIds) ? raw.claimIds : []);
   } catch {
     return /* @__PURE__ */ new Set();
@@ -36927,7 +37570,7 @@ function markClaimNudged(id) {
     const ids2 = readNudgedClaimIds();
     ids2.add(id);
     ensureStateDir(TERMINALHIRE_DIR11);
-    writeFileSync16(REPO_CONTINUITY_NUDGE_MARKER, JSON.stringify({ claimIds: [...ids2] }), "utf8");
+    writeFileSync17(REPO_CONTINUITY_NUDGE_MARKER, JSON.stringify({ claimIds: [...ids2] }), "utf8");
   } catch {
   }
 }
@@ -37220,8 +37863,8 @@ function pickExistingPr(prListJson, ghUser) {
   return match2 && typeof match2.url === "string" ? match2.url : null;
 }
 function readClaimablePool() {
-  if (!existsSync13(INDEX_CACHE_FILE2)) return [];
-  const entry = JSON.parse(readFileSync14(INDEX_CACHE_FILE2, "utf8"));
+  if (!existsSync14(INDEX_CACHE_FILE2)) return [];
+  const entry = JSON.parse(readFileSync15(INDEX_CACHE_FILE2, "utf8"));
   const bounties = (entry?.index?.jobs ?? []).filter((j) => j.source === "bounty");
   const contributions = (entry?.index?.contribute ?? []).filter((j) => j.source === "contribute");
   return [...bounties, ...contributions];
@@ -39271,7 +39914,7 @@ async function cmdAttach(id, worktree, branch) {
 function workDirFor(repoFullName, issueNumber) {
   const [owner, repo] = String(repoFullName).split("/");
   const suffix = issueNumber ? `-${issueNumber}` : "";
-  return join29(homedir14(), "terminalhire", "work", `${owner}-${repo}${suffix}`);
+  return join31(homedir14(), "terminalhire", "work", `${owner}-${repo}${suffix}`);
 }
 function startBranchFor(repoFullName, issueNumber) {
   const repo = String(repoFullName).split("/")[1] || "claim";
@@ -39520,14 +40163,14 @@ terminalhire claim: not started \u2014 starting forks ${claim.repoFullName} to y
   }
   const issueNumber = (parseGitHubUrl(claim.issueUrl) || {}).number;
   const destDir = workDirFor(claim.repoFullName, issueNumber);
-  if (existsSync13(destDir)) {
+  if (existsSync14(destDir)) {
     console.error(
       `terminalhire claim: ${destDir} already exists \u2014 refusing to clobber it.
   Remove it and retry, or attach it: terminalhire claim attach ${id} --worktree ${destDir} --branch <branch>`
     );
     process.exit(1);
   }
-  mkdirSync8(join29(homedir14(), "terminalhire", "work"), { recursive: true });
+  mkdirSync10(join31(homedir14(), "terminalhire", "work"), { recursive: true });
   const { createProgress: createProgress2, parseGitProgress: parseGitProgress2, splitProgressChunk: splitProgressChunk2, shStream: shStream2 } = await Promise.resolve().then(() => (init_progress(), progress_exports));
   const progress = createProgress2();
   let forkFullName;
@@ -39655,7 +40298,7 @@ function founderPostingIdOf(claim) {
 }
 function sliceWorkDirFor(claimLocalId) {
   const safe = String(claimLocalId).replace(/[^A-Za-z0-9._-]/g, "-");
-  return join29(homedir14(), "terminalhire", "work", `slice-${safe}`);
+  return join31(homedir14(), "terminalhire", "work", `slice-${safe}`);
 }
 function assertNoBooleanPath(dest, flagName) {
   const last = String(dest).split(/[\\/]/).filter(Boolean).pop();
@@ -39667,7 +40310,7 @@ function assertNoBooleanPath(dest, flagName) {
   return dest;
 }
 function resolveDeliveryDir(flags, claimLocalId, { existsFn, readdirFn } = {}) {
-  const exists = existsFn ?? existsSync13;
+  const exists = existsFn ?? existsSync14;
   const readdir3 = readdirFn ?? readdirSync4;
   let probing = null;
   try {
@@ -39767,7 +40410,7 @@ function renderServerRefusal(status, body) {
 }
 function safeSliceRelPath(p) {
   if (typeof p !== "string" || p.length === 0) return false;
-  if (isAbsolute4(p) || p.includes("\\") || /^[A-Za-z]:/.test(p)) return false;
+  if (isAbsolute5(p) || p.includes("\\") || /^[A-Za-z]:/.test(p)) return false;
   return p.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
 }
 function writeSliceFiles(destDir, files) {
@@ -39780,9 +40423,9 @@ function writeSliceFiles(destDir, files) {
   const unavailable = [];
   for (const f of files) {
     if (typeof f.content === "string") {
-      const abs = join29(destDir, f.path);
-      mkdirSync8(dirname8(abs), { recursive: true });
-      writeFileSync16(abs, f.content, "utf8");
+      const abs = join31(destDir, f.path);
+      mkdirSync10(dirname9(abs), { recursive: true });
+      writeFileSync17(abs, f.content, "utf8");
       written.push(f.path);
     } else {
       unavailable.push({ path: f.path, reason: f.unavailableReason || "(no reason given)" });
@@ -39816,7 +40459,7 @@ function writeDeliveredBrief(destDir, spec) {
 function ensureExcludedPackDir(destDir) {
   let occupant = null;
   try {
-    occupant = lstatSync4(join29(destDir, BRIEF_DIR));
+    occupant = lstatSync4(join31(destDir, BRIEF_DIR));
   } catch (err) {
     if (err?.code !== "ENOENT") {
       return {
@@ -39831,12 +40474,12 @@ function ensureExcludedPackDir(destDir) {
       reason: `${BRIEF_DIR}/ already exists in the delivered tree, and excluding it would hide that content from your patch`
     };
   }
-  const excludeFile = join29(destDir, ".git", "info", "exclude");
+  const excludeFile = join31(destDir, ".git", "info", "exclude");
   try {
-    const existing = existsSync13(excludeFile) ? readFileSync14(excludeFile, "utf8") : "";
+    const existing = existsSync14(excludeFile) ? readFileSync15(excludeFile, "utf8") : "";
     if (!existing.split("\n").includes(BRIEF_EXCLUDE_LINE)) {
-      mkdirSync8(dirname8(excludeFile), { recursive: true });
-      writeFileSync16(
+      mkdirSync10(dirname9(excludeFile), { recursive: true });
+      writeFileSync17(
         excludeFile,
         `${existing}${existing === "" || existing.endsWith("\n") ? "" : "\n"}${BRIEF_EXCLUDE_LINE}
 `,
@@ -39850,16 +40493,16 @@ function ensureExcludedPackDir(destDir) {
 }
 function writePackFile(destDir, relPath, content, what) {
   try {
-    const abs = join29(destDir, relPath);
-    mkdirSync8(dirname8(abs), { recursive: true });
-    writeFileSync16(abs, content, { encoding: "utf8", flag: "wx" });
+    const abs = join31(destDir, relPath);
+    mkdirSync10(dirname9(abs), { recursive: true });
+    writeFileSync17(abs, content, { encoding: "utf8", flag: "wx" });
   } catch (err) {
     return { written: false, reason: `the ${what} could not be written (${err.message})` };
   }
   return { written: true, reason: null, sha256: sha256OfUtf8(content) };
 }
 function sha256OfUtf8(content) {
-  return createHash10("sha256").update(content, "utf8").digest("hex");
+  return createHash11("sha256").update(content, "utf8").digest("hex");
 }
 function writeWorkspacePack(destDir, spec, claim, delivery) {
   if (delivery !== "full" && delivery !== "sparse") {
@@ -39994,7 +40637,7 @@ function buildPatchSubmission({ bountyId, claimId, patch, authorName, authorEmai
   }
   return { bountyId, claimId, patch, authorName, authorEmail, proofToken: auth.proofToken };
 }
-function renderRunView(run2, message, extra = {}) {
+function renderRunView(run2, message2, extra = {}) {
   const lines = [];
   const sha = run2.commitSha ? String(run2.commitSha).slice(0, 10) : null;
   lines.push(`  run:        ${run2.branch ?? "(no branch)"}${sha ? ` @ ${sha}` : ""}`);
@@ -40028,7 +40671,7 @@ function renderRunView(run2, message, extra = {}) {
     lines.push("  \u2500\u2500 log tail \u2500\u2500");
     for (const l of terminalSafeLines(run2.logTail)) lines.push(`  \u2502 ${l}`);
   }
-  if (message) lines.push(`  ${message}`);
+  if (message2) lines.push(`  ${message2}`);
   return lines.join("\n");
 }
 var CLAIM_EVENT_LABEL = {
@@ -40331,7 +40974,7 @@ async function cmdSliceFullTier(claims, id, local, fullTierBody, flags, cloneRep
   if (resolvedDir.suffixed) {
     console.log(`terminalhire claim: the usual directory has content \u2014 using ${dest}`);
   }
-  mkdirSync8(dest, { recursive: true });
+  mkdirSync10(dest, { recursive: true });
   const branch = `claim/${String(claim.id).replace(/[^A-Za-z0-9._-]/g, "-")}`;
   let engine;
   try {
@@ -40515,7 +41158,7 @@ async function attemptSliceDelivery(id, flags = {}) {
   if (resolvedDir.suffixed) {
     console.log(`terminalhire claim: the usual directory has content \u2014 using ${finalDest}`);
   }
-  mkdirSync8(dirname8(finalDest), { recursive: true });
+  mkdirSync10(dirname9(finalDest), { recursive: true });
   let dest = mkdtempSync5(`${finalDest}.tmp-`);
   const { written, unavailable } = writeSliceFiles(dest, body.files);
   const branch = `claim/${String(claim.id).replace(/[^A-Za-z0-9._-]/g, "-")}`;
@@ -41056,17 +41699,17 @@ async function cmdSubmit(id, flags = {}) {
   const head = `${ghUser}:${claim.branch}`;
   const title = flags.title || claim.title;
   const noBody = Boolean(flags["no-body"]);
-  const prBodyPath = join29(wt, "PR-BODY.md");
+  const prBodyPath = join31(wt, "PR-BODY.md");
   const bodySource = pickBodySource({
     bodyFileFlag: flags["body-file"],
     noBody,
-    prBodyExists: existsSync13(prBodyPath)
+    prBodyExists: existsSync14(prBodyPath)
   });
   let bodyText;
   let bodyDescr;
   if (bodySource === "body-file") {
     try {
-      bodyText = readFileSync14(flags["body-file"], "utf8");
+      bodyText = readFileSync15(flags["body-file"], "utf8");
     } catch (err) {
       console.error(
         `terminalhire claim: could not read --body-file '${flags["body-file"]}': ${err.message ?? err}`
@@ -41075,7 +41718,7 @@ async function cmdSubmit(id, flags = {}) {
     }
     bodyDescr = `--body-file ${flags["body-file"]}`;
   } else if (bodySource === "pr-body") {
-    bodyText = readFileSync14(prBodyPath, "utf8");
+    bodyText = readFileSync15(prBodyPath, "utf8");
     bodyDescr = "PR-BODY.md (auto-detected)";
   } else {
     bodyDescr = "(default: Closes + disclosure)";
@@ -41289,14 +41932,14 @@ function claimSleep(ms) {
 }
 function readClaimPushMarker() {
   try {
-    return existsSync13(CLAIM_PUSH_MARKER) ? JSON.parse(readFileSync14(CLAIM_PUSH_MARKER, "utf8")) : null;
+    return existsSync14(CLAIM_PUSH_MARKER) ? JSON.parse(readFileSync15(CLAIM_PUSH_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
 }
 function writeClaimPushMarker(marker) {
   ensureStateDir(TERMINALHIRE_DIR11);
-  writeFileSync16(CLAIM_PUSH_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
+  writeFileSync17(CLAIM_PUSH_MARKER, JSON.stringify(marker, null, 2) + "\n", "utf8");
 }
 function clearClaimPushMarker() {
   try {
@@ -42097,8 +42740,8 @@ async function cmdResolve(id, flags = {}, deps = {}) {
       err("  Run `terminalhire link` and try again.");
       return 1;
     }
-    const message = typeof answer?.error === "string" && answer.error ? answer.error : `terminalhire answered ${res.status}`;
-    err(`terminalhire claim resolve: ${message}`);
+    const message2 = typeof answer?.error === "string" && answer.error ? answer.error : `terminalhire answered ${res.status}`;
+    err(`terminalhire claim resolve: ${message2}`);
     return 1;
   }
   const suspended = typeof answer?.postingSuspended === "boolean" ? answer.postingSuspended : isPostingLevelResolutionReason(reason);
