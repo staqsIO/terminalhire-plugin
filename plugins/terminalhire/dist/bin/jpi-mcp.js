@@ -30232,7 +30232,10 @@ var init_result = __esm({
       "detected",
       "none",
       "operator-declared",
-      "developer-declared"
+      "developer-declared",
+      // TERM-1221: the mapping chose the image from a runtime the POSTER declared, because the
+      // repository's own files named none.
+      "founder-declared"
     ];
     RUN_RESULT_SCHEMA = "terminalhire.verification-run/1";
     RUN_RESULT_FIELDS = [
@@ -30590,6 +30593,10 @@ var init_attestation2 = __esm({
     };
     IMAGE_SOURCE_IS_SIGNABLE = {
       detected: () => null,
+      // The command table's `founder-declared` reasoning, applied to the environment: the poster
+      // chose the runtime and the poster is paying, so a runtime they declared is theirs to stand
+      // behind. The image itself is still the runtime mapping's pick, not a name anyone typed.
+      "founder-declared": () => null,
       "operator-declared": () => "had its container image chosen by an operator out of band, and the signed vocabulary has no member for that. Signing it would present a hand-picked environment as the one the runtime mapping selected.",
       "developer-declared": () => "had its container image supplied by the developer whose work is under verification. A chosen interpreter turns a red suite green as surely as a chosen test command.",
       // `none` means no image was booted, so an image name beside it is a contradiction — the
@@ -31276,8 +31283,14 @@ import { createHash as createHash9, X509Certificate } from "crypto";
 import { chmodSync as chmodSync3, existsSync as existsSync11, mkdtempSync as mkdtempSync3, readFileSync as readFileSync13, rmSync as rmSync8, writeFileSync as writeFileSync15 } from "fs";
 import { request as httpsRequest } from "https";
 import { createServer } from "net";
-import { join as join26 } from "path";
+import { posix as posix3 } from "path";
 import { tmpdir as tmpdir3 } from "os";
+function refuseUnsupportedHost(io) {
+  const platform = io.platform ?? process.platform;
+  if (platform === "win32") {
+    throw new HostedVenueError("the hosted venue cannot run from a Windows host: it reaches the venue daemon through an ssh-forwarded Unix socket, and OpenSSH on Windows cannot forward to a local socket path. Run from Linux, macOS or WSL, or use --placement local-docker.", "ours");
+  }
+}
 function credentialInGitConfig(text) {
   for (const match2 of text.matchAll(/\b([a-z][a-z0-9+.-]*):\/\/(\S+)/gi)) {
     const scheme = (match2[1] ?? "").toLowerCase();
@@ -31814,6 +31827,7 @@ function hostedVenueAvailable(opts = {}, io = defaultHostedVenueIo) {
   const config2 = opts.gcloudConfig ?? VENUE_GCLOUD_CONFIG;
   const env = venueGcloudEnv(config2);
   try {
+    refuseUnsupportedHost(io);
     assertServiceCredentials(config2, io);
   } catch {
     return false;
@@ -32254,6 +32268,7 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
         ...image
       };
       let bootArgv = gcpBootArgv(bootParams(CLIENT_CERT_STAND_IN));
+      refuseUnsupportedHost(io);
       ensureVenueServiceCredentials(gcloudConfig, keyFile, io);
       const clientTls = csImageDigest === null ? null : { ...makeClientTls(io, allocated, vm), imageDigest: csImageDigest };
       if (clientTls !== null)
@@ -32547,7 +32562,8 @@ function makeLease(p) {
           throw new HostedVenueError(`could not stage ${from} onto ${p.vm}: ${execDetail(res).slice(0, 300)}`);
         }
       };
-      const { jail: localJail, tmp: localTmp } = localJailPaths(local.scratchRoot);
+      const localJail = join26(local.scratchRoot, JAIL_SEGMENT);
+      const localTmp = join26(local.scratchRoot, JAIL_TMP_SEGMENT);
       const required2 = [
         localTmp,
         join26(localJail, JAIL_PASSWD_FILE),
@@ -32696,7 +32712,7 @@ function makeLease(p) {
     }
   };
 }
-var SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, VOLUME_CREATE_TIMEOUT_MS, EXEC_PROBE_TIMEOUT_MS, POPULATE_TIMEOUT_MS, STAGE_PROOF_PREFIX, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING, CS_ATTEST_PORT, CS_DOCKER_PORT, CS_READY_BUDGET_MS, CS_ATTEST_TIMEOUT_MS, CS_PULL_TIMEOUT_MS, CS_ATTEST_INTERVAL_MS, OPENSSL_TIMEOUT_MS, CS_RUN_ARGS, CS_GUEST_USER, CS_STAGE_ROOT, CLIENT_CERT_STAND_IN;
+var join26, SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, VOLUME_CREATE_TIMEOUT_MS, EXEC_PROBE_TIMEOUT_MS, POPULATE_TIMEOUT_MS, STAGE_PROOF_PREFIX, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING, CS_ATTEST_PORT, CS_DOCKER_PORT, CS_READY_BUDGET_MS, CS_ATTEST_TIMEOUT_MS, CS_PULL_TIMEOUT_MS, CS_ATTEST_INTERVAL_MS, OPENSSL_TIMEOUT_MS, CS_RUN_ARGS, CS_GUEST_USER, CS_STAGE_ROOT, CLIENT_CERT_STAND_IN;
 var init_hostedVenue = __esm({
   "../../packages/envrun/dist/hostedVenue.js"() {
     "use strict";
@@ -32708,6 +32724,7 @@ var init_hostedVenue = __esm({
     init_labels();
     init_venueProof();
     init_venue();
+    ({ join: join26 } = posix3);
     SSH_READY_BUDGET_MS = 18e4;
     SSH_PROBE_INTERVAL_MS = 5e3;
     SSH_PROBE_TIMEOUT_MS = 25e3;
@@ -34858,8 +34875,11 @@ function publishableTarget(url) {
   if (separatorInTarget(url) !== null)
     return UNPARSEABLE_TARGET;
   const m = /^([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^/?#]*)([^?#]*)/.exec(url);
-  if (m === null)
-    return url.includes("?") ? UNPARSEABLE_TARGET : redactPathCredentials(url);
+  if (m === null) {
+    if (url.includes("?"))
+      return UNPARSEABLE_TARGET;
+    return WINDOWS_ABSOLUTE.test(url) ? redactWindowsPathCredentials(url) : redactPathCredentials(url);
+  }
   const authority = m[2] ?? "";
   const at = authority.lastIndexOf("@");
   const path5 = m[3] ?? "";
@@ -34872,6 +34892,16 @@ function redactPathCredentials(path5) {
       return WITHHELD_SEGMENT;
     return /:[^@]*@/.test(seen) ? WITHHELD_SEGMENT : segment;
   });
+}
+function redactWindowsPathCredentials(path5) {
+  const rest = path5.slice(2);
+  for (const m of rest.matchAll(/[^\\/]+/g)) {
+    const seen = decodeToFixedPoint(m[0]);
+    if (seen === null || seen.includes(":")) {
+      return path5.slice(0, 2) + rest.slice(0, m.index) + WITHHELD_SEGMENT;
+    }
+  }
+  return path5;
 }
 function decodeToFixedPoint(s) {
   let current = s;
@@ -35060,6 +35090,21 @@ async function releaseWithoutThrowing(lease, progress) {
       `venue ${lease.kind} threw while releasing, which its contract forbids: ${describeThrown(err, { includeName: true })}. The run result above stands; this is our environment failing to clean up, not a finding about the diff.`
     );
   }
+}
+function resolveRunEnvironment(derived, req) {
+  const runtimeDeclared = req.runtimeOverride !== void 0 && req.runtimeOverride !== "unknown" && derived.runtime === "unknown";
+  const withRuntime = runtimeDeclared ? {
+    ...derived,
+    runtime: req.runtimeOverride,
+    unresolved: derived.unresolved.filter((r) => r.kind !== "unknown-runtime")
+  } : derived;
+  const spec = req.testCommandOverride === void 0 ? withRuntime : { ...withRuntime, testCommand: req.testCommandOverride };
+  const imageSource = req.image !== void 0 ? req.imageOrigin === "operator" ? "operator-declared" : "developer-declared" : runtimeDeclared ? (
+    // Attributed only when the caller says the poster chose it. An unattributed override
+    // defaults the way `testCommandSource` does, to the developer, which does not sign.
+    req.runtimeOverrideOrigin === "founder" ? "founder-declared" : "developer-declared"
+  ) : "detected";
+  return { spec, imageSource };
 }
 async function verifyWorkingDiff(req) {
   const ctx = {
@@ -35258,7 +35303,7 @@ async function runVerification(req, ctx) {
   const treeDigest = patchedTreeDigest(cloneDir);
   const baselinePatchSha256 = hasBaselinePatch ? sha256Hex(baselinePatch ?? "") : null;
   const derived = deriveEnvironmentSpec(cloneDir);
-  const spec = req.testCommandOverride === void 0 ? derived : { ...derived, testCommand: req.testCommandOverride };
+  const { spec, imageSource } = resolveRunEnvironment(derived, req);
   progress("derive", `runtime=${spec.runtime} install=${String(spec.installCommand)} test=${String(spec.testCommand)}`);
   refuseUnbuildableSpec(spec);
   const image = placement.imageFor(spec.runtime, req.image, spec.runtimeVersion, imageVariantFor(spec));
@@ -35363,7 +35408,7 @@ async function runVerification(req, ctx) {
       // `developer-declared` is deliberate and matches `testCommandSource`: `th run --image`
       // runs on the developer's machine, judging the developer's work, so attributing it to
       // the operator would sign our name onto their choice.
-      imageSource: req.image === void 0 ? "detected" : req.imageOrigin === "operator" ? "operator-declared" : "developer-declared",
+      imageSource,
       leaksClean: verdict.leaks.clean,
       leakState: verdict.leaks.state,
       // Built from the LEASE, over the client that ran the steps — never from
@@ -36426,6 +36471,7 @@ __export(dist_exports, {
   renderVerdictLine: () => renderVerdictLine,
   resolveImageForSpec: () => resolveImageForSpec,
   resolveLease: () => resolveLease,
+  resolveRunEnvironment: () => resolveRunEnvironment,
   runEnvironmentSpec: () => runEnvironmentSpec,
   runLabels: () => runLabels,
   setManifestProbe: () => setManifestProbe,
