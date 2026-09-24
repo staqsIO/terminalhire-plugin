@@ -32765,6 +32765,11 @@ var init_egressProxy = __esm({
     "use strict";
     DEFAULT_INSTALL_ALLOWLIST = [
       "registry.npmjs.org",
+      // TERM-1240. `yarn install` is derived for every repo with a yarn.lock, and yarn
+      // classic writes this host into each lockfile entry — so every yarn repo could start
+      // and could never install, the TERM-1139 shape again. It serves the same packages as
+      // the npm registry, so the grant widens where a package comes from, not what can come.
+      "registry.yarnpkg.com",
       "pypi.org",
       "files.pythonhosted.org",
       "proxy.golang.org",
@@ -36235,7 +36240,10 @@ var init_boundary = __esm({
       },
       {
         code: "lockfile",
-        matches: (_p, _segments, base) => LOCKFILE_NAMES.has(base),
+        // The `.lock` suffix is the server's rule since TERM-412; this copy missed it, so
+        // the pre-flight passed `uv.lock` and bun's text `bun.lock` that the server refuses
+        // (TERM-1235). The name set only covers lockfiles whose names do not end in `.lock`.
+        matches: (_p, _segments, base) => LOCKFILE_NAMES.has(base) || base.endsWith(".lock"),
         why: "is a dependency lockfile. Nobody reads a lockfile diff, so a change to one is refused rather than shown"
       }
     ];
@@ -38786,6 +38794,151 @@ function nodeInstallCommand(repo) {
     return { command: "npm install", from: "manifest" };
   return null;
 }
+function lockfileGaps(repo) {
+  const pkg = readJsonObject(repo, "package.json");
+  if (pkg === null)
+    return null;
+  const wanted = [];
+  for (const section2 of DEPENDENCY_SECTIONS) {
+    const deps = readObjectField(pkg, section2);
+    if (deps === null)
+      continue;
+    for (const [name, range] of Object.entries(deps)) {
+      if (typeof range === "string")
+        wanted.push([name, range]);
+    }
+  }
+  if (wanted.length === 0)
+    return null;
+  const check = (lockfile, listed) => {
+    if (listed === null)
+      return null;
+    const missing = wanted.filter(([n, r]) => !listed(n, r)).map(([n, r]) => `${n}@${r}`);
+    return missing.length === 0 ? null : { lockfile, missing };
+  };
+  for (const lockfile of ["package-lock.json", "npm-shrinkwrap.json"]) {
+    if (repo.exists(lockfile))
+      return check(lockfile, npmLockListing(repo, lockfile));
+  }
+  if (repo.exists("yarn.lock"))
+    return check("yarn.lock", yarnLockListing(repo.readText("yarn.lock")));
+  if (repo.exists("pnpm-lock.yaml")) {
+    return check("pnpm-lock.yaml", pnpmLockListing(repo.readText("pnpm-lock.yaml")));
+  }
+  return null;
+}
+function npmLockListing(repo, lockfile) {
+  const lock = readJsonObject(repo, lockfile);
+  if (lock === null)
+    return null;
+  const root = readObjectField(readObjectField(lock, "packages"), "");
+  if (root !== null) {
+    return (name, range) => DEPENDENCY_SECTIONS.some((s) => readStringField(readObjectField(root, s), name) === range);
+  }
+  const v1 = readObjectField(lock, "dependencies");
+  if (v1 === null)
+    return null;
+  return (name) => readObjectField(v1, name) !== null;
+}
+function yarnLockListing(text) {
+  if (text === null || !/^(# yarn lockfile v1|__metadata:)/m.test(text))
+    return null;
+  const specs = /* @__PURE__ */ new Set();
+  for (const line of text.split(/\r?\n/)) {
+    if (line === "" || line.startsWith(" ") || line.startsWith("#") || !line.endsWith(":"))
+      continue;
+    for (const raw of line.slice(0, -1).split(",")) {
+      const spec = raw.trim().replace(/^"|"$/g, "");
+      specs.add(spec);
+      const berry = /^(@?[^@]+)@npm:(.+)$/.exec(spec);
+      if (berry !== null)
+        specs.add(`${berry[1]}@${berry[2]}`);
+    }
+  }
+  return (name, range) => specs.has(`${name}@${range}`);
+}
+function pnpmLockListing(text) {
+  if (text === null || !/^lockfileVersion:/m.test(text))
+    return null;
+  const lines = pnpmRootLines(text.split(/\r?\n/));
+  if (lines === null)
+    return null;
+  const unquote = (s) => s.replace(/^['"]|['"]$/g, "");
+  return (name, range) => lines.some((line, i) => {
+    if (unquote(line) === `${name}:` || line === `'${name}':` || line === `"${name}":`) {
+      const next = lines[i + 1] ?? "";
+      return next.startsWith("specifier:") && unquote(next.slice(10).trim()) === range;
+    }
+    const flat = /^(['"]?)(.+)\1:\s*(.+)$/.exec(line);
+    return flat !== null && flat[2] === name && unquote(flat[3] ?? "") === range;
+  });
+}
+function pnpmRootLines(raw) {
+  const importers = raw.indexOf("importers:");
+  if (importers === -1) {
+    const end = raw.indexOf("packages:");
+    return (end === -1 ? raw : raw.slice(0, end)).map((l) => l.trim());
+  }
+  const start = raw.findIndex((l, i) => i > importers && /^ {2}(['"]?)\.\1:\s*$/.test(l));
+  if (start === -1)
+    return null;
+  const out = [];
+  for (const line of raw.slice(start + 1)) {
+    if (line.trim() === "")
+      continue;
+    if (!line.startsWith("   "))
+      break;
+    out.push(line.trim());
+  }
+  return out;
+}
+function unfrozenInstall(command) {
+  const lead = /^(?:(?:sudo|time)\s+|env(?:\s+[A-Za-z_]\w*=\S*)*\s+)*/.exec(command)?.[0] ?? "";
+  const rest = command.slice(lead.length);
+  const end = installEnd(rest);
+  const head = rest.slice(0, end);
+  const tail2 = rest.slice(end);
+  const dropped = (flag) => head.replace(new RegExp(`\\s--${flag}(=\\S*)?(?=\\s|$)`, "g"), "");
+  if (/^npm ci(\s|$)/.test(head)) {
+    return lead + head.replace(/^npm ci/, "npm install --no-audit --no-fund") + tail2;
+  }
+  if (/^pnpm\b/.test(head)) {
+    if (/\s--no-frozen-lockfile(?=\s|$)/.test(head))
+      return command;
+    const bare = dropped("frozen-lockfile");
+    const withFlag = bare.replace(/^pnpm (install-test|install|it|i)(?=\s|$)/, "$& --no-frozen-lockfile");
+    if (withFlag !== bare)
+      return lead + withFlag + tail2;
+    return bare === head ? command : `${lead}${bare} --no-frozen-lockfile${tail2}`;
+  }
+  if (/^yarn\b/.test(head)) {
+    const bare = dropped("frozen-lockfile").replace(/\s--immutable(=\S*)?(?=\s|$)/g, "");
+    const assigns = lead === "" || /(^|\s)env(\s+[A-Za-z_]\w*=\S*)*\s+$/.test(lead);
+    return `${lead}${assigns ? "" : "env "}${YARN_MUTABLE} ${bare}${tail2}`;
+  }
+  return command;
+}
+function installEnd(command) {
+  let quote = null;
+  for (let i = 0; i < command.length; i += 1) {
+    const c = command[i];
+    if (quote !== null) {
+      if (c === quote)
+        quote = null;
+      else if (c === "\\" && quote === '"')
+        i += 1;
+      continue;
+    }
+    if (c === "\\") {
+      i += 1;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+    } else if (c === ";" || c === "&" && command[i + 1] === "&" || c === "|" && command[i + 1] === "|") {
+      return command.slice(0, i).trimEnd().length;
+    }
+  }
+  return command.length;
+}
 function pythonTestCommand(repo) {
   const pyproject = repo.readText("pyproject.toml") ?? "";
   if (pyproject.includes("[tool.pytest.ini_options]"))
@@ -39026,7 +39179,7 @@ function matchFirst(text, pattern) {
   const match2 = pattern.exec(text);
   return match2 === null ? null : match2[1];
 }
-var RUNTIME_MANIFESTS, MAKEFILE_NAMES, C_FAMILY_SOURCE, MANIFEST_FILENAMES, JVM_BUILD_FILES, NPM_PLACEHOLDER_TEST, REQUIREMENT_SPECIFIER, CPP_BUILD_FILES, CMAKE_DECLARES_TESTS, EXACT_VERSION;
+var RUNTIME_MANIFESTS, MAKEFILE_NAMES, C_FAMILY_SOURCE, MANIFEST_FILENAMES, JVM_BUILD_FILES, NPM_PLACEHOLDER_TEST, DEPENDENCY_SECTIONS, YARN_MUTABLE, REQUIREMENT_SPECIFIER, CPP_BUILD_FILES, CMAKE_DECLARES_TESTS, EXACT_VERSION;
 var init_manifest2 = __esm({
   "../../packages/envspec/dist/manifest.js"() {
     "use strict";
@@ -39047,8 +39200,19 @@ var init_manifest2 = __esm({
     MANIFEST_FILENAMES = RUNTIME_MANIFESTS.flatMap((m) => m.files).concat(["*.csproj", "*.fsproj", "*.sln"], MAKEFILE_NAMES).sort();
     JVM_BUILD_FILES = ["build.gradle", "build.gradle.kts", "pom.xml"];
     NPM_PLACEHOLDER_TEST = /^echo\s+["']?Error:\s*no test specified["']?\s*&&\s*exit\s+1$/;
+    DEPENDENCY_SECTIONS = [
+      "dependencies",
+      "devDependencies",
+      "optionalDependencies",
+      "peerDependencies"
+    ];
+    YARN_MUTABLE = "YARN_ENABLE_IMMUTABLE_INSTALLS=false";
     REQUIREMENT_SPECIFIER = /^[A-Za-z0-9._-]+(\[[A-Za-z0-9._,-]+\])?([<>=!~]=?[A-Za-z0-9._*+-]+(,[<>=!~]=?[A-Za-z0-9._*+-]+)*)?$/;
-    CPP_BUILD_FILES = ["CMakeLists.txt", "meson.build", ...MAKEFILE_NAMES];
+    CPP_BUILD_FILES = [
+      "CMakeLists.txt",
+      "meson.build",
+      ...MAKEFILE_NAMES
+    ];
     CMAKE_DECLARES_TESTS = /\benable_testing\s*\(|\binclude\s*\(\s*CTest\s*\)|\badd_test\s*\(/;
     EXACT_VERSION = /^v?(\d+(?:\.\d+){0,2})$/;
   }
@@ -39500,6 +39664,15 @@ function deriveFromReader(repo) {
       derivedFrom.add(fallback.from);
     }
   }
+  let installUnfrozen = null;
+  if (installCommand !== null && runtime === "node") {
+    const unfrozen = unfrozenInstall(installCommand);
+    const gaps = unfrozen === installCommand ? null : lockfileGaps(repo);
+    if (gaps !== null) {
+      installCommand = unfrozen;
+      installUnfrozen = { lockfile: gaps.lockfile, missing: gaps.missing };
+    }
+  }
   if (installCommand === null) {
     unresolved.push({
       kind: "no-install-command",
@@ -39546,6 +39719,7 @@ function deriveFromReader(repo) {
     runtime,
     runtimeVersion: version2.value,
     installCommand,
+    ...installUnfrozen === null ? {} : { installUnfrozen },
     testCommand,
     services,
     migrations,
@@ -40331,6 +40505,12 @@ function resolveRunEnvironment(derived, req) {
   ) : "detected";
   return { spec, imageSource };
 }
+function installUnfrozenNote(spec) {
+  const u = spec.installUnfrozen;
+  if (u === void 0)
+    return null;
+  return `${u.lockfile} does not list ${u.missing.join(", ")}, so the install ran as \`${String(spec.installCommand)}\` without its frozen-lockfile check. Regenerate ${u.lockfile} before merging.`;
+}
 async function verifyWorkingDiff(req) {
   const ctx = {
     startedAt: Date.now(),
@@ -40530,6 +40710,9 @@ async function runVerification(req, ctx) {
   const derived = deriveEnvironmentSpec(cloneDir);
   const { spec, imageSource } = resolveRunEnvironment(derived, req);
   progress("derive", `runtime=${spec.runtime} install=${String(spec.installCommand)} test=${String(spec.testCommand)}`);
+  const unfrozenNote = installUnfrozenNote(spec);
+  if (unfrozenNote !== null)
+    progress("derive", unfrozenNote);
   refuseUnbuildableSpec(spec);
   const image = placement.imageFor(spec.runtime, req.image, spec.runtimeVersion, imageVariantFor(spec));
   const resolved = await resolveLease(placement, runId);
@@ -41662,6 +41845,7 @@ __export(dist_exports, {
   imageVariantFor: () => imageVariantFor,
   installCommandFor: () => installCommandFor,
   installLocalMigrationTooling: () => installLocalMigrationTooling,
+  installUnfrozenNote: () => installUnfrozenNote,
   isBookkeepingTable: () => isBookkeepingTable,
   isCommandUnavailable: () => isCommandUnavailable,
   isGreen: () => isGreen,
@@ -41989,6 +42173,7 @@ __export(jpi_claim_exports, {
   buildStakeComment: () => buildStakeComment,
   buildStandDownComment: () => buildStandDownComment,
   buildSubmitBody: () => buildSubmitBody,
+  claimListTurnLabel: () => claimListTurnLabel,
   claimUpdatePatch: () => claimUpdatePatch,
   cloneFullTierRepo: () => cloneFullTierRepo,
   cmdNote: () => cmdNote,
@@ -43171,9 +43356,13 @@ function fmtContestedWarning(b) {
   }
   return `  \u26A0 This issue looks taken: ${parts.join(" / ")}. A merged PR here is unlikely.`;
 }
-async function mintRegistrationProof({ claimRef } = {}) {
-  console.log("\n  This posting registers your claim with terminalhire, so your");
-  console.log("  GitHub identity has to be verified once in the browser.");
+async function mintRegistrationProof({ claimRef, intro } = {}) {
+  console.log("");
+  for (const line of intro ?? [
+    "This posting registers your claim with terminalhire, so your",
+    "GitHub identity has to be verified once in the browser."
+  ])
+    console.log(`  ${line}`);
   let oauthBase2;
   try {
     oauthBase2 = resolveOAuthBase();
@@ -43475,17 +43664,18 @@ function readCredentialDisposition({
   return "store-and-clear-stale-marker";
 }
 async function bootstrapFounderClaimEnrollment(claim, registration) {
-  if (!(claim.amountUSD > 0)) return { stored: false, reason: "free" };
   if (!registration.pushToken || !registration.claimantLogin) {
     return { stored: false, reason: "token-unavailable" };
   }
+  const current = await readPushTokenEnc().catch(() => null);
   const disposition = readCredentialDisposition({
     markerExists: Boolean(readAutoMarker()),
-    enrolledTokenExists: Boolean(await readPushTokenEnc().catch(() => null))
+    enrolledTokenExists: Boolean(current)
   });
   if (disposition === "keep-enrolled") {
     return { stored: false, reason: "kept-enrolled" };
   }
+  if (current && current === registration.pushToken) return { stored: true, reason: "ok" };
   try {
     await writePushTokenEnc(registration.pushToken);
     if (disposition === "store-and-clear-stale-marker") clearAutoMarker();
@@ -43706,7 +43896,7 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
     console.log(
       `  registered with terminalhire${claim.approval.claimId ? ` (server claim ${claim.approval.claimId})` : ""}`
     );
-    if (claim.amountUSD > 0) {
+    if (enrollment) {
       if (enrollment?.stored) {
         console.log("  \u2713 credential for your granted slice + CI results stored encrypted here");
         console.log("  Background dashboard updates are NOT on (claiming does not enable them).");
@@ -43719,7 +43909,7 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
         if (enrollment?.detail) {
           for (const line of String(enrollment.detail).split("\n")) console.log(`    ${line}`);
         }
-        console.log("  Store it before fetching your slice: terminalhire claim --push");
+        console.log("  `claim start` will ask you to confirm in the browser once more.");
       }
     }
     if (claim.approval.state === "pending") {
@@ -43881,7 +44071,7 @@ async function cmdList(active) {
     );
     return;
   }
-  await syncFounderApprovals(claims, list);
+  const { approvalsChecked } = await syncFounderApprovals(claims, list);
   list = claims.listClaims({ active });
   await syncFounderVerdicts({
     claimsModule: claims,
@@ -43899,7 +44089,7 @@ ${list.length} ${active ? "active " : ""}claim${list.length === 1 ? "" : "s"}:
 `);
   for (const c of list) {
     const pr = c.prUrl ? ` \xB7 ${c.prUrl}` : "";
-    console.log(`  [${claimTurnLabel(c.state)}] ${fmtClaimAmount(c)} \xB7 ${c.title}`);
+    console.log(`  [${claimListTurnLabel(c, approvalsChecked)}] ${fmtClaimAmount(c)} \xB7 ${c.title}`);
     console.log(`    id: ${c.id} \xB7 ${c.state}${pr}`);
   }
   printMetric(claims.acceptedPRRate());
@@ -44005,6 +44195,12 @@ async function syncFounderApprovals(claimsModule, targets) {
     }
   }
   return { pushToken, approvalsChecked, approvalsUnavailable };
+}
+function claimListTurnLabel(claim, approvalsChecked) {
+  if (approvalsChecked && claim.state === "claimed" && claim.approval?.mode === "approval-only" && claim.approval?.state === "pending") {
+    return "waiting on poster";
+  }
+  return claimTurnLabel(claim.state);
 }
 function founderClaimStanding(claim, approvalsChecked) {
   const turn = claimTurnLabel(claim.state);
@@ -45219,11 +45415,72 @@ terminalhire claim: ${what} needs the stored credential, and the server says it 
   }
   return true;
 }
-async function requireReadPushToken(what) {
+async function enrolHeldClaimReadToken(postingId) {
+  const fail = (lines) => {
+    for (const line of lines) console.error(line);
+    process.exit(1);
+  };
+  const proofToken = await mintRegistrationProof({
+    claimRef: opportunityShortToken(`bounty:founder:${postingId}`),
+    intro: [
+      "This machine holds no terminalhire credential yet. Confirm once in the",
+      "browser, signed in as the GitHub account that claimed this work, and",
+      "this machine is linked to your claim."
+    ]
+  });
+  if (!proofToken) {
+    fail(["terminalhire claim: could not link this machine to your claim (see above)."]);
+  }
+  let res;
+  try {
+    res = await fetch(`${CLAIM_SYNC_BASE4}/api/claim/enrol`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bountyId: postingId, proofToken }),
+      signal: AbortSignal.timeout(CLAIM_SYNC_WRITE_TIMEOUT_MS)
+    });
+  } catch (err) {
+    fail([
+      `terminalhire claim: terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}).`,
+      "  Nothing was stored. Run the same command again."
+    ]);
+  }
+  let body = null;
+  try {
+    body = await res.json();
+  } catch {
+  }
+  if (res.status === 404 && body?.error === "no-live-claim") {
+    const who = typeof body.claimantLogin === "string" ? `@${body.claimantLogin}` : "that account";
+    fail([
+      `terminalhire claim: you confirmed in the browser as ${who}, and ${who} does not`,
+      "  hold a live claim on this posting. Nothing was stored.",
+      "  Sign the browser into the GitHub account that claimed it, then run this again."
+    ]);
+  }
+  if (!res.ok || typeof body?.pushToken !== "string" || body.pushToken.length === 0) {
+    fail([
+      `terminalhire claim: linking this machine failed (${res.status}${typeof body?.message === "string" ? `: ${body.message}` : ""}). Nothing was stored.`
+    ]);
+  }
+  try {
+    await writePushTokenEnc(body.pushToken);
+  } catch (err) {
+    fail([
+      `terminalhire claim: the credential could not be stored on this machine: ${err instanceof Error ? err.message : String(err)}`
+    ]);
+  }
+  console.log("  \u2713 This machine is linked to your claim (credential stored encrypted here).");
+  return body.pushToken;
+}
+async function requireReadPushToken(what, { enrolFor } = {}) {
   let stored = null;
   try {
     stored = await readPushTokenEnc();
   } catch {
+  }
+  if (!stored && typeof enrolFor === "string" && FOUNDER_POSTING_ID.test(enrolFor)) {
+    return enrolHeldClaimReadToken(enrolFor);
   }
   if (!stored) {
     console.error(
@@ -45247,7 +45504,9 @@ function cloneFullTierRepo({ engine, dest, url, sha, token, branch }) {
 async function cmdSliceFullTier(claims, id, local, fullTierBody, flags, cloneRepo = cloneFullTierRepo) {
   const claimId = fullTierBody.claimId;
   const bountyId = fullTierBody.bountyId;
-  const pushToken = await requireReadPushToken("fetching your full-repo clone credential");
+  const pushToken = await requireReadPushToken("fetching your full-repo clone credential", {
+    enrolFor: bountyId
+  });
   let res;
   try {
     res = await fetch(`${CLAIM_SYNC_BASE4}/api/claim/clone-token`, {
@@ -45423,7 +45682,9 @@ async function attemptSliceDelivery(id, flags = {}) {
     requireFounderLoopClaim(claims, id, "slice");
   }
   const bountyId = local ? founderPostingIdOf(local) : String(id).replace(/^bounty:founder:/, "");
-  const pushToken = await requireReadPushToken("fetching your granted slice");
+  const pushToken = await requireReadPushToken("fetching your granted slice", {
+    enrolFor: bountyId
+  });
   let res;
   try {
     res = await fetch(`${CLAIM_SYNC_BASE4}/api/claim/slice`, {
@@ -47197,7 +47458,7 @@ async function run7() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR17, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL6, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, CLAIM_SYNC_WRITE_TIMEOUT_MS, GH_API3, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, CLOSED_STATES, GH_SESSION_COOKIE4, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, OPENABLE_AGENTS, BRIEF_DIR, BRIEF_REL_PATH, VERIFY_REL_PATH, AGENTS_REL_PATH, BRIEF_EXCLUDE_LINE, PACK_SAFE_ID, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3, CLAIM_RESOLUTION_REASONS, POSTING_LEVEL_RESOLUTION_REASONS, RESOLUTION_REASON_BLURB;
+var TERMINALHIRE_DIR17, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL6, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, CLAIM_SYNC_WRITE_TIMEOUT_MS, GH_API3, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, CLOSED_STATES, GH_SESSION_COOKIE4, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, OPENABLE_AGENTS, BRIEF_DIR, BRIEF_REL_PATH, VERIFY_REL_PATH, AGENTS_REL_PATH, BRIEF_EXCLUDE_LINE, PACK_SAFE_ID, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3, FOUNDER_POSTING_ID, CLAIM_RESOLUTION_REASONS, POSTING_LEVEL_RESOLUTION_REASONS, RESOLUTION_REASON_BLURB;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
@@ -47313,6 +47574,7 @@ var init_jpi_claim = __esm({
     };
     LINE_BREAKS = /\r\n|[\r\n\v\f\u0085\u2028\u2029]/;
     CONTROL_CHARS3 = /[\u0000-\u001F\u007F-\u009F]/g;
+    FOUNDER_POSTING_ID = /^fb_[A-Za-z0-9_-]{1,80}$/;
     CLAIM_RESOLUTION_REASONS = [
       "not-my-stack",
       "out-of-time",
@@ -79452,7 +79714,7 @@ function buildApprovalsNudge(awaitingApproval) {
   if (!Number.isInteger(awaitingApproval) || awaitingApproval <= 0) return null;
   const n = awaitingApproval;
   return `  \u26A0 ${n} claim${n === 1 ? "" : "s"} awaiting poster approval \u2014 terminalhire cannot check in the background until you enrol:
-    terminalhire claim --push --keep-updated    (or check one now: terminalhire claim slice <id>)`;
+    terminalhire claim --push --keep-updated    (or check one now: terminalhire claim start <id>)`;
 }
 async function syncApprovedClaims({
   readAutoMarker: readAutoMarker2,

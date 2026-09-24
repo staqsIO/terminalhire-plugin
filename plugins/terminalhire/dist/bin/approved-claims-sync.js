@@ -106,7 +106,7 @@ function buildApprovalsNudge(awaitingApproval) {
   if (!Number.isInteger(awaitingApproval) || awaitingApproval <= 0) return null;
   const n = awaitingApproval;
   return `  \u26A0 ${n} claim${n === 1 ? "" : "s"} awaiting poster approval \u2014 terminalhire cannot check in the background until you enrol:
-    terminalhire claim --push --keep-updated    (or check one now: terminalhire claim slice <id>)`;
+    terminalhire claim --push --keep-updated    (or check one now: terminalhire claim start <id>)`;
 }
 async function syncApprovedClaims({
   readAutoMarker,

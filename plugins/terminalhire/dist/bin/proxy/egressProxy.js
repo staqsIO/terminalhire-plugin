@@ -20,6 +20,11 @@ import http from 'node:http';
 /** Registry hosts a dependency install legitimately needs. */
 export const DEFAULT_INSTALL_ALLOWLIST = [
     'registry.npmjs.org',
+    // TERM-1240. `yarn install` is derived for every repo with a yarn.lock, and yarn
+    // classic writes this host into each lockfile entry — so every yarn repo could start
+    // and could never install, the TERM-1139 shape again. It serves the same packages as
+    // the npm registry, so the grant widens where a package comes from, not what can come.
+    'registry.yarnpkg.com',
     'pypi.org',
     'files.pythonhosted.org',
     'proxy.golang.org',
