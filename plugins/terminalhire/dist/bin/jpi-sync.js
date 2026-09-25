@@ -2300,12 +2300,12 @@ async function run() {
   console.log("  terminalhire sync \u2014 opt-in Tier-1 profile sync (one-time snapshot)");
   console.log("");
   console.log(
-    '  terminalhire sync --push     Send your profile (shows a consent card, requires typed "yes")'
+    "  terminalhire sync --push     Send your profile (shows a consent card, requires browser confirm)"
   );
   console.log("  terminalhire sync --status   Show whether you have consented (local read only)");
   console.log("  terminalhire sync --delete   Hard-delete your synced profile (revocation)");
   console.log("");
-  console.log('  Your profile is NEVER sent without an explicit typed "yes".');
+  console.log("  Your profile is NEVER sent without an explicit browser confirm.");
   console.log("  This is NOT required to use terminalhire.");
   console.log("");
 }

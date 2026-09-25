@@ -31786,6 +31786,9 @@ var init_progress = __esm({
 });
 
 // ../../packages/envrun/dist/classify.js
+function reportedCounts(classified, reparsed) {
+  return classified !== void 0 ? classified : reparsed;
+}
 function readCounts(stdout, stderr = "") {
   const out = `${stdout}
 ${stderr}`;
@@ -35004,14 +35007,16 @@ async function runEnvironmentSpec(req) {
       result = {
         outcome: "test-command-unavailable",
         note: installEnvironmentFailureNote(install, image),
-        installOk: false
+        installOk: false,
+        counts: null
       };
     } else if (req.spec.testCommand === null) {
       const why = req.spec.unresolved.find((r) => r.kind === "no-test-command")?.detail;
       result = {
         outcome: "no-tests-observed",
         note: "the spec derived no test command, so nothing was executed: nothing failed and nothing ran. Certain, not inferred \u2014 no command was ever invoked." + (why === void 0 ? "" : ` Why: ${why}.`),
-        installOk: true
+        installOk: true,
+        counts: null
       };
     } else {
       test = await runStep(containment, {
@@ -35036,7 +35041,12 @@ async function runEnvironmentSpec(req) {
         timeoutMs: req.testTimeoutMs ?? 9e5
       });
       const verdict = classifyVerification({ ...toExecution(test), runtime: req.spec.runtime });
-      result = { outcome: verdict.outcome, note: verdict.reason, installOk: true };
+      result = {
+        outcome: verdict.outcome,
+        note: verdict.reason,
+        installOk: true,
+        counts: verdict.counts
+      };
     }
   } finally {
     watch?.stop();
@@ -35060,7 +35070,7 @@ async function runEnvironmentSpec(req) {
     install,
     test,
     installOk: result.installOk,
-    counts: test ? readCounts(test.stdout, test.stderr) : null,
+    counts: reportedCounts(result.counts, test ? readCounts(test.stdout, test.stderr) : null),
     leaks: judgeLeaks(peak, after, observation),
     note: result.note,
     wallMs: Date.now() - startedAt
@@ -40593,6 +40603,9 @@ var init_dist3 = __esm({
 // ../../packages/envrun/dist/screenshots.js
 import { copyFileSync as copyFileSync4, mkdirSync as mkdirSync8 } from "fs";
 import { join as join43 } from "path";
+function captureTimeout(ctx, fixedMs) {
+  return ctx.deadline === void 0 ? fixedMs : timeoutWithin(GUARDED_CAPTURE_CAP_MS, ctx.deadline);
+}
 function normalizeRoutes(routes) {
   const out = [];
   for (const raw of routes ?? []) {
@@ -40818,7 +40831,7 @@ async function captureSide(ctx, deps, side, tree, plan, image, code, routes) {
     user,
     labels: ctx.labels,
     onTiming: stepTimer(ctx, side)
-  }, timeoutWithin(SCREENSHOT_LIMITS.captureTimeoutMs, ctx.deadline), ctx.signal, ctx.deadline);
+  }, captureTimeout(ctx, SCREENSHOT_LIMITS.captureTimeoutMs), ctx.signal, ctx.deadline);
   if (shot.status === "captured")
     return done(side, shot, staticOut);
   if (shot.status !== "no-site" || plan.serveCommand === null) {
@@ -40828,7 +40841,7 @@ async function captureSide(ctx, deps, side, tree, plan, image, code, routes) {
   const findApp = () => lease.docker.sync(["ps", "-aq", "--filter", `label=terminalhire.capture-app=${appLabel}`], syncOpts(ctx)).stdout.trim().split("\n")[0] || null;
   const labels = { ...ctx.labels ?? {}, "terminalhire.capture-app": appLabel };
   ctx.progress?.("screenshots", `${side}: ${plan.serveCommand}`);
-  const serving = step("serve", "offline", plan.serveCommand, SCREENSHOT_LIMITS.waitForPortMs + SCREENSHOT_LIMITS.captureTimeoutMs, { labels }).catch(() => null);
+  const serving = step("serve", "offline", plan.serveCommand, captureTimeout(ctx, SCREENSHOT_LIMITS.waitForPortMs + SCREENSHOT_LIMITS.captureTimeoutMs), { labels }).catch(() => null);
   let appId = null;
   try {
     for (let i = 0; i < 60 && appId === null; i++) {
@@ -40851,7 +40864,7 @@ async function captureSide(ctx, deps, side, tree, plan, image, code, routes) {
       user,
       labels: ctx.labels,
       onTiming: stepTimer(ctx, side)
-    }, timeoutWithin(SCREENSHOT_LIMITS.waitForPortMs + SCREENSHOT_LIMITS.captureTimeoutMs, ctx.deadline), ctx.signal, ctx.deadline);
+    }, captureTimeout(ctx, SCREENSHOT_LIMITS.waitForPortMs + SCREENSHOT_LIMITS.captureTimeoutMs), ctx.signal, ctx.deadline);
     if (served.status !== "captured")
       return skip(served.reason ?? "the serve script produced no screenshot");
     return done(side, served, serverOut);
@@ -40955,7 +40968,7 @@ function syncOpts(ctx) {
 function message(err) {
   return String(err?.message ?? err).slice(0, 500);
 }
-var SCREENSHOT_LIMITS, BUILD_MARKER, realDeps, HOSTED_BEFORE_REASON, SCREENSHOT_BUDGET_MS, HOSTED_SCREENSHOT_BUDGET_MS, RENDERED_EXTENSIONS, RENDERED_DIRS;
+var SCREENSHOT_LIMITS, GUARDED_CAPTURE_CAP_MS, BUILD_MARKER, realDeps, HOSTED_BEFORE_REASON, SCREENSHOT_BUDGET_MS, HOSTED_SCREENSHOT_BUDGET_MS, RENDERED_EXTENSIONS, RENDERED_DIRS;
 var init_screenshots = __esm({
   "../../packages/envrun/dist/screenshots.js"() {
     "use strict";
@@ -40970,6 +40983,7 @@ var init_screenshots = __esm({
       captureTimeoutMs: 18e4,
       waitForPortMs: 6e4
     };
+    GUARDED_CAPTURE_CAP_MS = 6e5;
     BUILD_MARKER = ".terminalhire-build-start";
     realDeps = {
       runStep: (lease, r) => runStep(lease.containment, r),
@@ -40987,7 +41001,7 @@ var init_screenshots = __esm({
     };
     HOSTED_BEFORE_REASON = "before side not captured on hosted runs yet";
     SCREENSHOT_BUDGET_MS = 3e5;
-    HOSTED_SCREENSHOT_BUDGET_MS = 72e4;
+    HOSTED_SCREENSHOT_BUDGET_MS = 36e4;
     RENDERED_EXTENSIONS = /\.(html?|css|scss|sass|less|tsx|jsx|vue|svelte|astro|mdx|hbs|handlebars|ejs|erb|liquid|twig|njk)$/i;
     RENDERED_DIRS = /(^|\/)(public|static|assets|templates)\//i;
   }
@@ -43048,6 +43062,7 @@ __export(dist_exports, {
   renderRunReport: () => renderRunReport,
   renderVenueLine: () => renderVenueLine,
   renderVerdictLine: () => renderVerdictLine,
+  reportedCounts: () => reportedCounts,
   resolveImageForSpec: () => resolveImageForSpec,
   resolveLease: () => resolveLease,
   resolveRunEnvironment: () => resolveRunEnvironment,
@@ -80593,12 +80608,12 @@ async function run26() {
   console.log("  terminalhire sync \u2014 opt-in Tier-1 profile sync (one-time snapshot)");
   console.log("");
   console.log(
-    '  terminalhire sync --push     Send your profile (shows a consent card, requires typed "yes")'
+    "  terminalhire sync --push     Send your profile (shows a consent card, requires browser confirm)"
   );
   console.log("  terminalhire sync --status   Show whether you have consented (local read only)");
   console.log("  terminalhire sync --delete   Hard-delete your synced profile (revocation)");
   console.log("");
-  console.log('  Your profile is NEVER sent without an explicit typed "yes".');
+  console.log("  Your profile is NEVER sent without an explicit browser confirm.");
   console.log("  This is NOT required to use terminalhire.");
   console.log("");
 }
@@ -82378,7 +82393,7 @@ if (!firstArg || firstArg === "help" || firstArg === "--help" || firstArg === "-
   console.log("  terminalhire saved                          List all locally-saved jobs");
   console.log("  terminalhire unsave <jobId>                 Remove a saved job");
   console.log(
-    "  terminalhire sync --push                    Opt-in: send your profile to staqs (typed-yes consent)"
+    "  terminalhire sync --push                    Opt-in: send your profile to staqs (browser confirm)"
   );
   console.log(
     "  terminalhire sync --status                  Show whether you have consented (local read only)"
@@ -82402,7 +82417,7 @@ if (!firstArg || firstArg === "help" || firstArg === "--help" || firstArg === "-
   console.log("  GET /api/index   \u2014 anonymous index download (no dev data)");
   console.log("  POST /api/lead   \u2014 only after explicit per-role named-entity consent");
   console.log(
-    "  POST /api/profile-sync \u2014 only via `terminalhire sync --push` with a typed-yes consent token"
+    "  POST /api/profile-sync \u2014 only via `terminalhire sync --push` with a browser confirm token"
   );
   console.log(
     "  GitHub token     \u2014 encrypted at ~/.terminalhire/github-token.enc, scope: read:user"
