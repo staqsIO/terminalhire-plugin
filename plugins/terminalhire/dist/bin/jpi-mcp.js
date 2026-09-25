@@ -1644,7 +1644,7 @@ function makeDefaultGovernorConfig(o) {
     budgetMs: o.budgetMs ?? readBuildBudgetMs(),
     sleep: o.sleep ?? realSleep,
     now: o.now ?? Date.now,
-    probeTimeoutMs: o.probeTimeoutMs ?? (o.paceEnabled ? PROBE_TIMEOUT_MS : null)
+    probeTimeoutMs: o.probeTimeoutMs ?? (o.paceEnabled ? PROBE_TIMEOUT_MS2 : null)
   };
 }
 function makeGitHubGovernor(fetchImpl, cfg) {
@@ -1789,7 +1789,7 @@ function makeGitHubGovernor(fetchImpl, cfg) {
   }
   return { get, graphql, probe, setSecondaryHint, getStats, tripped, budgetExhausted };
 }
-var DEFAULT_REQ_GAP_MS, SECONDARY_BACKOFF_CAP_S, DEFAULT_BUILD_BUDGET_MS, MIN_BUILD_BUDGET_MS, MAX_BUILD_BUDGET_MS, PROBE_TIMEOUT_MS, realSleep;
+var DEFAULT_REQ_GAP_MS, SECONDARY_BACKOFF_CAP_S, DEFAULT_BUILD_BUDGET_MS, MIN_BUILD_BUDGET_MS, MAX_BUILD_BUDGET_MS, PROBE_TIMEOUT_MS2, realSleep;
 var init_gh_governor = __esm({
   "../../packages/core/src/gh-governor.ts"() {
     "use strict";
@@ -1798,7 +1798,7 @@ var init_gh_governor = __esm({
     DEFAULT_BUILD_BUDGET_MS = 9e4;
     MIN_BUILD_BUDGET_MS = 1e4;
     MAX_BUILD_BUDGET_MS = 9e4;
-    PROBE_TIMEOUT_MS = 3e3;
+    PROBE_TIMEOUT_MS2 = 3e3;
     realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }
 });
@@ -3726,10 +3726,10 @@ function parseComment(item) {
   if (!item.text || item.text.trim().length < 20) return null;
   const raw = stripHtml2(item.text);
   if (!raw) return null;
-  const firstLine = raw.split(/\n/)[0];
-  const parts = firstLine.split("|").map((s) => s.trim());
+  const firstLine2 = raw.split(/\n/)[0];
+  const parts = firstLine2.split("|").map((s) => s.trim());
   const company = parts[0] ?? "Unknown";
-  const title = parts[1] ?? firstLine.slice(0, 80).trim();
+  const title = parts[1] ?? firstLine2.slice(0, 80).trim();
   const location = parts[2] ?? "";
   if (company.toLowerCase().startsWith("note:") || company.toLowerCase().startsWith("ps:") || title.length < 3) {
     return null;
@@ -4637,7 +4637,7 @@ async function aggregateContributions(opts = {}) {
       now: opts.nowImpl ?? Date.now,
       // Bound the unguarded probe on the REAL network only; injected-fetch tests get
       // null so the probe stays deterministic (and its shared spy sleeper untouched).
-      probeTimeoutMs: opts.fetchImpl ? null : PROBE_TIMEOUT_MS
+      probeTimeoutMs: opts.fetchImpl ? null : PROBE_TIMEOUT_MS2
     },
     opts.token
   );
@@ -10940,7 +10940,7 @@ __export(src_exports, {
   METRICS: () => METRICS,
   MIN_CONTRIBUTORS: () => MIN_CONTRIBUTORS,
   MIN_STARS: () => MIN_STARS,
-  PROBE_TIMEOUT_MS: () => PROBE_TIMEOUT_MS,
+  PROBE_TIMEOUT_MS: () => PROBE_TIMEOUT_MS2,
   PROVENANCE: () => PROVENANCE,
   RIGOR: () => RIGOR,
   ROLLUP_VERSION: () => ROLLUP_VERSION,
@@ -17674,7 +17674,7 @@ var init_fs_util = __esm({
 import * as fs2 from "fs/promises";
 import * as fssync from "fs";
 import * as path3 from "path";
-import { execFile } from "child_process";
+import { execFile as execFile2 } from "child_process";
 import { promisify } from "util";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
@@ -17832,7 +17832,7 @@ var init_skills = __esm({
     init_error();
     init_log();
     init_fs_util();
-    execFileAsync = promisify(execFile);
+    execFileAsync = promisify(execFile2);
   }
 });
 
@@ -30213,7 +30213,7 @@ var init_dist2 = __esm({
 function readDaemonId(docker3, label) {
   let res;
   try {
-    res = docker3.sync(["info", "--format", "{{.ID}}"], { timeoutMs: PROBE_TIMEOUT_MS2 });
+    res = docker3.sync(["info", "--format", "{{.ID}}"], { timeoutMs: PROBE_TIMEOUT_MS3 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { id: null, detail: `${label} daemon probe threw: ${msg}` };
@@ -30260,12 +30260,12 @@ function describeVenueDaemon(verdict) {
   }
   return `venue daemon not distinct (${verdict.reason}): ${verdict.detail}`;
 }
-var PROBE_TIMEOUT_MS2, DAEMON_ID;
+var PROBE_TIMEOUT_MS3, DAEMON_ID;
 var init_venueProof = __esm({
   "../../packages/envrun/dist/venueProof.js"() {
     "use strict";
     init_dist();
-    PROBE_TIMEOUT_MS2 = 2e4;
+    PROBE_TIMEOUT_MS3 = 2e4;
     DAEMON_ID = /^[A-Za-z0-9:._-]+$/;
   }
 });
@@ -30275,7 +30275,7 @@ function readDaemonFacts(docker3) {
   let res;
   try {
     res = docker3.sync(["info", "--format", DAEMON_FACTS_FORMAT], {
-      timeoutMs: PROBE_TIMEOUT_MS2
+      timeoutMs: PROBE_TIMEOUT_MS3
     });
   } catch {
     return null;
@@ -34970,6 +34970,13 @@ var init_preview2 = __esm({
   }
 });
 
+// ../../packages/envspec/dist/runRequirements.js
+var init_runRequirements = __esm({
+  "../../packages/envspec/dist/runRequirements.js"() {
+    "use strict";
+  }
+});
+
 // ../../packages/envspec/dist/index.js
 var init_dist3 = __esm({
   "../../packages/envspec/dist/index.js"() {
@@ -34977,6 +34984,7 @@ var init_dist3 = __esm({
     init_derive();
     init_repo();
     init_preview2();
+    init_runRequirements();
     init_yaml();
   }
 });
@@ -37186,7 +37194,7 @@ __export(dist_exports, {
   PLACEMENT_ALIASES: () => PLACEMENT_ALIASES,
   PRISMA_IMAGE: () => PRISMA_IMAGE,
   PRISMA_INSTALL_ALLOWLIST: () => PRISMA_INSTALL_ALLOWLIST,
-  PROBE_TIMEOUT_MS: () => PROBE_TIMEOUT_MS2,
+  PROBE_TIMEOUT_MS: () => PROBE_TIMEOUT_MS3,
   PSQL_IMAGE: () => PSQL_IMAGE,
   PreviewError: () => PreviewError,
   REDACTED_TARGET_REPO: () => REDACTED_TARGET_REPO,
@@ -37430,7 +37438,7 @@ var identity_exports = {};
 __export(identity_exports, {
   resolveCallerIdentity: () => resolveCallerIdentity
 });
-import { execFile as execFile2 } from "child_process";
+import { execFile as execFile3 } from "child_process";
 import { promisify as promisify2 } from "util";
 async function resolveCallerIdentity() {
   try {
@@ -37448,7 +37456,7 @@ var execFileAsync2;
 var init_identity = __esm({
   "src/reputation/identity.ts"() {
     "use strict";
-    execFileAsync2 = promisify2(execFile2);
+    execFileAsync2 = promisify2(execFile3);
   }
 });
 
@@ -37579,6 +37587,7 @@ __export(jpi_claim_exports, {
   POSTING_LEVEL_RESOLUTION_REASONS: () => POSTING_LEVEL_RESOLUTION_REASONS,
   PUSH_TOKEN_REFUSAL: () => PUSH_TOKEN_REFUSAL,
   REVISE_RECOVERY_STATES: () => REVISE_RECOVERY_STATES,
+  SETUP_FAILED_REQUIREMENTS: () => SETUP_FAILED_REQUIREMENTS,
   SUBMIT_ACCEPTS: () => SUBMIT_ACCEPTS,
   SYNC_BACKGROUND_PUSH_ACTIVE_FIELD: () => SYNC_BACKGROUND_PUSH_ACTIVE_FIELD,
   VERIFY_REL_PATH: () => VERIFY_REL_PATH,
@@ -37690,7 +37699,7 @@ import {
 import { join as join32, dirname as dirname10, isAbsolute as isAbsolute5, resolve as pathResolve } from "path";
 import { createHash as createHash11 } from "crypto";
 import { homedir as homedir15, hostname as osHostname } from "os";
-import { execFile as execFile3, execFileSync as execFileSync2, spawnSync as spawnSync8 } from "child_process";
+import { execFile as execFile4, execFileSync as execFileSync2, spawnSync as spawnSync8 } from "child_process";
 import { promisify as promisify3 } from "util";
 import { createInterface as createInterface2 } from "readline";
 function readNudgedClaimIds() {
@@ -38060,7 +38069,12 @@ function extractClaimableFields(job) {
     // server-side (Decision 4). `claimMode` follows the index row's absent-means-
     // default convention: absent = open.
     founderPosting: b.bountySource === "founder",
-    claimMode: b.claimMode === "approval-only" ? "approval-only" : "open"
+    claimMode: b.claimMode === "approval-only" ? "approval-only" : "open",
+    // TERM-1259. What the work needs, as the SERVER projected it onto the index
+    // (`publicRunRequirements`). Carried, never derived here: the CLI has no copy of the
+    // repository before a claim, and a second derivation could disagree with the one the
+    // poster saw. Null when the index carries none.
+    runRequirements: b.runRequirements && typeof b.runRequirements === "object" ? b.runRequirements : null
   };
 }
 function parseGitHubUrl(url) {
@@ -38659,6 +38673,7 @@ async function resolveBounty(arg) {
   let bountyId, title, repoFullName, issueUrl, amountUSD, source, openPRsAtDiscovery, indexNativeId;
   let founderPosting = false;
   let claimMode = "open";
+  let runRequirements = null;
   let job = findClaimableInCache(arg) ?? (looksLikeShortRef(arg) ? findClaimableByShortRef(arg) : null);
   let freshPool;
   if (!job && looksLikeShortRef(arg)) {
@@ -38675,7 +38690,8 @@ async function resolveBounty(arg) {
       source,
       openPRsAtDiscovery,
       founderPosting,
-      claimMode
+      claimMode,
+      runRequirements
     } = extractClaimableFields(job));
     indexNativeId = bountyId;
   } else {
@@ -38746,7 +38762,9 @@ async function resolveBounty(arg) {
     // GitHub issue), so the defaults above are correct there: a URL-tier claim is
     // never treated as founder supply.
     founderPosting,
-    claimMode
+    claimMode,
+    // TERM-1259. Only a founder index hit carries these; every other path is null.
+    runRequirements: runRequirements ?? null
   };
 }
 function fmtOpenPRsLine(b) {
@@ -42660,10 +42678,14 @@ async function postJson(fetchImpl, url, body, linked) {
 function resolveUsageLines() {
   return [
     'Usage: terminalhire claim resolve <id> --reason <reason> [--note "..."]',
+    "                                  [--requirement <field>]",
     "",
     "  Hand a claim back and tell the poster why. Needs `terminalhire link`.",
     "",
-    ...resolutionReasonHelpLines()
+    ...resolutionReasonHelpLines(),
+    `  With --reason setup-failed, --requirement names what would not set up:`,
+    `    ${SETUP_FAILED_REQUIREMENTS.join(", ")}`,
+    ""
   ];
 }
 function printResolveHint(list, log) {
@@ -42719,6 +42741,16 @@ async function cmdResolve(id, flags = {}, deps = {}) {
     for (const line of resolutionReasonHelpLines()) err(line);
     return 1;
   }
+  const requirement = typeof flags.requirement === "string" && flags.requirement.trim() ? flags.requirement.trim() : null;
+  if (requirement !== null && reason !== "setup-failed") {
+    err("terminalhire claim resolve: --requirement is used only with --reason setup-failed.");
+    return 1;
+  }
+  if (requirement !== null && !SETUP_FAILED_REQUIREMENTS.includes(requirement)) {
+    err(`terminalhire claim resolve: '${requirement}' is not a run requirement. One of:`);
+    err(`  ${SETUP_FAILED_REQUIREMENTS.join(", ")}`);
+    return 1;
+  }
   const linked = deps.cookie ? { cookie: deps.cookie, mismatch: null } : webSessionCookieForHost(CLAIM_SYNC_BASE4);
   if (linked.mismatch) {
     err(
@@ -42733,6 +42765,7 @@ async function cmdResolve(id, flags = {}, deps = {}) {
   const note = typeof flags.note === "string" && flags.note.trim() ? flags.note.trim() : null;
   const body = { bountyId: founderPostingIdOf(claim), claimId, reason };
   if (note) body.note = note;
+  if (requirement) body.failedRequirement = requirement;
   let res;
   try {
     res = await fetchImpl(`${CLAIM_SYNC_BASE4}/api/claim/resolution`, {
@@ -42769,6 +42802,9 @@ async function cmdResolve(id, flags = {}, deps = {}) {
   log(
     suspended ? "    The posting is off the market until the poster acts on it." : "    The posting is open again for someone else."
   );
+  if (reason === "setup-failed") {
+    log(`    A setup failure does not stop you: you may claim it again once it sets up.`);
+  }
   log("");
   log(`  The local record is still here. To drop it: terminalhire claim release ${id}`);
   log("");
@@ -42876,7 +42912,7 @@ async function run() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR11, INDEX_CACHE_FILE2, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, CLAIM_SYNC_WRITE_TIMEOUT_MS, GH_API2, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, CLOSED_STATES, GH_SESSION_COOKIE, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, OPENABLE_AGENTS, BRIEF_DIR, BRIEF_REL_PATH, VERIFY_REL_PATH, AGENTS_REL_PATH, BRIEF_EXCLUDE_LINE, PACK_SAFE_ID, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3, FOUNDER_POSTING_ID, CLAIM_RESOLUTION_REASONS, POSTING_LEVEL_RESOLUTION_REASONS, RESOLUTION_REASON_BLURB;
+var TERMINALHIRE_DIR11, INDEX_CACHE_FILE2, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, CLAIM_SYNC_WRITE_TIMEOUT_MS, GH_API2, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, CLOSED_STATES, GH_SESSION_COOKIE, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, OPENABLE_AGENTS, BRIEF_DIR, BRIEF_REL_PATH, VERIFY_REL_PATH, AGENTS_REL_PATH, BRIEF_EXCLUDE_LINE, PACK_SAFE_ID, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3, FOUNDER_POSTING_ID, CLAIM_RESOLUTION_REASONS, SETUP_FAILED_REQUIREMENTS, POSTING_LEVEL_RESOLUTION_REASONS, RESOLUTION_REASON_BLURB;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
@@ -42905,7 +42941,7 @@ var init_jpi_claim = __esm({
     GH_HEADERS2 = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
     CONTENTION_HINT = "    tip: if scopes overlap, comment on the ISSUE comparing scope \u2014 generous + compatible wins triage.";
     AI_DISCLOSURE_NOTE = "---\nThis contribution was developed with AI assistance via [terminalhire](https://terminalhire.com). The author has reviewed the change and takes responsibility for its content.";
-    pExecFile = promisify3(execFile3);
+    pExecFile = promisify3(execFile4);
     VALUE_FLAGS = /* @__PURE__ */ new Set([
       "worktree",
       "branch",
@@ -42924,7 +42960,9 @@ var init_jpi_claim = __esm({
       // `--sha` was here for `claim note approve` and went with it: the send moved to the
       // dashboard, so no CLI verb names a digest any more. Left in place it would parse a
       // flag nothing reads, which is how a removed feature looks half-removed.
-      "body"
+      "body",
+      // TERM-1259. `claim resolve --reason setup-failed --requirement <field>`.
+      "requirement"
     ]);
     ASSIGNMENT_MARKER = "<!-- terminalhire:assignment-request -->";
     STAKE_MARKER = "<!-- terminalhire:claim-stake -->";
@@ -42998,7 +43036,16 @@ var init_jpi_claim = __esm({
       "out-of-time",
       "already-implemented",
       "repo-does-not-build",
-      "brief-insufficient"
+      "brief-insufficient",
+      "setup-failed"
+    ];
+    SETUP_FAILED_REQUIREMENTS = [
+      "runtime",
+      "runtimeVersion",
+      "install",
+      "test",
+      "services",
+      "os"
     ];
     POSTING_LEVEL_RESOLUTION_REASONS = [
       "already-implemented",
@@ -43010,7 +43057,8 @@ var init_jpi_claim = __esm({
       "out-of-time": "you ran out of time for it",
       "already-implemented": "the repo already has this",
       "repo-does-not-build": "the repo will not build, so nobody can finish it",
-      "brief-insufficient": "the task does not say enough to do the work"
+      "brief-insufficient": "the task does not say enough to do the work",
+      "setup-failed": "the environment would not set up; you may claim it again"
     };
   }
 });
@@ -65310,6 +65358,117 @@ function sessionCase(entry, { stale }) {
   return { kind: "expired" };
 }
 
+// bin/local-setup-probe.js
+import { execFile } from "child_process";
+var PROBE_TIMEOUT_MS = 3e3;
+var RUNTIME_PROBES = {
+  node: { tool: "node", file: "node", args: ["--version"] },
+  python: { tool: "python3", file: "python3", args: ["--version"] },
+  go: { tool: "go", file: "go", args: ["version"] },
+  rust: { tool: "cargo", file: "cargo", args: ["--version"] },
+  jvm: { tool: "java", file: "java", args: ["-version"] },
+  ruby: { tool: "ruby", file: "ruby", args: ["--version"] },
+  dotnet: { tool: "dotnet", file: "dotnet", args: ["--version"] },
+  cpp: { tool: "c++", file: "c++", args: ["--version"] }
+};
+var INSTALL_TOOL_PROBES = {
+  npm: { tool: "npm", file: "npm", args: ["--version"] },
+  yarn: { tool: "yarn", file: "yarn", args: ["--version"] },
+  pnpm: { tool: "pnpm", file: "pnpm", args: ["--version"] },
+  bun: { tool: "bun", file: "bun", args: ["--version"] },
+  pip: { tool: "pip", file: "pip", args: ["--version"] },
+  pip3: { tool: "pip3", file: "pip3", args: ["--version"] },
+  poetry: { tool: "poetry", file: "poetry", args: ["--version"] },
+  uv: { tool: "uv", file: "uv", args: ["--version"] },
+  pipenv: { tool: "pipenv", file: "pipenv", args: ["--version"] },
+  bundle: { tool: "bundle", file: "bundle", args: ["--version"] },
+  mvn: { tool: "mvn", file: "mvn", args: ["--version"] },
+  gradle: { tool: "gradle", file: "gradle", args: ["--version"] },
+  make: { tool: "make", file: "make", args: ["--version"] }
+};
+var CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
+function firstLine(text) {
+  const line = String(text ?? "").split(/\r\n|\r|\n/).map((l) => l.trim()).find((l) => l !== "");
+  return line ? line.replace(CONTROL, "").slice(0, 80) : null;
+}
+var SHELL_NOT_FOUND = /* @__PURE__ */ new Set([127, 9009]);
+function runProbe(file, args, timeoutMs = PROBE_TIMEOUT_MS, { shell = false } = {}) {
+  return new Promise((resolve5) => {
+    let child;
+    const opts = {
+      timeout: timeoutMs,
+      killSignal: "SIGKILL",
+      windowsHide: true,
+      maxBuffer: 64 * 1024
+    };
+    const done2 = (err, stdout, stderr) => {
+      if (!err) {
+        resolve5({ ok: true, version: firstLine(stdout) ?? firstLine(stderr) });
+        return;
+      }
+      if (err.code === "ENOENT" || shell && SHELL_NOT_FOUND.has(err.code)) {
+        resolve5({ ok: false, reason: "not found" });
+      } else if (err.killed || err.signal) resolve5({ ok: false, reason: "timed out" });
+      else resolve5({ ok: false, reason: "exited with an error" });
+    };
+    try {
+      child = shell ? execFile([file, ...args].join(" "), [], { ...opts, shell: true }, done2) : execFile(file, args, opts, done2);
+    } catch {
+      resolve5({ ok: false, reason: "not found" });
+      return;
+    }
+    child.stdin?.end();
+  });
+}
+var DOCKER_PROBE = {
+  tool: "docker",
+  file: "docker",
+  args: ["--version"],
+  foundNote: "Docker client found; daemon not checked."
+};
+function probesFor(requirements) {
+  if (!requirements || typeof requirements !== "object") return [];
+  const out = [];
+  const runtime = requirements.runtime?.value;
+  if (typeof runtime === "string" && RUNTIME_PROBES[runtime]) {
+    out.push({ ...RUNTIME_PROBES[runtime], for: "runtime" });
+  }
+  const install = requirements.install?.value;
+  if (typeof install === "string") {
+    const first = install.trim().split(/\s+/)[0];
+    const probe = INSTALL_TOOL_PROBES[first];
+    if (probe && !out.some((p) => p.tool === probe.tool)) out.push({ ...probe, for: "install" });
+  }
+  const services = requirements.services?.value;
+  if (Array.isArray(services) && services.length > 0) {
+    out.push({ ...DOCKER_PROBE, for: "services" });
+  }
+  return out;
+}
+async function probeLocalSetup(requirements, { run: run3 = runProbe, timeoutMs = PROBE_TIMEOUT_MS, platform = process.platform } = {}) {
+  const probes = probesFor(requirements);
+  const shell = platform === "win32";
+  const results = await Promise.all(probes.map((p) => run3(p.file, p.args, timeoutMs, { shell })));
+  const have = [];
+  const missing = [];
+  probes.forEach((p, i) => {
+    const r = results[i];
+    const base = { tool: p.tool, for: p.for };
+    if (r.ok) {
+      have.push({
+        ...base,
+        ...p.foundNote ? { note: p.foundNote } : {},
+        version: r.version ?? null
+      });
+    } else missing.push({ ...base, reason: r.reason });
+  });
+  return {
+    note: "Checked on this machine. These results were not sent anywhere.",
+    have,
+    missing
+  };
+}
+
 // bin/jpi-mcp.js
 var TOOL_NAMES = [
   "jobs",
@@ -65407,9 +65566,12 @@ function sessionDiagnostic(entry, hostDiffers) {
       detail: "This shell resolves a different host from the one the session was linked to, so the credential was withheld rather than presented to a server that did not mint it, and the counts above are empty. Run `terminalhire link` in this shell, or point it back at the host the session belongs to. No request went out, so nothing was refused."
     };
   }
-  const c = sessionCase({ ...entry, sessionHostMismatch: null }, {
-    stale: entry.sessionStale === true
-  });
+  const c = sessionCase(
+    { ...entry, sessionHostMismatch: null },
+    {
+      stale: entry.sessionStale === true
+    }
+  );
   if (c === null) return { state: "ok" };
   if (c.kind === "refused") {
     return {
@@ -65522,6 +65684,12 @@ async function resolveClaimPreview(opportunity, { semantic = false } = {}) {
     assignees: bounty.assignees,
     contested: isContested2(bounty),
     policy: policy ? publicPolicy(policy) : null,
+    // TERM-1259 step 5. What the work needs, exactly as the server put it on the index;
+    // null when the entry carries none. `localSetup` is this machine's answer to it, from
+    // a fixed table of version probes (`local-setup-probe.js`). It goes back to the local
+    // caller only and is never sent anywhere.
+    requirements: bounty.runRequirements ?? null,
+    localSetup: bounty.runRequirements ? await probeLocalSetup(bounty.runRequirements) : null,
     _policy: policy,
     // Internal routing bit from the CLI's shared resolver. Founder postings are
     // not ordinary local-only claims: the interactive CLI must register them
@@ -65872,7 +66040,7 @@ var TOOL_DEFS = [
   },
   {
     name: "claim_preview",
-    description: "Preview a bounty or contribution before claiming. Performs governed public reads for issue freshness, contention, and repository policy; writes nothing.",
+    description: "Preview a bounty or contribution before claiming. Performs governed public reads for issue freshness, contention, and repository policy; writes nothing. For a posted bounty it also returns what the work needs (runtime, install and test commands, services, OS) and which of those tools this machine has, checked locally and sent nowhere.",
     inputSchema: CLAIM_PREVIEW_SCHEMA
   },
   {

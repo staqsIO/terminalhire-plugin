@@ -34452,6 +34452,13 @@ var init_preview2 = __esm({
   }
 });
 
+// ../../packages/envspec/dist/runRequirements.js
+var init_runRequirements = __esm({
+  "../../packages/envspec/dist/runRequirements.js"() {
+    "use strict";
+  }
+});
+
 // ../../packages/envspec/dist/index.js
 var init_dist3 = __esm({
   "../../packages/envspec/dist/index.js"() {
@@ -34459,6 +34466,7 @@ var init_dist3 = __esm({
     init_derive();
     init_repo();
     init_preview2();
+    init_runRequirements();
     init_yaml();
   }
 });
@@ -37742,7 +37750,9 @@ var VALUE_FLAGS = /* @__PURE__ */ new Set([
   // `--sha` was here for `claim note approve` and went with it: the send moved to the
   // dashboard, so no CLI verb names a digest any more. Left in place it would parse a
   // flag nothing reads, which is how a removed feature looks half-removed.
-  "body"
+  "body",
+  // TERM-1259. `claim resolve --reason setup-failed --requirement <field>`.
+  "requirement"
 ]);
 function parseArgs(argv) {
   const flags = {};
@@ -37955,7 +37965,12 @@ function extractClaimableFields(job) {
     // server-side (Decision 4). `claimMode` follows the index row's absent-means-
     // default convention: absent = open.
     founderPosting: b.bountySource === "founder",
-    claimMode: b.claimMode === "approval-only" ? "approval-only" : "open"
+    claimMode: b.claimMode === "approval-only" ? "approval-only" : "open",
+    // TERM-1259. What the work needs, as the SERVER projected it onto the index
+    // (`publicRunRequirements`). Carried, never derived here: the CLI has no copy of the
+    // repository before a claim, and a second derivation could disagree with the one the
+    // poster saw. Null when the index carries none.
+    runRequirements: b.runRequirements && typeof b.runRequirements === "object" ? b.runRequirements : null
   };
 }
 function parseGitHubUrl(url) {
@@ -38565,6 +38580,7 @@ async function resolveBounty(arg) {
   let bountyId, title, repoFullName, issueUrl, amountUSD, source, openPRsAtDiscovery, indexNativeId;
   let founderPosting = false;
   let claimMode = "open";
+  let runRequirements = null;
   let job = findClaimableInCache(arg) ?? (looksLikeShortRef(arg) ? findClaimableByShortRef(arg) : null);
   let freshPool;
   if (!job && looksLikeShortRef(arg)) {
@@ -38581,7 +38597,8 @@ async function resolveBounty(arg) {
       source,
       openPRsAtDiscovery,
       founderPosting,
-      claimMode
+      claimMode,
+      runRequirements
     } = extractClaimableFields(job));
     indexNativeId = bountyId;
   } else {
@@ -38652,7 +38669,9 @@ async function resolveBounty(arg) {
     // GitHub issue), so the defaults above are correct there: a URL-tier claim is
     // never treated as founder supply.
     founderPosting,
-    claimMode
+    claimMode,
+    // TERM-1259. Only a founder index hit carries these; every other path is null.
+    runRequirements: runRequirements ?? null
   };
 }
 function fmtOpenPRsLine(b) {
@@ -42477,7 +42496,16 @@ var CLAIM_RESOLUTION_REASONS = [
   "out-of-time",
   "already-implemented",
   "repo-does-not-build",
-  "brief-insufficient"
+  "brief-insufficient",
+  "setup-failed"
+];
+var SETUP_FAILED_REQUIREMENTS = [
+  "runtime",
+  "runtimeVersion",
+  "install",
+  "test",
+  "services",
+  "os"
 ];
 var POSTING_LEVEL_RESOLUTION_REASONS = [
   "already-implemented",
@@ -42489,7 +42517,8 @@ var RESOLUTION_REASON_BLURB = {
   "out-of-time": "you ran out of time for it",
   "already-implemented": "the repo already has this",
   "repo-does-not-build": "the repo will not build, so nobody can finish it",
-  "brief-insufficient": "the task does not say enough to do the work"
+  "brief-insufficient": "the task does not say enough to do the work",
+  "setup-failed": "the environment would not set up; you may claim it again"
 };
 function isPostingLevelResolutionReason(reason) {
   return POSTING_LEVEL_RESOLUTION_REASONS.includes(reason);
@@ -42641,10 +42670,14 @@ async function postJson(fetchImpl, url, body, linked) {
 function resolveUsageLines() {
   return [
     'Usage: terminalhire claim resolve <id> --reason <reason> [--note "..."]',
+    "                                  [--requirement <field>]",
     "",
     "  Hand a claim back and tell the poster why. Needs `terminalhire link`.",
     "",
-    ...resolutionReasonHelpLines()
+    ...resolutionReasonHelpLines(),
+    `  With --reason setup-failed, --requirement names what would not set up:`,
+    `    ${SETUP_FAILED_REQUIREMENTS.join(", ")}`,
+    ""
   ];
 }
 function printResolveHint(list, log) {
@@ -42700,6 +42733,16 @@ async function cmdResolve(id, flags = {}, deps = {}) {
     for (const line of resolutionReasonHelpLines()) err(line);
     return 1;
   }
+  const requirement = typeof flags.requirement === "string" && flags.requirement.trim() ? flags.requirement.trim() : null;
+  if (requirement !== null && reason !== "setup-failed") {
+    err("terminalhire claim resolve: --requirement is used only with --reason setup-failed.");
+    return 1;
+  }
+  if (requirement !== null && !SETUP_FAILED_REQUIREMENTS.includes(requirement)) {
+    err(`terminalhire claim resolve: '${requirement}' is not a run requirement. One of:`);
+    err(`  ${SETUP_FAILED_REQUIREMENTS.join(", ")}`);
+    return 1;
+  }
   const linked = deps.cookie ? { cookie: deps.cookie, mismatch: null } : webSessionCookieForHost(CLAIM_SYNC_BASE4);
   if (linked.mismatch) {
     err(
@@ -42714,6 +42757,7 @@ async function cmdResolve(id, flags = {}, deps = {}) {
   const note = typeof flags.note === "string" && flags.note.trim() ? flags.note.trim() : null;
   const body = { bountyId: founderPostingIdOf(claim), claimId, reason };
   if (note) body.note = note;
+  if (requirement) body.failedRequirement = requirement;
   let res;
   try {
     res = await fetchImpl(`${CLAIM_SYNC_BASE4}/api/claim/resolution`, {
@@ -42750,6 +42794,9 @@ async function cmdResolve(id, flags = {}, deps = {}) {
   log(
     suspended ? "    The posting is off the market until the poster acts on it." : "    The posting is open again for someone else."
   );
+  if (reason === "setup-failed") {
+    log(`    A setup failure does not stop you: you may claim it again once it sets up.`);
+  }
   log("");
   log(`  The local record is still here. To drop it: terminalhire claim release ${id}`);
   log("");
@@ -42870,6 +42917,7 @@ export {
   POSTING_LEVEL_RESOLUTION_REASONS,
   PUSH_TOKEN_REFUSAL,
   REVISE_RECOVERY_STATES,
+  SETUP_FAILED_REQUIREMENTS,
   SUBMIT_ACCEPTS,
   SYNC_BACKGROUND_PUSH_ACTIVE_FIELD,
   VERIFY_REL_PATH,

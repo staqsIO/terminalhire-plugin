@@ -8445,6 +8445,13 @@ var init_preview2 = __esm({
   }
 });
 
+// ../../packages/envspec/dist/runRequirements.js
+var init_runRequirements = __esm({
+  "../../packages/envspec/dist/runRequirements.js"() {
+    "use strict";
+  }
+});
+
 // ../../packages/envspec/dist/index.js
 var init_dist3 = __esm({
   "../../packages/envspec/dist/index.js"() {
@@ -8452,6 +8459,7 @@ var init_dist3 = __esm({
     init_derive();
     init_repo();
     init_preview2();
+    init_runRequirements();
     init_yaml();
   }
 });
