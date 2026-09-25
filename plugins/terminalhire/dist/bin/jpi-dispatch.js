@@ -1674,7 +1674,7 @@ async function requireStoredLogin() {
   }
 }
 function sleep(ms) {
-  return new Promise((resolve8) => setTimeout(resolve8, ms));
+  return new Promise((resolve9) => setTimeout(resolve9, ms));
 }
 var TERMINALHIRE_DIR3, TOKEN_FILE, ALGO, IV_BYTES, GITHUB_SCOPE, DEVICE_CODE_URL, ACCESS_TOKEN_URL, BAKED_IN_CLIENT_ID, MOCK_TOKEN, MOCK_LOGIN;
 var init_github_auth = __esm({
@@ -2645,9 +2645,9 @@ function makeGitHubGovernor(fetchImpl, cfg) {
   let coreHealthyAtStart = false;
   async function noteAndMaybeBackOff(res) {
     if (res.status !== 403) return;
-    const remaining = res.headers.get("x-ratelimit-remaining");
+    const remaining2 = res.headers.get("x-ratelimit-remaining");
     const retryAfter = res.headers.get("retry-after");
-    const positiveSecondary = retryAfter != null || remaining != null && remaining !== "0";
+    const positiveSecondary = retryAfter != null || remaining2 != null && remaining2 !== "0";
     const isSecondary = positiveSecondary || coreHealthyAtStart;
     if (!isSecondary) return;
     await recordSecondaryStrike(retryAfter);
@@ -2741,8 +2741,8 @@ function makeGitHubGovernor(fetchImpl, cfg) {
     try {
       const res = bound == null ? await fetchP : await Promise.race([
         fetchP,
-        new Promise((resolve8) => {
-          timer = setTimeout(() => resolve8(null), bound);
+        new Promise((resolve9) => {
+          timer = setTimeout(() => resolve9(null), bound);
         })
       ]);
       if (!res || !res.ok) return null;
@@ -4207,14 +4207,14 @@ function mmrRerank(results, opts = {}) {
   let maxScore = 0;
   for (const r of results) if (r.score > maxScore) maxScore = r.score;
   const relNorm = (r) => maxScore > 0 ? r.score / maxScore : 0;
-  const remaining = results.slice();
+  const remaining2 = results.slice();
   const selected = [];
-  const window2 = Math.min(k, remaining.length);
+  const window2 = Math.min(k, remaining2.length);
   for (let pos = 0; pos < window2; pos++) {
     let bestIdx = 0;
     let bestObj = -Infinity;
-    for (let i = 0; i < remaining.length; i++) {
-      const cand = remaining[i];
+    for (let i = 0; i < remaining2.length; i++) {
+      const cand = remaining2[i];
       let minDissim = selected.length === 0 ? 0 : Infinity;
       for (const s of selected) {
         const d = simOf(cand, s);
@@ -4226,9 +4226,9 @@ function mmrRerank(results, opts = {}) {
         bestIdx = i;
       }
     }
-    selected.push(remaining.splice(bestIdx, 1)[0]);
+    selected.push(remaining2.splice(bestIdx, 1)[0]);
   }
-  return [...selected, ...remaining];
+  return [...selected, ...remaining2];
 }
 var init_rerank = __esm({
   "../../packages/core/src/rerank.ts"() {
@@ -6800,8 +6800,8 @@ async function getWithTimeout(governor, url, token, timeoutMs) {
   try {
     const res = await Promise.race([
       getP,
-      new Promise((resolve8) => {
-        timer = setTimeout(() => resolve8(null), timeoutMs);
+      new Promise((resolve9) => {
+        timer = setTimeout(() => resolve9(null), timeoutMs);
       })
     ]);
     if (res === null) controller.abort();
@@ -10298,10 +10298,10 @@ var init_node_model = __esm({
 // ../../packages/core/src/episodes/derivers/signals.ts
 function mcpToolSignal(name) {
   const rest = name.slice("mcp__".length);
-  const sep7 = rest.indexOf("__");
-  if (sep7 <= 0) return "mcp:custom";
-  const server = rest.slice(0, sep7).toLowerCase();
-  const leaf = rest.slice(sep7 + 2);
+  const sep8 = rest.indexOf("__");
+  if (sep8 <= 0) return "mcp:custom";
+  const server = rest.slice(0, sep8).toLowerCase();
+  const leaf = rest.slice(sep8 + 2);
   if (leaf.length === 0) return "mcp:custom";
   if (MCP_SERVER_CAPABILITY.has(server)) return MCP_SERVER_CAPABILITY.get(server) ?? null;
   return "mcp:custom";
@@ -12800,10 +12800,10 @@ async function maybePromptPeerConnect({
 } = {}) {
   const promptOnce = ask5 ? async (q) => String(await ask5(q) ?? "").trim().toLowerCase() : async (q) => {
     const rl = createInterface({ input, output });
-    const a = await new Promise((resolve8) => {
+    const a = await new Promise((resolve9) => {
       rl.question(q, (x) => {
         rl.close();
-        resolve8(x);
+        resolve9(x);
       });
     });
     return String(a).trim().toLowerCase();
@@ -14153,13 +14153,13 @@ function interleaveBySource(topMatches) {
     buckets.get(source).push(m);
   }
   const out = [];
-  let remaining = topMatches.length;
-  while (remaining > 0) {
+  let remaining2 = topMatches.length;
+  while (remaining2 > 0) {
     for (const source of order) {
       const b = buckets.get(source);
       if (b && b.length) {
         out.push(b.shift());
-        remaining--;
+        remaining2--;
       }
     }
   }
@@ -14470,12 +14470,12 @@ async function maybeAskPulse() {
   }
   writeConfig({ lastPulseAskAt: (/* @__PURE__ */ new Date()).toISOString() });
   const rl = createInterface2({ input: process.stdin, output: process.stdout });
-  const ask5 = (question) => new Promise((resolve8) => {
-    const onClose = () => resolve8(null);
+  const ask5 = (question) => new Promise((resolve9) => {
+    const onClose = () => resolve9(null);
     rl.once("close", onClose);
     rl.question(question, (answer2) => {
       rl.removeListener("close", onClose);
-      resolve8((answer2 || "").trim());
+      resolve9((answer2 || "").trim());
     });
   });
   const answer = await ask5(
@@ -14618,10 +14618,10 @@ async function fetchIndex(quiet = false) {
 }
 function prompt(question) {
   const rl = createInterface3({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve8) => {
+  return new Promise((resolve9) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve8(answer.trim().toLowerCase());
+      resolve9(answer.trim().toLowerCase());
     });
   });
 }
@@ -15261,10 +15261,10 @@ __export(jpi_devs_exports, {
 import { createInterface as createInterface4 } from "readline";
 function prompt2(question) {
   const rl = createInterface4({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve8) => {
+  return new Promise((resolve9) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve8(answer.trim().toLowerCase());
+      resolve9(answer.trim().toLowerCase());
     });
   });
 }
@@ -15408,10 +15408,10 @@ function readProject2() {
 }
 function promptRaw(question) {
   const rl = createInterface5({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve8) => {
+  return new Promise((resolve9) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve8(answer.trim());
+      resolve9(answer.trim());
     });
   });
 }
@@ -15725,7 +15725,7 @@ async function continuityForRepo(repoFullName, claims) {
 }
 function calibrationSummary(claims, repo) {
   const resolved = claims.filter(
-    (c) => c.repoFullName === repo && (c.state === "merged" || c.state === "abandoned") && c.review?.acceptanceScore != null
+    (c) => c.repoFullName === repo && (c.state === "merged" || c.state === "abandoned") && !(c.state === "abandoned" && c.serverReleased === true && !c.posterVerdict) && c.review?.acceptanceScore != null
   );
   const n = resolved.length;
   if (n < 5) return { available: false, n, text: null };
@@ -16014,7 +16014,7 @@ function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
 function countAwaitingFounderApproval(claims = readClaims()) {
   try {
     return claims.filter(
-      (c) => c.approval?.mode === "approval-only" && c.approval?.state === "pending"
+      (c) => !TERMINAL_STATES.has(c.state) && c.approval?.mode === "approval-only" && c.approval?.state === "pending"
     ).length;
   } catch {
     return 0;
@@ -16023,8 +16023,17 @@ function countAwaitingFounderApproval(claims = readClaims()) {
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;
   const merged = claims.filter((c) => c.state === "merged").length;
-  const decided = claims.filter((c) => DECIDED_STATES.has(c.state)).length;
-  return { merged, decided, inFlight: total - decided, total, rate: decided === 0 ? 0 : merged / decided };
+  const released = claims.filter(
+    (c) => c.state === "abandoned" && c.serverReleased === true && !c.posterVerdict
+  ).length;
+  const decided = claims.filter((c) => DECIDED_STATES.has(c.state)).length - released;
+  return {
+    merged,
+    decided,
+    inFlight: total - decided - released,
+    total,
+    rate: decided === 0 ? 0 : merged / decided
+  };
 }
 function formatAcceptedPRRate(rate) {
   const inFlight = rate.inFlight > 0 ? ` \xB7 ${rate.inFlight} in flight` : "";
@@ -16210,10 +16219,10 @@ function consentNotice(bountyId, reason) {
 }
 function prompt3(question) {
   const rl = createInterface6({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve8) => {
+  return new Promise((resolve9) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve8(String(answer ?? "").trim());
+      resolve9(String(answer ?? "").trim());
     });
   });
 }
@@ -16365,10 +16374,10 @@ async function fetchIndex2(quiet = false) {
 }
 function prompt4(question) {
   const rl = createInterface7({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve8) => {
+  return new Promise((resolve9) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve8(answer.trim().toLowerCase());
+      resolve9(answer.trim().toLowerCase());
     });
   });
 }
@@ -17754,25 +17763,33 @@ async function fetchFounderVerdicts(pushToken, fetchImpl = fetch) {
     const verdicts = body.verdicts.filter(
       (v) => v && typeof v.claimId === "string" && v.claimId !== "" && (v.verdict === "accepted" || v.verdict === "rejected")
     );
-    return { verdicts, latestAt: typeof body.latestAt === "string" ? body.latestAt : null };
+    const releases = (Array.isArray(body.releases) ? body.releases : []).filter(
+      (r) => r && typeof r.claimId === "string" && r.claimId !== "" && typeof r.at === "string" && Number.isFinite(Date.parse(r.at))
+    );
+    return {
+      verdicts,
+      latestAt: typeof body.latestAt === "string" ? body.latestAt : null,
+      ...releases.length ? { releases } : {}
+    };
   } catch {
     return null;
   }
 }
-function planVerdictTransitions(claims, verdicts, nextPolledState2) {
+function planVerdictTransitions(claims, verdicts, nextPolledState2, releases = []) {
   if (!Array.isArray(claims) || !Array.isArray(verdicts)) return [];
   const byClaimId = /* @__PURE__ */ new Map();
   for (const v of verdicts) {
     if (v && typeof v.claimId === "string" && v.claimId !== "") byClaimId.set(v.claimId, v);
   }
+  const released = new Set(releases.map((r) => r.claimId));
   const plan = [];
   for (const c of claims) {
     const claimId = c?.approval?.claimId;
     if (!claimId) continue;
     const v = byClaimId.get(claimId);
-    if (!v) continue;
+    if (!v && !released.has(claimId)) continue;
     if (TERMINAL.has(c.state)) continue;
-    const to = verdictState(v.verdict);
+    const to = v ? verdictState(v.verdict) : "abandoned";
     const next = nextPolledState2(c.state, to);
     if (next === c.state) continue;
     plan.push({
@@ -17780,8 +17797,8 @@ function planVerdictTransitions(claims, verdicts, nextPolledState2) {
       claimId,
       from: c.state,
       to: next,
-      verdict: v.verdict,
-      settled: v.settled === true,
+      ...v ? { verdict: v.verdict } : { serverReleased: true },
+      settled: v?.settled === true,
       amountUSD: typeof c.amountUSD === "number" ? c.amountUSD : null,
       title: typeof c.title === "string" ? c.title : ""
     });
@@ -17790,6 +17807,7 @@ function planVerdictTransitions(claims, verdicts, nextPolledState2) {
 }
 function buildVerdictNotice(t) {
   if (!t || typeof t.to !== "string") return null;
+  if (t.serverReleased === true) return "  claim released \u2014 this request is closed";
   const amount = typeof t.amountUSD === "number" && t.amountUSD > 0 ? `$${t.amountUSD}` : null;
   if (t.verdict === "rejected") {
     return `  \u2717 poster rejected${amount ? ` \u2014 ${amount}` : ""} \xB7 claim moved to ${t.to}`;
@@ -17819,11 +17837,19 @@ async function syncFounderVerdicts({
     if (!pushToken) return quiet;
     const res = await fetchFounderVerdicts(pushToken, fetchImpl);
     if (!res) return { checked: false, unavailable: true, applied: [] };
-    const plan = planVerdictTransitions(founderTargets, res.verdicts, claimsModule.nextPolledState);
+    const plan = planVerdictTransitions(
+      founderTargets,
+      res.verdicts,
+      claimsModule.nextPolledState,
+      res.releases
+    );
     const applied = [];
     for (const t of plan) {
       try {
-        claimsModule.updateClaim(t.id, { state: t.to, posterVerdict: t.verdict });
+        claimsModule.updateClaim(t.id, {
+          state: t.to,
+          ...t.serverReleased === true ? { serverReleased: true } : { posterVerdict: t.verdict }
+        });
         applied.push(t);
         const line = buildVerdictNotice(t);
         if (line) log(line);
@@ -18240,16 +18266,16 @@ var sleep2;
 var init_sleep = __esm({
   "../../node_modules/@anthropic-ai/sdk/internal/utils/sleep.mjs"() {
     "use strict";
-    sleep2 = (ms, signal) => new Promise((resolve8) => {
+    sleep2 = (ms, signal) => new Promise((resolve9) => {
       if (signal?.aborted)
-        return resolve8();
+        return resolve9();
       const onAbort = () => {
         clearTimeout(timer);
-        resolve8();
+        resolve9();
       };
       const timer = setTimeout(() => {
         signal?.removeEventListener("abort", onAbort);
-        resolve8();
+        resolve9();
       }, ms);
       signal?.addEventListener("abort", onAbort, { once: true });
     });
@@ -19022,9 +19048,9 @@ async function readLimitedText(resp) {
     if (done2)
       break;
     if (received + value.length > MAX_TOKEN_RESPONSE_BYTES) {
-      const remaining = MAX_TOKEN_RESPONSE_BYTES - received;
-      if (remaining > 0)
-        chunks.push(value.subarray(0, remaining));
+      const remaining2 = MAX_TOKEN_RESPONSE_BYTES - received;
+      if (remaining2 > 0)
+        chunks.push(value.subarray(0, remaining2));
       await reader.cancel();
       break;
     }
@@ -19108,11 +19134,11 @@ var init_token_cache = __esm({
         if (cached2.expiresAt == null) {
           return cached2.token;
         }
-        const remaining = cached2.expiresAt - nowAsSeconds();
-        if (remaining > ADVISORY_REFRESH_THRESHOLD_IN_SECONDS) {
+        const remaining2 = cached2.expiresAt - nowAsSeconds();
+        if (remaining2 > ADVISORY_REFRESH_THRESHOLD_IN_SECONDS) {
           return cached2.token;
         }
-        if (remaining > MANDATORY_REFRESH_THRESHOLD_IN_SECONDS) {
+        if (remaining2 > MANDATORY_REFRESH_THRESHOLD_IN_SECONDS) {
           this.backgroundRefresh();
           return cached2.token;
         }
@@ -20378,8 +20404,8 @@ var init_api_promise = __esm({
     init_parse();
     APIPromise = class _APIPromise extends Promise {
       constructor(client, responsePromise, parseResponse = defaultParseResponse) {
-        super((resolve8) => {
-          resolve8(null);
+        super((resolve9) => {
+          resolve9(null);
         });
         this.responsePromise = responsePromise;
         this.parseResponse = parseResponse;
@@ -22899,16 +22925,16 @@ var init_async_queue = __esm({
         if (__classPrivateFieldGet(this, _AsyncQueue_closed, "f") || signal?.aborted) {
           return Promise.resolve({ done: true, value: void 0 });
         }
-        return new Promise((resolve8) => {
+        return new Promise((resolve9) => {
           const waiter = (r) => {
             signal?.removeEventListener("abort", onAbort);
-            resolve8(r);
+            resolve9(r);
           };
           const onAbort = () => {
             const idx = __classPrivateFieldGet(this, _AsyncQueue_waiters, "f").indexOf(waiter);
             if (idx >= 0)
               __classPrivateFieldGet(this, _AsyncQueue_waiters, "f").splice(idx, 1);
-            resolve8({ done: true, value: void 0 });
+            resolve9({ done: true, value: void 0 });
           };
           __classPrivateFieldGet(this, _AsyncQueue_waiters, "f").push(waiter);
           signal?.addEventListener("abort", onAbort, { once: true });
@@ -23508,13 +23534,13 @@ var init_json_schema = __esm({
 
 // ../../node_modules/@anthropic-ai/sdk/internal/utils/promise.mjs
 function promiseWithResolvers() {
-  let resolve8;
+  let resolve9;
   let reject;
   const promise = new Promise((res, rej) => {
-    resolve8 = res;
+    resolve9 = res;
     reject = rej;
   });
-  return { promise, resolve: resolve8, reject };
+  return { promise, resolve: resolve9, reject };
 }
 var init_promise = __esm({
   "../../node_modules/@anthropic-ai/sdk/internal/utils/promise.mjs"() {
@@ -24116,7 +24142,7 @@ function betaGrepTool(ctx) {
   });
 }
 function runRipgrep(rg, pattern, searchPath, signal) {
-  return new Promise((resolve8, reject) => {
+  return new Promise((resolve9, reject) => {
     const proc = cp.spawn(rg, ["-n", "--no-heading", "-e", pattern, "--", searchPath], {
       ...signal ? { signal } : {}
     });
@@ -24138,12 +24164,12 @@ function runRipgrep(rg, pattern, searchPath, signal) {
       if (signal?.aborted)
         return reject(new ToolError("grep: aborted"));
       if (truncated)
-        return resolve8(out + `
+        return resolve9(out + `
 [output truncated at ${GREP_OUTPUT_LIMIT} bytes]`);
       if (code === 0)
-        return resolve8(out);
+        return resolve9(out);
       if (code === 1)
-        return resolve8("no matches");
+        return resolve9("no matches");
       reject(new ToolError(`grep: rg failed: ${errOut || `exit ${code}`}`));
     });
     proc.on("error", (e) => {
@@ -24206,7 +24232,7 @@ function isWithin(root, p) {
   return rel === "" || !rel.startsWith(".." + path4.sep) && rel !== ".." && !path4.isAbsolute(rel);
 }
 async function walk(root, rel, fn, signal) {
-  let remaining = WALK_MAX_ENTRIES;
+  let remaining2 = WALK_MAX_ENTRIES;
   async function inner(rel2, depth) {
     if (depth > WALK_MAX_DEPTH)
       return true;
@@ -24221,7 +24247,7 @@ async function walk(root, rel, fn, signal) {
     for (const e of entries) {
       if (e.name === ".git" || e.name === "node_modules")
         continue;
-      if (remaining-- <= 0)
+      if (remaining2-- <= 0)
         return false;
       if (signal?.aborted)
         return false;
@@ -24321,8 +24347,8 @@ var init_node = __esm({
 `;
         __classPrivateFieldGet(this, _BashSession_proc, "f").stdin.write(wrapped);
         if (__classPrivateFieldGet(this, _BashSession_buf, "f").indexOf(sentinel2) < 0) {
-          const { promise: sentinelSeen, resolve: resolve8 } = promiseWithResolvers();
-          __classPrivateFieldSet(this, _BashSession_waiting, { sentinel: sentinel2, resolve: resolve8 }, "f");
+          const { promise: sentinelSeen, resolve: resolve9 } = promiseWithResolvers();
+          __classPrivateFieldSet(this, _BashSession_waiting, { sentinel: sentinel2, resolve: resolve9 }, "f");
           let timer;
           let onAbort;
           try {
@@ -26077,12 +26103,12 @@ var init_BetaMessageStream = __esm({
           }
           return this._emit("error", new AnthropicError(String(error2)));
         });
-        __classPrivateFieldSet(this, _BetaMessageStream_connectedPromise, new Promise((resolve8, reject) => {
-          __classPrivateFieldSet(this, _BetaMessageStream_resolveConnectedPromise, resolve8, "f");
+        __classPrivateFieldSet(this, _BetaMessageStream_connectedPromise, new Promise((resolve9, reject) => {
+          __classPrivateFieldSet(this, _BetaMessageStream_resolveConnectedPromise, resolve9, "f");
           __classPrivateFieldSet(this, _BetaMessageStream_rejectConnectedPromise, reject, "f");
         }), "f");
-        __classPrivateFieldSet(this, _BetaMessageStream_endPromise, new Promise((resolve8, reject) => {
-          __classPrivateFieldSet(this, _BetaMessageStream_resolveEndPromise, resolve8, "f");
+        __classPrivateFieldSet(this, _BetaMessageStream_endPromise, new Promise((resolve9, reject) => {
+          __classPrivateFieldSet(this, _BetaMessageStream_resolveEndPromise, resolve9, "f");
           __classPrivateFieldSet(this, _BetaMessageStream_rejectEndPromise, reject, "f");
         }), "f");
         __classPrivateFieldGet(this, _BetaMessageStream_connectedPromise, "f").catch(() => {
@@ -26252,11 +26278,11 @@ var init_BetaMessageStream = __esm({
        *   const message = await stream.emitted('message') // rejects if the stream errors
        */
       emitted(event) {
-        return new Promise((resolve8, reject) => {
+        return new Promise((resolve9, reject) => {
           __classPrivateFieldSet(this, _BetaMessageStream_catchingPromiseCreated, true, "f");
           if (event !== "error")
             this.once("error", reject);
-          this.once(event, resolve8);
+          this.once(event, resolve9);
         });
       }
       async done() {
@@ -26618,7 +26644,7 @@ var init_BetaMessageStream = __esm({
               if (done2) {
                 return { value: void 0, done: true };
               }
-              return new Promise((resolve8, reject) => readQueue.push({ resolve: resolve8, reject })).then((chunk2) => chunk2 ? { value: chunk2, done: false } : { value: void 0, done: true });
+              return new Promise((resolve9, reject) => readQueue.push({ resolve: resolve9, reject })).then((chunk2) => chunk2 ? { value: chunk2, done: false } : { value: void 0, done: true });
             }
             const chunk = pushQueue.shift();
             return { value: chunk, done: false };
@@ -28856,12 +28882,12 @@ var init_MessageStream = __esm({
           }
           return this._emit("error", new AnthropicError(String(error2)));
         });
-        __classPrivateFieldSet(this, _MessageStream_connectedPromise, new Promise((resolve8, reject) => {
-          __classPrivateFieldSet(this, _MessageStream_resolveConnectedPromise, resolve8, "f");
+        __classPrivateFieldSet(this, _MessageStream_connectedPromise, new Promise((resolve9, reject) => {
+          __classPrivateFieldSet(this, _MessageStream_resolveConnectedPromise, resolve9, "f");
           __classPrivateFieldSet(this, _MessageStream_rejectConnectedPromise, reject, "f");
         }), "f");
-        __classPrivateFieldSet(this, _MessageStream_endPromise, new Promise((resolve8, reject) => {
-          __classPrivateFieldSet(this, _MessageStream_resolveEndPromise, resolve8, "f");
+        __classPrivateFieldSet(this, _MessageStream_endPromise, new Promise((resolve9, reject) => {
+          __classPrivateFieldSet(this, _MessageStream_resolveEndPromise, resolve9, "f");
           __classPrivateFieldSet(this, _MessageStream_rejectEndPromise, reject, "f");
         }), "f");
         __classPrivateFieldGet(this, _MessageStream_connectedPromise, "f").catch(() => {
@@ -29031,11 +29057,11 @@ var init_MessageStream = __esm({
        *   const message = await stream.emitted('message') // rejects if the stream errors
        */
       emitted(event) {
-        return new Promise((resolve8, reject) => {
+        return new Promise((resolve9, reject) => {
           __classPrivateFieldSet(this, _MessageStream_catchingPromiseCreated, true, "f");
           if (event !== "error")
             this.once("error", reject);
-          this.once(event, resolve8);
+          this.once(event, resolve9);
         });
       }
       async done() {
@@ -29356,7 +29382,7 @@ var init_MessageStream = __esm({
               if (done2) {
                 return { value: void 0, done: true };
               }
-              return new Promise((resolve8, reject) => readQueue.push({ resolve: resolve8, reject })).then((chunk2) => chunk2 ? { value: chunk2, done: false } : { value: void 0, done: true });
+              return new Promise((resolve9, reject) => readQueue.push({ resolve: resolve9, reject })).then((chunk2) => chunk2 ? { value: chunk2, done: false } : { value: void 0, done: true });
             }
             const chunk = pushQueue.shift();
             return { value: chunk, done: false };
@@ -31718,7 +31744,7 @@ function splitProgressChunk(chunk) {
 }
 function shStream(cmd, args5, opts = {}) {
   const cap = opts.maxStderrBytes ?? 64 * 1024;
-  return new Promise((resolve8, reject) => {
+  return new Promise((resolve9, reject) => {
     void (async () => {
       const spawn8 = opts.spawnFn ?? (await import("child_process")).spawn;
       const child = spawn8(cmd, args5, { shell: false, stdio: ["ignore", "pipe", "pipe"] });
@@ -31736,7 +31762,7 @@ function shStream(cmd, args5, opts = {}) {
       child.on("error", (err) => reject(err));
       child.on("close", (code, signal) => {
         if (code === 0) {
-          resolve8({ stdout: stdout.trim(), stderr });
+          resolve9({ stdout: stdout.trim(), stderr });
           return;
         }
         const err = new Error(
@@ -32861,11 +32887,11 @@ function buildTranslation(spec) {
     { raw: spec.jail, guest: GUEST.jail, label: "jail" },
     { raw: spec.tmp, guest: GUEST.tmp, label: "tmp" }
   ];
-  const resolve8 = resolverFor(pathDomainOf(spec));
+  const resolve9 = resolverFor(pathDomainOf(spec));
   const pairs = [];
   const seen = /* @__PURE__ */ new Set();
   for (const { raw, guest, label } of roots) {
-    for (const host of [raw, resolve8(raw, label)]) {
+    for (const host of [raw, resolve9(raw, label)]) {
       if (seen.has(host))
         continue;
       seen.add(host);
@@ -32987,7 +33013,7 @@ function validateVolumeName(name, label) {
 }
 function stageMounts(spec) {
   const domain = pathDomainOf(spec);
-  const resolve8 = resolverFor(domain);
+  const resolve9 = resolverFor(domain);
   const volumes = spec.stageVolumes;
   if (domain === "venue") {
     if (spec.cloneVolume !== void 0) {
@@ -32996,8 +33022,8 @@ function stageMounts(spec) {
     if (volumes === void 0) {
       throw new FenceError("a venue-domain spec must declare stageVolumes: every writable host path on the venue is mounted noexec, so a bind mount of the staged clone cannot run the binaries an install step downloads (esbuild, swc, sharp, node-gyp \u2014 EACCES). The venue that staged the tree names the volumes it populated; a spec without them would reproduce that EACCES and report it as the developer\u2019s suite failing.");
     }
-    resolve8(spec.clone, "clone");
-    resolve8(spec.jail, "jail");
+    resolve9(spec.clone, "clone");
+    resolve9(spec.jail, "jail");
     return [
       `--volume=${validateVolumeName(volumes.clone, "the clone volume")}:${GUEST.clone}:rw`,
       `--volume=${validateVolumeName(volumes.jail, "the jail volume")}:${GUEST.jail}:rw`
@@ -33006,9 +33032,9 @@ function stageMounts(spec) {
   if (volumes !== void 0) {
     throw new FenceError("a local-domain spec must not declare stageVolumes: the paths are on this machine and ARE the mount sources, and nothing on the local path populates a volume \u2014 honouring the field would mount an empty clone. Volumes exist for the venue\u2019s noexec host only.");
   }
-  const clone2 = resolve8(spec.clone, "clone");
+  const clone2 = resolve9(spec.clone, "clone");
   const cloneSource = spec.cloneVolume === void 0 ? clone2 : validateVolumeName(spec.cloneVolume, "the clone volume");
-  const jail = resolve8(spec.jail, "jail");
+  const jail = resolve9(spec.jail, "jail");
   assertHoldsNoRealHome(jail, "the jail bind source", "stageMounts");
   return [
     `--volume=${cloneSource}:${GUEST.clone}:rw`,
@@ -33019,11 +33045,11 @@ function guestIdentityMounts(spec) {
   if (guestUserFlag(spec).length === 0)
     return [];
   const domain = pathDomainOf(spec);
-  const resolve8 = resolverFor(domain);
+  const resolve9 = resolverFor(domain);
   const under = domain === "venue" ? venueJoin : join36;
-  const jail = resolve8(spec.jail, "jail");
-  const passwd = resolve8(under(jail, JAIL_PASSWD_FILE), "the jail passwd file");
-  const group = resolve8(under(jail, JAIL_GROUP_FILE), "the jail group file");
+  const jail = resolve9(spec.jail, "jail");
+  const passwd = resolve9(under(jail, JAIL_PASSWD_FILE), "the jail passwd file");
+  const group = resolve9(under(jail, JAIL_GROUP_FILE), "the jail group file");
   return [`--volume=${passwd}:/etc/passwd:ro`, `--volume=${group}:/etc/group:ro`];
 }
 function containerArgs(spec, env, opts) {
@@ -33518,11 +33544,58 @@ var init_containerLocal = __esm({
 
 // ../../packages/containment/dist/capture.js
 import { createHash as createHash7 } from "crypto";
-import { copyFileSync as copyFileSync3, existsSync as existsSync18, mkdirSync as mkdirSync6, readFileSync as readFileSync25, writeFileSync as writeFileSync20 } from "fs";
-import { dirname as dirname10, isAbsolute as isAbsolute5, join as join37 } from "path";
+import { closeSync as closeSync5, constants as constants4, copyFileSync as copyFileSync3, existsSync as existsSync18, lstatSync as lstatSync5, mkdirSync as mkdirSync6, openSync as openSync5, readdirSync as readdirSync3, readFileSync as readFileSync25, writeFileSync as writeFileSync20 } from "fs";
+import { dirname as dirname10, isAbsolute as isAbsolute5, join as join37, resolve as resolve6, sep as sep6 } from "path";
 import { fileURLToPath as fileURLToPath9 } from "url";
+function captureRecipeHash(recipe = CAPTURE_DOCKERFILE) {
+  return createHash7("sha256").update(recipe).digest("hex").slice(0, 16);
+}
 function captureImageTag(recipe = CAPTURE_DOCKERFILE) {
-  return `terminalhire-capture:${createHash7("sha256").update(recipe).digest("hex").slice(0, 16)}`;
+  return `terminalhire-capture:${captureRecipeHash(recipe)}`;
+}
+function preloadCaptureImage(docker3, published = CAPTURE_IMAGE_PUBLISHED, timeoutMs = 6e5) {
+  const image = captureImageTag();
+  const deadline = Date.now() + timeoutMs;
+  try {
+    if (docker3.sync(["image", "inspect", "--format={{.Id}}", image], {
+      timeoutMs: timeoutWithin(3e4, deadline)
+    }).status === 0) {
+      return { image, pulled: false };
+    }
+    if (published.recipeHash !== captureRecipeHash()) {
+      return {
+        skipped: `the published screenshot image was built from another recipe (${published.recipeHash})`
+      };
+    }
+    if (published.digest === null) {
+      return { skipped: "the screenshot image has not been published for hosted runs yet" };
+    }
+    const ref = `${CAPTURE_IMAGE_REPO}@${published.digest}`;
+    const pull = docker3.sync(["pull", "--quiet", ref], {
+      timeoutMs: timeoutWithin(timeoutMs, deadline)
+    });
+    if (pull.status !== 0) {
+      return {
+        skipped: `could not pull the screenshot image: ${(pull.error?.message ?? "") + pull.stderr.slice(-300)}`
+      };
+    }
+    const tag = docker3.sync(["tag", ref, image], { timeoutMs: timeoutWithin(3e4, deadline) });
+    if (tag.status !== 0) {
+      return {
+        skipped: `could not tag the screenshot image: ${(tag.error?.message ?? "") + tag.stderr.slice(-300)}`
+      };
+    }
+    return { image, pulled: true };
+  } catch (err) {
+    return {
+      skipped: `could not prepare the screenshot image: ${String(err?.message ?? err)}`
+    };
+  }
+}
+function timeoutWithin(capMs, deadline) {
+  if (deadline === void 0)
+    return capMs;
+  return Math.max(1, Math.min(capMs, deadline - Date.now()));
 }
 function captureArgs(o) {
   let network;
@@ -33540,8 +33613,8 @@ function captureArgs(o) {
     throw new FenceError(`refusing capture container name ${JSON.stringify(o.name)}`);
   }
   for (const [label, path6] of [
-    ["capture code", o.code],
-    ["capture output", o.out],
+    ...typeof o.code === "string" ? [["capture code", o.code]] : [],
+    ["capture output", captureOutDir(o)],
     ...o.site !== null && "bind" in o.site ? [["site", o.site.bind]] : []
   ]) {
     if (!isAbsolute5(path6)) {
@@ -33563,13 +33636,16 @@ function captureArgs(o) {
     "--env=HOME=/tmp",
     "--tmpfs=/tmp:rw,exec,mode=1777",
     ...site,
-    `--volume=${o.code}:/capture:ro`,
-    `--volume=${o.out}:/out:rw`,
+    typeof o.code === "string" ? `--volume=${o.code}:/capture:ro` : `--volume=${validateVolumeName(o.code.volume, "the capture code volume")}:/capture:ro`,
+    typeof o.out === "string" ? `--volume=${o.out}:/out:rw` : `--volume=${validateVolumeName(o.out.volume, "the capture output volume")}:/out:rw`,
     o.image,
     "node",
     "/capture/captureEntry.js",
     JSON.stringify(o.request)
   ];
+}
+function captureOutDir(o) {
+  return typeof o.out === "string" ? o.out : o.out.localDir;
 }
 function resolveCaptureCodeSource() {
   const here = dirname10(fileURLToPath9(import.meta.url));
@@ -33578,13 +33654,18 @@ function resolveCaptureCodeSource() {
 }
 function ensureCaptureImage(docker3, workDir, timeoutMs = 6e5) {
   const image = captureImageTag();
-  if (docker3.sync(["image", "inspect", "--format={{.Id}}", image]).status === 0) {
+  const deadline = Date.now() + timeoutMs;
+  if (docker3.sync(["image", "inspect", "--format={{.Id}}", image], {
+    timeoutMs: timeoutWithin(3e4, deadline)
+  }).status === 0) {
     return { image, built: false };
   }
   const context = join37(workDir, "capture-image");
   mkdirSync6(context, { recursive: true });
   writeFileSync20(join37(context, "Dockerfile"), CAPTURE_DOCKERFILE);
-  const res = docker3.sync(["build", "--quiet", `--tag=${image}`, context], { timeoutMs });
+  const res = docker3.sync(["build", "--quiet", `--tag=${image}`, context], {
+    timeoutMs: timeoutWithin(timeoutMs, deadline)
+  });
   if (res.status !== 0) {
     throw new Error(`could not build the screenshot image: ${(res.error?.message ?? "") + res.stderr.slice(-800)}`);
   }
@@ -33596,7 +33677,7 @@ function stageCaptureCode(workDir) {
   copyFileSync3(join37(resolveCaptureCodeSource(), "captureEntry.js"), join37(dir, "captureEntry.js"));
   return dir;
 }
-async function runCapture(docker3, o, timeoutMs) {
+async function runCapture(docker3, o, timeoutMs, signal, deadline) {
   const failed = (reason) => ({
     status: "failed",
     reason,
@@ -33606,27 +33687,55 @@ async function runCapture(docker3, o, timeoutMs) {
     failures: [],
     notes: []
   });
+  if (signal?.aborted === true)
+    return failed("the screenshot step was stopped");
+  const captureStarted = Date.now();
   const child = docker3.spawn(captureArgs(o));
+  const abort = killOnAbort(docker3, o.name, signal);
   let stderr = "";
   child.stdout.resume();
   child.stderr.on("data", (d) => {
     stderr = (stderr + d.toString()).slice(-4e3);
   });
-  const code = await new Promise((resolve8) => {
-    const timer = setTimeout(() => resolve8(null), timeoutMs);
+  const code = await new Promise((resolve9) => {
+    const timer = setTimeout(() => resolve9(null), timeoutMs);
+    void abort.stopped.then(() => {
+      clearTimeout(timer);
+      resolve9("stopped");
+    });
     child.on("exit", (c) => {
       clearTimeout(timer);
-      resolve8(c);
+      resolve9(c);
     });
     child.on("error", () => {
       clearTimeout(timer);
-      resolve8(-1);
+      resolve9(-1);
     });
   });
-  docker3.sync(["rm", "--force", o.name], { timeoutMs: 3e4 });
+  abort.release();
+  o.onTiming?.("capture", Date.now() - captureStarted);
+  if (code === "stopped")
+    return failed("the screenshot step was stopped");
+  docker3.sync(["rm", "--force", o.name], { timeoutMs: timeoutWithin(3e4, deadline) });
   if (code === null)
     return failed(`the screenshot step ran past ${Math.round(timeoutMs / 1e3)}s`);
-  const manifestPath = join37(o.out, "manifest.json");
+  if (typeof o.out !== "string") {
+    const readbackStarted = Date.now();
+    try {
+      await readVolumeTar(docker3, o.out.volume, o.out.localDir, {
+        image: o.out.helperImage,
+        maxBytes: CAPTURE_READBACK_MAX_BYTES,
+        timeoutMs: timeoutWithin(CAPTURE_READBACK_TIMEOUT_MS, deadline),
+        name: `${o.name}-readback`,
+        ...signal === void 0 ? {} : { signal }
+      });
+    } catch (err) {
+      return failed(`could not read the screenshots back: ${String(err?.message ?? err).slice(0, 400)}`);
+    } finally {
+      o.onTiming?.("readback", Date.now() - readbackStarted);
+    }
+  }
+  const manifestPath = join37(captureOutDir(o), "manifest.json");
   if (!existsSync18(manifestPath)) {
     return failed(`the screenshot container exited ${String(code)} without a manifest: ${stderr.trim().slice(-400)}`);
   }
@@ -33636,7 +33745,234 @@ async function runCapture(docker3, o, timeoutMs) {
     return failed("the screenshot manifest could not be read");
   }
 }
-var CAPTURE_DOCKERFILE, CONTAINER_NAME;
+function killOnAbort(docker3, name, signal) {
+  if (signal === void 0)
+    return { stopped: new Promise(() => void 0), release: () => {
+    } };
+  let onAbort = () => {
+  };
+  const stopped = new Promise((resolve9) => {
+    onAbort = () => {
+      try {
+        const kill = docker3.spawn(["kill", name]);
+        kill.stdout.resume();
+        kill.stderr.resume();
+        kill.on("error", () => void 0);
+      } catch {
+      }
+      resolve9();
+    };
+  });
+  signal.addEventListener("abort", onAbort, { once: true });
+  return { stopped, release: () => signal.removeEventListener("abort", onAbort) };
+}
+async function readVolumeTar(docker3, volume, localDir, o) {
+  const v = validateVolumeName(volume, "the volume to read back");
+  if (!isAbsolute5(localDir)) {
+    throw new FenceError(`the readback directory must be an absolute path, got ${JSON.stringify(localDir)}`);
+  }
+  if (o.name !== void 0 && !CONTAINER_NAME.test(o.name)) {
+    throw new FenceError(`refusing readback container name ${JSON.stringify(o.name)}`);
+  }
+  if (o.signal?.aborted === true)
+    throw new Error(`reading ${v} back was stopped`);
+  const child = docker3.spawn([
+    "run",
+    "--rm",
+    ...o.name === void 0 ? [] : [`--name=${o.name}`],
+    "--network=none",
+    `--volume=${v}:/out:ro`,
+    "--",
+    o.image,
+    "tar",
+    "-cf",
+    "-",
+    "-C",
+    "/out",
+    "."
+  ]);
+  const streamCap = o.maxBytes + 1024 * 1024;
+  const chunks = [];
+  let total = 0;
+  let over = false;
+  let stderr = "";
+  child.stdout.on("data", (d) => {
+    if (over)
+      return;
+    total += d.length;
+    if (total > streamCap) {
+      over = true;
+      child.kill("SIGKILL");
+      return;
+    }
+    chunks.push(d);
+  });
+  child.stderr.on("data", (d) => {
+    stderr = (stderr + d.toString()).slice(-2e3);
+  });
+  const exited = new Promise((resolve9) => {
+    child.on("exit", (c) => resolve9(c));
+    child.on("error", () => resolve9(-1));
+  });
+  const drained = new Promise((resolve9) => {
+    child.stdout.on("end", () => resolve9());
+    child.stdout.on("close", () => resolve9());
+    child.stdout.on("error", () => resolve9());
+  });
+  let timer;
+  const timedOut = new Promise((resolve9) => {
+    timer = setTimeout(() => resolve9("timeout"), o.timeoutMs);
+  });
+  const abort = o.name === void 0 ? killOnAbort(docker3, "", void 0) : killOnAbort(docker3, o.name, o.signal);
+  const stopped = abort.stopped.then(() => "stopped");
+  const done2 = await Promise.race([Promise.all([exited, drained]), timedOut, stopped]);
+  clearTimeout(timer);
+  abort.release();
+  if (done2 === "stopped") {
+    child.kill("SIGKILL");
+    throw new Error(`reading ${v} back was stopped`);
+  }
+  if (done2 === "timeout") {
+    child.kill("SIGKILL");
+    throw new Error(`reading ${v} back ran past ${Math.round(o.timeoutMs / 1e3)}s`);
+  }
+  if (over)
+    throw new Error(`${v} holds more than the ${String(o.maxBytes)}-byte cap`);
+  const [code] = done2;
+  if (code !== 0) {
+    throw new Error(`the readback tar exited ${String(code)}: ${stderr.trim().slice(-300)}`);
+  }
+  untarSafely(Buffer.concat(chunks), localDir, o.maxBytes);
+}
+function untarSafely(buf, localDir, maxBytes) {
+  const root = resolve6(localDir);
+  if (!lstatSync5(root).isDirectory())
+    throw new Error(`refusing to unpack into ${root}: not a directory`);
+  if (readdirSync3(root).length !== 0)
+    throw new Error(`refusing to unpack into ${root}: not empty`);
+  const entries = [];
+  let content = 0;
+  let off = 0;
+  let longName = null;
+  for (; ; ) {
+    if (off + 512 > buf.length)
+      throw new Error("the tar archive is truncated: no end-of-archive block");
+    const h = buf.subarray(off, off + 512);
+    if (h.every((b) => b === 0)) {
+      if (longName !== null)
+        throw new Error("the tar archive is truncated after a long name");
+      break;
+    }
+    let sum = 0;
+    for (let i = 0; i < 512; i++)
+      sum += i >= 148 && i < 156 ? 32 : h[i] ?? 0;
+    if (octal(h.subarray(148, 156)) !== sum) {
+      throw new Error(`the tar header at byte ${String(off)} fails its checksum`);
+    }
+    const size = octal(h.subarray(124, 136));
+    const type = h[156] === 0 ? "0" : String.fromCharCode(h[156] ?? 0);
+    const prefix = h.subarray(257, 262).toString("latin1") === "ustar" ? cString(h.subarray(345, 500)) : "";
+    let name = cString(h.subarray(0, 100));
+    if (prefix !== "")
+      name = `${prefix}/${name}`;
+    if (longName !== null) {
+      name = longName;
+      longName = null;
+    }
+    const start = off + 512;
+    off = start + Math.ceil(size / 512) * 512;
+    if (off > buf.length)
+      throw new Error(`the tar entry ${JSON.stringify(name)} is truncated`);
+    if (type === "L") {
+      longName = cString(buf.subarray(start, start + size));
+      continue;
+    }
+    if (type !== "0" && type !== "7" && type !== "5") {
+      throw new Error(`refusing the tar entry ${JSON.stringify(name)} of type '${type}': only files and directories are read back`);
+    }
+    const rel = safeRelative(name);
+    if (rel === null)
+      continue;
+    if (type === "5") {
+      entries.push({ rel, body: null });
+      continue;
+    }
+    content += size;
+    if (content > maxBytes)
+      throw new Error(`the screenshots are larger than the ${String(maxBytes)}-byte cap`);
+    entries.push({ rel, body: buf.subarray(start, start + size) });
+  }
+  const kinds = /* @__PURE__ */ new Map();
+  for (const e of entries) {
+    const target = join37(root, e.rel);
+    if (!target.startsWith(root + sep6))
+      throw new Error(`refusing ${JSON.stringify(e.rel)}: outside ${root}`);
+    const kind = e.body === null ? "dir" : "file";
+    const had = kinds.get(e.rel);
+    if (had !== void 0 && (had === "file" || kind === "file"))
+      throw new Error(`refusing ${JSON.stringify(e.rel)}: the archive names it twice`);
+    kinds.set(e.rel, kind);
+  }
+  for (const rel of kinds.keys()) {
+    const parts = rel.split("/");
+    for (let i = 1; i < parts.length; i++) {
+      if (kinds.get(parts.slice(0, i).join("/")) === "file")
+        throw new Error(`refusing ${JSON.stringify(rel)}: a file in the archive is its parent`);
+    }
+  }
+  for (const e of entries) {
+    const target = join37(root, e.rel);
+    if (e.body === null) {
+      realDirs(root, e.rel);
+    } else {
+      realDirs(root, dirname10(e.rel));
+      const fd = openSync5(target, constants4.O_WRONLY | constants4.O_CREAT | constants4.O_EXCL | constants4.O_NOFOLLOW, 420);
+      try {
+        writeFileSync20(fd, e.body);
+      } finally {
+        closeSync5(fd);
+      }
+    }
+  }
+}
+function realDirs(root, rel) {
+  let at = root;
+  for (const part of rel.split("/")) {
+    if (part === "" || part === ".")
+      continue;
+    at = join37(at, part);
+    let st;
+    try {
+      st = lstatSync5(at);
+    } catch {
+      mkdirSync6(at);
+      continue;
+    }
+    if (!st.isDirectory())
+      throw new Error(`refusing ${at}: not a directory`);
+  }
+}
+function safeRelative(name) {
+  if (name.startsWith("/"))
+    throw new Error(`refusing the absolute tar path ${JSON.stringify(name)}`);
+  const parts = name.split("/").filter((p) => p !== "" && p !== ".");
+  if (parts.includes(".."))
+    throw new Error(`refusing the tar path ${JSON.stringify(name)}: it climbs with ..`);
+  return parts.length === 0 ? null : parts.join("/");
+}
+function octal(field) {
+  if (((field[0] ?? 0) & 128) !== 0)
+    throw new Error("refusing a base-256 tar number");
+  const text = cString(field).trim();
+  if (!/^[0-7]*$/.test(text))
+    throw new Error(`the tar number ${JSON.stringify(text)} is not octal`);
+  return text === "" ? 0 : parseInt(text, 8);
+}
+function cString(field) {
+  const nul = field.indexOf(0);
+  return field.subarray(0, nul === -1 ? field.length : nul).toString("utf8");
+}
+var CAPTURE_DOCKERFILE, CAPTURE_IMAGE_REPO, CAPTURE_IMAGE_PUBLISHED, CONTAINER_NAME, CAPTURE_READBACK_MAX_BYTES, CAPTURE_READBACK_TIMEOUT_MS;
 var init_capture = __esm({
   "../../packages/containment/dist/capture.js"() {
     "use strict";
@@ -33651,7 +33987,14 @@ var init_capture = __esm({
       " && chmod -R a+rX /ms-playwright",
       ""
     ].join("\n");
+    CAPTURE_IMAGE_REPO = "us-east1-docker.pkg.dev/terminalhire-pool/venue-images/capture";
+    CAPTURE_IMAGE_PUBLISHED = {
+      recipeHash: "578230f84e7464f6",
+      digest: "sha256:851b4882dd348ea707e63dfed620879c05092ec3a097dbd58a7c43398f66f2f1"
+    };
     CONTAINER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
+    CAPTURE_READBACK_MAX_BYTES = 40 * 5 * 1024 * 1024 + 1024 * 1024;
+    CAPTURE_READBACK_TIMEOUT_MS = 12e4;
   }
 });
 
@@ -36092,10 +36435,10 @@ function unquoteDiffPath(token) {
       i += 1;
       continue;
     }
-    const octal = `${next}${chars[i + 2] ?? ""}${chars[i + 3] ?? ""}`;
-    if (!/^[0-7]{3}$/.test(octal))
+    const octal2 = `${next}${chars[i + 2] ?? ""}${chars[i + 3] ?? ""}`;
+    if (!/^[0-7]{3}$/.test(octal2))
       return null;
-    bytes.push(parseInt(octal, 8));
+    bytes.push(parseInt(octal2, 8));
     i += 3;
   }
   try {
@@ -36905,12 +37248,12 @@ function socketErrorReason(err) {
   return err.name;
 }
 function fetchAttestationOverTls(req) {
-  return new Promise((resolve8) => {
+  return new Promise((resolve9) => {
     let whole;
     const settle = (reading) => {
       if (whole !== void 0)
         clearTimeout(whole);
-      resolve8(reading);
+      resolve9(reading);
     };
     let cert;
     let key;
@@ -37413,6 +37756,20 @@ function csUntarProxyArgv(dir, owner) {
     `mkdir -p ${d} && tar -C ${d} -xf - && chmod 0644 ${d}/*.js && chmod 0755 ${d}`
   ];
 }
+function csFillVolumeArgv(volume, owner) {
+  return [
+    "run",
+    "-i",
+    "--rm",
+    "--network=none",
+    `--volume=${validateVolumeName(volume, "the screenshot volume")}:/dst:rw`,
+    "--",
+    STAGE_HELPER_IMAGE,
+    "sh",
+    "-c",
+    `tar -xf - -C /dst && chown -R ${String(owner.uid)}:${String(owner.gid)} /dst && chmod -R a+rX /dst`
+  ];
+}
 function csRemoveArgv(dir, owner) {
   return [
     "run",
@@ -37470,11 +37827,11 @@ function sshStageTransport(vm, project, zone, env, io) {
   };
 }
 function dockerStageTransport(docker3, env, io) {
-  const pushVia = (from, args5) => {
+  const pushVia = (from, args5, timeoutMs = STAGE_PUSH_TIMEOUT_MS) => {
     const [file, ...rest] = docker3.commandLine(args5);
     if (file === void 0)
       throw new Error("the docker client returned an empty command line");
-    return io.pushTree(from, file, rest, STAGE_PUSH_TIMEOUT_MS, env);
+    return io.pushTree(from, file, rest, timeoutMs, env);
   };
   return {
     // Fixed rather than probed: the helpers unpack as this account, so it owns the tree.
@@ -37483,7 +37840,8 @@ function dockerStageTransport(docker3, env, io) {
     pushProxy: (from, dir) => pushVia(from, csUntarProxyArgv(dir, CS_GUEST_USER)),
     removeProxy: (dir) => {
       docker3.sync(csRemoveArgv(dir, CS_GUEST_USER), { timeoutMs: PROXY_CLEANUP_TIMEOUT_MS });
-    }
+    },
+    fillVolume: (from, volume, timeoutMs) => pushVia(from, csFillVolumeArgv(volume, CS_GUEST_USER), Math.min(timeoutMs ?? STAGE_PUSH_TIMEOUT_MS, STAGE_PUSH_TIMEOUT_MS))
   };
 }
 function bothTunnels(a, b) {
@@ -37879,6 +38237,23 @@ function guardedContainment(inner, check) {
     }
   };
 }
+function screenshotVenueOf(p, fill2, check) {
+  return {
+    helperImage: STAGE_HELPER_IMAGE,
+    volumeName: (purpose) => validateVolumeName(`${p.vm}-${purpose}`, "the screenshot volume"),
+    check,
+    async fillVolume(localDir, volume, timeoutMs) {
+      check("filling a screenshot volume");
+      p.docker.sync(volumeCreateArgv(volume, p.runId), {
+        timeoutMs: Math.min(timeoutMs ?? VOLUME_CREATE_TIMEOUT_MS, VOLUME_CREATE_TIMEOUT_MS)
+      });
+      const res = await fill2(localDir, volume, timeoutMs);
+      if (!res.ok) {
+        throw new HostedVenueError(`could not fill the screenshot volume ${volume} on ${p.vm}: ${execDetail(res).slice(0, 300)}`);
+      }
+    }
+  };
+}
 function makeLease(p) {
   let released = false;
   let tunnelClosed = false;
@@ -37928,6 +38303,7 @@ function makeLease(p) {
     // The third field about the same machine (TERM-913): WHICH volumes back
     // the paths `stage()` returns. Names only; the contents arrive in `stage()`.
     stageVolumes: p.stageVolumes,
+    ...p.transport.fillVolume === void 0 ? {} : { screenshotVenue: screenshotVenueOf(p, p.transport.fillVolume, check) },
     // Verified at acquire, before anything was staged; carried so the caller
     // can hand PR 5's intake the evidence. The lease is the only holder of
     // the raw token — `VenueLease.venueIdentity` says why it is not a result
@@ -38264,18 +38640,18 @@ var init_hostedVenue = __esm({
           for (let i = 0; i < n; i += 1) {
             const server = createServer();
             servers.push(server);
-            await new Promise((resolve8, reject) => {
+            await new Promise((resolve9, reject) => {
               server.once("error", reject);
               server.listen(0, "localhost", () => {
-                resolve8();
+                resolve9();
               });
             });
           }
           return servers.map((s) => s.address().port);
         } finally {
-          await Promise.all(servers.map((s) => new Promise((resolve8) => {
+          await Promise.all(servers.map((s) => new Promise((resolve9) => {
             s.close(() => {
-              resolve8();
+              resolve9();
             });
           })));
         }
@@ -39455,11 +39831,11 @@ var init_references = __esm({
 });
 
 // ../../packages/envspec/dist/repo.js
-import { readdirSync as readdirSync3, readFileSync as readFileSync27, statSync as statSync6 } from "fs";
-import { join as join42, relative as relative2, sep as sep6 } from "path";
+import { readdirSync as readdirSync4, readFileSync as readFileSync27, statSync as statSync6 } from "fs";
+import { join as join42, relative as relative2, sep as sep7 } from "path";
 function createRepoReader(repoPath) {
   const resolveIn = (relativePath) => relativePath === "" ? repoPath : join42(repoPath, relativePath);
-  const toPosix = (absolute) => relative2(repoPath, absolute).split(sep6).join("/");
+  const toPosix = (absolute) => relative2(repoPath, absolute).split(sep7).join("/");
   const readText = (relativePath) => {
     try {
       return readFileSync27(resolveIn(relativePath), "utf8");
@@ -39481,7 +39857,7 @@ function createRepoReader(repoPath) {
         return;
       let names;
       try {
-        names = readdirSync3(dir);
+        names = readdirSync4(dir);
       } catch {
         return;
       }
@@ -39516,7 +39892,7 @@ function createRepoReader(repoPath) {
       if (st === null || !st.isDirectory())
         return [];
       try {
-        return readdirSync3(resolveIn(relativeDir)).slice().sort();
+        return readdirSync4(resolveIn(relativeDir)).slice().sort();
       } catch {
         return [];
       }
@@ -40262,12 +40638,23 @@ async function takeScreenshots(ctx, deps) {
   }
   if (!plan.previewable)
     return skipped(plan.reason);
+  const venue = ctx.after.lease.screenshotVenue;
   let image;
   let code;
   try {
     ctx.progress?.("screenshots", "preparing the screenshot image");
-    image = deps.ensureImage(ctx.after.lease.docker, ctx.workDir).image;
-    code = deps.stageCode(ctx.workDir);
+    if (venue === void 0) {
+      image = deps.ensureImage(ctx.after.lease.docker, ctx.workDir, remaining(ctx)).image;
+      code = deps.stageCode(ctx.workDir);
+    } else {
+      const pullStarted = Date.now();
+      const pulled = deps.preloadImage(ctx.after.lease.docker, remaining(ctx));
+      timed(ctx, "pull:", pullStarted);
+      if ("skipped" in pulled)
+        return skipped(pulled.skipped);
+      image = pulled.image;
+      code = { volume: await fill(ctx, venue, deps.stageCode(ctx.workDir), "capcode") };
+    }
   } catch (err) {
     return skipped(message(err));
   }
@@ -40277,6 +40664,8 @@ async function takeScreenshots(ctx, deps) {
   const take = async (side, tree, sidePlan) => {
     try {
       const got = await captureSide(ctx, deps, side, tree, sidePlan, image, code, routes);
+      if (ctx.signal?.aborted === true)
+        throw new Error("the screenshot step was stopped");
       sides.push(got.side);
       for (const item of got.items) {
         const file = `${side}/${item.file}`;
@@ -40291,11 +40680,11 @@ async function takeScreenshots(ctx, deps) {
   };
   ctx.progress?.("screenshots", `after: ${routes.join(", ")}`);
   await take("after", ctx.after, plan);
-  if (ctx.before === null) {
+  if (ctx.before === null || typeof ctx.before === "string") {
     sides.push({
       side: "before",
       status: "skipped",
-      reason: "this run has no base tree to compare with",
+      reason: ctx.before ?? "this run has no base tree to compare with",
       mode: null,
       basePath: null
     });
@@ -40379,7 +40768,7 @@ async function captureSide(ctx, deps, side, tree, plan, image, code, routes) {
     env: deps.env(tree),
     image: ctx.image,
     labels: ctx.labels,
-    timeoutMs,
+    timeoutMs: timeoutWithin(timeoutMs, ctx.deadline),
     ...extra
   });
   if (tree.needsInstall && ctx.spec.installCommand !== null) {
@@ -40402,7 +40791,15 @@ async function captureSide(ctx, deps, side, tree, plan, image, code, routes) {
     }
   }
   const user = lease.guestUser ?? hostIds();
-  const site = lease.cloneVolume !== void 0 ? { volume: lease.cloneVolume } : { bind: tree.repoDir };
+  const cloneVolume = lease.cloneVolume ?? lease.stageVolumes?.clone;
+  const site = cloneVolume !== void 0 ? { volume: cloneVolume } : { bind: tree.repoDir };
+  const venue = lease.screenshotVenue;
+  const outTo = async (dir, purpose) => {
+    if (venue === void 0)
+      return dir;
+    const volume = await fill(ctx, venue, dir, purpose);
+    return { volume, localDir: dir, helperImage: venue.helperImage };
+  };
   const staticOut = join43(ctx.workDir, side, "static");
   deps.mkdir(staticOut);
   const shot = await deps.runCapture(lease.docker, {
@@ -40411,7 +40808,7 @@ async function captureSide(ctx, deps, side, tree, plan, image, code, routes) {
     site,
     network: "none",
     code,
-    out: staticOut,
+    out: await outTo(staticOut, `capout-${side}`),
     request: {
       mode: "static",
       routes,
@@ -40419,15 +40816,16 @@ async function captureSide(ctx, deps, side, tree, plan, image, code, routes) {
       ...plan.buildCommand === null ? {} : { sinceFile: BUILD_MARKER }
     },
     user,
-    labels: ctx.labels
-  }, SCREENSHOT_LIMITS.captureTimeoutMs);
+    labels: ctx.labels,
+    onTiming: stepTimer(ctx, side)
+  }, timeoutWithin(SCREENSHOT_LIMITS.captureTimeoutMs, ctx.deadline), ctx.signal, ctx.deadline);
   if (shot.status === "captured")
     return done(side, shot, staticOut);
   if (shot.status !== "no-site" || plan.serveCommand === null) {
     return skip(shot.reason ?? "the screenshot step took no screenshot");
   }
   const appLabel = `${ctx.runId}-${side}`;
-  const findApp = () => lease.docker.sync(["ps", "-aq", "--filter", `label=terminalhire.capture-app=${appLabel}`]).stdout.trim().split("\n")[0] || null;
+  const findApp = () => lease.docker.sync(["ps", "-aq", "--filter", `label=terminalhire.capture-app=${appLabel}`], syncOpts(ctx)).stdout.trim().split("\n")[0] || null;
   const labels = { ...ctx.labels ?? {}, "terminalhire.capture-app": appLabel };
   ctx.progress?.("screenshots", `${side}: ${plan.serveCommand}`);
   const serving = step("serve", "offline", plan.serveCommand, SCREENSHOT_LIMITS.waitForPortMs + SCREENSHOT_LIMITS.captureTimeoutMs, { labels }).catch(() => null);
@@ -40448,20 +40846,90 @@ async function captureSide(ctx, deps, side, tree, plan, image, code, routes) {
       site: null,
       network: { container: appId },
       code,
-      out: serverOut,
+      out: await outTo(serverOut, `capout-${side}-srv`),
       request: { mode: "server", routes, waitForPortMs: SCREENSHOT_LIMITS.waitForPortMs },
       user,
-      labels: ctx.labels
-    }, SCREENSHOT_LIMITS.waitForPortMs + SCREENSHOT_LIMITS.captureTimeoutMs);
+      labels: ctx.labels,
+      onTiming: stepTimer(ctx, side)
+    }, timeoutWithin(SCREENSHOT_LIMITS.waitForPortMs + SCREENSHOT_LIMITS.captureTimeoutMs, ctx.deadline), ctx.signal, ctx.deadline);
     if (served.status !== "captured")
       return skip(served.reason ?? "the serve script produced no screenshot");
     return done(side, served, serverOut);
   } finally {
     const app = appId ?? findApp();
     if (app !== null)
-      lease.docker.sync(["rm", "--force", app]);
+      lease.docker.sync(["rm", "--force", app], syncOpts(ctx));
     await serving;
   }
+}
+function screenshotDeadline(lease, o, now = Date.now()) {
+  const budget = o.budgetMs ?? (lease.pathDomain === "local" ? SCREENSHOT_BUDGET_MS : HOSTED_SCREENSHOT_BUDGET_MS);
+  return Math.min(now + budget, o.notAfter ?? Infinity);
+}
+function touchesRenderedFiles(paths) {
+  return paths.some((p) => RENDERED_EXTENSIONS.test(p) || RENDERED_DIRS.test(p));
+}
+async function screenshotPhase(p, take = (ctx) => runScreenshots(ctx)) {
+  const local = p.lease.pathDomain === "local";
+  if (local && p.guarded !== true)
+    return take(p.ctx);
+  const skip = (reason) => ({
+    status: "skipped",
+    reason,
+    routes: normalizeRoutes(p.ctx.routes),
+    dir: null,
+    sides: [],
+    items: [],
+    notes: []
+  });
+  const venue = local ? void 0 : p.lease.screenshotVenue;
+  if (!local && venue === void 0)
+    return skip("this venue cannot take screenshots");
+  if (p.changedPaths !== null && !touchesRenderedFiles(p.changedPaths)) {
+    return skip("the change touches no file a browser renders");
+  }
+  const deadline = p.deadline ?? screenshotDeadline(p.lease, p.budgetMs === void 0 ? {} : { budgetMs: p.budgetMs });
+  const budgetMs = deadline - Date.now();
+  if (budgetMs <= 0)
+    return skip("no time left for screenshots");
+  const stop = new AbortController();
+  let timer;
+  const watchdog = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`the screenshot step ran past ${String(Math.round(budgetMs / 1e3))}s`)), Math.max(0, deadline - Date.now()));
+  });
+  watchdog.catch(() => void 0);
+  try {
+    venue?.check("taking screenshots");
+    const shots = await Promise.race([
+      watchdog,
+      Promise.resolve().then(() => take({
+        ...p.ctx,
+        ...venue === void 0 ? {} : { before: HOSTED_BEFORE_REASON },
+        signal: stop.signal,
+        deadline
+      }))
+    ]);
+    venue?.check("reading the screenshots back");
+    return shots;
+  } catch (err) {
+    return skip(message(err));
+  } finally {
+    clearTimeout(timer);
+    stop.abort();
+  }
+}
+function timed(ctx, what, started) {
+  ctx.progress?.("screenshots", `${what} ${((Date.now() - started) / 1e3).toFixed(1)}s`);
+}
+async function fill(ctx, venue, localDir, purpose) {
+  const volume = venue.volumeName(purpose);
+  const started = Date.now();
+  await venue.fillVolume(localDir, volume, remaining(ctx));
+  timed(ctx, `fill ${purpose}:`, started);
+  return volume;
+}
+function stepTimer(ctx, side) {
+  return (step, ms) => ctx.progress?.("screenshots", `${side}: ${step} ${(ms / 1e3).toFixed(1)}s`);
 }
 function done(side, m, outDir) {
   const failed = m.failures.length;
@@ -40478,10 +40946,16 @@ function done(side, m, outDir) {
     outDir
   };
 }
+function remaining(ctx) {
+  return ctx.deadline === void 0 ? void 0 : timeoutWithin(Number.MAX_SAFE_INTEGER, ctx.deadline);
+}
+function syncOpts(ctx) {
+  return ctx.deadline === void 0 ? void 0 : { timeoutMs: timeoutWithin(3e4, ctx.deadline) };
+}
 function message(err) {
   return String(err?.message ?? err).slice(0, 500);
 }
-var SCREENSHOT_LIMITS, BUILD_MARKER, realDeps;
+var SCREENSHOT_LIMITS, BUILD_MARKER, realDeps, HOSTED_BEFORE_REASON, SCREENSHOT_BUDGET_MS, HOSTED_SCREENSHOT_BUDGET_MS, RENDERED_EXTENSIONS, RENDERED_DIRS;
 var init_screenshots = __esm({
   "../../packages/envrun/dist/screenshots.js"() {
     "use strict";
@@ -40500,7 +40974,8 @@ var init_screenshots = __esm({
     realDeps = {
       runStep: (lease, r) => runStep(lease.containment, r),
       runCapture,
-      ensureImage: (docker3, workDir) => ensureCaptureImage(docker3, workDir),
+      ensureImage: (docker3, workDir, timeoutMs) => ensureCaptureImage(docker3, workDir, timeoutMs),
+      preloadImage: (docker3, timeoutMs) => preloadCaptureImage(docker3, CAPTURE_IMAGE_PUBLISHED, timeoutMs),
       stageCode: stageCaptureCode,
       plan: (dir) => planPreview(createRepoReader(dir)),
       copy: (from, to) => {
@@ -40510,6 +40985,11 @@ var init_screenshots = __esm({
       mkdir: (dir) => mkdirSync8(dir, { recursive: true, mode: 511 }),
       env: (tree) => scrubEnv(process.env, scrubEnvPathsFor("container", { jail: tree.jail, tmp: tree.tmp }))
     };
+    HOSTED_BEFORE_REASON = "before side not captured on hosted runs yet";
+    SCREENSHOT_BUDGET_MS = 3e5;
+    HOSTED_SCREENSHOT_BUDGET_MS = 72e4;
+    RENDERED_EXTENSIONS = /\.(html?|css|scss|sass|less|tsx|jsx|vue|svelte|astro|mdx|hbs|handlebars|ejs|erb|liquid|twig|njk)$/i;
+    RENDERED_DIRS = /(^|\/)(public|static|assets|templates)\//i;
   }
 });
 
@@ -40737,6 +41217,41 @@ function refuseSshTransport(url) {
   if (!isSsh)
     return;
   throw new RunRefusalError("refusing an ssh target: this clone runs with no credential of yours, and an ssh host authenticates the client before it serves anything \u2014 including a public repository. Use the https URL for the same repo; a private one is reached with a credential this runner is handed deliberately. We refuse rather than let the fetch fail and read as your own tests failing.");
+}
+function claimChangedPaths(cloneDir, from, log = () => {
+}, timeoutMs = 6e4) {
+  try {
+    return changedPathsOrThrow(cloneDir, from, log, timeoutMs);
+  } catch (err) {
+    const code = err?.code;
+    log(`could not read the claim's changed paths (${typeof code === "string" ? code : "error"}); the screenshot gate will treat them as unknown`);
+    return null;
+  }
+}
+function changedPathsOrThrow(cloneDir, from, log, timeoutMs) {
+  const { sha } = from;
+  const deadline = Date.now() + timeoutMs;
+  assertSafeTargetSha(sha);
+  const git3 = (args5) => execFileSync("git", [...gitConfigArgs(), ...args5], {
+    cwd: cloneDir,
+    encoding: "utf8",
+    stdio: "pipe",
+    env: gitCloneEnv(from.auth),
+    timeout: timeoutWithin(6e4, deadline)
+  });
+  try {
+    git3(["fetch", "-q", "--depth", "2", "--end-of-options", from.cacheDir ?? from.url, sha]);
+  } catch (err) {
+    log(`could not fetch the claim's parent (exit ${String(err.status ?? "?")}); the screenshot gate will treat the changed paths as unknown`);
+    return null;
+  } finally {
+    rmSync11(join45(cloneDir, ".git", "FETCH_HEAD"), { force: true });
+  }
+  try {
+    return git3(["diff", "--name-only", "-z", `${sha}^`, sha, "--"]).split("\0").filter((p) => p !== "");
+  } catch {
+    return null;
+  }
 }
 function cloneTargetAt(opts) {
   try {
@@ -41038,9 +41553,12 @@ function toPreviewHandle(p) {
 }
 async function releaseWithoutThrowing(lease, progress) {
   try {
+    const started = Date.now();
     const report = await lease.release();
     if (report.error !== null) {
       progress("teardown", `venue ${report.kind} reported a teardown failure: ${report.error}`);
+    } else if (lease.pathDomain !== "local") {
+      progress("teardown", `venue released in ${((Date.now() - started) / 1e3).toFixed(1)}s`);
     }
   } catch (err) {
     progress(
@@ -41388,34 +41906,46 @@ async function runVerification(req, ctx) {
       venue: describeVenue(lease)
     };
     if (req.screenshots !== void 0) {
-      const shots = lease.pathDomain !== "local" ? skippedScreenshots(req.screenshots.routes, "screenshots are taken on local runs only for now") : await runScreenshots({
-        after: {
-          lease,
-          repoDir: venuePaths.cloneDir,
-          localRepoDir: cloneDir,
-          jail: venuePaths.jail,
-          tmp: venuePaths.tmp,
-          needsInstall: false
-        },
-        before: diff2 === null ? null : () => prepareBaseTree({
-          stage,
+      const shotsDeadline = screenshotDeadline(lease, req.screenshots);
+      const shots = await screenshotPhase({
+        lease,
+        changedPaths: diff2 !== null ? pre.touchedPaths : lease.pathDomain === "local" && req.screenshots.guarded !== true ? null : claimChangedPaths(cloneDir, {
+          url: req.targetRepo,
+          sha: req.targetSha,
+          ...req.targetCacheDir ? { cacheDir: req.targetCacheDir } : {},
+          ...req.targetAuth ? { auth: req.targetAuth } : {}
+        }, (line) => progress("screenshots", line), timeoutWithin(6e4, shotsDeadline)),
+        deadline: shotsDeadline,
+        ...req.screenshots.guarded === true ? { guarded: true } : {},
+        ctx: {
+          after: {
+            lease,
+            repoDir: venuePaths.cloneDir,
+            localRepoDir: cloneDir,
+            jail: venuePaths.jail,
+            tmp: venuePaths.tmp,
+            needsInstall: false
+          },
+          before: diff2 === null ? null : () => prepareBaseTree({
+            stage,
+            runId,
+            placement,
+            targetRepo: req.targetRepo,
+            targetSha: req.targetSha,
+            ...req.targetCacheDir ? { targetCacheDir: req.targetCacheDir } : {},
+            ...req.targetAuth ? { targetAuth: req.targetAuth } : {},
+            baselinePatch: hasBaselinePatch ? baselinePatch ?? "" : null,
+            progress
+          }),
+          spec,
+          image,
+          ...labels ? { labels } : {},
+          routes: req.screenshots.routes ?? ["/"],
+          outDir: req.screenshots.outDir,
+          workDir: join45(stage, "screenshots"),
           runId,
-          placement,
-          targetRepo: req.targetRepo,
-          targetSha: req.targetSha,
-          ...req.targetCacheDir ? { targetCacheDir: req.targetCacheDir } : {},
-          ...req.targetAuth ? { targetAuth: req.targetAuth } : {},
-          baselinePatch: hasBaselinePatch ? baselinePatch ?? "" : null,
           progress
-        }),
-        spec,
-        image,
-        ...labels ? { labels } : {},
-        routes: req.screenshots.routes ?? ["/"],
-        outDir: req.screenshots.outDir,
-        workDir: join45(stage, "screenshots"),
-        runId,
-        progress
+        }
       });
       base = { ...base, screenshots: shots };
     }
@@ -41460,17 +41990,6 @@ async function runVerification(req, ctx) {
   } finally {
     await releaseWithoutThrowing(lease, progress);
   }
-}
-function skippedScreenshots(routes, reason) {
-  return {
-    status: "skipped",
-    reason,
-    routes: normalizeRoutes(routes),
-    dir: null,
-    sides: [],
-    items: [],
-    notes: []
-  };
 }
 async function prepareBaseTree(o) {
   const root = join45(o.stage, "base");
@@ -42916,10 +43435,10 @@ import {
   mkdtempSync as mkdtempSync5,
   renameSync as renameSync11,
   existsSync as existsSync21,
-  lstatSync as lstatSync5,
+  lstatSync as lstatSync6,
   realpathSync as realpathSync3,
   rmSync as rmSync12,
-  readdirSync as readdirSync4
+  readdirSync as readdirSync5
 } from "fs";
 import { join as join46, dirname as dirname11, isAbsolute as isAbsolute6, resolve as pathResolve } from "path";
 import { createHash as createHash12 } from "crypto";
@@ -43046,7 +43565,7 @@ async function sh(cmd, args5, opts = {}) {
 async function confirm(question) {
   const rl = createInterface9({ input: process.stdin, output: process.stdout });
   try {
-    const ans = await new Promise((resolve8) => rl.question(question, resolve8));
+    const ans = await new Promise((resolve9) => rl.question(question, resolve9));
     return /^y(es)?$/i.test(String(ans).trim());
   } finally {
     rl.close();
@@ -43077,7 +43596,7 @@ async function confirmSubmit(flags, question, { unattendedAllowed = true, refusa
 async function ask(question) {
   const rl = createInterface9({ input: process.stdin, output: process.stdout });
   try {
-    const ans = await new Promise((resolve8) => rl.question(question, resolve8));
+    const ans = await new Promise((resolve9) => rl.question(question, resolve9));
     return String(ans).trim();
   } finally {
     rl.close();
@@ -44869,6 +45388,9 @@ function founderClaimStanding(claim, approvalsChecked) {
     case "merged":
       return `${turn} \u2014 accepted by the poster`;
     case "abandoned":
+      if (claim.serverReleased === true && !claim.posterVerdict) {
+        return `${turn} \u2014 claim released; this request is closed`;
+      }
       return `${turn} \u2014 rejected, or released locally`;
     case "submitted":
       return `${turn} \u2014 CI and the verdict: ${nextStep(`terminalhire claim runs ${claim.id}`)}`;
@@ -45620,7 +46142,7 @@ function assertNoBooleanPath(dest, flagName) {
 }
 function resolveDeliveryDir(flags, claimLocalId, { existsFn, readdirFn } = {}) {
   const exists = existsFn ?? existsSync21;
-  const readdir3 = readdirFn ?? readdirSync4;
+  const readdir3 = readdirFn ?? readdirSync5;
   let probing = null;
   try {
     const base = flags?.dir ? assertNoBooleanPath(pathResolve(String(flags.dir)), "dir") : sliceWorkDirFor(claimLocalId);
@@ -45755,7 +46277,7 @@ function writeDeliveredBrief(destDir, spec) {
 function ensureExcludedPackDir(destDir) {
   let occupant = null;
   try {
-    occupant = lstatSync5(join46(destDir, BRIEF_DIR));
+    occupant = lstatSync6(join46(destDir, BRIEF_DIR));
   } catch (err) {
     if (err?.code !== "ENOENT") {
       return {
@@ -48900,7 +49422,7 @@ an interactive terminal and creates an unowned web draft; the browser publishes 
 async function ask2(question) {
   const rl = createInterface10({ input: process.stdin, output: process.stdout });
   try {
-    return await new Promise((resolve8) => rl.question(question, (answer) => resolve8(answer.trim())));
+    return await new Promise((resolve9) => rl.question(question, (answer) => resolve9(answer.trim())));
   } finally {
     rl.close();
   }
@@ -49225,12 +49747,12 @@ var init_jpi_repo = __esm({
 
 // bin/recall-check.js
 import {
-  closeSync as closeSync5,
+  closeSync as closeSync6,
   existsSync as existsSync24,
   mkdirSync as mkdirSync13,
-  openSync as openSync5,
+  openSync as openSync6,
   readFileSync as readFileSync31,
-  readdirSync as readdirSync5,
+  readdirSync as readdirSync6,
   renameSync as renameSync13,
   statSync as statSync7,
   unlinkSync as unlinkSync4,
@@ -49277,7 +49799,7 @@ function mutateCache(path6, mutate) {
     const deadline = Date.now() + LOCK_WAIT_MS;
     while (!held && Date.now() < deadline) {
       try {
-        closeSync5(openSync5(lock, "wx", 384));
+        closeSync6(openSync6(lock, "wx", 384));
         held = true;
       } catch (err) {
         if (err?.code !== "EEXIST") return false;
@@ -49323,7 +49845,7 @@ function sweepTempFiles(path6) {
   try {
     const dir = dirname12(path6);
     const prefix = `${basename9(path6)}.`;
-    for (const name of readdirSync5(dir)) {
+    for (const name of readdirSync6(dir)) {
       if (!name.startsWith(prefix) || !name.endsWith(".tmp")) continue;
       const full = join49(dir, name);
       try {
@@ -49431,7 +49953,7 @@ __export(jpi_run_exports, {
 });
 import { existsSync as existsSync25, readFileSync as readFileSync32, realpathSync as realpathSync4 } from "fs";
 import { execFileSync as execFileSync4 } from "child_process";
-import { join as join50, resolve as resolve6 } from "path";
+import { join as join50, resolve as resolve7 } from "path";
 import { homedir as homedir29, tmpdir as tmpdir5 } from "os";
 import { mkdtempSync as mkdtempSync6, rmSync as rmSync14 } from "fs";
 function screenshotsOption(routeFlag, env = process.env) {
@@ -49666,7 +50188,7 @@ async function run10() {
 `);
     return 0;
   }
-  const localDir = resolve6(parsed.flags["local"] ?? process.cwd());
+  const localDir = resolve7(parsed.flags["local"] ?? process.cwd());
   const config2 = readConfig2(localDir);
   const pick2 = (name) => parsed.flags[name] ?? config2[name];
   const sliceRaw = pick2("slice");
@@ -50482,7 +51004,7 @@ __export(trajectory_exports, {
   runTrajectory: () => runTrajectory,
   runTrajectoryPush: () => runTrajectoryPush
 });
-import { existsSync as existsSync26, readFileSync as readFileSync33, readdirSync as readdirSync6, writeFileSync as writeFileSync28 } from "fs";
+import { existsSync as existsSync26, readFileSync as readFileSync33, readdirSync as readdirSync7, writeFileSync as writeFileSync28 } from "fs";
 import { homedir as homedir30 } from "os";
 import { join as join51 } from "path";
 function isRecord4(value) {
@@ -50511,7 +51033,7 @@ function findJsonlFiles(dir) {
   const out = [];
   let entries;
   try {
-    entries = readdirSync6(dir, { withFileTypes: true, encoding: "utf8" });
+    entries = readdirSync7(dir, { withFileTypes: true, encoding: "utf8" });
   } catch {
     return out;
   }
@@ -52757,7 +53279,7 @@ async function runInboxPane(opts = {}) {
     clearTimer = (t) => clearInterval(t),
     refreshMs = DEFAULT_REFRESH_MS
   } = opts;
-  return await new Promise((resolve8) => {
+  return await new Promise((resolve9) => {
     let rows = [];
     let inviteCount = 0;
     let selected = 0;
@@ -53025,7 +53547,7 @@ async function runInboxPane(opts = {}) {
     function finish(result) {
       if (cleaned) return;
       cleanup();
-      resolve8(result);
+      resolve9(result);
     }
     function onSignal() {
       finish({ action: "quit" });
@@ -53063,7 +53585,7 @@ async function runInboxPane(opts = {}) {
   Inbox error: ${err instanceof Error ? err.message : String(err)}
 
 `);
-      resolve8({ action: "quit" });
+      resolve9({ action: "quit" });
     }
   });
 }
@@ -53167,10 +53689,10 @@ import { join as join55 } from "path";
 function defaultPromptAck({ input = process.stdin, output = process.stdout } = {}) {
   if (!input || input.isTTY !== true) return Promise.resolve(false);
   const rl = createInterface11({ input, output });
-  return new Promise((resolve8) => {
+  return new Promise((resolve9) => {
     rl.question("  Press Enter to acknowledge and continue (Ctrl-C to cancel): ", () => {
       rl.close();
-      resolve8(true);
+      resolve9(true);
     });
   });
 }
@@ -53374,7 +53896,7 @@ function runNoticePane(opts = {}) {
     output = process.stdout,
     signals = process
   } = opts;
-  return new Promise((resolve8) => {
+  return new Promise((resolve9) => {
     let cleaned = false;
     const body = String(message2 ?? "").replace(/^\n+/, "").replace(/\n+$/, "");
     function render() {
@@ -53413,7 +53935,7 @@ function runNoticePane(opts = {}) {
     function onDismiss() {
       if (cleaned) return;
       cleanup();
-      resolve8();
+      resolve9();
     }
     function onUncaught(err) {
       cleanup();
@@ -53452,7 +53974,7 @@ function runNoticePane(opts = {}) {
   ${err instanceof Error ? err.message : String(err)}
 
 `);
-      resolve8();
+      resolve9();
     }
   });
 }
@@ -53599,7 +54121,7 @@ async function runChatPane(opts = {}) {
     selfShareActivity = readConfig().chatShareActivity === true;
   } catch {
   }
-  return await new Promise((resolve8) => {
+  return await new Promise((resolve9) => {
     let messages = [];
     let inputBuffer = "";
     let presence = null;
@@ -53668,7 +54190,7 @@ async function runChatPane(opts = {}) {
       exitReason = reason;
       cleanup();
       output.write(DEPOSIT_CTA);
-      resolve8({ entered: true, reason });
+      resolve9({ entered: true, reason });
     }
     async function doPoll() {
       if (polling || cleaned) return;
@@ -53709,7 +54231,7 @@ async function runChatPane(opts = {}) {
   ${err.message}
 
 `);
-            resolve8({ entered: true, reason: "session-expired" });
+            resolve9({ entered: true, reason: "session-expired" });
           }
           return;
         }
@@ -53763,7 +54285,7 @@ async function runChatPane(opts = {}) {
   ${err.message}
 
 `);
-              resolve8({ entered: true, reason: "session-expired" });
+              resolve9({ entered: true, reason: "session-expired" });
             }
             return;
           }
@@ -53781,7 +54303,7 @@ async function runChatPane(opts = {}) {
 
 `
           );
-          resolve8({ entered: true, reason: "blocked" });
+          resolve9({ entered: true, reason: "blocked" });
         }
         return;
       }
@@ -53797,7 +54319,7 @@ async function runChatPane(opts = {}) {
   ${err.message}
 
 `);
-            resolve8({ entered: true, reason: "session-expired" });
+            resolve9({ entered: true, reason: "session-expired" });
           }
           return;
         }
@@ -53884,7 +54406,7 @@ async function runChatPane(opts = {}) {
   Chat pane error: ${err instanceof Error ? err.message : String(err)}
 
 `);
-      resolve8({ entered: true, reason: "error" });
+      resolve9({ entered: true, reason: "error" });
     }
   });
 }
@@ -54151,7 +54673,7 @@ function runHubTui({
     // tests override with a tiny value to exercise auto-dismiss without a real wait.
     splashMs: _splashMs = DEFAULT_SPLASH_MS
   } = deps;
-  return new Promise((resolve8) => {
+  return new Promise((resolve9) => {
     const level = detectColorLevel(
       typeof process !== "undefined" ? process.env : {},
       output && output.isTTY
@@ -55044,7 +55566,7 @@ function runHubTui({
       } catch {
       }
       runtime.cleanup();
-      resolve8({ ok: true, lastVerb });
+      resolve9({ ok: true, lastVerb });
     }
     runtime.enter();
     splashTimer = setTimeout(() => {
@@ -55400,7 +55922,7 @@ function firstLine(text) {
   return line ? line.replace(CONTROL, "").slice(0, 80) : null;
 }
 function runProbe(file, args5, timeoutMs = PROBE_TIMEOUT_MS3, { shell = false } = {}) {
-  return new Promise((resolve8) => {
+  return new Promise((resolve9) => {
     let child;
     const opts = {
       timeout: timeoutMs,
@@ -55410,18 +55932,18 @@ function runProbe(file, args5, timeoutMs = PROBE_TIMEOUT_MS3, { shell = false } 
     };
     const done2 = (err, stdout, stderr) => {
       if (!err) {
-        resolve8({ ok: true, version: firstLine(stdout) ?? firstLine(stderr) });
+        resolve9({ ok: true, version: firstLine(stdout) ?? firstLine(stderr) });
         return;
       }
       if (err.code === "ENOENT" || shell && SHELL_NOT_FOUND.has(err.code)) {
-        resolve8({ ok: false, reason: "not found" });
-      } else if (err.killed || err.signal) resolve8({ ok: false, reason: "timed out" });
-      else resolve8({ ok: false, reason: "exited with an error" });
+        resolve9({ ok: false, reason: "not found" });
+      } else if (err.killed || err.signal) resolve9({ ok: false, reason: "timed out" });
+      else resolve9({ ok: false, reason: "exited with an error" });
     };
     try {
       child = shell ? execFile5([file, ...args5].join(" "), [], { ...opts, shell: true }, done2) : execFile5(file, args5, opts, done2);
     } catch {
-      resolve8({ ok: false, reason: "not found" });
+      resolve9({ ok: false, reason: "not found" });
       return;
     }
     child.stdin?.end();
@@ -63748,7 +64270,7 @@ var init_protocol2 = __esm({
               return;
             }
             const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-            await new Promise((resolve8) => setTimeout(resolve8, pollInterval));
+            await new Promise((resolve9) => setTimeout(resolve9, pollInterval));
             options?.signal?.throwIfAborted();
           }
         } catch (error2) {
@@ -63765,7 +64287,7 @@ var init_protocol2 = __esm({
        */
       request(request, resultSchema, options) {
         const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-        return new Promise((resolve8, reject) => {
+        return new Promise((resolve9, reject) => {
           const earlyReject = (error2) => {
             reject(error2);
           };
@@ -63843,7 +64365,7 @@ var init_protocol2 = __esm({
               if (!parseResult.success) {
                 reject(parseResult.error);
               } else {
-                resolve8(parseResult.data);
+                resolve9(parseResult.data);
               }
             } catch (error2) {
               reject(error2);
@@ -64104,12 +64626,12 @@ var init_protocol2 = __esm({
           }
         } catch {
         }
-        return new Promise((resolve8, reject) => {
+        return new Promise((resolve9, reject) => {
           if (signal.aborted) {
             reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
             return;
           }
-          const timeoutId = setTimeout(resolve8, interval);
+          const timeoutId = setTimeout(resolve9, interval);
           signal.addEventListener("abort", () => {
             clearTimeout(timeoutId);
             reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -64562,11 +65084,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants4);
+          this.rhs = optimizeExpr(this.rhs, names, constants5);
         return this;
       }
       get names() {
@@ -64583,10 +65105,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants4);
+        this.rhs = optimizeExpr(this.rhs, names, constants5);
         return this;
       }
       get names() {
@@ -64647,8 +65169,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants4) {
-        this.code = optimizeExpr(this.code, names, constants4);
+      optimizeNames(names, constants5) {
+        this.code = optimizeExpr(this.code, names, constants5);
         return this;
       }
       get names() {
@@ -64677,12 +65199,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         const { nodes } = this;
         let i = nodes.length;
         while (i--) {
           const n = nodes[i];
-          if (n.optimizeNames(names, constants4))
+          if (n.optimizeNames(names, constants5))
             continue;
           subtractNames(names, n.names);
           nodes.splice(i, 1);
@@ -64735,12 +65257,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         var _a4;
-        this.else = (_a4 = this.else) === null || _a4 === void 0 ? void 0 : _a4.optimizeNames(names, constants4);
-        if (!(super.optimizeNames(names, constants4) || this.else))
+        this.else = (_a4 = this.else) === null || _a4 === void 0 ? void 0 : _a4.optimizeNames(names, constants5);
+        if (!(super.optimizeNames(names, constants5) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants4);
+        this.condition = optimizeExpr(this.condition, names, constants5);
         return this;
       }
       get names() {
@@ -64763,10 +65285,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants4) {
-        if (!super.optimizeNames(names, constants4))
+      optimizeNames(names, constants5) {
+        if (!super.optimizeNames(names, constants5))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants4);
+        this.iteration = optimizeExpr(this.iteration, names, constants5);
         return this;
       }
       get names() {
@@ -64802,10 +65324,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants4) {
-        if (!super.optimizeNames(names, constants4))
+      optimizeNames(names, constants5) {
+        if (!super.optimizeNames(names, constants5))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants4);
+        this.iterable = optimizeExpr(this.iterable, names, constants5);
         return this;
       }
       get names() {
@@ -64847,11 +65369,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         var _a4, _b;
-        super.optimizeNames(names, constants4);
-        (_a4 = this.catch) === null || _a4 === void 0 ? void 0 : _a4.optimizeNames(names, constants4);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants4);
+        super.optimizeNames(names, constants5);
+        (_a4 = this.catch) === null || _a4 === void 0 ? void 0 : _a4.optimizeNames(names, constants5);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants5);
         return this;
       }
       get names() {
@@ -65152,7 +65674,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants4) {
+    function optimizeExpr(expr, names, constants5) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -65167,14 +65689,14 @@ var require_codegen = __commonJS({
         return items;
       }, []));
       function replaceName(n) {
-        const c = constants4[n.str];
+        const c = constants5[n.str];
         if (c === void 0 || names[n.str] !== 1)
           return n;
         delete names[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants4[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants5[c.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -67136,7 +67658,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve8.call(this, root, ref);
+      let _sch = resolve9.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a4 = root.localRefs) === null || _a4 === void 0 ? void 0 : _a4[ref];
         const { schemaId } = this.opts;
@@ -67163,7 +67685,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve8(root, ref) {
+    function resolve9(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -67794,7 +68316,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve8(baseURI, relativeURI, options) {
+    function resolve9(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse4(baseURI, schemelessOptions), parse4(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -68052,7 +68574,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize: normalize4,
-      resolve: resolve8,
+      resolve: resolve9,
       resolveComponent,
       equal,
       serialize,
@@ -71304,11 +71826,11 @@ var require_codegen2 = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants4);
+          this.rhs = optimizeExpr(this.rhs, names, constants5);
         return this;
       }
       get names() {
@@ -71325,10 +71847,10 @@ var require_codegen2 = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants4);
+        this.rhs = optimizeExpr(this.rhs, names, constants5);
         return this;
       }
       get names() {
@@ -71389,8 +71911,8 @@ var require_codegen2 = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants4) {
-        this.code = optimizeExpr(this.code, names, constants4);
+      optimizeNames(names, constants5) {
+        this.code = optimizeExpr(this.code, names, constants5);
         return this;
       }
       get names() {
@@ -71419,12 +71941,12 @@ var require_codegen2 = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         const { nodes } = this;
         let i = nodes.length;
         while (i--) {
           const n = nodes[i];
-          if (n.optimizeNames(names, constants4))
+          if (n.optimizeNames(names, constants5))
             continue;
           subtractNames(names, n.names);
           nodes.splice(i, 1);
@@ -71477,12 +71999,12 @@ var require_codegen2 = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         var _a4;
-        this.else = (_a4 = this.else) === null || _a4 === void 0 ? void 0 : _a4.optimizeNames(names, constants4);
-        if (!(super.optimizeNames(names, constants4) || this.else))
+        this.else = (_a4 = this.else) === null || _a4 === void 0 ? void 0 : _a4.optimizeNames(names, constants5);
+        if (!(super.optimizeNames(names, constants5) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants4);
+        this.condition = optimizeExpr(this.condition, names, constants5);
         return this;
       }
       get names() {
@@ -71505,10 +72027,10 @@ var require_codegen2 = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants4) {
-        if (!super.optimizeNames(names, constants4))
+      optimizeNames(names, constants5) {
+        if (!super.optimizeNames(names, constants5))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants4);
+        this.iteration = optimizeExpr(this.iteration, names, constants5);
         return this;
       }
       get names() {
@@ -71544,10 +72066,10 @@ var require_codegen2 = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants4) {
-        if (!super.optimizeNames(names, constants4))
+      optimizeNames(names, constants5) {
+        if (!super.optimizeNames(names, constants5))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants4);
+        this.iterable = optimizeExpr(this.iterable, names, constants5);
         return this;
       }
       get names() {
@@ -71589,11 +72111,11 @@ var require_codegen2 = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants5) {
         var _a4, _b;
-        super.optimizeNames(names, constants4);
-        (_a4 = this.catch) === null || _a4 === void 0 ? void 0 : _a4.optimizeNames(names, constants4);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants4);
+        super.optimizeNames(names, constants5);
+        (_a4 = this.catch) === null || _a4 === void 0 ? void 0 : _a4.optimizeNames(names, constants5);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants5);
         return this;
       }
       get names() {
@@ -71894,7 +72416,7 @@ var require_codegen2 = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants4) {
+    function optimizeExpr(expr, names, constants5) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -71909,14 +72431,14 @@ var require_codegen2 = __commonJS({
         return items;
       }, []));
       function replaceName(n) {
-        const c = constants4[n.str];
+        const c = constants5[n.str];
         if (c === void 0 || names[n.str] !== 1)
           return n;
         delete names[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants4[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants5[c.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -73843,7 +74365,7 @@ var require_compile2 = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve8.call(this, root, ref);
+      let _sch = resolve9.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a4 = root.localRefs) === null || _a4 === void 0 ? void 0 : _a4[ref];
         const { schemaId } = this.opts;
@@ -73870,7 +74392,7 @@ var require_compile2 = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve8(root, ref) {
+    function resolve9(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -77561,12 +78083,12 @@ var init_stdio2 = __esm({
         this.onclose?.();
       }
       send(message2) {
-        return new Promise((resolve8) => {
+        return new Promise((resolve9) => {
           const json = serializeMessage(message2);
           if (this._stdout.write(json)) {
-            resolve8();
+            resolve9();
           } else {
-            this._stdout.once("drain", resolve8);
+            this._stdout.once("drain", resolve9);
           }
         });
       }
@@ -77951,7 +78473,7 @@ async function claimRecordResult(args5 = {}) {
 async function claimWorkspaceResult(args5 = {}) {
   try {
     const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
-    const { existsSync: existsSync38, readFileSync: readFileSync44, lstatSync: lstatSync6 } = await import("fs");
+    const { existsSync: existsSync38, readFileSync: readFileSync44, lstatSync: lstatSync7 } = await import("fs");
     const { join: join65 } = await import("path");
     const { BRIEF_REL_PATH: BRIEF_REL_PATH2, VERIFY_REL_PATH: VERIFY_REL_PATH2, AGENTS_REL_PATH: AGENTS_REL_PATH2, sha256OfUtf8: sha256OfUtf82 } = await Promise.resolve().then(() => (init_jpi_claim(), jpi_claim_exports));
     const packPaths = (c) => {
@@ -77967,7 +78489,7 @@ async function claimWorkspaceResult(args5 = {}) {
         if (typeof digest !== "string" || digest === "") continue;
         const abs = join65(c.worktreePath, rel);
         try {
-          const st = lstatSync6(abs);
+          const st = lstatSync7(abs);
           if (!st.isFile() || st.size > 1024 * 1024) continue;
           if (sha256OfUtf82(readFileSync44(abs, "utf8")) === digest) p[key] = abs;
         } catch {
@@ -78869,10 +79391,10 @@ __export(jpi_profile_exports, {
 import { createInterface as createInterface12 } from "readline";
 function prompt5(question) {
   const rl = createInterface12({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve8) => {
+  return new Promise((resolve9) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve8(answer.trim());
+      resolve9(answer.trim());
     });
   });
 }
@@ -78969,7 +79491,7 @@ var signal_exports = {};
 __export(signal_exports, {
   extractFingerprint: () => extractFingerprint
 });
-import { readFileSync as readFileSync39, readdirSync as readdirSync7 } from "fs";
+import { readFileSync as readFileSync39, readdirSync as readdirSync8 } from "fs";
 import { execFileSync as execFileSync5 } from "child_process";
 import { join as join57 } from "path";
 function safeGit(args5, cwd) {
@@ -79027,7 +79549,7 @@ function workspaceMemberDirs(cwd) {
   for (const group of ["apps", "packages"]) {
     try {
       const groupDir = join57(cwd, group);
-      for (const e of readdirSync7(groupDir, { withFileTypes: true })) {
+      for (const e of readdirSync8(groupDir, { withFileTypes: true })) {
         if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join57(groupDir, e.name));
       }
     } catch {
@@ -79069,13 +79591,13 @@ function tokensFromFileExtensions(cwd) {
   const scanDirs = [cwd];
   try {
     const srcDir = join57(cwd, "src");
-    readdirSync7(srcDir);
+    readdirSync8(srcDir);
     scanDirs.push(srcDir);
   } catch {
   }
   for (const dir of scanDirs) {
     try {
-      const entries = readdirSync7(dir, { withFileTypes: true });
+      const entries = readdirSync8(dir, { withFileTypes: true });
       for (const e of entries) {
         if (!e.isFile()) continue;
         const dotIdx = e.name.lastIndexOf(".");
@@ -79823,13 +80345,13 @@ async function runPush() {
   }
   const fields = buildConsentFields(profile);
   renderPreview(fields);
-  await new Promise((resolve8) => {
+  await new Promise((resolve9) => {
     const rl = createInterface14({ input: process.stdin, output: process.stdout });
     rl.question(
       "  Press Enter to open your browser to authorize + consent (or Ctrl-C to cancel)... ",
       () => {
         rl.close();
-        resolve8();
+        resolve9();
       }
     );
   });
@@ -80103,30 +80625,30 @@ __export(jpi_init_exports, {
   run: () => run27
 });
 import { existsSync as existsSync34 } from "fs";
-import { join as join61, resolve as resolve7 } from "path";
+import { join as join61, resolve as resolve8 } from "path";
 import { fileURLToPath as fileURLToPath11, pathToFileURL } from "url";
 import { createInterface as createInterface15 } from "readline";
 import { spawnSync as spawnSync12 } from "child_process";
 function resolveScript(name) {
-  const distPath = resolve7(join61(__dirname5, "..", "..", "dist", "bin", `${name}.js`));
-  const legacyPath = resolve7(join61(__dirname5, `${name}.js`));
+  const distPath = resolve8(join61(__dirname5, "..", "..", "dist", "bin", `${name}.js`));
+  const legacyPath = resolve8(join61(__dirname5, `${name}.js`));
   return existsSync34(distPath) ? distPath : legacyPath;
 }
 function resolveSrc(name) {
-  const distPath = resolve7(join61(__dirname5, "..", "..", "dist", "src", `${name}.js`));
-  const legacyPath = resolve7(join61(__dirname5, "..", "src", `${name}.js`));
+  const distPath = resolve8(join61(__dirname5, "..", "..", "dist", "src", `${name}.js`));
+  const legacyPath = resolve8(join61(__dirname5, "..", "src", `${name}.js`));
   return existsSync34(distPath) ? distPath : legacyPath;
 }
 function resolveInstallJs() {
-  const fromDist = resolve7(join61(__dirname5, "..", "..", "install.js"));
-  const fromBin = resolve7(join61(__dirname5, "..", "install.js"));
+  const fromDist = resolve8(join61(__dirname5, "..", "..", "install.js"));
+  const fromBin = resolve8(join61(__dirname5, "..", "install.js"));
   if (existsSync34(fromDist)) return fromDist;
   if (existsSync34(fromBin)) return fromBin;
   return fromBin;
 }
 function resolveStatuslineInstallJs() {
-  const fromDist = resolve7(join61(__dirname5, "..", "..", "statusline-install.js"));
-  const fromBin = resolve7(join61(__dirname5, "..", "statusline-install.js"));
+  const fromDist = resolve8(join61(__dirname5, "..", "..", "statusline-install.js"));
+  const fromBin = resolve8(join61(__dirname5, "..", "statusline-install.js"));
   if (existsSync34(fromDist)) return fromDist;
   if (existsSync34(fromBin)) return fromBin;
   return fromBin;
@@ -80136,14 +80658,14 @@ function tokenizeInterest(raw) {
 }
 async function run27() {
   const rl = createInterface15({ input: process.stdin, output: process.stdout });
-  const ask5 = (question) => new Promise((resolve8) => {
+  const ask5 = (question) => new Promise((resolve9) => {
     let answered = false;
     rl.question(question, (answer) => {
       answered = true;
-      resolve8((answer || "").trim().toLowerCase());
+      resolve9((answer || "").trim().toLowerCase());
     });
     rl.once("close", () => {
-      if (!answered) resolve8(null);
+      if (!answered) resolve9(null);
     });
   });
   console.log("");
@@ -81243,12 +81765,12 @@ __export(jpi_beta_exports, {
 import { createInterface as createInterface16 } from "readline";
 async function run30() {
   const rl = createInterface16({ input: process.stdin, output: process.stdout });
-  const ask5 = (question) => new Promise((resolve8) => {
-    const onClose = () => resolve8(null);
+  const ask5 = (question) => new Promise((resolve9) => {
+    const onClose = () => resolve9(null);
     rl.once("close", onClose);
     rl.question(question, (answer) => {
       rl.removeListener("close", onClose);
-      resolve8((answer || "").trim());
+      resolve9((answer || "").trim());
     });
   });
   const alreadyActed = readConfig().betaOptIn === true;
@@ -81394,12 +81916,12 @@ function readLocalVersion3() {
 }
 async function run31() {
   const rl = createInterface17({ input: process.stdin, output: process.stdout });
-  const ask5 = (question) => new Promise((resolve8) => {
-    const onClose = () => resolve8(null);
+  const ask5 = (question) => new Promise((resolve9) => {
+    const onClose = () => resolve9(null);
     rl.once("close", onClose);
     rl.question(question, (answer) => {
       rl.removeListener("close", onClose);
-      resolve8((answer || "").trim());
+      resolve9((answer || "").trim());
     });
   });
   const lastFull = readConfig().lastFullFeedbackAt;

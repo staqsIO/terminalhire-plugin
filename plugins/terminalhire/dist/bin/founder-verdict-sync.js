@@ -113,25 +113,33 @@ async function fetchFounderVerdicts(pushToken, fetchImpl = fetch) {
     const verdicts = body.verdicts.filter(
       (v) => v && typeof v.claimId === "string" && v.claimId !== "" && (v.verdict === "accepted" || v.verdict === "rejected")
     );
-    return { verdicts, latestAt: typeof body.latestAt === "string" ? body.latestAt : null };
+    const releases = (Array.isArray(body.releases) ? body.releases : []).filter(
+      (r) => r && typeof r.claimId === "string" && r.claimId !== "" && typeof r.at === "string" && Number.isFinite(Date.parse(r.at))
+    );
+    return {
+      verdicts,
+      latestAt: typeof body.latestAt === "string" ? body.latestAt : null,
+      ...releases.length ? { releases } : {}
+    };
   } catch {
     return null;
   }
 }
-function planVerdictTransitions(claims, verdicts, nextPolledState) {
+function planVerdictTransitions(claims, verdicts, nextPolledState, releases = []) {
   if (!Array.isArray(claims) || !Array.isArray(verdicts)) return [];
   const byClaimId = /* @__PURE__ */ new Map();
   for (const v of verdicts) {
     if (v && typeof v.claimId === "string" && v.claimId !== "") byClaimId.set(v.claimId, v);
   }
+  const released = new Set(releases.map((r) => r.claimId));
   const plan = [];
   for (const c of claims) {
     const claimId = c?.approval?.claimId;
     if (!claimId) continue;
     const v = byClaimId.get(claimId);
-    if (!v) continue;
+    if (!v && !released.has(claimId)) continue;
     if (TERMINAL.has(c.state)) continue;
-    const to = verdictState(v.verdict);
+    const to = v ? verdictState(v.verdict) : "abandoned";
     const next = nextPolledState(c.state, to);
     if (next === c.state) continue;
     plan.push({
@@ -139,8 +147,8 @@ function planVerdictTransitions(claims, verdicts, nextPolledState) {
       claimId,
       from: c.state,
       to: next,
-      verdict: v.verdict,
-      settled: v.settled === true,
+      ...v ? { verdict: v.verdict } : { serverReleased: true },
+      settled: v?.settled === true,
       amountUSD: typeof c.amountUSD === "number" ? c.amountUSD : null,
       title: typeof c.title === "string" ? c.title : ""
     });
@@ -149,6 +157,7 @@ function planVerdictTransitions(claims, verdicts, nextPolledState) {
 }
 function buildVerdictNotice(t) {
   if (!t || typeof t.to !== "string") return null;
+  if (t.serverReleased === true) return "  claim released \u2014 this request is closed";
   const amount = typeof t.amountUSD === "number" && t.amountUSD > 0 ? `$${t.amountUSD}` : null;
   if (t.verdict === "rejected") {
     return `  \u2717 poster rejected${amount ? ` \u2014 ${amount}` : ""} \xB7 claim moved to ${t.to}`;
@@ -178,11 +187,19 @@ async function syncFounderVerdicts({
     if (!pushToken) return quiet;
     const res = await fetchFounderVerdicts(pushToken, fetchImpl);
     if (!res) return { checked: false, unavailable: true, applied: [] };
-    const plan = planVerdictTransitions(founderTargets, res.verdicts, claimsModule.nextPolledState);
+    const plan = planVerdictTransitions(
+      founderTargets,
+      res.verdicts,
+      claimsModule.nextPolledState,
+      res.releases
+    );
     const applied = [];
     for (const t of plan) {
       try {
-        claimsModule.updateClaim(t.id, { state: t.to, posterVerdict: t.verdict });
+        claimsModule.updateClaim(t.id, {
+          state: t.to,
+          ...t.serverReleased === true ? { serverReleased: true } : { posterVerdict: t.verdict }
+        });
         applied.push(t);
         const line = buildVerdictNotice(t);
         if (line) log(line);

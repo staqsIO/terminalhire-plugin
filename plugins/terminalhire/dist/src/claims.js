@@ -315,7 +315,7 @@ function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
 function countAwaitingFounderApproval(claims = readClaims()) {
   try {
     return claims.filter(
-      (c) => c.approval?.mode === "approval-only" && c.approval?.state === "pending"
+      (c) => !TERMINAL_STATES.has(c.state) && c.approval?.mode === "approval-only" && c.approval?.state === "pending"
     ).length;
   } catch {
     return 0;
@@ -325,8 +325,17 @@ var DECIDED_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
 function acceptedPRRate(claims = readClaims()) {
   const total = claims.length;
   const merged = claims.filter((c) => c.state === "merged").length;
-  const decided = claims.filter((c) => DECIDED_STATES.has(c.state)).length;
-  return { merged, decided, inFlight: total - decided, total, rate: decided === 0 ? 0 : merged / decided };
+  const released = claims.filter(
+    (c) => c.state === "abandoned" && c.serverReleased === true && !c.posterVerdict
+  ).length;
+  const decided = claims.filter((c) => DECIDED_STATES.has(c.state)).length - released;
+  return {
+    merged,
+    decided,
+    inFlight: total - decided - released,
+    total,
+    rate: decided === 0 ? 0 : merged / decided
+  };
 }
 function formatAcceptedPRRate(rate) {
   const inFlight = rate.inFlight > 0 ? ` \xB7 ${rate.inFlight} in flight` : "";

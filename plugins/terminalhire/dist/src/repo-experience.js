@@ -1182,7 +1182,7 @@ async function continuityForRepo(repoFullName, claims) {
 }
 function calibrationSummary(claims, repo) {
   const resolved = claims.filter(
-    (c) => c.repoFullName === repo && (c.state === "merged" || c.state === "abandoned") && c.review?.acceptanceScore != null
+    (c) => c.repoFullName === repo && (c.state === "merged" || c.state === "abandoned") && !(c.state === "abandoned" && c.serverReleased === true && !c.posterVerdict) && c.review?.acceptanceScore != null
   );
   const n = resolved.length;
   if (n < 5) return { available: false, n, text: null };
