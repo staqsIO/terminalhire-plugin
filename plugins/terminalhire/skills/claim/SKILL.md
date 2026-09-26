@@ -155,6 +155,21 @@ once the claim is `ready`. It prints the preflight card first; at a real termina
 asks y/N, in your session it proceeds, and for a posting the developer confirms their
 identity once in the browser before anything leaves the machine.
 
+**Attaching your own screenshots (first-party postings only):** run the app and take the
+pictures that show the change with Playwright (the `browser_take_screenshot` tool, or
+`npx playwright screenshot <url> <file>`), or reuse the ones the `run` verb took (its
+report prints the directory; the files are `<side>/<name>.png`). List them in a small
+JSON file, with paths relative to that file, and pass it as `claim submit <id>
+--screenshots <file>`. The poster sees them on the claim page beside the verification
+run's own pictures, labelled as the developer's. One rule: pictures of this patch as it
+runs, never edited. Up to six PNGs of 4 MiB each, captions to 140 characters; a bad file
+is refused before anything is sent, and a picture that fails to upload never fails the
+submission.
+
+```json
+{ "v": 1, "shots": [{ "file": "./shots/home-dark.png", "caption": "Home in dark mode" }] }
+```
+
 ### Advance a claim
 
 ```bash

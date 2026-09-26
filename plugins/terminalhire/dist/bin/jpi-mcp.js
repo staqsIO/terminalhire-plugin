@@ -5860,20 +5860,20 @@ var init_github_issue_status = __esm({
 // ../../packages/core/src/credit.ts
 function verifyClaimCredit(claim, facts) {
   const reasons = [];
-  const fail = (code, message2) => reasons.push({ code, message: message2 });
+  const fail2 = (code, message2) => reasons.push({ code, message: message2 });
   const norm = (r) => r.trim().toLowerCase();
   if (norm(facts.repo) !== norm(claim.repo))
-    fail("repo-mismatch", `PR is in ${facts.repo}, claim is against ${claim.repo}`);
-  if (!facts.merged) fail("not-merged", `PR #${facts.prNumber} is not merged`);
+    fail2("repo-mismatch", `PR is in ${facts.repo}, claim is against ${claim.repo}`);
+  if (!facts.merged) fail2("not-merged", `PR #${facts.prNumber} is not merged`);
   if (facts.authorId == null || facts.authorId !== claim.claimantId)
-    fail("author-mismatch", `PR author id ${facts.authorId} !== claimant id ${claim.claimantId}`);
+    fail2("author-mismatch", `PR author id ${facts.authorId} !== claimant id ${claim.claimantId}`);
   if (facts.merged && facts.mergedById != null && facts.authorId != null && facts.mergedById === facts.authorId)
-    fail("self-merged", `PR was merged by its own author (id ${facts.authorId})`);
+    fail2("self-merged", `PR was merged by its own author (id ${facts.authorId})`);
   if (claim.claimedIssueNumber != null) {
     if (facts.closesIssues.length === 0)
-      fail("issue-linkage-missing", `PR closes no issue; claim names #${claim.claimedIssueNumber}`);
+      fail2("issue-linkage-missing", `PR closes no issue; claim names #${claim.claimedIssueNumber}`);
     else if (!facts.closesIssues.includes(claim.claimedIssueNumber))
-      fail(
+      fail2(
         "issue-linkage-mismatch",
         `PR closes ${facts.closesIssues.map((n) => "#" + n).join(", ")}; claim names #${claim.claimedIssueNumber}`
       );
@@ -11156,6 +11156,181 @@ var init_src = __esm({
     init_ledger();
     init_audit();
     init_short_token();
+  }
+});
+
+// ../../packages/envspec/dist/claimScreenshots.js
+function isPlainObject(v) {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+function isWhole(v, min, max) {
+  return typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
+}
+function unknownKey(o, allowed) {
+  for (const key of Object.keys(o))
+    if (!allowed.includes(key))
+      return key;
+  return null;
+}
+function fail(error2) {
+  return { ok: false, error: error2 };
+}
+function parseCaption(raw, at) {
+  if (typeof raw !== "string")
+    return { error: `${at}.caption: must be a string` };
+  if (CONTROL2.test(raw))
+    return { error: `${at}.caption: no control characters` };
+  const caption = raw.trim();
+  if (caption.length === 0)
+    return { error: `${at}.caption: must not be empty` };
+  if (caption.length > CLAIM_SCREENSHOT_LIMITS.caption) {
+    return {
+      error: `${at}.caption: at most ${String(CLAIM_SCREENSHOT_LIMITS.caption)} characters`
+    };
+  }
+  return caption;
+}
+function parseItem(v, at, seen) {
+  if (!isPlainObject(v))
+    return `${at}: must be an object`;
+  const extra = unknownKey(v, ITEM_KEYS);
+  if (extra !== null)
+    return `${at}.${extra}: unknown key`;
+  const file = v["file"];
+  if (typeof file !== "string" || !CLAIM_SCREENSHOT_FILE.test(file)) {
+    return `${at}.file: must be NN-<slug>.png (two digits, a dash, up to 40 of a-z 0-9 -)`;
+  }
+  if (seen.has(file))
+    return `${at}.file: duplicate of an earlier item`;
+  const caption = parseCaption(v["caption"], at);
+  if (typeof caption !== "string")
+    return caption.error;
+  const sha256 = v["sha256"];
+  if (typeof sha256 !== "string" || !SHA256_HEX.test(sha256)) {
+    return `${at}.sha256: must be 64 lowercase hex characters`;
+  }
+  const { bytes, width, height } = v;
+  if (!isWhole(bytes, 1, CLAIM_SCREENSHOT_LIMITS.bytes)) {
+    return `${at}.bytes: must be a whole number from 1 to ${String(CLAIM_SCREENSHOT_LIMITS.bytes)}`;
+  }
+  const maxDim = CLAIM_SCREENSHOT_LIMITS.maxDimension;
+  if (!isWhole(width, 1, maxDim)) {
+    return `${at}.width: must be a whole number from 1 to ${String(maxDim)}`;
+  }
+  if (!isWhole(height, 1, maxDim)) {
+    return `${at}.height: must be a whole number from 1 to ${String(maxDim)}`;
+  }
+  seen.add(file);
+  return { file, caption, sha256, bytes, width, height };
+}
+function parseClaimScreenshotManifest(input) {
+  if (!isPlainObject(input))
+    return fail("manifest: must be an object");
+  const extra = unknownKey(input, MANIFEST_KEYS);
+  if (extra !== null)
+    return fail(`${extra}: unknown key`);
+  if (input["v"] !== 1)
+    return fail("v: must be 1");
+  if (input["author"] !== "developer")
+    return fail('author: must be "developer"');
+  const rawItems = input["items"];
+  if (!Array.isArray(rawItems) || rawItems.length < 1 || rawItems.length > CLAIM_SCREENSHOT_LIMITS.items) {
+    return fail(`items: must list 1 to ${String(CLAIM_SCREENSHOT_LIMITS.items)} pictures`);
+  }
+  const items = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (let i = 0; i < rawItems.length; i++) {
+    const parsed = parseItem(rawItems[i], `items[${String(i)}]`, seen);
+    if (typeof parsed === "string")
+      return fail(parsed);
+    items.push(parsed);
+  }
+  return { ok: true, manifest: { v: 1, author: "developer", items } };
+}
+function parseShot(v, at) {
+  if (!isPlainObject(v))
+    return `${at}: must be an object`;
+  const extra = unknownKey(v, SHOT_KEYS);
+  if (extra !== null)
+    return `${at}.${extra}: unknown key`;
+  const file = v["file"];
+  if (typeof file !== "string" || file.trim().length === 0 || file.length > CLAIM_SCREENSHOT_ATTACHMENT_FILE_MAX || CONTROL2.test(file)) {
+    return `${at}.file: must be a path of 1 to ${String(CLAIM_SCREENSHOT_ATTACHMENT_FILE_MAX)} characters`;
+  }
+  const caption = parseCaption(v["caption"], at);
+  if (typeof caption !== "string")
+    return caption.error;
+  return { file, caption };
+}
+function parseClaimScreenshotAttachments(input) {
+  if (!isPlainObject(input))
+    return fail("attachments: must be an object");
+  const extra = unknownKey(input, ATTACHMENTS_KEYS);
+  if (extra !== null)
+    return fail(`${extra}: unknown key`);
+  if (input["v"] !== 1)
+    return fail("v: must be 1");
+  const rawShots = input["shots"];
+  if (!Array.isArray(rawShots) || rawShots.length < 1 || rawShots.length > CLAIM_SCREENSHOT_LIMITS.items) {
+    return fail(`shots: must list 1 to ${String(CLAIM_SCREENSHOT_LIMITS.items)} pictures`);
+  }
+  const shots = [];
+  for (let i = 0; i < rawShots.length; i++) {
+    const parsed = parseShot(rawShots[i], `shots[${String(i)}]`);
+    if (typeof parsed === "string")
+      return fail(parsed);
+    shots.push(parsed);
+  }
+  return { ok: true, attachments: { v: 1, shots } };
+}
+function u32be(b, at) {
+  return (b[at] << 24 | b[at + 1] << 16 | b[at + 2] << 8 | b[at + 3]) >>> 0;
+}
+function pngHeader(bytes) {
+  if (bytes.byteLength < 24)
+    return null;
+  if (!PNG_SIGNATURE.every((b, i) => bytes[i] === b))
+    return null;
+  if (u32be(bytes, 8) !== 13)
+    return null;
+  if (!IHDR.every((b, i) => bytes[12 + i] === b))
+    return null;
+  return { width: u32be(bytes, 16), height: u32be(bytes, 20) };
+}
+function claimScreenshotFileName(index, label) {
+  if (!Number.isInteger(index) || index < 0 || index > 99) {
+    throw new RangeError(`claimScreenshotFileName: index ${String(index)} is not 0..99`);
+  }
+  let slug = label.replace(/\.png$/i, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  if (slug.length > SLUG_MAX)
+    slug = slug.slice(0, SLUG_MAX).replace(/-+$/g, "");
+  if (slug.length === 0)
+    slug = "shot";
+  return `${String(index).padStart(2, "0")}-${slug}.png`;
+}
+var CLAIM_SCREENSHOT_LIMITS, CLAIM_SCREENSHOT_FILE, SHA256_HEX, CONTROL2, MANIFEST_KEYS, ITEM_KEYS, CLAIM_SCREENSHOT_ATTACHMENT_FILE_MAX, ATTACHMENTS_KEYS, SHOT_KEYS, PNG_SIGNATURE, IHDR, SLUG_MAX;
+var init_claimScreenshots = __esm({
+  "../../packages/envspec/dist/claimScreenshots.js"() {
+    "use strict";
+    CLAIM_SCREENSHOT_LIMITS = {
+      items: 6,
+      /** Under Vercel's 4.5 MB request body limit, with headroom. */
+      bytes: 4 * 1024 * 1024,
+      caption: 140,
+      /** Width and height each. */
+      maxDimension: 8192
+    };
+    CLAIM_SCREENSHOT_FILE = /^[0-9]{2}-[a-z0-9][a-z0-9-]{0,39}\.png$/;
+    SHA256_HEX = /^[0-9a-f]{64}$/;
+    CONTROL2 = /[\u0000-\u001f\u007f]/;
+    MANIFEST_KEYS = ["v", "author", "items"];
+    ITEM_KEYS = ["file", "caption", "sha256", "bytes", "width", "height"];
+    CLAIM_SCREENSHOT_ATTACHMENT_FILE_MAX = 200;
+    ATTACHMENTS_KEYS = ["v", "shots"];
+    SHOT_KEYS = ["file", "caption"];
+    PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
+    IHDR = [73, 72, 68, 82];
+    SLUG_MAX = 40;
   }
 });
 
@@ -26757,10 +26932,10 @@ var init_classify2 = __esm({
         runner: "node --test (TAP)",
         read: (out) => {
           const pass = /^# pass (\d+)$/m.exec(out);
-          const fail = /^# fail (\d+)$/m.exec(out);
-          if (!pass || !fail)
+          const fail2 = /^# fail (\d+)$/m.exec(out);
+          if (!pass || !fail2)
             return null;
-          return { tests_passed: int(pass), tests_failed: int(fail) };
+          return { tests_passed: int(pass), tests_failed: int(fail2) };
         }
       },
       {
@@ -30030,28 +30205,36 @@ var init_execute = __esm({
 });
 
 // ../../packages/envrun/dist/screenshotsResult.js
+function shotIn(order, items, key) {
+  const seen = order.filter((o) => items.some((i) => key(i) === o));
+  return seen.length > 0 ? seen.join(" and ") : "none";
+}
 function renderScreenshots(s) {
   if (s === null || s === void 0)
     return null;
   if (s.status === "skipped")
     return `screenshots  skipped \u2014 ${s.reason ?? "no reason recorded"}`;
+  if (s.status === "pending")
+    return "screenshots  pending \u2014 taken after the verdict";
   const lines = [
-    `screenshots  ${String(s.items.length)} in ${s.dir ?? "?"} (routes ${s.routes.join(", ")}; light and dark; desktop and mobile)`
+    `screenshots  ${String(s.items.length)} in ${s.dir ?? "?"} (routes ${s.routes.join(", ")}; ${shotIn(SCHEME_ORDER, s.items, (i) => i.scheme)}; ${shotIn(VIEWPORT_ORDER, s.items, (i) => i.viewport)})`
   ];
   for (const side of s.sides) {
     const count = s.items.filter((i) => i.side === side.side).length;
-    lines.push(side.status === "captured" ? `${INDENT}${side.side}: ${String(count)} shots${side.reason === null ? "" : ` (${side.reason})`}` : `${INDENT}${side.side}: skipped \u2014 ${side.reason ?? "no reason recorded"}`);
+    lines.push(side.status === "captured" ? `${INDENT}${side.side}: ${String(count)} ${count === 1 ? "shot" : "shots"}${side.reason === null ? "" : ` (${side.reason})`}` : `${INDENT}${side.side}: skipped \u2014 ${side.reason ?? "no reason recorded"}`);
   }
   for (const note of s.notes)
     lines.push(`${INDENT}${note}`);
   lines.push(`${INDENT}rendered with no network: no backend, no signed-in state`);
   return lines.join("\n");
 }
-var INDENT;
+var INDENT, VIEWPORT_ORDER, SCHEME_ORDER;
 var init_screenshotsResult = __esm({
   "../../packages/envrun/dist/screenshotsResult.js"() {
     "use strict";
     INDENT = " ".repeat(13);
+    VIEWPORT_ORDER = ["desktop", "mobile"];
+    SCHEME_ORDER = ["light", "dark"];
   }
 });
 
@@ -30336,7 +30519,7 @@ import { createHash as createHash8, createPublicKey as createPublicKey3, verify 
 function refuse2(reason, detail) {
   return { ok: false, reason, detail };
 }
-function isPlainObject(v) {
+function isPlainObject2(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 function assertExpectationsComplete2(expectations) {
@@ -30459,8 +30642,8 @@ async function verifyConfidentialSpaceToken(token, expectations, deps) {
   }
   const hwmodel = payload.hwmodel;
   const submods = payload.submods;
-  const gce = isPlainObject(submods) ? submods.gce : void 0;
-  if (!isPlainObject(gce)) {
+  const gce = isPlainObject2(submods) ? submods.gce : void 0;
+  if (!isPlainObject2(gce)) {
     return refuse2("submods-gce-missing", "no submods.gce block names the instance");
   }
   if (gce.project_id !== expectations.projectId) {
@@ -30477,8 +30660,8 @@ async function verifyConfidentialSpaceToken(token, expectations, deps) {
     return refuse2("zone-not-allowed", "zone is not one the pool is configured to use");
   }
   const zone = gce.zone;
-  const container = isPlainObject(submods) ? submods.container : void 0;
-  if (!isPlainObject(container)) {
+  const container = isPlainObject2(submods) ? submods.container : void 0;
+  if (!isPlainObject2(container)) {
     return refuse2("submods-container-missing", "no submods.container block names the workload");
   }
   if (typeof container.image_reference !== "string" || container.image_reference === "") {
@@ -30490,7 +30673,7 @@ async function verifyConfidentialSpaceToken(token, expectations, deps) {
   }
   const env = container.env;
   for (const [name, value] of Object.entries(expectations.containerEnv ?? {})) {
-    if (!isPlainObject(env) || !Object.prototype.hasOwnProperty.call(env, name) || env[name] !== value) {
+    if (!isPlainObject2(env) || !Object.prototype.hasOwnProperty.call(env, name) || env[name] !== value) {
       return refuse2("container-env-mismatch", `the signed container environment does not carry the ${name} this caller booted with`);
     }
   }
@@ -30563,10 +30746,10 @@ var init_dist2 = __esm({
 });
 
 // ../../packages/envrun/dist/venueProof.js
-function readDaemonId(docker3, label) {
+function readDaemonId(docker3, label, timeoutMs) {
   let res;
   try {
-    res = docker3.sync(["info", "--format", "{{.ID}}"], { timeoutMs: PROBE_TIMEOUT_MS3 });
+    res = docker3.sync(["info", "--format", "{{.ID}}"], { timeoutMs });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { id: null, detail: `${label} daemon probe threw: ${msg}` };
@@ -30590,9 +30773,9 @@ function readDaemonId(docker3, label) {
   }
   return { id, detail: `${label} daemon ${id}` };
 }
-function classifyVenueDaemon(venue, local = localDockerClient()) {
-  const v = readDaemonId(venue, "venue");
-  const l = readDaemonId(local, "local");
+function classifyVenueDaemon(venue, local = localDockerClient(), timeoutMs = PROBE_TIMEOUT_MS3) {
+  const v = readDaemonId(venue, "venue", timeoutMs);
+  const l = readDaemonId(local, "local", timeoutMs);
   if (v.id === null || l.id === null) {
     const unread = [v.id === null ? v.detail : null, l.id === null ? l.detail : null].filter((d) => d !== null).join("; ");
     return { distinct: false, reason: "unknown", detail: unread };
@@ -31298,14 +31481,14 @@ function parsePatchPaths(patch) {
   let oldRemaining = 0;
   let newRemaining = 0;
   let inHunk = false;
-  const fail = (detail) => ({ failure: { code: "unparseable", detail } });
+  const fail2 = (detail) => ({ failure: { code: "unparseable", detail } });
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     if (line === void 0)
       continue;
     if (line.startsWith(DIFF_HEADER)) {
       if (inHunk && (oldRemaining > 0 || newRemaining > 0)) {
-        return fail("a change block ended before it delivered the lines it announced");
+        return fail2("a change block ended before it delivered the lines it announced");
       }
       inHunk = false;
       skippingBinary = false;
@@ -31317,12 +31500,12 @@ function parsePatchPaths(patch) {
         const left = unquoteDiffPath(leftToken);
         const right = unquoteDiffPath(rightToken);
         if (left === null || right === null) {
-          return fail("a file name in the patch is quoted in a form we cannot read back");
+          return fail2("a file name in the patch is quoted in a form we cannot read back");
         }
         const oldPath = stripSidePrefix(left, "a/");
         const newPath = stripSidePrefix(right, "b/");
         if (oldPath === null || newPath === null) {
-          return fail("the patch was written without the standard a/ and b/ file-name prefixes, so we cannot tell a prefix from a real directory");
+          return fail2("the patch was written without the standard a/ and b/ file-name prefixes, so we cannot tell a prefix from a real directory");
         }
         entry.rawPaths.push(oldPath, newPath);
       }
@@ -31344,10 +31527,10 @@ function parsePatchPaths(patch) {
       } else if (marker === "+") {
         newRemaining -= 1;
       } else {
-        return fail("a change block contains a line that is neither an addition, a removal nor context");
+        return fail2("a change block contains a line that is neither an addition, a removal nor context");
       }
       if (oldRemaining < 0 || newRemaining < 0) {
-        return fail("a change block delivered more lines than it announced");
+        return fail2("a change block delivered more lines than it announced");
       }
       if (oldRemaining === 0 && newRemaining === 0)
         inHunk = false;
@@ -31358,7 +31541,7 @@ function parsePatchPaths(patch) {
     if (line.startsWith("@@")) {
       const m = HUNK_HEADER.exec(line);
       if (m === null) {
-        return fail("a change block header is malformed, so we cannot tell which lines belong to it");
+        return fail2("a change block header is malformed, so we cannot tell which lines belong to it");
       }
       oldRemaining = m[2] === void 0 ? 1 : Number(m[2]);
       newRemaining = m[4] === void 0 ? 1 : Number(m[4]);
@@ -31379,11 +31562,11 @@ function parsePatchPaths(patch) {
         continue;
       const decoded = unquoteDiffPath(token);
       if (decoded === null) {
-        return fail("a file name in the patch is quoted in a form we cannot read back");
+        return fail2("a file name in the patch is quoted in a form we cannot read back");
       }
       const stripped = stripSidePrefix(decoded, sideMarker);
       if (stripped === null) {
-        return fail("the patch was written without the standard a/ and b/ file-name prefixes, so we cannot tell a prefix from a real directory");
+        return fail2("the patch was written without the standard a/ and b/ file-name prefixes, so we cannot tell a prefix from a real directory");
       }
       entry.rawPaths.push(stripped);
       continue;
@@ -31392,24 +31575,24 @@ function parsePatchPaths(patch) {
     if (moveMarker !== void 0) {
       const decoded = unquoteDiffPath(line.slice(moveMarker.length));
       if (decoded === null) {
-        return fail("a file name in the patch is quoted in a form we cannot read back");
+        return fail2("a file name in the patch is quoted in a form we cannot read back");
       }
       entry.rawPaths.push(decoded);
       continue;
     }
     if (line.startsWith("+") || line.startsWith("-")) {
-      return fail("the patch contains a changed line that belongs to no change block");
+      return fail2("the patch contains a changed line that belongs to no change block");
     }
   }
   if (inHunk && (oldRemaining > 0 || newRemaining > 0)) {
-    return fail("the patch ends in the middle of a change block");
+    return fail2("the patch ends in the middle of a change block");
   }
   if (entries.length === 0) {
     return { failure: { code: "empty-patch", detail: "The patch contains no changes at all." } };
   }
   for (const e of entries) {
     if (e.rawPaths.length === 0)
-      return fail("a change in the patch names no file");
+      return fail2("a change in the patch names no file");
   }
   return { entries };
 }
@@ -32997,12 +33180,12 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
 function describeErr(err) {
   return err instanceof Error ? err.message : String(err);
 }
-function assertVenueUnchanged(p, doing) {
+function assertVenueUnchanged(p, doing, timeoutMs) {
   const failure = p.tunnel.failure();
   if (failure !== null) {
     throw new HostedVenueError(`the tunnel carrying ${p.vm}'s docker socket is gone, so ${doing} would go to whatever now answers at ${p.socketPath} \u2014 ${failure}`);
   }
-  const verdict = p.io.classifyDaemon(p.docker);
+  const verdict = p.io.classifyDaemon(p.docker, timeoutMs);
   if (!verdict.distinct) {
     throw new HostedVenueError(`refusing ${doing}: ${p.socketPath} no longer answers as the venue daemon this lease acquired \u2014 ${describeVenueDaemon(verdict)}`);
   }
@@ -33028,7 +33211,7 @@ function screenshotVenueOf(p, fill2, check) {
     volumeName: (purpose) => validateVolumeName(`${p.vm}-${purpose}`, "the screenshot volume"),
     check,
     async fillVolume(localDir, volume, timeoutMs) {
-      check("filling a screenshot volume");
+      check("filling a screenshot volume", timeoutMs === void 0 ? void 0 : Math.min(timeoutMs, PROBE_TIMEOUT_MS3));
       p.docker.sync(volumeCreateArgv(volume, p.runId), {
         timeoutMs: Math.min(timeoutMs ?? VOLUME_CREATE_TIMEOUT_MS, VOLUME_CREATE_TIMEOUT_MS)
       });
@@ -33042,8 +33225,8 @@ function screenshotVenueOf(p, fill2, check) {
 function makeLease(p) {
   let released = false;
   let tunnelClosed = false;
-  const check = (doing) => {
-    assertVenueUnchanged(p, doing);
+  const check = (doing, timeoutMs) => {
+    assertVenueUnchanged(p, doing, timeoutMs);
   };
   const containment = guardedContainment(p.io.containmentOn(p.docker), check);
   const closeTunnel = () => {
@@ -33383,7 +33566,7 @@ var init_hostedVenue = __esm({
         rmSync8(path5, { recursive: true, force: true });
       },
       dockerFor: (socketPath) => remoteDockerClient(`unix://${socketPath}`),
-      classifyDaemon: (docker3) => classifyVenueDaemon(docker3),
+      classifyDaemon: (docker3, timeoutMs) => classifyVenueDaemon(docker3, void 0, timeoutMs),
       containmentOn: (docker3) => containerContainmentOn(docker3),
       fetchJwks: async () => {
         const res = await globalThis.fetch(GOOGLE_JWKS_URL, {
@@ -35371,6 +35554,7 @@ var init_dist3 = __esm({
     init_repo();
     init_preview2();
     init_runRequirements();
+    init_claimScreenshots();
     init_yaml();
   }
 });
@@ -35651,60 +35835,93 @@ async function captureSide(ctx, deps, side, tree, plan, image, code, routes) {
   }
 }
 function screenshotDeadline(lease, o, now = Date.now()) {
-  const budget = o.budgetMs ?? (lease.pathDomain === "local" ? SCREENSHOT_BUDGET_MS : HOSTED_SCREENSHOT_BUDGET_MS);
+  const budget = o.budgetMs ?? (o.deferred === true ? DEFERRED_SCREENSHOT_BUDGET_MS : lease.pathDomain === "local" ? SCREENSHOT_BUDGET_MS : HOSTED_SCREENSHOT_BUDGET_MS);
   return Math.min(now + budget, o.notAfter ?? Infinity);
 }
 function touchesRenderedFiles(paths) {
   return paths.some((p) => RENDERED_EXTENSIONS.test(p) || RENDERED_DIRS.test(p));
 }
-async function screenshotPhase(p, take = (ctx) => runScreenshots(ctx)) {
+function screenshotGate(p) {
   const local = p.lease.pathDomain === "local";
   if (local && p.guarded !== true)
-    return take(p.ctx);
-  const skip = (reason) => ({
-    status: "skipped",
+    return null;
+  if (!local && p.lease.screenshotVenue === void 0)
+    return "this venue cannot take screenshots";
+  if (p.changedPaths !== null && !touchesRenderedFiles(p.changedPaths)) {
+    return "the change touches no file a browser renders";
+  }
+  return null;
+}
+function emptyScreenshots(routes, reason) {
+  return {
+    status: reason === null ? "pending" : "skipped",
     reason,
-    routes: normalizeRoutes(p.ctx.routes),
+    routes: normalizeRoutes(routes),
     dir: null,
     sides: [],
     items: [],
     notes: []
-  });
+  };
+}
+async function screenshotPhase(p, take = (ctx) => runScreenshots(ctx)) {
+  const local = p.lease.pathDomain === "local";
+  if (local && p.guarded !== true)
+    return take(p.ctx);
+  const skip = (reason) => emptyScreenshots(p.ctx.routes, reason);
+  const gated = screenshotGate(p);
+  if (gated !== null)
+    return skip(gated);
   const venue = local ? void 0 : p.lease.screenshotVenue;
-  if (!local && venue === void 0)
-    return skip("this venue cannot take screenshots");
-  if (p.changedPaths !== null && !touchesRenderedFiles(p.changedPaths)) {
-    return skip("the change touches no file a browser renders");
-  }
   const deadline = p.deadline ?? screenshotDeadline(p.lease, p.budgetMs === void 0 ? {} : { budgetMs: p.budgetMs });
   const budgetMs = deadline - Date.now();
   if (budgetMs <= 0)
     return skip("no time left for screenshots");
+  p.ctx.progress?.("screenshots", `budget ${String(Math.round(budgetMs / 1e3))}s`);
   const stop = new AbortController();
   let timer;
+  let onAbandon;
   const watchdog = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(`the screenshot step ran past ${String(Math.round(budgetMs / 1e3))}s`)), Math.max(0, deadline - Date.now()));
+    onAbandon = () => reject(new Error(SCREENSHOTS_ABANDONED));
+    if (p.signal?.aborted === true)
+      onAbandon();
+    else
+      p.signal?.addEventListener("abort", onAbandon, { once: true });
   });
   watchdog.catch(() => void 0);
+  let taking;
   try {
-    venue?.check("taking screenshots");
-    const shots = await Promise.race([
-      watchdog,
-      Promise.resolve().then(() => take({
-        ...p.ctx,
-        ...venue === void 0 ? {} : { before: HOSTED_BEFORE_REASON },
-        signal: stop.signal,
-        deadline
-      }))
-    ]);
-    venue?.check("reading the screenshots back");
+    venue?.check("taking screenshots", timeoutWithin(PROBE_TIMEOUT_MS3, deadline));
+    taking = Promise.resolve().then(() => take({
+      ...p.ctx,
+      ...venue === void 0 ? {} : { before: HOSTED_BEFORE_REASON },
+      signal: stop.signal,
+      deadline
+    }));
+    const shots = await Promise.race([watchdog, taking]);
+    venue?.check("reading the screenshots back", timeoutWithin(PROBE_TIMEOUT_MS3, deadline));
     return shots;
   } catch (err) {
+    stop.abort();
+    if (taking !== void 0)
+      await settleWithin(taking, p.drainMs ?? SCREENSHOT_DRAIN_MS);
     return skip(message(err));
   } finally {
     clearTimeout(timer);
+    if (onAbandon !== void 0)
+      p.signal?.removeEventListener("abort", onAbandon);
     stop.abort();
   }
+}
+async function settleWithin(work, ms) {
+  let timer;
+  await Promise.race([
+    work.then(() => void 0, () => void 0),
+    new Promise((resolve6) => {
+      timer = setTimeout(resolve6, ms);
+    })
+  ]);
+  clearTimeout(timer);
 }
 function timed(ctx, what, started) {
   ctx.progress?.("screenshots", `${what} ${((Date.now() - started) / 1e3).toFixed(1)}s`);
@@ -35743,13 +35960,14 @@ function syncOpts(ctx) {
 function message(err) {
   return String(err?.message ?? err).slice(0, 500);
 }
-var SCREENSHOT_LIMITS, GUARDED_CAPTURE_CAP_MS, BUILD_MARKER, realDeps, HOSTED_BEFORE_REASON, SCREENSHOT_BUDGET_MS, HOSTED_SCREENSHOT_BUDGET_MS, RENDERED_EXTENSIONS, RENDERED_DIRS;
+var SCREENSHOT_LIMITS, GUARDED_CAPTURE_CAP_MS, BUILD_MARKER, realDeps, HOSTED_BEFORE_REASON, SCREENSHOT_BUDGET_MS, HOSTED_SCREENSHOT_BUDGET_MS, DEFERRED_SCREENSHOT_BUDGET_MS, SCREENSHOT_DRAIN_MS, SCREENSHOTS_ABANDONED, RENDERED_EXTENSIONS, RENDERED_DIRS;
 var init_screenshots = __esm({
   "../../packages/envrun/dist/screenshots.js"() {
     "use strict";
     init_dist();
     init_dist3();
     init_execute();
+    init_venueProof();
     init_screenshotsResult();
     SCREENSHOT_LIMITS = {
       routes: 5,
@@ -35777,6 +35995,9 @@ var init_screenshots = __esm({
     HOSTED_BEFORE_REASON = "before side not captured on hosted runs yet";
     SCREENSHOT_BUDGET_MS = 3e5;
     HOSTED_SCREENSHOT_BUDGET_MS = 36e4;
+    DEFERRED_SCREENSHOT_BUDGET_MS = 12e5;
+    SCREENSHOT_DRAIN_MS = 3e4;
+    SCREENSHOTS_ABANDONED = "the screenshots were abandoned";
     RENDERED_EXTENSIONS = /\.(html?|css|scss|sass|less|tsx|jsx|vue|svelte|astro|mdx|hbs|handlebars|ejs|erb|liquid|twig|njk)$/i;
     RENDERED_DIRS = /(^|\/)(public|static|assets|templates)\//i;
   }
@@ -36616,6 +36837,7 @@ async function runVerification(req, ctx) {
     };
   }
   const lease = resolved.lease;
+  let leaseHandedOff = false;
   try {
     buildJail(scratch, lease.guestUser);
     if (spec.runtime === "jvm")
@@ -36694,16 +36916,24 @@ async function runVerification(req, ctx) {
       // reasoning and the #735 failure that makes the distinction load-bearing.
       venue: describeVenue(lease)
     };
+    let later = null;
     if (req.screenshots !== void 0) {
       const shotsDeadline = screenshotDeadline(lease, req.screenshots);
-      const shots = await screenshotPhase({
+      const deferred = req.screenshots.deferred === true;
+      const fetchesPaths = diff === null && !(lease.pathDomain === "local" && req.screenshots.guarded !== true);
+      const readChangedPaths = (timeoutMs) => claimChangedPaths(cloneDir, {
+        url: req.targetRepo,
+        sha: req.targetSha,
+        ...req.targetCacheDir ? { cacheDir: req.targetCacheDir } : {},
+        ...req.targetAuth ? { auth: req.targetAuth } : {}
+      }, (line) => progress("screenshots", line), timeoutMs);
+      const phase = {
         lease,
-        changedPaths: diff !== null ? pre.touchedPaths : lease.pathDomain === "local" && req.screenshots.guarded !== true ? null : claimChangedPaths(cloneDir, {
-          url: req.targetRepo,
-          sha: req.targetSha,
-          ...req.targetCacheDir ? { cacheDir: req.targetCacheDir } : {},
-          ...req.targetAuth ? { auth: req.targetAuth } : {}
-        }, (line) => progress("screenshots", line), timeoutWithin(6e4, shotsDeadline)),
+        changedPaths: diff !== null ? pre.touchedPaths : !fetchesPaths ? null : (
+          // Deferred, the verdict is waiting on this fetch, so it gets little
+          // time; the continuation fetches again when it could not decide.
+          readChangedPaths(deferred ? DEFERRED_GATE_TIMEOUT_MS : timeoutWithin(6e4, shotsDeadline))
+        ),
         deadline: shotsDeadline,
         ...req.screenshots.guarded === true ? { guarded: true } : {},
         ctx: {
@@ -36735,18 +36965,39 @@ async function runVerification(req, ctx) {
           runId,
           progress
         }
-      });
-      base = { ...base, screenshots: shots };
+      };
+      if (req.screenshots.deferred === true) {
+        const gated = screenshotGate(phase);
+        base = { ...base, screenshots: emptyScreenshots(phase.ctx.routes, gated) };
+        if (gated === null) {
+          const asked = req.screenshots;
+          later = deferScreenshots((signal) => {
+            const deadline = screenshotDeadline(lease, asked);
+            const undecided = fetchesPaths && phase.changedPaths === null;
+            return screenshotPhase({
+              ...phase,
+              ...undecided ? { changedPaths: readChangedPaths(timeoutWithin(6e4, deadline)) } : {},
+              deadline,
+              signal
+            });
+          }, () => releaseWithoutThrowing(lease, progress), phase.ctx.routes);
+        }
+      } else {
+        base = { ...base, screenshots: await screenshotPhase(phase) };
+      }
     }
-    if (req.preview === false)
+    if (req.preview === false) {
+      leaseHandedOff = later !== null;
       return {
         result: base,
         preview: null,
         spec,
         verdict,
         diagnostic: null,
-        venueIdentity: lease.venueIdentity ?? null
+        venueIdentity: lease.venueIdentity ?? null,
+        ...later === null ? {} : { finishScreenshots: later }
       };
+    }
     progress("preview", "starting one instance both parties can open");
     const previewStartedAt = Date.now();
     const instance = await lease.publishPreview({
@@ -36760,6 +37011,7 @@ async function runVerification(req, ctx) {
       // have to be written after the port was known.
       document: base
     });
+    leaseHandedOff = later !== null;
     return {
       result: {
         ...base,
@@ -36774,11 +37026,38 @@ async function runVerification(req, ctx) {
       spec,
       verdict,
       diagnostic: null,
-      venueIdentity: lease.venueIdentity ?? null
+      venueIdentity: lease.venueIdentity ?? null,
+      ...later === null ? {} : { finishScreenshots: later }
     };
   } finally {
-    await releaseWithoutThrowing(lease, progress);
+    if (!leaseHandedOff)
+      await releaseWithoutThrowing(lease, progress);
   }
+}
+function deferScreenshots(take, release, routes) {
+  let settled = null;
+  const stop = new AbortController();
+  const finish = () => {
+    settled ??= (async () => {
+      try {
+        return await take(stop.signal);
+      } catch (err) {
+        return emptyScreenshots(routes, describeThrown(err, { includeName: false }));
+      } finally {
+        await release();
+      }
+    })();
+    return settled;
+  };
+  const abandon = async () => {
+    stop.abort();
+    settled ??= (async () => {
+      await release();
+      return emptyScreenshots(routes, SCREENSHOTS_ABANDONED);
+    })();
+    await settled;
+  };
+  return Object.assign(finish, { abandon });
 }
 async function prepareBaseTree(o) {
   const root = join31(o.stage, "base");
@@ -36821,7 +37100,7 @@ async function prepareBaseTree(o) {
     throw err;
   }
 }
-var ThRunError, OUTPUT_TAIL_BYTES, FULL_COMMIT_ID, ALLOWED_URL_SCHEMES, SCP_STYLE, URL_SCHEME, WINDOWS_ABSOLUTE, UNC_PATH, TRANSPORT_REASON, SHA_REASON, FULL_SHA, MIN_GIT_VERSION_FOR_END_OF_OPTIONS, CloneUnavailableError, GIT_ENV_ALLOWLIST, credentialFreeHomeDir, SSH_ISOLATION_ARGS, WITHHELD_SEGMENT, UNPARSEABLE_TARGET, FAILURE_LINE, REDACTED_TARGET_REPO, REDACTED_TARGET_SHA;
+var ThRunError, OUTPUT_TAIL_BYTES, FULL_COMMIT_ID, ALLOWED_URL_SCHEMES, SCP_STYLE, URL_SCHEME, WINDOWS_ABSOLUTE, UNC_PATH, TRANSPORT_REASON, SHA_REASON, FULL_SHA, MIN_GIT_VERSION_FOR_END_OF_OPTIONS, CloneUnavailableError, GIT_ENV_ALLOWLIST, credentialFreeHomeDir, SSH_ISOLATION_ARGS, WITHHELD_SEGMENT, UNPARSEABLE_TARGET, DEFERRED_GATE_TIMEOUT_MS, FAILURE_LINE, REDACTED_TARGET_REPO, REDACTED_TARGET_SHA;
 var init_thrun = __esm({
   "../../packages/envrun/dist/thrun.js"() {
     "use strict";
@@ -36903,6 +37182,7 @@ var init_thrun = __esm({
     ];
     WITHHELD_SEGMENT = "(credential withheld)";
     UNPARSEABLE_TARGET = "(a target this runner could not parse, withheld)";
+    DEFERRED_GATE_TIMEOUT_MS = 15e3;
     FAILURE_LINE = /^(?:[ \t]*(?:not ok |FAILED |FAIL )|E {3}|# fail [1-9])/m;
     REDACTED_TARGET_REPO = "(refused before the target was accepted)";
     REDACTED_TARGET_SHA = "(refused)";
@@ -38228,7 +38508,11 @@ import {
   lstatSync as lstatSync5,
   realpathSync as realpathSync2,
   rmSync as rmSync10,
-  readdirSync as readdirSync5
+  readdirSync as readdirSync5,
+  statSync as statSync6,
+  openSync as openSync5,
+  readSync,
+  closeSync as closeSync5
 } from "fs";
 import { join as join32, dirname as dirname10, isAbsolute as isAbsolute5, resolve as pathResolve } from "path";
 import { createHash as createHash11 } from "crypto";
@@ -41228,7 +41512,15 @@ function printWorkspacePack(pack) {
     console.log(`  agents:   not written \u2014 ${pack.agents.reason}`);
   }
 }
-function buildPatchSubmission({ bountyId, claimId, patch, authorName, authorEmail, auth }) {
+function buildPatchSubmission({
+  bountyId,
+  claimId,
+  patch,
+  authorName,
+  authorEmail,
+  auth,
+  screenshots = null
+}) {
   if (auth && "pushToken" in auth) {
     throw new Error(
       "patch submission must never authenticate with the persistent pushToken \u2014 refusing"
@@ -41242,7 +41534,9 @@ function buildPatchSubmission({ bountyId, claimId, patch, authorName, authorEmai
   for (const [k, v] of Object.entries({ bountyId, claimId, patch, authorName, authorEmail })) {
     if (typeof v !== "string" || v.length === 0) throw new Error(`${k} is required`);
   }
-  return { bountyId, claimId, patch, authorName, authorEmail, proofToken: auth.proofToken };
+  const body = { bountyId, claimId, patch, authorName, authorEmail, proofToken: auth.proofToken };
+  if (screenshots !== null) body.screenshots = screenshots;
+  return body;
 }
 function renderRunView(run3, message2, extra = {}) {
   const lines = [];
@@ -41389,7 +41683,7 @@ terminalhire claim: ${what} needs the stored credential, and the server says it 
   return true;
 }
 async function enrolHeldClaimReadToken(postingId) {
-  const fail = (lines) => {
+  const fail2 = (lines) => {
     for (const line of lines) console.error(line);
     process.exit(1);
   };
@@ -41402,7 +41696,7 @@ async function enrolHeldClaimReadToken(postingId) {
     ]
   });
   if (!proofToken) {
-    fail(["terminalhire claim: could not link this machine to your claim (see above)."]);
+    fail2(["terminalhire claim: could not link this machine to your claim (see above)."]);
   }
   let res;
   try {
@@ -41413,7 +41707,7 @@ async function enrolHeldClaimReadToken(postingId) {
       signal: AbortSignal.timeout(CLAIM_SYNC_WRITE_TIMEOUT_MS)
     });
   } catch (err) {
-    fail([
+    fail2([
       `terminalhire claim: terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}).`,
       "  Nothing was stored. Run the same command again."
     ]);
@@ -41425,21 +41719,21 @@ async function enrolHeldClaimReadToken(postingId) {
   }
   if (res.status === 404 && body?.error === "no-live-claim") {
     const who = typeof body.claimantLogin === "string" ? `@${body.claimantLogin}` : "that account";
-    fail([
+    fail2([
       `terminalhire claim: you confirmed in the browser as ${who}, and ${who} does not`,
       "  hold a live claim on this posting. Nothing was stored.",
       "  Sign the browser into the GitHub account that claimed it, then run this again."
     ]);
   }
   if (!res.ok || typeof body?.pushToken !== "string" || body.pushToken.length === 0) {
-    fail([
+    fail2([
       `terminalhire claim: linking this machine failed (${res.status}${typeof body?.message === "string" ? `: ${body.message}` : ""}). Nothing was stored.`
     ]);
   }
   try {
     await writePushTokenEnc(body.pushToken);
   } catch (err) {
-    fail([
+    fail2([
       `terminalhire claim: the credential could not be stored on this machine: ${err instanceof Error ? err.message : String(err)}`
     ]);
   }
@@ -41926,6 +42220,133 @@ ${claim.title}`);
     );
   }
 }
+function refuseScreenshots(detail) {
+  console.error(`terminalhire claim: screenshots: ${detail}`);
+  process.exit(1);
+}
+function readFileCapped(path5, limit2) {
+  if (statSync6(path5).size > limit2) return null;
+  const fd = openSync5(path5, "r");
+  try {
+    const buf = Buffer.allocUnsafe(limit2 + 1);
+    let n = 0;
+    while (n < buf.length) {
+      const got = readSync(fd, buf, n, buf.length - n, n);
+      if (got === 0) break;
+      n += got;
+    }
+    return n > limit2 ? null : buf.subarray(0, n);
+  } finally {
+    closeSync5(fd);
+  }
+}
+function loadClaimScreenshots(specArg) {
+  const specPath = pathResolve(String(specArg));
+  let raw;
+  try {
+    raw = readFileSync16(specPath, "utf8");
+  } catch (err) {
+    refuseScreenshots(`cannot read ${specPath} (${err?.code ?? err?.message ?? err})`);
+  }
+  let json;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    refuseScreenshots(`${specPath} is not valid JSON`);
+  }
+  const parsed = parseClaimScreenshotAttachments(json);
+  if (!parsed.ok) refuseScreenshots(parsed.error);
+  const dir = dirname10(specPath);
+  const { bytes: maxBytes, maxDimension } = CLAIM_SCREENSHOT_LIMITS;
+  const items = [];
+  const uploads = [];
+  parsed.attachments.shots.forEach((shot, i) => {
+    const at = `shots[${i}] (${shot.file})`;
+    let bytes;
+    try {
+      bytes = readFileCapped(pathResolve(dir, shot.file), maxBytes);
+    } catch (err) {
+      refuseScreenshots(`${at}: cannot read (${err?.code ?? err?.message ?? err})`);
+    }
+    if (bytes === null) refuseScreenshots(`${at}: too large (over ${maxBytes} bytes)`);
+    const header = pngHeader(bytes);
+    if (!header || header.width < 1 || header.height < 1) refuseScreenshots(`${at}: not a PNG`);
+    const { width, height } = header;
+    if (width > maxDimension || height > maxDimension) {
+      refuseScreenshots(
+        `${at}: too large a picture (${width}\xD7${height}; at most ${maxDimension} on a side)`
+      );
+    }
+    const file = claimScreenshotFileName(i, shot.caption);
+    items.push({
+      file,
+      caption: shot.caption,
+      sha256: createHash11("sha256").update(bytes).digest("hex"),
+      bytes: bytes.byteLength,
+      width,
+      height
+    });
+    uploads.push({ file, bytes });
+  });
+  const manifest = parseClaimScreenshotManifest({ v: 1, author: "developer", items });
+  if (!manifest.ok) refuseScreenshots(manifest.error);
+  return { manifest: manifest.manifest, uploads };
+}
+async function uploadClaimScreenshots(intake, uploads) {
+  const STANDS = "The submission stands";
+  const notRecorded = (why) => console.log(`
+\u26A0 the server did not record your screenshots: ${why}. ${STANDS}.`);
+  if (!intake || typeof intake !== "object") {
+    notRecorded("the response carried no upload details");
+    return;
+  }
+  if (typeof intake.refused === "string") {
+    notRecorded(intake.refused);
+    return;
+  }
+  const { token, items } = intake;
+  if (typeof token !== "string" || token.length === 0 || !Array.isArray(items)) {
+    notRecorded("the response carried no upload details");
+    return;
+  }
+  const byFile = new Map(uploads.map((u) => [u.file, u.bytes]));
+  let uploaded = 0;
+  const failed = [];
+  for (const item of items) {
+    const file = typeof item?.file === "string" ? item.file : "";
+    const bytes = byFile.get(file);
+    const url = typeof item?.url === "string" && item.url.startsWith("/") ? item.url : null;
+    if (!bytes || !url) {
+      failed.push([file || "(unnamed)", "not in this submission"]);
+      continue;
+    }
+    let why = null;
+    try {
+      const res = await fetch(`${CLAIM_SYNC_BASE4}${url}`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "image/png" },
+        body: bytes,
+        signal: AbortSignal.timeout(CLAIM_SCREENSHOT_PUT_TIMEOUT_MS),
+        // The route never redirects today; this keeps the bearer from following one if
+        // that changes, or if the Node under us forwards Authorization across origins.
+        // A 3xx lands in the branch below as a failed upload.
+        redirect: "manual"
+      });
+      if (res.status !== 204) why = `HTTP ${res.status}`;
+    } catch {
+      why = "unreachable";
+    }
+    if (why === null) uploaded++;
+    else failed.push([file, why]);
+  }
+  console.log("");
+  if (uploaded > 0) console.log(`\u2713 ${uploaded} screenshot${uploaded === 1 ? "" : "s"} uploaded`);
+  for (const [file, why] of failed) {
+    console.log(
+      `\u26A0 screenshot ${file} did not upload (${why}). ${STANDS}; the claim page lists it as not arrived.`
+    );
+  }
+}
 async function submitFounderPatch({ claims, claim, id, wt, flags }) {
   let roots;
   try {
@@ -41974,6 +42395,7 @@ async function submitFounderPatch({ claims, claim, id, wt, flags }) {
   }
   const authorName = await sh("git", ["-C", wt, "log", "-1", "--format=%an"]);
   const authorEmail = await sh("git", ["-C", wt, "log", "-1", "--format=%ae"]);
+  const shots = flags.screenshots === void 0 ? null : loadClaimScreenshots(flags.screenshots);
   console.log(`
   SUBMIT \xB7 ${claim.title}`);
   console.log("  delivery: platform-applied patch (terminalhire posting) \u2014 no fork, no push,");
@@ -41983,6 +42405,10 @@ async function submitFounderPatch({ claims, claim, id, wt, flags }) {
   console.log(
     `  author:   ${authorName} <${authorEmail}> (from your HEAD commit; sent as patch authorship)`
   );
+  if (shots) {
+    const captions = shots.manifest.items.map((i) => i.caption).join("; ");
+    console.log(`  Screenshots: ${shots.manifest.items.length} (${captions})`);
+  }
   const ok = await confirmSubmit(
     flags,
     `
@@ -42009,7 +42435,8 @@ async function submitFounderPatch({ claims, claim, id, wt, flags }) {
       patch,
       authorName,
       authorEmail,
-      auth: { proofToken }
+      auth: { proofToken },
+      screenshots: shots === null ? null : shots.manifest
     });
   } catch (err) {
     console.error(`terminalhire claim: ${err.message}`);
@@ -42046,6 +42473,7 @@ async function submitFounderPatch({ claims, claim, id, wt, flags }) {
     process.exit(1);
   }
   const submitted = claims.updateClaim(id, { state: "submitted" });
+  if (shots !== null) await uploadClaimScreenshots(body.screenshots, shots.uploads);
   console.log(`
 \u2713 Patch applied by terminalhire`);
   console.log(`  branch:    ${body.branch}`);
@@ -42092,7 +42520,7 @@ async function cmdSubmit(id, flags = {}) {
     } else {
       console.error(
         `terminalhire claim: no claim is recorded for this directory or branch, so there is nothing to infer.
-  Usage: terminalhire claim submit <id> [--worktree <path>] [--yes] [--body-file <path>] [--no-body] [--title <t>] [--no-closes]
+  Usage: terminalhire claim submit <id> [--worktree <path>] [--yes] [--body-file <path>] [--no-body] [--title <t>] [--no-closes] [--screenshots <file>]
   Your claims:  terminalhire claim list --active`
       );
       process.exit(1);
@@ -42101,6 +42529,12 @@ async function cmdSubmit(id, flags = {}) {
   const claim = claims.findClaim(id);
   if (!claim) {
     console.error(`terminalhire claim: no claim with id '${id}'.`);
+    process.exit(1);
+  }
+  if (flags.screenshots !== void 0 && !claim.approval) {
+    console.error(
+      "terminalhire claim: --screenshots attaches pictures to a first-party submission; on this claim, add them to the pull request instead."
+    );
     process.exit(1);
   }
   const submitRefusal = submitRefusalFor(claim);
@@ -43449,11 +43883,12 @@ async function run() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR11, INDEX_CACHE_FILE2, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, CLAIM_SYNC_WRITE_TIMEOUT_MS, GH_API2, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, CLOSED_STATES, GH_SESSION_COOKIE, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, OPENABLE_AGENTS, BRIEF_DIR, BRIEF_REL_PATH, VERIFY_REL_PATH, AGENTS_REL_PATH, BRIEF_EXCLUDE_LINE, PACK_SAFE_ID, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3, FOUNDER_POSTING_ID, CLAIM_RESOLUTION_REASONS, SETUP_FAILED_REQUIREMENTS, POSTING_LEVEL_RESOLUTION_REASONS, RESOLUTION_REASON_BLURB;
+var TERMINALHIRE_DIR11, INDEX_CACHE_FILE2, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, CLAIM_SYNC_WRITE_TIMEOUT_MS, GH_API2, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, CLOSED_STATES, GH_SESSION_COOKIE, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, OPENABLE_AGENTS, BRIEF_DIR, BRIEF_REL_PATH, VERIFY_REL_PATH, AGENTS_REL_PATH, BRIEF_EXCLUDE_LINE, PACK_SAFE_ID, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3, FOUNDER_POSTING_ID, CLAIM_SCREENSHOT_PUT_TIMEOUT_MS, CLAIM_RESOLUTION_REASONS, SETUP_FAILED_REQUIREMENTS, POSTING_LEVEL_RESOLUTION_REASONS, RESOLUTION_REASON_BLURB;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
     init_src();
+    init_claimScreenshots();
     init_open_url();
     init_sanitize();
     init_policy_acks();
@@ -43499,7 +43934,9 @@ var init_jpi_claim = __esm({
       // flag nothing reads, which is how a removed feature looks half-removed.
       "body",
       // TERM-1259. `claim resolve --reason setup-failed --requirement <field>`.
-      "requirement"
+      "requirement",
+      // TERM-1273. `claim submit --screenshots <file>` names the attachments JSON.
+      "screenshots"
     ]);
     ASSIGNMENT_MARKER = "<!-- terminalhire:assignment-request -->";
     STAKE_MARKER = "<!-- terminalhire:claim-stake -->";
@@ -43568,6 +44005,7 @@ var init_jpi_claim = __esm({
     LINE_BREAKS = /\r\n|[\r\n\v\f\u0085\u2028\u2029]/;
     CONTROL_CHARS3 = /[\u0000-\u001F\u007F-\u009F]/g;
     FOUNDER_POSTING_ID = /^fb_[A-Za-z0-9_-]{1,80}$/;
+    CLAIM_SCREENSHOT_PUT_TIMEOUT_MS = 2e4;
     CLAIM_RESOLUTION_REASONS = [
       "not-my-stack",
       "out-of-time",
@@ -43715,7 +44153,7 @@ __export(util_exports, {
   getSizableOrigin: () => getSizableOrigin,
   hexToUint8Array: () => hexToUint8Array,
   isObject: () => isObject,
-  isPlainObject: () => isPlainObject2,
+  isPlainObject: () => isPlainObject3,
   issue: () => issue,
   joinValues: () => joinValues,
   jsonStringifyReplacer: () => jsonStringifyReplacer,
@@ -43877,7 +44315,7 @@ function slugify(input) {
 function isObject(data) {
   return typeof data === "object" && data !== null && !Array.isArray(data);
 }
-function isPlainObject2(o) {
+function isPlainObject3(o) {
   if (isObject(o) === false)
     return false;
   const ctor = o.constructor;
@@ -43894,7 +44332,7 @@ function isPlainObject2(o) {
   return true;
 }
 function shallowClone(o) {
-  if (isPlainObject2(o))
+  if (isPlainObject3(o))
     return { ...o };
   if (Array.isArray(o))
     return [...o];
@@ -44034,7 +44472,7 @@ function omit(schema, mask) {
   return clone(schema, def);
 }
 function extend(schema, shape) {
-  if (!isPlainObject2(shape)) {
+  if (!isPlainObject3(shape)) {
     throw new Error("Invalid input to extend: expected a plain object");
   }
   const checks = schema._zod.def.checks;
@@ -44057,7 +44495,7 @@ function extend(schema, shape) {
   return clone(schema, def);
 }
 function safeExtend(schema, shape) {
-  if (!isPlainObject2(shape)) {
+  if (!isPlainObject3(shape)) {
     throw new Error("Invalid input to safeExtend: expected a plain object");
   }
   const def = mergeDefs(schema._zod.def, {
@@ -45218,7 +45656,7 @@ function mergeValues(a, b) {
   if (a instanceof Date && b instanceof Date && +a === +b) {
     return { valid: true, data: a };
   }
-  if (isPlainObject2(a) && isPlainObject2(b)) {
+  if (isPlainObject3(a) && isPlainObject3(b)) {
     const bKeys = Object.keys(b);
     const sharedKeys = Object.keys(a).filter((key) => bKeys.indexOf(key) !== -1);
     const newObj = { ...a, ...b };
@@ -46170,7 +46608,7 @@ var init_schemas = __esm({
       $ZodType.init(inst, def);
       inst._zod.parse = (payload, ctx) => {
         const input = payload.value;
-        if (!isPlainObject2(input)) {
+        if (!isPlainObject3(input)) {
           payload.issues.push({
             expected: "record",
             code: "invalid_type",
@@ -51312,7 +51750,7 @@ var init_zod_json_schema_compat = __esm({
 });
 
 // ../../node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
-function isPlainObject3(value) {
+function isPlainObject4(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 function mergeCapabilities(base, additional) {
@@ -51323,7 +51761,7 @@ function mergeCapabilities(base, additional) {
     if (addValue === void 0)
       continue;
     const baseValue = result[k];
-    if (isPlainObject3(baseValue) && isPlainObject3(addValue)) {
+    if (isPlainObject4(baseValue) && isPlainObject4(addValue)) {
       result[k] = { ...baseValue, ...addValue };
     } else {
       result[k] = addValue;

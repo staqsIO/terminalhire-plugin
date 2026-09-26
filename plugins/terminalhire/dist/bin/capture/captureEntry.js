@@ -6,8 +6,8 @@
  * repository's. The repository's code has already run: its build wrote files into the
  * clone, or its serve script is listening in a container this one shares a network
  * namespace with. This process serves or reaches that app over loopback, drives a
- * headless Chromium through each route × viewport × colour scheme, and writes PNGs
- * plus `manifest.json` to /out.
+ * headless Chromium through each planned shot (with no spec, one per route: desktop,
+ * light), and writes PNGs plus `manifest.json` to /out.
  *
  * No network in either mode: static capture runs under `--network=none`, and server
  * capture joins an app container that itself has `--network=none`. Whatever the page
@@ -27,7 +27,16 @@ export const VIEWPORTS = {
     desktop: { width: 1280, height: 800, isMobile: false },
     mobile: { width: 390, height: 844, isMobile: true },
 };
-const SCHEMES = ['light', 'dark'];
+export const SCHEMES = ['light', 'dark'];
+/**
+ * What gets shot. With no spec, one picture per route at desktop size in light mode
+ * (TERM-1272). The desktop/mobile × light/dark matrix this replaces suited one claim
+ * and cost every other one three more renders of the same screen, most often a
+ * loading state; mobile and dark are for a spec to ask for, shot by shot.
+ */
+export function plannedShots(req) {
+    return req.routes.map((route) => ({ route, viewport: 'desktop', scheme: 'light' }));
+}
 // ---- which directory is the site -------------------------------------------
 /**
  * When the build started, read off the marker the build step wrote. Taken from the
@@ -287,53 +296,49 @@ async function shoot(origin, basePath, req, out) {
     const items = [];
     const failures = [];
     try {
-        for (const route of req.routes) {
+        for (const { route, viewport, scheme } of plannedShots(req)) {
             const url = `${origin}${basePath.replace(/\/$/, '')}${route.startsWith('/') ? route : `/${route}`}`;
-            for (const viewport of Object.keys(VIEWPORTS)) {
-                for (const scheme of SCHEMES) {
-                    const v = VIEWPORTS[viewport];
-                    const context = await browser.newContext({
-                        viewport: { width: v.width, height: v.height },
-                        isMobile: v.isMobile,
-                        hasTouch: v.isMobile,
-                        colorScheme: scheme,
-                        deviceScaleFactor: 1,
-                    });
-                    try {
-                        const page = await context.newPage();
-                        await page.goto(url, { waitUntil: 'load', timeout: 20_000 });
-                        // A page with no backend may keep retrying forever, so idle is
-                        // waited for briefly and never required.
-                        await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined);
-                        await page.waitForTimeout(300);
-                        // Frozen, so two shots of the same page are the same bytes: a spinner
-                        // caught on different frames would otherwise hide that light and dark
-                        // render identically, which is the one comparison the notes rely on.
-                        const png = await page.screenshot({ animations: 'disabled', caret: 'hide' });
-                        const file = shotName(route, viewport, scheme);
-                        writeFileSync(join(out, file), png);
-                        items.push({
-                            route,
-                            viewport,
-                            scheme,
-                            file,
-                            sha256: createHash('sha256').update(png).digest('hex'),
-                            bytes: png.length,
-                            ...PNG_SIZE(png),
-                        });
-                    }
-                    catch (err) {
-                        failures.push({
-                            route,
-                            viewport,
-                            scheme,
-                            error: String(err?.message ?? err).slice(0, 300),
-                        });
-                    }
-                    finally {
-                        await context.close();
-                    }
-                }
+            const v = VIEWPORTS[viewport];
+            const context = await browser.newContext({
+                viewport: { width: v.width, height: v.height },
+                isMobile: v.isMobile,
+                hasTouch: v.isMobile,
+                colorScheme: scheme,
+                deviceScaleFactor: 1,
+            });
+            try {
+                const page = await context.newPage();
+                await page.goto(url, { waitUntil: 'load', timeout: 20_000 });
+                // A page with no backend may keep retrying forever, so idle is
+                // waited for briefly and never required.
+                await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined);
+                await page.waitForTimeout(300);
+                // Frozen, so two shots of the same page are the same bytes: a spinner
+                // caught on different frames would otherwise hide that light and dark
+                // render identically, which is the one comparison the notes rely on.
+                const png = await page.screenshot({ animations: 'disabled', caret: 'hide' });
+                const file = shotName(route, viewport, scheme);
+                writeFileSync(join(out, file), png);
+                items.push({
+                    route,
+                    viewport,
+                    scheme,
+                    file,
+                    sha256: createHash('sha256').update(png).digest('hex'),
+                    bytes: png.length,
+                    ...PNG_SIZE(png),
+                });
+            }
+            catch (err) {
+                failures.push({
+                    route,
+                    viewport,
+                    scheme,
+                    error: String(err?.message ?? err).slice(0, 300),
+                });
+            }
+            finally {
+                await context.close();
             }
         }
     }

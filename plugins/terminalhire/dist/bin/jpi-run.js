@@ -3479,28 +3479,36 @@ var init_execute = __esm({
 });
 
 // ../../packages/envrun/dist/screenshotsResult.js
+function shotIn(order, items, key) {
+  const seen = order.filter((o) => items.some((i) => key(i) === o));
+  return seen.length > 0 ? seen.join(" and ") : "none";
+}
 function renderScreenshots(s) {
   if (s === null || s === void 0)
     return null;
   if (s.status === "skipped")
     return `screenshots  skipped \u2014 ${s.reason ?? "no reason recorded"}`;
+  if (s.status === "pending")
+    return "screenshots  pending \u2014 taken after the verdict";
   const lines = [
-    `screenshots  ${String(s.items.length)} in ${s.dir ?? "?"} (routes ${s.routes.join(", ")}; light and dark; desktop and mobile)`
+    `screenshots  ${String(s.items.length)} in ${s.dir ?? "?"} (routes ${s.routes.join(", ")}; ${shotIn(SCHEME_ORDER, s.items, (i) => i.scheme)}; ${shotIn(VIEWPORT_ORDER, s.items, (i) => i.viewport)})`
   ];
   for (const side of s.sides) {
     const count = s.items.filter((i) => i.side === side.side).length;
-    lines.push(side.status === "captured" ? `${INDENT}${side.side}: ${String(count)} shots${side.reason === null ? "" : ` (${side.reason})`}` : `${INDENT}${side.side}: skipped \u2014 ${side.reason ?? "no reason recorded"}`);
+    lines.push(side.status === "captured" ? `${INDENT}${side.side}: ${String(count)} ${count === 1 ? "shot" : "shots"}${side.reason === null ? "" : ` (${side.reason})`}` : `${INDENT}${side.side}: skipped \u2014 ${side.reason ?? "no reason recorded"}`);
   }
   for (const note of s.notes)
     lines.push(`${INDENT}${note}`);
   lines.push(`${INDENT}rendered with no network: no backend, no signed-in state`);
   return lines.join("\n");
 }
-var INDENT;
+var INDENT, VIEWPORT_ORDER, SCHEME_ORDER;
 var init_screenshotsResult = __esm({
   "../../packages/envrun/dist/screenshotsResult.js"() {
     "use strict";
     INDENT = " ".repeat(13);
+    VIEWPORT_ORDER = ["desktop", "mobile"];
+    SCHEME_ORDER = ["light", "dark"];
   }
 });
 
@@ -4012,10 +4020,10 @@ var init_dist2 = __esm({
 });
 
 // ../../packages/envrun/dist/venueProof.js
-function readDaemonId(docker3, label) {
+function readDaemonId(docker3, label, timeoutMs) {
   let res;
   try {
-    res = docker3.sync(["info", "--format", "{{.ID}}"], { timeoutMs: PROBE_TIMEOUT_MS });
+    res = docker3.sync(["info", "--format", "{{.ID}}"], { timeoutMs });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { id: null, detail: `${label} daemon probe threw: ${msg}` };
@@ -4039,9 +4047,9 @@ function readDaemonId(docker3, label) {
   }
   return { id, detail: `${label} daemon ${id}` };
 }
-function classifyVenueDaemon(venue, local = localDockerClient()) {
-  const v = readDaemonId(venue, "venue");
-  const l = readDaemonId(local, "local");
+function classifyVenueDaemon(venue, local = localDockerClient(), timeoutMs = PROBE_TIMEOUT_MS) {
+  const v = readDaemonId(venue, "venue", timeoutMs);
+  const l = readDaemonId(local, "local", timeoutMs);
   if (v.id === null || l.id === null) {
     const unread = [v.id === null ? v.detail : null, l.id === null ? l.detail : null].filter((d) => d !== null).join("; ");
     return { distinct: false, reason: "unknown", detail: unread };
@@ -6446,12 +6454,12 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
 function describeErr(err) {
   return err instanceof Error ? err.message : String(err);
 }
-function assertVenueUnchanged(p, doing) {
+function assertVenueUnchanged(p, doing, timeoutMs) {
   const failure = p.tunnel.failure();
   if (failure !== null) {
     throw new HostedVenueError(`the tunnel carrying ${p.vm}'s docker socket is gone, so ${doing} would go to whatever now answers at ${p.socketPath} \u2014 ${failure}`);
   }
-  const verdict = p.io.classifyDaemon(p.docker);
+  const verdict = p.io.classifyDaemon(p.docker, timeoutMs);
   if (!verdict.distinct) {
     throw new HostedVenueError(`refusing ${doing}: ${p.socketPath} no longer answers as the venue daemon this lease acquired \u2014 ${describeVenueDaemon(verdict)}`);
   }
@@ -6477,7 +6485,7 @@ function screenshotVenueOf(p, fill2, check) {
     volumeName: (purpose) => validateVolumeName(`${p.vm}-${purpose}`, "the screenshot volume"),
     check,
     async fillVolume(localDir, volume, timeoutMs) {
-      check("filling a screenshot volume");
+      check("filling a screenshot volume", timeoutMs === void 0 ? void 0 : Math.min(timeoutMs, PROBE_TIMEOUT_MS));
       p.docker.sync(volumeCreateArgv(volume, p.runId), {
         timeoutMs: Math.min(timeoutMs ?? VOLUME_CREATE_TIMEOUT_MS, VOLUME_CREATE_TIMEOUT_MS)
       });
@@ -6491,8 +6499,8 @@ function screenshotVenueOf(p, fill2, check) {
 function makeLease(p) {
   let released = false;
   let tunnelClosed = false;
-  const check = (doing) => {
-    assertVenueUnchanged(p, doing);
+  const check = (doing, timeoutMs) => {
+    assertVenueUnchanged(p, doing, timeoutMs);
   };
   const containment = guardedContainment(p.io.containmentOn(p.docker), check);
   const closeTunnel = () => {
@@ -6832,7 +6840,7 @@ var init_hostedVenue = __esm({
         rmSync4(path, { recursive: true, force: true });
       },
       dockerFor: (socketPath) => remoteDockerClient(`unix://${socketPath}`),
-      classifyDaemon: (docker3) => classifyVenueDaemon(docker3),
+      classifyDaemon: (docker3, timeoutMs) => classifyVenueDaemon(docker3, void 0, timeoutMs),
       containmentOn: (docker3) => containerContainmentOn(docker3),
       fetchJwks: async () => {
         const res = await globalThis.fetch(GOOGLE_JWKS_URL, {
@@ -8812,6 +8820,22 @@ var init_runRequirements = __esm({
   }
 });
 
+// ../../packages/envspec/dist/claimScreenshots.js
+var CLAIM_SCREENSHOT_LIMITS;
+var init_claimScreenshots = __esm({
+  "../../packages/envspec/dist/claimScreenshots.js"() {
+    "use strict";
+    CLAIM_SCREENSHOT_LIMITS = {
+      items: 6,
+      /** Under Vercel's 4.5 MB request body limit, with headroom. */
+      bytes: 4 * 1024 * 1024,
+      caption: 140,
+      /** Width and height each. */
+      maxDimension: 8192
+    };
+  }
+});
+
 // ../../packages/envspec/dist/index.js
 var init_dist3 = __esm({
   "../../packages/envspec/dist/index.js"() {
@@ -8820,6 +8844,7 @@ var init_dist3 = __esm({
     init_repo();
     init_preview2();
     init_runRequirements();
+    init_claimScreenshots();
     init_yaml();
   }
 });
@@ -9100,60 +9125,93 @@ async function captureSide(ctx, deps, side, tree, plan, image, code, routes) {
   }
 }
 function screenshotDeadline(lease, o, now = Date.now()) {
-  const budget = o.budgetMs ?? (lease.pathDomain === "local" ? SCREENSHOT_BUDGET_MS : HOSTED_SCREENSHOT_BUDGET_MS);
+  const budget = o.budgetMs ?? (o.deferred === true ? DEFERRED_SCREENSHOT_BUDGET_MS : lease.pathDomain === "local" ? SCREENSHOT_BUDGET_MS : HOSTED_SCREENSHOT_BUDGET_MS);
   return Math.min(now + budget, o.notAfter ?? Infinity);
 }
 function touchesRenderedFiles(paths) {
   return paths.some((p) => RENDERED_EXTENSIONS.test(p) || RENDERED_DIRS.test(p));
 }
-async function screenshotPhase(p, take = (ctx) => runScreenshots(ctx)) {
+function screenshotGate(p) {
   const local = p.lease.pathDomain === "local";
   if (local && p.guarded !== true)
-    return take(p.ctx);
-  const skip = (reason) => ({
-    status: "skipped",
+    return null;
+  if (!local && p.lease.screenshotVenue === void 0)
+    return "this venue cannot take screenshots";
+  if (p.changedPaths !== null && !touchesRenderedFiles(p.changedPaths)) {
+    return "the change touches no file a browser renders";
+  }
+  return null;
+}
+function emptyScreenshots(routes, reason) {
+  return {
+    status: reason === null ? "pending" : "skipped",
     reason,
-    routes: normalizeRoutes(p.ctx.routes),
+    routes: normalizeRoutes(routes),
     dir: null,
     sides: [],
     items: [],
     notes: []
-  });
+  };
+}
+async function screenshotPhase(p, take = (ctx) => runScreenshots(ctx)) {
+  const local = p.lease.pathDomain === "local";
+  if (local && p.guarded !== true)
+    return take(p.ctx);
+  const skip = (reason) => emptyScreenshots(p.ctx.routes, reason);
+  const gated = screenshotGate(p);
+  if (gated !== null)
+    return skip(gated);
   const venue = local ? void 0 : p.lease.screenshotVenue;
-  if (!local && venue === void 0)
-    return skip("this venue cannot take screenshots");
-  if (p.changedPaths !== null && !touchesRenderedFiles(p.changedPaths)) {
-    return skip("the change touches no file a browser renders");
-  }
   const deadline = p.deadline ?? screenshotDeadline(p.lease, p.budgetMs === void 0 ? {} : { budgetMs: p.budgetMs });
   const budgetMs = deadline - Date.now();
   if (budgetMs <= 0)
     return skip("no time left for screenshots");
+  p.ctx.progress?.("screenshots", `budget ${String(Math.round(budgetMs / 1e3))}s`);
   const stop = new AbortController();
   let timer;
+  let onAbandon;
   const watchdog = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(`the screenshot step ran past ${String(Math.round(budgetMs / 1e3))}s`)), Math.max(0, deadline - Date.now()));
+    onAbandon = () => reject(new Error(SCREENSHOTS_ABANDONED));
+    if (p.signal?.aborted === true)
+      onAbandon();
+    else
+      p.signal?.addEventListener("abort", onAbandon, { once: true });
   });
   watchdog.catch(() => void 0);
+  let taking;
   try {
-    venue?.check("taking screenshots");
-    const shots = await Promise.race([
-      watchdog,
-      Promise.resolve().then(() => take({
-        ...p.ctx,
-        ...venue === void 0 ? {} : { before: HOSTED_BEFORE_REASON },
-        signal: stop.signal,
-        deadline
-      }))
-    ]);
-    venue?.check("reading the screenshots back");
+    venue?.check("taking screenshots", timeoutWithin(PROBE_TIMEOUT_MS, deadline));
+    taking = Promise.resolve().then(() => take({
+      ...p.ctx,
+      ...venue === void 0 ? {} : { before: HOSTED_BEFORE_REASON },
+      signal: stop.signal,
+      deadline
+    }));
+    const shots = await Promise.race([watchdog, taking]);
+    venue?.check("reading the screenshots back", timeoutWithin(PROBE_TIMEOUT_MS, deadline));
     return shots;
   } catch (err) {
+    stop.abort();
+    if (taking !== void 0)
+      await settleWithin(taking, p.drainMs ?? SCREENSHOT_DRAIN_MS);
     return skip(message(err));
   } finally {
     clearTimeout(timer);
+    if (onAbandon !== void 0)
+      p.signal?.removeEventListener("abort", onAbandon);
     stop.abort();
   }
+}
+async function settleWithin(work, ms) {
+  let timer;
+  await Promise.race([
+    work.then(() => void 0, () => void 0),
+    new Promise((resolve4) => {
+      timer = setTimeout(resolve4, ms);
+    })
+  ]);
+  clearTimeout(timer);
 }
 function timed(ctx, what, started) {
   ctx.progress?.("screenshots", `${what} ${((Date.now() - started) / 1e3).toFixed(1)}s`);
@@ -9192,13 +9250,14 @@ function syncOpts(ctx) {
 function message(err) {
   return String(err?.message ?? err).slice(0, 500);
 }
-var SCREENSHOT_LIMITS, GUARDED_CAPTURE_CAP_MS, BUILD_MARKER, realDeps, HOSTED_BEFORE_REASON, SCREENSHOT_BUDGET_MS, HOSTED_SCREENSHOT_BUDGET_MS, RENDERED_EXTENSIONS, RENDERED_DIRS;
+var SCREENSHOT_LIMITS, GUARDED_CAPTURE_CAP_MS, BUILD_MARKER, realDeps, HOSTED_BEFORE_REASON, SCREENSHOT_BUDGET_MS, HOSTED_SCREENSHOT_BUDGET_MS, DEFERRED_SCREENSHOT_BUDGET_MS, SCREENSHOT_DRAIN_MS, SCREENSHOTS_ABANDONED, RENDERED_EXTENSIONS, RENDERED_DIRS;
 var init_screenshots = __esm({
   "../../packages/envrun/dist/screenshots.js"() {
     "use strict";
     init_dist();
     init_dist3();
     init_execute();
+    init_venueProof();
     init_screenshotsResult();
     SCREENSHOT_LIMITS = {
       routes: 5,
@@ -9226,6 +9285,9 @@ var init_screenshots = __esm({
     HOSTED_BEFORE_REASON = "before side not captured on hosted runs yet";
     SCREENSHOT_BUDGET_MS = 3e5;
     HOSTED_SCREENSHOT_BUDGET_MS = 36e4;
+    DEFERRED_SCREENSHOT_BUDGET_MS = 12e5;
+    SCREENSHOT_DRAIN_MS = 3e4;
+    SCREENSHOTS_ABANDONED = "the screenshots were abandoned";
     RENDERED_EXTENSIONS = /\.(html?|css|scss|sass|less|tsx|jsx|vue|svelte|astro|mdx|hbs|handlebars|ejs|erb|liquid|twig|njk)$/i;
     RENDERED_DIRS = /(^|\/)(public|static|assets|templates)\//i;
   }
@@ -10065,6 +10127,7 @@ async function runVerification(req, ctx) {
     };
   }
   const lease = resolved.lease;
+  let leaseHandedOff = false;
   try {
     buildJail(scratch, lease.guestUser);
     if (spec.runtime === "jvm")
@@ -10143,16 +10206,24 @@ async function runVerification(req, ctx) {
       // reasoning and the #735 failure that makes the distinction load-bearing.
       venue: describeVenue(lease)
     };
+    let later = null;
     if (req.screenshots !== void 0) {
       const shotsDeadline = screenshotDeadline(lease, req.screenshots);
-      const shots = await screenshotPhase({
+      const deferred = req.screenshots.deferred === true;
+      const fetchesPaths = diff === null && !(lease.pathDomain === "local" && req.screenshots.guarded !== true);
+      const readChangedPaths = (timeoutMs) => claimChangedPaths(cloneDir, {
+        url: req.targetRepo,
+        sha: req.targetSha,
+        ...req.targetCacheDir ? { cacheDir: req.targetCacheDir } : {},
+        ...req.targetAuth ? { auth: req.targetAuth } : {}
+      }, (line) => progress("screenshots", line), timeoutMs);
+      const phase = {
         lease,
-        changedPaths: diff !== null ? pre.touchedPaths : lease.pathDomain === "local" && req.screenshots.guarded !== true ? null : claimChangedPaths(cloneDir, {
-          url: req.targetRepo,
-          sha: req.targetSha,
-          ...req.targetCacheDir ? { cacheDir: req.targetCacheDir } : {},
-          ...req.targetAuth ? { auth: req.targetAuth } : {}
-        }, (line) => progress("screenshots", line), timeoutWithin(6e4, shotsDeadline)),
+        changedPaths: diff !== null ? pre.touchedPaths : !fetchesPaths ? null : (
+          // Deferred, the verdict is waiting on this fetch, so it gets little
+          // time; the continuation fetches again when it could not decide.
+          readChangedPaths(deferred ? DEFERRED_GATE_TIMEOUT_MS : timeoutWithin(6e4, shotsDeadline))
+        ),
         deadline: shotsDeadline,
         ...req.screenshots.guarded === true ? { guarded: true } : {},
         ctx: {
@@ -10184,18 +10255,39 @@ async function runVerification(req, ctx) {
           runId,
           progress
         }
-      });
-      base = { ...base, screenshots: shots };
+      };
+      if (req.screenshots.deferred === true) {
+        const gated = screenshotGate(phase);
+        base = { ...base, screenshots: emptyScreenshots(phase.ctx.routes, gated) };
+        if (gated === null) {
+          const asked = req.screenshots;
+          later = deferScreenshots((signal) => {
+            const deadline = screenshotDeadline(lease, asked);
+            const undecided = fetchesPaths && phase.changedPaths === null;
+            return screenshotPhase({
+              ...phase,
+              ...undecided ? { changedPaths: readChangedPaths(timeoutWithin(6e4, deadline)) } : {},
+              deadline,
+              signal
+            });
+          }, () => releaseWithoutThrowing(lease, progress), phase.ctx.routes);
+        }
+      } else {
+        base = { ...base, screenshots: await screenshotPhase(phase) };
+      }
     }
-    if (req.preview === false)
+    if (req.preview === false) {
+      leaseHandedOff = later !== null;
       return {
         result: base,
         preview: null,
         spec,
         verdict,
         diagnostic: null,
-        venueIdentity: lease.venueIdentity ?? null
+        venueIdentity: lease.venueIdentity ?? null,
+        ...later === null ? {} : { finishScreenshots: later }
       };
+    }
     progress("preview", "starting one instance both parties can open");
     const previewStartedAt = Date.now();
     const instance = await lease.publishPreview({
@@ -10209,6 +10301,7 @@ async function runVerification(req, ctx) {
       // have to be written after the port was known.
       document: base
     });
+    leaseHandedOff = later !== null;
     return {
       result: {
         ...base,
@@ -10223,11 +10316,38 @@ async function runVerification(req, ctx) {
       spec,
       verdict,
       diagnostic: null,
-      venueIdentity: lease.venueIdentity ?? null
+      venueIdentity: lease.venueIdentity ?? null,
+      ...later === null ? {} : { finishScreenshots: later }
     };
   } finally {
-    await releaseWithoutThrowing(lease, progress);
+    if (!leaseHandedOff)
+      await releaseWithoutThrowing(lease, progress);
   }
+}
+function deferScreenshots(take, release, routes) {
+  let settled = null;
+  const stop = new AbortController();
+  const finish = () => {
+    settled ??= (async () => {
+      try {
+        return await take(stop.signal);
+      } catch (err) {
+        return emptyScreenshots(routes, describeThrown(err, { includeName: false }));
+      } finally {
+        await release();
+      }
+    })();
+    return settled;
+  };
+  const abandon = async () => {
+    stop.abort();
+    settled ??= (async () => {
+      await release();
+      return emptyScreenshots(routes, SCREENSHOTS_ABANDONED);
+    })();
+    await settled;
+  };
+  return Object.assign(finish, { abandon });
 }
 async function prepareBaseTree(o) {
   const root = join16(o.stage, "base");
@@ -10270,7 +10390,7 @@ async function prepareBaseTree(o) {
     throw err;
   }
 }
-var ThRunError, OUTPUT_TAIL_BYTES, FULL_COMMIT_ID, ALLOWED_URL_SCHEMES, SCP_STYLE, URL_SCHEME, WINDOWS_ABSOLUTE, UNC_PATH, TRANSPORT_REASON, SHA_REASON, FULL_SHA, MIN_GIT_VERSION_FOR_END_OF_OPTIONS, CloneUnavailableError, GIT_ENV_ALLOWLIST, credentialFreeHomeDir, SSH_ISOLATION_ARGS, WITHHELD_SEGMENT, UNPARSEABLE_TARGET, FAILURE_LINE, REDACTED_TARGET_REPO, REDACTED_TARGET_SHA;
+var ThRunError, OUTPUT_TAIL_BYTES, FULL_COMMIT_ID, ALLOWED_URL_SCHEMES, SCP_STYLE, URL_SCHEME, WINDOWS_ABSOLUTE, UNC_PATH, TRANSPORT_REASON, SHA_REASON, FULL_SHA, MIN_GIT_VERSION_FOR_END_OF_OPTIONS, CloneUnavailableError, GIT_ENV_ALLOWLIST, credentialFreeHomeDir, SSH_ISOLATION_ARGS, WITHHELD_SEGMENT, UNPARSEABLE_TARGET, DEFERRED_GATE_TIMEOUT_MS, FAILURE_LINE, REDACTED_TARGET_REPO, REDACTED_TARGET_SHA;
 var init_thrun = __esm({
   "../../packages/envrun/dist/thrun.js"() {
     "use strict";
@@ -10352,6 +10472,7 @@ var init_thrun = __esm({
     ];
     WITHHELD_SEGMENT = "(credential withheld)";
     UNPARSEABLE_TARGET = "(a target this runner could not parse, withheld)";
+    DEFERRED_GATE_TIMEOUT_MS = 15e3;
     FAILURE_LINE = /^(?:[ \t]*(?:not ok |FAILED |FAIL )|E {3}|# fail [1-9])/m;
     REDACTED_TARGET_REPO = "(refused before the target was accepted)";
     REDACTED_TARGET_SHA = "(refused)";
@@ -11753,10 +11874,10 @@ Options:
   --json                Print the run result as JSON instead of a report.
   --no-preview          Skip the preview URL.
   --no-screenshots      Skip the before/after screenshots. When the repository can be
-                        built or served, a run shoots each route in light and dark, at
-                        desktop and mobile size, with no network, and saves the PNGs
-                        under ~/.terminalhire/screenshots/. The first time, this builds
-                        the screenshot image (about 900 MB). Off under --watch.
+                        built or served, a run takes one shot of each route, desktop
+                        size in light mode, with no network, and saves the PNGs under
+                        ~/.terminalhire/screenshots/. The first time, this builds the
+                        screenshot image (about 900 MB). Off under --watch.
   --preview-route <r>   Routes to shoot, comma-separated (default: /; at most 5).
   --keep <seconds>      Hold the preview open this long, at most ${String(KEEP_MAX_SECONDS)}
                         (default: until Ctrl-C).
