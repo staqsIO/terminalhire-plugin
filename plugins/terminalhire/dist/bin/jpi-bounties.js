@@ -12592,6 +12592,11 @@ function wrapIndented(text, indent, width) {
   lines.push(pad + line);
   return lines;
 }
+function projectMarkerLine(bounty) {
+  const tasks = bounty?.project?.tasks;
+  if (typeof tasks !== "number" || !Number.isInteger(tasks) || tasks <= 0) return null;
+  return tasks > 1 ? `project \xB7 ${tasks} tasks` : "project";
+}
 function printBounty(i, job, score, reason, matchedTags, claimedIds = /* @__PURE__ */ new Set(), continuityNote = null) {
   const b = job.bounty ?? {};
   const stars = b.repoStars != null ? ` \xB7 ${b.repoStars}\u2605` : "";
@@ -12607,6 +12612,8 @@ ${i + 1}. ${linkTitle(job.title, job.url)} [${ref}]`);
   console.log(
     `   ${formatAmount(b)}${effort} \xB7 ${sanitizeText(b.repoFullName ?? job.company)}${stars}${scoreStr}${contend}${badge}`
   );
+  const marker = projectMarkerLine(b);
+  if (marker) console.log(`   ${marker}`);
   if (reason) console.log(`   ${reason}`);
   if (continuityNote) console.log(`   ${continuityNote}`);
   if (b.publicSummary) {
@@ -12862,6 +12869,7 @@ export {
   getBounties,
   isPinnedFounderBounty,
   printBounty,
+  projectMarkerLine,
   rankBounties,
   run,
   wrapIndented

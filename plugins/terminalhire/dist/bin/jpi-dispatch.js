@@ -1314,10 +1314,17 @@ var init_version_nudge = __esm({
 // src/open-url.js
 var open_url_exports = {};
 __export(open_url_exports, {
-  openInBrowser: () => openInBrowser
+  openInBrowser: () => openInBrowser,
+  shouldOpenBrowser: () => shouldOpenBrowser
 });
-import { spawn as spawn2 } from "child_process";
-function openInBrowser(url) {
+import { spawn as nodeSpawn } from "child_process";
+function shouldOpenBrowser(env = process.env) {
+  if (env.NODE_TEST_CONTEXT) return false;
+  const off = String(env.TERMINALHIRE_NO_BROWSER ?? "").trim().toLowerCase();
+  return !(off === "1" || off === "true");
+}
+function openInBrowser(url, { env = process.env, spawn: spawn7 = nodeSpawn } = {}) {
+  if (!shouldOpenBrowser(env)) return;
   let cmd;
   let args5;
   if (process.platform === "darwin") {
@@ -1331,7 +1338,7 @@ function openInBrowser(url) {
     args5 = [url];
   }
   try {
-    const child = spawn2(cmd, args5, { stdio: "ignore", detached: true });
+    const child = spawn7(cmd, args5, { stdio: "ignore", detached: true });
     child.on("error", () => {
     });
     child.unref();
@@ -16340,6 +16347,7 @@ __export(jpi_bounties_exports, {
   getBounties: () => getBounties,
   isPinnedFounderBounty: () => isPinnedFounderBounty,
   printBounty: () => printBounty,
+  projectMarkerLine: () => projectMarkerLine,
   rankBounties: () => rankBounties,
   run: () => run5,
   wrapIndented: () => wrapIndented
@@ -16421,6 +16429,11 @@ function wrapIndented(text, indent, width) {
   lines.push(pad + line);
   return lines;
 }
+function projectMarkerLine(bounty) {
+  const tasks = bounty?.project?.tasks;
+  if (typeof tasks !== "number" || !Number.isInteger(tasks) || tasks <= 0) return null;
+  return tasks > 1 ? `project \xB7 ${tasks} tasks` : "project";
+}
 function printBounty(i, job, score, reason, matchedTags, claimedIds = /* @__PURE__ */ new Set(), continuityNote = null) {
   const b = job.bounty ?? {};
   const stars = b.repoStars != null ? ` \xB7 ${b.repoStars}\u2605` : "";
@@ -16436,6 +16449,8 @@ ${i + 1}. ${linkTitle(job.title, job.url)} [${ref}]`);
   console.log(
     `   ${formatAmount(b)}${effort} \xB7 ${sanitizeText(b.repoFullName ?? job.company)}${stars}${scoreStr}${contend}${badge}`
   );
+  const marker = projectMarkerLine(b);
+  if (marker) console.log(`   ${marker}`);
   if (reason) console.log(`   ${reason}`);
   if (continuityNote) console.log(`   ${continuityNote}`);
   if (b.publicSummary) {
@@ -31921,8 +31936,8 @@ function shStream(cmd, args5, opts = {}) {
   const cap = opts.maxStderrBytes ?? 64 * 1024;
   return new Promise((resolve9, reject) => {
     void (async () => {
-      const spawn8 = opts.spawnFn ?? (await import("child_process")).spawn;
-      const child = spawn8(cmd, args5, { shell: false, stdio: ["ignore", "pipe", "pipe"] });
+      const spawn7 = opts.spawnFn ?? (await import("child_process")).spawn;
+      const child = spawn7(cmd, args5, { shell: false, stdio: ["ignore", "pipe", "pipe"] });
       let stdout = "";
       let stderr = "";
       child.stdout?.setEncoding("utf8");
@@ -32116,7 +32131,7 @@ function classifyVerification(facts) {
     return {
       outcome: "counts-unparsed",
       counts: null,
-      reason: 'the command exited 0 but no supported reporter format was found in its output, so the number of tests that ran is UNKNOWN. Not the same as "nothing ran": reporting that would tell a developer their passing work is unverified. Supported formats: ' + SUPPORTED_RUNNERS.join(", ")
+      reason: 'the command exited 0 but no supported reporter format was found in its output, so the number of tests that ran is UNKNOWN. Not the same as "nothing ran": reporting that would tell a developer their passing work is unverified. One line per test in the form `ok 1 - name` / `not ok 2 - name` is enough to count; the full list of readable formats: ' + SUPPORTED_RUNNERS.join(", ")
     };
   }
   return {
@@ -32129,9 +32144,9 @@ function isGreen(outcome) {
   return outcome === "completed";
 }
 function isOurFault(outcome) {
-  return OUR_FAULT[outcome];
+  return LIMIT_OWNER[outcome] === "ours";
 }
-var VERIFICATION_OUTCOMES, int, withSuiteFailures, READERS, SUPPORTED_RUNNERS, COVERAGE_TABLE, EXEC_FAILURE, SUITE_REPORTED_FAILURE, MISSING_SYSTEM_DEPENDENCY, OFFLINE_BUILD_GAP, OUR_FAULT;
+var VERIFICATION_OUTCOMES, int, withSuiteFailures, READERS, SUPPORTED_RUNNERS, COVERAGE_TABLE, EXEC_FAILURE, SUITE_REPORTED_FAILURE, MISSING_SYSTEM_DEPENDENCY, OFFLINE_BUILD_GAP, LIMIT_OWNER;
 var init_classify2 = __esm({
   "../../packages/envrun/dist/classify.js"() {
     "use strict";
@@ -32453,14 +32468,15 @@ var init_classify2 = __esm({
       /No matching toolchains found for requested specification/,
       /Cannot find a Java installation on your machine matching/
     ];
-    OUR_FAULT = {
-      completed: false,
-      "tests-failed": false,
-      "no-tests-observed": false,
-      "budget-exceeded": false,
-      "counts-unparsed": true,
-      "test-command-unavailable": true,
-      "environment-exhausted": true
+    LIMIT_OWNER = {
+      completed: "theirs",
+      "tests-failed": "theirs",
+      // Unresolved: the runner read the suite and saw nothing run. Exit 1 by default; a later ticket may revisit.
+      "no-tests-observed": "nobody-judged",
+      "counts-unparsed": "ours",
+      "test-command-unavailable": "ours",
+      "environment-exhausted": "ours",
+      "budget-exceeded": "ours"
     };
   }
 });
@@ -32584,7 +32600,7 @@ var init_reap = __esm({
 });
 
 // ../../packages/containment/dist/fence.js
-import { spawn as spawn4, spawnSync as spawnSync3 } from "child_process";
+import { spawn as spawn3, spawnSync as spawnSync3 } from "child_process";
 import { existsSync as existsSync16, lchownSync, lstatSync as lstatSync4, mkdirSync as mkdirSync5, readdirSync as readdirSync2, realpathSync as realpathSync2, statSync as statSync4, writeFileSync as writeFileSync19 } from "fs";
 import { basename as basename6, dirname as dirname8, isAbsolute as isAbsolute4, join as join35, posix as posix2, resolve as resolve5, sep as sep5 } from "path";
 import { fileURLToPath as fileURLToPath7 } from "url";
@@ -32817,7 +32833,7 @@ var init_containment = __esm({
 });
 
 // ../../packages/containment/dist/dockerClient.js
-import { spawn as spawn5, spawnSync as spawnSync4 } from "child_process";
+import { spawn as spawn4, spawnSync as spawnSync4 } from "child_process";
 function syncResult(res) {
   return {
     status: res.status,
@@ -32891,7 +32907,7 @@ function remoteDockerClient(endpoint, opts = {}) {
       return [];
     },
     spawn(args5) {
-      return spawn5(DOCKER_BIN, argv(args5), {
+      return spawn4(DOCKER_BIN, argv(args5), {
         stdio: ["ignore", "pipe", "pipe"],
         env: scrubEndpointEnv(process.env)
       });
@@ -32927,7 +32943,7 @@ var init_dockerClient = __esm({
         return ambientTargetKeysIn(process.env);
       },
       spawn(args5) {
-        return spawn5(DOCKER_BIN, [...args5], { stdio: ["ignore", "pipe", "pipe"] });
+        return spawn4(DOCKER_BIN, [...args5], { stdio: ["ignore", "pipe", "pipe"] });
       },
       sync(args5, opts) {
         return syncResult(spawnSync4(DOCKER_BIN, [...args5], { encoding: "utf8", timeout: opts?.timeoutMs }));
@@ -34495,9 +34511,17 @@ async function startPreview(req) {
     let hostPort = null;
     let token = null;
     let lastDetail = "never answered";
+    const throwIfExited = () => {
+      const alive = docker(client, ["inspect", "--format", "{{.State.Running}}", container]);
+      if (alive.stdout.trim() !== "true") {
+        const logs = docker(client, ["logs", "--tail", "20", container]);
+        throw new PreviewError(`the preview container exited before serving: ${logs.stdout.trim()}${logs.stderr.trim()}`);
+      }
+    };
     while (Date.now() < deadline) {
       hostPort ??= readHostPort(client, container);
       if (hostPort === null) {
+        throwIfExited();
         lastDetail = "Docker never reported a published host port";
         await sleep4(200);
         continue;
@@ -34505,11 +34529,7 @@ async function startPreview(req) {
       token = await fetchInstanceToken(`http://${probeAuthority}:${String(hostPort)}/`, authToken);
       if (token !== null)
         break;
-      const alive = docker(client, ["inspect", "--format", "{{.State.Running}}", container]);
-      if (alive.stdout.trim() !== "true") {
-        const logs = docker(client, ["logs", "--tail", "20", container]);
-        throw new PreviewError(`the preview container exited before serving: ${logs.stdout.trim()}${logs.stderr.trim()}`);
-      }
+      throwIfExited();
       lastDetail = "the port is published but the server has not answered yet";
       await sleep4(150);
     }
@@ -35095,11 +35115,16 @@ function resolveImageForSpec(spec, override) {
   }
   return image;
 }
-function installEnvironmentFailureNote(install, image) {
+function installEnvironmentFailureNote(install, image, pathDomain) {
   const base = `the install step exited ${String(install.exitCode)}, so the test command was never invoked. The repo has not been judged; this is an environment failure.` + refusedHostsSentence(install.egressDenied ?? []);
-  if (!MISSING_IMAGE_SHAPE.test(`${install.stdout}
-${install.stderr}`))
+  const output = `${install.stdout}
+${install.stderr}`;
+  const pullFailed = install.exitCode === DOCKER_RUN_FAILED && MISSING_IMAGE_SHAPE.test(output) && PULL_FAILED_SHAPE.test(output) && !PULL_SUCCEEDED_SHAPE.test(output);
+  if (!pullFailed)
     return base;
+  if (pathDomain === "venue") {
+    return `${base} The venue could not pull the container image ${image}; this is ours to fix.`;
+  }
   return `${base} The container image ${image} is not present on this machine \u2014 run \`docker pull ${image}\` and try again.`;
 }
 function refusedHostsSentence(hosts) {
@@ -35181,7 +35206,7 @@ async function runEnvironmentSpec(req) {
     if (install !== null && install.exitCode !== 0) {
       result = {
         outcome: "test-command-unavailable",
-        note: installEnvironmentFailureNote(install, image),
+        note: installEnvironmentFailureNote(install, image, req.lease.pathDomain),
         installOk: false,
         counts: null
       };
@@ -35298,7 +35323,7 @@ async function runStep(containment, r) {
     ...res.egressDenied && res.egressDenied.length > 0 ? { egressDenied: [...new Set(res.egressDenied)] } : {}
   };
 }
-var EnvRunError, RunRefusalError, MAX_CAUSE_FRAMES, CHAIN_UNREADABLE, CHAIN_TOO_DEEP, RUNTIME_IMAGES, JVM_GRADLE_IMAGE, unversionedImage, TAG_VERSION, dockerManifestProbe, manifestProbe, MISSING_IMAGE_SHAPE, MAX_NAMED_REFUSED_HOSTS;
+var EnvRunError, RunRefusalError, MAX_CAUSE_FRAMES, CHAIN_UNREADABLE, CHAIN_TOO_DEEP, RUNTIME_IMAGES, JVM_GRADLE_IMAGE, unversionedImage, TAG_VERSION, dockerManifestProbe, manifestProbe, MISSING_IMAGE_SHAPE, PULL_FAILED_SHAPE, PULL_SUCCEEDED_SHAPE, DOCKER_RUN_FAILED, MAX_NAMED_REFUSED_HOSTS;
 var init_execute = __esm({
   "../../packages/envrun/dist/execute.js"() {
     "use strict";
@@ -35425,6 +35450,9 @@ var init_execute = __esm({
     };
     manifestProbe = dockerManifestProbe;
     MISSING_IMAGE_SHAPE = /Unable to find image ['"][^'"]*['"] locally/i;
+    PULL_FAILED_SHAPE = /manifest unknown|\bdenied: /i;
+    PULL_SUCCEEDED_SHAPE = /Status: (?:Downloaded newer image|Image is up to date) for /;
+    DOCKER_RUN_FAILED = 125;
     MAX_NAMED_REFUSED_HOSTS = 5;
   }
 });
@@ -36113,7 +36141,7 @@ function renderVerdictLine(r) {
     case "environment-exhausted":
       return `OUR FAULT  the run ran out of a resource we cap; your work has not been judged \u2014 ${t}`;
     case "budget-exceeded":
-      return `TIMED OUT  the run was killed for exceeding its budget \u2014 ${t}`;
+      return `OUR LIMIT  we stopped the run at our time limit; this is not a result about the work \u2014 ${t}`;
     case null:
       throw new Error("a verified run has no outcome \u2014 the result was assembled wrong");
   }
@@ -36132,7 +36160,11 @@ function renderRunReport(r) {
   if (showOutput) {
     lines.push("", "--- test output (tail) ---", r.testOutputTail);
   }
-  if (r.status === "verified" && r.outcome !== null && isOurFault(r.outcome)) {
+  if (r.status === "verified" && r.outcome === "counts-unparsed") {
+    lines.push("", "Your suite exited 0, but we could not read how many tests ran, so this is not a verdict either way.");
+  } else if (r.status === "verified" && r.outcome === "budget-exceeded") {
+    lines.push("", "Our time limit ended the run; that says nothing about your work.");
+  } else if (r.status === "verified" && r.outcome !== null && isOurFault(r.outcome)) {
     lines.push("", "This is an environment failure on our side, not a statement about your work.");
   }
   return lines.join("\n");
@@ -36141,14 +36173,19 @@ function answerDidItPass(r) {
   const passed = r.status === "verified" && r.outcome !== null && isGreen(r.outcome);
   return { passed, summary: renderVerdictLine(r), lookAt: r.preview?.url ?? null };
 }
+function exitCodeForOutcome(outcome) {
+  if (isGreen(outcome))
+    return 0;
+  return LIMIT_OWNER[outcome] === "ours" ? 2 : 1;
+}
 function exitCodeFor(r) {
   if (r.status === "refused")
     return 2;
   if (r.outcome === null)
     return 2;
-  return OUTCOME_EXIT_CODES[r.outcome];
+  return exitCodeForOutcome(r.outcome);
 }
-var RUN_TEST_COMMAND_SOURCES, RUN_IMAGE_SOURCES, RUN_RESULT_SCHEMA, RUN_RESULT_FIELDS, RENDER_NONE, FIELD_VIEWS, OUTCOME_EXIT_CODES;
+var RUN_TEST_COMMAND_SOURCES, RUN_IMAGE_SOURCES, RUN_RESULT_SCHEMA, RUN_RESULT_FIELDS, RENDER_NONE, FIELD_VIEWS;
 var init_result = __esm({
   "../../packages/envrun/dist/result.js"() {
     "use strict";
@@ -36256,15 +36293,6 @@ var init_result = __esm({
       // here is the honest rendering of "no venue answered": a placeholder line would
       // invite a reader to treat an unanswered probe as a described venue.
       venue: (r) => r.venue === null ? null : renderVenueLine(r.venue)
-    };
-    OUTCOME_EXIT_CODES = {
-      completed: 0,
-      "tests-failed": 1,
-      "no-tests-observed": 1,
-      "budget-exceeded": 1,
-      "counts-unparsed": 2,
-      "test-command-unavailable": 2,
-      "environment-exhausted": 2
     };
   }
 });
@@ -36472,11 +36500,13 @@ var init_attestation2 = __esm({
       "counts-unparsed": "no-tests-observed",
       "test-command-unavailable": null,
       // null, with the same reasoning as `test-command-unavailable` and NOT
-      // `budget-exceeded` (TERM-644). `budget-exceeded` is a signed statement ABOUT
-      // the developer — their work overran a budget. Exhausting the tmpfs we sized,
-      // or an OOM kill from memory we did not cap, is a statement about US. Signing
-      // either as a budget outcome would put our environment failure into the
-      // vocabulary a founder reads to decide whether to pay.
+      // `budget-exceeded` (TERM-644). A signed `budget-exceeded` records one fact:
+      // the run hit OUR time budget. It blames no one (TERM-1289; `LIMIT_OWNER` in
+      // `classify.ts` owns that question), and it is not an acceptable run:
+      // `acceptRun` (`packages/attest/src/verify.ts`) refuses every `budget_outcome`
+      // except `completed`. Exhausting the tmpfs we sized, or an OOM kill from memory we
+      // did not cap, is a different fact, and signing it under the time-budget word
+      // would record something that did not happen.
       "environment-exhausted": null
     };
     BASELINE_IS_A_VERDICT = {
@@ -37155,13 +37185,14 @@ function gcpDeleteArgv(p) {
     "--quiet"
   ];
 }
-var DEFAULT_GCP_PROJECT, DEFAULT_GCP_ZONE, DEFAULT_GCP_MACHINE_TYPE, GcpPlacementError, GCP_MAX_RUN_DURATION_SECONDS, GCP_MANAGED_LABEL_KEY, GCP_RUN_LABEL_KEY, CONFIDENTIAL_SPACE_MACHINE_TYPE, WORKLOAD_IMAGE_REFERENCE, CLIENT_CERT_BASE64URL, MIN_NONCE_BYTES, GCP_LABEL_VALUE, GCE_INSTANCE_NAME, GCP_RESOURCE_ID;
+var DEFAULT_GCP_PROJECT, DEFAULT_GCP_ZONE, DEFAULT_GCP_BOOT_ZONES, DEFAULT_GCP_MACHINE_TYPE, GcpPlacementError, GCP_MAX_RUN_DURATION_SECONDS, GCP_MANAGED_LABEL_KEY, GCP_RUN_LABEL_KEY, CONFIDENTIAL_SPACE_MACHINE_TYPE, WORKLOAD_IMAGE_REFERENCE, CLIENT_CERT_BASE64URL, MIN_NONCE_BYTES, GCP_LABEL_VALUE, GCE_INSTANCE_NAME, GCP_RESOURCE_ID;
 var init_gcpPlacement = __esm({
   "../../packages/envrun/dist/gcpPlacement.js"() {
     "use strict";
     init_dist2();
     DEFAULT_GCP_PROJECT = "terminalhire-pool";
     DEFAULT_GCP_ZONE = "us-east1-b";
+    DEFAULT_GCP_BOOT_ZONES = ["us-east1-b", "us-east1-c", "us-east1-d"];
     DEFAULT_GCP_MACHINE_TYPE = "e2-standard-2";
     GcpPlacementError = class extends Error {
       constructor(message2) {
@@ -37216,7 +37247,7 @@ var init_emptyGitConfig = __esm({
 });
 
 // ../../packages/envrun/dist/hostedVenue.js
-import { spawn as spawn6, spawnSync as spawnSync6 } from "child_process";
+import { spawn as spawn5, spawnSync as spawnSync6 } from "child_process";
 import { createHash as createHash11, X509Certificate } from "crypto";
 import { chmodSync as chmodSync3, existsSync as existsSync19, mkdtempSync as mkdtempSync3, readFileSync as readFileSync26, rmSync as rmSync10, writeFileSync as writeFileSync23 } from "fs";
 import { request as httpsRequest } from "https";
@@ -37298,8 +37329,8 @@ function failureSourceOf(err) {
   const source = err.source;
   return source === "ours" ? "ours" : "venue";
 }
-function venueGcloudEnv(config2) {
-  return { CLOUDSDK_ACTIVE_CONFIG_NAME: config2 };
+function venueGcloudEnv(config2, configDir) {
+  return configDir === void 0 ? { CLOUDSDK_ACTIVE_CONFIG_NAME: config2 } : { CLOUDSDK_ACTIVE_CONFIG_NAME: config2, CLOUDSDK_CONFIG: configDir };
 }
 function execFailureOf(err, timeoutMs) {
   if (err === void 0)
@@ -37343,10 +37374,10 @@ function pushFailure(timedOut, timeoutMs, spawnFailure) {
 }
 function pushTreeWithTar(from, file, args5, timeoutMs, env) {
   return new Promise((settle) => {
-    const source = spawn6("tar", ["-C", from, "-cf", "-", "."], {
+    const source = spawn5("tar", ["-C", from, "-cf", "-", "."], {
       stdio: ["ignore", "pipe", "pipe"]
     });
-    const sink = spawn6(file, [...args5], { stdio: ["pipe", "pipe", "pipe"], env: childEnv(env) });
+    const sink = spawn5(file, [...args5], { stdio: ["pipe", "pipe", "pipe"], env: childEnv(env) });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
@@ -37713,15 +37744,15 @@ ${r.stderr}`;
     reason: line === "" ? "the probe failed without writing to either stream" : `unrecognised probe failure: ${line.slice(0, 200)}`
   };
 }
-function assertServiceCredentials(config2, io) {
-  const env = venueGcloudEnv(config2);
+function assertServiceCredentials(config2, io, configDir) {
+  const env = venueGcloudEnv(config2, configDir);
   const active = io.exec("gcloud", ["auth", "list", "--filter=status:ACTIVE", "--format=value(account)"], LOCAL_GCLOUD_TIMEOUT_MS, env);
   if (!active.ok) {
     throw new HostedVenueError(`could not read which account the ${config2} gcloud configuration acts as, so booting would run as whoever this terminal is signed in as: ${execDetail(active).slice(0, 300)}`, "ours");
   }
   const account = active.stdout.trim();
   if (account === "") {
-    throw new HostedVenueError(`the ${config2} gcloud configuration has no active account. Activate the service credential first \u2014 docs/runbooks/gcp-tier-1-provisioning.md Step 6.`, "ours");
+    throw new HostedVenueError(`the ${config2} gcloud configuration has no active account. Activate the service credential first \u2014 docs/runbooks/gcp-tier-1-provisioning.md Step 6.` + (configDir === void 0 ? "" : " Each run starts from an empty gcloud directory of its own, so a credential activated by hand is not seen here: export GOOGLE_APPLICATION_CREDENTIALS at the key, or run on a GCE host whose attached service account gcloud can use."), "ours");
   }
   if (!account.endsWith(SERVICE_ACCOUNT_SUFFIX)) {
     throw new HostedVenueError(`the ${config2} gcloud configuration acts as ${account}, which is a person and not a service account. A dispatched run has nobody at a terminal, so the venue must come up under a credential the service owns \u2014 docs/runbooks/gcp-tier-1-provisioning.md Step 6.`, "ours");
@@ -37735,8 +37766,8 @@ function resolveServiceAccountKeyFile(opts) {
   const fromEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS;
   return fromEnv === void 0 || fromEnv.trim() === "" ? null : fromEnv;
 }
-function configurationPresent(config2, io) {
-  const listed = io.exec("gcloud", ["config", "configurations", "list", "--format=value(name)"], LOCAL_GCLOUD_TIMEOUT_MS, venueGcloudEnv(config2));
+function configurationPresent(config2, io, configDir) {
+  const listed = io.exec("gcloud", ["config", "configurations", "list", "--format=value(name)"], LOCAL_GCLOUD_TIMEOUT_MS, venueGcloudEnv(config2, configDir));
   if (!listed.ok) {
     throw new HostedVenueError(`could not read the gcloud configuration list, so the ${config2} configuration could not be provisioned: ${execDetail(listed).slice(0, 300)}`, "ours");
   }
@@ -37745,20 +37776,20 @@ function configurationPresent(config2, io) {
 function redactKeyFile(detail, keyFile) {
   return keyFile === "" ? detail : detail.split(keyFile).join("<key-file>");
 }
-function ensureVenueServiceCredentials(config2, keyFile, io) {
+function ensureVenueServiceCredentials(config2, keyFile, io, configDir) {
   if (keyFile === null)
-    return assertServiceCredentials(config2, io);
-  if (!configurationPresent(config2, io)) {
-    const created = io.exec("gcloud", ["config", "configurations", "create", config2, "--no-activate"], LOCAL_GCLOUD_TIMEOUT_MS, venueGcloudEnv(config2));
-    if (!created.ok && !configurationPresent(config2, io)) {
+    return assertServiceCredentials(config2, io, configDir);
+  if (!configurationPresent(config2, io, configDir)) {
+    const created = io.exec("gcloud", ["config", "configurations", "create", config2, "--no-activate"], LOCAL_GCLOUD_TIMEOUT_MS, venueGcloudEnv(config2, configDir));
+    if (!created.ok && !configurationPresent(config2, io, configDir)) {
       throw new HostedVenueError(`could not create the ${config2} gcloud configuration to hold the service credential: ${execDetail(created).slice(0, 300)}`, "ours");
     }
   }
-  const activated = io.exec("gcloud", ["auth", "activate-service-account", `--key-file=${keyFile}`], SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, venueGcloudEnv(config2));
+  const activated = io.exec("gcloud", ["auth", "activate-service-account", `--key-file=${keyFile}`], SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, venueGcloudEnv(config2, configDir));
   if (!activated.ok) {
     throw new HostedVenueError(`could not activate the runner service credential into the ${config2} gcloud configuration: ${redactKeyFile(execDetail(activated), keyFile).slice(0, 300)}`, "ours");
   }
-  return assertServiceCredentials(config2, io);
+  return assertServiceCredentials(config2, io, configDir);
 }
 function hostedVenueAvailable(opts = {}, io = defaultHostedVenueIo) {
   const project = opts.project ?? DEFAULT_GCP_PROJECT;
@@ -37795,6 +37826,12 @@ function execDetail(res) {
     return said === "" ? "it said nothing" : said;
   return said === "" ? res.failure.message : `${res.failure.message}: ${said}`;
 }
+function bootWasStockout(res) {
+  if (res.ok || res.failure !== null)
+    return false;
+  return /ZONE_RESOURCE_POOL_EXHAUSTED/.test(`${res.stdout}
+${res.stderr}`);
+}
 function classifyBootFailure(res) {
   const said = `${res.stdout}
 ${res.stderr}`;
@@ -37813,7 +37850,7 @@ ${res.stderr}`;
       reason: `the create was killed on this machine before GCE answered, so whether an instance exists is unknown \u2014 ${res.failure.message}`
     };
   }
-  if (/ZONE_RESOURCE_POOL_EXHAUSTED/.test(said)) {
+  if (bootWasStockout(res)) {
     return {
       source: "ours",
       created: "none",
@@ -38192,41 +38229,63 @@ async function reachConfidentialSpace(a) {
 }
 function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
   const project = opts.project ?? DEFAULT_GCP_PROJECT;
-  const zone = opts.zone ?? DEFAULT_GCP_ZONE;
+  const bootZones = opts.bootZones ?? [opts.zone ?? DEFAULT_GCP_ZONE];
+  if (bootZones.length === 0) {
+    throw new GcpPlacementError("bootZones is empty, so there is no zone to boot a venue in");
+  }
   const gcloudConfig = opts.gcloudConfig ?? VENUE_GCLOUD_CONFIG;
   const keyFile = resolveServiceAccountKeyFile(opts);
   const image = venueImageFromEnv(process.env);
   const csImageDigest = image.venueImage === "confidential-space" ? requireWorkloadDigest(image.workloadImage) : null;
-  const env = venueGcloudEnv(gcloudConfig);
   return {
     kind: "hosted-pool",
     acquire: (runId) => acquireTransactionally(async (allocated) => {
       const vm = venueInstanceName(runId);
       const stageBase = `/tmp/th-stage-${runId}`;
-      const bootParams = (clientCert) => image.venueImage === "confidential-space" ? {
+      const bootParams = (clientCert2, zone2) => image.venueImage === "confidential-space" ? {
         vmName: vm,
         project,
-        zone,
+        zone: zone2,
         runId,
         machineType: opts.machineType ?? CONFIDENTIAL_SPACE_MACHINE_TYPE,
         venueImage: "confidential-space",
         workloadImage: image.workloadImage,
-        clientCert
+        clientCert: clientCert2
       } : {
         vmName: vm,
         project,
-        zone,
+        zone: zone2,
         runId,
         machineType: opts.machineType ?? DEFAULT_GCP_MACHINE_TYPE,
         ...image
       };
-      let bootArgv = gcpBootArgv(bootParams(CLIENT_CERT_STAND_IN));
+      for (const z of bootZones)
+        gcpBootArgv(bootParams(CLIENT_CERT_STAND_IN, z));
       refuseUnsupportedHost(io);
-      ensureVenueServiceCredentials(gcloudConfig, keyFile, io);
+      const gcloudHome = io.makeGcloudHome();
+      allocated.onRollback(() => {
+        io.removeGcloudHome(gcloudHome);
+      });
+      const env = venueGcloudEnv(gcloudConfig, gcloudHome);
+      ensureVenueServiceCredentials(gcloudConfig, keyFile, io, gcloudHome);
       const clientTls = csImageDigest === null ? null : { ...makeClientTls(io, allocated, vm), imageDigest: csImageDigest };
-      if (clientTls !== null)
-        bootArgv = gcpBootArgv(bootParams(clientTls.metadataValue));
-      const boot = io.exec("gcloud", bootArgv, BOOT_TIMEOUT_MS, env);
+      const clientCert = clientTls === null ? CLIENT_CERT_STAND_IN : clientTls.metadataValue;
+      const attempts = bootZones.length * (STOCKOUT_RETRY_DELAYS_MS.length + 1);
+      let tryZone = bootZones[0];
+      let boot = null;
+      for (let attempt2 = 0; attempt2 < attempts; attempt2 += 1) {
+        if (attempt2 > 0 && attempt2 % bootZones.length === 0) {
+          await io.sleep(STOCKOUT_RETRY_DELAYS_MS[attempt2 / bootZones.length - 1]);
+        }
+        tryZone = bootZones[attempt2 % bootZones.length];
+        const bootArgv = gcpBootArgv(bootParams(clientCert, tryZone));
+        boot = io.exec("gcloud", bootArgv, BOOT_TIMEOUT_MS, env);
+        if (!bootWasStockout(boot) || attempt2 === attempts - 1)
+          break;
+      }
+      if (boot === null)
+        throw new GcpPlacementError("no boot was attempted");
+      const zone = tryZone;
       let instanceState = "unknown";
       allocated.onRollback(() => {
         const del = io.exec("gcloud", gcpDeleteArgv({ vmName: vm, project, zone }), DELETE_TIMEOUT_MS, env);
@@ -38238,7 +38297,8 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
       if (!boot.ok) {
         const verdict2 = classifyBootFailure(boot);
         instanceState = verdict2.created;
-        throw new HostedVenueError(`could not boot ${vm}: ${verdict2.reason.slice(0, 400)}`, verdict2.source);
+        const tried = bootWasStockout(boot) ? ` (after ${String(attempts)} attempts in ${bootZones.join(", ")})` : "";
+        throw new HostedVenueError(`could not boot ${vm}${tried}: ${verdict2.reason.slice(0, 400)}`, verdict2.source);
       }
       instanceState = "exists";
       if (clientTls !== null) {
@@ -38396,6 +38456,7 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
           venueIdentity: r.venueIdentity,
           transport: r.transport,
           env,
+          gcloudHome,
           io
         });
       }
@@ -38424,11 +38485,26 @@ function guardedContainment(inner, check) {
     available: () => inner.available(),
     run: async (spec, env, opts) => {
       check(`the ${spec.profile} step`);
-      const res = await inner.run(spec, env, opts);
+      let res;
+      try {
+        res = await inner.run(spec, env, opts);
+      } catch (err) {
+        throw venueFailureBehind(err, spec.profile, check);
+      }
       check(`reporting the ${spec.profile} step`);
       return res;
     }
   };
+}
+function venueFailureBehind(err, profile, check) {
+  try {
+    check(`reporting the ${profile} step`);
+  } catch (venueErr) {
+    if (!(venueErr instanceof HostedVenueError))
+      return err;
+    return new HostedVenueError(`the ${profile} step failed and ${venueErr.message} (the step said: ${describeErr(err).slice(0, 300)})`, venueErr.source, { cause: err });
+  }
+  return err;
 }
 function screenshotVenueOf(p, fill2, check) {
   return {
@@ -38450,6 +38526,7 @@ function screenshotVenueOf(p, fill2, check) {
 function makeLease(p) {
   let released = false;
   let tunnelClosed = false;
+  let gcloudHomeRemoved = false;
   const check = (doing, timeoutMs) => {
     assertVenueUnchanged(p, doing, timeoutMs);
   };
@@ -38472,6 +38549,21 @@ function makeLease(p) {
       return failures.join("; ");
     tunnelClosed = true;
     return null;
+  };
+  const removeGcloudHome = () => {
+    if (gcloudHomeRemoved)
+      return null;
+    try {
+      p.io.removeGcloudHome(p.gcloudHome);
+    } catch (err) {
+      return `the run's gcloud directory ${p.gcloudHome} could not be removed and is left behind: ${describeErr(err)}`;
+    }
+    gcloudHomeRemoved = true;
+    return null;
+  };
+  const residueOf = (...parts) => {
+    const named = parts.filter((x) => x !== null);
+    return named.length === 0 ? null : named.join("; ");
   };
   let stagedOwner;
   stagedOwner = p.transport.readOwner();
@@ -38637,30 +38729,40 @@ function makeLease(p) {
     publishPreview(_req) {
       return Promise.reject(new HostedVenueError("a venue-hosted preview needs its own ingress (design \xA76 item 7) and does not exist yet"));
     },
-    release() {
-      const tunnelResidue = closeTunnel();
+    async release() {
+      const tunnelClosure = closeTunnel();
       if (released) {
+        const localResidue2 = residueOf(tunnelClosure, removeGcloudHome());
         return Promise.resolve({
           kind: "hosted-pool",
           released: false,
           alreadyReleased: true,
-          error: tunnelResidue,
-          detail: tunnelResidue === null ? `${p.vm} was already released` : `${p.vm} was already released, but ${tunnelResidue}`
+          error: localResidue2,
+          detail: localResidue2 === null ? `${p.vm} was already released` : `${p.vm} was already released, but ${localResidue2}`
         });
       }
-      const del = p.io.exec("gcloud", gcpDeleteArgv({ vmName: p.vm, project: p.project, zone: p.zone }), DELETE_TIMEOUT_MS, p.env);
+      const deleteArgv = gcpDeleteArgv({ vmName: p.vm, project: p.project, zone: p.zone });
+      let del = p.io.exec("gcloud", deleteArgv, DELETE_TIMEOUT_MS, p.env);
+      const earlierFailures = [];
+      if (!del.ok && !deleteFoundNothing(del, p.vm)) {
+        earlierFailures.push(execDetail(del).slice(0, 300));
+        await p.io.sleep(DELETE_RETRY_DELAY_MS);
+        del = p.io.exec("gcloud", [...deleteArgv, "--async"], DELETE_RETRY_TIMEOUT_MS, p.env);
+      }
       if (!del.ok && deleteFoundNothing(del, p.vm)) {
         released = true;
+        const localResidue2 = residueOf(tunnelClosure, removeGcloudHome());
         return Promise.resolve({
           kind: "hosted-pool",
           released: true,
           alreadyReleased: false,
-          error: tunnelResidue,
-          detail: `${p.vm} is already gone \u2014 GCE reports no such instance, so something removed it first (the hard --max-run-duration is the likely one). Nothing is billing` + (tunnelResidue === null ? "" : `, but ${tunnelResidue}`)
+          error: localResidue2,
+          detail: `${p.vm} is already gone \u2014 GCE reports no such instance, so something removed it first (the hard --max-run-duration is the likely one). Nothing is billing` + (localResidue2 === null ? "" : `, but ${localResidue2}`)
         });
       }
       if (!del.ok) {
-        const deleteError = execDetail(del).slice(0, 300);
+        const localResidue2 = tunnelClosure;
+        const deleteError = [...earlierFailures, execDetail(del).slice(0, 300)].join("; then ") + `; ${p.vm} in ${p.zone} was not deleted and may still be billing \u2014 delete it by hand: ${manualDeleteCommand(p.vm, p.project, p.zone)}`;
         return Promise.resolve({
           kind: "hosted-pool",
           released: false,
@@ -38668,22 +38770,24 @@ function makeLease(p) {
           // BOTH failures, never the delete alone. They are independent pieces
           // of residue and a report that names one of them lets the other pass
           // for cleaned up.
-          error: tunnelResidue === null ? deleteError : `${deleteError}; ${tunnelResidue}`,
+          error: localResidue2 === null ? deleteError : `${deleteError}; ${localResidue2}`,
           detail: `${p.vm} may still exist and is still billing. Releasing again will retry the delete. It carries a hard --max-run-duration, so the platform deletes it within the hour even if nothing else does. To remove it now: ` + manualDeleteCommand(p.vm, p.project, p.zone)
         });
       }
       released = true;
+      const localResidue = residueOf(tunnelClosure, removeGcloudHome());
+      const deleted = earlierFailures.length === 0 ? `deleted ${p.vm}` : `GCE accepted the delete of ${p.vm} on a second, --async attempt, after: ${earlierFailures.join("; ")}`;
       return Promise.resolve({
         kind: "hosted-pool",
         released: true,
         alreadyReleased: false,
-        error: tunnelResidue,
-        detail: tunnelResidue === null ? `deleted ${p.vm}` : `deleted ${p.vm}, but ${tunnelResidue}`
+        error: localResidue,
+        detail: localResidue === null ? deleted : `${deleted}, but ${localResidue}`
       });
     }
   };
 }
-var join41, SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, VOLUME_CREATE_TIMEOUT_MS, EXEC_PROBE_TIMEOUT_MS, POPULATE_TIMEOUT_MS, STAGE_PROOF_PREFIX, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING, CS_ATTEST_PORT, CS_DOCKER_PORT, CS_READY_BUDGET_MS, CS_ATTEST_TIMEOUT_MS, CS_PULL_TIMEOUT_MS, CS_ATTEST_INTERVAL_MS, OPENSSL_TIMEOUT_MS, CS_RUN_ARGS, CS_GUEST_USER, CS_STAGE_ROOT, CLIENT_CERT_STAND_IN;
+var join41, SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, DELETE_RETRY_DELAY_MS, DELETE_RETRY_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, GCLOUD_HOME_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, VOLUME_CREATE_TIMEOUT_MS, EXEC_PROBE_TIMEOUT_MS, POPULATE_TIMEOUT_MS, STAGE_PROOF_PREFIX, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING, STOCKOUT_RETRY_DELAYS_MS, CS_ATTEST_PORT, CS_DOCKER_PORT, CS_READY_BUDGET_MS, CS_ATTEST_TIMEOUT_MS, CS_PULL_TIMEOUT_MS, CS_ATTEST_INTERVAL_MS, OPENSSL_TIMEOUT_MS, CS_RUN_ARGS, CS_GUEST_USER, CS_STAGE_ROOT, CLIENT_CERT_STAND_IN;
 var init_hostedVenue = __esm({
   "../../packages/envrun/dist/hostedVenue.js"() {
     "use strict";
@@ -38725,9 +38829,12 @@ var init_hostedVenue = __esm({
     BOOT_TIMEOUT_MS = 18e4;
     MKDIR_TIMEOUT_MS = 6e4;
     DELETE_TIMEOUT_MS = 3e5;
+    DELETE_RETRY_DELAY_MS = 5e3;
+    DELETE_RETRY_TIMEOUT_MS = 3e4;
     LOCAL_GCLOUD_TIMEOUT_MS = 2e4;
     SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS = 3e4;
     SOCKET_DIR_PREFIX = "th-venue-";
+    GCLOUD_HOME_PREFIX = "th-gcloud-";
     VENUE_SOCKET_NAME = "docker.sock";
     HostedVenueError = class extends RunRefusalError {
       source;
@@ -38757,7 +38864,7 @@ var init_hostedVenue = __esm({
         }
       },
       spawnTunnel: (file, args5, env) => {
-        const child = spawn6(file, [...args5], {
+        const child = spawn5(file, [...args5], {
           stdio: ["ignore", "ignore", "ignore"],
           env: childEnv(env)
         });
@@ -38788,6 +38895,14 @@ var init_hostedVenue = __esm({
         return dir;
       },
       removeTree: (path6) => {
+        rmSync10(path6, { recursive: true, force: true });
+      },
+      makeGcloudHome: () => {
+        const dir = mkdtempSync3(join41(tmpdir3(), GCLOUD_HOME_PREFIX));
+        chmodSync3(dir, 448);
+        return dir;
+      },
+      removeGcloudHome: (path6) => {
         rmSync10(path6, { recursive: true, force: true });
       },
       dockerFor: (socketPath) => remoteDockerClient(`unix://${socketPath}`),
@@ -38872,6 +38987,7 @@ var init_hostedVenue = __esm({
     SSH_KEY_NOT_READY = /Permission denied \(publickey/;
     DAEMON_NOT_READY = /Cannot connect to the Docker daemon/;
     SSH_NOT_ANSWERING = /Connection refused|Connection reset|Connection closed by|kex_exchange_identification|Operation timed out/;
+    STOCKOUT_RETRY_DELAYS_MS = [3e4, 9e4];
     CS_ATTEST_PORT = 8443;
     CS_DOCKER_PORT = 2376;
     CS_READY_BUDGET_MS = 48e4;
@@ -38895,11 +39011,11 @@ function localDockerPlacement() {
     imageFor: (runtime, override, version2, variant) => imageForRuntime(runtime, override, version2, variant)
   };
 }
-function hostedPoolPlacement() {
+function hostedPoolPlacement(io) {
   return {
     kind: "hosted-pool",
     refusal: null,
-    venue: () => hostedVenue(),
+    venue: () => hostedVenue({ bootZones: DEFAULT_GCP_BOOT_ZONES }, io),
     imageFor: (runtime, override, version2, variant) => imageForRuntime(runtime, override, version2, variant)
   };
 }
@@ -38964,6 +39080,7 @@ var init_placement = __esm({
     "use strict";
     init_dist();
     init_execute();
+    init_gcpPlacement();
     init_hostedVenue();
     init_venue();
     PLACEMENTS = {
@@ -40787,6 +40904,14 @@ var init_dist3 = __esm({
 // ../../packages/envrun/dist/screenshots.js
 import { copyFileSync as copyFileSync4, mkdirSync as mkdirSync8 } from "fs";
 import { join as join43 } from "path";
+function tooBigNote(items) {
+  const mib = (b) => `${(b / (1024 * 1024)).toFixed(1)} MiB`;
+  const named = items.map((i) => `${i.route} ${i.viewport}/${i.scheme} (${mib(i.bytes)})`);
+  const n = items.length;
+  const text = `${String(n)} screenshot${n === 1 ? "" : "s"} left out, over the ${UPLOAD_CAP_TEXT} upload limit: ${named.join(", ")}`;
+  const room = NOTE_MAX - "before: ".length;
+  return text.length <= room ? text : `${text.slice(0, room - 1)}\u2026`;
+}
 function captureTimeout(ctx, fixedMs) {
   return ctx.deadline === void 0 ? fixedMs : timeoutWithin(GUARDED_CAPTURE_CAP_MS, ctx.deadline);
 }
@@ -40858,13 +40983,21 @@ async function takeScreenshots(ctx, deps) {
   const sides = [];
   const items = [];
   const notes = [];
+  let leftOut = 0;
   const take = async (side, tree, sidePlan) => {
     try {
       const got = await captureSide(ctx, deps, side, tree, sidePlan, image, code, routes);
       if (ctx.signal?.aborted === true)
         throw new Error("the screenshot step was stopped");
       sides.push(got.side);
+      const tooBig = got.items.filter((i) => i.bytes > SCREENSHOT_UPLOAD_MAX_BYTES);
+      if (tooBig.length > 0) {
+        leftOut += tooBig.length;
+        notes.push(`${side}: ${tooBigNote(tooBig)}`);
+      }
       for (const item of got.items) {
+        if (item.bytes > SCREENSHOT_UPLOAD_MAX_BYTES)
+          continue;
         const file = `${side}/${item.file}`;
         deps.copy(join43(got.outDir, item.file), join43(ctx.outDir, file));
         items.push({ ...item, side, file });
@@ -40931,7 +41064,8 @@ async function takeScreenshots(ctx, deps) {
   }
   if (items.length === 0) {
     const after = sides.find((s) => s.side === "after");
-    return skipped(after?.reason ?? "no screenshot was taken", sides);
+    const reason = after?.reason ?? (leftOut > 0 ? `every screenshot was over the ${UPLOAD_CAP_TEXT} upload limit` : "no screenshot was taken");
+    return skipped(reason, sides);
   }
   return {
     status: "captured",
@@ -41185,7 +41319,7 @@ function syncOpts(ctx) {
 function message(err) {
   return String(err?.message ?? err).slice(0, 500);
 }
-var SCREENSHOT_LIMITS, GUARDED_CAPTURE_CAP_MS, BUILD_MARKER, realDeps, HOSTED_BEFORE_REASON, SCREENSHOT_BUDGET_MS, HOSTED_SCREENSHOT_BUDGET_MS, DEFERRED_SCREENSHOT_BUDGET_MS, SCREENSHOT_DRAIN_MS, SCREENSHOTS_ABANDONED, RENDERED_EXTENSIONS, RENDERED_DIRS;
+var SCREENSHOT_LIMITS, GUARDED_CAPTURE_CAP_MS, SCREENSHOT_UPLOAD_MAX_BYTES, UPLOAD_CAP_TEXT, NOTE_MAX, BUILD_MARKER, realDeps, HOSTED_BEFORE_REASON, SCREENSHOT_BUDGET_MS, HOSTED_SCREENSHOT_BUDGET_MS, DEFERRED_SCREENSHOT_BUDGET_MS, SCREENSHOT_DRAIN_MS, SCREENSHOTS_ABANDONED, RENDERED_EXTENSIONS, RENDERED_DIRS;
 var init_screenshots = __esm({
   "../../packages/envrun/dist/screenshots.js"() {
     "use strict";
@@ -41202,6 +41336,9 @@ var init_screenshots = __esm({
       waitForPortMs: 6e4
     };
     GUARDED_CAPTURE_CAP_MS = 6e5;
+    SCREENSHOT_UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
+    UPLOAD_CAP_TEXT = "4 MiB";
+    NOTE_MAX = 300;
     BUILD_MARKER = ".terminalhire-build-start";
     realDeps = {
       runStep: (lease, r) => runStep(lease.containment, r),
@@ -42193,8 +42330,11 @@ async function runVerification(req, ctx) {
       };
       if (req.screenshots.deferred === true) {
         const gated = screenshotGate(phase);
-        base = { ...base, screenshots: emptyScreenshots(phase.ctx.routes, gated) };
-        if (gated === null) {
+        const manifest = emptyScreenshots(phase.ctx.routes, gated);
+        base = { ...base, screenshots: manifest };
+        if (gated !== null) {
+          later = deferScreenshots(() => Promise.resolve(manifest), () => releaseWithoutThrowing(lease, progress), phase.ctx.routes);
+        } else {
           const asked = req.screenshots;
           later = deferScreenshots((signal) => {
             const deadline = screenshotDeadline(lease, asked);
@@ -42211,7 +42351,7 @@ async function runVerification(req, ctx) {
         base = { ...base, screenshots: await screenshotPhase(phase) };
       }
     }
-    if (req.preview === false) {
+    const withoutPreview = () => {
       leaseHandedOff = later !== null;
       return {
         result: base,
@@ -42222,20 +42362,30 @@ async function runVerification(req, ctx) {
         venueIdentity: lease.venueIdentity ?? null,
         ...later === null ? {} : { finishScreenshots: later }
       };
-    }
+    };
+    if (req.preview === false)
+      return withoutPreview();
     progress("preview", "starting one instance both parties can open");
     const previewStartedAt = Date.now();
-    const instance = await lease.publishPreview({
-      labels,
-      idBase: `th-${runId}`,
-      image,
-      scratchDir: venuePaths.previewDir,
-      // The document is the result itself, so the URL and the terminal cannot
-      // disagree about what happened. `preview` is null inside it on purpose —
-      // a document that carried its own URL would be self-referential and would
-      // have to be written after the port was known.
-      document: base
-    });
+    let instance;
+    try {
+      instance = await lease.publishPreview({
+        labels,
+        idBase: `th-${runId}`,
+        // The node image, not the run's: the server is `node -e`, and the cpp image
+        // (among others) has no node binary (TERM-1287).
+        image: placement.imageFor("node"),
+        scratchDir: venuePaths.previewDir,
+        // The document is the result itself, so the URL and the terminal cannot
+        // disagree about what happened. `preview` is null inside it on purpose —
+        // a document that carried its own URL would be self-referential and would
+        // have to be written after the port was known.
+        document: base
+      });
+    } catch (err) {
+      progress("preview", `not started: ${describeThrown(err, { includeName: false })}`);
+      return withoutPreview();
+    }
     leaseHandedOff = later !== null;
     return {
       result: {
@@ -42592,7 +42742,7 @@ function installCommandFor(runner) {
     case "prisma":
       return "npm i prisma@6 --no-save --no-audit --no-fund 2>&1 | tail -5";
     case "alembic":
-      return `python -m venv ${VENV_DIR} && ${VENV_DIR}/bin/pip install --quiet alembic psycopg2-binary 2>&1 | tail -5`;
+      return `python -m venv ${VENV_DIR} && ${VENV_DIR}/bin/pip install --quiet "alembic==1.20.0" "sqlalchemy==2.1.1" "psycopg[binary]==3.3.6" "psycopg2-binary==2.9.13" 2>&1 | tail -5`;
     default:
       return null;
   }
@@ -43209,6 +43359,7 @@ __export(dist_exports, {
   CONTAINMENT_UNAVAILABLE_PREFIX: () => CONTAINMENT_UNAVAILABLE_PREFIX,
   CloneUnavailableError: () => CloneUnavailableError,
   DAEMON_FACTS_FORMAT: () => DAEMON_FACTS_FORMAT,
+  DEFAULT_GCP_BOOT_ZONES: () => DEFAULT_GCP_BOOT_ZONES,
   DEFAULT_GCP_PROJECT: () => DEFAULT_GCP_PROJECT,
   DEFAULT_GCP_ZONE: () => DEFAULT_GCP_ZONE,
   DEFAULT_PLACEMENT_KIND: () => DEFAULT_PLACEMENT_KIND,
@@ -43223,6 +43374,7 @@ __export(dist_exports, {
   HostedVenueError: () => HostedVenueError,
   JWKS_FETCH_TIMEOUT_MS: () => JWKS_FETCH_TIMEOUT_MS,
   LEAK_STATES: () => LEAK_STATES,
+  LIMIT_OWNER: () => LIMIT_OWNER,
   LOCAL_MEASUREMENT_PREFIX: () => LOCAL_MEASUREMENT_PREFIX,
   LabelWatch: () => LabelWatch,
   MIN_GIT_VERSION_FOR_END_OF_OPTIONS: () => MIN_GIT_VERSION_FOR_END_OF_OPTIONS,
@@ -46473,8 +46625,8 @@ function launchAgentIn(dest, agentName, { spawnFn, log = console.log } = {}) {
     );
     return { launched: false, reason: "not-allowlisted" };
   }
-  const spawn8 = spawnFn ?? spawnSync9;
-  const result = spawn8(command, [], { cwd: dest, stdio: "inherit", shell: false });
+  const spawn7 = spawnFn ?? spawnSync9;
+  const result = spawn7(command, [], { cwd: dest, stdio: "inherit", shell: false });
   if (result?.error) {
     log(
       `terminalhire claim: ${command} is not on your PATH \u2014 the workspace is ready anyway.
@@ -46514,8 +46666,8 @@ function landDeveloperIn(dest, flags = {}, deps = {}) {
   }
   log(`
   You're in the workspace now \u2014 \`exit\` brings you back here.`);
-  const spawn8 = spawnFn ?? spawnSync9;
-  const result = spawn8(shell, [], { cwd: dest, stdio: "inherit", shell: false });
+  const spawn7 = spawnFn ?? spawnSync9;
+  const result = spawn7(shell, [], { cwd: dest, stdio: "inherit", shell: false });
   if (result?.error) {
     log(`  ${shell} would not start \u2014 the workspace is ready anyway.`);
     cdLine();
@@ -81405,7 +81557,7 @@ __export(founder_bounty_notify_exports, {
   maybeNotifyFounderBounties: () => maybeNotifyFounderBounties,
   nextFounderBountyNotifyState: () => nextFounderBountyNotifyState
 });
-import { spawn as spawn7 } from "child_process";
+import { spawn as spawn6 } from "child_process";
 function nextFounderBountyNotifyState(index, previous) {
   const open3 = openPaidIds(index);
   const prior = previous && Array.isArray(previous.ids) ? previous.ids : null;
@@ -81438,7 +81590,7 @@ function displayLocalNotification({
   title = "Terminalhire",
   body,
   platform = process.platform,
-  spawnFn = spawn7
+  spawnFn = spawn6
 } = {}) {
   if (!body || typeof body !== "string") return false;
   try {

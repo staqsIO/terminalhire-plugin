@@ -10,8 +10,14 @@ var __export = (target, all) => {
 };
 
 // src/open-url.js
-import { spawn } from "child_process";
-function openInBrowser(url) {
+import { spawn as nodeSpawn } from "child_process";
+function shouldOpenBrowser(env = process.env) {
+  if (env.NODE_TEST_CONTEXT) return false;
+  const off = String(env.TERMINALHIRE_NO_BROWSER ?? "").trim().toLowerCase();
+  return !(off === "1" || off === "true");
+}
+function openInBrowser(url, { env = process.env, spawn = nodeSpawn } = {}) {
+  if (!shouldOpenBrowser(env)) return;
   let cmd;
   let args;
   if (process.platform === "darwin") {
