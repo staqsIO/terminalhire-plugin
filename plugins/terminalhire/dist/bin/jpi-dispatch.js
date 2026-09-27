@@ -31982,12 +31982,22 @@ function reportedCounts(classified, reparsed) {
 function readCounts(stdout, stderr = "") {
   const out = `${stdout}
 ${stderr}`;
+  const matched = [];
   for (const reader of READERS) {
     const counts = reader.read(out);
     if (counts)
-      return { ...counts, runner: reader.runner };
+      matched.push({ reader, counts });
   }
-  return null;
+  const first = matched[0];
+  if (first === void 0)
+    return null;
+  const legs = matched.filter(({ reader }) => !matched.some((m) => reader.shadowedBy?.includes(m.reader.runner)));
+  const partial2 = legs.length > 1 || (first.reader.summaries?.(out) ?? 1) > 1;
+  return {
+    ...first.counts,
+    runner: first.reader.runner,
+    ...partial2 ? { coverage: "partial" } : {}
+  };
 }
 function coverageThresholdUnmet(facts, counts) {
   if (counts === null || counts.runner !== "node-tap")
@@ -32146,7 +32156,7 @@ function isGreen(outcome) {
 function isOurFault(outcome) {
   return LIMIT_OWNER[outcome] === "ours";
 }
-var VERIFICATION_OUTCOMES, int, withSuiteFailures, READERS, SUPPORTED_RUNNERS, COVERAGE_TABLE, EXEC_FAILURE, SUITE_REPORTED_FAILURE, MISSING_SYSTEM_DEPENDENCY, OFFLINE_BUILD_GAP, LIMIT_OWNER;
+var VERIFICATION_OUTCOMES, int, withSuiteFailures, countLines, READERS, SUPPORTED_RUNNERS, COVERAGE_TABLE, EXEC_FAILURE, SUITE_REPORTED_FAILURE, MISSING_SYSTEM_DEPENDENCY, OFFLINE_BUILD_GAP, LIMIT_OWNER;
 var init_classify2 = __esm({
   "../../packages/envrun/dist/classify.js"() {
     "use strict";
@@ -32165,6 +32175,7 @@ var init_classify2 = __esm({
         return counts;
       return { ...counts, tests_failed: int(/(\d+) failed/.exec(suiteLine[1])) };
     };
+    countLines = (out, re) => (out.match(re) ?? []).length;
     READERS = [
       {
         // `node --test` TAP. Anchored to line start, which is what makes it a
@@ -32176,7 +32187,10 @@ var init_classify2 = __esm({
           if (!pass || !fail2)
             return null;
           return { tests_passed: int(pass), tests_failed: int(fail2) };
-        }
+        },
+        // One `# pass N` per invocation, so a script that runs `node --test` once per file
+        // prints many. envrun's own offline leg printed 67 and was read as the first one's 4.
+        summaries: (out) => countLines(out, /^# pass \d+$/gm)
       },
       {
         // node-tap's runner summary, which is NOT the `# pass N` / `# fail N` pair
@@ -32203,7 +32217,8 @@ var init_classify2 = __esm({
             tests_passed: int(/\bpass: (\d+)/.exec(line[1])),
             tests_failed: int(/\bfail: (\d+)/.exec(line[1]))
           };
-        }
+        },
+        summaries: (out) => countLines(out, /^# \{ total: \d+[^}\n]* \}$/gm)
       },
       {
         // jest: `Tests:       1 failed, 2 passed, 3 total`
@@ -32216,7 +32231,8 @@ var init_classify2 = __esm({
             tests_passed: int(/(\d+) passed/.exec(line[1])),
             tests_failed: int(/(\d+) failed/.exec(line[1]))
           }, /^Test Suites:\s+(.+?)\s*$/m.exec(out));
-        }
+        },
+        summaries: (out) => countLines(out, /^Tests:\s+[^\n]*\btotal\b/gm)
       },
       {
         // vitest: `Tests  3 passed (3)` / `Tests  1 failed | 2 passed (3)`
@@ -32233,7 +32249,12 @@ var init_classify2 = __esm({
           if (!passed && !failed)
             return null;
           return withSuiteFailures({ tests_passed: int(passed), tests_failed: int(failed) }, files);
-        }
+        },
+        // One invocation prints one `Test Files` line, and a numeric `Tests` line only when a
+        // spec loaded (the every-spec-failed shape above has none). The larger of the two
+        // counts invocations without counting a paired block twice; reading `Tests` alone
+        // missed an all-failed run that followed a passing one (Codex review).
+        summaries: (out) => Math.max(countLines(out, /^\s*Tests\s+[^\n]*\(\d+\)\s*$/gm), countLines(out, /^\s*Test Files\s+[^\n]*\(\d+\)\s*$/gm))
       },
       {
         // pytest summary rule: `===== 297 passed in 0.54s =====`,
@@ -32256,7 +32277,10 @@ var init_classify2 = __esm({
           if (!passed && !failed && !errors)
             return null;
           return { tests_passed: int(passed), tests_failed: int(failed) + int(errors) };
-        }
+        },
+        // Only FINAL tallies, which carry pytest's `in 0.54s`. The interim banners the reader
+        // skips above carry no duration, and counting them would mark every red run partial.
+        summaries: (out) => Math.max(1, countLines(out, /^=+ [^\n]*?(?:passed|failed|error|no tests ran)[^\n]*? in [\d.]+s[^\n]*? =+$/gm))
       },
       {
         // Maven surefire's per-module summary (TERM-1122), measured against surefire
@@ -32318,7 +32342,8 @@ var init_classify2 = __esm({
             return null;
           const failed = Number(m[1]);
           return { tests_passed: Number(m[2]) - failed, tests_failed: failed };
-        }
+        },
+        summaries: (out) => Math.max(1, countLines(out, /^\d+% tests passed, \d+ tests? failed out of \d+$/gm))
       },
       {
         // mocha: `  440 passing (1s)` and `  2 failing`
@@ -32329,7 +32354,8 @@ var init_classify2 = __esm({
           if (!passing && !failing)
             return null;
           return { tests_passed: int(passing), tests_failed: int(failing) };
-        }
+        },
+        summaries: (out) => Math.max(countLines(out, /^\s*\d+ passing\b/gm), countLines(out, /^\s*\d+ failing\b/gm))
       },
       {
         // ava: `  3 tests passed` / `  1 test failed`
@@ -32340,7 +32366,8 @@ var init_classify2 = __esm({
           if (!passed && !failed)
             return null;
           return { tests_passed: int(passed), tests_failed: int(failed) };
-        }
+        },
+        summaries: (out) => Math.max(countLines(out, /^\s*\d+ tests? passed\b/gm), countLines(out, /^\s*\d+ tests? failed\b/gm))
       },
       {
         // uvu: a `Total:` / `Passed:` / `Skipped:` block.
@@ -32353,7 +32380,8 @@ var init_classify2 = __esm({
           const t = int(total);
           const p = int(passed);
           return { tests_passed: p, tests_failed: Math.max(0, t - p) };
-        }
+        },
+        summaries: (out) => countLines(out, /^\s*Total:\s+\d+/gm)
       },
       {
         /**
@@ -32388,6 +32416,7 @@ var init_classify2 = __esm({
          *     those would double them against their parent.
          */
         runner: "bare TAP",
+        shadowedBy: ["node --test (TAP)", "node-tap"],
         read: (out) => {
           let n = 0;
           let failed = 0;
@@ -36133,9 +36162,9 @@ function renderVerdictLine(r) {
   const t = fmtMs(r.wallMs);
   switch (r.outcome) {
     case "completed":
-      return `GREEN     ${String(r.counts?.tests_passed ?? 0)} test(s) passed, none failed \u2014 ${t}${r.preview ? ` \u2014 ${r.preview.url}` : ""}`;
+      return `GREEN     ${String(r.counts?.tests_passed ?? 0)} test(s) passed, none failed ` + (r.counts?.coverage === "partial" ? `(${PARTIAL_COUNTS_NOTE}) ` : "") + `\u2014 ${t}${r.preview ? ` \u2014 ${r.preview.url}` : ""}`;
     case "tests-failed":
-      return `RED       ${r.counts ? `${String(r.counts.tests_failed)} test(s) failed` : `exit ${String(r.exitCode)}`} \u2014 ${t}${r.preview ? ` \u2014 ${r.preview.url}` : ""}`;
+      return `RED       ${r.counts ? `${String(r.counts.tests_failed)} test(s) failed` : `exit ${String(r.exitCode)}`}` + (r.counts?.coverage === "partial" ? ` (${PARTIAL_COUNTS_NOTE})` : "") + ` \u2014 ${t}${r.preview ? ` \u2014 ${r.preview.url}` : ""}`;
     case "no-tests-observed":
       return `NOTHING RAN  the suite reported zero tests passed and zero failed \u2014 ${t}`;
     case "counts-unparsed":
@@ -36189,7 +36218,7 @@ function exitCodeFor(r) {
     return 2;
   return exitCodeForOutcome(r.outcome);
 }
-var RUN_TEST_COMMAND_SOURCES, RUN_IMAGE_SOURCES, RUN_RESULT_SCHEMA, RUN_RESULT_FIELDS, RENDER_NONE, FIELD_VIEWS;
+var RUN_TEST_COMMAND_SOURCES, RUN_IMAGE_SOURCES, RUN_RESULT_SCHEMA, PARTIAL_COUNTS_NOTE, RUN_RESULT_FIELDS, RENDER_NONE, FIELD_VIEWS;
 var init_result = __esm({
   "../../packages/envrun/dist/result.js"() {
     "use strict";
@@ -36212,6 +36241,7 @@ var init_result = __esm({
       "founder-declared"
     ];
     RUN_RESULT_SCHEMA = "terminalhire.verification-run/1";
+    PARTIAL_COUNTS_NOTE = "from one of several test summaries in the output, so not a total for the whole run";
     RUN_RESULT_FIELDS = [
       "schema",
       "runId",
@@ -36257,7 +36287,7 @@ var init_result = __esm({
       testCommand: (r) => r.testCommand === null ? null : `test command ${r.testCommand}`,
       testOutputTail: RENDER_NONE,
       // printed as a block below the fields, when red
-      counts: (r) => r.counts === null ? null : `tests        ${String(r.counts.tests_passed)} passed, ${String(r.counts.tests_failed)} failed (${r.counts.runner})`,
+      counts: (r) => r.counts === null ? null : `tests        ${String(r.counts.tests_passed)} passed, ${String(r.counts.tests_failed)} failed (${r.counts.runner})` + (r.counts.coverage === "partial" ? ` \u2014 ${PARTIAL_COUNTS_NOTE}` : ""),
       wallMs: (r) => `round trip   ${fmtMs(r.wallMs)}`,
       installMs: (r) => r.installMs === void 0 ? null : `install step ${fmtMs(r.installMs)}`,
       testMs: (r) => r.testMs === void 0 ? null : `test step    ${fmtMs(r.testMs)}`,
@@ -36356,7 +36386,11 @@ function toTestRunResult(result, outputSha256) {
   return {
     exit_code: result.exitCode ?? -1,
     ...outputSha256 === void 0 ? {} : { output_sha256: outputSha256 },
-    ...result.counts === null ? {} : { tests_passed: result.counts.tests_passed, tests_failed: result.counts.tests_failed }
+    ...result.counts === null ? {} : {
+      tests_passed: result.counts.tests_passed,
+      tests_failed: result.counts.tests_failed,
+      ...result.counts.coverage === "partial" ? { tests_coverage: "partial" } : {}
+    }
   };
 }
 function toAcceptancePredicate(pair, opts = {}) {
@@ -43808,6 +43842,7 @@ __export(dist_exports, {
   LabelWatch: () => LabelWatch,
   MIN_GIT_VERSION_FOR_END_OF_OPTIONS: () => MIN_GIT_VERSION_FOR_END_OF_OPTIONS,
   OUTCOME_TO_BUDGET: () => OUTCOME_TO_BUDGET,
+  PARTIAL_COUNTS_NOTE: () => PARTIAL_COUNTS_NOTE,
   PATH_REFUSAL_CODES: () => PATH_REFUSAL_CODES,
   PLACEMENTS: () => PLACEMENTS,
   PLACEMENT_ALIASES: () => PLACEMENT_ALIASES,
