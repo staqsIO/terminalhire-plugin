@@ -36118,6 +36118,10 @@ var init_venueDescriptor = __esm({
 function fmtMs(ms) {
   return ms < 1e3 ? `${String(ms)}ms` : `${(ms / 1e3).toFixed(1)}s`;
 }
+function fmtMinutes(ms) {
+  const min = ms / 6e4;
+  return Number.isInteger(min) ? String(min) : min.toFixed(1);
+}
 function renderVerdictLine(r) {
   if (r.status === "refused") {
     const first = r.boundaryRefusals[0];
@@ -36141,7 +36145,7 @@ function renderVerdictLine(r) {
     case "environment-exhausted":
       return `OUR FAULT  the run ran out of a resource we cap; your work has not been judged \u2014 ${t}`;
     case "budget-exceeded":
-      return `OUR LIMIT  we stopped the run at our time limit; this is not a result about the work \u2014 ${t}`;
+      return r.testTimeoutMs === void 0 ? `OUR LIMIT  we stopped the run at our time limit; this is not a result about the work \u2014 ${t}` : `OUR LIMIT  the ${fmtMinutes(r.testTimeoutMs)}-min test time limit set for this posting stopped the run; this is not a result about the work \u2014 ${t}`;
     case null:
       throw new Error("a verified run has no outcome \u2014 the result was assembled wrong");
   }
@@ -36163,7 +36167,7 @@ function renderRunReport(r) {
   if (r.status === "verified" && r.outcome === "counts-unparsed") {
     lines.push("", "Your suite exited 0, but we could not read how many tests ran, so this is not a verdict either way.");
   } else if (r.status === "verified" && r.outcome === "budget-exceeded") {
-    lines.push("", "Our time limit ended the run; that says nothing about your work.");
+    lines.push("", r.testTimeoutMs === void 0 ? "Our time limit ended the run; that says nothing about your work." : `The ${fmtMinutes(r.testTimeoutMs)}-min test time limit set for this posting ended the run; that says nothing about your work.`);
   } else if (r.status === "verified" && r.outcome !== null && isOurFault(r.outcome)) {
     lines.push("", "This is an environment failure on our side, not a statement about your work.");
   }
@@ -36220,6 +36224,9 @@ var init_result = __esm({
       "testOutputTail",
       "counts",
       "wallMs",
+      "installMs",
+      "testMs",
+      "testTimeoutMs",
       "targetRepo",
       "targetSha",
       "patchSha256",
@@ -36252,6 +36259,9 @@ var init_result = __esm({
       // printed as a block below the fields, when red
       counts: (r) => r.counts === null ? null : `tests        ${String(r.counts.tests_passed)} passed, ${String(r.counts.tests_failed)} failed (${r.counts.runner})`,
       wallMs: (r) => `round trip   ${fmtMs(r.wallMs)}`,
+      installMs: (r) => r.installMs === void 0 ? null : `install step ${fmtMs(r.installMs)}`,
+      testMs: (r) => r.testMs === void 0 ? null : `test step    ${fmtMs(r.testMs)}`,
+      testTimeoutMs: (r) => r.testTimeoutMs === void 0 ? null : `time limit   ${fmtMinutes(r.testTimeoutMs)} min`,
       targetRepo: (r) => `target       ${r.targetRepo}`,
       targetSha: (r) => `commit       ${r.targetSha.slice(0, 12)}`,
       patchSha256: (r) => r.patchSha256 === null ? null : `patch        ${r.patchSha256.slice(0, 12)}`,
@@ -36501,7 +36511,8 @@ var init_attestation2 = __esm({
       "test-command-unavailable": null,
       // null, with the same reasoning as `test-command-unavailable` and NOT
       // `budget-exceeded` (TERM-644). A signed `budget-exceeded` records one fact:
-      // the run hit OUR time budget. It blames no one (TERM-1289; `LIMIT_OWNER` in
+      // the run hit the time budget we applied — our default, or the one set for the
+      // posting (TERM-1308), which is still ours to enforce. It blames no one (TERM-1289; `LIMIT_OWNER` in
       // `classify.ts` owns that question), and it is not an acceptable run:
       // `acceptRun` (`packages/attest/src/verify.ts`) refuses every `budget_outcome`
       // except `completed`. Exhausting the tmpfs we sized, or an OOM kill from memory we
@@ -37200,7 +37211,7 @@ var init_gcpPlacement = __esm({
         this.name = "GcpPlacementError";
       }
     };
-    GCP_MAX_RUN_DURATION_SECONDS = 3600;
+    GCP_MAX_RUN_DURATION_SECONDS = 10800;
     GCP_MANAGED_LABEL_KEY = "th-managed";
     GCP_RUN_LABEL_KEY = "th-run";
     CONFIDENTIAL_SPACE_MACHINE_TYPE = "n2d-standard-2";
@@ -39096,9 +39107,9 @@ var init_placement = __esm({
 });
 
 // ../../packages/envspec/dist/yaml.js
-function parseYaml(source) {
-  const lines = splitLines(source);
-  const cursor = { lines, index: 0 };
+function parseYaml(source, limits = {}) {
+  const lines = splitLines(source, limits.maxLineLength ?? Infinity);
+  const cursor = { lines, index: 0, depth: 0, maxDepth: limits.maxDepth ?? Infinity };
   skipIgnorable(cursor);
   if (cursor.index >= lines.length)
     return null;
@@ -39110,13 +39121,16 @@ function parseYaml(source) {
   }
   return value;
 }
-function splitLines(source) {
+function splitLines(source, maxLineLength) {
   const raw = source.replace(/\r\n/g, "\n").split("\n");
   const out = [];
   let sawDocumentStart = false;
   for (let i = 0; i < raw.length; i += 1) {
     const line = raw[i];
     const number3 = i + 1;
+    if (line.length > maxLineLength) {
+      throw new YamlUnsupportedError("line-length", number3, `line longer than ${maxLineLength} characters`);
+    }
     const withoutIndent = line.replace(/^[ ]+/, "");
     const indent = line.length - withoutIndent.length;
     if (/^[ ]*\t/.test(line)) {
@@ -39153,6 +39167,18 @@ function peek(cursor) {
   return cursor.index < cursor.lines.length ? cursor.lines[cursor.index] : null;
 }
 function parseNode(cursor, indent) {
+  if (cursor.depth >= cursor.maxDepth) {
+    const at = peek(cursor);
+    throw new YamlUnsupportedError("depth", at?.number ?? 0, `nesting deeper than ${cursor.maxDepth}`);
+  }
+  cursor.depth += 1;
+  try {
+    return parseNodeAt(cursor, indent);
+  } finally {
+    cursor.depth -= 1;
+  }
+}
+function parseNodeAt(cursor, indent) {
   const line = peek(cursor);
   if (line === null)
     return null;
@@ -39572,6 +39598,178 @@ var init_database = __esm({
   }
 });
 
+// ../../packages/envspec/dist/semverRange.js
+function rangeAdmits(version2, range) {
+  const locked = parseVersion2(version2);
+  if (locked === null || range.length > MAX_RANGE_LENGTH)
+    return null;
+  let unknown2 = false;
+  for (const alternative of range.split("||")) {
+    const interval = parseSet(alternative);
+    if (interval === null) {
+      unknown2 = true;
+      continue;
+    }
+    if (within(locked, interval))
+      return true;
+  }
+  return unknown2 ? null : false;
+}
+function parseVersion2(text) {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z.-]+)?$/.exec(text.trim());
+  if (m === null || !NUMBER.test(m[1]) || !NUMBER.test(m[2]) || !NUMBER.test(m[3]))
+    return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+function parseSet(text) {
+  const set = text.trim();
+  if (set === "")
+    return { low: null, high: null };
+  const hyphen = /^(\S+)\s+-\s+(\S+)$/.exec(set);
+  if (hyphen !== null) {
+    const from = parsePartial(hyphen[1]);
+    const to = parsePartial(hyphen[2]);
+    if (from === null || to === null)
+      return null;
+    return intersect(atLeast2(from), atMost(to));
+  }
+  const comparators = set.replace(/(<=|>=|<|>|=|~>|~|\^)\s+/g, "$1").split(/\s+/);
+  let interval = { low: null, high: null };
+  for (const comparator of comparators) {
+    const next = parseComparator(comparator);
+    if (next === null)
+      return null;
+    interval = intersect(interval, next);
+  }
+  return interval;
+}
+function parsePartial(text) {
+  const m = /^v?([^.]+)(?:\.([^.]+))?(?:\.([^.+]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(text);
+  if (m === null)
+    return null;
+  const parts = [];
+  let wild = false;
+  for (const part of [m[1], m[2], m[3]]) {
+    if (part === void 0 || /^[xX*]$/.test(part)) {
+      wild = true;
+      parts.push(null);
+      continue;
+    }
+    if (wild || !NUMBER.test(part))
+      return null;
+    parts.push(Number(part));
+  }
+  return { major: parts[0] ?? null, minor: parts[1] ?? null, patch: parts[2] ?? null };
+}
+function parseComparator(text) {
+  const m = /^(<=|>=|<|>|=|~>|~|\^)?(.*)$/.exec(text);
+  if (m === null)
+    return null;
+  const operator = m[1] ?? "";
+  const partial2 = parsePartial(m[2]);
+  if (partial2 === null)
+    return null;
+  const { major, minor, patch } = partial2;
+  if (major === null) {
+    return operator === "" || operator === "=" || operator === ">=" ? { low: null, high: null } : null;
+  }
+  switch (operator) {
+    case "":
+    case "=":
+      return intersect(atLeast2(partial2), atMost(partial2));
+    case ">=":
+      return atLeast2(partial2);
+    case "<=":
+      return atMost(partial2);
+    case ">":
+      return { low: { at: bumpPartial(partial2), inclusive: true }, high: null };
+    case "<":
+      return { low: null, high: { at: floor(partial2), inclusive: false } };
+    case "~":
+    case "~>":
+      return {
+        low: { at: floor(partial2), inclusive: true },
+        high: { at: minor === null ? [major + 1, 0, 0] : [major, minor + 1, 0], inclusive: false }
+      };
+    case "^": {
+      let high;
+      if (major > 0 || minor === null)
+        high = [major + 1, 0, 0];
+      else if (minor > 0 || patch === null)
+        high = [0, minor + 1, 0];
+      else
+        high = [0, 0, patch + 1];
+      return { low: { at: floor(partial2), inclusive: true }, high: { at: high, inclusive: false } };
+    }
+    default:
+      return null;
+  }
+}
+function floor(p) {
+  return [p.major ?? 0, p.minor ?? 0, p.patch ?? 0];
+}
+function bumpPartial(p) {
+  const major = p.major ?? 0;
+  if (p.minor === null)
+    return [major + 1, 0, 0];
+  if (p.patch === null)
+    return [major, p.minor + 1, 0];
+  return [major, p.minor, p.patch + 1];
+}
+function atLeast2(p) {
+  return p.major === null ? { low: null, high: null } : { low: { at: floor(p), inclusive: true }, high: null };
+}
+function atMost(p) {
+  if (p.major === null)
+    return { low: null, high: null };
+  if (p.patch !== null && p.minor !== null) {
+    return { low: null, high: { at: [p.major, p.minor, p.patch], inclusive: true } };
+  }
+  return { low: null, high: { at: bumpPartial(p), inclusive: false } };
+}
+function compare(a, b) {
+  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+}
+function intersect(a, b) {
+  const low = a.low === null ? b.low : b.low === null ? a.low : tighterLow(a.low, b.low);
+  const high = a.high === null ? b.high : b.high === null ? a.high : tighterHigh(a.high, b.high);
+  return { low, high };
+}
+function tighterLow(a, b) {
+  const c = compare(a.at, b.at);
+  if (c !== 0)
+    return c > 0 ? a : b;
+  return a.inclusive ? b : a;
+}
+function tighterHigh(a, b) {
+  const c = compare(a.at, b.at);
+  if (c !== 0)
+    return c < 0 ? a : b;
+  return a.inclusive ? b : a;
+}
+function within(v, interval) {
+  const { low, high } = interval;
+  if (low !== null) {
+    const c = compare(v, low.at);
+    if (c < 0 || c === 0 && !low.inclusive)
+      return false;
+  }
+  if (high !== null) {
+    const c = compare(v, high.at);
+    if (c > 0 || c === 0 && !high.inclusive)
+      return false;
+  }
+  return true;
+}
+var MAX_RANGE_LENGTH, NUMBER;
+var init_semverRange = __esm({
+  "../../packages/envspec/dist/semverRange.js"() {
+    "use strict";
+    MAX_RANGE_LENGTH = 1024;
+    NUMBER = /^(?:0|[1-9]\d{0,15})$/;
+  }
+});
+
 // ../../packages/envspec/dist/manifest.js
 function detectRuntime(repo) {
   const candidates = [];
@@ -39653,47 +39851,155 @@ function lockfileGaps(repo) {
   const pkg = readJsonObject(repo, "package.json");
   if (pkg === null)
     return null;
+  const lockfile = ["package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml"].find((name) => repo.exists(name));
+  if (lockfile === void 0)
+    return null;
+  const listingFor = lockfileListings(repo, pkg, lockfile);
+  if (listingFor === null)
+    return null;
+  const missing = [];
+  const rootListing = listingFor("");
+  if (rootListing !== null) {
+    for (const [n, r, sec] of wantedDependencies(pkg))
+      if (!rootListing(n, r, sec))
+        missing.push(`${n}@${r}`);
+  }
+  for (const dir of workspaceDirs(repo, pkg, lockfile)) {
+    const listing = listingFor(dir);
+    const manifest = readJsonObject(repo, `${dir}/package.json`);
+    if (listing === null || manifest === null)
+      continue;
+    for (const [n, r, sec] of wantedDependencies(manifest)) {
+      if (!listing(n, r, sec))
+        missing.push(`${n}@${r} (${dir})`);
+    }
+  }
+  return missing.length === 0 ? null : { lockfile, missing };
+}
+function wantedDependencies(pkg) {
   const wanted = [];
+  const optional2 = readObjectField(pkg, "optionalDependencies");
   for (const section2 of DEPENDENCY_SECTIONS) {
     const deps = readObjectField(pkg, section2);
     if (deps === null)
       continue;
     for (const [name, range] of Object.entries(deps)) {
+      if (section2 === "dependencies" && readStringField(optional2, name) !== null)
+        continue;
       if (typeof range === "string")
-        wanted.push([name, range]);
+        wanted.push([name, range, section2]);
     }
   }
-  if (wanted.length === 0)
-    return null;
-  const check = (lockfile, listed) => {
-    if (listed === null)
-      return null;
-    const missing = wanted.filter(([n, r]) => !listed(n, r)).map(([n, r]) => `${n}@${r}`);
-    return missing.length === 0 ? null : { lockfile, missing };
-  };
-  for (const lockfile of ["package-lock.json", "npm-shrinkwrap.json"]) {
-    if (repo.exists(lockfile))
-      return check(lockfile, npmLockListing(repo, lockfile));
-  }
-  if (repo.exists("yarn.lock"))
-    return check("yarn.lock", yarnLockListing(repo.readText("yarn.lock")));
-  if (repo.exists("pnpm-lock.yaml")) {
-    return check("pnpm-lock.yaml", pnpmLockListing(repo.readText("pnpm-lock.yaml")));
-  }
-  return null;
+  return wanted;
 }
-function npmLockListing(repo, lockfile) {
+function lockfileListings(repo, pkg, lockfile) {
+  if (lockfile === "yarn.lock") {
+    const root = yarnLockListing(repo.readText(lockfile));
+    return root === null ? null : (dir) => dir === "" ? root : null;
+  }
+  if (lockfile === "pnpm-lock.yaml") {
+    const text = repo.readText(lockfile);
+    const importers = pnpmImporters(text);
+    const settings = pnpmSettings(text);
+    const overrides = pnpmOverrides(text);
+    if (importers === null || settings === null || overrides === null)
+      return null;
+    const honoured = sameOverrides(overrides, declaredPnpmOverrides(repo, pkg)) ? overrides : /* @__PURE__ */ new Map();
+    const withOverrides = (listing) => (name, range, section2) => {
+      const override = honoured.get(name);
+      return listing(name, range, section2) || override !== void 0 && listing(name, override, section2);
+    };
+    const withSettings = (listing) => (name, range, section2) => !settings.autoInstallPeers && section2 === "peerDependencies" || settings.excludeLinksFromLockfile && range.startsWith("link:") || listing(name, range, section2);
+    const workspaceAware = text !== null && /^importers:/m.test(text);
+    return (dir) => {
+      const importer = importers.get(dir === "" ? "." : dir);
+      if (importer !== void 0)
+        return withSettings(withOverrides(pnpmImporterListing(importer)));
+      return dir === "" || !workspaceAware ? null : () => false;
+    };
+  }
+  return npmLockListings(repo, lockfile);
+}
+function npmLockListings(repo, lockfile) {
   const lock = readJsonObject(repo, lockfile);
   if (lock === null)
     return null;
-  const root = readObjectField(readObjectField(lock, "packages"), "");
-  if (root !== null) {
-    return (name, range) => DEPENDENCY_SECTIONS.some((s) => readStringField(readObjectField(root, s), name) === range);
+  const packages = readObjectField(lock, "packages");
+  if (readObjectField(packages, "") !== null) {
+    return (dir) => {
+      const entry = readObjectField(packages, dir);
+      if (entry === null)
+        return () => false;
+      return (name, range) => DEPENDENCY_SECTIONS.some((s) => readStringField(readObjectField(entry, s), name) === range);
+    };
   }
   const v1 = readObjectField(lock, "dependencies");
   if (v1 === null)
     return null;
-  return (name) => readObjectField(v1, name) !== null;
+  const root = (name, range) => {
+    const entry = readObjectField(v1, name);
+    if (entry === null)
+      return false;
+    const version2 = readStringField(entry, "version");
+    return version2 === null ? true : rangeAdmits(version2, range) ?? true;
+  };
+  return (dir) => dir === "" ? root : null;
+}
+function workspaceDirs(repo, pkg, lockfile) {
+  let patterns;
+  if (lockfile === "pnpm-lock.yaml") {
+    const text = repo.readText("pnpm-workspace.yaml");
+    try {
+      patterns = text === null ? [] : asStringList(mapGet(parseYaml(text, PNPM_LIMITS), "packages"));
+    } catch (err) {
+      if (!(err instanceof YamlUnsupportedError))
+        throw err;
+      patterns = [];
+    }
+  } else {
+    const field = pkg["workspaces"];
+    patterns = Array.isArray(field) ? field : readObjectField(pkg, "workspaces")?.["packages"];
+  }
+  if (!Array.isArray(patterns))
+    return [];
+  const budget = { visits: 0 };
+  const included = /* @__PURE__ */ new Set();
+  const excluded = /* @__PURE__ */ new Set();
+  for (const raw of patterns) {
+    if (typeof raw !== "string")
+      continue;
+    const negated = raw.startsWith("!");
+    const pattern = (negated ? raw.slice(1) : raw).replace(/^\.\//, "").replace(/\/+$/, "");
+    const segments = pattern.split("/");
+    if (pattern === "" || /[{}[\]\\]/.test(pattern) || segments.some((s) => s === ".." || s === "." || s === "")) {
+      continue;
+    }
+    for (const dir of matchSegments(repo, "", segments, 0, budget))
+      (negated ? excluded : included).add(dir);
+  }
+  const manifestOf = (dir) => `${dir}/package.json`;
+  return [...included].filter((dir) => !excluded.has(dir) && dir !== "" && readJsonObject(repo, manifestOf(dir)) !== null).sort().slice(0, WORKSPACE_LIMITS.maxWorkspaces);
+}
+function matchSegments(repo, base, segments, depth, budget) {
+  if (segments.length === 0)
+    return [base];
+  if (depth > WORKSPACE_LIMITS.maxDepth || budget.visits >= WORKSPACE_LIMITS.maxVisits)
+    return [];
+  budget.visits += 1;
+  const [head, ...rest] = segments;
+  const at = (name) => base === "" ? name : `${base}/${name}`;
+  const children = () => repo.listNames(base).filter((n) => n !== "node_modules" && !n.startsWith(".") && repo.isDirectory(at(n)));
+  if (head === "**") {
+    return [
+      ...matchSegments(repo, base, rest, depth + 1, budget),
+      ...children().flatMap((n) => matchSegments(repo, at(n), segments, depth + 1, budget))
+    ];
+  }
+  if (!/[*?]/.test(head)) {
+    return head !== "node_modules" && repo.isDirectory(at(head)) ? matchSegments(repo, at(head), rest, depth + 1, budget) : [];
+  }
+  const re = new RegExp(`^${head.replace(/[.+^$()|]/g, "\\$&").replace(/\*/g, "[^/]*").replace(/\?/g, "[^/]")}$`);
+  return children().filter((n) => re.test(n)).flatMap((n) => matchSegments(repo, at(n), rest, depth + 1, budget));
 }
 function yarnLockListing(text) {
   if (text === null || !/^(# yarn lockfile v1|__metadata:)/m.test(text))
@@ -39712,40 +40018,120 @@ function yarnLockListing(text) {
   }
   return (name, range) => specs.has(`${name}@${range}`);
 }
-function pnpmLockListing(text) {
+function pnpmImporterListing(importer) {
+  return (name, range) => asString2(mapGet(mapGet(importer, "specifiers"), name)) === range || PNPM_SECTIONS.some((section2) => asString2(mapGet(mapGet(mapGet(importer, section2), name), "specifier")) === range);
+}
+function pnpmSettings(text) {
+  if (text === null)
+    return null;
+  const block = topLevelBlock(text.replace(/\r\n/g, "\n").split("\n"), "settings");
+  let node = null;
+  try {
+    node = block === null ? null : mapGet(parseYaml(block, PNPM_LIMITS), "settings");
+  } catch (err) {
+    if (err instanceof YamlUnsupportedError)
+      return null;
+    throw err;
+  }
+  return {
+    autoInstallPeers: asString2(mapGet(node, "autoInstallPeers")) !== "false",
+    excludeLinksFromLockfile: asString2(mapGet(node, "excludeLinksFromLockfile")) === "true"
+  };
+}
+function pnpmOverrides(text) {
+  if (text === null)
+    return null;
+  const block = topLevelBlock(text.replace(/\r\n/g, "\n").split("\n"), "overrides");
+  if (block === null)
+    return /* @__PURE__ */ new Map();
+  let node;
+  try {
+    node = mapGet(parseYaml(block, PNPM_LIMITS), "overrides");
+  } catch (err) {
+    if (err instanceof YamlUnsupportedError)
+      return null;
+    throw err;
+  }
+  if (node === null)
+    return /* @__PURE__ */ new Map();
+  if (!isMap(node))
+    return null;
+  const overrides = /* @__PURE__ */ new Map();
+  for (const { key, value } of node.entries) {
+    const spec = asString2(value);
+    if (spec === null)
+      return null;
+    overrides.set(key, spec);
+  }
+  return overrides;
+}
+function declaredPnpmOverrides(repo, pkg) {
+  const sources = [
+    readObjectField(readObjectField(pkg, "pnpm"), "overrides"),
+    readObjectField(pkg, "resolutions")
+  ];
+  const workspace = repo.readText("pnpm-workspace.yaml");
+  if (workspace !== null) {
+    let node;
+    try {
+      node = mapGet(parseYaml(workspace, PNPM_LIMITS), "overrides");
+    } catch (err) {
+      if (err instanceof YamlUnsupportedError)
+        return null;
+      throw err;
+    }
+    if (node !== null && !isMap(node))
+      return null;
+    if (isMap(node))
+      sources.push(Object.fromEntries(node.entries.map((e) => [e.key, e.value])));
+  }
+  const declared = /* @__PURE__ */ new Map();
+  for (const source of sources) {
+    for (const [key, value] of Object.entries(source ?? {})) {
+      if (typeof value !== "string")
+        return null;
+      const seen = declared.get(key);
+      if (seen !== void 0 && seen !== value)
+        return null;
+      declared.set(key, value);
+    }
+  }
+  return declared;
+}
+function sameOverrides(a, b) {
+  return b !== null && a.size === b.size && [...a].every(([key, value]) => b.get(key) === value);
+}
+function pnpmImporters(text) {
   if (text === null || !/^lockfileVersion:/m.test(text))
     return null;
-  const lines = pnpmRootLines(text.split(/\r?\n/));
-  if (lines === null)
-    return null;
-  const unquote = (s) => s.replace(/^['"]|['"]$/g, "");
-  return (name, range) => lines.some((line, i) => {
-    if (unquote(line) === `${name}:` || line === `'${name}':` || line === `"${name}":`) {
-      const next = lines[i + 1] ?? "";
-      return next.startsWith("specifier:") && unquote(next.slice(10).trim()) === range;
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  try {
+    const importers = topLevelBlock(lines, "importers");
+    if (importers !== null) {
+      const node = mapGet(parseYaml(importers, PNPM_LIMITS), "importers");
+      return isMap(node) ? new Map(node.entries.map((e) => [e.key, e.value])) : null;
     }
-    const flat = /^(['"]?)(.+)\1:\s*(.+)$/.exec(line);
-    return flat !== null && flat[2] === name && unquote(flat[3] ?? "") === range;
-  });
-}
-function pnpmRootLines(raw) {
-  const importers = raw.indexOf("importers:");
-  if (importers === -1) {
-    const end = raw.indexOf("packages:");
-    return (end === -1 ? raw : raw.slice(0, end)).map((l) => l.trim());
+    const entries = [];
+    for (const key of [...PNPM_SECTIONS, "specifiers"]) {
+      const block = topLevelBlock(lines, key);
+      if (block !== null)
+        entries.push({ key, value: mapGet(parseYaml(block, PNPM_LIMITS), key) });
+    }
+    return /* @__PURE__ */ new Map([[".", { kind: "map", entries }]]);
+  } catch (err) {
+    if (err instanceof YamlUnsupportedError)
+      return null;
+    throw err;
   }
-  const start = raw.findIndex((l, i) => i > importers && /^ {2}(['"]?)\.\1:\s*$/.test(l));
+}
+function topLevelBlock(lines, key) {
+  const start = lines.findIndex((l) => l === `${key}:` || l.startsWith(`${key}: `));
   if (start === -1)
     return null;
-  const out = [];
-  for (const line of raw.slice(start + 1)) {
-    if (line.trim() === "")
-      continue;
-    if (!line.startsWith("   "))
-      break;
-    out.push(line.trim());
-  }
-  return out;
+  let end = start + 1;
+  while (end < lines.length && (lines[end] === "" || /^[ \t#]/.test(lines[end])))
+    end += 1;
+  return lines.slice(start, end).join("\n");
 }
 function unfrozenInstall(command) {
   const lead = /^(?:(?:sudo|time)\s+|env(?:\s+[A-Za-z_]\w*=\S*)*\s+)*/.exec(command)?.[0] ?? "";
@@ -40034,10 +40420,12 @@ function matchFirst(text, pattern) {
   const match2 = pattern.exec(text);
   return match2 === null ? null : match2[1];
 }
-var RUNTIME_MANIFESTS, MAKEFILE_NAMES, C_FAMILY_SOURCE, MANIFEST_FILENAMES, JVM_BUILD_FILES, NPM_PLACEHOLDER_TEST, DEPENDENCY_SECTIONS, YARN_MUTABLE, REQUIREMENT_SPECIFIER, CPP_BUILD_FILES, CMAKE_DECLARES_TESTS, EXACT_VERSION;
+var RUNTIME_MANIFESTS, MAKEFILE_NAMES, C_FAMILY_SOURCE, MANIFEST_FILENAMES, JVM_BUILD_FILES, NPM_PLACEHOLDER_TEST, DEPENDENCY_SECTIONS, WORKSPACE_LIMITS, PNPM_LIMITS, PNPM_SECTIONS, YARN_MUTABLE, REQUIREMENT_SPECIFIER, CPP_BUILD_FILES, CMAKE_DECLARES_TESTS, EXACT_VERSION;
 var init_manifest2 = __esm({
   "../../packages/envspec/dist/manifest.js"() {
     "use strict";
+    init_semverRange();
+    init_yaml();
     RUNTIME_MANIFESTS = [
       { runtime: "node", files: ["package.json"] },
       { runtime: "python", files: ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"] },
@@ -40061,6 +40449,9 @@ var init_manifest2 = __esm({
       "optionalDependencies",
       "peerDependencies"
     ];
+    WORKSPACE_LIMITS = { maxDepth: 8, maxVisits: 2e3, maxWorkspaces: 200 };
+    PNPM_LIMITS = { maxDepth: 8, maxLineLength: 4096 };
+    PNPM_SECTIONS = ["dependencies", "devDependencies", "optionalDependencies"];
     YARN_MUTABLE = "YARN_ENABLE_IMMUTABLE_INSTALLS=false";
     REQUIREMENT_SPECIFIER = /^[A-Za-z0-9._-]+(\[[A-Za-z0-9._,-]+\])?([<>=!~]=?[A-Za-z0-9._*+-]+(,[<>=!~]=?[A-Za-z0-9._*+-]+)*)?$/;
     CPP_BUILD_FILES = [
@@ -40141,21 +40532,50 @@ var init_references = __esm({
 });
 
 // ../../packages/envspec/dist/repo.js
-import { readdirSync as readdirSync4, readFileSync as readFileSync27, statSync as statSync6 } from "fs";
+import { readdirSync as readdirSync4, readFileSync as readFileSync27, realpathSync as realpathSync3, statSync as statSync6 } from "fs";
 import { join as join42, relative as relative2, sep as sep7 } from "path";
 function createRepoReader(repoPath) {
   const resolveIn = (relativePath) => relativePath === "" ? repoPath : join42(repoPath, relativePath);
   const toPosix = (absolute) => relative2(repoPath, absolute).split(sep7).join("/");
-  const readText = (relativePath) => {
+  let realRoot;
+  const rootPrefix = () => {
+    if (realRoot === void 0) {
+      try {
+        const real = realpathSync3(repoPath);
+        realRoot = real.endsWith(sep7) ? real : real + sep7;
+      } catch {
+        realRoot = null;
+      }
+    }
+    return realRoot;
+  };
+  const containedPath = (relativePath) => {
+    const prefix = rootPrefix();
+    if (prefix === null)
+      return null;
     try {
-      return readFileSync27(resolveIn(relativePath), "utf8");
+      const real = realpathSync3(resolveIn(relativePath));
+      return real + sep7 === prefix || real.startsWith(prefix) ? real : null;
+    } catch {
+      return null;
+    }
+  };
+  const readText = (relativePath) => {
+    const real = containedPath(relativePath);
+    if (real === null)
+      return null;
+    try {
+      return readFileSync27(real, "utf8");
     } catch {
       return null;
     }
   };
   const statOf = (relativePath) => {
+    const real = containedPath(relativePath);
+    if (real === null)
+      return null;
     try {
-      return statSync6(resolveIn(relativePath));
+      return statSync6(real);
     } catch {
       return null;
     }
@@ -40201,11 +40621,14 @@ function createRepoReader(repoPath) {
       const st = statOf(relativeDir);
       if (st === null || !st.isDirectory())
         return [];
+      let names;
       try {
-        return readdirSync4(resolveIn(relativeDir)).slice().sort();
+        names = readdirSync4(resolveIn(relativeDir));
       } catch {
         return [];
       }
+      const at = (name) => relativeDir === "" ? name : `${relativeDir}/${name}`;
+      return names.filter((name) => containedPath(at(name)) !== null).sort();
     }
   };
 }
@@ -42242,6 +42665,12 @@ async function runVerification(req, ctx) {
       testOutputTail: outputTail,
       counts: verdict.counts,
       wallMs: Date.now() - startedAt,
+      // TERM-1308: the steps' own durations, which `runEnvironmentSpec` measures, and the
+      // limit applied to the test step. Absent rather than 0 or a default when there is
+      // nothing to report, so a baseline never sizes a budget from a step that did not run.
+      ...verdict.install === null ? {} : { installMs: verdict.install.wallMs },
+      ...verdict.test === null ? {} : { testMs: verdict.test.wallMs },
+      ...req.testTimeoutMs === void 0 ? {} : { testTimeoutMs: req.testTimeoutMs },
       targetRepo: publishableTarget(req.targetRepo),
       targetSha: req.targetSha,
       patchSha256,
@@ -43785,6 +44214,8 @@ __export(jpi_claim_exports, {
   assertNoBooleanPath: () => assertNoBooleanPath,
   attemptSliceDelivery: () => attemptSliceDelivery,
   backgroundEnableFailed: () => backgroundEnableFailed,
+  baselineFields: () => baselineFields,
+  baselineLine: () => baselineLine,
   beatFounderPresence: () => beatFounderPresence,
   buildAssignmentComment: () => buildAssignmentComment,
   buildPatchSubmission: () => buildPatchSubmission,
@@ -43837,6 +44268,7 @@ __export(jpi_claim_exports, {
   pickBodySource: () => pickBodySource,
   pickExistingPr: () => pickExistingPr,
   pickStartableClaim: () => pickStartableClaim,
+  postingTestBudgetMinutes: () => postingTestBudgetMinutes,
   printNextSteps: () => printNextSteps,
   printReleaseIsLocalOnly: () => printReleaseIsLocalOnly,
   printResolveHint: () => printResolveHint,
@@ -43883,7 +44315,7 @@ import {
   renameSync as renameSync11,
   existsSync as existsSync21,
   lstatSync as lstatSync6,
-  realpathSync as realpathSync3,
+  realpathSync as realpathSync4,
   rmSync as rmSync12,
   readdirSync as readdirSync5,
   statSync as statSync7,
@@ -44145,7 +44577,7 @@ function canonicalPath2(p) {
   if (typeof p !== "string" || p === "") return p;
   const resolved = pathResolve(p);
   try {
-    return realpathSync3.native(resolved);
+    return realpathSync4.native(resolved);
   } catch {
     return resolved;
   }
@@ -44226,6 +44658,52 @@ async function fetchFreshClaimablePool() {
   const contributions = (index?.contribute ?? []).filter((j) => j.source === "contribute");
   return [...bounties, ...contributions];
 }
+function baselineFields(b) {
+  const out = {};
+  const m = b?.testBudgetMinutes;
+  if (Number.isInteger(m) && m >= MIN_TEST_BUDGET_MINUTES && m <= MAX_TEST_BUDGET_MINUTES) {
+    out.testBudgetMinutes = m;
+  }
+  if (typeof b?.baselineStatus === "string" && BASELINE_STATUSES.has(b.baselineStatus)) {
+    out.baselineStatus = b.baselineStatus;
+  }
+  if (typeof b?.baselineSha === "string" && /^[0-9a-f]{7,40}$/.test(b.baselineSha)) {
+    out.baselineSha = b.baselineSha;
+  }
+  return out;
+}
+function baselineLine({ baselineStatus, baselineSha, testBudgetMinutes } = {}) {
+  const at = typeof baselineSha === "string" ? ` at ${baselineSha.slice(0, 12)}` : "";
+  const limit2 = typeof testBudgetMinutes === "number" ? ` Time limit ${String(testBudgetMinutes)} min.` : "";
+  switch (baselineStatus) {
+    case "passed":
+      return `Tests ran on Terminal Hire's machines${at} and passed.${limit2}`;
+    case "failed":
+      return `Tests ran on Terminal Hire's machines${at} and did not pass.${limit2}`;
+    case "unreadable":
+      return `Tests ran; Terminal Hire could not read the result.${limit2}`;
+    case "no-tests":
+      return `Tests ran and none were observed.${limit2}`;
+    case "over-ceiling":
+      return "Terminal Hire stopped this repository's tests at the 120-min limit.";
+    case "not-runnable":
+      return "Terminal Hire could not run this repository's tests.";
+    case "not-runnable-policy":
+      return "Terminal Hire does not run tests for postings shared at this level.";
+    case "pending":
+      return "Test time being measured.";
+    case "over-cap":
+      return "Test time not measured yet.";
+    default:
+      return null;
+  }
+}
+function postingTestBudgetMinutes(bountyId) {
+  if (typeof bountyId !== "string") return null;
+  const job = findClaimableInCache(bountyId);
+  if (!job || job.source !== "bounty") return null;
+  return baselineFields(job.bounty).testBudgetMinutes ?? null;
+}
 function extractClaimableFields(job) {
   if (job.source === "contribute") {
     const c = job.contribution ?? {};
@@ -44269,7 +44747,9 @@ function extractClaimableFields(job) {
     // (`publicRunRequirements`). Carried, never derived here: the CLI has no copy of the
     // repository before a claim, and a second derivation could disagree with the one the
     // poster saw. Null when the index carries none.
-    runRequirements: b.runRequirements && typeof b.runRequirements === "object" ? b.runRequirements : null
+    runRequirements: b.runRequirements && typeof b.runRequirements === "object" ? b.runRequirements : null,
+    // TERM-1308. Present only when the index row carries them; no key otherwise.
+    ...b.bountySource === "founder" ? baselineFields(b) : {}
   };
 }
 function parseGitHubUrl(url) {
@@ -44869,6 +45349,7 @@ async function resolveBounty(arg) {
   let founderPosting = false;
   let claimMode = "open";
   let runRequirements = null;
+  let baseline = {};
   let job = findClaimableInCache(arg) ?? (looksLikeShortRef(arg) ? findClaimableByShortRef(arg) : null);
   let freshPool;
   if (!job && looksLikeShortRef(arg)) {
@@ -44876,6 +45357,7 @@ async function resolveBounty(arg) {
     if (freshPool) job = findByShortRefInPool(freshPool, arg);
   }
   if (job) {
+    let testBudgetMinutes, baselineStatus, baselineSha;
     ({
       bountyId,
       title,
@@ -44886,8 +45368,16 @@ async function resolveBounty(arg) {
       openPRsAtDiscovery,
       founderPosting,
       claimMode,
-      runRequirements
+      runRequirements,
+      testBudgetMinutes,
+      baselineStatus,
+      baselineSha
     } = extractClaimableFields(job));
+    baseline = {
+      ...testBudgetMinutes === void 0 ? {} : { testBudgetMinutes },
+      ...baselineStatus === void 0 ? {} : { baselineStatus },
+      ...baselineSha === void 0 ? {} : { baselineSha }
+    };
     indexNativeId = bountyId;
   } else {
     const parsed = parseGitHubUrl(arg);
@@ -44959,7 +45449,8 @@ async function resolveBounty(arg) {
     founderPosting,
     claimMode,
     // TERM-1259. Only a founder index hit carries these; every other path is null.
-    runRequirements: runRequirements ?? null
+    runRequirements: runRequirements ?? null,
+    ...baseline
   };
 }
 function fmtOpenPRsLine(b) {
@@ -45643,6 +46134,8 @@ async function cmdPreview(arg, { json } = {}) {
         openPRs: b.openPRs,
         assignees: b.assignees,
         contested: isContested(b),
+        // TERM-1308. The posting's test budget and baseline, only when the index carried them.
+        ...baselineFields(b),
         // Absent on a founder posting — see the scan above. A consumer must read
         // "no policy key" as "no policy step exists here", never as "clean".
         ...policy ? {
@@ -45673,6 +46166,8 @@ async function cmdPreview(arg, { json } = {}) {
   console.log(fmtOpenPRsLine(b));
   const previewContested = fmtContestedWarning(b);
   if (previewContested) console.log(previewContested);
+  const previewBaseline = baselineLine(b);
+  if (previewBaseline) console.log(`  tests:  ${previewBaseline}`);
   if (policy) printPolicySection(policy);
   if (process.stdout.isTTY) {
     try {
@@ -49260,7 +49755,7 @@ async function run7() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR17, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL6, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, CLAIM_SYNC_WRITE_TIMEOUT_MS, GH_API3, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, CLOSED_STATES, GH_SESSION_COOKIE4, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, OPENABLE_AGENTS, BRIEF_DIR, BRIEF_REL_PATH, VERIFY_REL_PATH, AGENTS_REL_PATH, BRIEF_EXCLUDE_LINE, PACK_SAFE_ID, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3, FOUNDER_POSTING_ID, CLAIM_SCREENSHOT_PUT_TIMEOUT_MS, CLAIM_RESOLUTION_REASONS, SETUP_FAILED_REQUIREMENTS, POSTING_LEVEL_RESOLUTION_REASONS, RESOLUTION_REASON_BLURB;
+var TERMINALHIRE_DIR17, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL6, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, CLAIM_SYNC_WRITE_TIMEOUT_MS, GH_API3, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, BASELINE_STATUSES, MIN_TEST_BUDGET_MINUTES, MAX_TEST_BUDGET_MINUTES, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, CLOSED_STATES, GH_SESSION_COOKIE4, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, OPENABLE_AGENTS, BRIEF_DIR, BRIEF_REL_PATH, VERIFY_REL_PATH, AGENTS_REL_PATH, BRIEF_EXCLUDE_LINE, PACK_SAFE_ID, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3, FOUNDER_POSTING_ID, CLAIM_SCREENSHOT_PUT_TIMEOUT_MS, CLAIM_RESOLUTION_REASONS, SETUP_FAILED_REQUIREMENTS, POSTING_LEVEL_RESOLUTION_REASONS, RESOLUTION_REASON_BLURB;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
@@ -49315,6 +49810,20 @@ var init_jpi_claim = __esm({
       // TERM-1273. `claim submit --screenshots <file>` names the attachments JSON.
       "screenshots"
     ]);
+    BASELINE_STATUSES = /* @__PURE__ */ new Set([
+      "pending",
+      "not-scheduled",
+      "passed",
+      "failed",
+      "unreadable",
+      "no-tests",
+      "over-ceiling",
+      "not-runnable",
+      "not-runnable-policy",
+      "over-cap"
+    ]);
+    MIN_TEST_BUDGET_MINUTES = 5;
+    MAX_TEST_BUDGET_MINUTES = 120;
     ASSIGNMENT_MARKER = "<!-- terminalhire:assignment-request -->";
     STAKE_MARKER = "<!-- terminalhire:claim-stake -->";
     STANDDOWN_MARKER = "<!-- terminalhire:claim-standdown -->";
@@ -50554,9 +51063,10 @@ __export(jpi_run_exports, {
   once: () => once,
   resolveClaimContext: () => resolveClaimContext,
   run: () => run10,
-  screenshotsOption: () => screenshotsOption
+  screenshotsOption: () => screenshotsOption,
+  testTimeoutMsForBudget: () => testTimeoutMsForBudget
 });
-import { existsSync as existsSync25, readFileSync as readFileSync32, realpathSync as realpathSync4 } from "fs";
+import { existsSync as existsSync25, readFileSync as readFileSync32, realpathSync as realpathSync5 } from "fs";
 import { execFileSync as execFileSync4 } from "child_process";
 import { join as join50, resolve as resolve7 } from "path";
 import { homedir as homedir29, tmpdir as tmpdir5 } from "os";
@@ -50647,14 +51157,14 @@ function realToplevel(dir) {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"]
     }).trim();
-    return top === "" ? null : realpathSync4(top);
+    return top === "" ? null : realpathSync5(top);
   } catch {
     return null;
   }
 }
 function realpathOrNull(path6) {
   try {
-    return realpathSync4(path6);
+    return realpathSync5(path6);
   } catch {
     return null;
   }
@@ -50705,6 +51215,9 @@ function resolveClaimContext({ localDir, flags, claims }) {
   }
   return { claimId: claim.id, target, sha, diffBase, workspaceRoot: here };
 }
+function testTimeoutMsForBudget(minutes) {
+  return Number.isInteger(minutes) && minutes > 0 ? minutes * 6e4 : null;
+}
 async function once(engine, opts) {
   const { root } = opts.scratch;
   const started = Date.now();
@@ -50733,6 +51246,9 @@ async function once(engine, opts) {
     ...opts.screenshots ? { screenshots: opts.screenshots } : {},
     ...opts.placement ? { placement: opts.placement } : {},
     ...opts.testCommand ? { testCommandOverride: opts.testCommand } : {},
+    // TERM-1308. The posting's own test time limit, when its baseline set one; absent
+    // means envrun's default, exactly as before.
+    ...opts.testTimeoutMs ? { testTimeoutMs: opts.testTimeoutMs } : {},
     // No `imageOrigin` beside it, deliberately. This flag runs on the DEVELOPER's machine,
     // judging the developer's work, so it takes `thrun`'s default of `developer` — the same
     // reasoning that makes `--test-command` developer-declared. An operator override is a
@@ -50817,11 +51333,16 @@ async function run10() {
       `terminalhire: --keep must be at most ${String(KEEP_MAX_SECONDS)} seconds, got ${JSON.stringify(String(keepRaw))}. Past that the timer overflows its int32 of milliseconds and the wait collapses to 1ms, so asking for a longer hold would give you no hold at all and the URL printed above it would be dead before anyone could open it. Refused rather than clamped, because a preview that died on the way to you looks exactly like one that worked.`
     );
   }
+  const claims = readClaims();
   const claimContext = resolveClaimContext({
     localDir,
     flags: { claim: pick2("claim"), target: pick2("target"), sha: pick2("sha") },
-    claims: readClaims()
+    claims
   });
+  const claimedBountyId = claimContext ? claims.find((c) => c.id === claimContext.claimId)?.bountyId ?? null : null;
+  const testTimeoutMs = claimedBountyId === null ? null : testTimeoutMsForBudget(
+    (await Promise.resolve().then(() => (init_jpi_claim(), jpi_claim_exports))).postingTestBudgetMinutes(claimedBountyId)
+  );
   const opts = {
     claimId: requireField(
       claimContext?.claimId ?? pick2("claim"),
@@ -50852,6 +51373,7 @@ async function run10() {
     watch: parsed.bools.has("watch"),
     json: parsed.bools.has("json"),
     testCommand: pick2("test-command") ?? null,
+    testTimeoutMs,
     image: pick2("image") ?? null,
     keepSeconds,
     scratch: runScratchRoot()
@@ -71857,8 +72379,8 @@ var require_formats = __commonJS({
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.formatNames = exports.fastFormats = exports.fullFormats = void 0;
-    function fmtDef(validate, compare) {
-      return { validate, compare };
+    function fmtDef(validate, compare2) {
+      return { validate, compare: compare2 };
     }
     exports.fullFormats = {
       // date: http://tools.ietf.org/html/rfc3339#section-5.6
@@ -78875,8 +79397,9 @@ async function resolveClaimPreview(opportunity, { semantic = false } = {}) {
       hint: "Pass an indexed bounty/contribution id, short reference, or GitHub issue URL in `opportunity`."
     };
   }
-  const { resolveBounty: resolveBounty2, isContested: isContested2 } = await Promise.resolve().then(() => (init_jpi_claim(), jpi_claim_exports));
+  const { resolveBounty: resolveBounty2, isContested: isContested2, baselineFields: baselineFields2, baselineLine: baselineLine2 } = await Promise.resolve().then(() => (init_jpi_claim(), jpi_claim_exports));
   const bounty = await resolveBounty2(opportunity.trim());
+  const line = bounty ? baselineLine2(bounty) : null;
   if (!bounty) {
     return {
       status: "not_found",
@@ -78916,6 +79439,11 @@ async function resolveClaimPreview(opportunity, { semantic = false } = {}) {
     // caller only and is never sent anywhere.
     requirements: bounty.runRequirements ?? null,
     localSetup: bounty.runRequirements ? await probeLocalSetup(bounty.runRequirements) : null,
+    // TERM-1308. The posting's test budget and what its baseline run found, plus the one
+    // line the CLI card prints for it. No key at all when the index carries none, so a
+    // posting without a baseline reads exactly as it did before.
+    ...baselineFields2(bounty),
+    ...line === null ? {} : { baselineLine: line },
     _policy: policy,
     // Internal routing bit from the CLI's shared resolver. Founder postings are
     // not ordinary local-only claims: the interactive CLI must register them
@@ -79376,7 +79904,7 @@ var init_jpi_mcp = __esm({
       },
       {
         name: "claim_preview",
-        description: "Preview a bounty or contribution before claiming. Performs governed public reads for issue freshness, contention, and repository policy; writes nothing. For a posted bounty it also returns what the work needs (runtime, install and test commands, services, OS) and which of those tools this machine has, checked locally and sent nowhere.",
+        description: "Preview a bounty or contribution before claiming. Performs governed public reads for issue freshness, contention, and repository policy; writes nothing. For a posted bounty it also returns what the work needs (runtime, install and test commands, services, OS) and which of those tools this machine has, checked locally and sent nowhere, and, once measured, the test time limit set for the posting with one line on its baseline run.",
         inputSchema: CLAIM_PREVIEW_SCHEMA
       },
       {
@@ -80077,8 +80605,8 @@ async function run22() {
     const remote = await prompt5(`Remote only? (y/n) [${profile.remoteOnly ? "y" : "n"}]: `);
     if (remote === "y") profile.remoteOnly = true;
     if (remote === "n") profile.remoteOnly = false;
-    const floor = await prompt5(`Comp floor USD [${profile.compFloorUsd ?? "not set"}]: `);
-    if (floor && !isNaN(parseInt(floor, 10))) profile.compFloorUsd = parseInt(floor, 10);
+    const floor2 = await prompt5(`Comp floor USD [${profile.compFloorUsd ?? "not set"}]: `);
+    if (floor2 && !isNaN(parseInt(floor2, 10))) profile.compFloorUsd = parseInt(floor2, 10);
     await writeProfile2(profile);
     console.log("\nProfile updated (encrypted at ~/.terminalhire/profile.enc)");
     return;

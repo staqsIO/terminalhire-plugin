@@ -1,6 +1,6 @@
 ---
 name: approvals
-description: Show a poster what is waiting on them — work on their own TerminalHire postings, the check results, any held patch — as one selectable list, and send a claim back for another pass with a note. Reads through the poster connector (the terminalhire-founder MCP server). Use when the user asks "are there any approvals?", "anything I need to approve?", "what's waiting on me?", or reacts to the statusline's 🧭 decision badge. Accepting work and paying happen only in the browser.
+description: Show a poster what is waiting on them — work on their own TerminalHire postings, the check results, any held patch — as one selectable list, and send a claim back for another pass with a note. Reads through the poster connector (the terminalhire-founder MCP server). Use when the user asks "are there any approvals?", "anything I need to approve?", "what's waiting on me?", reacts to the statusline's 🧭 decision badge, or asks to watch for new submissions ("keep an eye on my postings", "tell me when work comes in"). Accepting work and paying happen only in the browser.
 ---
 
 # terminalhire:approvals
@@ -98,3 +98,39 @@ After the summary, offer exactly these:
   `dashboardUrl` followed by `/dashboard/postings/<postingId>/claims/<claimId>`. Say that
   accepting the work and paying happen there, signed in.
 - **Next item** — go back to the list.
+
+## 6. Watching for new work
+
+When the poster asks you to watch — "keep an eye on my postings", "tell me when work
+comes in" — check on a timer instead of once, so a submission is seen the same day. A
+submission gives the poster 96 hours to decide, and the developer waits on that.
+
+**The watch only reads.** Each check calls two tools and nothing else:
+
+- `pending_count()` — has the number waiting on the poster changed?
+- `claim_progress()` — only when it has, to see which postings and claims are new.
+
+The watch never sends anything to a developer, and it never accepts, rejects or pays.
+Nothing the connector offers can. When something new is waiting, say so in one short
+message: the title, whether it is work to review (`verdict`) or a developer asking to
+start (`approval`), and the review link. That is the origin of `dashboardUrl` followed by
+`/dashboard/postings/<postingId>/claims/<claimId>`, or `/dashboard/postings/<postingId>`
+for an `approval` row. Say that deciding happens in the browser, signed in. If the poster
+then wants to go through it, leave the watch and use sections 3 to 5, where every reply
+waits on their say-so.
+
+**How to run it.** In Claude Code, start it with `/loop` and the poster's interval.
+Every 30 minutes is the default; do not go below 5. Remember the last `needsYouCount`,
+and for each row you report, its `claimId`, `waitingOn` and `attempts` together. Report a
+row when that combination is new. A claim keeps its `claimId` when it is sent back and
+resubmitted, so a resubmission shows up as a higher `attempts`, and a developer who was
+approved and then submits shows up as `waitingOn` moving from `approval` to `verdict`.
+Both are new work and must be reported. A check where nothing is new says nothing. If you
+have lost track of what you reported (after a long session, say), report what is waiting
+once and carry on from there: a repeat costs the poster a line, a missed submission costs
+them the deadline. Without a loop facility, check once and tell the poster to ask again
+later. Do not busy-wait.
+
+**When to stop.** Stop when the poster says so. Also stop, and tell them, when a check
+comes back signed out or unauthorized: the connector was revoked, and retrying will not
+fix it.
