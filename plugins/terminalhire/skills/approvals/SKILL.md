@@ -103,7 +103,8 @@ After the summary, offer exactly these:
 
 When the poster asks you to watch — "keep an eye on my postings", "tell me when work
 comes in" — check on a timer instead of once, so a submission is seen the same day. A
-submission gives the poster 96 hours to decide, and the developer waits on that.
+submission gives the poster their posting's decision window to decide (96 hours
+unless they set another), and the developer waits on that.
 
 **The watch only reads.** Each check calls two tools and nothing else:
 

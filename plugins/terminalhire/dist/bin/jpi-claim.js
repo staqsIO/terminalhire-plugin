@@ -5181,20 +5181,20 @@ var init_github_issue_status = __esm({
 // ../../packages/core/src/credit.ts
 function verifyClaimCredit(claim, facts) {
   const reasons = [];
-  const fail2 = (code, message2) => reasons.push({ code, message: message2 });
+  const fail3 = (code, message2) => reasons.push({ code, message: message2 });
   const norm = (r) => r.trim().toLowerCase();
   if (norm(facts.repo) !== norm(claim.repo))
-    fail2("repo-mismatch", `PR is in ${facts.repo}, claim is against ${claim.repo}`);
-  if (!facts.merged) fail2("not-merged", `PR #${facts.prNumber} is not merged`);
+    fail3("repo-mismatch", `PR is in ${facts.repo}, claim is against ${claim.repo}`);
+  if (!facts.merged) fail3("not-merged", `PR #${facts.prNumber} is not merged`);
   if (facts.authorId == null || facts.authorId !== claim.claimantId)
-    fail2("author-mismatch", `PR author id ${facts.authorId} !== claimant id ${claim.claimantId}`);
+    fail3("author-mismatch", `PR author id ${facts.authorId} !== claimant id ${claim.claimantId}`);
   if (facts.merged && facts.mergedById != null && facts.authorId != null && facts.mergedById === facts.authorId)
-    fail2("self-merged", `PR was merged by its own author (id ${facts.authorId})`);
+    fail3("self-merged", `PR was merged by its own author (id ${facts.authorId})`);
   if (claim.claimedIssueNumber != null) {
     if (facts.closesIssues.length === 0)
-      fail2("issue-linkage-missing", `PR closes no issue; claim names #${claim.claimedIssueNumber}`);
+      fail3("issue-linkage-missing", `PR closes no issue; claim names #${claim.claimedIssueNumber}`);
     else if (!facts.closesIssues.includes(claim.claimedIssueNumber))
-      fail2(
+      fail3(
         "issue-linkage-mismatch",
         `PR closes ${facts.closesIssues.map((n) => "#" + n).join(", ")}; claim names #${claim.claimedIssueNumber}`
       );
@@ -26408,10 +26408,10 @@ var init_classify2 = __esm({
         runner: "node --test (TAP)",
         read: (out) => {
           const pass = /^# pass (\d+)$/m.exec(out);
-          const fail2 = /^# fail (\d+)$/m.exec(out);
-          if (!pass || !fail2)
+          const fail3 = /^# fail (\d+)$/m.exec(out);
+          if (!pass || !fail3)
             return null;
-          return { tests_passed: int(pass), tests_failed: int(fail2) };
+          return { tests_passed: int(pass), tests_failed: int(fail3) };
         },
         // One `# pass N` per invocation, so a script that runs `node --test` once per file
         // prints many. envrun's own offline leg printed 67 and was read as the first one's 4.
@@ -29349,7 +29349,7 @@ function resolvePublishedImage(image, runtime, version, variant) {
   if (shape && shape.declaredIsFloor && atLeast(shape.defaultVersion, version)) {
     return unversionedImage(shape);
   }
-  throw new RunRefusalError(`the repo declares ${runtime} ${version}, and no image is published at ${image}` + (shape && shape.declaredIsFloor ? `. Our default is ${shape.defaultVersion}, which is OLDER than that, so falling back would run the repo under a toolchain it says it cannot use` : `. ${runtime} treats a declared version as an exact pin, not a minimum, so a different one is a different environment`) + ". Refusing rather than booting a version the repo did not ask for \u2014 that substitution is what made this class of failure unattributable (TERM-643). Pass an explicit image to override.");
+  throw new RunRefusalError(`the repo declares ${runtime} ${version}, and no image is published at ${image}` + (shape && shape.declaredIsFloor ? `. Our default is ${shape.defaultVersion}, which is OLDER than that, so falling back would run the repo under a toolchain it says it cannot use` : `. ${runtime} treats a declared version as an exact pin, not a minimum, so a different one is a different environment`) + ". Refusing rather than booting a version the repo did not ask for \u2014 that substitution is what made this class of failure unattributable (TERM-643). Pass an explicit image to override.", { origin: "repository" });
 }
 function resolveImageForSpec(spec, override) {
   const variant = imageVariantFor(spec);
@@ -29588,6 +29588,17 @@ var init_execute = __esm({
     EnvRunError = class extends Error {
     };
     RunRefusalError = class extends EnvRunError {
+      /**
+       * Whose side refused (TERM-1313), set at the throw and never read back out of the message.
+       * A baseline intake labels a posting not-runnable on `repository`, so that value is passed
+       * only where envrun can show the repository asked for something we cannot supply. Every
+       * other refusal, including one nobody has classified yet, is `ours` by default.
+       */
+      origin;
+      constructor(message2, options) {
+        super(message2, options);
+        this.origin = options?.origin ?? "ours";
+      }
     };
     MAX_CAUSE_FRAMES = 16;
     CHAIN_UNREADABLE = "<the cause chain stopped: a value refused to be read>";
@@ -29815,6 +29826,17 @@ var init_dsse = __esm({
   }
 });
 
+// ../../packages/attest/dist/dispatchedRun.js
+import { createHash as createHash7, createPublicKey as createPublicKey2 } from "crypto";
+var init_dispatchedRun = __esm({
+  "../../packages/attest/dist/dispatchedRun.js"() {
+    "use strict";
+    init_keys();
+    init_pae();
+    init_types4();
+  }
+});
+
 // ../../packages/attest/dist/sealedbox.js
 import { createCipheriv as createCipheriv3, createDecipheriv as createDecipheriv3, diffieHellman, generateKeyPairSync as generateKeyPairSync2, hkdfSync as hkdfSync2, randomBytes as randomBytes9 } from "crypto";
 var init_sealedbox = __esm({
@@ -29861,7 +29883,7 @@ var init_nonce = __esm({
 });
 
 // ../../packages/attest/dist/gceIdentity.js
-import { createHash as createHash7, createPublicKey as createPublicKey2, verify as cryptoVerify2 } from "crypto";
+import { createHash as createHash8, createPublicKey as createPublicKey3, verify as cryptoVerify2 } from "crypto";
 function expectedAudience(dispatchId) {
   if (dispatchId === "")
     throw new TypeError("expectedAudience: dispatchId is empty");
@@ -29946,7 +29968,7 @@ async function verifyGceIdentityToken(token, expectations, deps) {
   }
   let signatureValid = false;
   try {
-    const publicKey = createPublicKey2({ key: jwk, format: "jwk" });
+    const publicKey = createPublicKey3({ key: jwk, format: "jwk" });
     signatureValid = cryptoVerify2("sha256", Buffer.from(`${headerB64}.${payloadB64}`, "utf8"), publicKey, signature);
   } catch {
     signatureValid = false;
@@ -30007,7 +30029,7 @@ async function verifyGceIdentityToken(token, expectations, deps) {
       email: expectations.serviceAccountEmail,
       iat,
       exp,
-      tokenSha256: createHash7("sha256").update(token, "utf8").digest("hex")
+      tokenSha256: createHash8("sha256").update(token, "utf8").digest("hex")
     }
   };
 }
@@ -30022,7 +30044,7 @@ var init_gceIdentity = __esm({
 });
 
 // ../../packages/attest/dist/confidentialSpace.js
-import { createHash as createHash8, createPublicKey as createPublicKey3, verify as cryptoVerify3 } from "crypto";
+import { createHash as createHash9, createPublicKey as createPublicKey4, verify as cryptoVerify3 } from "crypto";
 function refuse2(reason, detail) {
   return { ok: false, reason, detail };
 }
@@ -30096,7 +30118,7 @@ async function verifyConfidentialSpaceToken(token, expectations, deps) {
   }
   let signatureValid = false;
   try {
-    const publicKey = createPublicKey3({ key: jwk, format: "jwk" });
+    const publicKey = createPublicKey4({ key: jwk, format: "jwk" });
     signatureValid = cryptoVerify3("sha256", Buffer.from(`${headerB64}.${payloadB64}`, "utf8"), publicKey, signature);
   } catch {
     signatureValid = false;
@@ -30196,7 +30218,7 @@ async function verifyConfidentialSpaceToken(token, expectations, deps) {
       hwmodel,
       iat,
       exp,
-      tokenSha256: createHash8("sha256").update(token, "utf8").digest("hex")
+      tokenSha256: createHash9("sha256").update(token, "utf8").digest("hex")
     }
   };
 }
@@ -30240,6 +30262,7 @@ var init_dist2 = __esm({
     init_pae();
     init_keys();
     init_dsse();
+    init_dispatchedRun();
     init_sealedbox();
     init_aead();
     init_manifest();
@@ -30497,7 +30520,8 @@ var init_result = __esm({
       "imageSource",
       "leaksClean",
       "leakState",
-      "venue"
+      "venue",
+      "refusalOrigin"
     ];
     RENDER_NONE = null;
     FIELD_VIEWS = {
@@ -30557,13 +30581,16 @@ var init_result = __esm({
       // Absent on most runs, so it prints only when there is something to say. Silence
       // here is the honest rendering of "no venue answered": a placeholder line would
       // invite a reader to treat an unanswered probe as a described venue.
-      venue: (r) => r.venue === null ? null : renderVenueLine(r.venue)
+      venue: (r) => r.venue === null ? null : renderVenueLine(r.venue),
+      // For the worker and the baseline intake, not the terminal: `reason` already says which
+      // side refused in words a developer reads.
+      refusalOrigin: RENDER_NONE
     };
   }
 });
 
 // ../../packages/envrun/dist/attestation.js
-import { createHash as createHash9, randomBytes as randomBytes11 } from "crypto";
+import { createHash as createHash10, randomBytes as randomBytes11 } from "crypto";
 function contradicts(outcome, counts, exitCode) {
   const budget = OUTCOME_TO_BUDGET[outcome];
   if (budget === null)
@@ -30605,7 +30632,7 @@ function imageDigestOf(ref) {
   return at === -1 ? null : ref.slice(at + 1);
 }
 function sha256Hex(data) {
-  return createHash9("sha256").update(typeof data === "string" ? Buffer.from(data, "utf8") : data).digest("hex");
+  return createHash10("sha256").update(typeof data === "string" ? Buffer.from(data, "utf8") : data).digest("hex");
 }
 function toTestRunResult(result, outputSha256) {
   return {
@@ -30900,7 +30927,382 @@ var init_attestation2 = __esm({
   }
 });
 
+// ../../packages/envrun/dist/lockfileCheck.js
+function supportedLockfile(basename7) {
+  return basename7 === "package-lock.json" || basename7 === "yarn.lock" ? basename7 : null;
+}
+function fail2(detail) {
+  return { ok: false, detail };
+}
+function tarballBasename(name) {
+  return name.startsWith("@") ? name.slice(name.indexOf("/") + 1) : name;
+}
+function resolvedProblem(label, path5, name, version, resolved) {
+  if (typeof resolved !== "string") {
+    return `\`${label}\` in ${path5} records no download address, so where it installs from could not be checked.`;
+  }
+  const tail2 = `${name}/-/${tarballBasename(name)}-${version}.tgz`;
+  if (REGISTRY_ORIGINS.some((origin) => resolved === origin + tail2))
+    return null;
+  if (REGISTRY_ORIGINS.some((origin) => resolved.startsWith(origin))) {
+    return `\`${label}\` in ${path5} resolves to a registry tarball for a different package or version than the entry records.`;
+  }
+  return `\`${label}\` in ${path5} resolves outside the npm registry. ${RULE}`;
+}
+function integrityProblem(label, path5, integrity, sha1Only) {
+  if (typeof integrity === "string") {
+    const tokens = integrity.split(" ");
+    if (tokens.length > 0 && tokens.every((t) => SRI_TOKEN.test(t)))
+      return null;
+    return `\`${label}\` in ${path5} has an integrity field we could not read as a sha256, sha384 or sha512 hash.`;
+  }
+  const strength = "A change is accepted only when every new or changed entry records a sha256, sha384 or sha512 integrity hash.";
+  return sha1Only ? `\`${label}\` in ${path5} carries only a SHA-1 checksum and no integrity field. ${strength}` : `\`${label}\` in ${path5} has no integrity field. ${strength}`;
+}
+function checkLockfileChange(input) {
+  const kind = supportedLockfile(input.path.split("/").pop() ?? "");
+  if (kind === "yarn.lock")
+    return checkYarn(input);
+  if (kind === "package-lock.json")
+    return checkNpm(input);
+  return fail2(`${input.path} is not a lockfile this check can read.`);
+}
+function isObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function sameJson(a, b) {
+  if (a === b)
+    return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length)
+      return false;
+    return a.every((x, i) => sameJson(x, b[i]));
+  }
+  if (!isObject(a) || !isObject(b))
+    return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length)
+    return false;
+  return keys.every((k) => Object.prototype.hasOwnProperty.call(b, k) && sameJson(a[k], b[k]));
+}
+function parseObject(text) {
+  try {
+    const value = JSON.parse(text);
+    return isObject(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+function checkNpm({ path: path5, base, post }) {
+  const before = parseObject(base);
+  const after = parseObject(post);
+  if (before === null || after === null) {
+    return fail2(`${path5} could not be read as JSON, so its entries could not be checked.`);
+  }
+  for (const doc of [before, after]) {
+    const version = doc["lockfileVersion"];
+    if (version === 1) {
+      return fail2(`${path5} is an npm lockfile at lockfileVersion 1. Only versions 2 and 3 record every package in a form we can check, so a change to it is refused.`);
+    }
+    if (version !== 2 && version !== 3) {
+      return fail2(`${path5} does not declare lockfileVersion 2 or 3, so its entries could not be checked.`);
+    }
+  }
+  for (const key of /* @__PURE__ */ new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (!NPM_TOP_LEVEL.has(key) && !sameJson(before[key], after[key])) {
+      return fail2(`${path5} changes its top-level "${key}" field, which is not a package entry this check can read.`);
+    }
+  }
+  const beforePackages = before["packages"];
+  const afterPackages = after["packages"];
+  if (!isObject(beforePackages) || !isObject(afterPackages)) {
+    return fail2(`${path5} has no "packages" section, so its entries could not be checked.`);
+  }
+  let judged = 0;
+  for (const [key, entry] of Object.entries(afterPackages)) {
+    if (Object.prototype.hasOwnProperty.call(beforePackages, key) && sameJson(beforePackages[key], entry)) {
+      continue;
+    }
+    judged += 1;
+    if (!isObject(entry))
+      return fail2(`${path5} has an entry "${key}" that is not an object.`);
+    if (key === "") {
+      if ("resolved" in entry || "link" in entry) {
+        return fail2(`${path5} gives the root project a download address or a link, which this check does not accept.`);
+      }
+      continue;
+    }
+    const problem = npmPackageProblem(path5, key, entry);
+    if (problem !== null)
+      return fail2(problem);
+  }
+  const legacy = after["dependencies"];
+  if (legacy !== void 0) {
+    const problem = npmLegacyProblem(path5, before["dependencies"], legacy);
+    if (problem !== null)
+      return fail2(problem);
+  }
+  return { ok: true, judged };
+}
+function npmPackageProblem(path5, key, entry) {
+  const match2 = NPM_INSTALL_KEY.exec(key);
+  const name = match2?.[1];
+  if (name === void 0 || !PACKAGE_NAME.test(name)) {
+    return `${path5} changes the entry "${key}", which is a workspace or local path rather than a package from the registry, so the change is refused.`;
+  }
+  if (entry["link"] !== void 0) {
+    return `${path5} changes "${name}" into a link to a local directory, which this check does not accept.`;
+  }
+  if (entry["inBundle"] !== void 0) {
+    return `${path5} changes "${name}", which comes bundled inside another package and so records no download address to check.`;
+  }
+  if (entry["name"] !== void 0 && entry["name"] !== name) {
+    return `${path5} installs a package under the alias "${name}", which this check does not accept.`;
+  }
+  const version = entry["version"];
+  if (typeof version !== "string" || !VERSION2.test(version)) {
+    return `${path5} records "${name}" with no published version we can check.`;
+  }
+  const label = `${name}@${version}`;
+  return resolvedProblem(label, path5, name, version, entry["resolved"]) ?? integrityProblem(label, path5, entry["integrity"], false);
+}
+function withoutNested(entry) {
+  const copy = { ...entry };
+  delete copy["dependencies"];
+  return copy;
+}
+function npmLegacyProblem(path5, before, after) {
+  if (!isObject(after))
+    return `${path5} has a "dependencies" section that is not an object.`;
+  const previous = isObject(before) ? before : {};
+  for (const [name, entry] of Object.entries(after)) {
+    if (!isObject(entry))
+      return `${path5} has a "dependencies" entry "${name}" that is not an object.`;
+    const old = previous[name];
+    const unchanged = isObject(old) && sameJson(withoutNested(old), withoutNested(entry));
+    if (!unchanged) {
+      if (!PACKAGE_NAME.test(name))
+        return `${path5} names a dependency "${name}" we could not read.`;
+      if (entry["bundled"] !== void 0) {
+        return `${path5} changes "${name}", which comes bundled inside another package and so records no download address to check.`;
+      }
+      const version = entry["version"];
+      if (typeof version !== "string" || !VERSION2.test(version)) {
+        return `${path5} records "${name}" with no published version we can check.`;
+      }
+      const label = `${name}@${version}`;
+      const problem = resolvedProblem(label, path5, name, version, entry["resolved"]) ?? integrityProblem(label, path5, entry["integrity"], false);
+      if (problem !== null)
+        return problem;
+    }
+    const nested = entry["dependencies"];
+    if (nested !== void 0) {
+      const problem = npmLegacyProblem(path5, isObject(old) ? old["dependencies"] : void 0, nested);
+      if (problem !== null)
+        return problem;
+    }
+  }
+  return null;
+}
+function unquote(value) {
+  if (value.startsWith('"')) {
+    try {
+      const parsed = JSON.parse(value);
+      return typeof parsed === "string" ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return BARE_WORD.test(value) ? value : null;
+}
+function leadingPart(text) {
+  if (text.startsWith('"')) {
+    for (let i = 1; i < text.length; i += 1) {
+      if (text[i] === "\\") {
+        i += 1;
+        continue;
+      }
+      if (text[i] === '"') {
+        const value = unquote(text.slice(0, i + 1));
+        return value === null ? null : { value, rest: text.slice(i + 1) };
+      }
+    }
+    return null;
+  }
+  const bare = /^[^\s"]+/.exec(text)?.[0];
+  if (bare === void 0 || !BARE_WORD.test(bare))
+    return null;
+  return { value: bare, rest: text.slice(bare.length) };
+}
+function mapLine(text) {
+  const key = leadingPart(text);
+  if (key === null || !key.rest.startsWith(" "))
+    return null;
+  const value = leadingPart(key.rest.slice(1));
+  if (value === null || value.rest !== "")
+    return null;
+  return { key: key.value, value: value.value };
+}
+function parseYarn(path5, text, when) {
+  const lines = text.split("\n");
+  if (text.includes("\r")) {
+    return { problem: `${path5} ${when} uses carriage returns, which this check does not read.` };
+  }
+  if (lines.some((l) => l === "__metadata:")) {
+    return {
+      problem: `${path5} ${when} is a lockfile from Yarn 2 or later. Only yarn v1 lockfiles are checked, so a change to it is refused.`
+    };
+  }
+  if (!lines.some((l) => l === "# yarn lockfile v1")) {
+    return {
+      problem: `${path5} ${when} is not a yarn v1 lockfile, so its entries could not be checked.`
+    };
+  }
+  const entries = /* @__PURE__ */ new Map();
+  let header = null;
+  let block = [];
+  let fields = /* @__PURE__ */ new Map();
+  let inMap = false;
+  const close = () => {
+    if (header === null)
+      return null;
+    if (entries.has(header))
+      return `${path5} ${when} lists the entry ${header} twice.`;
+    entries.set(header, { raw: block.join("\n"), fields });
+    header = null;
+    return null;
+  };
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    const unreadable = `${path5} ${when} could not be read at line ${String(i + 1)}, so its entries could not be checked.`;
+    if (line === "") {
+      const problem2 = close();
+      if (problem2 !== null)
+        return { problem: problem2 };
+      continue;
+    }
+    if (header === null && line.startsWith("#"))
+      continue;
+    if (!line.startsWith(" ")) {
+      const problem2 = close();
+      if (problem2 !== null)
+        return { problem: problem2 };
+      if (!line.endsWith(":") || line.length < 2)
+        return { problem: unreadable };
+      header = line.slice(0, -1);
+      block = [line];
+      fields = /* @__PURE__ */ new Map();
+      inMap = false;
+      continue;
+    }
+    if (header === null)
+      return { problem: unreadable };
+    block.push(line);
+    if (line.startsWith("    ")) {
+      if (!inMap || mapLine(line.slice(4)) === null)
+        return { problem: unreadable };
+      continue;
+    }
+    const field = /^ {2}([A-Za-z]+)(?: (.+)|:)$/.exec(line);
+    const key = field?.[1];
+    if (field === null || key === void 0 || fields.has(key))
+      return { problem: unreadable };
+    if (field[2] === void 0) {
+      if (!YARN_MAP_FIELDS.has(key))
+        return { problem: unreadable };
+      fields.set(key, "");
+      inMap = true;
+      continue;
+    }
+    const value = unquote(field[2]);
+    if (!YARN_VALUE_FIELDS.has(key) || value === null)
+      return { problem: unreadable };
+    fields.set(key, value);
+    inMap = false;
+  }
+  const problem = close();
+  if (problem !== null)
+    return { problem };
+  return { entries };
+}
+function headerName(header) {
+  let name = null;
+  for (const part of header.split(", ")) {
+    const spec = unquote(part);
+    if (spec === null)
+      return null;
+    const at = spec.lastIndexOf("@");
+    if (at <= 0)
+      return null;
+    const candidate = spec.slice(0, at);
+    const range = spec.slice(at + 1);
+    if (!PACKAGE_NAME.test(candidate) || /[:/#\\]/.test(range))
+      return null;
+    if (name !== null && name !== candidate)
+      return null;
+    name = candidate;
+  }
+  return name;
+}
+function checkYarn({ path: path5, base, post }) {
+  const before = parseYarn(path5, base, "as it was");
+  if ("problem" in before)
+    return fail2(before.problem);
+  const after = parseYarn(path5, post, "after the change");
+  if ("problem" in after)
+    return fail2(after.problem);
+  let judged = 0;
+  for (const [header, entry] of after.entries) {
+    if (before.entries.get(header)?.raw === entry.raw)
+      continue;
+    judged += 1;
+    const name = headerName(header);
+    if (name === null) {
+      return fail2(`The entry ${header} in ${path5} is not a plain package range from the registry, so the change is refused.`);
+    }
+    const version = entry.fields.get("version");
+    if (version === void 0 || !VERSION2.test(version)) {
+      return fail2(`${path5} records ${name} with no published version we can check.`);
+    }
+    const label = `${name}@${version}`;
+    const resolved = entry.fields.get("resolved");
+    const fragment = resolved === void 0 ? null : /^(.*)#([0-9a-f]{40})$/.exec(resolved);
+    const url = fragment?.[1] ?? resolved;
+    const problem = resolvedProblem(label, path5, name, version, url) ?? integrityProblem(label, path5, entry.fields.get("integrity"), fragment !== null);
+    if (problem !== null)
+      return fail2(problem);
+  }
+  return { ok: true, judged };
+}
+var REGISTRY_ORIGINS, PACKAGE_NAME, VERSION2, SRI_TOKEN, RULE, NPM_TOP_LEVEL, NPM_INSTALL_KEY, YARN_VALUE_FIELDS, YARN_MAP_FIELDS, BARE_WORD;
+var init_lockfileCheck = __esm({
+  "../../packages/envrun/dist/lockfileCheck.js"() {
+    "use strict";
+    REGISTRY_ORIGINS = ["https://registry.npmjs.org/", "https://registry.yarnpkg.com/"];
+    PACKAGE_NAME = /^(?:@[A-Za-z0-9][A-Za-z0-9._~-]*\/)?[A-Za-z0-9][A-Za-z0-9._~-]*$/;
+    VERSION2 = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+    SRI_TOKEN = /^sha(?:256|384|512)-[A-Za-z0-9+/]+={0,2}$/;
+    RULE = "Only a tarball on registry.npmjs.org or registry.yarnpkg.com, for the exact name and version the entry records, is accepted.";
+    NPM_TOP_LEVEL = /* @__PURE__ */ new Set([
+      "name",
+      "version",
+      "lockfileVersion",
+      "requires",
+      "packages",
+      "dependencies"
+    ]);
+    NPM_INSTALL_KEY = /^(?:node_modules\/(?:@[^/]+\/)?[^/]+\/)*node_modules\/((?:@[^/]+\/)?[^/]+)$/;
+    YARN_VALUE_FIELDS = /* @__PURE__ */ new Set(["version", "resolved", "integrity"]);
+    YARN_MAP_FIELDS = /* @__PURE__ */ new Set(["dependencies", "optionalDependencies"]);
+    BARE_WORD = /^(?!true|false)[A-Za-z/.-][^:\s,"]*$/;
+  }
+});
+
 // ../../packages/envrun/dist/boundary.js
+function lockfileRefusal(base) {
+  const kind = LOCKFILE_KINDS[base];
+  return kind === void 0 ? "is a dependency lockfile of a kind we do not check. Only package-lock.json (lockfileVersion 2 or 3) and yarn.lock (v1) changes are checked entry by entry, so a change to it is refused" : `is ${kind}. Only package-lock.json (lockfileVersion 2 or 3) and yarn.lock (v1) changes are checked entry by entry, so a change to it is refused`;
+}
 function unquoteDiffPath(token) {
   if (!token.startsWith('"'))
     return token === "" ? null : token;
@@ -31006,18 +31408,29 @@ function parsePatchPaths(patch) {
   let oldRemaining = 0;
   let newRemaining = 0;
   let inHunk = false;
-  const fail2 = (detail) => ({ failure: { code: "unparseable", detail } });
+  const fail3 = (detail) => ({ failure: { code: "unparseable", detail } });
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     if (line === void 0)
       continue;
     if (line.startsWith(DIFF_HEADER)) {
       if (inHunk && (oldRemaining > 0 || newRemaining > 0)) {
-        return fail2("a change block ended before it delivered the lines it announced");
+        return fail3("a change block ended before it delivered the lines it announced");
       }
       inHunk = false;
       skippingBinary = false;
-      entry = { rawPaths: [], binary: false };
+      entry = {
+        rawPaths: [],
+        binary: false,
+        headerOld: null,
+        headerNew: null,
+        plusPath: null,
+        createsFile: false,
+        deletesFile: false,
+        moved: false,
+        changed: false,
+        modes: []
+      };
       entries.push(entry);
       const split2 = splitDiffHeader(line.slice(DIFF_HEADER.length));
       if (split2 !== null) {
@@ -31025,14 +31438,18 @@ function parsePatchPaths(patch) {
         const left = unquoteDiffPath(leftToken);
         const right = unquoteDiffPath(rightToken);
         if (left === null || right === null) {
-          return fail2("a file name in the patch is quoted in a form we cannot read back");
+          return fail3("a file name in the patch is quoted in a form we cannot read back");
         }
         const oldPath = stripSidePrefix(left, "a/");
         const newPath = stripSidePrefix(right, "b/");
         if (oldPath === null || newPath === null) {
-          return fail2("the patch was written without the standard a/ and b/ file-name prefixes, so we cannot tell a prefix from a real directory");
+          return fail3("the patch was written without the standard a/ and b/ file-name prefixes, so we cannot tell a prefix from a real directory");
         }
         entry.rawPaths.push(oldPath, newPath);
+        entry.headerOld = oldPath;
+        entry.headerNew = newPath;
+        if (oldPath !== newPath)
+          entry.moved = true;
       }
       continue;
     }
@@ -31049,13 +31466,15 @@ function parsePatchPaths(patch) {
         newRemaining -= 1;
       } else if (marker === "-") {
         oldRemaining -= 1;
+        entry.changed = true;
       } else if (marker === "+") {
         newRemaining -= 1;
+        entry.changed = true;
       } else {
-        return fail2("a change block contains a line that is neither an addition, a removal nor context");
+        return fail3("a change block contains a line that is neither an addition, a removal nor context");
       }
       if (oldRemaining < 0 || newRemaining < 0) {
-        return fail2("a change block delivered more lines than it announced");
+        return fail3("a change block delivered more lines than it announced");
       }
       if (oldRemaining === 0 && newRemaining === 0)
         inHunk = false;
@@ -31066,13 +31485,20 @@ function parsePatchPaths(patch) {
     if (line.startsWith("@@")) {
       const m = HUNK_HEADER.exec(line);
       if (m === null) {
-        return fail2("a change block header is malformed, so we cannot tell which lines belong to it");
+        return fail3("a change block header is malformed, so we cannot tell which lines belong to it");
       }
       oldRemaining = m[2] === void 0 ? 1 : Number(m[2]);
       newRemaining = m[4] === void 0 ? 1 : Number(m[4]);
       inHunk = oldRemaining > 0 || newRemaining > 0;
       continue;
     }
+    if (line.startsWith("new file mode"))
+      entry.createsFile = true;
+    if (line.startsWith("deleted file mode"))
+      entry.deletesFile = true;
+    const mode = /^(?:old mode|new mode|new file mode|deleted file mode) (\d+)$/.exec(line)?.[1] ?? /^index [0-9a-f]+\.\.[0-9a-f]+ (\d+)$/.exec(line)?.[1];
+    if (mode !== void 0)
+      entry.modes.push(mode);
     if (line === "GIT binary patch" || line.startsWith("Binary files ")) {
       entry.binary = true;
       skippingBinary = true;
@@ -31083,41 +31509,49 @@ function parsePatchPaths(patch) {
       const rest = line.slice(4);
       const tab = rest.indexOf("	");
       const token = tab === -1 ? rest : rest.slice(0, tab);
-      if (token === "/dev/null")
+      if (token === "/dev/null") {
+        if (sideMarker === "a/")
+          entry.createsFile = true;
+        else
+          entry.deletesFile = true;
         continue;
+      }
       const decoded = unquoteDiffPath(token);
       if (decoded === null) {
-        return fail2("a file name in the patch is quoted in a form we cannot read back");
+        return fail3("a file name in the patch is quoted in a form we cannot read back");
       }
       const stripped = stripSidePrefix(decoded, sideMarker);
       if (stripped === null) {
-        return fail2("the patch was written without the standard a/ and b/ file-name prefixes, so we cannot tell a prefix from a real directory");
+        return fail3("the patch was written without the standard a/ and b/ file-name prefixes, so we cannot tell a prefix from a real directory");
       }
       entry.rawPaths.push(stripped);
+      if (sideMarker === "b/")
+        entry.plusPath = stripped;
       continue;
     }
     const moveMarker = ["rename from ", "rename to ", "copy from ", "copy to "].find((p) => line.startsWith(p));
     if (moveMarker !== void 0) {
       const decoded = unquoteDiffPath(line.slice(moveMarker.length));
       if (decoded === null) {
-        return fail2("a file name in the patch is quoted in a form we cannot read back");
+        return fail3("a file name in the patch is quoted in a form we cannot read back");
       }
       entry.rawPaths.push(decoded);
+      entry.moved = true;
       continue;
     }
     if (line.startsWith("+") || line.startsWith("-")) {
-      return fail2("the patch contains a changed line that belongs to no change block");
+      return fail3("the patch contains a changed line that belongs to no change block");
     }
   }
   if (inHunk && (oldRemaining > 0 || newRemaining > 0)) {
-    return fail2("the patch ends in the middle of a change block");
+    return fail3("the patch ends in the middle of a change block");
   }
   if (entries.length === 0) {
     return { failure: { code: "empty-patch", detail: "The patch contains no changes at all." } };
   }
   for (const e of entries) {
     if (e.rawPaths.length === 0)
-      return fail2("a change in the patch names no file");
+      return fail3("a change in the patch names no file");
   }
   return { entries };
 }
@@ -31142,6 +31576,10 @@ function preflightBoundary(input) {
   const refusals = [];
   const touched = /* @__PURE__ */ new Set();
   const seenPaths = /* @__PURE__ */ new Set();
+  const lockfileTouches = /* @__PURE__ */ new Map();
+  const changedManifests = /* @__PURE__ */ new Set();
+  const deniedPaths = /* @__PURE__ */ new Set();
+  const nonFileLockfiles = /* @__PURE__ */ new Set();
   for (const entry of parsed.entries) {
     if (entry.binary) {
       const name = entry.rawPaths[0] ?? "a file";
@@ -31169,20 +31607,55 @@ function preflightBoundary(input) {
       seenPaths.add(path5);
       const denied = DENY_RULES.find((rule) => rule.matches(path5, segments, base));
       if (denied !== void 0) {
-        refusals.push(refusal(denied.code, path5, `${path5} ${denied.why}.`));
+        deniedPaths.add(path5);
+        const why = typeof denied.why === "string" ? denied.why : denied.why(base);
+        refusals.push(refusal(denied.code, path5, `${path5} ${why}.`));
         continue;
       }
       if (!slice.has(path5)) {
         refusals.push(refusal("out-of-slice", path5, `${path5} is not one of the files shared for this bounty, so a change to it is outside what the developer was asked to work on.`));
       }
     }
+    const contentRaw = entry.deletesFile ? entry.headerOld : entry.plusPath ?? entry.headerNew;
+    const contentPath = contentRaw === null ? null : normalizePath(contentRaw)?.path ?? null;
+    const plainEdit = entry.changed && !entry.createsFile && !entry.deletesFile && !entry.moved;
+    const nonFile = entry.modes.some((m) => NON_FILE_MODES.has(m));
+    for (const { path: path5, base } of entryPaths) {
+      if (supportedLockfile(base) === null)
+        continue;
+      if (nonFile)
+        nonFileLockfiles.add(path5);
+      const seen = lockfileTouches.get(path5) ?? { touches: 0, edits: 0 };
+      const edit = plainEdit && contentPath === path5 ? 1 : 0;
+      lockfileTouches.set(path5, { touches: seen.touches + 1, edits: seen.edits + edit });
+    }
+    if (contentPath !== null && contentPath.split("/").pop() === "package.json" && entry.changed) {
+      changedManifests.add(contentPath);
+    }
+  }
+  for (const [path5, { touches, edits }] of lockfileTouches) {
+    if (deniedPaths.has(path5))
+      continue;
+    if (nonFileLockfiles.has(path5)) {
+      refusals.push(refusal("lockfile", path5, `${path5} is a symbolic link or a submodule in this patch, not a regular file. A lockfile must be a file whose entries can be checked, so the change is refused.`));
+      continue;
+    }
+    if (touches !== 1 || edits !== 1) {
+      refusals.push(refusal("lockfile", path5, `${path5} is created, deleted, moved or copied by this patch, or named more than once. Only an edit to the contents of an existing lockfile is checked, so this change is refused.`));
+      continue;
+    }
+    const manifest = `${path5.slice(0, path5.lastIndexOf("/") + 1)}package.json`;
+    if (!changedManifests.has(manifest)) {
+      refusals.push(refusal("lockfile", path5, `${path5} changed but ${manifest} did not. A lockfile change is accepted only beside a change to the package.json it records.`));
+    }
   }
   return { refused: refusals.length > 0, refusals, touchedPaths: [...touched].sort() };
 }
-var PATH_REFUSAL_CODES, LOCKFILE_NAMES, DENY_RULES, TEXT_ENCODER, TEXT_DECODER, C_ESCAPES, DIFF_HEADER, HUNK_HEADER;
+var PATH_REFUSAL_CODES, LOCKFILE_NAMES, LOCKFILE_KINDS, REGISTRY_CONFIG_NAMES, DENY_RULES, TEXT_ENCODER, TEXT_DECODER, C_ESCAPES, NON_FILE_MODES, DIFF_HEADER, HUNK_HEADER;
 var init_boundary = __esm({
   "../../packages/envrun/dist/boundary.js"() {
     "use strict";
+    init_lockfileCheck();
     PATH_REFUSAL_CODES = [
       "empty-patch",
       "unparseable",
@@ -31191,6 +31664,7 @@ var init_boundary = __esm({
       "out-of-slice",
       "ci-config",
       "lockfile",
+      "registry-config",
       "build-file",
       "git-internals"
     ];
@@ -31207,6 +31681,22 @@ var init_boundary = __esm({
       "go.sum",
       "composer.lock"
     ]);
+    LOCKFILE_KINDS = {
+      "package-lock.json": "an npm lockfile",
+      "npm-shrinkwrap.json": "an npm shrinkwrap file",
+      "yarn.lock": "a yarn lockfile",
+      "pnpm-lock.yaml": "a pnpm lockfile",
+      "bun.lockb": "a bun lockfile",
+      "bun.lock": "a bun lockfile",
+      "Cargo.lock": "a Cargo lockfile",
+      "poetry.lock": "a Poetry lockfile",
+      "Pipfile.lock": "a Pipenv lockfile",
+      "Gemfile.lock": "a Bundler lockfile",
+      "go.sum": "a Go checksum file",
+      "composer.lock": "a Composer lockfile",
+      "uv.lock": "a uv lockfile"
+    };
+    REGISTRY_CONFIG_NAMES = /* @__PURE__ */ new Set([".npmrc", ".yarnrc", ".yarnrc.yml"]);
     DENY_RULES = [
       {
         code: "git-internals",
@@ -31248,8 +31738,15 @@ var init_boundary = __esm({
         // The `.lock` suffix is the server's rule since TERM-412; this copy missed it, so
         // the pre-flight passed `uv.lock` and bun's text `bun.lock` that the server refuses
         // (TERM-1235). The name set only covers lockfiles whose names do not end in `.lock`.
-        matches: (_p, _segments, base) => LOCKFILE_NAMES.has(base) || base.endsWith(".lock"),
-        why: "is a dependency lockfile. Nobody reads a lockfile diff, so a change to one is refused rather than shown"
+        // TERM-1331: package-lock.json and yarn.lock are judged in `preflightBoundary` below,
+        // as the source judges them in `validatePatch`.
+        matches: (_p, _segments, base) => (LOCKFILE_NAMES.has(base) || base.endsWith(".lock")) && supportedLockfile(base) === null,
+        why: lockfileRefusal
+      },
+      {
+        code: "registry-config",
+        matches: (_p, _segments, base) => REGISTRY_CONFIG_NAMES.has(base),
+        why: "configures where packages are installed from. A patch may not change it, because it could point the install at another registry"
       }
     ];
     TEXT_ENCODER = new TextEncoder();
@@ -31265,6 +31762,7 @@ var init_boundary = __esm({
       '"': 34,
       "\\": 92
     };
+    NON_FILE_MODES = /* @__PURE__ */ new Set(["120000", "160000"]);
     DIFF_HEADER = "diff --git ";
     HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
   }
@@ -31518,7 +32016,7 @@ var init_emptyGitConfig = __esm({
 
 // ../../packages/envrun/dist/hostedVenue.js
 import { spawn as spawn4, spawnSync as spawnSync5 } from "child_process";
-import { createHash as createHash10, X509Certificate } from "crypto";
+import { createHash as createHash11, X509Certificate } from "crypto";
 import { chmodSync as chmodSync3, existsSync as existsSync12, mkdtempSync as mkdtempSync3, readFileSync as readFileSync12, rmSync as rmSync8, writeFileSync as writeFileSync14 } from "fs";
 import { request as httpsRequest } from "https";
 import { createServer } from "net";
@@ -32188,7 +32686,7 @@ function iapPortTunnelArgv(vm, project, zone, remotePort, localPort) {
 }
 function spkiSha256Hex(certDer) {
   const spki = new X509Certificate(certDer).publicKey.export({ type: "spki", format: "der" });
-  return createHash10("sha256").update(spki).digest("hex");
+  return createHash11("sha256").update(spki).digest("hex");
 }
 function certMetadataValue(pem) {
   return new X509Certificate(pem).raw.toString("base64url");
@@ -36083,7 +36581,7 @@ allprojects {
 
 // ../../packages/envrun/dist/thrun.js
 import { execFileSync, spawnSync as spawnSync6 } from "child_process";
-import { existsSync as existsSync13, mkdirSync as mkdirSync8, mkdtempSync as mkdtempSync4, rmSync as rmSync9 } from "fs";
+import { closeSync as closeSync5, constants as fsConstants, existsSync as existsSync13, fstatSync as fstatSync2, lstatSync as lstatSync5, mkdirSync as mkdirSync8, mkdtempSync as mkdtempSync4, openSync as openSync5, readSync, rmSync as rmSync9 } from "fs";
 import { randomUUID as randomUUID3 } from "crypto";
 import { tmpdir as tmpdir4 } from "os";
 import { join as join29 } from "path";
@@ -36120,6 +36618,59 @@ function collectWorkingDiff(repoDir, opts = {}) {
       parts.push(one.replace(/\n*$/, "\n"));
   }
   return { patch: parts.join(""), headSha, diffBase, trackedChanged, untracked };
+}
+function readLockfileBytes(file, path5) {
+  const notRegular = `${path5} is a symbolic link or another special file, not a regular file, so its entries could not be checked.`;
+  const tooLarge = `${path5} is larger than 64MB, so its entries were not checked.`;
+  try {
+    const before = lstatSync5(file);
+    if (!before.isFile())
+      return { refusal: notRegular };
+    if (before.size > LOCKFILE_READ_CAP)
+      return { refusal: tooLarge };
+    const fd = openSync5(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    try {
+      const opened = fstatSync2(fd);
+      if (!opened.isFile())
+        return { refusal: notRegular };
+      if (opened.size > LOCKFILE_READ_CAP)
+        return { refusal: tooLarge };
+      const buf = Buffer.alloc(LOCKFILE_READ_CAP + 1);
+      let length = 0;
+      for (; ; ) {
+        const n = readSync(fd, buf, length, buf.length - length, null);
+        if (n === 0)
+          break;
+        length += n;
+        if (length > LOCKFILE_READ_CAP)
+          return { refusal: tooLarge };
+      }
+      return { text: buf.subarray(0, length).toString("utf8") };
+    } finally {
+      closeSync5(fd);
+    }
+  } catch {
+    return { refusal: `${path5} could not be read, so its entries could not be checked.` };
+  }
+}
+function lockfileContentRefusals(cloneDir, before) {
+  const refusals = [];
+  for (const [path5, base] of before) {
+    const post = readLockfileBytes(join29(cloneDir, path5), path5);
+    const problem = "refusal" in base ? base.refusal : "refusal" in post ? post.refusal : null;
+    if (problem !== null) {
+      refusals.push({ code: "lockfile", path: path5, detail: problem });
+      continue;
+    }
+    const result = checkLockfileChange({
+      path: path5,
+      base: base.text,
+      post: post.text
+    });
+    if (!result.ok)
+      refusals.push({ code: "lockfile", path: path5, detail: result.detail });
+  }
+  return refusals;
 }
 function assertDiffBase(repoDir, base) {
   if (!FULL_COMMIT_ID.test(base)) {
@@ -36511,6 +37062,18 @@ function applyPatch(repoDir, patch, what) {
     throw new ThRunError(`the ${what} did not apply cleanly to the target checkout: ${(res.stderr ?? "").trim()}. The diff was built against a different commit than the one being verified.`);
   }
 }
+function imageInputsAt(repoDir) {
+  try {
+    const pinned = deriveEnvironmentSpec(repoDir);
+    return {
+      runtime: pinned.runtime,
+      runtimeVersion: pinned.runtimeVersion,
+      variant: imageVariantFor(pinned)
+    };
+  } catch {
+    return null;
+  }
+}
 function tail(text, bytes = OUTPUT_TAIL_BYTES) {
   return text.length <= bytes ? text : text.slice(-bytes);
 }
@@ -36566,8 +37129,16 @@ function refusedRun(fields) {
     // A refused run never held a lease, so there is no venue to describe. Same
     // reasoning as `leaksClean` above: null because nothing happened, and it must
     // not read as a venue we looked at and could not name.
-    venue: null
+    venue: null,
+    refusalOrigin: fields.origin
   };
+}
+function refusalOriginOf(refusal2) {
+  try {
+    return refusal2.origin === "repository" ? "repository" : "ours";
+  } catch {
+    return "ours";
+  }
 }
 function unacceptableTarget(req) {
   try {
@@ -36649,7 +37220,8 @@ async function verifyWorkingDiff(req) {
   const ctx = {
     startedAt: Date.now(),
     runId: req.runId ?? `run-${randomUUID3().slice(0, 8)}`,
-    touchedPaths: []
+    touchedPaths: [],
+    imageChosenByRepository: false
   };
   const target = {
     claimId: req.claimId,
@@ -36664,6 +37236,10 @@ async function verifyWorkingDiff(req) {
       throw err;
     return {
       result: refusedRun({
+        // `repository` survives only when the repository's files alone chose the image.
+        // `resolvePublishedImage` knows the version came from the repo, but not whether an
+        // override picked the image variant the missing tag belongs to (Codex, TERM-1313).
+        origin: refusalOriginOf(refusal2) === "repository" && ctx.imageChosenByRepository ? "repository" : "ours",
         runId: ctx.runId,
         claimId: target.claimId,
         // `describeThrown`, not `refusal.message`. Classifying a value does not make
@@ -36731,6 +37307,7 @@ async function runVerification(req, ctx) {
   if (badTarget !== null) {
     return {
       result: refusedRun({
+        origin: "ours",
         runId,
         claimId: req.claimId,
         reason: badTarget,
@@ -36754,6 +37331,7 @@ async function runVerification(req, ctx) {
   if (placement.refusal !== null) {
     return {
       result: refusedRun({
+        origin: "ours",
         runId,
         claimId: req.claimId,
         reason: placement.refusal,
@@ -36787,15 +37365,17 @@ async function runVerification(req, ctx) {
     progress("collect", "dispatched run: the tree is the stored commit itself");
   }
   const boundary = source.kind !== "working-diff" || diff === null || diff.patch.trim() === "" ? { refused: false, refusals: [], touchedPaths: [] } : preflightBoundary({ patch: diff.patch, sliceFiles: source.sliceFiles });
-  const pre = source.kind === "working-diff" && source.sliceFiles.length > 0 ? boundary : (() => {
+  const pathPre = source.kind === "working-diff" && source.sliceFiles.length > 0 ? boundary : (() => {
     const refusals = boundary.refusals.filter((r) => r.code !== "out-of-slice");
     return { refused: refusals.length > 0, refusals, touchedPaths: boundary.touchedPaths };
   })();
+  const pre = pathPre;
   ctx.touchedPaths = pre.touchedPaths;
   if (pre.refused) {
     const first = pre.refusals[0];
     return {
       result: refusedRun({
+        origin: "ours",
         runId,
         claimId: req.claimId,
         reason: first?.detail ?? "the diff was refused by the local slice pre-flight, but no reason was recorded",
@@ -36830,19 +37410,52 @@ async function runVerification(req, ctx) {
     // there and passing it unconditionally keeps one code path instead of two.
     ...req.targetAuth ? { auth: req.targetAuth } : {}
   });
+  const pinnedImageInputs = imageInputsAt(cloneDir);
   const baselinePatch = source.kind === "working-diff" ? source.baselinePatch : void 0;
   const hasBaselinePatch = baselinePatch !== void 0 && baselinePatch.trim() !== "";
   if (hasBaselinePatch) {
     applyPatch(cloneDir, baselinePatch ?? "", "baseline patch");
   }
+  const lockfileBase = /* @__PURE__ */ new Map();
+  if (diff !== null) {
+    for (const path5 of pre.touchedPaths) {
+      if (supportedLockfile(path5.split("/").pop() ?? "") === null)
+        continue;
+      lockfileBase.set(path5, readLockfileBytes(join29(cloneDir, path5), path5));
+    }
+  }
   if (diff !== null) {
     applyPatch(cloneDir, diff.patch, "developer's working diff");
+  }
+  const lockfileRefusals = lockfileContentRefusals(cloneDir, lockfileBase);
+  if (lockfileRefusals.length > 0) {
+    return {
+      result: refusedRun({
+        // The developer's diff, not the repository's environment, so never `repository`
+        // (TERM-1313). Only a working diff is judged here; a dispatched baseline has none.
+        origin: "ours",
+        runId,
+        claimId: req.claimId,
+        reason: lockfileRefusals[0]?.detail ?? "a lockfile in the diff was refused",
+        wallMs: Date.now() - startedAt,
+        targetRepo: publishableTarget(req.targetRepo),
+        targetSha: req.targetSha,
+        boundaryRefusals: lockfileRefusals,
+        touchedPaths: pre.touchedPaths
+      }),
+      preview: null,
+      spec: null,
+      verdict: null,
+      diagnostic: null,
+      venueIdentity: null
+    };
   }
   const patchSha256 = diff === null ? null : sha256Hex(diff.patch);
   const treeDigest = patchedTreeDigest(cloneDir);
   const baselinePatchSha256 = hasBaselinePatch ? sha256Hex(baselinePatch ?? "") : null;
   const derived = deriveEnvironmentSpec(cloneDir);
   const { spec, imageSource } = resolveRunEnvironment(derived, req);
+  ctx.imageChosenByRepository = imageSource === "detected" && imageVariantFor(spec) === imageVariantFor(derived) && pinnedImageInputs !== null && pinnedImageInputs.runtime === spec.runtime && pinnedImageInputs.runtimeVersion === spec.runtimeVersion && pinnedImageInputs.variant === imageVariantFor(spec);
   progress("derive", `runtime=${spec.runtime} install=${String(spec.installCommand)} test=${String(spec.testCommand)}`);
   const unfrozenNote = installUnfrozenNote(spec);
   if (unfrozenNote !== null)
@@ -36853,6 +37466,7 @@ async function runVerification(req, ctx) {
   if (!resolved.ok) {
     return {
       result: refusedRun({
+        origin: "ours",
         runId,
         claimId: req.claimId,
         reason: resolved.refusal,
@@ -36964,7 +37578,9 @@ async function runVerification(req, ctx) {
       // Built from the LEASE, over the client that ran the steps — never from
       // `req.placement`, which is a request. `venueDescriptor.ts` carries the
       // reasoning and the #735 failure that makes the distinction load-bearing.
-      venue: describeVenue(lease)
+      venue: describeVenue(lease),
+      // A run that reached a verdict was not refused, so neither side refused it.
+      refusalOrigin: null
     };
     let later = null;
     if (req.screenshots !== void 0) {
@@ -37163,7 +37779,7 @@ async function prepareBaseTree(o) {
     throw err;
   }
 }
-var ThRunError, OUTPUT_TAIL_BYTES, FULL_COMMIT_ID, ALLOWED_URL_SCHEMES, SCP_STYLE, URL_SCHEME, WINDOWS_ABSOLUTE, UNC_PATH, TRANSPORT_REASON, SHA_REASON, FULL_SHA, MIN_GIT_VERSION_FOR_END_OF_OPTIONS, CloneUnavailableError, GIT_ENV_ALLOWLIST, credentialFreeHomeDir, SSH_ISOLATION_ARGS, WITHHELD_SEGMENT, UNPARSEABLE_TARGET, DEFERRED_GATE_TIMEOUT_MS, FAILURE_LINE, REDACTED_TARGET_REPO, REDACTED_TARGET_SHA;
+var ThRunError, OUTPUT_TAIL_BYTES, LOCKFILE_READ_CAP, FULL_COMMIT_ID, ALLOWED_URL_SCHEMES, SCP_STYLE, URL_SCHEME, WINDOWS_ABSOLUTE, UNC_PATH, TRANSPORT_REASON, SHA_REASON, FULL_SHA, MIN_GIT_VERSION_FOR_END_OF_OPTIONS, CloneUnavailableError, GIT_ENV_ALLOWLIST, credentialFreeHomeDir, SSH_ISOLATION_ARGS, WITHHELD_SEGMENT, UNPARSEABLE_TARGET, DEFERRED_GATE_TIMEOUT_MS, FAILURE_LINE, REDACTED_TARGET_REPO, REDACTED_TARGET_SHA;
 var init_thrun = __esm({
   "../../packages/envrun/dist/thrun.js"() {
     "use strict";
@@ -37172,6 +37788,7 @@ var init_thrun = __esm({
     init_dist3();
     init_attestation2();
     init_boundary();
+    init_lockfileCheck();
     init_emptyGitConfig();
     init_labels();
     init_execute();
@@ -37183,6 +37800,7 @@ var init_thrun = __esm({
     ThRunError = class extends Error {
     };
     OUTPUT_TAIL_BYTES = 4e3;
+    LOCKFILE_READ_CAP = 64 * 1024 * 1024;
     FULL_COMMIT_ID = /^[0-9a-f]{40}$/;
     ALLOWED_URL_SCHEMES = /* @__PURE__ */ new Set(["https", "http", "ssh", "git"]);
     SCP_STYLE = /^[A-Za-z0-9._~+-]+@[A-Za-z0-9._-]+:[^:]/;
@@ -38114,6 +38732,7 @@ __export(dist_exports, {
   census: () => census,
   censusReport: () => censusReport,
   censusTotal: () => censusTotal,
+  checkLockfileChange: () => checkLockfileChange,
   classifyBootFailure: () => classifyBootFailure,
   classifyProbeFailure: () => classifyProbeFailure,
   classifySingleRun: () => classifySingleRun,
@@ -38196,6 +38815,7 @@ __export(dist_exports, {
   startDatabase: () => startDatabase,
   startLocalPreview: () => startLocalPreview,
   startPreview: () => startPreview,
+  supportedLockfile: () => supportedLockfile,
   targetCarriesCredential: () => targetCarriesCredential,
   toAcceptancePredicate: () => toAcceptancePredicate,
   toolingImageFor: () => toolingImageFor,
@@ -38214,6 +38834,7 @@ var init_dist4 = __esm({
     init_result();
     init_attestation2();
     init_boundary();
+    init_lockfileCheck();
     init_placement();
     init_gcpPlacement();
     init_venue();
@@ -38508,17 +39129,17 @@ import {
   mkdtempSync as mkdtempSync5,
   renameSync as renameSync6,
   existsSync as existsSync14,
-  lstatSync as lstatSync5,
+  lstatSync as lstatSync6,
   realpathSync as realpathSync3,
   rmSync as rmSync10,
   readdirSync as readdirSync5,
   statSync as statSync6,
-  openSync as openSync5,
-  readSync,
-  closeSync as closeSync5
+  openSync as openSync6,
+  readSync as readSync2,
+  closeSync as closeSync6
 } from "fs";
 import { join as join31, dirname as dirname9, isAbsolute as isAbsolute5, resolve as pathResolve } from "path";
-import { createHash as createHash11 } from "crypto";
+import { createHash as createHash12 } from "crypto";
 import { homedir as homedir14, hostname as osHostname } from "os";
 import { execFile as execFile3, execFileSync as execFileSync2, spawnSync as spawnSync8 } from "child_process";
 import { promisify as promisify3 } from "util";
@@ -39169,13 +39790,9 @@ var VALUE_FLAGS = /* @__PURE__ */ new Set([
   "open",
   "reason",
   "note",
-  // TERM-1044. `--body` carries a draft note's text and takes the next token. `--note`
-  // above is already taken by `claim resolve`, where it means something different, so
-  // this does NOT reuse it.
-  //
-  // `--sha` was here for `claim note approve` and went with it: the send moved to the
-  // dashboard, so no CLI verb names a digest any more. Left in place it would parse a
-  // flag nothing reads, which is how a removed feature looks half-removed.
+  // TERM-1044. `--body` carries a note's text and takes the next token. `--note` above
+  // is already taken by `claim resolve`, where it means something different, so this
+  // does NOT reuse it. (`--sha` went with `claim note approve`; no verb names a digest.)
   "body",
   // TERM-1259. `claim resolve --reason setup-failed --requirement <field>`.
   "requirement",
@@ -41986,7 +42603,7 @@ function writeDeliveredBrief(destDir, spec) {
 function ensureExcludedPackDir(destDir) {
   let occupant = null;
   try {
-    occupant = lstatSync5(join31(destDir, BRIEF_DIR));
+    occupant = lstatSync6(join31(destDir, BRIEF_DIR));
   } catch (err) {
     if (err?.code !== "ENOENT") {
       return {
@@ -42029,7 +42646,7 @@ function writePackFile(destDir, relPath, content, what) {
   return { written: true, reason: null, sha256: sha256OfUtf8(content) };
 }
 function sha256OfUtf8(content) {
-  return createHash11("sha256").update(content, "utf8").digest("hex");
+  return createHash12("sha256").update(content, "utf8").digest("hex");
 }
 function writeWorkspacePack(destDir, spec, claim, delivery) {
   if (delivery !== "full" && delivery !== "sparse") {
@@ -42332,7 +42949,7 @@ terminalhire claim: ${what} needs the stored credential, and the server says it 
   return true;
 }
 async function enrolHeldClaimReadToken(postingId) {
-  const fail2 = (lines) => {
+  const fail3 = (lines) => {
     for (const line of lines) console.error(line);
     process.exit(1);
   };
@@ -42345,7 +42962,7 @@ async function enrolHeldClaimReadToken(postingId) {
     ]
   });
   if (!proofToken) {
-    fail2(["terminalhire claim: could not link this machine to your claim (see above)."]);
+    fail3(["terminalhire claim: could not link this machine to your claim (see above)."]);
   }
   let res;
   try {
@@ -42356,7 +42973,7 @@ async function enrolHeldClaimReadToken(postingId) {
       signal: AbortSignal.timeout(CLAIM_SYNC_WRITE_TIMEOUT_MS)
     });
   } catch (err) {
-    fail2([
+    fail3([
       `terminalhire claim: terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}).`,
       "  Nothing was stored. Run the same command again."
     ]);
@@ -42368,21 +42985,21 @@ async function enrolHeldClaimReadToken(postingId) {
   }
   if (res.status === 404 && body?.error === "no-live-claim") {
     const who = typeof body.claimantLogin === "string" ? `@${body.claimantLogin}` : "that account";
-    fail2([
+    fail3([
       `terminalhire claim: you confirmed in the browser as ${who}, and ${who} does not`,
       "  hold a live claim on this posting. Nothing was stored.",
       "  Sign the browser into the GitHub account that claimed it, then run this again."
     ]);
   }
   if (!res.ok || typeof body?.pushToken !== "string" || body.pushToken.length === 0) {
-    fail2([
+    fail3([
       `terminalhire claim: linking this machine failed (${res.status}${typeof body?.message === "string" ? `: ${body.message}` : ""}). Nothing was stored.`
     ]);
   }
   try {
     await writePushTokenEnc(body.pushToken);
   } catch (err) {
-    fail2([
+    fail3([
       `terminalhire claim: the credential could not be stored on this machine: ${err instanceof Error ? err.message : String(err)}`
     ]);
   }
@@ -42877,18 +43494,18 @@ function refuseScreenshots(detail) {
 }
 function readFileCapped(path5, limit2) {
   if (statSync6(path5).size > limit2) return null;
-  const fd = openSync5(path5, "r");
+  const fd = openSync6(path5, "r");
   try {
     const buf = Buffer.allocUnsafe(limit2 + 1);
     let n = 0;
     while (n < buf.length) {
-      const got = readSync(fd, buf, n, buf.length - n, n);
+      const got = readSync2(fd, buf, n, buf.length - n, n);
       if (got === 0) break;
       n += got;
     }
     return n > limit2 ? null : buf.subarray(0, n);
   } finally {
-    closeSync5(fd);
+    closeSync6(fd);
   }
 }
 function loadClaimScreenshots(specArg) {
@@ -42932,7 +43549,7 @@ function loadClaimScreenshots(specArg) {
     items.push({
       file,
       caption: shot.caption,
-      sha256: createHash11("sha256").update(bytes).digest("hex"),
+      sha256: createHash12("sha256").update(bytes).digest("hex"),
       bytes: bytes.byteLength,
       width,
       height
@@ -44201,26 +44818,27 @@ function resolutionReasonHelpLines() {
 }
 function noteUsageLines() {
   return [
-    'Usage: terminalhire claim note <id> --body "..."      draft a note to the poster',
+    'Usage: terminalhire claim note <id> --body "..."      send a note to the poster',
     "",
     "  Tell the poster something about a claim you hold. Needs `terminalhire link`.",
     "",
-    "  This DRAFTS. It stores the text, prints it back with a digest, and sends",
-    "  nothing. It then prints a link to your dashboard, and the note is sent from",
-    "  there \u2014 there is no approve command any more.",
+    "  This SENDS. The server checks the text for credentials and pasted",
+    "  instructions, sends it to the poster, and this prints back the exact text",
+    "  that went out.",
     "",
-    "  Why the send moved to the browser: a note is drafted by an agent that has just",
-    "  read a repository nobody vetted, and that repository can carry text aimed at",
-    "  the agent. An approve command took a digest this tool could compute itself, so",
-    "  one script could draft and send with nobody reading anything.",
+    "  Sending from the CLI is off until you turn it on once, in your browser:",
+    '  on the dashboard, Settings > "Let my CLI send notes to posters". That switch',
+    "  cannot be changed from this terminal, and you can turn it off there any time.",
     "",
-    "  This CLI cannot send a note at all. `terminalhire link` gave it its own",
-    "  session, separate from your browser one, and the send refuses it \u2014 so there",
-    "  is no flag, no digest and no scripted path from here to a sent note.",
+    "  Why a switch: a note is often written by an agent that has just read a",
+    "  repository nobody has checked, and that repository can carry text aimed at",
+    '  the agent. The check catches known shapes (keys, tokens, "paste your .env"),',
+    "  not everything. Turning the switch on says your CLI may send under your name.",
+    "  It does not prove a person read each note.",
     "",
-    "  It does not prove a person read it: anything driving your BROWSER session can",
-    "  open the page and send from it. What it proves is narrower \u2014 the approval came",
-    "  from a browser session, which this terminal login never issues."
+    "  Limits: 3 notes per claim and 10 per poster in any 24 hours. The same text",
+    "  sent twice on one claim within 24 hours goes once. The poster can report a",
+    "  note to us."
   ];
 }
 async function cmdNote(id, flags = {}, deps = {}) {
@@ -44256,11 +44874,33 @@ async function cmdNote(id, flags = {}, deps = {}) {
   if (!linked) return 1;
   const res = await postJson(
     fetchImpl,
-    `${CLAIM_SYNC_BASE4}/api/claim/note/draft`,
+    `${CLAIM_SYNC_BASE4}/api/claim/note`,
     { bountyId: founderPostingIdOf(claim), claimId, body },
     linked
   );
   if (!res.ok) {
+    const answer = res.answer ?? {};
+    if (answer.reason === "no-grant") {
+      err("terminalhire claim note: sending notes from the CLI is not turned on for your account.");
+      err("  Turn it on once, in your browser, then run this again:");
+      err(
+        `    ${CLAIM_SYNC_BASE4}${typeof answer.grantPath === "string" ? answer.grantPath : "/dashboard?tab=settings"}`
+      );
+      err('  Settings > "Let my CLI send notes to posters". Nothing was sent.');
+      return 1;
+    }
+    if (answer.reason === "capped") {
+      const where = answer.scope === "poster" ? "to this poster" : "on this claim";
+      err(
+        `terminalhire claim note: you have sent ${answer.limit ?? "the most"} notes ${where} in the last 24 hours, the most allowed.`
+      );
+      if (typeof answer.nextAllowedAt === "string") {
+        err(`  The next one can go at ${answer.nextAllowedAt}. Nothing was sent.`);
+      } else {
+        err("  Nothing was sent.");
+      }
+      return 1;
+    }
     err(`terminalhire claim note: ${res.message}`);
     for (const f of res.findings ?? []) {
       err(`  line ${f.line}: ${f.label}`);
@@ -44268,18 +44908,16 @@ async function cmdNote(id, flags = {}, deps = {}) {
     return 1;
   }
   log("");
-  log("  Draft stored. Nothing has been sent.");
+  if (res.body.alreadySent) {
+    log(`  Already sent. This exact text went to the poster at ${res.body.sentAt};`);
+    log("  nothing new was sent.");
+  } else {
+    log("  Sent to the poster:");
+  }
   log("");
   for (const line of String(res.body.body).split("\n")) log(`  \u2502 ${line}`);
   log("");
-  log(`  draft: ${res.body.draftId}`);
-  log(`  sha:   ${res.body.bodySha256}`);
-  log("");
-  log("  Read it. If it says what you mean and carries nothing private, send it here:");
-  log(`    ${CLAIM_SYNC_BASE4}/dashboard/notes/${res.body.draftId}`);
-  log("");
-  log("  There is no approve command. The page needs a value only it can issue, which");
-  log("  is what stops this tool from sending a note it just wrote.");
+  log(`  note: ${res.body.eventId}   sent: ${res.body.sentAt}`);
   log("");
   return 0;
 }
@@ -44321,7 +44959,9 @@ async function postJson(fetchImpl, url, body, linked) {
     return {
       ok: false,
       message: typeof answer?.error === "string" && answer.error ? answer.error : `terminalhire answered ${res.status}`,
-      findings: Array.isArray(answer?.findings) ? answer.findings : []
+      findings: Array.isArray(answer?.findings) ? answer.findings : [],
+      // The whole refusal, for a caller that branches on its `reason` (TERM-1322).
+      answer: answer && typeof answer === "object" ? answer : null
     };
   }
   return { ok: true, body: answer ?? {} };
@@ -44540,12 +45180,8 @@ async function run() {
       // is three years of muscle memory and `note` is what you leave.
       case "note": {
         if (positional[0] === "approve") {
-          console.error(
-            "terminalhire claim note approve: removed. Notes are sent from your dashboard."
-          );
-          console.error(
-            '  Draft with `terminalhire claim note <id> --body "..."` \u2014 it prints the link.'
-          );
+          console.error("terminalhire claim note approve: removed. `claim note` sends directly.");
+          console.error('  Run `terminalhire claim note <id> --body "..."`.');
           process.exit(1);
         }
         const code = await cmdNote(positional[0], flags);
