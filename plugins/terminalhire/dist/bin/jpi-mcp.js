@@ -26745,6 +26745,60 @@ var init_progress = __esm({
 function reportedCounts(classified, reparsed) {
   return classified !== void 0 ? classified : reparsed;
 }
+function readGoTestVerbose(out) {
+  const TRAILER = /^(?:ok {2}\t\S+\t|FAIL\t\S+(?:\t| \[(?:build|setup) failed\]$)|\? {3}\t\S+\t)/;
+  const lines = out.split("\n");
+  let passed = 0;
+  let failed = 0;
+  let frames = 0;
+  let packageOnly = 0;
+  const everOpen = /* @__PURE__ */ new Set();
+  let nested = false;
+  let incomplete = false;
+  let block = [];
+  for (const line of lines) {
+    if (!TRAILER.test(line)) {
+      block.push(line);
+      continue;
+    }
+    const invocations = [];
+    const latest = /* @__PURE__ */ new Map();
+    for (const l of block) {
+      const run3 = /^=== RUN {3}(\S+)$/.exec(l);
+      if (run3?.[1] !== void 0)
+        latest.set(run3[1], invocations.push(null) - 1);
+      const frame = /^--- (PASS|FAIL|SKIP): (\S+) \(\d+\.\d+s\)$/.exec(l);
+      if (frame?.[2] !== void 0 && !latest.has(frame[2]) && everOpen.has(frame[2])) {
+        nested = true;
+      }
+      const slot = frame?.[2] === void 0 ? void 0 : latest.get(frame[2]);
+      if (slot !== void 0)
+        invocations[slot] = frame?.[1];
+    }
+    const blockPassed = invocations.filter((r) => r === "PASS").length;
+    const blockFailed = invocations.filter((r) => r === "FAIL").length;
+    frames += invocations.filter((r) => r !== null).length;
+    passed += blockPassed;
+    failed += blockFailed;
+    if (line.startsWith("FAIL	") && blockFailed === 0)
+      packageOnly += 1;
+    const openNow = [...latest].filter(([, i]) => invocations[i] === null).map(([n]) => n);
+    for (const n of openNow)
+      everOpen.add(n);
+    if (line.startsWith("ok ") && openNow.some((n) => !n.includes("/"))) {
+      incomplete = true;
+    }
+    block = [];
+  }
+  if (nested || incomplete)
+    return null;
+  if (failed === 0) {
+    if (frames === 0 || packageOnly > 0)
+      return null;
+    return { tests_passed: passed, tests_failed: 0 };
+  }
+  return { tests_passed: passed, tests_failed: failed };
+}
 function readCounts(stdout, stderr = "") {
   const out = `${stdout}
 ${stderr}`;
@@ -26911,9 +26965,9 @@ function classifyVerification(facts) {
     };
   }
   return {
-    outcome: "tests-failed",
+    outcome: "counts-unparsed",
     counts: null,
-    reason: `the command exited ${String(facts.exitCode)} and no reporter format could be read. A nonzero exit that is not an invocation failure is a failure we can name, even without counts.`
+    reason: `the command exited ${String(facts.exitCode)} and no supported reporter format was found in its output, so we cannot tell whether a test failed or something that runs before the tests stopped it \u2014 a lint, format or build-freshness check chained into the test command does that. This is not a verdict on the work. Readable formats: ` + SUPPORTED_RUNNERS.join(", ")
   };
 }
 function isGreen(outcome) {
@@ -27110,6 +27164,78 @@ var init_classify2 = __esm({
           return { tests_passed: Number(m[2]) - failed, tests_failed: failed };
         },
         summaries: (out) => Math.max(1, countLines(out, /^\d+% tests passed, \d+ tests? failed out of \d+$/gm))
+      },
+      {
+        // `go test -v` (TERM-1339). Go prints no totals at all, and without `-v` a passing
+        // package is one `ok` line, a count of packages rather than tests, so the test step
+        // runs with GOFLAGS=-v (`testStepEnv` in execute.ts) and this counts the per-test lines.
+        // Measured on golang:1.23-bookworm. Subtests are indented under their parent and skips
+        // print `--- SKIP`, so neither is counted.
+        //
+        // Read per package and per invocation, not per line (`readGoTestVerbose`), because
+        // review found line counting wrong in both directions. A test printing `--- FAIL:`
+        // read as a failure, `-count=2` collapsed to one result per name, and a package that
+        // never built, from a full disk or a missing header, reached the verdict as the
+        // developer's red.
+        runner: "go test -v",
+        read: (out) => readGoTestVerbose(out)
+      },
+      {
+        // cargo: one `test result:` line per test target (unit tests, each integration test
+        // file, doc-tests), SUMMED. Measured on rust:1-bookworm. cargo stops at the first
+        // failing target, so a red run shows only the targets up to that one.
+        runner: "cargo test",
+        read: (out) => {
+          const lines = [
+            ...out.matchAll(/^test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; /gm)
+          ];
+          if (lines.length === 0)
+            return null;
+          return {
+            tests_passed: lines.reduce((sum, m) => sum + Number(m[1]), 0),
+            tests_failed: lines.reduce((sum, m) => sum + Number(m[2]), 0)
+          };
+        }
+      },
+      {
+        // rspec: `4 examples, 1 failure, 1 pending`, measured with rspec 3.13 on
+        // ruby:3.3-bookworm. A pending example is neither a pass nor a failure. A spec file
+        // that fails to load reads `0 examples, 0 failures, 1 error occurred outside of
+        // examples`, counted as failed, as pytest's collection errors are.
+        runner: "rspec",
+        read: (out) => {
+          const all = [...out.matchAll(/^(\d+) examples?, (\d+) failures?([^\n]*)$/gm)];
+          const line = all.at(-1);
+          if (!line)
+            return null;
+          const examples = Number(line[1]);
+          const failures = Number(line[2]);
+          const pending = int(/(\d+) pending/.exec(line[3] ?? ""));
+          const errors = int(/(\d+) errors? occurred outside of examples/.exec(line[3] ?? ""));
+          return {
+            tests_passed: Math.max(0, examples - failures - pending),
+            tests_failed: failures + errors
+          };
+        },
+        summaries: (out) => countLines(out, /^\d+ examples?, \d+ failures?/gm)
+      },
+      {
+        // `dotnet test`: one `Passed!` or `Failed!` line per test project, SUMMED. Measured on
+        // mcr.microsoft.com/dotnet/sdk:8.0 with xunit:
+        //
+        //     Failed!  - Failed:     1, Passed:     0, Skipped:     0, Total:     1, Duration: …
+        runner: "dotnet test",
+        read: (out) => {
+          const lines = [
+            ...out.matchAll(/^(?:Passed|Failed)!\s+-\s+Failed:\s+(\d+),\s+Passed:\s+(\d+),\s+Skipped:\s+\d+,\s+Total:\s+\d+/gm)
+          ];
+          if (lines.length === 0)
+            return null;
+          return {
+            tests_passed: lines.reduce((sum, m) => sum + Number(m[2]), 0),
+            tests_failed: lines.reduce((sum, m) => sum + Number(m[1]), 0)
+          };
+        }
       },
       {
         // mocha: `  440 passing (1s)` and `  2 failing`
@@ -29003,1300 +29129,6 @@ var init_dist = __esm({
   }
 });
 
-// ../../packages/envrun/dist/labels.js
-function runLabels(runId, callerLabels) {
-  return { ...callerLabels ?? {}, [RUN_ID_LABEL_KEY]: runId, [RUN_LABEL_KEY]: "term-350" };
-}
-function censusTotal(c) {
-  return c.containers.length + c.volumes.length + c.networks.length;
-}
-function query(docker3, args) {
-  const res = docker3.sync([...args], { timeoutMs: 15e3 });
-  if (res.error || res.status !== 0) {
-    const why = res.error?.message ?? (res.stderr.trim() || `exit ${String(res.status)}`);
-    return { ids: [], failure: `docker ${args.slice(0, 2).join(" ")}: ${why}` };
-  }
-  const ids2 = res.stdout.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
-  return { ids: ids2, failure: null };
-}
-function ids(docker3, args) {
-  return query(docker3, args).ids;
-}
-function census(docker3, label) {
-  const filter = `label=${label}`;
-  return {
-    containers: ids(docker3, ["ps", "-aq", "--filter", filter]),
-    volumes: ids(docker3, ["volume", "ls", "-q", "--filter", filter]),
-    networks: ids(docker3, ["network", "ls", "-q", "--filter", filter])
-  };
-}
-function censusReport(docker3, label) {
-  const filter = `label=${label}`;
-  const failures = [];
-  const ask2 = (args) => {
-    const q = query(docker3, args);
-    if (q.failure !== null)
-      failures.push(q.failure);
-    return q.ids;
-  };
-  const taken = {
-    containers: ask2(["ps", "-aq", "--filter", filter]),
-    volumes: ask2(["volume", "ls", "-q", "--filter", filter]),
-    networks: ask2(["network", "ls", "-q", "--filter", filter])
-  };
-  return failures.length === 0 ? { observed: true, census: taken, unobservedReason: null } : { observed: false, census: taken, unobservedReason: failures.join("; ") };
-}
-function localCensus(label) {
-  return census(localDockerClient(), label);
-}
-function judgeLeaks(peak, after, observation) {
-  const labelObserved = peak.containers.length > 0;
-  if (!observation.observed) {
-    return {
-      labelObserved,
-      reaped: false,
-      observed: false,
-      clean: false,
-      state: "unobserved",
-      peak,
-      after,
-      note: `UNOBSERVED, not clean: we could not look at what survived teardown (${observation.unobservedReason ?? "no reason given"}), so nothing is known about leaks on this run, in either direction.`
-    };
-  }
-  const reaped = censusTotal(after) === 0;
-  let note;
-  let state;
-  if (!labelObserved && reaped) {
-    state = "inconclusive";
-    note = "INCONCLUSIVE, not clean: nothing labelled was ever seen alive, so an empty final census is equally consistent with the label never being applied. The control failed, so the denial proves nothing.";
-  } else if (!labelObserved) {
-    state = "leak";
-    note = "no labelled container was observed alive AND objects remain \u2014 the label wiring is wrong.";
-  } else if (!reaped) {
-    state = "leak";
-    note = `LEAK: ${String(censusTotal(after))} labelled object(s) survived teardown (containers=${String(after.containers.length)} volumes=${String(after.volumes.length)} networks=${String(after.networks.length)}).`;
-  } else {
-    state = "clean";
-    note = `clean: peak ${String(peak.containers.length)} labelled container(s) observed alive, 0 labelled objects remain after teardown.`;
-  }
-  return {
-    labelObserved,
-    reaped,
-    observed: true,
-    clean: labelObserved && reaped,
-    state,
-    peak,
-    after,
-    note
-  };
-}
-var RUN_LABEL_KEY, RUN_ID_LABEL_KEY, LabelWatch, LEAK_STATES;
-var init_labels = __esm({
-  "../../packages/envrun/dist/labels.js"() {
-    "use strict";
-    init_dist();
-    RUN_LABEL_KEY = "supergoal.run";
-    RUN_ID_LABEL_KEY = "supergoal.run-id";
-    LabelWatch = class {
-      label;
-      docker;
-      intervalMs;
-      #timer = null;
-      #peak = { containers: [], volumes: [], networks: [] };
-      #samples = 0;
-      /**
-       * `docker` is REQUIRED and second, so a sampler cannot be built without
-       * naming the daemon it watches. A watch polling one daemon while the run
-       * executes on another reports a high-water mark of 0 — indistinguishable
-       * from "the label never applied", which is the exact ambiguity this class
-       * exists to remove.
-       */
-      constructor(label, docker3, intervalMs = 250) {
-        this.label = label;
-        this.docker = docker3;
-        this.intervalMs = intervalMs;
-      }
-      start() {
-        if (this.#timer !== null)
-          return;
-        this.#sample();
-        this.#timer = setInterval(() => this.#sample(), this.intervalMs);
-        this.#timer.unref();
-      }
-      #sample() {
-        this.#samples += 1;
-        const now = census(this.docker, this.label);
-        this.#peak = {
-          containers: now.containers.length > this.#peak.containers.length ? now.containers : this.#peak.containers,
-          volumes: now.volumes.length > this.#peak.volumes.length ? now.volumes : this.#peak.volumes,
-          networks: now.networks.length > this.#peak.networks.length ? now.networks : this.#peak.networks
-        };
-      }
-      stop() {
-        if (this.#timer !== null) {
-          clearInterval(this.#timer);
-          this.#timer = null;
-        }
-        this.#sample();
-      }
-      get peak() {
-        return this.#peak;
-      }
-      get samples() {
-        return this.#samples;
-      }
-    };
-    LEAK_STATES = ["clean", "leak", "inconclusive", "unobserved"];
-  }
-});
-
-// ../../packages/envrun/dist/previewRegistry.js
-function createPreviewRegistry() {
-  const live = /* @__PURE__ */ new Map();
-  return {
-    register(client, container) {
-      const names = live.get(client) ?? /* @__PURE__ */ new Set();
-      names.add(container);
-      live.set(client, names);
-    },
-    deregister(client, container) {
-      const names = live.get(client);
-      if (names === void 0)
-        return;
-      names.delete(container);
-      if (names.size === 0)
-        live.delete(client);
-    },
-    pairs() {
-      const out = [];
-      for (const [client, names] of live) {
-        for (const container of names)
-          out.push({ client, container });
-      }
-      return out;
-    },
-    reapAll() {
-      for (const [client, names] of live) {
-        for (const container of names) {
-          client.sync(["rm", "-f", container], { timeoutMs: 15e3 });
-        }
-      }
-      live.clear();
-    }
-  };
-}
-var init_previewRegistry = __esm({
-  "../../packages/envrun/dist/previewRegistry.js"() {
-    "use strict";
-  }
-});
-
-// ../../packages/envrun/dist/preview.js
-import { randomBytes as randomBytes7 } from "crypto";
-import { mkdirSync as mkdirSync5, writeFileSync as writeFileSync14 } from "fs";
-import { join as join24 } from "path";
-function docker(client, args, timeoutMs = 6e4) {
-  const res = client.sync([...args], { timeoutMs });
-  return {
-    ok: !res.error && res.status === 0,
-    stdout: res.stdout,
-    stderr: (res.error ? res.error.message : "") + res.stderr
-  };
-}
-function installReaper() {
-  if (reaperInstalled)
-    return;
-  reaperInstalled = true;
-  process.on("exit", () => {
-    livePreviews.reapAll();
-  });
-}
-function readHostPort(client, container) {
-  const res = docker(client, ["port", container, `${String(GUEST_PORT)}/tcp`]);
-  if (!res.ok)
-    return null;
-  for (const line of res.stdout.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed === "")
-      continue;
-    const idx = trimmed.lastIndexOf(":");
-    if (idx === -1)
-      continue;
-    const port = Number(trimmed.slice(idx + 1));
-    if (Number.isInteger(port) && port > 0)
-      return port;
-  }
-  return null;
-}
-async function fetchInstanceToken(url, authToken) {
-  try {
-    const headers = {};
-    if (authToken) {
-      headers["Authorization"] = `Bearer ${authToken}`;
-    }
-    const res = await fetch(url, { cache: "no-store", headers });
-    if (!res.ok)
-      return null;
-    const body = await res.json();
-    return typeof body.instanceToken === "string" ? body.instanceToken : null;
-  } catch {
-    return null;
-  }
-}
-async function startPreview(req) {
-  const label = labelArgs(req.labels);
-  const container = `${req.idBase}-preview`;
-  const image = validateImage(req.image);
-  const bindAddress = req.bindAddress ?? "127.0.0.1";
-  const client = req.docker;
-  if (!LOOPBACK_BINDS.has(bindAddress) && req.authToken === void 0) {
-    throw new PreviewError(`refusing to publish the preview on ${bindAddress} without an explicit authToken: a bind wider than loopback puts this run \u2014 the test output tail included \u2014 on the developer's local network`);
-  }
-  const authToken = req.authToken ?? randomBytes7(24).toString("base64url");
-  const envArgs = ["--env", `PREVIEW_AUTH_TOKEN=${authToken}`];
-  const probeHost = WILDCARD_BINDS.has(bindAddress) ? "127.0.0.1" : bindAddress;
-  const probeAuthority = probeHost.includes(":") ? `[${probeHost}]` : probeHost;
-  mkdirSync5(req.scratchDir, { recursive: true });
-  const docPath = join24(req.scratchDir, "preview-run.json");
-  writeFileSync14(docPath, JSON.stringify(req.document, null, 2), "utf8");
-  const teardown = () => {
-    livePreviews.deregister(client, container);
-    for (let i = 0; i < 3; i += 1) {
-      const inspect = docker(client, ["inspect", "--format", "{{.State.Status}}", container]);
-      if (!inspect.ok)
-        return { clean: true, leaked: [] };
-      docker(client, ["rm", "-f", container]);
-    }
-    const still = docker(client, ["inspect", "--format", "{{.State.Status}}", container]);
-    return still.ok ? { clean: false, leaked: [`container ${container}`] } : { clean: true, leaked: [] };
-  };
-  const startedAt = Date.now();
-  try {
-    const run3 = docker(client, [
-      "run",
-      "-d",
-      "--init",
-      `--name=${container}`,
-      // A network IS granted here, unlike the verification step. It carries our
-      // own argv over a document we wrote; the repo's code never runs in it.
-      "--network=bridge",
-      // Loopback by default, and anything wider was refused above unless the
-      // caller named a token. A bare `-p 8080` would bind 0.0.0.0 and put a
-      // developer's in-progress work on their local network.
-      `--publish=${bindAddress}:0:${String(GUEST_PORT)}`,
-      ...envArgs,
-      "--cap-drop=ALL",
-      "--security-opt=no-new-privileges",
-      "--pids-limit=64",
-      "--memory=256m",
-      "--read-only",
-      "--tmpfs=/tmp:rw,noexec,nosuid,size=8m",
-      ...label,
-      `--volume=${docPath}:${GUEST_DOC}:ro`,
-      "--",
-      image,
-      "node",
-      "-e",
-      SERVER_SOURCE
-    ]);
-    if (!run3.ok) {
-      throw new PreviewError(`could not start the preview container: ${run3.stderr.trim()}`);
-    }
-    const deadline = Date.now() + (req.readyTimeoutMs ?? 6e4);
-    let hostPort = null;
-    let token = null;
-    let lastDetail = "never answered";
-    const throwIfExited = () => {
-      const alive = docker(client, ["inspect", "--format", "{{.State.Running}}", container]);
-      if (alive.stdout.trim() !== "true") {
-        const logs = docker(client, ["logs", "--tail", "20", container]);
-        throw new PreviewError(`the preview container exited before serving: ${logs.stdout.trim()}${logs.stderr.trim()}`);
-      }
-    };
-    while (Date.now() < deadline) {
-      hostPort ??= readHostPort(client, container);
-      if (hostPort === null) {
-        throwIfExited();
-        lastDetail = "Docker never reported a published host port";
-        await sleep4(200);
-        continue;
-      }
-      token = await fetchInstanceToken(`http://${probeAuthority}:${String(hostPort)}/`, authToken);
-      if (token !== null)
-        break;
-      throwIfExited();
-      lastDetail = "the port is published but the server has not answered yet";
-      await sleep4(150);
-    }
-    if (hostPort === null || token === null) {
-      throw new PreviewError(`the preview URL never became reachable: ${lastDetail}`);
-    }
-    livePreviews.register(client, container);
-    installReaper();
-    const origin = `http://${probeAuthority}:${String(hostPort)}/`;
-    return {
-      url: `${origin}?token=${encodeURIComponent(authToken)}`,
-      origin,
-      authToken,
-      instanceToken: token,
-      container,
-      hostPort,
-      readyMs: Date.now() - startedAt,
-      teardown
-    };
-  } catch (err) {
-    teardown();
-    throw err;
-  }
-}
-function startLocalPreview(req) {
-  return startPreview({ ...req, docker: localDockerClient() });
-}
-var PreviewError, GUEST_PORT, GUEST_DOC, LOOPBACK_BINDS, WILDCARD_BINDS, SERVER_SOURCE, livePreviews, reaperInstalled, sleep4;
-var init_preview = __esm({
-  "../../packages/envrun/dist/preview.js"() {
-    "use strict";
-    init_dist();
-    init_previewRegistry();
-    PreviewError = class extends Error {
-    };
-    GUEST_PORT = 8080;
-    GUEST_DOC = "/preview/run.json";
-    LOOPBACK_BINDS = /* @__PURE__ */ new Set(["127.0.0.1", "localhost", "::1"]);
-    WILDCARD_BINDS = /* @__PURE__ */ new Set(["0.0.0.0", "::"]);
-    SERVER_SOURCE = `
-const http = require('node:http');
-const { readFileSync } = require('node:fs');
-const { randomUUID, timingSafeEqual } = require('node:crypto');
-
-// Read ONCE, at startup, and refuse to run without it. An unset token used to
-// skip the check entirely, which meant the one configuration nobody sets on
-// purpose was also the one that served a developer's in-progress work to
-// anything that could reach the port. Absent must never mean permitted \u2014 the
-// polarity requireSecret() holds in apps/web/lib/secrets.ts.
-const AUTH_TOKEN = process.env.PREVIEW_AUTH_TOKEN || '';
-if (AUTH_TOKEN === '') {
-  process.stderr.write(
-    'preview: refusing to start \u2014 PREVIEW_AUTH_TOKEN is unset, and this server will not ' +
-      'serve a run document unauthenticated\\n',
-  );
-  process.exit(1);
-}
-const EXPECTED = Buffer.from(AUTH_TOKEN, 'utf8');
-
-/** The token the client presented, or null. */
-function presented(req) {
-  const header = req.headers['authorization'];
-  const bearer = typeof header === 'string' ? /^Bearer\\s+(.+)$/i.exec(header) : null;
-  if (bearer !== null) return bearer[1];
-  // A non-Bearer Authorization header FALLS THROUGH to the query parameter. The
-  // earlier ternary branched on the header merely EXISTING, so a client sending
-  // "Basic \u2026" produced an empty string and could never authenticate at all.
-  //
-  // The query form stays because the founder opens this in a browser and a
-  // browser sends no Authorization header. That is the only reason it is
-  // accepted: a token in a URL lands in browser history, shell history and any
-  // proxy log on the way, where a header does not.
-  return new URL(req.url, 'http://localhost').searchParams.get('token');
-}
-
-function authorized(req) {
-  const given = presented(req);
-  if (typeof given !== 'string') return false;
-  const got = Buffer.from(given, 'utf8');
-  // timingSafeEqual THROWS on a length mismatch, so length is compared first and
-  // refused here. The length is not the secret; the bytes are.
-  if (got.length !== EXPECTED.length) return false;
-  return timingSafeEqual(got, EXPECTED);
-}
-
-// Per-INSTANCE, minted at boot. Not passed in, not derived from anything the
-// host controls \u2014 that is what makes "same token \u21D2 same instance" hold.
-const INSTANCE_TOKEN = randomUUID();
-const DOC = JSON.parse(readFileSync(${JSON.stringify(GUEST_DOC)}, 'utf8'));
-let served = 0;
-
-http
-  .createServer((req, res) => {
-    if (!authorized(req)) {
-      res.writeHead(401, { 'content-type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({ error: 'unauthorized' }));
-    }
-    served += 1;
-    const body = JSON.stringify(
-      {
-        instanceToken: INSTANCE_TOKEN,
-        servedCount: served,
-        pid: process.pid,
-        run: DOC,
-      },
-      null,
-      2,
-    );
-    res.writeHead(200, {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store',
-      'x-th-instance': INSTANCE_TOKEN,
-    });
-    res.end(body);
-  })
-  .listen(${String(GUEST_PORT)}, '0.0.0.0', () => {
-    console.log('preview-ready ' + INSTANCE_TOKEN);
-  });
-`;
-    livePreviews = createPreviewRegistry();
-    reaperInstalled = false;
-    sleep4 = (ms) => new Promise((r) => setTimeout(r, ms));
-  }
-});
-
-// ../../packages/envrun/dist/venue.js
-import { randomBytes as randomBytes8 } from "crypto";
-import { join as join25 } from "path";
-function localJailPaths(scratchRoot) {
-  return {
-    jail: join25(scratchRoot, JAIL_SEGMENT),
-    tmp: join25(scratchRoot, JAIL_TMP_SEGMENT)
-  };
-}
-function localVenue() {
-  return {
-    kind: "local",
-    acquire: (runId) => acquireTransactionally((allocated) => {
-      void allocated;
-      return Promise.resolve(acquireLocalLease(runId));
-    })
-  };
-}
-async function acquireTransactionally(body) {
-  const undos = [];
-  try {
-    return await body({
-      onRollback: (undo) => {
-        undos.push(undo);
-      }
-    });
-  } catch (err) {
-    const failures = [];
-    for (const undo of undos.reverse()) {
-      let failed = null;
-      try {
-        await undo();
-      } catch (rollbackErr) {
-        failed = { thrown: rollbackErr };
-      }
-      if (failed === null)
-        continue;
-      let entry;
-      try {
-        entry = describeThrown(failed.thrown, { includeName: true });
-      } catch {
-        entry = UNDESCRIBABLE_THROWN;
-      }
-      failures.push(entry);
-    }
-    if (failures.length > 0)
-      throw new VenueRollbackError(err, failures);
-    throw err;
-  }
-}
-function rollbackMessage(cause, rollbackFailures) {
-  const headline = describeThrown(cause, { includeName: false });
-  let tail2;
-  try {
-    tail2 = `[venue acquisition rolled back with ${String(rollbackFailures.length)} failure(s): ${rollbackFailures.join("; ")} \u2014 one or more allocated resources may still exist]`;
-  } catch {
-    tail2 = UNLISTABLE_ROLLBACK_FAILURES;
-  }
-  return `${headline} ${tail2}`;
-}
-function describeThrown(thrown, opts) {
-  try {
-    if (isErrorValue(thrown)) {
-      const message2 = readErrorField(thrown, "message", UNREADABLE_MESSAGE);
-      if (!opts.includeName)
-        return message2;
-      const name = readErrorField(thrown, "name", UNREADABLE_NAME);
-      return message2 === "" ? name : `${name}: ${message2}`;
-    }
-    return coerceToString(thrown);
-  } catch {
-    return UNDESCRIBABLE_THROWN;
-  }
-}
-function isErrorValue(thrown) {
-  try {
-    return thrown instanceof Error;
-  } catch {
-    return false;
-  }
-}
-function readErrorField(thrown, key, fallback) {
-  let raw;
-  try {
-    raw = thrown[key];
-  } catch {
-    return fallback;
-  }
-  return typeof raw === "string" ? raw : coerceToString(raw);
-}
-function coerceToString(thrown) {
-  try {
-    return String(thrown);
-  } catch {
-    return UNCOERCIBLE_THROWN;
-  }
-}
-function localTreeOwner(ids2 = hostIds()) {
-  if (ids2?.uid !== 0)
-    return void 0;
-  return localGuestUser(ids2) ?? void 0;
-}
-function handLocalTreeToGuest(local, owner, chown = chownTree) {
-  if (owner === void 0)
-    return;
-  chown(local.cloneDir, owner);
-  chown(local.scratchRoot, owner);
-}
-function localCloneVolumeName(runId, suffix = randomBytes8(4).toString("hex")) {
-  const tail2 = `-${suffix}`;
-  const safe = runId.replace(/[^a-zA-Z0-9_.-]/g, "-");
-  const head = `th-clone-${safe}`.slice(0, VOLUME_NAME_MAX2 - tail2.length);
-  return validateVolumeName(`${head}${tail2}`, "the local clone volume");
-}
-function localCloneFillArgv(from, volume, owner) {
-  const chown = owner === null ? "" : ` && chown -R ${String(owner.uid)}:${String(owner.gid)} /dst`;
-  return [
-    "run",
-    "--rm",
-    "--network=none",
-    `--volume=${from}:/src:ro`,
-    `--volume=${validateVolumeName(volume, "the local clone volume")}:/dst:rw`,
-    "--",
-    STAGE_HELPER_IMAGE,
-    "sh",
-    "-c",
-    `cp -a /src/. /dst/${chown}`
-  ];
-}
-function acquireLocalLease(runId) {
-  const docker3 = localDockerClient();
-  const containment = selectContainment([containerContainmentOn(docker3)]);
-  let released = false;
-  const stagedProxies = [];
-  const owner = localTreeOwner();
-  let cloneVolume;
-  const createdVolumes = [];
-  const fillCloneVolume = (cloneDir) => {
-    const name = localCloneVolumeName(runId);
-    const created = docker3.sync(["volume", "create", `--label=${STAGE_VOLUME_LABEL_KEY}=${runId}`, "--", name], { timeoutMs: LOCAL_VOLUME_CREATE_TIMEOUT_MS });
-    if (created.error || created.status !== 0) {
-      throw new ContainmentRefusalError(`could not create the clone volume ${name} on the local daemon: ${(created.error?.message ?? created.stderr).trim().slice(0, 300)}`);
-    }
-    createdVolumes.push(name);
-    const from = resolverFor("local")(cloneDir, "clone");
-    const filled = docker3.sync(localCloneFillArgv(from, name, localGuestUser()), {
-      timeoutMs: LOCAL_CLONE_FILL_TIMEOUT_MS
-    });
-    if (filled.error || filled.status !== 0) {
-      throw new ContainmentRefusalError(`could not copy the clone into its volume ${name}: ${(filled.error?.message ?? filled.stderr).trim().slice(0, 300)}`);
-    }
-    return name;
-  };
-  const lease = {
-    kind: "local",
-    runId,
-    containment,
-    docker: docker3,
-    // Stated, not inferred from `kind`. On this venue it is the truth twice over:
-    // the paths are on this machine AND `canonical()` is what should resolve
-    // them, which is the behaviour every local run has always had.
-    pathDomain: "local",
-    // Spread rather than `guestUser: owner`, so a non-root lease has no such key
-    // at all — the same object every local run has always had.
-    ...owner === void 0 ? {} : { guestUser: owner },
-    get released() {
-      return released;
-    },
-    get cloneVolume() {
-      return cloneVolume;
-    },
-    stage: (local) => {
-      if (released) {
-        return Promise.reject(new LeaseReleasedError("this lease was already released, so a clone volume made now would never be removed."));
-      }
-      try {
-        handLocalTreeToGuest(local, owner);
-        cloneVolume = fillCloneVolume(local.cloneDir);
-      } catch (err) {
-        return Promise.reject(err instanceof Error ? err : new Error(String(err)));
-      }
-      return Promise.resolve({
-        cloneDir: local.cloneDir,
-        scratchRoot: local.scratchRoot,
-        previewDir: local.previewDir,
-        ...localJailPaths(local.scratchRoot)
-      });
-    },
-    // The containment function verbatim, which is the point of the barrel
-    // re-export rather than a copy here: this venue's daemon and this process
-    // share a filesystem, so the directory it makes under `tmpdir()` is already
-    // venue-side and has been on every local run since the sidecar existed.
-    //
-    // TRACKED, so `release()` can be the guaranteed owner the interface
-    // promises. Returning a bare handle made that promise the CALLER's to keep,
-    // and a caller that staged and then failed outside `runEnvironmentSpec`'s
-    // `finally` left the directory behind while release reported success.
-    //
-    // REFUSING AFTER RELEASE is the other half of the same promise. Staging onto
-    // a drained list would leak with nothing left to drain, and `release()` has
-    // already reported it had nothing to do — the split ownership this tracking
-    // exists to close, reached from the other side.
-    //
-    // ONLY THIS ARM CHECKS IT. An earlier draft of this comment said the hosted
-    // arm refuses the same way through `check()`, and that is not what `check()`
-    // tests: `assertVenueUnchanged` reads the tunnel's failure and classifies
-    // the daemon, and never looks at `released`. Hosted refuses a post-release
-    // staging only incidentally, because by then the VM is gone. Naming the
-    // check and what it actually tests is the rule this branch spent its length
-    // on, and that draft broke it in the same breath as stating it.
-    //
-    // That leaves the two arms answering one programmer error with different
-    // exit codes — hosted's incidental failure is a `HostedVenueError` at 2,
-    // this one is a plain throw at 1. Recorded on TERM-752 rather than fixed
-    // here: it is unreachable while `placement.ts` refuses first.
-    //
-    // THE EXIT CODE IS WHY IT IS NOT A REFUSAL TYPE. Nothing catches it and
-    // `findRunRefusal` does not match it, so it reaches the top-level catch at
-    // exit 1 — correct, because only our own call ordering can reach this, which
-    // is `assertDomainDeclared`'s reasoning and the same one this branch applied
-    // to `assertProxyStagedForVenue`. Giving it `RunRefusalError` would dress
-    // our defect as a polite refusal, TERM-649's lie inverted.
-    //
-    // It is a NAMED subclass rather than a bare `Error` for a hazard already
-    // here, not a speculative one. `stageProxyCode()` in `containment` throws
-    // `FenceError` on a damaged install, telling the developer to reinstall the
-    // CLI. Two distinguishable failures leave this one call, so the day anyone
-    // adds a catch to surface that instruction, an unnamed ordering bug gets
-    // swept into it and tells a developer to reinstall over our mistake.
-    stageProxyCode: () => {
-      if (released) {
-        return Promise.reject(new LeaseReleasedError("this lease was already released, so a staging made now would never be removed: release() has run and drained what it was holding."));
-      }
-      const staged = stageProxyCode();
-      stagedProxies.push(staged);
-      return Promise.resolve(staged);
-    },
-    census: (label) => Promise.resolve(released ? {
-      observed: false,
-      census: { containers: [], volumes: [], networks: [] },
-      unobservedReason: RELEASED_LEASE_CENSUS_REASON
-    } : censusReport(docker3, label)),
-    publishPreview: (req) => startPreview({ ...req, docker: docker3 }),
-    release: () => {
-      if (released) {
-        return Promise.resolve({
-          kind: "local",
-          released: false,
-          alreadyReleased: true,
-          error: null,
-          detail: "already released; nothing to do"
-        });
-      }
-      released = true;
-      const staged = stagedProxies.splice(0, stagedProxies.length);
-      for (const s of staged)
-        s.cleanup();
-      const volumeFailures = [];
-      for (const name of createdVolumes.splice(0, createdVolumes.length)) {
-        const removed = docker3.sync(["volume", "rm", "-f", "--", name], {
-          timeoutMs: LOCAL_VOLUME_CREATE_TIMEOUT_MS
-        });
-        if (removed.error || removed.status !== 0) {
-          volumeFailures.push(`${name}: ${(removed.error?.message ?? removed.stderr).trim().slice(0, 200)}`);
-        }
-      }
-      cloneVolume = void 0;
-      if (volumeFailures.length > 0) {
-        return Promise.resolve({
-          kind: "local",
-          released: true,
-          alreadyReleased: false,
-          error: `could not remove the clone volume: ${volumeFailures.join("; ")}`,
-          detail: `the lease is closed, but a clone volume remains (label ${STAGE_VOLUME_LABEL_KEY})`
-        });
-      }
-      return Promise.resolve({
-        kind: "local",
-        released: true,
-        alreadyReleased: false,
-        error: null,
-        detail: "the local venue owns no host resources; the lease is closed"
-      });
-    }
-  };
-  return lease;
-}
-var VenueRollbackError, UNREADABLE_MESSAGE, UNREADABLE_NAME, UNCOERCIBLE_THROWN, UNDESCRIBABLE_THROWN, UNLISTABLE_ROLLBACK_FAILURES, RELEASED_LEASE_CENSUS_REASON, LeaseReleasedError, STAGE_HELPER_IMAGE, STAGE_VOLUME_LABEL_KEY, VOLUME_NAME_MAX2, LOCAL_VOLUME_CREATE_TIMEOUT_MS, LOCAL_CLONE_FILL_TIMEOUT_MS;
-var init_venue = __esm({
-  "../../packages/envrun/dist/venue.js"() {
-    "use strict";
-    init_dist();
-    init_labels();
-    init_preview();
-    VenueRollbackError = class extends Error {
-      /** Every undo that threw, in the order they ran (reverse allocation order). */
-      rollbackFailures;
-      constructor(cause, rollbackFailures) {
-        super(rollbackMessage(cause, rollbackFailures), { cause });
-        this.name = "VenueRollbackError";
-        this.rollbackFailures = rollbackFailures;
-      }
-    };
-    UNREADABLE_MESSAGE = "<an error whose message could not be read>";
-    UNREADABLE_NAME = "<an error whose name could not be read>";
-    UNCOERCIBLE_THROWN = "<a thrown value that cannot be converted to a string>";
-    UNDESCRIBABLE_THROWN = "<a thrown value that could not be described>";
-    UNLISTABLE_ROLLBACK_FAILURES = "[venue acquisition rolled back, and the failures could not be listed \u2014 one or more allocated resources may still exist]";
-    RELEASED_LEASE_CENSUS_REASON = "the lease was already released, so this venue can no longer be interrogated";
-    LeaseReleasedError = class extends Error {
-      name = "LeaseReleasedError";
-    };
-    STAGE_HELPER_IMAGE = "busybox:1.37.0";
-    STAGE_VOLUME_LABEL_KEY = "terminalhire.stage";
-    VOLUME_NAME_MAX2 = 128;
-    LOCAL_VOLUME_CREATE_TIMEOUT_MS = 3e4;
-    LOCAL_CLONE_FILL_TIMEOUT_MS = 6e5;
-  }
-});
-
-// ../../packages/envrun/dist/execute.js
-import { spawnSync as spawnSync4 } from "child_process";
-function findRunRefusal(err) {
-  try {
-    let current = err;
-    for (let depth = 0; depth < MAX_CAUSE_FRAMES; depth += 1) {
-      if (current instanceof RunRefusalError)
-        return current;
-      if (current instanceof ContainmentRefusalError) {
-        return new RunRefusalError(current.message, { cause: current });
-      }
-      const next = current?.cause;
-      if (next === void 0 || next === null)
-        return null;
-      current = next;
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-function describeCause(err) {
-  let out = "";
-  let frames = 0;
-  const append = (frame) => {
-    out = frames === 0 ? frame : `${out}
-caused by: ${frame}`;
-    frames += 1;
-  };
-  let current = err;
-  try {
-    for (let depth = 0; depth < MAX_CAUSE_FRAMES && current !== void 0 && current !== null; depth += 1) {
-      let frame = describeThrown(current, { includeName: true });
-      let next;
-      let asError = null;
-      try {
-        asError = current instanceof Error ? current : null;
-      } catch {
-        append(frame);
-        append(CHAIN_UNREADABLE);
-        return out;
-      }
-      try {
-        const stack = asError?.stack;
-        if (typeof stack === "string" && stack !== "")
-          frame = stack;
-      } catch {
-      }
-      try {
-        next = current.cause;
-      } catch {
-        append(frame);
-        append(CHAIN_UNREADABLE);
-        return out;
-      }
-      append(frame);
-      current = next;
-    }
-    if (current !== void 0 && current !== null)
-      append(CHAIN_TOO_DEEP);
-  } catch {
-    append(CHAIN_UNREADABLE);
-  }
-  return frames === 0 ? null : out;
-}
-function imageVariantFor(spec) {
-  if (spec.runtime !== "jvm")
-    return void 0;
-  const callsGradle = /(?:^|[\s;&|(])gradle(?=\s|$)/;
-  return [spec.installCommand, spec.testCommand].some((c) => c != null && callsGradle.test(c)) ? "gradle" : void 0;
-}
-function shapeFor(runtime, variant) {
-  if (runtime === "jvm" && variant === "gradle")
-    return JVM_GRADLE_IMAGE;
-  return RUNTIME_IMAGES[runtime];
-}
-function atLeast(a, b) {
-  const left = a.split(".").map(Number);
-  const right = b.split(".").map(Number);
-  const shared = Math.min(left.length, right.length);
-  for (let i = 0; i < shared; i += 1) {
-    const l = left[i];
-    const r = right[i];
-    if (l !== r)
-      return l > r;
-  }
-  return true;
-}
-function imageForRuntime(runtime, override, version2, variant) {
-  if (override)
-    return override;
-  const shape = shapeFor(runtime, variant);
-  if (!shape) {
-    throw new RunRefusalError(`no container image is mapped for runtime ${JSON.stringify(runtime)}. Refusing to run it in the Node image: a bare "command not found" exits 127, which classifyVerification already owns as ours \u2014 but a test script that RUNS and fails inside on the missing tool exits with its own status and prints to stdout, and that falls through to tests-failed \u2014 a false red blamed on the repo.`);
-  }
-  if (version2 === void 0 || version2 === null || shape.fixed)
-    return unversionedImage(shape);
-  if (!TAG_VERSION.test(version2)) {
-    throw new RunRefusalError(`runtime version ${JSON.stringify(version2)} is not a bare version, so no image tag can be built from it. Refusing rather than booting the default: the repo asked for a version, and supplying a different one silently is what TERM-643 fixed.`);
-  }
-  return `${shape.repository}:${shape.prefix ?? ""}${version2}${shape.suffix}`;
-}
-function setManifestProbe(probe) {
-  const previous = manifestProbe;
-  manifestProbe = probe ?? dockerManifestProbe;
-  return previous;
-}
-function imageDefinitelyAbsent(image) {
-  const res = manifestProbe(image);
-  if (res.status === 0)
-    return false;
-  return /manifest unknown|no such manifest/i.test(res.output);
-}
-function resolvePublishedImage(image, runtime, version2, variant) {
-  if (!imageDefinitelyAbsent(image))
-    return image;
-  const shape = shapeFor(runtime, variant);
-  if (shape && shape.declaredIsFloor && atLeast(shape.defaultVersion, version2)) {
-    return unversionedImage(shape);
-  }
-  throw new RunRefusalError(`the repo declares ${runtime} ${version2}, and no image is published at ${image}` + (shape && shape.declaredIsFloor ? `. Our default is ${shape.defaultVersion}, which is OLDER than that, so falling back would run the repo under a toolchain it says it cannot use` : `. ${runtime} treats a declared version as an exact pin, not a minimum, so a different one is a different environment`) + ". Refusing rather than booting a version the repo did not ask for \u2014 that substitution is what made this class of failure unattributable (TERM-643). Pass an explicit image to override.", { origin: "repository" });
-}
-function resolveImageForSpec(spec, override) {
-  const variant = imageVariantFor(spec);
-  const declared = shapeFor(spec.runtime, variant)?.fixed ? null : spec.runtimeVersion;
-  const image = imageForRuntime(spec.runtime, override, declared, variant);
-  const constructed = (() => {
-    if (declared === null)
-      return null;
-    try {
-      return imageForRuntime(spec.runtime, void 0, declared, variant);
-    } catch {
-      return null;
-    }
-  })();
-  if (constructed !== null && image === constructed && declared !== null) {
-    return resolvePublishedImage(image, spec.runtime, declared, variant);
-  }
-  return image;
-}
-function installEnvironmentFailureNote(install, image, pathDomain) {
-  const base = `the install step exited ${String(install.exitCode)}, so the test command was never invoked. The repo has not been judged; this is an environment failure.` + refusedHostsSentence(install.egressDenied ?? []);
-  const output = `${install.stdout}
-${install.stderr}`;
-  const pullFailed = install.exitCode === DOCKER_RUN_FAILED && MISSING_IMAGE_SHAPE.test(output) && PULL_FAILED_SHAPE.test(output) && !PULL_SUCCEEDED_SHAPE.test(output);
-  if (!pullFailed)
-    return base;
-  if (pathDomain === "venue") {
-    return `${base} The venue could not pull the container image ${image}; this is ours to fix.`;
-  }
-  return `${base} The container image ${image} is not present on this machine \u2014 run \`docker pull ${image}\` and try again.`;
-}
-function refusedHostsSentence(hosts) {
-  if (hosts.length === 0)
-    return "";
-  const named = hosts.slice(0, MAX_NAMED_REFUSED_HOSTS).join(", ");
-  const rest = hosts.length - MAX_NAMED_REFUSED_HOSTS;
-  return ` During install the network proxy refused ${named}` + (rest > 0 ? ` and ${String(rest)} more` : "") + ". Install reaches only the hosts on its allowlist, so a dependency whose install script downloads from any other host cannot get what it asked for.";
-}
-function classifySingleRun(run3) {
-  return classifyVerification(run3).outcome;
-}
-function toExecution(step) {
-  return {
-    exitCode: step.exitCode,
-    stdout: step.stdout,
-    stderr: step.stderr,
-    timedOut: step.timedOut
-  };
-}
-function assertVenueOwnerDeclared(lease) {
-  if (lease.pathDomain !== "venue" || lease.guestUser)
-    return;
-  throw new RunRefusalError("this venue did not say which account owns the tree it staged, so the guest would run under this machine's uid and could not write its own clone. We refuse rather than report that permission error as the repo's tests failing.");
-}
-function refuseUnbuildableSpec(spec) {
-  if (spec.runtime !== "jvm" || spec.installCommand !== null || spec.testCommand !== null)
-    return;
-  const why = spec.unresolved.find((r) => r.kind === "no-test-command")?.detail;
-  if (why === void 0) {
-    throw new EnvRunError("internal: a jvm spec with no test command carries no no-test-command reason");
-  }
-  throw new RunRefusalError(`refusing to run this repository: ${why}.`);
-}
-async function runEnvironmentSpec(req) {
-  const startedAt = Date.now();
-  const containment = req.lease.containment;
-  if (containment.kind !== "container") {
-    throw new EnvRunError(`phase 2 requires the container tier, got ${containment.kind}. Refusing: a container phase that silently ran under seatbelt would make every container claim vacuous.`);
-  }
-  refuseUnbuildableSpec(req.spec);
-  assertVenueOwnerDeclared(req.lease);
-  const image = resolveImageForSpec(req.spec, req.image);
-  const { jail, tmp } = req;
-  const env = scrubEnv(process.env, scrubEnvPathsFor("container", { jail, tmp }));
-  const labels = req.labels;
-  const watch = labels ? new LabelWatch(labelSelector(labels), req.lease.docker) : null;
-  watch?.start();
-  let install = null;
-  let test = null;
-  let result;
-  let proxyCode = null;
-  try {
-    if (req.spec.installCommand !== null) {
-      proxyCode = await req.lease.stageProxyCode();
-      install = await runStep(containment, {
-        step: "install",
-        profile: "install",
-        proxyCode,
-        command: req.spec.installCommand,
-        repoDir: req.repoDir,
-        jail,
-        tmp,
-        pathDomain: req.lease.pathDomain,
-        // TERM-729: travels WITH pathDomain, because it answers the same
-        // question about the same machine. Undefined on a local lease.
-        guestUser: req.lease.guestUser,
-        // TERM-913: the third answer about that machine — which volumes the
-        // fence mounts in place of the noexec stage. Undefined on a local lease.
-        stageVolumes: req.lease.stageVolumes,
-        // TERM-1106: the local venue's copy of the clone. Undefined on a hosted lease.
-        cloneVolume: req.lease.cloneVolume,
-        env,
-        image,
-        labels,
-        timeoutMs: req.installTimeoutMs ?? 9e5
-      });
-    }
-    if (install !== null && install.exitCode !== 0) {
-      result = {
-        outcome: "test-command-unavailable",
-        note: installEnvironmentFailureNote(install, image, req.lease.pathDomain),
-        installOk: false,
-        counts: null
-      };
-    } else if (req.spec.testCommand === null) {
-      const why = req.spec.unresolved.find((r) => r.kind === "no-test-command")?.detail;
-      result = {
-        outcome: "no-tests-observed",
-        note: "the spec derived no test command, so nothing was executed: nothing failed and nothing ran. Certain, not inferred \u2014 no command was ever invoked." + (why === void 0 ? "" : ` Why: ${why}.`),
-        installOk: true,
-        counts: null
-      };
-    } else {
-      test = await runStep(containment, {
-        step: "test",
-        profile: "offline",
-        command: req.spec.testCommand,
-        repoDir: req.repoDir,
-        jail,
-        tmp,
-        pathDomain: req.lease.pathDomain,
-        // TERM-729: travels WITH pathDomain, because it answers the same
-        // question about the same machine. Undefined on a local lease.
-        guestUser: req.lease.guestUser,
-        // TERM-913: the third answer about that machine — which volumes the
-        // fence mounts in place of the noexec stage. Undefined on a local lease.
-        stageVolumes: req.lease.stageVolumes,
-        // TERM-1106: the local venue's copy of the clone. Undefined on a hosted lease.
-        cloneVolume: req.lease.cloneVolume,
-        env,
-        image,
-        labels,
-        timeoutMs: req.testTimeoutMs ?? 9e5
-      });
-      const verdict = classifyVerification({ ...toExecution(test), runtime: req.spec.runtime });
-      result = {
-        outcome: verdict.outcome,
-        note: verdict.reason,
-        installOk: true,
-        counts: verdict.counts
-      };
-    }
-  } finally {
-    watch?.stop();
-    proxyCode?.cleanup();
-  }
-  const peak = watch?.peak ?? { containers: [], volumes: [], networks: [] };
-  const afterReport = labels ? await req.lease.census(labelSelector(labels)) : null;
-  const after = afterReport?.census ?? {
-    containers: [],
-    volumes: [],
-    networks: []
-  };
-  const observation = afterReport ?? {
-    observed: false,
-    unobservedReason: "the run carried no label, so there was nothing to count by"
-  };
-  return {
-    outcome: result.outcome,
-    tier: "container",
-    image,
-    install,
-    test,
-    installOk: result.installOk,
-    counts: reportedCounts(result.counts, test ? readCounts(test.stdout, test.stderr) : null),
-    leaks: judgeLeaks(peak, after, observation),
-    note: result.note,
-    wallMs: Date.now() - startedAt
-  };
-}
-function labelSelector(labels) {
-  const first = Object.entries(labels)[0];
-  if (!first)
-    throw new EnvRunError("labels object is empty; pass at least one label or omit it");
-  return `${first[0]}=${first[1]}`;
-}
-function withUserScriptPath(command) {
-  return `PATH="$PATH:$HOME/.local/bin"; export PATH; ${command}`;
-}
-async function runStep(containment, r) {
-  const spec = {
-    profile: r.profile,
-    clone: r.repoDir,
-    jail: r.jail,
-    tmp: r.tmp,
-    // DECLARED, never derived from the docker endpoint — `fence.ts`'s
-    // `PathDomain` comment explains why that inference is unavailable: a hosted
-    // venue is reached over a forwarded unix socket, so the endpoint is a local
-    // path in front of a remote daemon. The venue that produced these paths is
-    // the one party that knows, and it is the lease this value came from.
-    pathDomain: r.pathDomain,
-    guestUser: r.guestUser,
-    stageVolumes: r.stageVolumes,
-    cloneVolume: r.cloneVolume,
-    program: "/bin/sh",
-    args: ["-c", withUserScriptPath(r.command)]
-  };
-  const startedAt = Date.now();
-  const res = await containment.run(spec, r.env, {
-    timeoutMs: r.timeoutMs,
-    image: r.image,
-    ...r.labels ? { labels: r.labels } : {},
-    ...r.proxyCode ? { proxyCode: r.proxyCode } : {}
-  });
-  return {
-    step: r.step,
-    profile: r.profile,
-    command: r.command,
-    argv: res.argv,
-    exitCode: res.status,
-    stdout: res.stdout,
-    stderr: res.stderr,
-    timedOut: res.timedOut,
-    wallMs: Date.now() - startedAt,
-    ...res.egressDenied && res.egressDenied.length > 0 ? { egressDenied: [...new Set(res.egressDenied)] } : {}
-  };
-}
-var EnvRunError, RunRefusalError, MAX_CAUSE_FRAMES, CHAIN_UNREADABLE, CHAIN_TOO_DEEP, RUNTIME_IMAGES, JVM_GRADLE_IMAGE, unversionedImage, TAG_VERSION, dockerManifestProbe, manifestProbe, MISSING_IMAGE_SHAPE, PULL_FAILED_SHAPE, PULL_SUCCEEDED_SHAPE, DOCKER_RUN_FAILED, MAX_NAMED_REFUSED_HOSTS;
-var init_execute = __esm({
-  "../../packages/envrun/dist/execute.js"() {
-    "use strict";
-    init_dist();
-    init_classify2();
-    init_labels();
-    init_venue();
-    EnvRunError = class extends Error {
-    };
-    RunRefusalError = class extends EnvRunError {
-      /**
-       * Whose side refused (TERM-1313), set at the throw and never read back out of the message.
-       * A baseline intake labels a posting not-runnable on `repository`, so that value is passed
-       * only where envrun can show the repository asked for something we cannot supply. Every
-       * other refusal, including one nobody has classified yet, is `ours` by default.
-       */
-      origin;
-      constructor(message2, options) {
-        super(message2, options);
-        this.origin = options?.origin ?? "ours";
-      }
-    };
-    MAX_CAUSE_FRAMES = 16;
-    CHAIN_UNREADABLE = "<the cause chain stopped: a value refused to be read>";
-    CHAIN_TOO_DEEP = `<the cause chain continued past ${MAX_CAUSE_FRAMES} frames and was not followed further>`;
-    RUNTIME_IMAGES = {
-      node: {
-        repository: "node",
-        // NOT `-bookworm-slim`, and the reason is `git`. The slim variant ships none,
-        // and npm resolves a GitHub-shorthand dependency by spawning it: measured
-        // 2026-08-26 on `gang-jiffy/th-globby`, `npm install` exited 254 with
-        // `syscall spawn git / errno -2` before the suite was ever invoked, and the
-        // developer read "our environment could not run your tests" for a repository
-        // that was fine. `image-tooling-live.test.mjs` opens the image and checks,
-        // because a tag cannot tell you what is inside it.
-        suffix: "-bookworm",
-        defaultVersion: "22",
-        declaredIsFloor: false
-      },
-      python: {
-        repository: "python",
-        suffix: "-bookworm",
-        defaultVersion: "3.12",
-        declaredIsFloor: false
-      },
-      go: { repository: "golang", suffix: "-bookworm", defaultVersion: "1.23", declaredIsFloor: true },
-      ruby: { repository: "ruby", suffix: "-bookworm", defaultVersion: "3.3", declaredIsFloor: false },
-      rust: { repository: "rust", suffix: "-bookworm", defaultVersion: "1", declaredIsFloor: true },
-      /**
-       * TERM-1139. `dotnet` was unmapped alongside `jvm`, and the recorded reason was that
-       * neither had "a single obvious base image (gradle vs maven, sdk vs runtime)". That
-       * reason holds for jvm and it does NOT hold here, which is why only this half moved.
-       *
-       * "sdk vs runtime" answers itself: the derived commands are `dotnet restore` and
-       * `dotnet test`, and neither exists on the runtime image. There is no second build
-       * tool competing for the slot the way maven and gradle compete for jvm's — and since
-       * no official image carries both of those, jvm genuinely cannot be served by one key.
-       *
-       * MEASURED, not chosen by tag: `mcr.microsoft.com/dotnet/sdk:8.0` carries `git` and
-       * `dotnet` (881MB). `git` is the property the whole `image-tooling-live` test exists
-       * for, and `eclipse-temurin:21-jdk` was rejected here for lacking it.
-       *
-       * The tag shape fits without touching the builder: the SDK publishes a tag per
-       * version, so `repository:VERSION` is a real image at every version envspec can
-       * derive, with no suffix. That is NOT true of the maven images, where the leading
-       * tag component is maven's version and Java's sits in the suffix.
-       *
-       * `declaredIsFloor` is true on the same reasoning as go and rust: an SDK builds
-       * older target frameworks, so booting 8.0 for a repo asking 6.0 is the supported
-       * case rather than a substitution. A repo asking for something NEWER than our
-       * default still refuses, which is where TERM-643 put that line.
-       */
-      dotnet: {
-        repository: "mcr.microsoft.com/dotnet/sdk",
-        suffix: "",
-        defaultVersion: "8.0",
-        declaredIsFloor: true
-      },
-      /**
-       * TERM-1122. Maven's image, and the one a Gradle WRAPPER repo gets too: the wrapper
-       * downloads its own Gradle, so it needs a JDK and nothing else. MEASURED
-       * 2026-09-18: `maven:3.9-eclipse-temurin-21` carries `git`, `mvn` and JDK 21 on
-       * Ubuntu 24.04, which is why this is not `eclipse-temurin` (no `git`, rejected
-       * under TERM-1139). The JDK sits AFTER maven's own version in the tag, hence
-       * `prefix`, and the major is all envspec derives (`javaMajor`).
-       *
-       * `declaredIsFloor`: a JDK builds for older `--release` targets, so a repo asking
-       * for 16, which has no image, runs on 21. A Gradle toolchain is stricter than a
-       * floor and asks for its exact JDK; Gradle's refusal on the wrong one reads as
-       * ours (`classify.ts`, `isOfflineBuildGap`), never as the repo's.
-       */
-      jvm: {
-        repository: "maven",
-        prefix: "3.9-eclipse-temurin-",
-        suffix: "",
-        defaultVersion: "21",
-        declaredIsFloor: true
-      },
-      /**
-       * TERM-1123. OUR image (`packages/envrun/images/cpp/Dockerfile`): Debian bookworm
-       * with the C/C++ toolchain, CMake, Meson and the common -dev libraries baked in.
-       * No official image carries that set. Libraries are baked rather than installed per
-       * run because the install step has network only through the allowlist, and apt is
-       * not on it; a repo needing a library the image lacks gets `test-command-unavailable`
-       * (`isMissingSystemDependency`), never a red.
-       *
-       * `fixed`: a C/C++ repo declares no compiler version envspec can read, so there is
-       * nothing to derive and nothing to probe. The tag moves only when the Dockerfile
-       * does. It lives in a PUBLIC repository, apart from the private venue images, so a
-       * developer's own Docker can pull it with no credential.
-       */
-      cpp: {
-        repository: "us-east1-docker.pkg.dev/terminalhire-pool/runtime-images/cpp",
-        suffix: "",
-        defaultVersion: "1",
-        declaredIsFloor: false,
-        fixed: true
-      }
-    };
-    JVM_GRADLE_IMAGE = {
-      repository: "gradle",
-      prefix: "jdk",
-      suffix: "",
-      defaultVersion: "21",
-      declaredIsFloor: true
-    };
-    unversionedImage = (shape) => `${shape.repository}:${shape.prefix ?? ""}${shape.defaultVersion}${shape.suffix}`;
-    TAG_VERSION = /^\d+(?:\.\d+){0,2}$/;
-    dockerManifestProbe = (image) => {
-      const res = spawnSync4("docker", ["manifest", "inspect", image], {
-        encoding: "utf8",
-        timeout: 3e4
-      });
-      return { status: res.status, output: `${res.stdout ?? ""}${res.stderr ?? ""}` };
-    };
-    manifestProbe = dockerManifestProbe;
-    MISSING_IMAGE_SHAPE = /Unable to find image ['"][^'"]*['"] locally/i;
-    PULL_FAILED_SHAPE = /manifest unknown|\bdenied: /i;
-    PULL_SUCCEEDED_SHAPE = /Status: (?:Downloaded newer image|Image is up to date) for /;
-    DOCKER_RUN_FAILED = 125;
-    MAX_NAMED_REFUSED_HOSTS = 5;
-  }
-});
-
-// ../../packages/envrun/dist/screenshotsResult.js
-function shotIn(order, items, key) {
-  const seen = order.filter((o) => items.some((i) => key(i) === o));
-  return seen.length > 0 ? seen.join(" and ") : "none";
-}
-function renderScreenshots(s) {
-  if (s === null || s === void 0)
-    return null;
-  if (s.status === "skipped")
-    return `screenshots  skipped \u2014 ${s.reason ?? "no reason recorded"}`;
-  if (s.status === "pending")
-    return "screenshots  pending \u2014 taken after the verdict";
-  const lines = [
-    `screenshots  ${String(s.items.length)} in ${s.dir ?? "?"} (routes ${s.routes.join(", ")}; ${shotIn(SCHEME_ORDER, s.items, (i) => i.scheme)}; ${shotIn(VIEWPORT_ORDER, s.items, (i) => i.viewport)})`
-  ];
-  for (const side of s.sides) {
-    const count = s.items.filter((i) => i.side === side.side).length;
-    lines.push(side.status === "captured" ? `${INDENT}${side.side}: ${String(count)} ${count === 1 ? "shot" : "shots"}${side.reason === null ? "" : ` (${side.reason})`}` : `${INDENT}${side.side}: skipped \u2014 ${side.reason ?? "no reason recorded"}`);
-  }
-  for (const note of s.notes)
-    lines.push(`${INDENT}${note}`);
-  lines.push(`${INDENT}rendered with no network: no backend, no signed-in state`);
-  return lines.join("\n");
-}
-var INDENT, VIEWPORT_ORDER, SCHEME_ORDER;
-var init_screenshotsResult = __esm({
-  "../../packages/envrun/dist/screenshotsResult.js"() {
-    "use strict";
-    INDENT = " ".repeat(13);
-    VIEWPORT_ORDER = ["desktop", "mobile"];
-    SCHEME_ORDER = ["light", "dark"];
-  }
-});
-
 // ../../packages/attest/dist/types.js
 var IN_TOTO_STATEMENT_TYPE, ACCEPTANCE_RUN_PREDICATE_TYPE, IN_TOTO_PAYLOAD_TYPE, TEST_COMMAND_SOURCES;
 var init_types4 = __esm({
@@ -30379,7 +29211,7 @@ var init_dispatchedRun = __esm({
 });
 
 // ../../packages/attest/dist/sealedbox.js
-import { createCipheriv as createCipheriv3, createDecipheriv as createDecipheriv3, diffieHellman, generateKeyPairSync as generateKeyPairSync2, hkdfSync as hkdfSync2, randomBytes as randomBytes9 } from "crypto";
+import { createCipheriv as createCipheriv3, createDecipheriv as createDecipheriv3, diffieHellman, generateKeyPairSync as generateKeyPairSync2, hkdfSync as hkdfSync2, randomBytes as randomBytes7 } from "crypto";
 var init_sealedbox = __esm({
   "../../packages/attest/dist/sealedbox.js"() {
     "use strict";
@@ -30389,7 +29221,7 @@ var init_sealedbox = __esm({
 });
 
 // ../../packages/attest/dist/aead.js
-import { createCipheriv as createCipheriv4, createDecipheriv as createDecipheriv4, randomBytes as randomBytes10 } from "crypto";
+import { createCipheriv as createCipheriv4, createDecipheriv as createDecipheriv4, randomBytes as randomBytes8 } from "crypto";
 var init_aead = __esm({
   "../../packages/attest/dist/aead.js"() {
     "use strict";
@@ -30816,322 +29648,8 @@ var init_dist2 = __esm({
   }
 });
 
-// ../../packages/envrun/dist/venueProof.js
-function readDaemonId(docker3, label, timeoutMs) {
-  let res;
-  try {
-    res = docker3.sync(["info", "--format", "{{.ID}}"], { timeoutMs });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { id: null, detail: `${label} daemon probe threw: ${msg}` };
-  }
-  if (res.error) {
-    return { id: null, detail: `${label} daemon probe failed: ${res.error.message}` };
-  }
-  if (res.status !== 0) {
-    const tail2 = res.stderr.trim().split("\n").slice(-1)[0] ?? "";
-    return { id: null, detail: `${label} daemon probe exited ${String(res.status)}: ${tail2}` };
-  }
-  const id = res.stdout.trim();
-  if (id === "") {
-    return { id: null, detail: `${label} daemon reported an empty ID` };
-  }
-  if (!DAEMON_ID.test(id)) {
-    return {
-      id: null,
-      detail: `${label} daemon returned a non-identity: ${JSON.stringify(id.slice(0, 80))}`
-    };
-  }
-  return { id, detail: `${label} daemon ${id}` };
-}
-function classifyVenueDaemon(venue, local = localDockerClient(), timeoutMs = PROBE_TIMEOUT_MS3) {
-  const v = readDaemonId(venue, "venue", timeoutMs);
-  const l = readDaemonId(local, "local", timeoutMs);
-  if (v.id === null || l.id === null) {
-    const unread = [v.id === null ? v.detail : null, l.id === null ? l.detail : null].filter((d) => d !== null).join("; ");
-    return { distinct: false, reason: "unknown", detail: unread };
-  }
-  if (v.id === l.id) {
-    return {
-      distinct: false,
-      reason: "same-daemon",
-      daemonId: v.id,
-      detail: `the venue and this machine are the same Docker daemon (${v.id}), so nothing ran elsewhere`
-    };
-  }
-  return { distinct: true, localDaemonId: l.id, venueDaemonId: v.id };
-}
-function describeVenueDaemon(verdict) {
-  if (verdict.distinct) {
-    return `venue daemon ${verdict.venueDaemonId} is a different daemon from this machine's ${verdict.localDaemonId} (which does not by itself establish a different machine)`;
-  }
-  return `venue daemon not distinct (${verdict.reason}): ${verdict.detail}`;
-}
-var PROBE_TIMEOUT_MS3, DAEMON_ID;
-var init_venueProof = __esm({
-  "../../packages/envrun/dist/venueProof.js"() {
-    "use strict";
-    init_dist();
-    PROBE_TIMEOUT_MS3 = 2e4;
-    DAEMON_ID = /^[A-Za-z0-9:._-]+$/;
-  }
-});
-
-// ../../packages/envrun/dist/venueDescriptor.js
-function readDaemonFacts(docker3) {
-  let res;
-  try {
-    res = docker3.sync(["info", "--format", DAEMON_FACTS_FORMAT], {
-      timeoutMs: PROBE_TIMEOUT_MS3
-    });
-  } catch {
-    return null;
-  }
-  if (res.error || res.status !== 0)
-    return null;
-  const lines = res.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "");
-  const last = lines.at(-1);
-  if (last === void 0)
-    return null;
-  const parts = last.split(/\s+/);
-  if (parts.length !== 2)
-    return null;
-  const [id, version2] = parts;
-  if (!DAEMON_ID.test(id))
-    return null;
-  return { id, version: version2 };
-}
-function describeVenue(lease) {
-  const daemon = readDaemonFacts(lease.docker);
-  if (daemon === null)
-    return null;
-  const claims = lease.venueIdentity?.claims ?? null;
-  return {
-    kind: lease.kind,
-    daemonId: daemon.id,
-    daemonVersion: daemon.version,
-    instance: claims?.instanceId ?? null,
-    zone: claims?.zone ?? null,
-    // Driven by whether an identity was actually verified, never by `kind`.
-    // Reading it off the kind would be the placement flag arriving by another
-    // route: a venue that CALLS itself hosted would certify itself.
-    evidence: claims === null ? "self-reported" : "google-signed-instance-identity"
-  };
-}
-function renderVenueLine(v) {
-  const where = v.instance === null ? v.kind : `${v.kind} instance ${v.instance}`;
-  const zone = v.zone === null ? "" : ` (${v.zone})`;
-  return `venue        ${where}${zone} \u2014 daemon ${v.daemonId} v${v.daemonVersion}, ${v.evidence}`;
-}
-var DAEMON_FACTS_FORMAT;
-var init_venueDescriptor = __esm({
-  "../../packages/envrun/dist/venueDescriptor.js"() {
-    "use strict";
-    init_venueProof();
-    DAEMON_FACTS_FORMAT = "{{.ID}} {{.ServerVersion}}";
-  }
-});
-
-// ../../packages/envrun/dist/result.js
-function fmtMs(ms) {
-  return ms < 1e3 ? `${String(ms)}ms` : `${(ms / 1e3).toFixed(1)}s`;
-}
-function fmtMinutes(ms) {
-  const min = ms / 6e4;
-  return Number.isInteger(min) ? String(min) : min.toFixed(1);
-}
-function renderVerdictLine(r) {
-  if (r.status === "refused") {
-    const first = r.boundaryRefusals[0];
-    if (first === void 0)
-      return `REFUSED   ${r.reason}`;
-    const where = first.path ?? "the patch";
-    return `REFUSED   ${where} is outside this bounty's slice \u2014 nothing was run, no container started.`;
-  }
-  const t = fmtMs(r.wallMs);
-  switch (r.outcome) {
-    case "completed":
-      return `GREEN     ${String(r.counts?.tests_passed ?? 0)} test(s) passed, none failed ` + (r.counts?.coverage === "partial" ? `(${PARTIAL_COUNTS_NOTE}) ` : "") + `\u2014 ${t}${r.preview ? ` \u2014 ${r.preview.url}` : ""}`;
-    case "tests-failed":
-      return `RED       ${r.counts ? `${String(r.counts.tests_failed)} test(s) failed` : `exit ${String(r.exitCode)}`}` + (r.counts?.coverage === "partial" ? ` (${PARTIAL_COUNTS_NOTE})` : "") + ` \u2014 ${t}${r.preview ? ` \u2014 ${r.preview.url}` : ""}`;
-    case "no-tests-observed":
-      return `NOTHING RAN  the suite reported zero tests passed and zero failed \u2014 ${t}`;
-    case "counts-unparsed":
-      return `UNKNOWN   exit 0 but no reporter format was readable, so nothing is verified \u2014 ${t}`;
-    case "test-command-unavailable":
-      return `OUR FAULT  the test command could not be invoked; your work has not been judged \u2014 ${t}`;
-    case "environment-exhausted":
-      return `OUR FAULT  the run ran out of a resource we cap; your work has not been judged \u2014 ${t}`;
-    case "budget-exceeded":
-      return r.testTimeoutMs === void 0 ? `OUR LIMIT  we stopped the run at our time limit; this is not a result about the work \u2014 ${t}` : `OUR LIMIT  the ${fmtMinutes(r.testTimeoutMs)}-min test time limit set for this posting stopped the run; this is not a result about the work \u2014 ${t}`;
-    case null:
-      throw new Error("a verified run has no outcome \u2014 the result was assembled wrong");
-  }
-}
-function renderRunReport(r) {
-  const lines = [renderVerdictLine(r), ""];
-  for (const field of RUN_RESULT_FIELDS) {
-    const view = FIELD_VIEWS[field];
-    if (view === RENDER_NONE)
-      continue;
-    const rendered = view(r);
-    if (rendered !== null)
-      lines.push(rendered);
-  }
-  const showOutput = r.status === "verified" && r.outcome !== null && !isGreen(r.outcome) && r.testOutputTail !== "";
-  if (showOutput) {
-    lines.push("", "--- test output (tail) ---", r.testOutputTail);
-  }
-  if (r.status === "verified" && r.outcome === "counts-unparsed") {
-    lines.push("", "Your suite exited 0, but we could not read how many tests ran, so this is not a verdict either way.");
-  } else if (r.status === "verified" && r.outcome === "budget-exceeded") {
-    lines.push("", r.testTimeoutMs === void 0 ? "Our time limit ended the run; that says nothing about your work." : `The ${fmtMinutes(r.testTimeoutMs)}-min test time limit set for this posting ended the run; that says nothing about your work.`);
-  } else if (r.status === "verified" && r.outcome !== null && isOurFault(r.outcome)) {
-    lines.push("", "This is an environment failure on our side, not a statement about your work.");
-  }
-  return lines.join("\n");
-}
-function answerDidItPass(r) {
-  const passed = r.status === "verified" && r.outcome !== null && isGreen(r.outcome);
-  return { passed, summary: renderVerdictLine(r), lookAt: r.preview?.url ?? null };
-}
-function exitCodeForOutcome(outcome) {
-  if (isGreen(outcome))
-    return 0;
-  return LIMIT_OWNER[outcome] === "ours" ? 2 : 1;
-}
-function exitCodeFor(r) {
-  if (r.status === "refused")
-    return 2;
-  if (r.outcome === null)
-    return 2;
-  return exitCodeForOutcome(r.outcome);
-}
-var RUN_TEST_COMMAND_SOURCES, RUN_IMAGE_SOURCES, RUN_RESULT_SCHEMA, PARTIAL_COUNTS_NOTE, RUN_RESULT_FIELDS, RENDER_NONE, FIELD_VIEWS;
-var init_result = __esm({
-  "../../packages/envrun/dist/result.js"() {
-    "use strict";
-    init_screenshotsResult();
-    init_dist2();
-    init_classify2();
-    init_venueDescriptor();
-    RUN_TEST_COMMAND_SOURCES = [
-      ...TEST_COMMAND_SOURCES,
-      "developer-declared",
-      "operator-declared"
-    ];
-    RUN_IMAGE_SOURCES = [
-      "detected",
-      "none",
-      "operator-declared",
-      "developer-declared",
-      // TERM-1221: the mapping chose the image from a runtime the POSTER declared, because the
-      // repository's own files named none.
-      "founder-declared"
-    ];
-    RUN_RESULT_SCHEMA = "terminalhire.verification-run/1";
-    PARTIAL_COUNTS_NOTE = "from one of several test summaries in the output, so not a total for the whole run";
-    RUN_RESULT_FIELDS = [
-      "schema",
-      "runId",
-      "claimId",
-      "status",
-      "outcome",
-      "reason",
-      "exitCode",
-      "testCommand",
-      "testOutputTail",
-      "counts",
-      "wallMs",
-      "installMs",
-      "testMs",
-      "testTimeoutMs",
-      "targetRepo",
-      "targetSha",
-      "patchSha256",
-      "treeDigest",
-      "testCommandSource",
-      "baselinePatchSha256",
-      "boundaryRefusals",
-      "touchedPaths",
-      "preview",
-      "screenshots",
-      "containerImage",
-      "containerImageDigest",
-      "imageSource",
-      "leaksClean",
-      "leakState",
-      "venue",
-      "refusalOrigin"
-    ];
-    RENDER_NONE = null;
-    FIELD_VIEWS = {
-      schema: RENDER_NONE,
-      runId: (r) => `run          ${r.runId}`,
-      claimId: (r) => `claim        ${r.claimId}`,
-      status: RENDER_NONE,
-      // carried by the verdict line, which is always printed
-      outcome: (r) => r.outcome === null ? null : `outcome      ${r.outcome}`,
-      reason: (r) => `why          ${r.reason}`,
-      exitCode: (r) => r.exitCode === null ? null : `exit code    ${String(r.exitCode)}`,
-      testCommand: (r) => r.testCommand === null ? null : `test command ${r.testCommand}`,
-      testOutputTail: RENDER_NONE,
-      // printed as a block below the fields, when red
-      counts: (r) => r.counts === null ? null : `tests        ${String(r.counts.tests_passed)} passed, ${String(r.counts.tests_failed)} failed (${r.counts.runner})` + (r.counts.coverage === "partial" ? ` \u2014 ${PARTIAL_COUNTS_NOTE}` : ""),
-      wallMs: (r) => `round trip   ${fmtMs(r.wallMs)}`,
-      installMs: (r) => r.installMs === void 0 ? null : `install step ${fmtMs(r.installMs)}`,
-      testMs: (r) => r.testMs === void 0 ? null : `test step    ${fmtMs(r.testMs)}`,
-      testTimeoutMs: (r) => r.testTimeoutMs === void 0 ? null : `time limit   ${fmtMinutes(r.testTimeoutMs)} min`,
-      targetRepo: (r) => `target       ${r.targetRepo}`,
-      targetSha: (r) => `commit       ${r.targetSha.slice(0, 12)}`,
-      patchSha256: (r) => r.patchSha256 === null ? null : `patch        ${r.patchSha256.slice(0, 12)}`,
-      treeDigest: (r) => r.treeDigest === null ? null : `tree         ${r.treeDigest.slice(0, 12)}`,
-      // Worth a line of its own: `detected` means the repo chose the command, not us and not a
-      // founder picking one that suits the outcome.
-      testCommandSource: (r) => `cmd source   ${r.testCommandSource}`,
-      // Shown only when set, because it is the unusual case and it blocks signing.
-      baselinePatchSha256: (r) => r.baselinePatchSha256 === null ? null : `base patch   ${r.baselinePatchSha256.slice(0, 12)} (not in the signed binding)`,
-      boundaryRefusals: (r) => r.boundaryRefusals.length === 0 ? null : ["refused", ...r.boundaryRefusals.map((b) => `  - ${b.detail}`)].join("\n"),
-      touchedPaths: (r) => r.touchedPaths.length === 0 ? null : `files        ${String(r.touchedPaths.length)}: ${r.touchedPaths.join(", ")}`,
-      preview: (r) => r.preview === null ? null : `preview      ${r.preview.url}`,
-      screenshots: (r) => renderScreenshots(r.screenshots),
-      containerImage: (r) => r.containerImage === null ? null : `image        ${r.containerImage}`,
-      containerImageDigest: (r) => r.containerImageDigest === null ? null : `image digest ${r.containerImageDigest}`,
-      // Shown only when a human chose the environment. `detected` is the ordinary case and
-      // saying so on every run would train the reader to skip the line that matters.
-      imageSource: (r) => r.imageSource === "detected" || r.imageSource === "none" ? null : `image source ${r.imageSource} (not signed)`,
-      // Printed through `leakState` below, which knows WHY a false is false. Rendering both would
-      // print the leak warning on a run where we merely could not look (TERM-1144).
-      leaksClean: RENDER_NONE,
-      // Silent when clean and when refused, as the boolean's line was. The two not-a-leak states
-      // get their own sentence, because "we could not check" read as "we found a leak" is the
-      // exact confusion this field exists to end.
-      leakState: (r) => {
-        switch (r.leakState) {
-          case null:
-          case "clean":
-            return null;
-          case "leak":
-            return "WARNING      labelled Docker objects survived teardown";
-          case "inconclusive":
-            return "leak check   inconclusive \u2014 no labelled container was seen while the run was live, so finding nothing afterwards proves nothing";
-          case "unobserved":
-            return "leak check   not taken \u2014 we could not check what was left after teardown";
-        }
-      },
-      // Absent on most runs, so it prints only when there is something to say. Silence
-      // here is the honest rendering of "no venue answered": a placeholder line would
-      // invite a reader to treat an unanswered probe as a described venue.
-      venue: (r) => r.venue === null ? null : renderVenueLine(r.venue),
-      // For the worker and the baseline intake, not the terminal: `reason` already says which
-      // side refused in words a developer reads.
-      refusalOrigin: RENDER_NONE
-    };
-  }
-});
-
 // ../../packages/envrun/dist/attestation.js
-import { createHash as createHash10, randomBytes as randomBytes11 } from "crypto";
+import { createHash as createHash10, randomBytes as randomBytes9 } from "crypto";
 function contradicts(outcome, counts, exitCode) {
   const budget = OUTCOME_TO_BUDGET[outcome];
   if (budget === null)
@@ -31315,7 +29833,7 @@ function toAcceptancePredicate(pair, opts = {}) {
       // RepoDigest (`repo@sha256:…`) carries the repo name and the content hash, and the
       // tag it drops is the part a registry can re-point (TERM-893).
       enclave_measurement: localMeasurement(patched.containerImageDigest),
-      nonce: opts.nonce ?? randomBytes11(16).toString("hex"),
+      nonce: opts.nonce ?? randomBytes9(16).toString("hex"),
       run_policy: { max_attempts: opts.maxAttempts ?? 1, budget_outcome: budget }
     }
   };
@@ -31465,6 +29983,1662 @@ var init_attestation2 = __esm({
     REFERENCE_DOMAIN = `(?:${REFERENCE_DOMAIN_NAME}|${REFERENCE_IPV6})(?::[0-9]+)?`;
     REFERENCE_PATH_COMPONENT = "[a-z0-9]+(?:(?:\\.|_{1,2}|-+)[a-z0-9]+)*";
     REPO_DIGEST_RE = new RegExp(`^(?:(${REFERENCE_DOMAIN})/)?${REFERENCE_PATH_COMPONENT}(?:/${REFERENCE_PATH_COMPONENT})*@sha256:[0-9a-f]{64}$`);
+  }
+});
+
+// ../../packages/envrun/dist/labels.js
+function runLabels(runId, callerLabels) {
+  return { ...callerLabels ?? {}, [RUN_ID_LABEL_KEY]: runId, [RUN_LABEL_KEY]: "term-350" };
+}
+function censusTotal(c) {
+  return c.containers.length + c.volumes.length + c.networks.length;
+}
+function query(docker3, args) {
+  const res = docker3.sync([...args], { timeoutMs: 15e3 });
+  if (res.error || res.status !== 0) {
+    const why = res.error?.message ?? (res.stderr.trim() || `exit ${String(res.status)}`);
+    return { ids: [], failure: `docker ${args.slice(0, 2).join(" ")}: ${why}` };
+  }
+  const ids2 = res.stdout.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
+  return { ids: ids2, failure: null };
+}
+function ids(docker3, args) {
+  return query(docker3, args).ids;
+}
+function census(docker3, label) {
+  const filter = `label=${label}`;
+  return {
+    containers: ids(docker3, ["ps", "-aq", "--filter", filter]),
+    volumes: ids(docker3, ["volume", "ls", "-q", "--filter", filter]),
+    networks: ids(docker3, ["network", "ls", "-q", "--filter", filter])
+  };
+}
+function censusReport(docker3, label) {
+  const filter = `label=${label}`;
+  const failures = [];
+  const ask2 = (args) => {
+    const q = query(docker3, args);
+    if (q.failure !== null)
+      failures.push(q.failure);
+    return q.ids;
+  };
+  const taken = {
+    containers: ask2(["ps", "-aq", "--filter", filter]),
+    volumes: ask2(["volume", "ls", "-q", "--filter", filter]),
+    networks: ask2(["network", "ls", "-q", "--filter", filter])
+  };
+  return failures.length === 0 ? { observed: true, census: taken, unobservedReason: null } : { observed: false, census: taken, unobservedReason: failures.join("; ") };
+}
+function localCensus(label) {
+  return census(localDockerClient(), label);
+}
+function judgeLeaks(peak, after, observation) {
+  const labelObserved = peak.containers.length > 0;
+  if (!observation.observed) {
+    return {
+      labelObserved,
+      reaped: false,
+      observed: false,
+      clean: false,
+      state: "unobserved",
+      peak,
+      after,
+      note: `UNOBSERVED, not clean: we could not look at what survived teardown (${observation.unobservedReason ?? "no reason given"}), so nothing is known about leaks on this run, in either direction.`
+    };
+  }
+  const reaped = censusTotal(after) === 0;
+  let note;
+  let state;
+  if (!labelObserved && reaped) {
+    state = "inconclusive";
+    note = "INCONCLUSIVE, not clean: nothing labelled was ever seen alive, so an empty final census is equally consistent with the label never being applied. The control failed, so the denial proves nothing.";
+  } else if (!labelObserved) {
+    state = "leak";
+    note = "no labelled container was observed alive AND objects remain \u2014 the label wiring is wrong.";
+  } else if (!reaped) {
+    state = "leak";
+    note = `LEAK: ${String(censusTotal(after))} labelled object(s) survived teardown (containers=${String(after.containers.length)} volumes=${String(after.volumes.length)} networks=${String(after.networks.length)}).`;
+  } else {
+    state = "clean";
+    note = `clean: peak ${String(peak.containers.length)} labelled container(s) observed alive, 0 labelled objects remain after teardown.`;
+  }
+  return {
+    labelObserved,
+    reaped,
+    observed: true,
+    clean: labelObserved && reaped,
+    state,
+    peak,
+    after,
+    note
+  };
+}
+var RUN_LABEL_KEY, RUN_ID_LABEL_KEY, LabelWatch, LEAK_STATES;
+var init_labels = __esm({
+  "../../packages/envrun/dist/labels.js"() {
+    "use strict";
+    init_dist();
+    RUN_LABEL_KEY = "supergoal.run";
+    RUN_ID_LABEL_KEY = "supergoal.run-id";
+    LabelWatch = class {
+      label;
+      docker;
+      intervalMs;
+      #timer = null;
+      #peak = { containers: [], volumes: [], networks: [] };
+      #samples = 0;
+      /**
+       * `docker` is REQUIRED and second, so a sampler cannot be built without
+       * naming the daemon it watches. A watch polling one daemon while the run
+       * executes on another reports a high-water mark of 0 — indistinguishable
+       * from "the label never applied", which is the exact ambiguity this class
+       * exists to remove.
+       */
+      constructor(label, docker3, intervalMs = 250) {
+        this.label = label;
+        this.docker = docker3;
+        this.intervalMs = intervalMs;
+      }
+      start() {
+        if (this.#timer !== null)
+          return;
+        this.#sample();
+        this.#timer = setInterval(() => this.#sample(), this.intervalMs);
+        this.#timer.unref();
+      }
+      #sample() {
+        this.#samples += 1;
+        const now = census(this.docker, this.label);
+        this.#peak = {
+          containers: now.containers.length > this.#peak.containers.length ? now.containers : this.#peak.containers,
+          volumes: now.volumes.length > this.#peak.volumes.length ? now.volumes : this.#peak.volumes,
+          networks: now.networks.length > this.#peak.networks.length ? now.networks : this.#peak.networks
+        };
+      }
+      stop() {
+        if (this.#timer !== null) {
+          clearInterval(this.#timer);
+          this.#timer = null;
+        }
+        this.#sample();
+      }
+      get peak() {
+        return this.#peak;
+      }
+      get samples() {
+        return this.#samples;
+      }
+    };
+    LEAK_STATES = ["clean", "leak", "inconclusive", "unobserved"];
+  }
+});
+
+// ../../packages/envrun/dist/previewRegistry.js
+function createPreviewRegistry() {
+  const live = /* @__PURE__ */ new Map();
+  return {
+    register(client, container) {
+      const names = live.get(client) ?? /* @__PURE__ */ new Set();
+      names.add(container);
+      live.set(client, names);
+    },
+    deregister(client, container) {
+      const names = live.get(client);
+      if (names === void 0)
+        return;
+      names.delete(container);
+      if (names.size === 0)
+        live.delete(client);
+    },
+    pairs() {
+      const out = [];
+      for (const [client, names] of live) {
+        for (const container of names)
+          out.push({ client, container });
+      }
+      return out;
+    },
+    reapAll() {
+      for (const [client, names] of live) {
+        for (const container of names) {
+          client.sync(["rm", "-f", container], { timeoutMs: 15e3 });
+        }
+      }
+      live.clear();
+    }
+  };
+}
+var init_previewRegistry = __esm({
+  "../../packages/envrun/dist/previewRegistry.js"() {
+    "use strict";
+  }
+});
+
+// ../../packages/envrun/dist/preview.js
+import { randomBytes as randomBytes10 } from "crypto";
+import { mkdirSync as mkdirSync5, writeFileSync as writeFileSync14 } from "fs";
+import { join as join24 } from "path";
+function docker(client, args, timeoutMs = 6e4) {
+  const res = client.sync([...args], { timeoutMs });
+  return {
+    ok: !res.error && res.status === 0,
+    stdout: res.stdout,
+    stderr: (res.error ? res.error.message : "") + res.stderr
+  };
+}
+function installReaper() {
+  if (reaperInstalled)
+    return;
+  reaperInstalled = true;
+  process.on("exit", () => {
+    livePreviews.reapAll();
+  });
+}
+function readHostPort(client, container) {
+  const res = docker(client, ["port", container, `${String(GUEST_PORT)}/tcp`]);
+  if (!res.ok)
+    return null;
+  for (const line of res.stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "")
+      continue;
+    const idx = trimmed.lastIndexOf(":");
+    if (idx === -1)
+      continue;
+    const port = Number(trimmed.slice(idx + 1));
+    if (Number.isInteger(port) && port > 0)
+      return port;
+  }
+  return null;
+}
+async function fetchInstanceToken(url, authToken) {
+  try {
+    const headers = {};
+    if (authToken) {
+      headers["Authorization"] = `Bearer ${authToken}`;
+    }
+    const res = await fetch(url, { cache: "no-store", headers });
+    if (!res.ok)
+      return null;
+    const body = await res.json();
+    return typeof body.instanceToken === "string" ? body.instanceToken : null;
+  } catch {
+    return null;
+  }
+}
+async function startPreview(req) {
+  const label = labelArgs(req.labels);
+  const container = `${req.idBase}-preview`;
+  const image = validateImage(req.image);
+  const bindAddress = req.bindAddress ?? "127.0.0.1";
+  const client = req.docker;
+  if (!LOOPBACK_BINDS.has(bindAddress) && req.authToken === void 0) {
+    throw new PreviewError(`refusing to publish the preview on ${bindAddress} without an explicit authToken: a bind wider than loopback puts this run \u2014 the test output tail included \u2014 on the developer's local network`);
+  }
+  const authToken = req.authToken ?? randomBytes10(24).toString("base64url");
+  const envArgs = ["--env", `PREVIEW_AUTH_TOKEN=${authToken}`];
+  const probeHost = WILDCARD_BINDS.has(bindAddress) ? "127.0.0.1" : bindAddress;
+  const probeAuthority = probeHost.includes(":") ? `[${probeHost}]` : probeHost;
+  mkdirSync5(req.scratchDir, { recursive: true });
+  const docPath = join24(req.scratchDir, "preview-run.json");
+  writeFileSync14(docPath, JSON.stringify(req.document, null, 2), "utf8");
+  const teardown = () => {
+    livePreviews.deregister(client, container);
+    for (let i = 0; i < 3; i += 1) {
+      const inspect = docker(client, ["inspect", "--format", "{{.State.Status}}", container]);
+      if (!inspect.ok)
+        return { clean: true, leaked: [] };
+      docker(client, ["rm", "-f", container]);
+    }
+    const still = docker(client, ["inspect", "--format", "{{.State.Status}}", container]);
+    return still.ok ? { clean: false, leaked: [`container ${container}`] } : { clean: true, leaked: [] };
+  };
+  const startedAt = Date.now();
+  try {
+    const run3 = docker(client, [
+      "run",
+      "-d",
+      "--init",
+      `--name=${container}`,
+      // A network IS granted here, unlike the verification step. It carries our
+      // own argv over a document we wrote; the repo's code never runs in it.
+      "--network=bridge",
+      // Loopback by default, and anything wider was refused above unless the
+      // caller named a token. A bare `-p 8080` would bind 0.0.0.0 and put a
+      // developer's in-progress work on their local network.
+      `--publish=${bindAddress}:0:${String(GUEST_PORT)}`,
+      ...envArgs,
+      "--cap-drop=ALL",
+      "--security-opt=no-new-privileges",
+      "--pids-limit=64",
+      "--memory=256m",
+      "--read-only",
+      "--tmpfs=/tmp:rw,noexec,nosuid,size=8m",
+      ...label,
+      `--volume=${docPath}:${GUEST_DOC}:ro`,
+      "--",
+      image,
+      "node",
+      "-e",
+      SERVER_SOURCE
+    ]);
+    if (!run3.ok) {
+      throw new PreviewError(`could not start the preview container: ${run3.stderr.trim()}`);
+    }
+    const deadline = Date.now() + (req.readyTimeoutMs ?? 6e4);
+    let hostPort = null;
+    let token = null;
+    let lastDetail = "never answered";
+    const throwIfExited = () => {
+      const alive = docker(client, ["inspect", "--format", "{{.State.Running}}", container]);
+      if (alive.stdout.trim() !== "true") {
+        const logs = docker(client, ["logs", "--tail", "20", container]);
+        throw new PreviewError(`the preview container exited before serving: ${logs.stdout.trim()}${logs.stderr.trim()}`);
+      }
+    };
+    while (Date.now() < deadline) {
+      hostPort ??= readHostPort(client, container);
+      if (hostPort === null) {
+        throwIfExited();
+        lastDetail = "Docker never reported a published host port";
+        await sleep4(200);
+        continue;
+      }
+      token = await fetchInstanceToken(`http://${probeAuthority}:${String(hostPort)}/`, authToken);
+      if (token !== null)
+        break;
+      throwIfExited();
+      lastDetail = "the port is published but the server has not answered yet";
+      await sleep4(150);
+    }
+    if (hostPort === null || token === null) {
+      throw new PreviewError(`the preview URL never became reachable: ${lastDetail}`);
+    }
+    livePreviews.register(client, container);
+    installReaper();
+    const origin = `http://${probeAuthority}:${String(hostPort)}/`;
+    return {
+      url: `${origin}?token=${encodeURIComponent(authToken)}`,
+      origin,
+      authToken,
+      instanceToken: token,
+      container,
+      hostPort,
+      readyMs: Date.now() - startedAt,
+      teardown
+    };
+  } catch (err) {
+    teardown();
+    throw err;
+  }
+}
+function startLocalPreview(req) {
+  return startPreview({ ...req, docker: localDockerClient() });
+}
+var PreviewError, GUEST_PORT, GUEST_DOC, LOOPBACK_BINDS, WILDCARD_BINDS, SERVER_SOURCE, livePreviews, reaperInstalled, sleep4;
+var init_preview = __esm({
+  "../../packages/envrun/dist/preview.js"() {
+    "use strict";
+    init_dist();
+    init_previewRegistry();
+    PreviewError = class extends Error {
+    };
+    GUEST_PORT = 8080;
+    GUEST_DOC = "/preview/run.json";
+    LOOPBACK_BINDS = /* @__PURE__ */ new Set(["127.0.0.1", "localhost", "::1"]);
+    WILDCARD_BINDS = /* @__PURE__ */ new Set(["0.0.0.0", "::"]);
+    SERVER_SOURCE = `
+const http = require('node:http');
+const { readFileSync } = require('node:fs');
+const { randomUUID, timingSafeEqual } = require('node:crypto');
+
+// Read ONCE, at startup, and refuse to run without it. An unset token used to
+// skip the check entirely, which meant the one configuration nobody sets on
+// purpose was also the one that served a developer's in-progress work to
+// anything that could reach the port. Absent must never mean permitted \u2014 the
+// polarity requireSecret() holds in apps/web/lib/secrets.ts.
+const AUTH_TOKEN = process.env.PREVIEW_AUTH_TOKEN || '';
+if (AUTH_TOKEN === '') {
+  process.stderr.write(
+    'preview: refusing to start \u2014 PREVIEW_AUTH_TOKEN is unset, and this server will not ' +
+      'serve a run document unauthenticated\\n',
+  );
+  process.exit(1);
+}
+const EXPECTED = Buffer.from(AUTH_TOKEN, 'utf8');
+
+/** The token the client presented, or null. */
+function presented(req) {
+  const header = req.headers['authorization'];
+  const bearer = typeof header === 'string' ? /^Bearer\\s+(.+)$/i.exec(header) : null;
+  if (bearer !== null) return bearer[1];
+  // A non-Bearer Authorization header FALLS THROUGH to the query parameter. The
+  // earlier ternary branched on the header merely EXISTING, so a client sending
+  // "Basic \u2026" produced an empty string and could never authenticate at all.
+  //
+  // The query form stays because the founder opens this in a browser and a
+  // browser sends no Authorization header. That is the only reason it is
+  // accepted: a token in a URL lands in browser history, shell history and any
+  // proxy log on the way, where a header does not.
+  return new URL(req.url, 'http://localhost').searchParams.get('token');
+}
+
+function authorized(req) {
+  const given = presented(req);
+  if (typeof given !== 'string') return false;
+  const got = Buffer.from(given, 'utf8');
+  // timingSafeEqual THROWS on a length mismatch, so length is compared first and
+  // refused here. The length is not the secret; the bytes are.
+  if (got.length !== EXPECTED.length) return false;
+  return timingSafeEqual(got, EXPECTED);
+}
+
+// Per-INSTANCE, minted at boot. Not passed in, not derived from anything the
+// host controls \u2014 that is what makes "same token \u21D2 same instance" hold.
+const INSTANCE_TOKEN = randomUUID();
+const DOC = JSON.parse(readFileSync(${JSON.stringify(GUEST_DOC)}, 'utf8'));
+let served = 0;
+
+http
+  .createServer((req, res) => {
+    if (!authorized(req)) {
+      res.writeHead(401, { 'content-type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ error: 'unauthorized' }));
+    }
+    served += 1;
+    const body = JSON.stringify(
+      {
+        instanceToken: INSTANCE_TOKEN,
+        servedCount: served,
+        pid: process.pid,
+        run: DOC,
+      },
+      null,
+      2,
+    );
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+      'x-th-instance': INSTANCE_TOKEN,
+    });
+    res.end(body);
+  })
+  .listen(${String(GUEST_PORT)}, '0.0.0.0', () => {
+    console.log('preview-ready ' + INSTANCE_TOKEN);
+  });
+`;
+    livePreviews = createPreviewRegistry();
+    reaperInstalled = false;
+    sleep4 = (ms) => new Promise((r) => setTimeout(r, ms));
+  }
+});
+
+// ../../packages/envrun/dist/venue.js
+import { randomBytes as randomBytes11 } from "crypto";
+import { join as join25 } from "path";
+function localJailPaths(scratchRoot) {
+  return {
+    jail: join25(scratchRoot, JAIL_SEGMENT),
+    tmp: join25(scratchRoot, JAIL_TMP_SEGMENT)
+  };
+}
+function localVenue() {
+  return {
+    kind: "local",
+    acquire: (runId) => acquireTransactionally((allocated) => {
+      void allocated;
+      return Promise.resolve(acquireLocalLease(runId));
+    })
+  };
+}
+async function acquireTransactionally(body) {
+  const undos = [];
+  try {
+    return await body({
+      onRollback: (undo) => {
+        undos.push(undo);
+      }
+    });
+  } catch (err) {
+    const failures = [];
+    for (const undo of undos.reverse()) {
+      let failed = null;
+      try {
+        await undo();
+      } catch (rollbackErr) {
+        failed = { thrown: rollbackErr };
+      }
+      if (failed === null)
+        continue;
+      let entry;
+      try {
+        entry = describeThrown(failed.thrown, { includeName: true });
+      } catch {
+        entry = UNDESCRIBABLE_THROWN;
+      }
+      failures.push(entry);
+    }
+    if (failures.length > 0)
+      throw new VenueRollbackError(err, failures);
+    throw err;
+  }
+}
+function rollbackMessage(cause, rollbackFailures) {
+  const headline = describeThrown(cause, { includeName: false });
+  let tail2;
+  try {
+    tail2 = `[venue acquisition rolled back with ${String(rollbackFailures.length)} failure(s): ${rollbackFailures.join("; ")} \u2014 one or more allocated resources may still exist]`;
+  } catch {
+    tail2 = UNLISTABLE_ROLLBACK_FAILURES;
+  }
+  return `${headline} ${tail2}`;
+}
+function describeThrown(thrown, opts) {
+  try {
+    if (isErrorValue(thrown)) {
+      const message2 = readErrorField(thrown, "message", UNREADABLE_MESSAGE);
+      if (!opts.includeName)
+        return message2;
+      const name = readErrorField(thrown, "name", UNREADABLE_NAME);
+      return message2 === "" ? name : `${name}: ${message2}`;
+    }
+    return coerceToString(thrown);
+  } catch {
+    return UNDESCRIBABLE_THROWN;
+  }
+}
+function isErrorValue(thrown) {
+  try {
+    return thrown instanceof Error;
+  } catch {
+    return false;
+  }
+}
+function readErrorField(thrown, key, fallback) {
+  let raw;
+  try {
+    raw = thrown[key];
+  } catch {
+    return fallback;
+  }
+  return typeof raw === "string" ? raw : coerceToString(raw);
+}
+function coerceToString(thrown) {
+  try {
+    return String(thrown);
+  } catch {
+    return UNCOERCIBLE_THROWN;
+  }
+}
+function localTreeOwner(ids2 = hostIds()) {
+  if (ids2?.uid !== 0)
+    return void 0;
+  return localGuestUser(ids2) ?? void 0;
+}
+function handLocalTreeToGuest(local, owner, chown = chownTree) {
+  if (owner === void 0)
+    return;
+  chown(local.cloneDir, owner);
+  chown(local.scratchRoot, owner);
+}
+function localCloneVolumeName(runId, suffix = randomBytes11(4).toString("hex")) {
+  const tail2 = `-${suffix}`;
+  const safe = runId.replace(/[^a-zA-Z0-9_.-]/g, "-");
+  const head = `th-clone-${safe}`.slice(0, VOLUME_NAME_MAX2 - tail2.length);
+  return validateVolumeName(`${head}${tail2}`, "the local clone volume");
+}
+function localCloneFillArgv(from, volume, owner) {
+  const chown = owner === null ? "" : ` && chown -R ${String(owner.uid)}:${String(owner.gid)} /dst`;
+  return [
+    "run",
+    "--rm",
+    "--network=none",
+    `--volume=${from}:/src:ro`,
+    `--volume=${validateVolumeName(volume, "the local clone volume")}:/dst:rw`,
+    "--",
+    STAGE_HELPER_IMAGE,
+    "sh",
+    "-c",
+    `cp -a /src/. /dst/${chown}`
+  ];
+}
+function acquireLocalLease(runId) {
+  const docker3 = localDockerClient();
+  const containment = selectContainment([containerContainmentOn(docker3)]);
+  let released = false;
+  const stagedProxies = [];
+  const owner = localTreeOwner();
+  let cloneVolume;
+  const createdVolumes = [];
+  const fillCloneVolume = (cloneDir) => {
+    const name = localCloneVolumeName(runId);
+    const created = docker3.sync(["volume", "create", `--label=${STAGE_VOLUME_LABEL_KEY}=${runId}`, "--", name], { timeoutMs: LOCAL_VOLUME_CREATE_TIMEOUT_MS });
+    if (created.error || created.status !== 0) {
+      throw new ContainmentRefusalError(`could not create the clone volume ${name} on the local daemon: ${(created.error?.message ?? created.stderr).trim().slice(0, 300)}`);
+    }
+    createdVolumes.push(name);
+    const from = resolverFor("local")(cloneDir, "clone");
+    const filled = docker3.sync(localCloneFillArgv(from, name, localGuestUser()), {
+      timeoutMs: LOCAL_CLONE_FILL_TIMEOUT_MS
+    });
+    if (filled.error || filled.status !== 0) {
+      throw new ContainmentRefusalError(`could not copy the clone into its volume ${name}: ${(filled.error?.message ?? filled.stderr).trim().slice(0, 300)}`);
+    }
+    return name;
+  };
+  const lease = {
+    kind: "local",
+    runId,
+    containment,
+    docker: docker3,
+    // Stated, not inferred from `kind`. On this venue it is the truth twice over:
+    // the paths are on this machine AND `canonical()` is what should resolve
+    // them, which is the behaviour every local run has always had.
+    pathDomain: "local",
+    // Spread rather than `guestUser: owner`, so a non-root lease has no such key
+    // at all — the same object every local run has always had.
+    ...owner === void 0 ? {} : { guestUser: owner },
+    get released() {
+      return released;
+    },
+    get cloneVolume() {
+      return cloneVolume;
+    },
+    stage: (local) => {
+      if (released) {
+        return Promise.reject(new LeaseReleasedError("this lease was already released, so a clone volume made now would never be removed."));
+      }
+      try {
+        handLocalTreeToGuest(local, owner);
+        cloneVolume = fillCloneVolume(local.cloneDir);
+      } catch (err) {
+        return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+      }
+      return Promise.resolve({
+        cloneDir: local.cloneDir,
+        scratchRoot: local.scratchRoot,
+        previewDir: local.previewDir,
+        ...localJailPaths(local.scratchRoot)
+      });
+    },
+    // The containment function verbatim, which is the point of the barrel
+    // re-export rather than a copy here: this venue's daemon and this process
+    // share a filesystem, so the directory it makes under `tmpdir()` is already
+    // venue-side and has been on every local run since the sidecar existed.
+    //
+    // TRACKED, so `release()` can be the guaranteed owner the interface
+    // promises. Returning a bare handle made that promise the CALLER's to keep,
+    // and a caller that staged and then failed outside `runEnvironmentSpec`'s
+    // `finally` left the directory behind while release reported success.
+    //
+    // REFUSING AFTER RELEASE is the other half of the same promise. Staging onto
+    // a drained list would leak with nothing left to drain, and `release()` has
+    // already reported it had nothing to do — the split ownership this tracking
+    // exists to close, reached from the other side.
+    //
+    // ONLY THIS ARM CHECKS IT. An earlier draft of this comment said the hosted
+    // arm refuses the same way through `check()`, and that is not what `check()`
+    // tests: `assertVenueUnchanged` reads the tunnel's failure and classifies
+    // the daemon, and never looks at `released`. Hosted refuses a post-release
+    // staging only incidentally, because by then the VM is gone. Naming the
+    // check and what it actually tests is the rule this branch spent its length
+    // on, and that draft broke it in the same breath as stating it.
+    //
+    // That leaves the two arms answering one programmer error with different
+    // exit codes — hosted's incidental failure is a `HostedVenueError` at 2,
+    // this one is a plain throw at 1. Recorded on TERM-752 rather than fixed
+    // here: it is unreachable while `placement.ts` refuses first.
+    //
+    // THE EXIT CODE IS WHY IT IS NOT A REFUSAL TYPE. Nothing catches it and
+    // `findRunRefusal` does not match it, so it reaches the top-level catch at
+    // exit 1 — correct, because only our own call ordering can reach this, which
+    // is `assertDomainDeclared`'s reasoning and the same one this branch applied
+    // to `assertProxyStagedForVenue`. Giving it `RunRefusalError` would dress
+    // our defect as a polite refusal, TERM-649's lie inverted.
+    //
+    // It is a NAMED subclass rather than a bare `Error` for a hazard already
+    // here, not a speculative one. `stageProxyCode()` in `containment` throws
+    // `FenceError` on a damaged install, telling the developer to reinstall the
+    // CLI. Two distinguishable failures leave this one call, so the day anyone
+    // adds a catch to surface that instruction, an unnamed ordering bug gets
+    // swept into it and tells a developer to reinstall over our mistake.
+    stageProxyCode: () => {
+      if (released) {
+        return Promise.reject(new LeaseReleasedError("this lease was already released, so a staging made now would never be removed: release() has run and drained what it was holding."));
+      }
+      const staged = stageProxyCode();
+      stagedProxies.push(staged);
+      return Promise.resolve(staged);
+    },
+    census: (label) => Promise.resolve(released ? {
+      observed: false,
+      census: { containers: [], volumes: [], networks: [] },
+      unobservedReason: RELEASED_LEASE_CENSUS_REASON
+    } : censusReport(docker3, label)),
+    publishPreview: (req) => startPreview({ ...req, docker: docker3 }),
+    release: () => {
+      if (released) {
+        return Promise.resolve({
+          kind: "local",
+          released: false,
+          alreadyReleased: true,
+          error: null,
+          detail: "already released; nothing to do"
+        });
+      }
+      released = true;
+      const staged = stagedProxies.splice(0, stagedProxies.length);
+      for (const s of staged)
+        s.cleanup();
+      const volumeFailures = [];
+      for (const name of createdVolumes.splice(0, createdVolumes.length)) {
+        const removed = docker3.sync(["volume", "rm", "-f", "--", name], {
+          timeoutMs: LOCAL_VOLUME_CREATE_TIMEOUT_MS
+        });
+        if (removed.error || removed.status !== 0) {
+          volumeFailures.push(`${name}: ${(removed.error?.message ?? removed.stderr).trim().slice(0, 200)}`);
+        }
+      }
+      cloneVolume = void 0;
+      if (volumeFailures.length > 0) {
+        return Promise.resolve({
+          kind: "local",
+          released: true,
+          alreadyReleased: false,
+          error: `could not remove the clone volume: ${volumeFailures.join("; ")}`,
+          detail: `the lease is closed, but a clone volume remains (label ${STAGE_VOLUME_LABEL_KEY})`
+        });
+      }
+      return Promise.resolve({
+        kind: "local",
+        released: true,
+        alreadyReleased: false,
+        error: null,
+        detail: "the local venue owns no host resources; the lease is closed"
+      });
+    }
+  };
+  return lease;
+}
+var VenueRollbackError, UNREADABLE_MESSAGE, UNREADABLE_NAME, UNCOERCIBLE_THROWN, UNDESCRIBABLE_THROWN, UNLISTABLE_ROLLBACK_FAILURES, RELEASED_LEASE_CENSUS_REASON, LeaseReleasedError, STAGE_HELPER_IMAGE, STAGE_VOLUME_LABEL_KEY, VOLUME_NAME_MAX2, LOCAL_VOLUME_CREATE_TIMEOUT_MS, LOCAL_CLONE_FILL_TIMEOUT_MS;
+var init_venue = __esm({
+  "../../packages/envrun/dist/venue.js"() {
+    "use strict";
+    init_dist();
+    init_labels();
+    init_preview();
+    VenueRollbackError = class extends Error {
+      /** Every undo that threw, in the order they ran (reverse allocation order). */
+      rollbackFailures;
+      constructor(cause, rollbackFailures) {
+        super(rollbackMessage(cause, rollbackFailures), { cause });
+        this.name = "VenueRollbackError";
+        this.rollbackFailures = rollbackFailures;
+      }
+    };
+    UNREADABLE_MESSAGE = "<an error whose message could not be read>";
+    UNREADABLE_NAME = "<an error whose name could not be read>";
+    UNCOERCIBLE_THROWN = "<a thrown value that cannot be converted to a string>";
+    UNDESCRIBABLE_THROWN = "<a thrown value that could not be described>";
+    UNLISTABLE_ROLLBACK_FAILURES = "[venue acquisition rolled back, and the failures could not be listed \u2014 one or more allocated resources may still exist]";
+    RELEASED_LEASE_CENSUS_REASON = "the lease was already released, so this venue can no longer be interrogated";
+    LeaseReleasedError = class extends Error {
+      name = "LeaseReleasedError";
+    };
+    STAGE_HELPER_IMAGE = "busybox:1.37.0";
+    STAGE_VOLUME_LABEL_KEY = "terminalhire.stage";
+    VOLUME_NAME_MAX2 = 128;
+    LOCAL_VOLUME_CREATE_TIMEOUT_MS = 3e4;
+    LOCAL_CLONE_FILL_TIMEOUT_MS = 6e5;
+  }
+});
+
+// ../../packages/envrun/dist/execute.js
+import { spawnSync as spawnSync4 } from "child_process";
+function findRunRefusal(err) {
+  try {
+    let current = err;
+    for (let depth = 0; depth < MAX_CAUSE_FRAMES; depth += 1) {
+      if (current instanceof RunRefusalError)
+        return current;
+      if (current instanceof ContainmentRefusalError) {
+        return new RunRefusalError(current.message, { cause: current });
+      }
+      const next = current?.cause;
+      if (next === void 0 || next === null)
+        return null;
+      current = next;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+function describeCause(err) {
+  let out = "";
+  let frames = 0;
+  const append = (frame) => {
+    out = frames === 0 ? frame : `${out}
+caused by: ${frame}`;
+    frames += 1;
+  };
+  let current = err;
+  try {
+    for (let depth = 0; depth < MAX_CAUSE_FRAMES && current !== void 0 && current !== null; depth += 1) {
+      let frame = describeThrown(current, { includeName: true });
+      let next;
+      let asError = null;
+      try {
+        asError = current instanceof Error ? current : null;
+      } catch {
+        append(frame);
+        append(CHAIN_UNREADABLE);
+        return out;
+      }
+      try {
+        const stack = asError?.stack;
+        if (typeof stack === "string" && stack !== "")
+          frame = stack;
+      } catch {
+      }
+      try {
+        next = current.cause;
+      } catch {
+        append(frame);
+        append(CHAIN_UNREADABLE);
+        return out;
+      }
+      append(frame);
+      current = next;
+    }
+    if (current !== void 0 && current !== null)
+      append(CHAIN_TOO_DEEP);
+  } catch {
+    append(CHAIN_UNREADABLE);
+  }
+  return frames === 0 ? null : out;
+}
+function imageVariantFor(spec) {
+  if (spec.runtime !== "jvm")
+    return void 0;
+  const callsGradle = /(?:^|[\s;&|(])gradle(?=\s|$)/;
+  return [spec.installCommand, spec.testCommand].some((c) => c != null && callsGradle.test(c)) ? "gradle" : void 0;
+}
+function shapeFor(runtime, variant) {
+  if (runtime === "jvm" && variant === "gradle")
+    return JVM_GRADLE_IMAGE;
+  return RUNTIME_IMAGES[runtime];
+}
+function atLeast(a, b) {
+  const left = a.split(".").map(Number);
+  const right = b.split(".").map(Number);
+  const shared = Math.min(left.length, right.length);
+  for (let i = 0; i < shared; i += 1) {
+    const l = left[i];
+    const r = right[i];
+    if (l !== r)
+      return l > r;
+  }
+  return true;
+}
+function imageForRuntime(runtime, override, version2, variant) {
+  if (override)
+    return override;
+  const shape = shapeFor(runtime, variant);
+  if (!shape) {
+    throw new RunRefusalError(`no container image is mapped for runtime ${JSON.stringify(runtime)}. Refusing to run it in the Node image: a bare "command not found" exits 127, which classifyVerification already owns as ours \u2014 but a test script that RUNS and fails inside on the missing tool exits with its own status and prints to stdout, and that falls through to tests-failed \u2014 a false red blamed on the repo.`);
+  }
+  if (version2 === void 0 || version2 === null || shape.fixed)
+    return unversionedImage(shape);
+  if (!TAG_VERSION.test(version2)) {
+    throw new RunRefusalError(`runtime version ${JSON.stringify(version2)} is not a bare version, so no image tag can be built from it. Refusing rather than booting the default: the repo asked for a version, and supplying a different one silently is what TERM-643 fixed.`);
+  }
+  return `${shape.repository}:${shape.prefix ?? ""}${version2}${shape.suffix}`;
+}
+function setManifestProbe(probe) {
+  const previous = manifestProbe;
+  manifestProbe = probe ?? dockerManifestProbe;
+  return previous;
+}
+function imageDefinitelyAbsent(image) {
+  const res = manifestProbe(image);
+  if (res.status === 0)
+    return false;
+  return /manifest unknown|no such manifest/i.test(res.output);
+}
+function resolvePublishedImage(image, runtime, version2, variant) {
+  if (!imageDefinitelyAbsent(image))
+    return image;
+  const shape = shapeFor(runtime, variant);
+  if (shape && shape.declaredIsFloor && atLeast(shape.defaultVersion, version2)) {
+    return unversionedImage(shape);
+  }
+  throw new RunRefusalError(`the repo declares ${runtime} ${version2}, and no image is published at ${image}` + (shape && shape.declaredIsFloor ? `. Our default is ${shape.defaultVersion}, which is OLDER than that, so falling back would run the repo under a toolchain it says it cannot use` : `. ${runtime} treats a declared version as an exact pin, not a minimum, so a different one is a different environment`) + ". Refusing rather than booting a version the repo did not ask for \u2014 that substitution is what made this class of failure unattributable (TERM-643). Pass an explicit image to override.", { origin: "repository" });
+}
+function resolveImageForSpec(spec, override) {
+  const variant = imageVariantFor(spec);
+  const declared = shapeFor(spec.runtime, variant)?.fixed ? null : spec.runtimeVersion;
+  const image = imageForRuntime(spec.runtime, override, declared, variant);
+  const constructed = (() => {
+    if (declared === null)
+      return null;
+    try {
+      return imageForRuntime(spec.runtime, void 0, declared, variant);
+    } catch {
+      return null;
+    }
+  })();
+  if (constructed !== null && image === constructed && declared !== null) {
+    return resolvePublishedImage(image, spec.runtime, declared, variant);
+  }
+  return image;
+}
+function installEnvironmentFailureNote(install, image, pathDomain) {
+  const base = `the install step exited ${String(install.exitCode)}, so the test command was never invoked. The repo has not been judged; this is an environment failure.` + refusedHostsSentence(install.egressDenied ?? []);
+  const output = `${install.stdout}
+${install.stderr}`;
+  const pullFailed = install.exitCode === DOCKER_RUN_FAILED && MISSING_IMAGE_SHAPE.test(output) && PULL_FAILED_SHAPE.test(output) && !PULL_SUCCEEDED_SHAPE.test(output);
+  if (!pullFailed)
+    return base;
+  if (pathDomain === "venue") {
+    return `${base} The venue could not pull the container image ${image}; this is ours to fix.`;
+  }
+  return `${base} The container image ${image} is not present on this machine \u2014 run \`docker pull ${image}\` and try again.`;
+}
+function refusedHostsSentence(hosts) {
+  if (hosts.length === 0)
+    return "";
+  const named = hosts.slice(0, MAX_NAMED_REFUSED_HOSTS).join(", ");
+  const rest = hosts.length - MAX_NAMED_REFUSED_HOSTS;
+  return ` During install the network proxy refused ${named}` + (rest > 0 ? ` and ${String(rest)} more` : "") + ". Install reaches only the hosts on its allowlist, so a dependency whose install script downloads from any other host cannot get what it asked for.";
+}
+function selectRunDigest(image, repoDigests) {
+  const repo = imageRepo(image);
+  const at = image.indexOf("@");
+  const pinned = at === -1 ? null : image.slice(at + 1);
+  const own = repoDigests.filter((d) => typeof d === "string" && isCanonicalRepoDigest(d) && imageRepo(d) === repo && (pinned === null || d.slice(d.indexOf("@") + 1) === pinned));
+  return own.length === 1 ? own[0] ?? null : null;
+}
+function inspectRunDigest(docker3, image, log) {
+  let res;
+  try {
+    res = docker3.sync(["image", "inspect", "--format", "{{json .RepoDigests}}", "--", image], {
+      timeoutMs: IMAGE_INSPECT_TIMEOUT_MS
+    });
+  } catch (err) {
+    log(`image digest: inspect of ${image} threw (${describeThrown(err, { includeName: false })}); running by name`);
+    return null;
+  }
+  if (res.error || res.status !== 0) {
+    const why = (res.error?.message ?? res.stderr).trim().slice(0, 200);
+    log(`image digest: inspect of ${image} failed (${why}); running by name`);
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(res.stdout);
+  } catch {
+    parsed = null;
+  }
+  if (!Array.isArray(parsed)) {
+    log(`image digest: inspect of ${image} returned no digest list; running by name`);
+    return null;
+  }
+  const digest = selectRunDigest(image, parsed);
+  log(digest === null ? `image digest: ${String(parsed.length)} RepoDigest(s) for ${image}, none alone names its repository; running by name` : `image digest: running the test step as ${digest}`);
+  return digest;
+}
+function classifySingleRun(run3) {
+  return classifyVerification(run3).outcome;
+}
+function testStepEnv(env, runtime) {
+  if (runtime !== "go")
+    return env;
+  const current = env["GOFLAGS"];
+  return { ...env, GOFLAGS: current ? `${current} -v` : "-v" };
+}
+function toExecution(step) {
+  return {
+    exitCode: step.exitCode,
+    stdout: step.stdout,
+    stderr: step.stderr,
+    timedOut: step.timedOut
+  };
+}
+function assertVenueOwnerDeclared(lease) {
+  if (lease.pathDomain !== "venue" || lease.guestUser)
+    return;
+  throw new RunRefusalError("this venue did not say which account owns the tree it staged, so the guest would run under this machine's uid and could not write its own clone. We refuse rather than report that permission error as the repo's tests failing.");
+}
+function refuseUnbuildableSpec(spec) {
+  if (spec.runtime !== "jvm" || spec.installCommand !== null || spec.testCommand !== null)
+    return;
+  const why = spec.unresolved.find((r) => r.kind === "no-test-command")?.detail;
+  if (why === void 0) {
+    throw new EnvRunError("internal: a jvm spec with no test command carries no no-test-command reason");
+  }
+  throw new RunRefusalError(`refusing to run this repository: ${why}.`);
+}
+async function runEnvironmentSpec(req) {
+  const startedAt = Date.now();
+  const containment = req.lease.containment;
+  if (containment.kind !== "container") {
+    throw new EnvRunError(`phase 2 requires the container tier, got ${containment.kind}. Refusing: a container phase that silently ran under seatbelt would make every container claim vacuous.`);
+  }
+  refuseUnbuildableSpec(req.spec);
+  assertVenueOwnerDeclared(req.lease);
+  const image = resolveImageForSpec(req.spec, req.image);
+  const { jail, tmp } = req;
+  const env = scrubEnv(process.env, scrubEnvPathsFor("container", { jail, tmp }));
+  const labels = req.labels;
+  const watch = labels ? new LabelWatch(labelSelector(labels), req.lease.docker) : null;
+  watch?.start();
+  let install = null;
+  let test = null;
+  let imageDigest = null;
+  let result;
+  let proxyCode = null;
+  try {
+    if (req.spec.installCommand !== null) {
+      proxyCode = await req.lease.stageProxyCode();
+      install = await runStep(containment, {
+        step: "install",
+        profile: "install",
+        proxyCode,
+        command: req.spec.installCommand,
+        repoDir: req.repoDir,
+        jail,
+        tmp,
+        pathDomain: req.lease.pathDomain,
+        // TERM-729: travels WITH pathDomain, because it answers the same
+        // question about the same machine. Undefined on a local lease.
+        guestUser: req.lease.guestUser,
+        // TERM-913: the third answer about that machine — which volumes the
+        // fence mounts in place of the noexec stage. Undefined on a local lease.
+        stageVolumes: req.lease.stageVolumes,
+        // TERM-1106: the local venue's copy of the clone. Undefined on a hosted lease.
+        cloneVolume: req.lease.cloneVolume,
+        env,
+        image,
+        labels,
+        timeoutMs: req.installTimeoutMs ?? 9e5
+      });
+    }
+    if (install !== null && install.exitCode !== 0) {
+      result = {
+        outcome: "test-command-unavailable",
+        note: installEnvironmentFailureNote(install, image, req.lease.pathDomain),
+        installOk: false,
+        counts: null
+      };
+    } else if (req.spec.testCommand === null) {
+      const why = req.spec.unresolved.find((r) => r.kind === "no-test-command")?.detail;
+      result = {
+        outcome: "no-tests-observed",
+        note: "the spec derived no test command, so nothing was executed: nothing failed and nothing ran. Certain, not inferred \u2014 no command was ever invoked." + (why === void 0 ? "" : ` Why: ${why}.`),
+        installOk: true,
+        counts: null
+      };
+    } else {
+      imageDigest = inspectRunDigest(req.lease.docker, image, req.log ?? (() => {
+      }));
+      test = await runStep(containment, {
+        step: "test",
+        profile: "offline",
+        command: req.spec.testCommand,
+        repoDir: req.repoDir,
+        jail,
+        tmp,
+        pathDomain: req.lease.pathDomain,
+        // TERM-729: travels WITH pathDomain, because it answers the same
+        // question about the same machine. Undefined on a local lease.
+        guestUser: req.lease.guestUser,
+        // TERM-913: the third answer about that machine — which volumes the
+        // fence mounts in place of the noexec stage. Undefined on a local lease.
+        stageVolumes: req.lease.stageVolumes,
+        // TERM-1106: the local venue's copy of the clone. Undefined on a hosted lease.
+        cloneVolume: req.lease.cloneVolume,
+        env: testStepEnv(env, req.spec.runtime),
+        image: imageDigest ?? image,
+        labels,
+        timeoutMs: req.testTimeoutMs ?? 9e5
+      });
+      const verdict = classifyVerification({ ...toExecution(test), runtime: req.spec.runtime });
+      result = {
+        outcome: verdict.outcome,
+        note: verdict.reason,
+        installOk: true,
+        counts: verdict.counts
+      };
+    }
+  } finally {
+    watch?.stop();
+    proxyCode?.cleanup();
+  }
+  const peak = watch?.peak ?? { containers: [], volumes: [], networks: [] };
+  const afterReport = labels ? await req.lease.census(labelSelector(labels)) : null;
+  const after = afterReport?.census ?? {
+    containers: [],
+    volumes: [],
+    networks: []
+  };
+  const observation = afterReport ?? {
+    observed: false,
+    unobservedReason: "the run carried no label, so there was nothing to count by"
+  };
+  return {
+    outcome: result.outcome,
+    tier: "container",
+    image,
+    imageDigest,
+    install,
+    test,
+    installOk: result.installOk,
+    counts: reportedCounts(result.counts, test ? readCounts(test.stdout, test.stderr) : null),
+    leaks: judgeLeaks(peak, after, observation),
+    note: result.note,
+    wallMs: Date.now() - startedAt
+  };
+}
+function labelSelector(labels) {
+  const first = Object.entries(labels)[0];
+  if (!first)
+    throw new EnvRunError("labels object is empty; pass at least one label or omit it");
+  return `${first[0]}=${first[1]}`;
+}
+function withUserScriptPath(command) {
+  return `PATH="$PATH:$HOME/.local/bin"; export PATH; ${command}`;
+}
+async function runStep(containment, r) {
+  const spec = {
+    profile: r.profile,
+    clone: r.repoDir,
+    jail: r.jail,
+    tmp: r.tmp,
+    // DECLARED, never derived from the docker endpoint — `fence.ts`'s
+    // `PathDomain` comment explains why that inference is unavailable: a hosted
+    // venue is reached over a forwarded unix socket, so the endpoint is a local
+    // path in front of a remote daemon. The venue that produced these paths is
+    // the one party that knows, and it is the lease this value came from.
+    pathDomain: r.pathDomain,
+    guestUser: r.guestUser,
+    stageVolumes: r.stageVolumes,
+    cloneVolume: r.cloneVolume,
+    program: "/bin/sh",
+    args: ["-c", withUserScriptPath(r.command)]
+  };
+  const startedAt = Date.now();
+  const res = await containment.run(spec, r.env, {
+    timeoutMs: r.timeoutMs,
+    image: r.image,
+    ...r.labels ? { labels: r.labels } : {},
+    ...r.proxyCode ? { proxyCode: r.proxyCode } : {}
+  });
+  return {
+    step: r.step,
+    profile: r.profile,
+    command: r.command,
+    argv: res.argv,
+    exitCode: res.status,
+    stdout: res.stdout,
+    stderr: res.stderr,
+    timedOut: res.timedOut,
+    wallMs: Date.now() - startedAt,
+    ...res.egressDenied && res.egressDenied.length > 0 ? { egressDenied: [...new Set(res.egressDenied)] } : {}
+  };
+}
+var EnvRunError, RunRefusalError, MAX_CAUSE_FRAMES, CHAIN_UNREADABLE, CHAIN_TOO_DEEP, RUNTIME_IMAGES, JVM_GRADLE_IMAGE, unversionedImage, TAG_VERSION, dockerManifestProbe, manifestProbe, MISSING_IMAGE_SHAPE, PULL_FAILED_SHAPE, PULL_SUCCEEDED_SHAPE, DOCKER_RUN_FAILED, MAX_NAMED_REFUSED_HOSTS, IMAGE_INSPECT_TIMEOUT_MS;
+var init_execute = __esm({
+  "../../packages/envrun/dist/execute.js"() {
+    "use strict";
+    init_dist();
+    init_classify2();
+    init_attestation2();
+    init_labels();
+    init_venue();
+    EnvRunError = class extends Error {
+    };
+    RunRefusalError = class extends EnvRunError {
+      /**
+       * Whose side refused (TERM-1313), set at the throw and never read back out of the message.
+       * A baseline intake labels a posting not-runnable on `repository`, so that value is passed
+       * only where envrun can show the repository asked for something we cannot supply. Every
+       * other refusal, including one nobody has classified yet, is `ours` by default.
+       */
+      origin;
+      constructor(message2, options) {
+        super(message2, options);
+        this.origin = options?.origin ?? "ours";
+      }
+    };
+    MAX_CAUSE_FRAMES = 16;
+    CHAIN_UNREADABLE = "<the cause chain stopped: a value refused to be read>";
+    CHAIN_TOO_DEEP = `<the cause chain continued past ${MAX_CAUSE_FRAMES} frames and was not followed further>`;
+    RUNTIME_IMAGES = {
+      node: {
+        repository: "node",
+        // NOT `-bookworm-slim`, and the reason is `git`. The slim variant ships none,
+        // and npm resolves a GitHub-shorthand dependency by spawning it: measured
+        // 2026-08-26 on `gang-jiffy/th-globby`, `npm install` exited 254 with
+        // `syscall spawn git / errno -2` before the suite was ever invoked, and the
+        // developer read "our environment could not run your tests" for a repository
+        // that was fine. `image-tooling-live.test.mjs` opens the image and checks,
+        // because a tag cannot tell you what is inside it.
+        suffix: "-bookworm",
+        defaultVersion: "22",
+        declaredIsFloor: false
+      },
+      python: {
+        repository: "python",
+        suffix: "-bookworm",
+        defaultVersion: "3.12",
+        declaredIsFloor: false
+      },
+      go: { repository: "golang", suffix: "-bookworm", defaultVersion: "1.23", declaredIsFloor: true },
+      ruby: { repository: "ruby", suffix: "-bookworm", defaultVersion: "3.3", declaredIsFloor: false },
+      rust: { repository: "rust", suffix: "-bookworm", defaultVersion: "1", declaredIsFloor: true },
+      /**
+       * TERM-1139. `dotnet` was unmapped alongside `jvm`, and the recorded reason was that
+       * neither had "a single obvious base image (gradle vs maven, sdk vs runtime)". That
+       * reason holds for jvm and it does NOT hold here, which is why only this half moved.
+       *
+       * "sdk vs runtime" answers itself: the derived commands are `dotnet restore` and
+       * `dotnet test`, and neither exists on the runtime image. There is no second build
+       * tool competing for the slot the way maven and gradle compete for jvm's — and since
+       * no official image carries both of those, jvm genuinely cannot be served by one key.
+       *
+       * MEASURED, not chosen by tag: `mcr.microsoft.com/dotnet/sdk:8.0` carries `git` and
+       * `dotnet` (881MB). `git` is the property the whole `image-tooling-live` test exists
+       * for, and `eclipse-temurin:21-jdk` was rejected here for lacking it.
+       *
+       * The tag shape fits without touching the builder: the SDK publishes a tag per
+       * version, so `repository:VERSION` is a real image at every version envspec can
+       * derive, with no suffix. That is NOT true of the maven images, where the leading
+       * tag component is maven's version and Java's sits in the suffix.
+       *
+       * `declaredIsFloor` is true on the same reasoning as go and rust: an SDK builds
+       * older target frameworks, so booting 8.0 for a repo asking 6.0 is the supported
+       * case rather than a substitution. A repo asking for something NEWER than our
+       * default still refuses, which is where TERM-643 put that line.
+       */
+      dotnet: {
+        repository: "mcr.microsoft.com/dotnet/sdk",
+        suffix: "",
+        defaultVersion: "8.0",
+        declaredIsFloor: true
+      },
+      /**
+       * TERM-1122. Maven's image, and the one a Gradle WRAPPER repo gets too: the wrapper
+       * downloads its own Gradle, so it needs a JDK and nothing else. MEASURED
+       * 2026-09-18: `maven:3.9-eclipse-temurin-21` carries `git`, `mvn` and JDK 21 on
+       * Ubuntu 24.04, which is why this is not `eclipse-temurin` (no `git`, rejected
+       * under TERM-1139). The JDK sits AFTER maven's own version in the tag, hence
+       * `prefix`, and the major is all envspec derives (`javaMajor`).
+       *
+       * `declaredIsFloor`: a JDK builds for older `--release` targets, so a repo asking
+       * for 16, which has no image, runs on 21. A Gradle toolchain is stricter than a
+       * floor and asks for its exact JDK; Gradle's refusal on the wrong one reads as
+       * ours (`classify.ts`, `isOfflineBuildGap`), never as the repo's.
+       */
+      jvm: {
+        repository: "maven",
+        prefix: "3.9-eclipse-temurin-",
+        suffix: "",
+        defaultVersion: "21",
+        declaredIsFloor: true
+      },
+      /**
+       * TERM-1123. OUR image (`packages/envrun/images/cpp/Dockerfile`): Debian bookworm
+       * with the C/C++ toolchain, CMake, Meson and the common -dev libraries baked in.
+       * No official image carries that set. Libraries are baked rather than installed per
+       * run because the install step has network only through the allowlist, and apt is
+       * not on it; a repo needing a library the image lacks gets `test-command-unavailable`
+       * (`isMissingSystemDependency`), never a red.
+       *
+       * `fixed`: a C/C++ repo declares no compiler version envspec can read, so there is
+       * nothing to derive and nothing to probe. The tag moves only when the Dockerfile
+       * does. It lives in a PUBLIC repository, apart from the private venue images, so a
+       * developer's own Docker can pull it with no credential.
+       */
+      cpp: {
+        repository: "us-east1-docker.pkg.dev/terminalhire-pool/runtime-images/cpp",
+        suffix: "",
+        defaultVersion: "1",
+        declaredIsFloor: false,
+        fixed: true
+      }
+    };
+    JVM_GRADLE_IMAGE = {
+      repository: "gradle",
+      prefix: "jdk",
+      suffix: "",
+      defaultVersion: "21",
+      declaredIsFloor: true
+    };
+    unversionedImage = (shape) => `${shape.repository}:${shape.prefix ?? ""}${shape.defaultVersion}${shape.suffix}`;
+    TAG_VERSION = /^\d+(?:\.\d+){0,2}$/;
+    dockerManifestProbe = (image) => {
+      const res = spawnSync4("docker", ["manifest", "inspect", image], {
+        encoding: "utf8",
+        timeout: 3e4
+      });
+      return { status: res.status, output: `${res.stdout ?? ""}${res.stderr ?? ""}` };
+    };
+    manifestProbe = dockerManifestProbe;
+    MISSING_IMAGE_SHAPE = /Unable to find image ['"][^'"]*['"] locally/i;
+    PULL_FAILED_SHAPE = /manifest unknown|\bdenied: /i;
+    PULL_SUCCEEDED_SHAPE = /Status: (?:Downloaded newer image|Image is up to date) for /;
+    DOCKER_RUN_FAILED = 125;
+    MAX_NAMED_REFUSED_HOSTS = 5;
+    IMAGE_INSPECT_TIMEOUT_MS = 3e4;
+  }
+});
+
+// ../../packages/envrun/dist/screenshotsResult.js
+function shotIn(order, items, key) {
+  const seen = order.filter((o) => items.some((i) => key(i) === o));
+  return seen.length > 0 ? seen.join(" and ") : "none";
+}
+function renderScreenshots(s) {
+  if (s === null || s === void 0)
+    return null;
+  if (s.status === "skipped")
+    return `screenshots  skipped \u2014 ${s.reason ?? "no reason recorded"}`;
+  if (s.status === "pending")
+    return "screenshots  pending \u2014 taken after the verdict";
+  const lines = [
+    `screenshots  ${String(s.items.length)} in ${s.dir ?? "?"} (routes ${s.routes.join(", ")}; ${shotIn(SCHEME_ORDER, s.items, (i) => i.scheme)}; ${shotIn(VIEWPORT_ORDER, s.items, (i) => i.viewport)})`
+  ];
+  for (const side of s.sides) {
+    const count = s.items.filter((i) => i.side === side.side).length;
+    lines.push(side.status === "captured" ? `${INDENT}${side.side}: ${String(count)} ${count === 1 ? "shot" : "shots"}${side.reason === null ? "" : ` (${side.reason})`}` : `${INDENT}${side.side}: skipped \u2014 ${side.reason ?? "no reason recorded"}`);
+  }
+  for (const note of s.notes)
+    lines.push(`${INDENT}${note}`);
+  lines.push(`${INDENT}rendered with no network: no backend, no signed-in state`);
+  return lines.join("\n");
+}
+var INDENT, VIEWPORT_ORDER, SCHEME_ORDER;
+var init_screenshotsResult = __esm({
+  "../../packages/envrun/dist/screenshotsResult.js"() {
+    "use strict";
+    INDENT = " ".repeat(13);
+    VIEWPORT_ORDER = ["desktop", "mobile"];
+    SCHEME_ORDER = ["light", "dark"];
+  }
+});
+
+// ../../packages/envrun/dist/venueProof.js
+function readDaemonId(docker3, label, timeoutMs) {
+  let res;
+  try {
+    res = docker3.sync(["info", "--format", "{{.ID}}"], { timeoutMs });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { id: null, detail: `${label} daemon probe threw: ${msg}` };
+  }
+  if (res.error) {
+    return { id: null, detail: `${label} daemon probe failed: ${res.error.message}` };
+  }
+  if (res.status !== 0) {
+    const tail2 = res.stderr.trim().split("\n").slice(-1)[0] ?? "";
+    return { id: null, detail: `${label} daemon probe exited ${String(res.status)}: ${tail2}` };
+  }
+  const id = res.stdout.trim();
+  if (id === "") {
+    return { id: null, detail: `${label} daemon reported an empty ID` };
+  }
+  if (!DAEMON_ID.test(id)) {
+    return {
+      id: null,
+      detail: `${label} daemon returned a non-identity: ${JSON.stringify(id.slice(0, 80))}`
+    };
+  }
+  return { id, detail: `${label} daemon ${id}` };
+}
+function classifyVenueDaemon(venue, local = localDockerClient(), timeoutMs = PROBE_TIMEOUT_MS3) {
+  const v = readDaemonId(venue, "venue", timeoutMs);
+  const l = readDaemonId(local, "local", timeoutMs);
+  if (v.id === null || l.id === null) {
+    const unread = [v.id === null ? v.detail : null, l.id === null ? l.detail : null].filter((d) => d !== null).join("; ");
+    return { distinct: false, reason: "unknown", detail: unread };
+  }
+  if (v.id === l.id) {
+    return {
+      distinct: false,
+      reason: "same-daemon",
+      daemonId: v.id,
+      detail: `the venue and this machine are the same Docker daemon (${v.id}), so nothing ran elsewhere`
+    };
+  }
+  return { distinct: true, localDaemonId: l.id, venueDaemonId: v.id };
+}
+function describeVenueDaemon(verdict) {
+  if (verdict.distinct) {
+    return `venue daemon ${verdict.venueDaemonId} is a different daemon from this machine's ${verdict.localDaemonId} (which does not by itself establish a different machine)`;
+  }
+  return `venue daemon not distinct (${verdict.reason}): ${verdict.detail}`;
+}
+var PROBE_TIMEOUT_MS3, DAEMON_ID;
+var init_venueProof = __esm({
+  "../../packages/envrun/dist/venueProof.js"() {
+    "use strict";
+    init_dist();
+    PROBE_TIMEOUT_MS3 = 2e4;
+    DAEMON_ID = /^[A-Za-z0-9:._-]+$/;
+  }
+});
+
+// ../../packages/envrun/dist/venueDescriptor.js
+function readDaemonFacts(docker3) {
+  let res;
+  try {
+    res = docker3.sync(["info", "--format", DAEMON_FACTS_FORMAT], {
+      timeoutMs: PROBE_TIMEOUT_MS3
+    });
+  } catch {
+    return null;
+  }
+  if (res.error || res.status !== 0)
+    return null;
+  const lines = res.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+  const last = lines.at(-1);
+  if (last === void 0)
+    return null;
+  const parts = last.split(/\s+/);
+  if (parts.length !== 2)
+    return null;
+  const [id, version2] = parts;
+  if (!DAEMON_ID.test(id))
+    return null;
+  return { id, version: version2 };
+}
+function describeVenue(lease) {
+  const daemon = readDaemonFacts(lease.docker);
+  if (daemon === null)
+    return null;
+  const claims = lease.venueIdentity?.claims ?? null;
+  return {
+    kind: lease.kind,
+    daemonId: daemon.id,
+    daemonVersion: daemon.version,
+    instance: claims?.instanceId ?? null,
+    zone: claims?.zone ?? null,
+    // Driven by whether an identity was actually verified, never by `kind`.
+    // Reading it off the kind would be the placement flag arriving by another
+    // route: a venue that CALLS itself hosted would certify itself.
+    evidence: claims === null ? "self-reported" : "google-signed-instance-identity"
+  };
+}
+function renderVenueLine(v) {
+  const where = v.instance === null ? v.kind : `${v.kind} instance ${v.instance}`;
+  const zone = v.zone === null ? "" : ` (${v.zone})`;
+  return `venue        ${where}${zone} \u2014 daemon ${v.daemonId} v${v.daemonVersion}, ${v.evidence}`;
+}
+var DAEMON_FACTS_FORMAT;
+var init_venueDescriptor = __esm({
+  "../../packages/envrun/dist/venueDescriptor.js"() {
+    "use strict";
+    init_venueProof();
+    DAEMON_FACTS_FORMAT = "{{.ID}} {{.ServerVersion}}";
+  }
+});
+
+// ../../packages/envrun/dist/result.js
+function fmtMs(ms) {
+  return ms < 1e3 ? `${String(ms)}ms` : `${(ms / 1e3).toFixed(1)}s`;
+}
+function fmtMinutes(ms) {
+  const min = ms / 6e4;
+  return Number.isInteger(min) ? String(min) : min.toFixed(1);
+}
+function renderVerdictLine(r) {
+  if (r.status === "refused") {
+    const first = r.boundaryRefusals[0];
+    if (first === void 0)
+      return `REFUSED   ${r.reason}`;
+    const where = first.path ?? "the patch";
+    return `REFUSED   ${where} is outside this bounty's slice \u2014 nothing was run, no container started.`;
+  }
+  const t = fmtMs(r.wallMs);
+  switch (r.outcome) {
+    case "completed":
+      return `GREEN     ${String(r.counts?.tests_passed ?? 0)} test(s) passed, none failed ` + (r.counts?.coverage === "partial" ? `(${PARTIAL_COUNTS_NOTE}) ` : "") + `\u2014 ${t}${r.preview ? ` \u2014 ${r.preview.url}` : ""}`;
+    case "tests-failed":
+      return `RED       ${r.counts ? `${String(r.counts.tests_failed)} test(s) failed` : `exit ${String(r.exitCode)}`}` + (r.counts?.coverage === "partial" ? ` (${PARTIAL_COUNTS_NOTE})` : "") + ` \u2014 ${t}${r.preview ? ` \u2014 ${r.preview.url}` : ""}`;
+    case "no-tests-observed":
+      return `NOTHING RAN  the suite reported zero tests passed and zero failed \u2014 ${t}`;
+    case "counts-unparsed":
+      return `UNKNOWN   exit ${String(r.exitCode)} but no reporter format was readable, so nothing is verified \u2014 ${t}`;
+    case "test-command-unavailable":
+      return `OUR FAULT  the test command could not be invoked; your work has not been judged \u2014 ${t}`;
+    case "environment-exhausted":
+      return `OUR FAULT  the run ran out of a resource we cap; your work has not been judged \u2014 ${t}`;
+    case "budget-exceeded":
+      return r.testTimeoutMs === void 0 ? `OUR LIMIT  we stopped the run at our time limit; this is not a result about the work \u2014 ${t}` : `OUR LIMIT  the ${fmtMinutes(r.testTimeoutMs)}-min test time limit set for this posting stopped the run; this is not a result about the work \u2014 ${t}`;
+    case null:
+      throw new Error("a verified run has no outcome \u2014 the result was assembled wrong");
+  }
+}
+function renderRunReport(r) {
+  const lines = [renderVerdictLine(r), ""];
+  for (const field of RUN_RESULT_FIELDS) {
+    const view = FIELD_VIEWS[field];
+    if (view === RENDER_NONE)
+      continue;
+    const rendered = view(r);
+    if (rendered !== null)
+      lines.push(rendered);
+  }
+  const showOutput = r.status === "verified" && r.outcome !== null && !isGreen(r.outcome) && r.testOutputTail !== "";
+  if (showOutput) {
+    lines.push("", "--- test output (tail) ---", r.testOutputTail);
+  }
+  if (r.status === "verified" && r.outcome === "counts-unparsed") {
+    lines.push("", r.exitCode === 0 ? "Your suite exited 0, but we could not read how many tests ran, so this is not a verdict either way." : `Your test command exited ${String(r.exitCode)}, but we could not read which tests ran or failed. A check that runs before the tests can stop the command this way, so this is not a verdict either way.`);
+  } else if (r.status === "verified" && r.outcome === "budget-exceeded") {
+    lines.push("", r.testTimeoutMs === void 0 ? "Our time limit ended the run; that says nothing about your work." : `The ${fmtMinutes(r.testTimeoutMs)}-min test time limit set for this posting ended the run; that says nothing about your work.`);
+  } else if (r.status === "verified" && r.outcome !== null && isOurFault(r.outcome)) {
+    lines.push("", "This is an environment failure on our side, not a statement about your work.");
+  }
+  return lines.join("\n");
+}
+function answerDidItPass(r) {
+  const passed = r.status === "verified" && r.outcome !== null && isGreen(r.outcome);
+  return { passed, summary: renderVerdictLine(r), lookAt: r.preview?.url ?? null };
+}
+function exitCodeForOutcome(outcome) {
+  if (isGreen(outcome))
+    return 0;
+  return LIMIT_OWNER[outcome] === "ours" ? 2 : 1;
+}
+function exitCodeFor(r) {
+  if (r.status === "refused")
+    return 2;
+  if (r.outcome === null)
+    return 2;
+  return exitCodeForOutcome(r.outcome);
+}
+var RUN_TEST_COMMAND_SOURCES, RUN_IMAGE_SOURCES, RUN_RESULT_SCHEMA, PARTIAL_COUNTS_NOTE, RUN_RESULT_FIELDS, RENDER_NONE, FIELD_VIEWS;
+var init_result = __esm({
+  "../../packages/envrun/dist/result.js"() {
+    "use strict";
+    init_screenshotsResult();
+    init_dist2();
+    init_classify2();
+    init_venueDescriptor();
+    RUN_TEST_COMMAND_SOURCES = [
+      ...TEST_COMMAND_SOURCES,
+      "developer-declared",
+      "operator-declared"
+    ];
+    RUN_IMAGE_SOURCES = [
+      "detected",
+      "none",
+      "operator-declared",
+      "developer-declared",
+      // TERM-1221: the mapping chose the image from a runtime the POSTER declared, because the
+      // repository's own files named none.
+      "founder-declared"
+    ];
+    RUN_RESULT_SCHEMA = "terminalhire.verification-run/1";
+    PARTIAL_COUNTS_NOTE = "from one of several test summaries in the output, so not a total for the whole run";
+    RUN_RESULT_FIELDS = [
+      "schema",
+      "runId",
+      "claimId",
+      "status",
+      "outcome",
+      "reason",
+      "exitCode",
+      "testCommand",
+      "testOutputTail",
+      "counts",
+      "wallMs",
+      "installMs",
+      "testMs",
+      "testTimeoutMs",
+      "targetRepo",
+      "targetSha",
+      "patchSha256",
+      "treeDigest",
+      "testCommandSource",
+      "baselinePatchSha256",
+      "boundaryRefusals",
+      "touchedPaths",
+      "preview",
+      "screenshots",
+      "containerImage",
+      "containerImageDigest",
+      "imageSource",
+      "leaksClean",
+      "leakState",
+      "venue",
+      "refusalOrigin"
+    ];
+    RENDER_NONE = null;
+    FIELD_VIEWS = {
+      schema: RENDER_NONE,
+      runId: (r) => `run          ${r.runId}`,
+      claimId: (r) => `claim        ${r.claimId}`,
+      status: RENDER_NONE,
+      // carried by the verdict line, which is always printed
+      outcome: (r) => r.outcome === null ? null : `outcome      ${r.outcome}`,
+      reason: (r) => `why          ${r.reason}`,
+      exitCode: (r) => r.exitCode === null ? null : `exit code    ${String(r.exitCode)}`,
+      testCommand: (r) => r.testCommand === null ? null : `test command ${r.testCommand}`,
+      testOutputTail: RENDER_NONE,
+      // printed as a block below the fields, when red
+      counts: (r) => r.counts === null ? null : `tests        ${String(r.counts.tests_passed)} passed, ${String(r.counts.tests_failed)} failed (${r.counts.runner})` + (r.counts.coverage === "partial" ? ` \u2014 ${PARTIAL_COUNTS_NOTE}` : ""),
+      wallMs: (r) => `round trip   ${fmtMs(r.wallMs)}`,
+      installMs: (r) => r.installMs === void 0 ? null : `install step ${fmtMs(r.installMs)}`,
+      testMs: (r) => r.testMs === void 0 ? null : `test step    ${fmtMs(r.testMs)}`,
+      testTimeoutMs: (r) => r.testTimeoutMs === void 0 ? null : `time limit   ${fmtMinutes(r.testTimeoutMs)} min`,
+      targetRepo: (r) => `target       ${r.targetRepo}`,
+      targetSha: (r) => `commit       ${r.targetSha.slice(0, 12)}`,
+      patchSha256: (r) => r.patchSha256 === null ? null : `patch        ${r.patchSha256.slice(0, 12)}`,
+      treeDigest: (r) => r.treeDigest === null ? null : `tree         ${r.treeDigest.slice(0, 12)}`,
+      // Worth a line of its own: `detected` means the repo chose the command, not us and not a
+      // founder picking one that suits the outcome.
+      testCommandSource: (r) => `cmd source   ${r.testCommandSource}`,
+      // Shown only when set, because it is the unusual case and it blocks signing.
+      baselinePatchSha256: (r) => r.baselinePatchSha256 === null ? null : `base patch   ${r.baselinePatchSha256.slice(0, 12)} (not in the signed binding)`,
+      boundaryRefusals: (r) => r.boundaryRefusals.length === 0 ? null : ["refused", ...r.boundaryRefusals.map((b) => `  - ${b.detail}`)].join("\n"),
+      touchedPaths: (r) => r.touchedPaths.length === 0 ? null : `files        ${String(r.touchedPaths.length)}: ${r.touchedPaths.join(", ")}`,
+      preview: (r) => r.preview === null ? null : `preview      ${r.preview.url}`,
+      screenshots: (r) => renderScreenshots(r.screenshots),
+      containerImage: (r) => r.containerImage === null ? null : `image        ${r.containerImage}`,
+      containerImageDigest: (r) => r.containerImageDigest === null ? null : `image digest ${r.containerImageDigest}`,
+      // Shown only when a human chose the environment. `detected` is the ordinary case and
+      // saying so on every run would train the reader to skip the line that matters.
+      imageSource: (r) => r.imageSource === "detected" || r.imageSource === "none" ? null : `image source ${r.imageSource} (not signed)`,
+      // Printed through `leakState` below, which knows WHY a false is false. Rendering both would
+      // print the leak warning on a run where we merely could not look (TERM-1144).
+      leaksClean: RENDER_NONE,
+      // Silent when clean and when refused, as the boolean's line was. The two not-a-leak states
+      // get their own sentence, because "we could not check" read as "we found a leak" is the
+      // exact confusion this field exists to end.
+      leakState: (r) => {
+        switch (r.leakState) {
+          case null:
+          case "clean":
+            return null;
+          case "leak":
+            return "WARNING      labelled Docker objects survived teardown";
+          case "inconclusive":
+            return "leak check   inconclusive \u2014 no labelled container was seen while the run was live, so finding nothing afterwards proves nothing";
+          case "unobserved":
+            return "leak check   not taken \u2014 we could not check what was left after teardown";
+        }
+      },
+      // Absent on most runs, so it prints only when there is something to say. Silence
+      // here is the honest rendering of "no venue answered": a placeholder line would
+      // invite a reader to treat an unanswered probe as a described venue.
+      venue: (r) => r.venue === null ? null : renderVenueLine(r.venue),
+      // For the worker and the baseline intake, not the terminal: `reason` already says which
+      // side refused in words a developer reads.
+      refusalOrigin: RENDER_NONE
+    };
   }
 });
 
@@ -38063,6 +38237,7 @@ async function runVerification(req, ctx) {
       labels,
       image,
       lease,
+      log: (line) => progress("image", line),
       ...req.installTimeoutMs === void 0 ? {} : { installTimeoutMs: req.installTimeoutMs },
       ...req.testTimeoutMs === void 0 ? {} : { testTimeoutMs: req.testTimeoutMs }
     });
@@ -38103,11 +38278,11 @@ async function runVerification(req, ctx) {
       preview: null,
       screenshots: null,
       containerImage: verdict.image,
-      // The run body never inspects the image, so it records no digest rather than
-      // a re-read of the name. The audit harness (`e2e-audit.mjs`) is the producer
-      // that measures one; a run without it is recordable but not attestable —
-      // `toAcceptancePredicate` refuses `missing-image-digest` (TERM-893).
-      containerImageDigest: null,
+      // The digest the test step RAN BY, read on the lease's daemon before that step
+      // (TERM-1335, `selectRunDigest` in execute.ts). Null when the step ran by name,
+      // and then the run is recordable but not attestable — `toAcceptancePredicate`
+      // refuses `missing-image-digest` (TERM-893).
+      containerImageDigest: verdict.imageDigest,
       // The image half of the provenance pair above. `detected` means the runtime mapping
       // chose the environment; an override names the human. Defaulting an unstated origin to
       // `developer-declared` is deliberate and matches `testCommandSource`: `th run --image`
