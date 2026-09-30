@@ -810,7 +810,19 @@ function isGreen(outcome) {
 function isOurFault(outcome) {
   return LIMIT_OWNER[outcome] === "ours";
 }
-var VERIFICATION_OUTCOMES, int, withSuiteFailures, countLines, READERS, SUPPORTED_RUNNERS, COVERAGE_TABLE, EXEC_FAILURE, SUITE_REPORTED_FAILURE, MISSING_SYSTEM_DEPENDENCY, OFFLINE_BUILD_GAP, LIMIT_OWNER;
+function readStoppedAt(stdout, stderr = "") {
+  return lastStepMarker(stdout) ?? lastStepMarker(stderr);
+}
+function isStepName(value) {
+  return value.length > 0 && value.length <= STOPPED_AT_MAX && SCRIPT_NAME.test(value);
+}
+function lastStepMarker(text) {
+  let last = null;
+  for (const m of text.replace(/\r\n/g, "\n").matchAll(NPM_STEP_MARKER))
+    last = m[1];
+  return last !== null && isStepName(last) ? last : null;
+}
+var VERIFICATION_OUTCOMES, int, withSuiteFailures, countLines, READERS, SUPPORTED_RUNNERS, COVERAGE_TABLE, EXEC_FAILURE, SUITE_REPORTED_FAILURE, MISSING_SYSTEM_DEPENDENCY, OFFLINE_BUILD_GAP, LIMIT_OWNER, NPM_STEP_MARKER, STOPPED_AT_MAX, SCRIPT_NAME;
 var init_classify = __esm({
   "../../packages/envrun/dist/classify.js"() {
     "use strict";
@@ -1233,6 +1245,9 @@ var init_classify = __esm({
       "environment-exhausted": "ours",
       "budget-exceeded": "ours"
     };
+    NPM_STEP_MARKER = /^> (?:@[^\s@/]+\/)?[^\s@]+@\S+ (\S+)/gm;
+    STOPPED_AT_MAX = 200;
+    SCRIPT_NAME = /^[A-Za-z0-9:_.\-/+@]+$/;
   }
 });
 
@@ -5408,7 +5423,8 @@ var init_result = __esm({
       "leaksClean",
       "leakState",
       "venue",
-      "refusalOrigin"
+      "refusalOrigin",
+      "stoppedAt"
     ];
     RENDER_NONE = null;
     FIELD_VIEWS = {
@@ -5471,7 +5487,9 @@ var init_result = __esm({
       venue: (r) => r.venue === null ? null : renderVenueLine(r.venue),
       // For the worker and the baseline intake, not the terminal: `reason` already says which
       // side refused in words a developer reads.
-      refusalOrigin: RENDER_NONE
+      refusalOrigin: RENDER_NONE,
+      // Only when the run did not pass: on a green run "the last step" is just the last step.
+      stoppedAt: (r) => r.stoppedAt === null || r.outcome === "completed" ? null : `last step    ${r.stoppedAt} (the last package script named in the output)`
     };
   }
 });
@@ -5847,6 +5865,317 @@ var init_lockfileCheck = __esm({
   }
 });
 
+// ../../packages/envrun/dist/binaryPatch.js
+import { createHash as createHash6 } from "crypto";
+import { inflateSync } from "zlib";
+function decodeBase85Line(line) {
+  const first = line.charCodeAt(0);
+  let length;
+  if (first >= 65 && first <= 90)
+    length = first - 64;
+  else if (first >= 97 && first <= 122)
+    length = first - 96 + 26;
+  else
+    return null;
+  const groups = Math.ceil(length / 4);
+  if (line.length !== 1 + groups * 5)
+    return null;
+  const out = new Uint8Array(groups * 4);
+  for (let g = 0; g < groups; g += 1) {
+    let acc = 0;
+    for (let k = 0; k < 5; k += 1) {
+      const code = line.charCodeAt(1 + g * 5 + k);
+      const value = code < 128 ? B85_VALUE[code] ?? -1 : -1;
+      if (value < 0)
+        return null;
+      acc = acc * 85 + value;
+    }
+    if (acc > 4294967295)
+      return null;
+    out[g * 4] = acc >>> 24 & 255;
+    out[g * 4 + 1] = acc >>> 16 & 255;
+    out[g * 4 + 2] = acc >>> 8 & 255;
+    out[g * 4 + 3] = acc & 255;
+  }
+  return out.subarray(0, length);
+}
+function readBinaryPayload(lines) {
+  const blocks = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    if (line === "") {
+      i += 1;
+      continue;
+    }
+    if (blocks.length === 2)
+      return null;
+    const header = BLOCK_HEADER.exec(line);
+    if (header === null)
+      return null;
+    const size = Number(header[2]);
+    if (!Number.isSafeInteger(size))
+      return null;
+    i += 1;
+    const parts = [];
+    let total = 0;
+    while (i < lines.length && (lines[i] ?? "") !== "") {
+      const decoded = decodeBase85Line(lines[i] ?? "");
+      if (decoded === null)
+        return null;
+      total += decoded.length;
+      if (total > MAX_BINARY_DEFLATED_BLOCK_BYTES)
+        return null;
+      parts.push(decoded);
+      i += 1;
+    }
+    if (parts.length === 0)
+      return null;
+    if (i >= lines.length)
+      return null;
+    const deflated = new Uint8Array(total);
+    let at = 0;
+    for (const p of parts) {
+      deflated.set(p, at);
+      at += p.length;
+    }
+    blocks.push({ kind: header[1] === "delta" ? "delta" : "literal", size, deflated });
+  }
+  const forward = blocks[0];
+  if (forward === void 0)
+    return null;
+  return { forward, reverse: blocks[1] ?? null };
+}
+function inflateExact(block, limit2) {
+  if (block.size > limit2)
+    return null;
+  try {
+    const out = inflateSync(block.deflated, { maxOutputLength: block.size + 1 });
+    return out.length === block.size ? new Uint8Array(out) : null;
+  } catch {
+    return null;
+  }
+}
+function readVarint(delta, from) {
+  let value = 0;
+  let shift = 0;
+  let pos = from;
+  for (; ; ) {
+    const byte = delta[pos];
+    if (byte === void 0 || shift > 42)
+      return null;
+    value += (byte & 127) * 2 ** shift;
+    pos += 1;
+    shift += 7;
+    if ((byte & 128) === 0)
+      return { value, next: pos };
+  }
+}
+function deltaHeader(delta) {
+  const source = readVarint(delta, 0);
+  if (source === null)
+    return null;
+  const target = readVarint(delta, source.next);
+  if (target === null)
+    return null;
+  return { source: source.value, target: target.value, opsAt: target.next };
+}
+function deltaLeadingInserts(delta, opsAt) {
+  const parts = [];
+  let pos = opsAt;
+  while (pos < delta.length && parts.length < 64) {
+    const op = delta[pos] ?? 0;
+    if (op === 0 || (op & 128) !== 0)
+      break;
+    const end = Math.min(pos + 1 + op, delta.length);
+    for (let i = pos + 1; i < end; i += 1)
+      parts.push(delta[i] ?? 0);
+    pos = end;
+  }
+  return Uint8Array.from(parts);
+}
+function startsWith(bytes, magic, at = 0) {
+  if (bytes.length < at + magic.length)
+    return false;
+  return magic.every((b, i) => bytes[at + i] === b);
+}
+function sniffBinaryType(bytes) {
+  if (startsWith(bytes, [127, 69, 76, 70]))
+    return { label: "ELF", program: true };
+  for (const magic of [
+    [254, 237, 250, 206],
+    [254, 237, 250, 207],
+    [206, 250, 237, 254],
+    [207, 250, 237, 254],
+    [202, 254, 186, 191],
+    [190, 186, 254, 202],
+    [191, 186, 254, 202]
+  ]) {
+    if (startsWith(bytes, magic))
+      return { label: "Mach-O", program: true };
+  }
+  if (startsWith(bytes, [202, 254, 186, 190])) {
+    const major = bytes.length >= 8 ? (bytes[6] ?? 0) << 8 | (bytes[7] ?? 0) : 0;
+    return { label: major >= 45 ? "Java class" : "Mach-O", program: true };
+  }
+  if (startsWith(bytes, [0, 97, 115, 109]))
+    return { label: "WebAssembly", program: true };
+  if (startsWith(bytes, [77, 90]))
+    return { label: "PE", program: true };
+  if (startsWith(bytes, [137, 80, 78, 71, 13, 10, 26, 10])) {
+    return { label: "PNG", program: false };
+  }
+  if (startsWith(bytes, [255, 216, 255]))
+    return { label: "JPEG", program: false };
+  if (startsWith(bytes, [71, 73, 70, 56, 55, 97]) || startsWith(bytes, [71, 73, 70, 56, 57, 97])) {
+    return { label: "GIF", program: false };
+  }
+  if (startsWith(bytes, [82, 73, 70, 70]) && startsWith(bytes, [87, 69, 66, 80], 8)) {
+    return { label: "WebP", program: false };
+  }
+  if (startsWith(bytes, [37, 80, 68, 70, 45]))
+    return { label: "PDF", program: false };
+  if (startsWith(bytes, [119, 79, 70, 70]))
+    return { label: "WOFF", program: false };
+  if (startsWith(bytes, [119, 79, 70, 50]))
+    return { label: "WOFF2", program: false };
+  if (startsWith(bytes, [0, 1, 0, 0]) || startsWith(bytes, [116, 114, 117, 101])) {
+    return { label: "TTF", program: false };
+  }
+  if (startsWith(bytes, [79, 84, 84, 79]))
+    return { label: "OTF", program: false };
+  if (startsWith(bytes, [80, 75, 3, 4]) || startsWith(bytes, [80, 75, 5, 6]) || startsWith(bytes, [80, 75, 7, 8])) {
+    return { label: "ZIP", program: false };
+  }
+  return { label: "unknown binary", program: false };
+}
+function formatByteSize(bytes) {
+  if (bytes < 1024)
+    return `${bytes} B`;
+  if (bytes < 1024 * 1024)
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+function parseFullIndexLine(line) {
+  const m = /^index ([0-9a-f]+)\.\.([0-9a-f]+)(?: ([0-7]{6}))?$/.exec(line);
+  if (m === null)
+    return null;
+  const pre = m[1] ?? "";
+  const post = m[2] ?? "";
+  if (!FULL_ID.test(pre) || !FULL_ID.test(post))
+    return null;
+  return { pre, post, mode: m[3] ?? null };
+}
+function isZeroId(id) {
+  return id === ZERO_ID;
+}
+function refuse4(code, detail) {
+  return { kind: "refuse", code, detail };
+}
+function judgeBinaryEntry(input) {
+  const { path: path5 } = input;
+  if (input.stub) {
+    return refuse4("binary-content-missing", `${path5} is a binary file, but the patch leaves out its contents. Update terminalhire (npm install -g terminalhire@latest) and submit again.`);
+  }
+  if (input.textContent || input.indexLines.length !== 1)
+    return { kind: "unreadable" };
+  const index = parseFullIndexLine(input.indexLines[0] ?? "");
+  if (index === null)
+    return { kind: "unreadable" };
+  if (isZeroId(index.pre) !== input.createsFile)
+    return { kind: "unreadable" };
+  if (isZeroId(index.post) !== input.deletesFile)
+    return { kind: "unreadable" };
+  const payload = readBinaryPayload(input.payload);
+  if (payload === null)
+    return { kind: "unreadable" };
+  if (input.deletesFile) {
+    const forward2 = payload.forward;
+    if (forward2.kind !== "literal" || inflateExact(forward2, 0) === null) {
+      return { kind: "unreadable" };
+    }
+    const reverse = payload.reverse;
+    const removed = reverse !== null && reverse.kind === "literal" ? inflateExact(reverse, MAX_BINARY_FILE_BYTES) : null;
+    return {
+      kind: "hold",
+      type: removed === null ? "unknown binary" : sniffBinaryType(removed).label,
+      size: reverse !== null && reverse.kind === "literal" ? reverse.size : 0,
+      writes: 0,
+      hash: index.pre
+    };
+  }
+  const mode = input.newMode ?? index.mode ?? "100644";
+  if (mode === "100755")
+    return refuse4("binary-executable", binaryExecutableDetail(path5));
+  if (mode !== "100644")
+    return refuse4("binary-mode", unsupportedModeDetail(path5, mode));
+  const tooLarge = (size2) => refuse4("binary-too-large", `${path5} is ${formatByteSize(size2)}. One binary file can be at most 2 MB.`);
+  let size;
+  let head;
+  const forward = payload.forward;
+  if (forward.kind === "literal") {
+    if (forward.size > MAX_BINARY_FILE_BYTES) {
+      return tooLarge(forward.size);
+    }
+    const bytes = inflateExact(forward, MAX_BINARY_FILE_BYTES);
+    if (bytes === null)
+      return { kind: "unreadable" };
+    size = bytes.length;
+    head = bytes;
+  } else {
+    if (input.createsFile)
+      return { kind: "unreadable" };
+    const delta = inflateExact(forward, 2 * MAX_BINARY_FILE_BYTES);
+    if (delta === null)
+      return { kind: "unreadable" };
+    const header = deltaHeader(delta);
+    if (header === null)
+      return { kind: "unreadable" };
+    if (header.target > MAX_BINARY_FILE_BYTES)
+      return tooLarge(header.target);
+    size = header.target;
+    head = deltaLeadingInserts(delta, header.opsAt);
+  }
+  const type = sniffBinaryType(head);
+  if (type.program) {
+    return refuse4("binary-program", binaryProgramDetail(path5, type.label));
+  }
+  return { kind: "hold", type: type.label, size, writes: size, hash: index.post };
+}
+function binaryTotalRefusal(totalBytes) {
+  if (totalBytes <= MAX_BINARY_PATCH_BYTES)
+    return null;
+  return `The binary files in this patch add up to ${formatByteSize(totalBytes)}. A patch can carry at most 3 MB of binary files.`;
+}
+function binaryExecutableDetail(path5) {
+  return `${path5} is a binary file marked executable. Binary files can't be marked executable in a patch.`;
+}
+function unsupportedModeDetail(path5, mode) {
+  return `The patch changes ${path5} to a file type this platform will not apply on your behalf (mode ${mode}). Nothing on your repository was changed.`;
+}
+function binaryProgramDetail(path5, label) {
+  return `${path5} is a program (${label}). Patches can't add or change programs, because the install or test step could run them.`;
+}
+var MAX_BINARY_FILE_BYTES, MAX_BINARY_PATCH_BYTES, MAX_BINARY_DEFLATED_BLOCK_BYTES, FULL_ID, ZERO_ID, B85_ALPHABET, B85_VALUE, BLOCK_HEADER;
+var init_binaryPatch = __esm({
+  "../../packages/envrun/dist/binaryPatch.js"() {
+    "use strict";
+    MAX_BINARY_FILE_BYTES = 2 * 1024 * 1024;
+    MAX_BINARY_PATCH_BYTES = 3 * 1024 * 1024;
+    MAX_BINARY_DEFLATED_BLOCK_BYTES = 2 * MAX_BINARY_FILE_BYTES + 64 * 1024;
+    FULL_ID = /^[0-9a-f]{40}$/;
+    ZERO_ID = "0".repeat(40);
+    B85_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~";
+    B85_VALUE = (() => {
+      const table = new Array(128).fill(-1);
+      for (let i = 0; i < B85_ALPHABET.length; i += 1)
+        table[B85_ALPHABET.charCodeAt(i)] = i;
+      return table;
+    })();
+    BLOCK_HEADER = /^(literal|delta) (0|[1-9][0-9]{0,15})$/;
+  }
+});
+
 // ../../packages/envrun/dist/boundary.js
 function lockfileRefusal(base) {
   const kind = LOCKFILE_KINDS[base];
@@ -5971,6 +6300,11 @@ function parsePatchPaths(patch) {
       entry = {
         rawPaths: [],
         binary: false,
+        binaryStub: false,
+        binaryPayload: [],
+        indexLines: [],
+        newMode: null,
+        textContent: false,
         headerOld: null,
         headerNew: null,
         plusPath: null,
@@ -6004,8 +6338,10 @@ function parsePatchPaths(patch) {
     }
     if (entry === null)
       continue;
-    if (skippingBinary)
+    if (skippingBinary) {
+      entry.binaryPayload.push(line);
       continue;
+    }
     if (inHunk) {
       const marker = line === "" ? " " : line[0];
       if (marker === "\\")
@@ -6032,6 +6368,7 @@ function parsePatchPaths(patch) {
     if (line === "-- " || line === "--")
       break;
     if (line.startsWith("@@")) {
+      entry.textContent = true;
       const m = HUNK_HEADER.exec(line);
       if (m === null) {
         return fail3("a change block header is malformed, so we cannot tell which lines belong to it");
@@ -6048,13 +6385,20 @@ function parsePatchPaths(patch) {
     const mode = /^(?:old mode|new mode|new file mode|deleted file mode) (\d+)$/.exec(line)?.[1] ?? /^index [0-9a-f]+\.\.[0-9a-f]+ (\d+)$/.exec(line)?.[1];
     if (mode !== void 0)
       entry.modes.push(mode);
+    if (line.startsWith("index "))
+      entry.indexLines.push(line);
+    if (line.startsWith("new file mode ") || line.startsWith("new mode ")) {
+      entry.newMode = line.slice(line.lastIndexOf(" ") + 1).trim();
+    }
     if (line === "GIT binary patch" || line.startsWith("Binary files ")) {
       entry.binary = true;
+      entry.binaryStub = line !== "GIT binary patch";
       skippingBinary = true;
       continue;
     }
     const sideMarker = line.startsWith("--- ") ? "a/" : line.startsWith("+++ ") ? "b/" : null;
     if (sideMarker !== null) {
+      entry.textContent = true;
       const rest = line.slice(4);
       const tab = rest.indexOf("	");
       const token = tab === -1 ? rest : rest.slice(0, tab);
@@ -6129,16 +6473,14 @@ function preflightBoundary(input) {
   const changedManifests = /* @__PURE__ */ new Set();
   const deniedPaths = /* @__PURE__ */ new Set();
   const nonFileLockfiles = /* @__PURE__ */ new Set();
+  let binaryBytes = 0;
   for (const entry of parsed.entries) {
-    if (entry.binary) {
-      const name = entry.rawPaths[0] ?? "a file";
-      refusals.push(refusal("binary-patch", normalizePath(name)?.path ?? null, `${name} is changed as binary content, which nobody can review line by line. Binary changes are refused.`));
-      continue;
-    }
+    let refusedByPath = false;
     const entryPaths = [];
     for (const raw of entry.rawPaths) {
       const normalized = normalizePath(raw);
       if (normalized === null) {
+        refusedByPath = true;
         if (!seenPaths.has(raw)) {
           seenPaths.add(raw);
           refusals.push(refusal("unsafe-path", raw, `${raw} is not a file name a patch may name \u2014 it points outside the repository, or it is written in a form we cannot check.`));
@@ -6156,6 +6498,7 @@ function preflightBoundary(input) {
       seenPaths.add(path5);
       const denied = DENY_RULES.find((rule) => rule.matches(path5, segments, base));
       if (denied !== void 0) {
+        refusedByPath = true;
         deniedPaths.add(path5);
         const why = typeof denied.why === "string" ? denied.why : denied.why(base);
         refusals.push(refusal(denied.code, path5, `${path5} ${why}.`));
@@ -6181,7 +6524,29 @@ function preflightBoundary(input) {
     if (contentPath !== null && contentPath.split("/").pop() === "package.json" && entry.changed) {
       changedManifests.add(contentPath);
     }
+    if (entry.binary && !refusedByPath && contentPath !== null) {
+      const verdict = judgeBinaryEntry({
+        path: contentPath,
+        stub: entry.binaryStub,
+        payload: entry.binaryPayload,
+        indexLines: entry.indexLines,
+        newMode: entry.newMode,
+        createsFile: entry.createsFile,
+        deletesFile: entry.deletesFile,
+        textContent: entry.textContent
+      });
+      if (verdict.kind === "refuse") {
+        refusals.push(refusal(verdict.code, contentPath, verdict.detail));
+      } else if (verdict.kind === "unreadable") {
+        refusals.push(refusal("unparseable", contentPath, `The patch could not be read: the entry for ${contentPath} carries no changes we can apply. A patch we cannot read in full is refused rather than applied in part.`));
+      } else {
+        binaryBytes += verdict.writes;
+      }
+    }
   }
+  const overBinaryCap = binaryTotalRefusal(binaryBytes);
+  if (overBinaryCap !== null)
+    refusals.push(refusal("binary-too-large", null, overBinaryCap));
   for (const [path5, { touches, edits }] of lockfileTouches) {
     if (deniedPaths.has(path5))
       continue;
@@ -6205,10 +6570,18 @@ var init_boundary = __esm({
   "../../packages/envrun/dist/boundary.js"() {
     "use strict";
     init_lockfileCheck();
+    init_binaryPatch();
     PATH_REFUSAL_CODES = [
       "empty-patch",
       "unparseable",
       "binary-patch",
+      // Not path-derived, but refused on both sides for the same bytes, so they belong on the
+      // surface `boundary-oracle.test.mjs` compares (TERM-1342).
+      "binary-content-missing",
+      "binary-executable",
+      "binary-mode",
+      "binary-program",
+      "binary-too-large",
       "unsafe-path",
       "out-of-slice",
       "ci-config",
@@ -6565,7 +6938,7 @@ var init_emptyGitConfig = __esm({
 
 // ../../packages/envrun/dist/hostedVenue.js
 import { spawn as spawn3, spawnSync as spawnSync5 } from "child_process";
-import { createHash as createHash6, X509Certificate } from "crypto";
+import { createHash as createHash7, X509Certificate } from "crypto";
 import { chmodSync as chmodSync2, existsSync as existsSync7, mkdtempSync as mkdtempSync3, readFileSync as readFileSync5, rmSync as rmSync4, writeFileSync as writeFileSync7 } from "fs";
 import { request as httpsRequest } from "https";
 import { createServer } from "net";
@@ -7235,7 +7608,7 @@ function iapPortTunnelArgv(vm, project, zone, remotePort, localPort) {
 }
 function spkiSha256Hex(certDer) {
   const spki = new X509Certificate(certDer).publicKey.export({ type: "spki", format: "der" });
-  return createHash6("sha256").update(spki).digest("hex");
+  return createHash7("sha256").update(spki).digest("hex");
 }
 function certMetadataValue(pem) {
   return new X509Certificate(pem).raw.toString("base64url");
@@ -11854,7 +12227,9 @@ function refusedRun(fields) {
     // reasoning as `leaksClean` above: null because nothing happened, and it must
     // not read as a venue we looked at and could not name.
     venue: null,
-    refusalOrigin: fields.origin
+    refusalOrigin: fields.origin,
+    // No test step ran, so there is no output to read a step from.
+    stoppedAt: null
   };
 }
 function refusalOriginOf(refusal2) {
@@ -12305,7 +12680,9 @@ async function runVerification(req, ctx) {
       // reasoning and the #735 failure that makes the distinction load-bearing.
       venue: describeVenue(lease),
       // A run that reached a verdict was not refused, so neither side refused it.
-      refusalOrigin: null
+      refusalOrigin: null,
+      // Read from the full test output, not `outputTail`, which is an excerpt.
+      stoppedAt: readStoppedAt(verdict.test?.stdout ?? "", verdict.test?.stderr ?? "")
     };
     let later = null;
     if (req.screenshots !== void 0) {
@@ -12512,6 +12889,7 @@ var init_thrun = __esm({
     init_screenshots();
     init_dist3();
     init_attestation2();
+    init_classify();
     init_boundary();
     init_lockfileCheck();
     init_emptyGitConfig();
@@ -13521,6 +13899,7 @@ __export(dist_exports, {
   readAlembicChain: () => readAlembicChain,
   readCounts: () => readCounts,
   readSchema: () => readSchema,
+  readStoppedAt: () => readStoppedAt,
   recordedApplied: () => recordedApplied,
   refuseSshTransport: () => refuseSshTransport,
   refuseUnbuildableSpec: () => refuseUnbuildableSpec,
@@ -21892,7 +22271,7 @@ var init_chacha = __esm({
 });
 
 // ../../packages/core/src/chatCrypto.ts
-import { hkdfSync as hkdfSync2, createHash as createHash7, randomBytes as randomBytes9 } from "crypto";
+import { hkdfSync as hkdfSync2, createHash as createHash8, randomBytes as randomBytes9 } from "crypto";
 function bytesToHex2(bytes) {
   return Buffer.from(bytes).toString("hex");
 }
@@ -21942,7 +22321,7 @@ function decryptMessage(message2, myPrivateKey, peerPublicKey) {
 }
 function safetyNumber(pubA, pubB) {
   const [first, second] = [pubA.toLowerCase(), pubB.toLowerCase()].sort();
-  const digest = createHash7("sha256").update(first).update("\n").update(second).digest();
+  const digest = createHash8("sha256").update(first).update("\n").update(second).digest();
   const groups = [];
   for (let i = 0; i < 12; i++) {
     const chunk = digest.readUInt16BE(i * 2 % 30);
@@ -23722,12 +24101,12 @@ var init_audit = __esm({
 });
 
 // ../../packages/core/src/short-token.ts
-import { createHash as createHash8 } from "crypto";
+import { createHash as createHash9 } from "crypto";
 function opportunityShortToken(id) {
-  return createHash8("sha256").update(id, "utf8").digest("base64url").slice(0, 8);
+  return createHash9("sha256").update(id, "utf8").digest("base64url").slice(0, 8);
 }
 function jobShortToken(id) {
-  return createHash8("sha256").update(`job:${id}`, "utf8").digest("base64url").slice(0, 8);
+  return createHash9("sha256").update(`job:${id}`, "utf8").digest("base64url").slice(0, 8);
 }
 function jobTokenMap(index) {
   const cached = jobTokenMaps.get(index);
@@ -24557,7 +24936,7 @@ var init_github_auth = __esm({
 });
 
 // bin/claim-push-bg.js
-import { createHash as createHash9 } from "crypto";
+import { createHash as createHash10 } from "crypto";
 import { readFileSync as readFileSync12, writeFileSync as writeFileSync13, existsSync as existsSync13, rmSync as rmSync8 } from "fs";
 import { join as join23 } from "path";
 import { homedir as homedir9 } from "os";
@@ -24601,7 +24980,7 @@ function clearAutoMarker() {
   }
 }
 function computeSnapshotHash(pushed) {
-  return createHash9("sha256").update(JSON.stringify(pushed)).digest("hex");
+  return createHash10("sha256").update(JSON.stringify(pushed)).digest("hex");
 }
 function unpushedNudgeGate(params) {
   const {
@@ -38081,7 +38460,7 @@ __export(repo_policy_semantic_exports, {
   makeAnthropicSemanticGenerate: () => makeAnthropicSemanticGenerate,
   quoteFound: () => quoteFound
 });
-import { createHash as createHash10 } from "crypto";
+import { createHash as createHash11 } from "crypto";
 import { homedir as homedir10 } from "os";
 import { join as join27 } from "path";
 import { readFileSync as readFileSync13, writeFileSync as writeFileSync14 } from "fs";
@@ -38198,7 +38577,7 @@ function writeCachedSemantic(entry) {
   }
 }
 function contentHashOf(files) {
-  const h = createHash10("sha256");
+  const h = createHash11("sha256");
   for (const { file, content } of [...files].sort((a, b) => a.file.localeCompare(b.file))) {
     h.update(`${file.length}:${file} ${content.length}:${content} `);
   }
@@ -38379,7 +38758,7 @@ __export(repo_policy_exports, {
   checkRepoPolicy: () => checkRepoPolicy,
   ghHeaders: () => ghHeaders2
 });
-import { createHash as createHash11 } from "crypto";
+import { createHash as createHash12 } from "crypto";
 function ghHeaders2(url, token) {
   if (!token) return GH_HEADERS;
   let origin;
@@ -38468,7 +38847,7 @@ function excerptAround(lines, i) {
 }
 function hashFiles(files) {
   if (files.length === 0) return null;
-  const h = createHash11("sha256");
+  const h = createHash12("sha256");
   for (const { file, content } of files) h.update(`${file}
 ${content}
 `);
@@ -39914,7 +40293,7 @@ import {
   closeSync as closeSync7
 } from "fs";
 import { join as join33, dirname as dirname10, isAbsolute as isAbsolute5, resolve as pathResolve } from "path";
-import { createHash as createHash12 } from "crypto";
+import { createHash as createHash13 } from "crypto";
 import { homedir as homedir15, hostname as osHostname } from "os";
 import { execFile as execFile3, execFileSync as execFileSync3, spawnSync as spawnSync8 } from "child_process";
 import { promisify as promisify3 } from "util";
@@ -41178,7 +41557,7 @@ async function registerFounderClaim(b) {
   let clearedLocalCredential = false;
   let refusedForPurpose = false;
   let preserveBackgroundToken = false;
-  const refuse4 = (reason) => {
+  const refuse5 = (reason) => {
     console.error(
       `
 terminalhire claim: refusing to record \u2014 ${reason}
@@ -41203,7 +41582,7 @@ terminalhire claim: refusing to record \u2014 ${reason}
     try {
       expectLogin = await localLoginForPaidBrowserClaim();
     } catch (err) {
-      refuse4(
+      refuse5(
         `could not verify which GitHub account this machine is signed in as: ${err instanceof Error ? err.message : String(err)}.
   Run \`terminalhire login\`, then retry this claim. Browser verification was
   not opened and no claim was sent.`
@@ -41219,16 +41598,16 @@ terminalhire claim: refusing to record \u2014 ${reason}
       claimRef: opportunityShortToken(b.bountyId)
     });
     if (!proofToken) {
-      refuse4("could not verify your GitHub identity with terminalhire (see above).");
+      refuse5("could not verify your GitHub identity with terminalhire (see above).");
     }
     const verifiedLogin = proofTokenLogin(proofToken);
     if (!verifiedLogin) {
-      refuse4(
+      refuse5(
         "the browser verification response did not name a GitHub account, so it could not be compared with this machine\u2019s sign-in. Nothing was sent; retry the claim."
       );
     }
     if (verifiedLogin.toLowerCase() !== expectLogin.toLowerCase()) {
-      refuse4(
+      refuse5(
         `you verified in the browser as @${verifiedLogin}, but this machine is signed in as @${expectLogin}.
   Nothing was sent. Sign the browser into @${expectLogin} and run this again, or
   run \`terminalhire login\` if you meant to work as @${verifiedLogin}.`
@@ -41260,7 +41639,7 @@ terminalhire claim: refusing to record \u2014 ${reason}
   try {
     res = await sendRegistration(true);
   } catch (err) {
-    refuse4(
+    refuse5(
       `terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}), so the posting could not be revalidated.`
     );
   }
@@ -41311,7 +41690,7 @@ terminalhire claim: refusing to record \u2014 ${reason}
     try {
       res = await sendRegistration(true);
     } catch (err) {
-      refuse4(
+      refuse5(
         `terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}), so the posting could not be revalidated.`
       );
     }
@@ -41322,14 +41701,14 @@ terminalhire claim: refusing to record \u2014 ${reason}
       res = await sendRegistration(false);
       refusalBody = await readRefusal(res);
     } catch (err) {
-      refuse4(
+      refuse5(
         `terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}), so the posting could not be revalidated.`
       );
     }
   }
   if (!res.ok) {
     const detail = refusalBody?.message || refusalBody?.error || "";
-    refuse4(
+    refuse5(
       detail ? `the server refused this claim (${res.status}): ${detail}` : `the server refused this claim (${res.status}).`
     );
   }
@@ -41340,7 +41719,7 @@ terminalhire claim: refusing to record \u2014 ${reason}
     body = null;
   }
   if (!body || body.ok !== true) {
-    refuse4("malformed registration response from the server.");
+    refuse5("malformed registration response from the server.");
   }
   const mintedToken = typeof body.pushToken === "string" && body.pushToken.length > 0 ? body.pushToken : null;
   if (refusedForPurpose && mintedToken && !preserveBackgroundToken) {
@@ -42856,7 +43235,7 @@ function writePackFile(destDir, relPath, content, what) {
   return { written: true, reason: null, sha256: sha256OfUtf8(content) };
 }
 function sha256OfUtf8(content) {
-  return createHash12("sha256").update(content, "utf8").digest("hex");
+  return createHash13("sha256").update(content, "utf8").digest("hex");
 }
 function writeWorkspacePack(destDir, spec, claim, delivery) {
   if (delivery !== "full" && delivery !== "sparse") {
@@ -43743,7 +44122,7 @@ function loadClaimScreenshots(specArg) {
     items.push({
       file,
       caption: shot.caption,
-      sha256: createHash12("sha256").update(bytes).digest("hex"),
+      sha256: createHash13("sha256").update(bytes).digest("hex"),
       bytes: bytes.byteLength,
       width,
       height
@@ -43828,10 +44207,14 @@ async function submitFounderPatch({ claims, claim, id, wt, flags }) {
   const base = roots[0];
   let patch;
   try {
-    ({ stdout: patch } = await pExecFile("git", ["-C", wt, "diff", base, "HEAD"], {
-      shell: false,
-      maxBuffer: 16 * 1024 * 1024
-    }));
+    ({ stdout: patch } = await pExecFile(
+      "git",
+      ["-C", wt, "diff", "--binary", "--full-index", base, "HEAD"],
+      {
+        shell: false,
+        maxBuffer: 16 * 1024 * 1024
+      }
+    ));
     patch = String(patch);
   } catch (err) {
     console.error(
