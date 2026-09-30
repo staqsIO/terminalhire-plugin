@@ -6934,7 +6934,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   });
   const { prehash } = eddsaOpts;
   const { BASE, Fp: Fp2, Fn: Fn2 } = Point;
-  const randomBytes13 = eddsaOpts.randomBytes || randomBytes;
+  const randomBytes14 = eddsaOpts.randomBytes || randomBytes;
   const adjustScalarBytes2 = eddsaOpts.adjustScalarBytes || ((bytes) => bytes);
   const domain = eddsaOpts.domain || ((data, ctx, phflag) => {
     _abool2(phflag, "phflag");
@@ -7016,7 +7016,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
     signature: 2 * _size,
     seed: _size
   };
-  function randomSecretKey(seed = randomBytes13(lengths.seed)) {
+  function randomSecretKey(seed = randomBytes14(lengths.seed)) {
     return _abytes2(seed, lengths.seed, "seed");
   }
   function keygen(seed) {
@@ -26201,6 +26201,14 @@ var init_progress = __esm({
 });
 
 // ../../packages/envrun/dist/classify.js
+function venueExhaustionFrom(minFreeMiB, stdout, stderr) {
+  if (!(minFreeMiB < LAYER_STORAGE_BAND_MIB))
+    return null;
+  return outputNamesNoSpace(stdout, stderr) ? "layer storage full" : null;
+}
+function outputNamesNoSpace(stdout, stderr) {
+  return NO_SPACE.test(stdout) || NO_SPACE.test(stderr);
+}
 function reportedCounts(classified, reparsed) {
   return classified !== void 0 ? classified : reparsed;
 }
@@ -26289,7 +26297,7 @@ ${facts.stderr}`);
 function resourceExhaustion(facts, counts) {
   if (counts !== null && counts.tests_failed > 0)
     return null;
-  if (/no space left on device|ENOSPC/i.test(facts.stderr))
+  if (NO_SPACE.test(facts.stderr))
     return "no space left on device";
   if (SUITE_REPORTED_FAILURE.test(`${facts.stdout}
 ${facts.stderr}`))
@@ -26347,6 +26355,13 @@ function classifyVerification(facts) {
       outcome: "budget-exceeded",
       counts: null,
       reason: "the run was killed for exceeding its time budget, so no result is trustworthy"
+    };
+  }
+  if (facts.venueExhausted) {
+    return {
+      outcome: "environment-exhausted",
+      counts: null,
+      reason: "our layer storage on the verification venue filled during the test step (it was measured within 1 GiB of full and the output reports no space left on device). This is an environment failure on our side and the repo has NOT been judged."
     };
   }
   const counts = readCounts(facts.stdout, facts.stderr);
@@ -26447,7 +26462,12 @@ function lastStepMarker(text) {
     last = m[1];
   return last !== null && isStepName(last) ? last : null;
 }
-var VERIFICATION_OUTCOMES, int, withSuiteFailures, countLines, READERS, SUPPORTED_RUNNERS, COVERAGE_TABLE, EXEC_FAILURE, SUITE_REPORTED_FAILURE, MISSING_SYSTEM_DEPENDENCY, OFFLINE_BUILD_GAP, LIMIT_OWNER, NPM_STEP_MARKER, STOPPED_AT_MAX, SCRIPT_NAME;
+function stepNameOf(line) {
+  const m = STEP_MARKER_LINE.exec(line);
+  const name = m?.[1] ?? null;
+  return name !== null && isStepName(name) ? name : null;
+}
+var VERIFICATION_OUTCOMES, NO_SPACE, LAYER_STORAGE_BAND_MIB, int, withSuiteFailures, countLines, READERS, SUPPORTED_RUNNERS, COVERAGE_TABLE, EXEC_FAILURE, SUITE_REPORTED_FAILURE, MISSING_SYSTEM_DEPENDENCY, OFFLINE_BUILD_GAP, LIMIT_OWNER, NPM_STEP_MARKER, STOPPED_AT_MAX, SCRIPT_NAME, STEP_MARKER_LINE;
 var init_classify2 = __esm({
   "../../packages/envrun/dist/classify.js"() {
     "use strict";
@@ -26460,6 +26480,8 @@ var init_classify2 = __esm({
       "environment-exhausted",
       "budget-exceeded"
     ];
+    NO_SPACE = /no space left on device|ENOSPC/i;
+    LAYER_STORAGE_BAND_MIB = 1024;
     int = (m, i = 1) => m ? Number(m[i]) : 0;
     withSuiteFailures = (counts, suiteLine) => {
       if (counts.tests_failed > 0 || !suiteLine)
@@ -26873,6 +26895,7 @@ var init_classify2 = __esm({
     NPM_STEP_MARKER = /^> (?:@[^\s@/]+\/)?[^\s@]+@\S+ (\S+)/gm;
     STOPPED_AT_MAX = 200;
     SCRIPT_NAME = /^[A-Za-z0-9:_.\-/+@]+$/;
+    STEP_MARKER_LINE = new RegExp(NPM_STEP_MARKER.source);
   }
 });
 
@@ -27466,6 +27489,7 @@ var init_egressProxy = __esm({
 import { fileURLToPath as fileURLToPath3 } from "url";
 import { dirname as dirname7, join as join20 } from "path";
 import { chmodSync as chmodSync2, copyFileSync as copyFileSync2, existsSync as existsSync10, mkdtempSync, rmSync as rmSync6, statSync as statSync4 } from "fs";
+import { isIPv4 } from "net";
 import { tmpdir } from "os";
 function scrubEnvPathsFor(containmentKind, host) {
   return containmentKind === "container" ? { jailHome: GUEST.jail, tmpDir: GUEST.tmp, jailHomeNamespace: "guest" } : { jailHome: host.jail, tmpDir: host.tmp, jailHomeNamespace: "host" };
@@ -27625,10 +27649,7 @@ function stageMounts(spec) {
   const cloneSource = spec.cloneVolume === void 0 ? clone : validateVolumeName(spec.cloneVolume, "the clone volume");
   const jail = resolve6(spec.jail, "jail");
   assertHoldsNoRealHome(jail, "the jail bind source", "stageMounts");
-  return [
-    `--volume=${cloneSource}:${GUEST.clone}:rw`,
-    `--volume=${jail}:${GUEST.jail}:rw`
-  ];
+  return [`--volume=${cloneSource}:${GUEST.clone}:rw`, `--volume=${jail}:${GUEST.jail}:rw`];
 }
 function guestIdentityMounts(spec) {
   if (guestUserFlag(spec).length === 0)
@@ -27642,6 +27663,17 @@ function guestIdentityMounts(spec) {
   return [`--volume=${passwd}:/etc/passwd:ro`, `--volume=${group}:/etc/group:ro`];
 }
 function containerArgs(spec, env, opts) {
+  if (opts.runtime !== void 0 && !RUNTIME_NAME.test(opts.runtime)) {
+    throw new FenceError(`refusing runtime ${JSON.stringify(opts.runtime)}: not a runtime name`);
+  }
+  if (opts.networkOf !== void 0) {
+    if (!NETNS_HOLDER_NAME.test(opts.networkOf)) {
+      throw new FenceError(`refusing to join ${JSON.stringify(opts.networkOf)}: not a netns holder's name`);
+    }
+    if (spec.profile !== "offline" || opts.net) {
+      throw new FenceError("only an offline step joins a netns holder; its network is none");
+    }
+  }
   if (spec.profile === "offline" && opts.net) {
     throw new FenceError("the offline profile grants no network; passing a sidecar net is a category error");
   }
@@ -27658,10 +27690,11 @@ function containerArgs(spec, env, opts) {
     // Offline: no interface at all. Install: ONLY the sidecar's internal network
     // (no gateway), so the proxy container is the guest's sole route out and the
     // allowlist is enforced, not advisory.
-    opts.net ? `--network=${opts.net.network}` : "--network=none",
+    opts.net ? `--network=${opts.net.network}` : opts.networkOf !== void 0 ? `--network=container:${opts.networkOf}` : "--network=none",
     "--cap-drop=ALL",
     "--security-opt=no-new-privileges",
     "--pids-limit=512",
+    ...opts.runtime === void 0 ? [] : [`--runtime=${opts.runtime}`],
     ...labelArgs(opts.labels),
     // TERM-198. Run as the HOST owner of the three bind mounts, not as the
     // image's default uid 0. On Linux a bind mount is a passthrough: the guest
@@ -27820,7 +27853,8 @@ function dockerSync(d, args, timeoutMs = DOCKER_TIMEOUT_MS) {
   return {
     ok: !res.error && res.status === 0,
     stdout: res.stdout,
-    stderr: (res.error ? res.error.message : "") + res.stderr
+    stderr: (res.error ? res.error.message : "") + res.stderr,
+    timedOut: res.error?.code === "ETIMEDOUT"
   };
 }
 function pickProxyDir(baseDir) {
@@ -27951,6 +27985,12 @@ async function startProxySidecar(d, allow, idBase, staged, labels) {
       "-d",
       `--name=${proxyName}`,
       `--network=${netInt}`,
+      // runc, whatever the daemon's default (TERM-1336, design D2). On the
+      // Confidential Space venue dockerd defaults to gVisor (runsc), and a runsc
+      // container could not reach the internet through a network attached after
+      // it started, which is exactly how netExt joins below. runc is registered
+      // on every dockerd, so on every other tier this names the default.
+      "--runtime=runc",
       "--cap-drop=ALL",
       "--security-opt=no-new-privileges",
       "--pids-limit=128",
@@ -27963,14 +28003,29 @@ async function startProxySidecar(d, allow, idBase, staged, labels) {
       "node",
       `${SIDECAR_CODE_GUEST}/proxyEntry.js`
     ], 3e4);
-    if (!run2.ok)
-      throw new FenceError(`could not start the proxy sidecar: ${run2.stderr.trim()}`);
+    if (!run2.ok) {
+      const reason = `could not start the proxy sidecar: ${run2.stderr.trim()}`;
+      if (run2.timedOut || /no space left on device/i.test(run2.stderr)) {
+        throw new ContainmentRefusalError(reason);
+      }
+      throw new FenceError(reason);
+    }
     if (!dockerSync(d, ["network", "connect", netExt, proxyName]).ok) {
       throw new FenceError(`could not attach the proxy to the egress network ${netExt}`);
     }
     await waitForProxyReady(d, proxyName);
+    const inspected = dockerSync(d, [
+      "inspect",
+      "-f",
+      `{{(index .NetworkSettings.Networks "${netInt}").IPAddress}}`,
+      proxyName
+    ]);
+    const proxyIp = inspected.stdout.trim();
+    if (!inspected.ok || !isIPv4(proxyIp)) {
+      throw new ContainmentRefusalError(`could not read the proxy sidecar's address on ${netInt}: ` + (inspected.ok ? `got ${JSON.stringify(proxyIp)}` : inspected.stderr.trim()));
+    }
     return {
-      net: { network: netInt, proxyHost: proxyName, proxyPort: SIDECAR_PROXY_PORT },
+      net: { network: netInt, proxyHost: proxyIp, proxyPort: SIDECAR_PROXY_PORT },
       teardown,
       // A `docker logs` that fails yields no hosts. That loses the hint and
       // changes nothing else: the list only ever adds words to a reason.
@@ -27985,13 +28040,20 @@ ${logs.stderr}`) : [];
     throw err;
   }
 }
-function spawnWorkload(d, name, argv, timeoutMs) {
+function spawnWorkload(d, name, argv, timeoutMs, onStdout) {
   return new Promise((resolvePromise, reject) => {
     const child = d.spawn(argv);
     let stdout = "";
     let stderr = "";
     let timedOut = false;
-    child.stdout.on("data", (d2) => stdout += d2.toString());
+    child.stdout.on("data", (d2) => {
+      const chunk = d2.toString();
+      stdout += chunk;
+      try {
+        onStdout?.(chunk);
+      } catch {
+      }
+    });
     child.stderr.on("data", (d2) => stderr += d2.toString());
     const timer = setTimeout(() => {
       timedOut = true;
@@ -28063,9 +28125,11 @@ async function runContainedOn(d, spec, env, opts = {}) {
       cwd: opts.cwd,
       image: opts.image,
       net: sidecar?.net,
-      labels: opts.labels
+      labels: opts.labels,
+      ...opts.runtime === void 0 ? {} : { runtime: opts.runtime },
+      ...opts.networkOf === void 0 ? {} : { networkOf: opts.networkOf }
     });
-    const result = await spawnWorkload(d, idBase, argv, opts.timeoutMs ?? 9e5);
+    const result = await spawnWorkload(d, idBase, argv, opts.timeoutMs ?? 9e5, opts.onStdout);
     return sidecar ? { ...result, egressDenied: sidecar.deniedHosts() } : result;
   } finally {
     sidecar?.teardown();
@@ -28078,7 +28142,7 @@ function containerContainmentOn(d) {
     run: (spec, env, opts = {}) => runContainedOn(d, spec, env, opts)
   };
 }
-var DEFAULT_CONTAINER_IMAGE, GUEST, TMPFS_SIZE_MB, DOCKER_TIMEOUT_MS, SIDECAR_PROXY_PORT, SIDECAR_CODE_GUEST, PROXY_ENV_KEYS, WINDOWS_DRIVE_ROOT, IMAGE_HOST, IMAGE_NAME, IMAGE_PATH, IMAGE_TAG, IMAGE_DIGEST, IMAGE_REF, LABEL_KEY, VOLUME_NAME, VOLUME_NAME_MAX, probed, PROXY_FILES, leaveToTheLease;
+var DEFAULT_CONTAINER_IMAGE, GUEST, TMPFS_SIZE_MB, DOCKER_TIMEOUT_MS, SIDECAR_PROXY_PORT, SIDECAR_CODE_GUEST, PROXY_ENV_KEYS, WINDOWS_DRIVE_ROOT, IMAGE_HOST, IMAGE_NAME, IMAGE_PATH, IMAGE_TAG, IMAGE_DIGEST, IMAGE_REF, LABEL_KEY, VOLUME_NAME, VOLUME_NAME_MAX, NETNS_HOLDER_NAME, RUNTIME_NAME, probed, PROXY_FILES, leaveToTheLease;
 var init_container = __esm({
   "../../packages/containment/dist/container.js"() {
     "use strict";
@@ -28112,6 +28176,8 @@ var init_container = __esm({
     LABEL_KEY = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
     VOLUME_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
     VOLUME_NAME_MAX = 128;
+    NETNS_HOLDER_NAME = /^th-netns-[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$/;
+    RUNTIME_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
     probed = /* @__PURE__ */ new WeakMap();
     PROXY_FILES = ["proxyEntry.js", "egressProxy.js"];
     leaveToTheLease = () => {
@@ -28186,13 +28252,35 @@ function timeoutWithin(capMs, deadline) {
     return capMs;
   return Math.max(1, Math.min(capMs, deadline - Date.now()));
 }
+function netnsHolderArgs(o) {
+  if (!NETNS_HOLDER_NAME.test(o.name)) {
+    throw new FenceError(`refusing netns holder name ${JSON.stringify(o.name)}`);
+  }
+  return [
+    "run",
+    "-d",
+    "--rm",
+    `--name=${o.name}`,
+    "--network=none",
+    "--runtime=runc",
+    "--user=0:0",
+    "--cap-drop=ALL",
+    "--security-opt=no-new-privileges",
+    "--pids-limit=8",
+    ...labelArgs(o.labels),
+    // Bounded, in case every removal path is missed: the phase's own budget is shorter.
+    "--entrypoint=sleep",
+    o.image,
+    "1800"
+  ];
+}
 function captureArgs(o) {
   let network;
   if (o.network === "none") {
     network = "--network=none";
   } else if (typeof o.network === "object" && o.network !== null) {
-    if (!CONTAINER_NAME.test(o.network.container)) {
-      throw new FenceError(`refusing to join container ${JSON.stringify(o.network.container)}: not a container name`);
+    if (!NETNS_HOLDER_NAME.test(o.network.container)) {
+      throw new FenceError(`refusing to join container ${JSON.stringify(o.network.container)}: not a netns holder's name`);
     }
     network = `--network=container:${o.network.container}`;
   } else {
@@ -28217,6 +28305,12 @@ function captureArgs(o) {
     "--init",
     `--name=${o.name}`,
     network,
+    // runc, whatever the daemon's default (TERM-1336, design D2). Under gVisor each
+    // sandbox keeps its own loopback, so a server capture sharing the app's
+    // namespace could not reach `localhost`; the app's serve step is pinned to runc
+    // in envrun for the same reason. The static capture is pinned too, so the whole
+    // screenshot phase runs under one runtime. runc is registered on every dockerd.
+    "--runtime=runc",
     "--cap-drop=ALL",
     "--security-opt=no-new-privileges",
     "--pids-limit=512",
@@ -28603,6 +28697,1046 @@ var init_dist = __esm({
   }
 });
 
+// ../../packages/envrun/dist/labels.js
+function runLabels(runId, callerLabels) {
+  return { ...callerLabels ?? {}, [RUN_ID_LABEL_KEY]: runId, [RUN_LABEL_KEY]: "term-350" };
+}
+function censusTotal(c) {
+  return c.containers.length + c.volumes.length + c.networks.length;
+}
+function query(docker3, args) {
+  const res = docker3.sync([...args], { timeoutMs: 15e3 });
+  if (res.error || res.status !== 0) {
+    const why = res.error?.message ?? (res.stderr.trim() || `exit ${String(res.status)}`);
+    return { ids: [], failure: `docker ${args.slice(0, 2).join(" ")}: ${why}` };
+  }
+  const ids2 = res.stdout.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
+  return { ids: ids2, failure: null };
+}
+function ids(docker3, args) {
+  return query(docker3, args).ids;
+}
+function census(docker3, label) {
+  const filter = `label=${label}`;
+  return {
+    containers: ids(docker3, ["ps", "-aq", "--filter", filter]),
+    volumes: ids(docker3, ["volume", "ls", "-q", "--filter", filter]),
+    networks: ids(docker3, ["network", "ls", "-q", "--filter", filter])
+  };
+}
+function censusReport(docker3, label) {
+  const filter = `label=${label}`;
+  const failures = [];
+  const ask2 = (args) => {
+    const q = query(docker3, args);
+    if (q.failure !== null)
+      failures.push(q.failure);
+    return q.ids;
+  };
+  const taken = {
+    containers: ask2(["ps", "-aq", "--filter", filter]),
+    volumes: ask2(["volume", "ls", "-q", "--filter", filter]),
+    networks: ask2(["network", "ls", "-q", "--filter", filter])
+  };
+  return failures.length === 0 ? { observed: true, census: taken, unobservedReason: null } : { observed: false, census: taken, unobservedReason: failures.join("; ") };
+}
+function localCensus(label) {
+  return census(localDockerClient(), label);
+}
+function judgeLeaks(peak, after, observation) {
+  const labelObserved = peak.containers.length > 0;
+  if (!observation.observed) {
+    return {
+      labelObserved,
+      reaped: false,
+      observed: false,
+      clean: false,
+      state: "unobserved",
+      peak,
+      after,
+      note: `UNOBSERVED, not clean: we could not look at what survived teardown (${observation.unobservedReason ?? "no reason given"}), so nothing is known about leaks on this run, in either direction.`
+    };
+  }
+  const reaped = censusTotal(after) === 0;
+  let note;
+  let state;
+  if (!labelObserved && reaped) {
+    state = "inconclusive";
+    note = "INCONCLUSIVE, not clean: nothing labelled was ever seen alive, so an empty final census is equally consistent with the label never being applied. The control failed, so the denial proves nothing.";
+  } else if (!labelObserved) {
+    state = "leak";
+    note = "no labelled container was observed alive AND objects remain \u2014 the label wiring is wrong.";
+  } else if (!reaped) {
+    state = "leak";
+    note = `LEAK: ${String(censusTotal(after))} labelled object(s) survived teardown (containers=${String(after.containers.length)} volumes=${String(after.volumes.length)} networks=${String(after.networks.length)}).`;
+  } else {
+    state = "clean";
+    note = `clean: peak ${String(peak.containers.length)} labelled container(s) observed alive, 0 labelled objects remain after teardown.`;
+  }
+  return {
+    labelObserved,
+    reaped,
+    observed: true,
+    clean: labelObserved && reaped,
+    state,
+    peak,
+    after,
+    note
+  };
+}
+var RUN_LABEL_KEY, RUN_ID_LABEL_KEY, LabelWatch, LEAK_STATES;
+var init_labels = __esm({
+  "../../packages/envrun/dist/labels.js"() {
+    "use strict";
+    init_dist();
+    RUN_LABEL_KEY = "supergoal.run";
+    RUN_ID_LABEL_KEY = "supergoal.run-id";
+    LabelWatch = class {
+      label;
+      docker;
+      intervalMs;
+      #timer = null;
+      #peak = { containers: [], volumes: [], networks: [] };
+      #samples = 0;
+      /**
+       * `docker` is REQUIRED and second, so a sampler cannot be built without
+       * naming the daemon it watches. A watch polling one daemon while the run
+       * executes on another reports a high-water mark of 0 — indistinguishable
+       * from "the label never applied", which is the exact ambiguity this class
+       * exists to remove.
+       */
+      constructor(label, docker3, intervalMs = 250) {
+        this.label = label;
+        this.docker = docker3;
+        this.intervalMs = intervalMs;
+      }
+      start() {
+        if (this.#timer !== null)
+          return;
+        this.#sample();
+        this.#timer = setInterval(() => this.#sample(), this.intervalMs);
+        this.#timer.unref();
+      }
+      #sample() {
+        this.#samples += 1;
+        const now = census(this.docker, this.label);
+        this.#peak = {
+          containers: now.containers.length > this.#peak.containers.length ? now.containers : this.#peak.containers,
+          volumes: now.volumes.length > this.#peak.volumes.length ? now.volumes : this.#peak.volumes,
+          networks: now.networks.length > this.#peak.networks.length ? now.networks : this.#peak.networks
+        };
+      }
+      stop() {
+        if (this.#timer !== null) {
+          clearInterval(this.#timer);
+          this.#timer = null;
+        }
+        this.#sample();
+      }
+      get peak() {
+        return this.#peak;
+      }
+      get samples() {
+        return this.#samples;
+      }
+    };
+    LEAK_STATES = ["clean", "leak", "inconclusive", "unobserved"];
+  }
+});
+
+// ../../packages/envrun/dist/previewRegistry.js
+function createPreviewRegistry() {
+  const live = /* @__PURE__ */ new Map();
+  return {
+    register(client, container) {
+      const names = live.get(client) ?? /* @__PURE__ */ new Set();
+      names.add(container);
+      live.set(client, names);
+    },
+    deregister(client, container) {
+      const names = live.get(client);
+      if (names === void 0)
+        return;
+      names.delete(container);
+      if (names.size === 0)
+        live.delete(client);
+    },
+    pairs() {
+      const out = [];
+      for (const [client, names] of live) {
+        for (const container of names)
+          out.push({ client, container });
+      }
+      return out;
+    },
+    reapAll() {
+      for (const [client, names] of live) {
+        for (const container of names) {
+          client.sync(["rm", "-f", container], { timeoutMs: 15e3 });
+        }
+      }
+      live.clear();
+    }
+  };
+}
+var init_previewRegistry = __esm({
+  "../../packages/envrun/dist/previewRegistry.js"() {
+    "use strict";
+  }
+});
+
+// ../../packages/envrun/dist/preview.js
+import { randomBytes as randomBytes7 } from "crypto";
+import { mkdirSync as mkdirSync5, writeFileSync as writeFileSync12 } from "fs";
+import { join as join22 } from "path";
+function docker(client, args, timeoutMs = 6e4) {
+  const res = client.sync([...args], { timeoutMs });
+  return {
+    ok: !res.error && res.status === 0,
+    stdout: res.stdout,
+    stderr: (res.error ? res.error.message : "") + res.stderr
+  };
+}
+function installReaper() {
+  if (reaperInstalled)
+    return;
+  reaperInstalled = true;
+  process.on("exit", () => {
+    livePreviews.reapAll();
+  });
+}
+function readHostPort(client, container) {
+  const res = docker(client, ["port", container, `${String(GUEST_PORT)}/tcp`]);
+  if (!res.ok)
+    return null;
+  for (const line of res.stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "")
+      continue;
+    const idx = trimmed.lastIndexOf(":");
+    if (idx === -1)
+      continue;
+    const port = Number(trimmed.slice(idx + 1));
+    if (Number.isInteger(port) && port > 0)
+      return port;
+  }
+  return null;
+}
+async function fetchInstanceToken(url, authToken) {
+  try {
+    const headers = {};
+    if (authToken) {
+      headers["Authorization"] = `Bearer ${authToken}`;
+    }
+    const res = await fetch(url, { cache: "no-store", headers });
+    if (!res.ok)
+      return null;
+    const body = await res.json();
+    return typeof body.instanceToken === "string" ? body.instanceToken : null;
+  } catch {
+    return null;
+  }
+}
+async function startPreview(req) {
+  const label = labelArgs(req.labels);
+  const container = `${req.idBase}-preview`;
+  const image = validateImage(req.image);
+  const bindAddress = req.bindAddress ?? "127.0.0.1";
+  const client = req.docker;
+  if (!LOOPBACK_BINDS.has(bindAddress) && req.authToken === void 0) {
+    throw new PreviewError(`refusing to publish the preview on ${bindAddress} without an explicit authToken: a bind wider than loopback puts this run \u2014 the test output tail included \u2014 on the developer's local network`);
+  }
+  const authToken = req.authToken ?? randomBytes7(24).toString("base64url");
+  const envArgs = ["--env", `PREVIEW_AUTH_TOKEN=${authToken}`];
+  const probeHost = WILDCARD_BINDS.has(bindAddress) ? "127.0.0.1" : bindAddress;
+  const probeAuthority = probeHost.includes(":") ? `[${probeHost}]` : probeHost;
+  mkdirSync5(req.scratchDir, { recursive: true });
+  const docPath = join22(req.scratchDir, "preview-run.json");
+  writeFileSync12(docPath, JSON.stringify(req.document, null, 2), "utf8");
+  const teardown = () => {
+    livePreviews.deregister(client, container);
+    for (let i = 0; i < 3; i += 1) {
+      const inspect = docker(client, ["inspect", "--format", "{{.State.Status}}", container]);
+      if (!inspect.ok)
+        return { clean: true, leaked: [] };
+      docker(client, ["rm", "-f", container]);
+    }
+    const still = docker(client, ["inspect", "--format", "{{.State.Status}}", container]);
+    return still.ok ? { clean: false, leaked: [`container ${container}`] } : { clean: true, leaked: [] };
+  };
+  const startedAt = Date.now();
+  try {
+    const run2 = docker(client, [
+      "run",
+      "-d",
+      "--init",
+      `--name=${container}`,
+      // A network IS granted here, unlike the verification step. It carries our
+      // own argv over a document we wrote; the repo's code never runs in it.
+      "--network=bridge",
+      // Loopback by default, and anything wider was refused above unless the
+      // caller named a token. A bare `-p 8080` would bind 0.0.0.0 and put a
+      // developer's in-progress work on their local network.
+      `--publish=${bindAddress}:0:${String(GUEST_PORT)}`,
+      ...envArgs,
+      "--cap-drop=ALL",
+      "--security-opt=no-new-privileges",
+      "--pids-limit=64",
+      "--memory=256m",
+      "--read-only",
+      "--tmpfs=/tmp:rw,noexec,nosuid,size=8m",
+      ...label,
+      `--volume=${docPath}:${GUEST_DOC}:ro`,
+      "--",
+      image,
+      "node",
+      "-e",
+      SERVER_SOURCE
+    ]);
+    if (!run2.ok) {
+      throw new PreviewError(`could not start the preview container: ${run2.stderr.trim()}`);
+    }
+    const deadline = Date.now() + (req.readyTimeoutMs ?? 6e4);
+    let hostPort = null;
+    let token = null;
+    let lastDetail = "never answered";
+    const throwIfExited = () => {
+      const alive = docker(client, ["inspect", "--format", "{{.State.Running}}", container]);
+      if (alive.stdout.trim() !== "true") {
+        const logs = docker(client, ["logs", "--tail", "20", container]);
+        throw new PreviewError(`the preview container exited before serving: ${logs.stdout.trim()}${logs.stderr.trim()}`);
+      }
+    };
+    while (Date.now() < deadline) {
+      hostPort ??= readHostPort(client, container);
+      if (hostPort === null) {
+        throwIfExited();
+        lastDetail = "Docker never reported a published host port";
+        await sleep4(200);
+        continue;
+      }
+      token = await fetchInstanceToken(`http://${probeAuthority}:${String(hostPort)}/`, authToken);
+      if (token !== null)
+        break;
+      throwIfExited();
+      lastDetail = "the port is published but the server has not answered yet";
+      await sleep4(150);
+    }
+    if (hostPort === null || token === null) {
+      throw new PreviewError(`the preview URL never became reachable: ${lastDetail}`);
+    }
+    livePreviews.register(client, container);
+    installReaper();
+    const origin = `http://${probeAuthority}:${String(hostPort)}/`;
+    return {
+      url: `${origin}?token=${encodeURIComponent(authToken)}`,
+      origin,
+      authToken,
+      instanceToken: token,
+      container,
+      hostPort,
+      readyMs: Date.now() - startedAt,
+      teardown
+    };
+  } catch (err) {
+    teardown();
+    throw err;
+  }
+}
+function startLocalPreview(req) {
+  return startPreview({ ...req, docker: localDockerClient() });
+}
+var PreviewError, GUEST_PORT, GUEST_DOC, LOOPBACK_BINDS, WILDCARD_BINDS, SERVER_SOURCE, livePreviews, reaperInstalled, sleep4;
+var init_preview = __esm({
+  "../../packages/envrun/dist/preview.js"() {
+    "use strict";
+    init_dist();
+    init_previewRegistry();
+    PreviewError = class extends Error {
+    };
+    GUEST_PORT = 8080;
+    GUEST_DOC = "/preview/run.json";
+    LOOPBACK_BINDS = /* @__PURE__ */ new Set(["127.0.0.1", "localhost", "::1"]);
+    WILDCARD_BINDS = /* @__PURE__ */ new Set(["0.0.0.0", "::"]);
+    SERVER_SOURCE = `
+const http = require('node:http');
+const { readFileSync } = require('node:fs');
+const { randomUUID, timingSafeEqual } = require('node:crypto');
+
+// Read ONCE, at startup, and refuse to run without it. An unset token used to
+// skip the check entirely, which meant the one configuration nobody sets on
+// purpose was also the one that served a developer's in-progress work to
+// anything that could reach the port. Absent must never mean permitted \u2014 the
+// polarity requireSecret() holds in apps/web/lib/secrets.ts.
+const AUTH_TOKEN = process.env.PREVIEW_AUTH_TOKEN || '';
+if (AUTH_TOKEN === '') {
+  process.stderr.write(
+    'preview: refusing to start \u2014 PREVIEW_AUTH_TOKEN is unset, and this server will not ' +
+      'serve a run document unauthenticated\\n',
+  );
+  process.exit(1);
+}
+const EXPECTED = Buffer.from(AUTH_TOKEN, 'utf8');
+
+/** The token the client presented, or null. */
+function presented(req) {
+  const header = req.headers['authorization'];
+  const bearer = typeof header === 'string' ? /^Bearer\\s+(.+)$/i.exec(header) : null;
+  if (bearer !== null) return bearer[1];
+  // A non-Bearer Authorization header FALLS THROUGH to the query parameter. The
+  // earlier ternary branched on the header merely EXISTING, so a client sending
+  // "Basic \u2026" produced an empty string and could never authenticate at all.
+  //
+  // The query form stays because the founder opens this in a browser and a
+  // browser sends no Authorization header. That is the only reason it is
+  // accepted: a token in a URL lands in browser history, shell history and any
+  // proxy log on the way, where a header does not.
+  return new URL(req.url, 'http://localhost').searchParams.get('token');
+}
+
+function authorized(req) {
+  const given = presented(req);
+  if (typeof given !== 'string') return false;
+  const got = Buffer.from(given, 'utf8');
+  // timingSafeEqual THROWS on a length mismatch, so length is compared first and
+  // refused here. The length is not the secret; the bytes are.
+  if (got.length !== EXPECTED.length) return false;
+  return timingSafeEqual(got, EXPECTED);
+}
+
+// Per-INSTANCE, minted at boot. Not passed in, not derived from anything the
+// host controls \u2014 that is what makes "same token \u21D2 same instance" hold.
+const INSTANCE_TOKEN = randomUUID();
+const DOC = JSON.parse(readFileSync(${JSON.stringify(GUEST_DOC)}, 'utf8'));
+let served = 0;
+
+http
+  .createServer((req, res) => {
+    if (!authorized(req)) {
+      res.writeHead(401, { 'content-type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ error: 'unauthorized' }));
+    }
+    served += 1;
+    const body = JSON.stringify(
+      {
+        instanceToken: INSTANCE_TOKEN,
+        servedCount: served,
+        pid: process.pid,
+        run: DOC,
+      },
+      null,
+      2,
+    );
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+      'x-th-instance': INSTANCE_TOKEN,
+    });
+    res.end(body);
+  })
+  .listen(${String(GUEST_PORT)}, '0.0.0.0', () => {
+    console.log('preview-ready ' + INSTANCE_TOKEN);
+  });
+`;
+    livePreviews = createPreviewRegistry();
+    reaperInstalled = false;
+    sleep4 = (ms) => new Promise((r) => setTimeout(r, ms));
+  }
+});
+
+// ../../packages/envrun/dist/venue.js
+import { randomBytes as randomBytes8 } from "crypto";
+import { join as join23 } from "path";
+function localJailPaths(scratchRoot) {
+  return {
+    jail: join23(scratchRoot, JAIL_SEGMENT),
+    tmp: join23(scratchRoot, JAIL_TMP_SEGMENT)
+  };
+}
+function localVenue() {
+  return {
+    kind: "local",
+    acquire: (runId) => acquireTransactionally((allocated) => {
+      void allocated;
+      return Promise.resolve(acquireLocalLease(runId));
+    })
+  };
+}
+async function acquireTransactionally(body) {
+  const undos = [];
+  try {
+    return await body({
+      onRollback: (undo) => {
+        undos.push(undo);
+      }
+    });
+  } catch (err) {
+    const failures = [];
+    for (const undo of undos.reverse()) {
+      let failed = null;
+      try {
+        await undo();
+      } catch (rollbackErr) {
+        failed = { thrown: rollbackErr };
+      }
+      if (failed === null)
+        continue;
+      let entry;
+      try {
+        entry = describeThrown(failed.thrown, { includeName: true });
+      } catch {
+        entry = UNDESCRIBABLE_THROWN;
+      }
+      failures.push(entry);
+    }
+    if (failures.length > 0)
+      throw new VenueRollbackError(err, failures);
+    throw err;
+  }
+}
+function rollbackMessage(cause, rollbackFailures) {
+  const headline = describeThrown(cause, { includeName: false });
+  let tail2;
+  try {
+    tail2 = `[venue acquisition rolled back with ${String(rollbackFailures.length)} failure(s): ${rollbackFailures.join("; ")} \u2014 one or more allocated resources may still exist]`;
+  } catch {
+    tail2 = UNLISTABLE_ROLLBACK_FAILURES;
+  }
+  return `${headline} ${tail2}`;
+}
+function describeThrown(thrown, opts) {
+  try {
+    if (isErrorValue(thrown)) {
+      const message2 = readErrorField(thrown, "message", UNREADABLE_MESSAGE);
+      if (!opts.includeName)
+        return message2;
+      const name = readErrorField(thrown, "name", UNREADABLE_NAME);
+      return message2 === "" ? name : `${name}: ${message2}`;
+    }
+    return coerceToString(thrown);
+  } catch {
+    return UNDESCRIBABLE_THROWN;
+  }
+}
+function isErrorValue(thrown) {
+  try {
+    return thrown instanceof Error;
+  } catch {
+    return false;
+  }
+}
+function readErrorField(thrown, key, fallback) {
+  let raw;
+  try {
+    raw = thrown[key];
+  } catch {
+    return fallback;
+  }
+  return typeof raw === "string" ? raw : coerceToString(raw);
+}
+function coerceToString(thrown) {
+  try {
+    return String(thrown);
+  } catch {
+    return UNCOERCIBLE_THROWN;
+  }
+}
+function localTreeOwner(ids2 = hostIds()) {
+  if (ids2?.uid !== 0)
+    return void 0;
+  return localGuestUser(ids2) ?? void 0;
+}
+function handLocalTreeToGuest(local, owner, chown = chownTree) {
+  if (owner === void 0)
+    return;
+  chown(local.cloneDir, owner);
+  chown(local.scratchRoot, owner);
+}
+function localCloneVolumeName(runId, suffix = randomBytes8(4).toString("hex")) {
+  const tail2 = `-${suffix}`;
+  const safe = runId.replace(/[^a-zA-Z0-9_.-]/g, "-");
+  const head = `th-clone-${safe}`.slice(0, VOLUME_NAME_MAX2 - tail2.length);
+  return validateVolumeName(`${head}${tail2}`, "the local clone volume");
+}
+function localCloneFillArgv(from, volume, owner) {
+  const chown = owner === null ? "" : ` && chown -R ${String(owner.uid)}:${String(owner.gid)} /dst`;
+  return [
+    "run",
+    "--rm",
+    "--network=none",
+    `--volume=${from}:/src:ro`,
+    `--volume=${validateVolumeName(volume, "the local clone volume")}:/dst:rw`,
+    "--",
+    STAGE_HELPER_IMAGE,
+    "sh",
+    "-c",
+    `cp -a /src/. /dst/${chown}`
+  ];
+}
+function acquireLocalLease(runId) {
+  const docker3 = localDockerClient();
+  const containment = selectContainment([containerContainmentOn(docker3)]);
+  let released = false;
+  const stagedProxies = [];
+  const owner = localTreeOwner();
+  let cloneVolume;
+  const createdVolumes = [];
+  const fillCloneVolume = (cloneDir) => {
+    const name = localCloneVolumeName(runId);
+    const created = docker3.sync(["volume", "create", `--label=${STAGE_VOLUME_LABEL_KEY}=${runId}`, "--", name], { timeoutMs: LOCAL_VOLUME_CREATE_TIMEOUT_MS });
+    if (created.error || created.status !== 0) {
+      throw new ContainmentRefusalError(`could not create the clone volume ${name} on the local daemon: ${(created.error?.message ?? created.stderr).trim().slice(0, 300)}`);
+    }
+    createdVolumes.push(name);
+    const from = resolverFor("local")(cloneDir, "clone");
+    const filled = docker3.sync(localCloneFillArgv(from, name, localGuestUser()), {
+      timeoutMs: LOCAL_CLONE_FILL_TIMEOUT_MS
+    });
+    if (filled.error || filled.status !== 0) {
+      throw new ContainmentRefusalError(`could not copy the clone into its volume ${name}: ${(filled.error?.message ?? filled.stderr).trim().slice(0, 300)}`);
+    }
+    return name;
+  };
+  const lease = {
+    kind: "local",
+    runId,
+    containment,
+    docker: docker3,
+    // Stated, not inferred from `kind`. On this venue it is the truth twice over:
+    // the paths are on this machine AND `canonical()` is what should resolve
+    // them, which is the behaviour every local run has always had.
+    pathDomain: "local",
+    // Spread rather than `guestUser: owner`, so a non-root lease has no such key
+    // at all — the same object every local run has always had.
+    ...owner === void 0 ? {} : { guestUser: owner },
+    get released() {
+      return released;
+    },
+    get cloneVolume() {
+      return cloneVolume;
+    },
+    stage: (local) => {
+      if (released) {
+        return Promise.reject(new LeaseReleasedError("this lease was already released, so a clone volume made now would never be removed."));
+      }
+      try {
+        handLocalTreeToGuest(local, owner);
+        cloneVolume = fillCloneVolume(local.cloneDir);
+      } catch (err) {
+        return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+      }
+      return Promise.resolve({
+        cloneDir: local.cloneDir,
+        scratchRoot: local.scratchRoot,
+        previewDir: local.previewDir,
+        ...localJailPaths(local.scratchRoot)
+      });
+    },
+    // The containment function verbatim, which is the point of the barrel
+    // re-export rather than a copy here: this venue's daemon and this process
+    // share a filesystem, so the directory it makes under `tmpdir()` is already
+    // venue-side and has been on every local run since the sidecar existed.
+    //
+    // TRACKED, so `release()` can be the guaranteed owner the interface
+    // promises. Returning a bare handle made that promise the CALLER's to keep,
+    // and a caller that staged and then failed outside `runEnvironmentSpec`'s
+    // `finally` left the directory behind while release reported success.
+    //
+    // REFUSING AFTER RELEASE is the other half of the same promise. Staging onto
+    // a drained list would leak with nothing left to drain, and `release()` has
+    // already reported it had nothing to do — the split ownership this tracking
+    // exists to close, reached from the other side.
+    //
+    // ONLY THIS ARM CHECKS IT. An earlier draft of this comment said the hosted
+    // arm refuses the same way through `check()`, and that is not what `check()`
+    // tests: `assertVenueUnchanged` reads the tunnel's failure and classifies
+    // the daemon, and never looks at `released`. Hosted refuses a post-release
+    // staging only incidentally, because by then the VM is gone. Naming the
+    // check and what it actually tests is the rule this branch spent its length
+    // on, and that draft broke it in the same breath as stating it.
+    //
+    // That leaves the two arms answering one programmer error with different
+    // exit codes — hosted's incidental failure is a `HostedVenueError` at 2,
+    // this one is a plain throw at 1. Recorded on TERM-752 rather than fixed
+    // here: it is unreachable while `placement.ts` refuses first.
+    //
+    // THE EXIT CODE IS WHY IT IS NOT A REFUSAL TYPE. Nothing catches it and
+    // `findRunRefusal` does not match it, so it reaches the top-level catch at
+    // exit 1 — correct, because only our own call ordering can reach this, which
+    // is `assertDomainDeclared`'s reasoning and the same one this branch applied
+    // to `assertProxyStagedForVenue`. Giving it `RunRefusalError` would dress
+    // our defect as a polite refusal, TERM-649's lie inverted.
+    //
+    // It is a NAMED subclass rather than a bare `Error` for a hazard already
+    // here, not a speculative one. `stageProxyCode()` in `containment` throws
+    // `FenceError` on a damaged install, telling the developer to reinstall the
+    // CLI. Two distinguishable failures leave this one call, so the day anyone
+    // adds a catch to surface that instruction, an unnamed ordering bug gets
+    // swept into it and tells a developer to reinstall over our mistake.
+    stageProxyCode: () => {
+      if (released) {
+        return Promise.reject(new LeaseReleasedError("this lease was already released, so a staging made now would never be removed: release() has run and drained what it was holding."));
+      }
+      const staged = stageProxyCode();
+      stagedProxies.push(staged);
+      return Promise.resolve(staged);
+    },
+    census: (label) => Promise.resolve(released ? {
+      observed: false,
+      census: { containers: [], volumes: [], networks: [] },
+      unobservedReason: RELEASED_LEASE_CENSUS_REASON
+    } : censusReport(docker3, label)),
+    publishPreview: (req) => startPreview({ ...req, docker: docker3 }),
+    release: () => {
+      if (released) {
+        return Promise.resolve({
+          kind: "local",
+          released: false,
+          alreadyReleased: true,
+          error: null,
+          detail: "already released; nothing to do"
+        });
+      }
+      released = true;
+      const staged = stagedProxies.splice(0, stagedProxies.length);
+      for (const s of staged)
+        s.cleanup();
+      const volumeFailures = [];
+      for (const name of createdVolumes.splice(0, createdVolumes.length)) {
+        const removed = docker3.sync(["volume", "rm", "-f", "--", name], {
+          timeoutMs: LOCAL_VOLUME_CREATE_TIMEOUT_MS
+        });
+        if (removed.error || removed.status !== 0) {
+          volumeFailures.push(`${name}: ${(removed.error?.message ?? removed.stderr).trim().slice(0, 200)}`);
+        }
+      }
+      cloneVolume = void 0;
+      if (volumeFailures.length > 0) {
+        return Promise.resolve({
+          kind: "local",
+          released: true,
+          alreadyReleased: false,
+          error: `could not remove the clone volume: ${volumeFailures.join("; ")}`,
+          detail: `the lease is closed, but a clone volume remains (label ${STAGE_VOLUME_LABEL_KEY})`
+        });
+      }
+      return Promise.resolve({
+        kind: "local",
+        released: true,
+        alreadyReleased: false,
+        error: null,
+        detail: "the local venue owns no host resources; the lease is closed"
+      });
+    }
+  };
+  return lease;
+}
+var VenueRollbackError, UNREADABLE_MESSAGE, UNREADABLE_NAME, UNCOERCIBLE_THROWN, UNDESCRIBABLE_THROWN, UNLISTABLE_ROLLBACK_FAILURES, RELEASED_LEASE_CENSUS_REASON, LeaseReleasedError, STAGE_HELPER_IMAGE, STAGE_VOLUME_LABEL_KEY, VOLUME_NAME_MAX2, LOCAL_VOLUME_CREATE_TIMEOUT_MS, LOCAL_CLONE_FILL_TIMEOUT_MS;
+var init_venue = __esm({
+  "../../packages/envrun/dist/venue.js"() {
+    "use strict";
+    init_dist();
+    init_labels();
+    init_preview();
+    VenueRollbackError = class extends Error {
+      /** Every undo that threw, in the order they ran (reverse allocation order). */
+      rollbackFailures;
+      constructor(cause, rollbackFailures) {
+        super(rollbackMessage(cause, rollbackFailures), { cause });
+        this.name = "VenueRollbackError";
+        this.rollbackFailures = rollbackFailures;
+      }
+    };
+    UNREADABLE_MESSAGE = "<an error whose message could not be read>";
+    UNREADABLE_NAME = "<an error whose name could not be read>";
+    UNCOERCIBLE_THROWN = "<a thrown value that cannot be converted to a string>";
+    UNDESCRIBABLE_THROWN = "<a thrown value that could not be described>";
+    UNLISTABLE_ROLLBACK_FAILURES = "[venue acquisition rolled back, and the failures could not be listed \u2014 one or more allocated resources may still exist]";
+    RELEASED_LEASE_CENSUS_REASON = "the lease was already released, so this venue can no longer be interrogated";
+    LeaseReleasedError = class extends Error {
+      name = "LeaseReleasedError";
+    };
+    STAGE_HELPER_IMAGE = "busybox:1.37.0";
+    STAGE_VOLUME_LABEL_KEY = "terminalhire.stage";
+    VOLUME_NAME_MAX2 = 128;
+    LOCAL_VOLUME_CREATE_TIMEOUT_MS = 3e4;
+    LOCAL_CLONE_FILL_TIMEOUT_MS = 6e5;
+  }
+});
+
+// ../../packages/envrun/dist/venueStorageWatch.js
+function storageWatchArgv(name, labels) {
+  return [
+    "run",
+    "--rm",
+    `--name=${name}`,
+    "--runtime=runc",
+    "--network=none",
+    "--read-only",
+    "--cap-drop=ALL",
+    "--security-opt=no-new-privileges",
+    "--pids-limit=32",
+    ...labelArgs(labels),
+    "--",
+    STAGE_HELPER_IMAGE,
+    "sh",
+    "-c",
+    STORAGE_WATCH_SCRIPT
+  ];
+}
+function readStorageWatch(stream) {
+  const lines = stream.split("\n").filter((l) => l.trim().length > 0);
+  if (lines.length === 0) {
+    return { ok: false, reason: "the storage watcher printed nothing" };
+  }
+  let prevMs = null;
+  let minFreeMiB = Infinity;
+  let minMemAvailableKb = Infinity;
+  let maxGapMs = 0;
+  for (const raw of lines) {
+    const m = SAMPLE.exec(raw.trim());
+    if (m === null) {
+      return {
+        ok: false,
+        reason: `the storage watcher printed a line that is not a sample: ${JSON.stringify(raw.slice(0, 120))}`
+      };
+    }
+    const atMs = Math.round(Number(m[1]) * 1e3);
+    const free = Number(m[2]);
+    const mem = Number(m[3]);
+    if (prevMs !== null) {
+      if (atMs < prevMs) {
+        return { ok: false, reason: "the storage watcher\u2019s timestamps went backwards" };
+      }
+      maxGapMs = Math.max(maxGapMs, atMs - prevMs);
+    }
+    prevMs = atMs;
+    minFreeMiB = Math.min(minFreeMiB, free);
+    minMemAvailableKb = Math.min(minMemAvailableKb, mem);
+  }
+  const stats = {
+    samples: lines.length,
+    minFreeMiB,
+    minMemAvailableKb,
+    maxGapMs
+  };
+  if (lines.length < 2) {
+    return {
+      ok: false,
+      reason: "the storage watcher took one sample, which covers no step",
+      ...stats
+    };
+  }
+  if (maxGapMs > STORAGE_WATCH_MAX_GAP_MS) {
+    return {
+      ok: false,
+      reason: `the storage watcher went ${String(maxGapMs)} ms between two samples, over the ${String(STORAGE_WATCH_MAX_GAP_MS)} ms that guarantees a write through the last GiB is seen`,
+      ...stats
+    };
+  }
+  return { ok: true, ...stats };
+}
+function lastSampleUptime(stdout) {
+  const end = stdout.lastIndexOf("\n");
+  if (end === -1)
+    return null;
+  const lines = stdout.slice(0, end).split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = /^S (\d+(?:\.\d+)?) /.exec(lines[i]);
+    if (m)
+      return Number(m[1]);
+  }
+  return null;
+}
+async function startStorageWatch(docker3, labels) {
+  const name = `th-storage-watch-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e9).toString(36)}`;
+  let child;
+  try {
+    child = docker3.spawn(storageWatchArgv(name, labels));
+  } catch (err) {
+    return `the storage watcher could not be started: ${err instanceof Error ? err.message : String(err)}`;
+  }
+  let stdout = "";
+  let stderr = "";
+  let closed = false;
+  const waiters = /* @__PURE__ */ new Set();
+  const changed = () => {
+    for (const w of [...waiters])
+      w();
+  };
+  const closedPromise = new Promise((resolve6) => {
+    const done2 = () => {
+      closed = true;
+      changed();
+      resolve6();
+    };
+    child.on("close", done2);
+    child.on("error", done2);
+  });
+  child.stdout.on("data", (b) => {
+    stdout += b.toString();
+    changed();
+  });
+  child.stderr.on("data", (b) => {
+    stderr += b.toString();
+  });
+  const waitFor = (cond, ms) => new Promise((resolve6) => {
+    const check = () => {
+      if (cond())
+        finish(true);
+      else if (closed)
+        finish(false);
+    };
+    const timer = setTimeout(() => finish(cond()), ms);
+    const finish = (v) => {
+      clearTimeout(timer);
+      waiters.delete(check);
+      resolve6(v);
+    };
+    waiters.add(check);
+    check();
+  });
+  const killByName = () => {
+    try {
+      docker3.sync(["kill", name], { timeoutMs: STOP_TIMEOUT_MS });
+    } catch {
+    }
+  };
+  const stop = async () => {
+    let stepEnd = null;
+    let stopProblem = null;
+    if (!closed) {
+      try {
+        const res = docker3.sync(["exec", name, "cat", "/proc/uptime"], { timeoutMs: STOP_TIMEOUT_MS });
+        const t = res.error || res.status !== 0 ? NaN : Number(res.stdout.trim().split(/\s+/)[0]);
+        if (Number.isFinite(t))
+          stepEnd = t;
+        else
+          stopProblem = "could not read the venue clock after the step";
+      } catch (err) {
+        stopProblem = `reading the venue clock threw: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
+    const sampledAfterStep = stepEnd !== null && await waitFor(() => {
+      const last = lastSampleUptime(stdout);
+      return last !== null && last > stepEnd;
+    }, AFTER_STEP_SAMPLE_TIMEOUT_MS);
+    if (!closed) {
+      try {
+        const res = docker3.sync(["stop", "-t", "1", name], { timeoutMs: STOP_TIMEOUT_MS });
+        if (res.error || res.status !== 0) {
+          const said = `docker stop: ${(res.error?.message ?? res.stderr).trim().slice(0, 200)}`;
+          stopProblem = stopProblem ? `${stopProblem}; ${said}` : said;
+        }
+      } catch (err) {
+        const said = `docker stop threw: ${err instanceof Error ? err.message : String(err)}`;
+        stopProblem = stopProblem ? `${stopProblem}; ${said}` : said;
+      }
+      const timedOut = await Promise.race([
+        closedPromise.then(() => false),
+        new Promise((r) => setTimeout(() => r(true), CLOSE_TIMEOUT_MS).unref())
+      ]);
+      if (timedOut) {
+        stopProblem = `${stopProblem ?? ""} the watcher did not exit after docker stop`.trim();
+        child.kill("SIGKILL");
+      }
+    }
+    killByName();
+    return { stdout, sampledAfterStep, stopProblem };
+  };
+  const first = await waitFor(() => stdout.includes("\n"), FIRST_SAMPLE_TIMEOUT_MS);
+  if (!first) {
+    const out = await stop();
+    const said = (stderr || out.stdout).trim().slice(0, 300);
+    return "the storage watcher did not report a first sample" + (said ? `: ${said}` : "");
+  }
+  return { name, stop };
+}
+function judgeStorageWatch(out) {
+  const reading = readStorageWatch(out.stdout);
+  if (reading.ok && !out.sampledAfterStep) {
+    const { ok: _ok, ...stats } = reading;
+    return {
+      ok: false,
+      reason: "the storage watcher printed no sample after the test step returned, so the end of the step was not sampled",
+      ...stats
+    };
+  }
+  return reading;
+}
+function describeStorageWatch(r) {
+  const n = (v) => v === void 0 ? "?" : String(v);
+  return `storage watch: min free ${n(r.minFreeMiB)} MiB, min MemAvailable ${n(r.minMemAvailableKb)} kB, max gap ${n(r.maxGapMs)} ms, ${n(r.samples)} samples`;
+}
+var STORAGE_WATCH_MAX_GAP_MS, FIRST_SAMPLE_TIMEOUT_MS, STOP_TIMEOUT_MS, CLOSE_TIMEOUT_MS, STORAGE_WATCH_SCRIPT, SAMPLE, AFTER_STEP_SAMPLE_TIMEOUT_MS;
+var init_venueStorageWatch = __esm({
+  "../../packages/envrun/dist/venueStorageWatch.js"() {
+    "use strict";
+    init_dist();
+    init_venue();
+    STORAGE_WATCH_MAX_GAP_MS = 100;
+    FIRST_SAMPLE_TIMEOUT_MS = 3e4;
+    STOP_TIMEOUT_MS = 2e4;
+    CLOSE_TIMEOUT_MS = 1e4;
+    STORAGE_WATCH_SCRIPT = `trap 'exit 0' TERM; while :; do read u _ < /proc/uptime; f=$(df -P -m / | awk 'NR==2{print $(NF-2)}'); m=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo); echo "S $u $f $m"; sleep 0.05; done`;
+    SAMPLE = /^S (\d+(?:\.\d+)?) (\d+) (\d+)$/;
+    AFTER_STEP_SAMPLE_TIMEOUT_MS = 2e3;
+  }
+});
+
+// ../../packages/envrun/dist/npmScriptTimes.js
+function createNpmScriptTimesCollector(now = Date.now) {
+  let buffer = "";
+  const markers = [];
+  let lastChunkAt = null;
+  const onStdout = (chunk) => {
+    const at = now();
+    lastChunkAt = at;
+    buffer += chunk;
+    for (; ; ) {
+      const nl = buffer.indexOf("\n");
+      if (nl === -1)
+        break;
+      const line = buffer.slice(0, nl).replace(/\r$/, "");
+      buffer = buffer.slice(nl + 1);
+      const name = stepNameOf(line);
+      if (name !== null)
+        markers.push({ name, at });
+    }
+  };
+  const finish = (opts) => {
+    if (buffer.length > 0 && lastChunkAt !== null) {
+      const name = stepNameOf(buffer.replace(/\r$/, ""));
+      if (name !== null)
+        markers.push({ name, at: lastChunkAt });
+    }
+    if (markers.length === 0 || markers.length > MAX_NPM_SCRIPT_MARKERS)
+      return null;
+    const seen = /* @__PURE__ */ new Set();
+    for (const m of markers) {
+      if (seen.has(m.name))
+        return null;
+      seen.add(m.name);
+    }
+    return markers.map((m, i) => {
+      const next = markers[i + 1];
+      if (next !== void 0)
+        return { name: m.name, status: "ran", ms: next.at - m.at };
+      const ms = opts.timedOut || lastChunkAt === null ? null : lastChunkAt - m.at;
+      return { name: m.name, status: "ran", ms };
+    });
+  };
+  return { onStdout, finish };
+}
+var MAX_NPM_SCRIPT_MARKERS;
+var init_npmScriptTimes = __esm({
+  "../../packages/envrun/dist/npmScriptTimes.js"() {
+    "use strict";
+    init_classify2();
+    MAX_NPM_SCRIPT_MARKERS = 100;
+  }
+});
+
 // ../../packages/attest/dist/types.js
 var IN_TOTO_STATEMENT_TYPE, ACCEPTANCE_RUN_PREDICATE_TYPE, IN_TOTO_PAYLOAD_TYPE, TEST_COMMAND_SOURCES;
 var init_types4 = __esm({
@@ -28685,7 +29819,7 @@ var init_dispatchedRun = __esm({
 });
 
 // ../../packages/attest/dist/sealedbox.js
-import { createCipheriv as createCipheriv3, createDecipheriv as createDecipheriv3, diffieHellman, generateKeyPairSync as generateKeyPairSync2, hkdfSync as hkdfSync2, randomBytes as randomBytes7 } from "crypto";
+import { createCipheriv as createCipheriv3, createDecipheriv as createDecipheriv3, diffieHellman, generateKeyPairSync as generateKeyPairSync2, hkdfSync as hkdfSync2, randomBytes as randomBytes9 } from "crypto";
 var init_sealedbox = __esm({
   "../../packages/attest/dist/sealedbox.js"() {
     "use strict";
@@ -28695,7 +29829,7 @@ var init_sealedbox = __esm({
 });
 
 // ../../packages/attest/dist/aead.js
-import { createCipheriv as createCipheriv4, createDecipheriv as createDecipheriv4, randomBytes as randomBytes8 } from "crypto";
+import { createCipheriv as createCipheriv4, createDecipheriv as createDecipheriv4, randomBytes as randomBytes10 } from "crypto";
 var init_aead = __esm({
   "../../packages/attest/dist/aead.js"() {
     "use strict";
@@ -29123,7 +30257,7 @@ var init_dist2 = __esm({
 });
 
 // ../../packages/envrun/dist/attestation.js
-import { createHash as createHash10, randomBytes as randomBytes9 } from "crypto";
+import { createHash as createHash10, randomBytes as randomBytes11 } from "crypto";
 function contradicts(outcome, counts, exitCode) {
   const budget = OUTCOME_TO_BUDGET[outcome];
   if (budget === null)
@@ -29307,7 +30441,7 @@ function toAcceptancePredicate(pair, opts = {}) {
       // RepoDigest (`repo@sha256:…`) carries the repo name and the content hash, and the
       // tag it drops is the part a registry can re-point (TERM-893).
       enclave_measurement: localMeasurement(patched.containerImageDigest),
-      nonce: opts.nonce ?? randomBytes9(16).toString("hex"),
+      nonce: opts.nonce ?? randomBytes11(16).toString("hex"),
       run_policy: { max_attempts: opts.maxAttempts ?? 1, budget_outcome: budget }
     }
   };
@@ -29457,773 +30591,6 @@ var init_attestation2 = __esm({
     REFERENCE_DOMAIN = `(?:${REFERENCE_DOMAIN_NAME}|${REFERENCE_IPV6})(?::[0-9]+)?`;
     REFERENCE_PATH_COMPONENT = "[a-z0-9]+(?:(?:\\.|_{1,2}|-+)[a-z0-9]+)*";
     REPO_DIGEST_RE = new RegExp(`^(?:(${REFERENCE_DOMAIN})/)?${REFERENCE_PATH_COMPONENT}(?:/${REFERENCE_PATH_COMPONENT})*@sha256:[0-9a-f]{64}$`);
-  }
-});
-
-// ../../packages/envrun/dist/labels.js
-function runLabels(runId, callerLabels) {
-  return { ...callerLabels ?? {}, [RUN_ID_LABEL_KEY]: runId, [RUN_LABEL_KEY]: "term-350" };
-}
-function censusTotal(c) {
-  return c.containers.length + c.volumes.length + c.networks.length;
-}
-function query(docker3, args) {
-  const res = docker3.sync([...args], { timeoutMs: 15e3 });
-  if (res.error || res.status !== 0) {
-    const why = res.error?.message ?? (res.stderr.trim() || `exit ${String(res.status)}`);
-    return { ids: [], failure: `docker ${args.slice(0, 2).join(" ")}: ${why}` };
-  }
-  const ids2 = res.stdout.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
-  return { ids: ids2, failure: null };
-}
-function ids(docker3, args) {
-  return query(docker3, args).ids;
-}
-function census(docker3, label) {
-  const filter = `label=${label}`;
-  return {
-    containers: ids(docker3, ["ps", "-aq", "--filter", filter]),
-    volumes: ids(docker3, ["volume", "ls", "-q", "--filter", filter]),
-    networks: ids(docker3, ["network", "ls", "-q", "--filter", filter])
-  };
-}
-function censusReport(docker3, label) {
-  const filter = `label=${label}`;
-  const failures = [];
-  const ask2 = (args) => {
-    const q = query(docker3, args);
-    if (q.failure !== null)
-      failures.push(q.failure);
-    return q.ids;
-  };
-  const taken = {
-    containers: ask2(["ps", "-aq", "--filter", filter]),
-    volumes: ask2(["volume", "ls", "-q", "--filter", filter]),
-    networks: ask2(["network", "ls", "-q", "--filter", filter])
-  };
-  return failures.length === 0 ? { observed: true, census: taken, unobservedReason: null } : { observed: false, census: taken, unobservedReason: failures.join("; ") };
-}
-function localCensus(label) {
-  return census(localDockerClient(), label);
-}
-function judgeLeaks(peak, after, observation) {
-  const labelObserved = peak.containers.length > 0;
-  if (!observation.observed) {
-    return {
-      labelObserved,
-      reaped: false,
-      observed: false,
-      clean: false,
-      state: "unobserved",
-      peak,
-      after,
-      note: `UNOBSERVED, not clean: we could not look at what survived teardown (${observation.unobservedReason ?? "no reason given"}), so nothing is known about leaks on this run, in either direction.`
-    };
-  }
-  const reaped = censusTotal(after) === 0;
-  let note;
-  let state;
-  if (!labelObserved && reaped) {
-    state = "inconclusive";
-    note = "INCONCLUSIVE, not clean: nothing labelled was ever seen alive, so an empty final census is equally consistent with the label never being applied. The control failed, so the denial proves nothing.";
-  } else if (!labelObserved) {
-    state = "leak";
-    note = "no labelled container was observed alive AND objects remain \u2014 the label wiring is wrong.";
-  } else if (!reaped) {
-    state = "leak";
-    note = `LEAK: ${String(censusTotal(after))} labelled object(s) survived teardown (containers=${String(after.containers.length)} volumes=${String(after.volumes.length)} networks=${String(after.networks.length)}).`;
-  } else {
-    state = "clean";
-    note = `clean: peak ${String(peak.containers.length)} labelled container(s) observed alive, 0 labelled objects remain after teardown.`;
-  }
-  return {
-    labelObserved,
-    reaped,
-    observed: true,
-    clean: labelObserved && reaped,
-    state,
-    peak,
-    after,
-    note
-  };
-}
-var RUN_LABEL_KEY, RUN_ID_LABEL_KEY, LabelWatch, LEAK_STATES;
-var init_labels = __esm({
-  "../../packages/envrun/dist/labels.js"() {
-    "use strict";
-    init_dist();
-    RUN_LABEL_KEY = "supergoal.run";
-    RUN_ID_LABEL_KEY = "supergoal.run-id";
-    LabelWatch = class {
-      label;
-      docker;
-      intervalMs;
-      #timer = null;
-      #peak = { containers: [], volumes: [], networks: [] };
-      #samples = 0;
-      /**
-       * `docker` is REQUIRED and second, so a sampler cannot be built without
-       * naming the daemon it watches. A watch polling one daemon while the run
-       * executes on another reports a high-water mark of 0 — indistinguishable
-       * from "the label never applied", which is the exact ambiguity this class
-       * exists to remove.
-       */
-      constructor(label, docker3, intervalMs = 250) {
-        this.label = label;
-        this.docker = docker3;
-        this.intervalMs = intervalMs;
-      }
-      start() {
-        if (this.#timer !== null)
-          return;
-        this.#sample();
-        this.#timer = setInterval(() => this.#sample(), this.intervalMs);
-        this.#timer.unref();
-      }
-      #sample() {
-        this.#samples += 1;
-        const now = census(this.docker, this.label);
-        this.#peak = {
-          containers: now.containers.length > this.#peak.containers.length ? now.containers : this.#peak.containers,
-          volumes: now.volumes.length > this.#peak.volumes.length ? now.volumes : this.#peak.volumes,
-          networks: now.networks.length > this.#peak.networks.length ? now.networks : this.#peak.networks
-        };
-      }
-      stop() {
-        if (this.#timer !== null) {
-          clearInterval(this.#timer);
-          this.#timer = null;
-        }
-        this.#sample();
-      }
-      get peak() {
-        return this.#peak;
-      }
-      get samples() {
-        return this.#samples;
-      }
-    };
-    LEAK_STATES = ["clean", "leak", "inconclusive", "unobserved"];
-  }
-});
-
-// ../../packages/envrun/dist/previewRegistry.js
-function createPreviewRegistry() {
-  const live = /* @__PURE__ */ new Map();
-  return {
-    register(client, container) {
-      const names = live.get(client) ?? /* @__PURE__ */ new Set();
-      names.add(container);
-      live.set(client, names);
-    },
-    deregister(client, container) {
-      const names = live.get(client);
-      if (names === void 0)
-        return;
-      names.delete(container);
-      if (names.size === 0)
-        live.delete(client);
-    },
-    pairs() {
-      const out = [];
-      for (const [client, names] of live) {
-        for (const container of names)
-          out.push({ client, container });
-      }
-      return out;
-    },
-    reapAll() {
-      for (const [client, names] of live) {
-        for (const container of names) {
-          client.sync(["rm", "-f", container], { timeoutMs: 15e3 });
-        }
-      }
-      live.clear();
-    }
-  };
-}
-var init_previewRegistry = __esm({
-  "../../packages/envrun/dist/previewRegistry.js"() {
-    "use strict";
-  }
-});
-
-// ../../packages/envrun/dist/preview.js
-import { randomBytes as randomBytes10 } from "crypto";
-import { mkdirSync as mkdirSync5, writeFileSync as writeFileSync12 } from "fs";
-import { join as join22 } from "path";
-function docker(client, args, timeoutMs = 6e4) {
-  const res = client.sync([...args], { timeoutMs });
-  return {
-    ok: !res.error && res.status === 0,
-    stdout: res.stdout,
-    stderr: (res.error ? res.error.message : "") + res.stderr
-  };
-}
-function installReaper() {
-  if (reaperInstalled)
-    return;
-  reaperInstalled = true;
-  process.on("exit", () => {
-    livePreviews.reapAll();
-  });
-}
-function readHostPort(client, container) {
-  const res = docker(client, ["port", container, `${String(GUEST_PORT)}/tcp`]);
-  if (!res.ok)
-    return null;
-  for (const line of res.stdout.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed === "")
-      continue;
-    const idx = trimmed.lastIndexOf(":");
-    if (idx === -1)
-      continue;
-    const port = Number(trimmed.slice(idx + 1));
-    if (Number.isInteger(port) && port > 0)
-      return port;
-  }
-  return null;
-}
-async function fetchInstanceToken(url, authToken) {
-  try {
-    const headers = {};
-    if (authToken) {
-      headers["Authorization"] = `Bearer ${authToken}`;
-    }
-    const res = await fetch(url, { cache: "no-store", headers });
-    if (!res.ok)
-      return null;
-    const body = await res.json();
-    return typeof body.instanceToken === "string" ? body.instanceToken : null;
-  } catch {
-    return null;
-  }
-}
-async function startPreview(req) {
-  const label = labelArgs(req.labels);
-  const container = `${req.idBase}-preview`;
-  const image = validateImage(req.image);
-  const bindAddress = req.bindAddress ?? "127.0.0.1";
-  const client = req.docker;
-  if (!LOOPBACK_BINDS.has(bindAddress) && req.authToken === void 0) {
-    throw new PreviewError(`refusing to publish the preview on ${bindAddress} without an explicit authToken: a bind wider than loopback puts this run \u2014 the test output tail included \u2014 on the developer's local network`);
-  }
-  const authToken = req.authToken ?? randomBytes10(24).toString("base64url");
-  const envArgs = ["--env", `PREVIEW_AUTH_TOKEN=${authToken}`];
-  const probeHost = WILDCARD_BINDS.has(bindAddress) ? "127.0.0.1" : bindAddress;
-  const probeAuthority = probeHost.includes(":") ? `[${probeHost}]` : probeHost;
-  mkdirSync5(req.scratchDir, { recursive: true });
-  const docPath = join22(req.scratchDir, "preview-run.json");
-  writeFileSync12(docPath, JSON.stringify(req.document, null, 2), "utf8");
-  const teardown = () => {
-    livePreviews.deregister(client, container);
-    for (let i = 0; i < 3; i += 1) {
-      const inspect = docker(client, ["inspect", "--format", "{{.State.Status}}", container]);
-      if (!inspect.ok)
-        return { clean: true, leaked: [] };
-      docker(client, ["rm", "-f", container]);
-    }
-    const still = docker(client, ["inspect", "--format", "{{.State.Status}}", container]);
-    return still.ok ? { clean: false, leaked: [`container ${container}`] } : { clean: true, leaked: [] };
-  };
-  const startedAt = Date.now();
-  try {
-    const run2 = docker(client, [
-      "run",
-      "-d",
-      "--init",
-      `--name=${container}`,
-      // A network IS granted here, unlike the verification step. It carries our
-      // own argv over a document we wrote; the repo's code never runs in it.
-      "--network=bridge",
-      // Loopback by default, and anything wider was refused above unless the
-      // caller named a token. A bare `-p 8080` would bind 0.0.0.0 and put a
-      // developer's in-progress work on their local network.
-      `--publish=${bindAddress}:0:${String(GUEST_PORT)}`,
-      ...envArgs,
-      "--cap-drop=ALL",
-      "--security-opt=no-new-privileges",
-      "--pids-limit=64",
-      "--memory=256m",
-      "--read-only",
-      "--tmpfs=/tmp:rw,noexec,nosuid,size=8m",
-      ...label,
-      `--volume=${docPath}:${GUEST_DOC}:ro`,
-      "--",
-      image,
-      "node",
-      "-e",
-      SERVER_SOURCE
-    ]);
-    if (!run2.ok) {
-      throw new PreviewError(`could not start the preview container: ${run2.stderr.trim()}`);
-    }
-    const deadline = Date.now() + (req.readyTimeoutMs ?? 6e4);
-    let hostPort = null;
-    let token = null;
-    let lastDetail = "never answered";
-    const throwIfExited = () => {
-      const alive = docker(client, ["inspect", "--format", "{{.State.Running}}", container]);
-      if (alive.stdout.trim() !== "true") {
-        const logs = docker(client, ["logs", "--tail", "20", container]);
-        throw new PreviewError(`the preview container exited before serving: ${logs.stdout.trim()}${logs.stderr.trim()}`);
-      }
-    };
-    while (Date.now() < deadline) {
-      hostPort ??= readHostPort(client, container);
-      if (hostPort === null) {
-        throwIfExited();
-        lastDetail = "Docker never reported a published host port";
-        await sleep4(200);
-        continue;
-      }
-      token = await fetchInstanceToken(`http://${probeAuthority}:${String(hostPort)}/`, authToken);
-      if (token !== null)
-        break;
-      throwIfExited();
-      lastDetail = "the port is published but the server has not answered yet";
-      await sleep4(150);
-    }
-    if (hostPort === null || token === null) {
-      throw new PreviewError(`the preview URL never became reachable: ${lastDetail}`);
-    }
-    livePreviews.register(client, container);
-    installReaper();
-    const origin = `http://${probeAuthority}:${String(hostPort)}/`;
-    return {
-      url: `${origin}?token=${encodeURIComponent(authToken)}`,
-      origin,
-      authToken,
-      instanceToken: token,
-      container,
-      hostPort,
-      readyMs: Date.now() - startedAt,
-      teardown
-    };
-  } catch (err) {
-    teardown();
-    throw err;
-  }
-}
-function startLocalPreview(req) {
-  return startPreview({ ...req, docker: localDockerClient() });
-}
-var PreviewError, GUEST_PORT, GUEST_DOC, LOOPBACK_BINDS, WILDCARD_BINDS, SERVER_SOURCE, livePreviews, reaperInstalled, sleep4;
-var init_preview = __esm({
-  "../../packages/envrun/dist/preview.js"() {
-    "use strict";
-    init_dist();
-    init_previewRegistry();
-    PreviewError = class extends Error {
-    };
-    GUEST_PORT = 8080;
-    GUEST_DOC = "/preview/run.json";
-    LOOPBACK_BINDS = /* @__PURE__ */ new Set(["127.0.0.1", "localhost", "::1"]);
-    WILDCARD_BINDS = /* @__PURE__ */ new Set(["0.0.0.0", "::"]);
-    SERVER_SOURCE = `
-const http = require('node:http');
-const { readFileSync } = require('node:fs');
-const { randomUUID, timingSafeEqual } = require('node:crypto');
-
-// Read ONCE, at startup, and refuse to run without it. An unset token used to
-// skip the check entirely, which meant the one configuration nobody sets on
-// purpose was also the one that served a developer's in-progress work to
-// anything that could reach the port. Absent must never mean permitted \u2014 the
-// polarity requireSecret() holds in apps/web/lib/secrets.ts.
-const AUTH_TOKEN = process.env.PREVIEW_AUTH_TOKEN || '';
-if (AUTH_TOKEN === '') {
-  process.stderr.write(
-    'preview: refusing to start \u2014 PREVIEW_AUTH_TOKEN is unset, and this server will not ' +
-      'serve a run document unauthenticated\\n',
-  );
-  process.exit(1);
-}
-const EXPECTED = Buffer.from(AUTH_TOKEN, 'utf8');
-
-/** The token the client presented, or null. */
-function presented(req) {
-  const header = req.headers['authorization'];
-  const bearer = typeof header === 'string' ? /^Bearer\\s+(.+)$/i.exec(header) : null;
-  if (bearer !== null) return bearer[1];
-  // A non-Bearer Authorization header FALLS THROUGH to the query parameter. The
-  // earlier ternary branched on the header merely EXISTING, so a client sending
-  // "Basic \u2026" produced an empty string and could never authenticate at all.
-  //
-  // The query form stays because the founder opens this in a browser and a
-  // browser sends no Authorization header. That is the only reason it is
-  // accepted: a token in a URL lands in browser history, shell history and any
-  // proxy log on the way, where a header does not.
-  return new URL(req.url, 'http://localhost').searchParams.get('token');
-}
-
-function authorized(req) {
-  const given = presented(req);
-  if (typeof given !== 'string') return false;
-  const got = Buffer.from(given, 'utf8');
-  // timingSafeEqual THROWS on a length mismatch, so length is compared first and
-  // refused here. The length is not the secret; the bytes are.
-  if (got.length !== EXPECTED.length) return false;
-  return timingSafeEqual(got, EXPECTED);
-}
-
-// Per-INSTANCE, minted at boot. Not passed in, not derived from anything the
-// host controls \u2014 that is what makes "same token \u21D2 same instance" hold.
-const INSTANCE_TOKEN = randomUUID();
-const DOC = JSON.parse(readFileSync(${JSON.stringify(GUEST_DOC)}, 'utf8'));
-let served = 0;
-
-http
-  .createServer((req, res) => {
-    if (!authorized(req)) {
-      res.writeHead(401, { 'content-type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({ error: 'unauthorized' }));
-    }
-    served += 1;
-    const body = JSON.stringify(
-      {
-        instanceToken: INSTANCE_TOKEN,
-        servedCount: served,
-        pid: process.pid,
-        run: DOC,
-      },
-      null,
-      2,
-    );
-    res.writeHead(200, {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store',
-      'x-th-instance': INSTANCE_TOKEN,
-    });
-    res.end(body);
-  })
-  .listen(${String(GUEST_PORT)}, '0.0.0.0', () => {
-    console.log('preview-ready ' + INSTANCE_TOKEN);
-  });
-`;
-    livePreviews = createPreviewRegistry();
-    reaperInstalled = false;
-    sleep4 = (ms) => new Promise((r) => setTimeout(r, ms));
-  }
-});
-
-// ../../packages/envrun/dist/venue.js
-import { randomBytes as randomBytes11 } from "crypto";
-import { join as join23 } from "path";
-function localJailPaths(scratchRoot) {
-  return {
-    jail: join23(scratchRoot, JAIL_SEGMENT),
-    tmp: join23(scratchRoot, JAIL_TMP_SEGMENT)
-  };
-}
-function localVenue() {
-  return {
-    kind: "local",
-    acquire: (runId) => acquireTransactionally((allocated) => {
-      void allocated;
-      return Promise.resolve(acquireLocalLease(runId));
-    })
-  };
-}
-async function acquireTransactionally(body) {
-  const undos = [];
-  try {
-    return await body({
-      onRollback: (undo) => {
-        undos.push(undo);
-      }
-    });
-  } catch (err) {
-    const failures = [];
-    for (const undo of undos.reverse()) {
-      let failed = null;
-      try {
-        await undo();
-      } catch (rollbackErr) {
-        failed = { thrown: rollbackErr };
-      }
-      if (failed === null)
-        continue;
-      let entry;
-      try {
-        entry = describeThrown(failed.thrown, { includeName: true });
-      } catch {
-        entry = UNDESCRIBABLE_THROWN;
-      }
-      failures.push(entry);
-    }
-    if (failures.length > 0)
-      throw new VenueRollbackError(err, failures);
-    throw err;
-  }
-}
-function rollbackMessage(cause, rollbackFailures) {
-  const headline = describeThrown(cause, { includeName: false });
-  let tail2;
-  try {
-    tail2 = `[venue acquisition rolled back with ${String(rollbackFailures.length)} failure(s): ${rollbackFailures.join("; ")} \u2014 one or more allocated resources may still exist]`;
-  } catch {
-    tail2 = UNLISTABLE_ROLLBACK_FAILURES;
-  }
-  return `${headline} ${tail2}`;
-}
-function describeThrown(thrown, opts) {
-  try {
-    if (isErrorValue(thrown)) {
-      const message2 = readErrorField(thrown, "message", UNREADABLE_MESSAGE);
-      if (!opts.includeName)
-        return message2;
-      const name = readErrorField(thrown, "name", UNREADABLE_NAME);
-      return message2 === "" ? name : `${name}: ${message2}`;
-    }
-    return coerceToString(thrown);
-  } catch {
-    return UNDESCRIBABLE_THROWN;
-  }
-}
-function isErrorValue(thrown) {
-  try {
-    return thrown instanceof Error;
-  } catch {
-    return false;
-  }
-}
-function readErrorField(thrown, key, fallback) {
-  let raw;
-  try {
-    raw = thrown[key];
-  } catch {
-    return fallback;
-  }
-  return typeof raw === "string" ? raw : coerceToString(raw);
-}
-function coerceToString(thrown) {
-  try {
-    return String(thrown);
-  } catch {
-    return UNCOERCIBLE_THROWN;
-  }
-}
-function localTreeOwner(ids2 = hostIds()) {
-  if (ids2?.uid !== 0)
-    return void 0;
-  return localGuestUser(ids2) ?? void 0;
-}
-function handLocalTreeToGuest(local, owner, chown = chownTree) {
-  if (owner === void 0)
-    return;
-  chown(local.cloneDir, owner);
-  chown(local.scratchRoot, owner);
-}
-function localCloneVolumeName(runId, suffix = randomBytes11(4).toString("hex")) {
-  const tail2 = `-${suffix}`;
-  const safe = runId.replace(/[^a-zA-Z0-9_.-]/g, "-");
-  const head = `th-clone-${safe}`.slice(0, VOLUME_NAME_MAX2 - tail2.length);
-  return validateVolumeName(`${head}${tail2}`, "the local clone volume");
-}
-function localCloneFillArgv(from, volume, owner) {
-  const chown = owner === null ? "" : ` && chown -R ${String(owner.uid)}:${String(owner.gid)} /dst`;
-  return [
-    "run",
-    "--rm",
-    "--network=none",
-    `--volume=${from}:/src:ro`,
-    `--volume=${validateVolumeName(volume, "the local clone volume")}:/dst:rw`,
-    "--",
-    STAGE_HELPER_IMAGE,
-    "sh",
-    "-c",
-    `cp -a /src/. /dst/${chown}`
-  ];
-}
-function acquireLocalLease(runId) {
-  const docker3 = localDockerClient();
-  const containment = selectContainment([containerContainmentOn(docker3)]);
-  let released = false;
-  const stagedProxies = [];
-  const owner = localTreeOwner();
-  let cloneVolume;
-  const createdVolumes = [];
-  const fillCloneVolume = (cloneDir) => {
-    const name = localCloneVolumeName(runId);
-    const created = docker3.sync(["volume", "create", `--label=${STAGE_VOLUME_LABEL_KEY}=${runId}`, "--", name], { timeoutMs: LOCAL_VOLUME_CREATE_TIMEOUT_MS });
-    if (created.error || created.status !== 0) {
-      throw new ContainmentRefusalError(`could not create the clone volume ${name} on the local daemon: ${(created.error?.message ?? created.stderr).trim().slice(0, 300)}`);
-    }
-    createdVolumes.push(name);
-    const from = resolverFor("local")(cloneDir, "clone");
-    const filled = docker3.sync(localCloneFillArgv(from, name, localGuestUser()), {
-      timeoutMs: LOCAL_CLONE_FILL_TIMEOUT_MS
-    });
-    if (filled.error || filled.status !== 0) {
-      throw new ContainmentRefusalError(`could not copy the clone into its volume ${name}: ${(filled.error?.message ?? filled.stderr).trim().slice(0, 300)}`);
-    }
-    return name;
-  };
-  const lease = {
-    kind: "local",
-    runId,
-    containment,
-    docker: docker3,
-    // Stated, not inferred from `kind`. On this venue it is the truth twice over:
-    // the paths are on this machine AND `canonical()` is what should resolve
-    // them, which is the behaviour every local run has always had.
-    pathDomain: "local",
-    // Spread rather than `guestUser: owner`, so a non-root lease has no such key
-    // at all — the same object every local run has always had.
-    ...owner === void 0 ? {} : { guestUser: owner },
-    get released() {
-      return released;
-    },
-    get cloneVolume() {
-      return cloneVolume;
-    },
-    stage: (local) => {
-      if (released) {
-        return Promise.reject(new LeaseReleasedError("this lease was already released, so a clone volume made now would never be removed."));
-      }
-      try {
-        handLocalTreeToGuest(local, owner);
-        cloneVolume = fillCloneVolume(local.cloneDir);
-      } catch (err) {
-        return Promise.reject(err instanceof Error ? err : new Error(String(err)));
-      }
-      return Promise.resolve({
-        cloneDir: local.cloneDir,
-        scratchRoot: local.scratchRoot,
-        previewDir: local.previewDir,
-        ...localJailPaths(local.scratchRoot)
-      });
-    },
-    // The containment function verbatim, which is the point of the barrel
-    // re-export rather than a copy here: this venue's daemon and this process
-    // share a filesystem, so the directory it makes under `tmpdir()` is already
-    // venue-side and has been on every local run since the sidecar existed.
-    //
-    // TRACKED, so `release()` can be the guaranteed owner the interface
-    // promises. Returning a bare handle made that promise the CALLER's to keep,
-    // and a caller that staged and then failed outside `runEnvironmentSpec`'s
-    // `finally` left the directory behind while release reported success.
-    //
-    // REFUSING AFTER RELEASE is the other half of the same promise. Staging onto
-    // a drained list would leak with nothing left to drain, and `release()` has
-    // already reported it had nothing to do — the split ownership this tracking
-    // exists to close, reached from the other side.
-    //
-    // ONLY THIS ARM CHECKS IT. An earlier draft of this comment said the hosted
-    // arm refuses the same way through `check()`, and that is not what `check()`
-    // tests: `assertVenueUnchanged` reads the tunnel's failure and classifies
-    // the daemon, and never looks at `released`. Hosted refuses a post-release
-    // staging only incidentally, because by then the VM is gone. Naming the
-    // check and what it actually tests is the rule this branch spent its length
-    // on, and that draft broke it in the same breath as stating it.
-    //
-    // That leaves the two arms answering one programmer error with different
-    // exit codes — hosted's incidental failure is a `HostedVenueError` at 2,
-    // this one is a plain throw at 1. Recorded on TERM-752 rather than fixed
-    // here: it is unreachable while `placement.ts` refuses first.
-    //
-    // THE EXIT CODE IS WHY IT IS NOT A REFUSAL TYPE. Nothing catches it and
-    // `findRunRefusal` does not match it, so it reaches the top-level catch at
-    // exit 1 — correct, because only our own call ordering can reach this, which
-    // is `assertDomainDeclared`'s reasoning and the same one this branch applied
-    // to `assertProxyStagedForVenue`. Giving it `RunRefusalError` would dress
-    // our defect as a polite refusal, TERM-649's lie inverted.
-    //
-    // It is a NAMED subclass rather than a bare `Error` for a hazard already
-    // here, not a speculative one. `stageProxyCode()` in `containment` throws
-    // `FenceError` on a damaged install, telling the developer to reinstall the
-    // CLI. Two distinguishable failures leave this one call, so the day anyone
-    // adds a catch to surface that instruction, an unnamed ordering bug gets
-    // swept into it and tells a developer to reinstall over our mistake.
-    stageProxyCode: () => {
-      if (released) {
-        return Promise.reject(new LeaseReleasedError("this lease was already released, so a staging made now would never be removed: release() has run and drained what it was holding."));
-      }
-      const staged = stageProxyCode();
-      stagedProxies.push(staged);
-      return Promise.resolve(staged);
-    },
-    census: (label) => Promise.resolve(released ? {
-      observed: false,
-      census: { containers: [], volumes: [], networks: [] },
-      unobservedReason: RELEASED_LEASE_CENSUS_REASON
-    } : censusReport(docker3, label)),
-    publishPreview: (req) => startPreview({ ...req, docker: docker3 }),
-    release: () => {
-      if (released) {
-        return Promise.resolve({
-          kind: "local",
-          released: false,
-          alreadyReleased: true,
-          error: null,
-          detail: "already released; nothing to do"
-        });
-      }
-      released = true;
-      const staged = stagedProxies.splice(0, stagedProxies.length);
-      for (const s of staged)
-        s.cleanup();
-      const volumeFailures = [];
-      for (const name of createdVolumes.splice(0, createdVolumes.length)) {
-        const removed = docker3.sync(["volume", "rm", "-f", "--", name], {
-          timeoutMs: LOCAL_VOLUME_CREATE_TIMEOUT_MS
-        });
-        if (removed.error || removed.status !== 0) {
-          volumeFailures.push(`${name}: ${(removed.error?.message ?? removed.stderr).trim().slice(0, 200)}`);
-        }
-      }
-      cloneVolume = void 0;
-      if (volumeFailures.length > 0) {
-        return Promise.resolve({
-          kind: "local",
-          released: true,
-          alreadyReleased: false,
-          error: `could not remove the clone volume: ${volumeFailures.join("; ")}`,
-          detail: `the lease is closed, but a clone volume remains (label ${STAGE_VOLUME_LABEL_KEY})`
-        });
-      }
-      return Promise.resolve({
-        kind: "local",
-        released: true,
-        alreadyReleased: false,
-        error: null,
-        detail: "the local venue owns no host resources; the lease is closed"
-      });
-    }
-  };
-  return lease;
-}
-var VenueRollbackError, UNREADABLE_MESSAGE, UNREADABLE_NAME, UNCOERCIBLE_THROWN, UNDESCRIBABLE_THROWN, UNLISTABLE_ROLLBACK_FAILURES, RELEASED_LEASE_CENSUS_REASON, LeaseReleasedError, STAGE_HELPER_IMAGE, STAGE_VOLUME_LABEL_KEY, VOLUME_NAME_MAX2, LOCAL_VOLUME_CREATE_TIMEOUT_MS, LOCAL_CLONE_FILL_TIMEOUT_MS;
-var init_venue = __esm({
-  "../../packages/envrun/dist/venue.js"() {
-    "use strict";
-    init_dist();
-    init_labels();
-    init_preview();
-    VenueRollbackError = class extends Error {
-      /** Every undo that threw, in the order they ran (reverse allocation order). */
-      rollbackFailures;
-      constructor(cause, rollbackFailures) {
-        super(rollbackMessage(cause, rollbackFailures), { cause });
-        this.name = "VenueRollbackError";
-        this.rollbackFailures = rollbackFailures;
-      }
-    };
-    UNREADABLE_MESSAGE = "<an error whose message could not be read>";
-    UNREADABLE_NAME = "<an error whose name could not be read>";
-    UNCOERCIBLE_THROWN = "<a thrown value that cannot be converted to a string>";
-    UNDESCRIBABLE_THROWN = "<a thrown value that could not be described>";
-    UNLISTABLE_ROLLBACK_FAILURES = "[venue acquisition rolled back, and the failures could not be listed \u2014 one or more allocated resources may still exist]";
-    RELEASED_LEASE_CENSUS_REASON = "the lease was already released, so this venue can no longer be interrogated";
-    LeaseReleasedError = class extends Error {
-      name = "LeaseReleasedError";
-    };
-    STAGE_HELPER_IMAGE = "busybox:1.37.0";
-    STAGE_VOLUME_LABEL_KEY = "terminalhire.stage";
-    VOLUME_NAME_MAX2 = 128;
-    LOCAL_VOLUME_CREATE_TIMEOUT_MS = 3e4;
-    LOCAL_CLONE_FILL_TIMEOUT_MS = 6e5;
   }
 });
 
@@ -30470,6 +30837,7 @@ async function runEnvironmentSpec(req) {
   let install = null;
   let test = null;
   let imageDigest = null;
+  let scriptTimes = null;
   let result;
   let proxyCode = null;
   try {
@@ -30497,6 +30865,7 @@ async function runEnvironmentSpec(req) {
         labels,
         timeoutMs: req.installTimeoutMs ?? 9e5
       });
+      req.log?.(`step install took ${(install.wallMs / 1e3).toFixed(1)}s`);
     }
     if (install !== null && install.exitCode !== 0) {
       result = {
@@ -30516,28 +30885,65 @@ async function runEnvironmentSpec(req) {
     } else {
       imageDigest = inspectRunDigest(req.lease.docker, image, req.log ?? (() => {
       }));
-      test = await runStep(containment, {
-        step: "test",
-        profile: "offline",
-        command: req.spec.testCommand,
-        repoDir: req.repoDir,
-        jail,
-        tmp,
-        pathDomain: req.lease.pathDomain,
-        // TERM-729: travels WITH pathDomain, because it answers the same
-        // question about the same machine. Undefined on a local lease.
-        guestUser: req.lease.guestUser,
-        // TERM-913: the third answer about that machine — which volumes the
-        // fence mounts in place of the noexec stage. Undefined on a local lease.
-        stageVolumes: req.lease.stageVolumes,
-        // TERM-1106: the local venue's copy of the clone. Undefined on a hosted lease.
-        cloneVolume: req.lease.cloneVolume,
-        env: testStepEnv(env, req.spec.runtime),
-        image: imageDigest ?? image,
-        labels,
-        timeoutMs: req.testTimeoutMs ?? 9e5
+      const scriptTimesCollector = createNpmScriptTimesCollector();
+      const started = req.lease.pathDomain === "venue" ? await startStorageWatch(req.lease.docker, labels) : null;
+      let coverageFailure = typeof started === "string" ? started : null;
+      const storageWatch = typeof started === "string" ? null : started;
+      let watched = null;
+      try {
+        test = await runStep(containment, {
+          step: "test",
+          profile: "offline",
+          command: req.spec.testCommand,
+          repoDir: req.repoDir,
+          jail,
+          tmp,
+          pathDomain: req.lease.pathDomain,
+          // TERM-729: travels WITH pathDomain, because it answers the same
+          // question about the same machine. Undefined on a local lease.
+          guestUser: req.lease.guestUser,
+          // TERM-913: the third answer about that machine — which volumes the
+          // fence mounts in place of the noexec stage. Undefined on a local lease.
+          stageVolumes: req.lease.stageVolumes,
+          // TERM-1106: the local venue's copy of the clone. Undefined on a hosted lease.
+          cloneVolume: req.lease.cloneVolume,
+          env: testStepEnv(env, req.spec.runtime),
+          image: imageDigest ?? image,
+          labels,
+          timeoutMs: req.testTimeoutMs ?? 9e5,
+          onStdout: scriptTimesCollector.onStdout
+        });
+      } finally {
+        if (storageWatch !== null)
+          watched = await storageWatch.stop();
+      }
+      req.log?.(`step test took ${(test.wallMs / 1e3).toFixed(1)}s`);
+      scriptTimes = scriptTimesCollector.finish({ timedOut: test.timedOut });
+      let venueExhausted;
+      if (watched !== null) {
+        const reading = judgeStorageWatch(watched);
+        req.log?.(describeStorageWatch(reading));
+        if (watched.stopProblem !== null)
+          req.log?.(`storage watch detail: ${watched.stopProblem}`);
+        if (reading.ok) {
+          venueExhausted = venueExhaustionFrom(reading.minFreeMiB, test.stdout, test.stderr);
+        } else {
+          coverageFailure = reading.reason;
+        }
+      }
+      if (coverageFailure !== null) {
+        if (outputNamesNoSpace(test.stdout, test.stderr)) {
+          throw new RunRefusalError(`${coverageFailure}. The test output names ENOSPC, and without dense samples of the venue's layer storage a full tmpfs could read as the repo's tests failing, so we refuse rather than classify.`);
+        }
+        req.log?.("storage watch: coverage incomplete; the output names no ENOSPC, so the verdict stands");
+        req.log?.(`storage watch detail: ${coverageFailure}`);
+        venueExhausted = null;
+      }
+      const verdict = classifyVerification({
+        ...toExecution(test),
+        runtime: req.spec.runtime,
+        ...venueExhausted === void 0 ? {} : { venueExhausted }
       });
-      const verdict = classifyVerification({ ...toExecution(test), runtime: req.spec.runtime });
       result = {
         outcome: verdict.outcome,
         note: verdict.reason,
@@ -30571,7 +30977,8 @@ async function runEnvironmentSpec(req) {
     counts: reportedCounts(result.counts, test ? readCounts(test.stdout, test.stderr) : null),
     leaks: judgeLeaks(peak, after, observation),
     note: result.note,
-    wallMs: Date.now() - startedAt
+    wallMs: Date.now() - startedAt,
+    scriptTimes
   };
 }
 function labelSelector(labels) {
@@ -30606,7 +31013,10 @@ async function runStep(containment, r) {
     timeoutMs: r.timeoutMs,
     image: r.image,
     ...r.labels ? { labels: r.labels } : {},
-    ...r.proxyCode ? { proxyCode: r.proxyCode } : {}
+    ...r.proxyCode ? { proxyCode: r.proxyCode } : {},
+    ...r.runtime === void 0 ? {} : { runtime: r.runtime },
+    ...r.networkOf === void 0 ? {} : { networkOf: r.networkOf },
+    ...r.onStdout ? { onStdout: r.onStdout } : {}
   });
   return {
     step: r.step,
@@ -30627,8 +31037,10 @@ var init_execute = __esm({
     "use strict";
     init_dist();
     init_classify2();
+    init_venueStorageWatch();
     init_attestation2();
     init_labels();
+    init_npmScriptTimes();
     init_venue();
     EnvRunError = class extends Error {
     };
@@ -31050,7 +31462,8 @@ var init_result = __esm({
       "venue",
       "refusalOrigin",
       "stoppedAt",
-      "installFrozen"
+      "installFrozen",
+      "scriptTimes"
     ];
     RENDER_NONE = null;
     FIELD_VIEWS = {
@@ -31118,7 +31531,10 @@ var init_result = __esm({
       stoppedAt: (r) => r.stoppedAt === null || r.outcome === "completed" ? null : `last step    ${r.stoppedAt} (the last package script named in the output)`,
       // The run already prints the unfrozen note while it runs (`installUnfrozenNote`); this is
       // the record of it for the worker and the intake.
-      installFrozen: RENDER_NONE
+      installFrozen: RENDER_NONE,
+      // For the worker and the baseline intake, not the terminal (TERM-1351 PR2) —
+      // the same reasoning as `refusalOrigin` and `installFrozen` above.
+      scriptTimes: RENDER_NONE
     };
   }
 });
@@ -31132,6 +31548,23 @@ function fail2(detail) {
 }
 function tarballBasename(name) {
   return name.startsWith("@") ? name.slice(name.indexOf("/") + 1) : name;
+}
+function plainRange(name, range, manager) {
+  const archive = manager === "npm" ? /[.](?:tgz|tar\.gz|tar)$/i.test(range) : range.endsWith(".tgz") || range.endsWith(".tar.gz");
+  return PACKAGE_NAME.test(name) && !/[:/#\\]/.test(range) && !range.startsWith(".") && !archive;
+}
+function registryRange(name, range, manager) {
+  if (!range.startsWith("npm:"))
+    return plainRange(name, range, manager);
+  const target = range.slice("npm:".length);
+  const at = target.lastIndexOf("@");
+  return PACKAGE_NAME.test(name) && at > 0 && plainRange(target.slice(0, at), target.slice(at + 1), manager);
+}
+function notPlainRange(label, path5, dependency) {
+  return PACKAGE_NAME.test(dependency) ? `\`${label}\` in ${path5} depends on ${dependency} through a range that is not a plain version range from the registry, so the change is refused.` : `\`${label}\` in ${path5} depends on a package whose name we could not read, so the change is refused.`;
+}
+function noOwnEntry(label, path5, dependency) {
+  return `\`${label}\` in ${path5} depends on ${dependency}, which has no entry of its own in the lockfile, so where it installs from could not be checked.`;
 }
 function resolvedProblem(label, path5, name, version, resolved) {
   if (typeof resolved !== "string") {
@@ -31228,7 +31661,7 @@ function checkNpm({ path: path5, base, post }) {
       }
       continue;
     }
-    const problem = npmPackageProblem(path5, key, entry);
+    const problem = npmPackageProblem(path5, key, entry, afterPackages);
     if (problem !== null)
       return fail2(problem);
   }
@@ -31240,7 +31673,7 @@ function checkNpm({ path: path5, base, post }) {
   }
   return { ok: true, judged };
 }
-function npmPackageProblem(path5, key, entry) {
+function npmPackageProblem(path5, key, entry, packages) {
   const match2 = NPM_INSTALL_KEY.exec(key);
   const name = match2?.[1];
   if (name === void 0 || !PACKAGE_NAME.test(name)) {
@@ -31260,12 +31693,62 @@ function npmPackageProblem(path5, key, entry) {
     return `${path5} records "${name}" with no published version we can check.`;
   }
   const label = `${name}@${version}`;
-  return resolvedProblem(label, path5, name, version, entry["resolved"]) ?? integrityProblem(label, path5, entry["integrity"], false);
+  if (entry["hasShrinkwrap"] !== void 0 || entry["_hasShrinkwrap"] !== void 0) {
+    return `\`${label}\` in ${path5} carries a lockfile of its own, whose entries this check cannot read, so the change is refused.`;
+  }
+  return resolvedProblem(label, path5, name, version, entry["resolved"]) ?? integrityProblem(label, path5, entry["integrity"], false) ?? npmEdgesProblem(path5, key, label, entry, packages);
+}
+function npmEdgesProblem(path5, key, label, entry, packages) {
+  for (const field of ["dependencies", "optionalDependencies", "peerDependencies"]) {
+    const map = entry[field];
+    if (map === void 0)
+      continue;
+    const unreadable = `\`${label}\` in ${path5} has a "${field}" list we could not read, so the change is refused.`;
+    if (!isObject(map))
+      return unreadable;
+    for (const [dependency, range] of Object.entries(map)) {
+      if (typeof range !== "string")
+        return unreadable;
+      if (!registryRange(dependency, range, "npm")) {
+        return notPlainRange(label, path5, dependency);
+      }
+      if (field === "dependencies" && !npmResolves(packages, key, dependency)) {
+        return noOwnEntry(label, path5, dependency);
+      }
+    }
+  }
+  return null;
+}
+function npmResolves(packages, key, dependency) {
+  const has2 = (k) => Object.prototype.hasOwnProperty.call(packages, k);
+  let scope = key;
+  for (; ; ) {
+    if (has2(`${scope}/node_modules/${dependency}`))
+      return true;
+    const cut = scope.lastIndexOf("/node_modules/");
+    if (cut < 0)
+      return has2(`node_modules/${dependency}`);
+    scope = scope.slice(0, cut);
+  }
 }
 function withoutNested(entry) {
   const copy = { ...entry };
   delete copy["dependencies"];
   return copy;
+}
+function npmRequiresProblem(path5, label, requires) {
+  if (requires === void 0)
+    return null;
+  const unreadable = `\`${label}\` in ${path5} has a "requires" list we could not read, so the change is refused.`;
+  if (!isObject(requires))
+    return unreadable;
+  for (const [dependency, range] of Object.entries(requires)) {
+    if (typeof range !== "string")
+      return unreadable;
+    if (!registryRange(dependency, range, "npm"))
+      return notPlainRange(label, path5, dependency);
+  }
+  return null;
 }
 function npmLegacyProblem(path5, before, after) {
   if (!isObject(after))
@@ -31287,7 +31770,7 @@ function npmLegacyProblem(path5, before, after) {
         return `${path5} records "${name}" with no published version we can check.`;
       }
       const label = `${name}@${version}`;
-      const problem = resolvedProblem(label, path5, name, version, entry["resolved"]) ?? integrityProblem(label, path5, entry["integrity"], false);
+      const problem = resolvedProblem(label, path5, name, version, entry["resolved"]) ?? integrityProblem(label, path5, entry["integrity"], false) ?? npmRequiresProblem(path5, label, entry["requires"]);
       if (problem !== null)
         return problem;
     }
@@ -31358,13 +31841,14 @@ function parseYarn(path5, text, when) {
   let header = null;
   let block = [];
   let fields = /* @__PURE__ */ new Map();
+  let dependencies = [];
   let inMap = false;
   const close = () => {
     if (header === null)
       return null;
     if (entries.has(header))
       return `${path5} ${when} lists the entry ${header} twice.`;
-    entries.set(header, { raw: block.join("\n"), fields });
+    entries.set(header, { raw: block.join("\n"), fields, dependencies });
     header = null;
     return null;
   };
@@ -31388,6 +31872,7 @@ function parseYarn(path5, text, when) {
       header = line.slice(0, -1);
       block = [line];
       fields = /* @__PURE__ */ new Map();
+      dependencies = [];
       inMap = false;
       continue;
     }
@@ -31395,8 +31880,10 @@ function parseYarn(path5, text, when) {
       return { problem: unreadable };
     block.push(line);
     if (line.startsWith("    ")) {
-      if (!inMap || mapLine(line.slice(4)) === null)
+      const pair = inMap ? mapLine(line.slice(4)) : null;
+      if (pair === null)
         return { problem: unreadable };
+      dependencies.push({ name: pair.key, range: pair.value });
       continue;
     }
     const field = /^ {2}([A-Za-z]+)(?: (.+)|:)$/.exec(line);
@@ -31432,7 +31919,7 @@ function headerName(header) {
       return null;
     const candidate = spec.slice(0, at);
     const range = spec.slice(at + 1);
-    if (!PACKAGE_NAME.test(candidate) || /[:/#\\]/.test(range))
+    if (!plainRange(candidate, range, "yarn"))
       return null;
     if (name !== null && name !== candidate)
       return null;
@@ -31447,6 +31934,14 @@ function checkYarn({ path: path5, base, post }) {
   const after = parseYarn(path5, post, "after the change");
   if ("problem" in after)
     return fail2(after.problem);
+  const claims = /* @__PURE__ */ new Map();
+  for (const header of after.entries.keys()) {
+    for (const part of header.split(", ")) {
+      const spec = unquote(part);
+      if (spec !== null)
+        claims.set(spec, (claims.get(spec) ?? 0) + 1);
+    }
+  }
   let judged = 0;
   for (const [header, entry] of after.entries) {
     if (before.entries.get(header)?.raw === entry.raw)
@@ -31467,6 +31962,18 @@ function checkYarn({ path: path5, base, post }) {
     const problem = resolvedProblem(label, path5, name, version, url) ?? integrityProblem(label, path5, entry.fields.get("integrity"), fragment !== null);
     if (problem !== null)
       return fail2(problem);
+    for (const dependency of entry.dependencies) {
+      if (!registryRange(dependency.name, dependency.range, "yarn")) {
+        return fail2(notPlainRange(label, path5, dependency.name));
+      }
+      const spec = `${dependency.name}@${dependency.range}`;
+      const count = claims.get(spec) ?? 0;
+      if (count === 0)
+        return fail2(noOwnEntry(label, path5, spec));
+      if (count > 1) {
+        return fail2(`\`${label}\` in ${path5} depends on ${spec}, which more than one entry in the lockfile claims, so which one installs could not be checked.`);
+      }
+    }
   }
   return { ok: true, judged };
 }
@@ -36637,6 +37144,7 @@ var init_dist3 = __esm({
 });
 
 // ../../packages/envrun/dist/screenshots.js
+import { randomBytes as randomBytes12 } from "crypto";
 import { copyFileSync as copyFileSync4, mkdirSync as mkdirSync6 } from "fs";
 import { join as join27 } from "path";
 function tooBigNote(items) {
@@ -36893,10 +37401,31 @@ async function captureSide(ctx, deps, side, tree, plan, image, code, routes) {
   const appLabel = `${ctx.runId}-${side}`;
   const findApp = () => lease.docker.sync(["ps", "-aq", "--filter", `label=terminalhire.capture-app=${appLabel}`], syncOpts(ctx)).stdout.trim().split("\n")[0] || null;
   const labels = { ...ctx.labels ?? {}, "terminalhire.capture-app": appLabel };
-  ctx.progress?.("screenshots", `${side}: ${plan.serveCommand}`);
-  const serving = step("serve", "offline", plan.serveCommand, captureTimeout(ctx, SCREENSHOT_LIMITS.waitForPortMs + SCREENSHOT_LIMITS.captureTimeoutMs), { labels }).catch(() => null);
+  const holder = `th-netns-${ctx.runId}-${side}-${randomBytes12(4).toString("hex")}`;
+  const removeHolder = () => {
+    try {
+      lease.docker.sync(["rm", "--force", holder], { timeoutMs: HOLDER_REMOVE_TIMEOUT_MS });
+    } catch {
+    }
+  };
+  let serving = Promise.resolve();
   let appId = null;
   try {
+    const held = lease.docker.sync(netnsHolderArgs({ name: holder, image, labels: ctx.labels }), syncOpts(ctx));
+    if (held.status !== 0) {
+      return skip(`could not start the screenshot network holder: ${(held.stderr || held.stdout).trim().slice(-300)}`);
+    }
+    ctx.progress?.("screenshots", `${side}: ${plan.serveCommand}`);
+    serving = step(
+      "serve",
+      "offline",
+      plan.serveCommand,
+      captureTimeout(ctx, SCREENSHOT_LIMITS.waitForPortMs + SCREENSHOT_LIMITS.captureTimeoutMs),
+      // runc, the one step that names a runtime (TERM-1336, design D2): the capture
+      // shares this container's network namespace and probes `localhost`, which under
+      // gVisor stays inside the app's own sandbox. `captureArgs` pins the capture.
+      { labels, runtime: "runc", networkOf: holder }
+    ).catch(() => null);
     for (let i = 0; i < 60 && appId === null; i++) {
       appId = findApp();
       if (appId === null)
@@ -36910,7 +37439,7 @@ async function captureSide(ctx, deps, side, tree, plan, image, code, routes) {
       image,
       name: `th-capture-${ctx.runId}-${side}-srv`,
       site: null,
-      network: { container: appId },
+      network: { container: holder },
       code,
       out: await outTo(serverOut, `capout-${side}-srv`),
       request: { mode: "server", routes, waitForPortMs: SCREENSHOT_LIMITS.waitForPortMs },
@@ -36922,10 +37451,14 @@ async function captureSide(ctx, deps, side, tree, plan, image, code, routes) {
       return skip(served.reason ?? "the serve script produced no screenshot");
     return done(side, served, serverOut);
   } finally {
-    const app = appId ?? findApp();
-    if (app !== null)
-      lease.docker.sync(["rm", "--force", app], syncOpts(ctx));
-    await serving;
+    try {
+      const app = appId ?? findApp();
+      if (app !== null)
+        lease.docker.sync(["rm", "--force", app], syncOpts(ctx));
+    } finally {
+      removeHolder();
+      await serving;
+    }
   }
 }
 function screenshotDeadline(lease, o, now = Date.now()) {
@@ -37054,7 +37587,7 @@ function syncOpts(ctx) {
 function message(err) {
   return String(err?.message ?? err).slice(0, 500);
 }
-var SCREENSHOT_LIMITS, GUARDED_CAPTURE_CAP_MS, SCREENSHOT_UPLOAD_MAX_BYTES, UPLOAD_CAP_TEXT, NOTE_MAX, BUILD_MARKER, realDeps, HOSTED_BEFORE_REASON, SCREENSHOT_BUDGET_MS, HOSTED_SCREENSHOT_BUDGET_MS, DEFERRED_SCREENSHOT_BUDGET_MS, SCREENSHOT_DRAIN_MS, SCREENSHOTS_ABANDONED, RENDERED_EXTENSIONS, RENDERED_DIRS;
+var SCREENSHOT_LIMITS, GUARDED_CAPTURE_CAP_MS, SCREENSHOT_UPLOAD_MAX_BYTES, UPLOAD_CAP_TEXT, NOTE_MAX, BUILD_MARKER, realDeps, HOLDER_REMOVE_TIMEOUT_MS, HOSTED_BEFORE_REASON, SCREENSHOT_BUDGET_MS, HOSTED_SCREENSHOT_BUDGET_MS, DEFERRED_SCREENSHOT_BUDGET_MS, SCREENSHOT_DRAIN_MS, SCREENSHOTS_ABANDONED, RENDERED_EXTENSIONS, RENDERED_DIRS;
 var init_screenshots = __esm({
   "../../packages/envrun/dist/screenshots.js"() {
     "use strict";
@@ -37089,6 +37622,7 @@ var init_screenshots = __esm({
       mkdir: (dir) => mkdirSync6(dir, { recursive: true, mode: 511 }),
       env: (tree) => scrubEnv(process.env, scrubEnvPathsFor("container", { jail: tree.jail, tmp: tree.tmp }))
     };
+    HOLDER_REMOVE_TIMEOUT_MS = 3e4;
     HOSTED_BEFORE_REASON = "before side not captured on hosted runs yet";
     SCREENSHOT_BUDGET_MS = 3e5;
     HOSTED_SCREENSHOT_BUDGET_MS = 36e4;
@@ -37689,7 +38223,9 @@ function refusedRun(fields) {
     // No test step ran, so there is no output to read a step from.
     stoppedAt: null,
     // Refused before any install step ran.
-    installFrozen: null
+    installFrozen: null,
+    // No test step ran, so there is nothing to have timed (TERM-1351 PR2).
+    scriptTimes: null
   };
 }
 function refusalOriginOf(refusal2) {
@@ -38165,7 +38701,11 @@ async function runVerification(req, ctx) {
       refusalOrigin: null,
       // Read from the full test output, not `outputTail`, which is an excerpt.
       stoppedAt: readStoppedAt(verdict.test?.stdout ?? "", verdict.test?.stderr ?? ""),
-      installFrozen: installFrozenFor(spec, verdict.install)
+      installFrozen: installFrozenFor(spec, verdict.install),
+      // Copied through, not re-derived (TERM-1351 PR2): unlike `stoppedAt` above, which
+      // reads the full output after the fact, this was computed DURING the run from the
+      // fence's own `onStdout` relay, and `verdict` already carries the finished value.
+      scriptTimes: verdict.scriptTimes
     };
     let later = null;
     if (req.screenshots !== void 0) {
@@ -38626,7 +39166,7 @@ var init_dbplan = __esm({
 
 // ../../packages/envrun/dist/dbstack.js
 import { spawnSync as spawnSync7 } from "child_process";
-import { randomBytes as randomBytes12 } from "crypto";
+import { randomBytes as randomBytes13 } from "crypto";
 import { mkdirSync as mkdirSync9 } from "fs";
 function installCommandFor(runner) {
   switch (runner) {
@@ -38662,7 +39202,7 @@ function docker2(args, timeoutMs = DOCKER_TIMEOUT_MS2) {
 function generateCredentials(host) {
   return {
     user: "thverify",
-    password: randomBytes12(24).toString("base64url"),
+    password: randomBytes13(24).toString("base64url"),
     database: "thverify",
     host,
     port: 5432
@@ -39266,10 +39806,12 @@ __export(dist_exports, {
   GOOGLE_JWKS_URL: () => GOOGLE_JWKS_URL,
   HostedVenueError: () => HostedVenueError,
   JWKS_FETCH_TIMEOUT_MS: () => JWKS_FETCH_TIMEOUT_MS,
+  LAYER_STORAGE_BAND_MIB: () => LAYER_STORAGE_BAND_MIB,
   LEAK_STATES: () => LEAK_STATES,
   LIMIT_OWNER: () => LIMIT_OWNER,
   LOCAL_MEASUREMENT_PREFIX: () => LOCAL_MEASUREMENT_PREFIX,
   LabelWatch: () => LabelWatch,
+  MAX_NPM_SCRIPT_MARKERS: () => MAX_NPM_SCRIPT_MARKERS,
   MIN_GIT_VERSION_FOR_END_OF_OPTIONS: () => MIN_GIT_VERSION_FOR_END_OF_OPTIONS,
   OUTCOME_TO_BUDGET: () => OUTCOME_TO_BUDGET,
   PARTIAL_COUNTS_NOTE: () => PARTIAL_COUNTS_NOTE,
@@ -39297,6 +39839,7 @@ __export(dist_exports, {
   SSH_PROBE_INTERVAL_MS: () => SSH_PROBE_INTERVAL_MS,
   SSH_READY_BUDGET_MS: () => SSH_READY_BUDGET_MS,
   STOCK_POSTGRES_IMAGE: () => STOCK_POSTGRES_IMAGE,
+  STORAGE_WATCH_MAX_GAP_MS: () => STORAGE_WATCH_MAX_GAP_MS,
   SUPPORTED_RUNNERS: () => SUPPORTED_RUNNERS,
   ThRunError: () => ThRunError,
   UNPARSEABLE_TARGET: () => UNPARSEABLE_TARGET,
@@ -39329,6 +39872,7 @@ __export(dist_exports, {
   collectWorkingDiff: () => collectWorkingDiff,
   connectionUrl: () => connectionUrl,
   containmentUnavailableRefusal: () => containmentUnavailableRefusal,
+  createNpmScriptTimesCollector: () => createNpmScriptTimesCollector,
   credentialInGitUrl: () => credentialInGitUrl,
   defaultHostedVenueIo: () => defaultHostedVenueIo,
   deleteFoundNothing: () => deleteFoundNothing,
@@ -39385,6 +39929,7 @@ __export(dist_exports, {
   readCounts: () => readCounts,
   readSchema: () => readSchema,
   readStoppedAt: () => readStoppedAt,
+  readStorageWatch: () => readStorageWatch,
   recordedApplied: () => recordedApplied,
   refuseSshTransport: () => refuseSshTransport,
   refuseUnbuildableSpec: () => refuseUnbuildableSpec,
@@ -39404,11 +39949,13 @@ __export(dist_exports, {
   startDatabase: () => startDatabase,
   startLocalPreview: () => startLocalPreview,
   startPreview: () => startPreview,
+  stepNameOf: () => stepNameOf,
   supportedLockfile: () => supportedLockfile,
   targetCarriesCredential: () => targetCarriesCredential,
   toAcceptancePredicate: () => toAcceptancePredicate,
   toolingImageFor: () => toolingImageFor,
   unquoteDiffPath: () => unquoteDiffPath,
+  venueExhaustionFrom: () => venueExhaustionFrom,
   venueGcloudEnv: () => venueGcloudEnv,
   venueImageFromEnv: () => venueImageFromEnv,
   venueStagePaths: () => venueStagePaths,
@@ -39418,6 +39965,8 @@ var init_dist4 = __esm({
   "../../packages/envrun/dist/index.js"() {
     "use strict";
     init_classify2();
+    init_venueStorageWatch();
+    init_npmScriptTimes();
     init_execute();
     init_labels();
     init_result();
@@ -40582,6 +41131,19 @@ var BASELINE_STATUSES = /* @__PURE__ */ new Set([
 ]);
 var MIN_TEST_BUDGET_MINUTES = 5;
 var MAX_TEST_BUDGET_MINUTES = 120;
+var FIRST_TEST_RUN_STATES = /* @__PURE__ */ new Set(["running", "passed", "failed", "could-not-run", "none"]);
+function wellFormedFirstTestRun(v) {
+  if (typeof v !== "object" || v === null) return null;
+  if (typeof v.state !== "string" || !FIRST_TEST_RUN_STATES.has(v.state)) return null;
+  if (v.counts === void 0) return { state: v.state };
+  if (v.counts === null) return { state: v.state, counts: null };
+  const c = v.counts;
+  if (typeof c !== "object" || c === null) return null;
+  if (!Number.isInteger(c.passed) || c.passed < 0) return null;
+  if (!Number.isInteger(c.failed) || c.failed < 0) return null;
+  if (c.runner !== null && typeof c.runner !== "string") return null;
+  return { state: v.state, counts: { passed: c.passed, failed: c.failed, runner: c.runner } };
+}
 function baselineFields(b) {
   const out = {};
   const m = b?.testBudgetMinutes;
@@ -40594,7 +41156,26 @@ function baselineFields(b) {
   if (typeof b?.baselineSha === "string" && /^[0-9a-f]{7,40}$/.test(b.baselineSha)) {
     out.baselineSha = b.baselineSha;
   }
+  const ftr = wellFormedFirstTestRun(b?.firstTestRun);
+  if (ftr !== null) out.firstTestRun = ftr;
   return out;
+}
+function firstTestRunLabel(info) {
+  const counts = info?.counts ?? null;
+  switch (info?.state) {
+    case "none":
+      return null;
+    case "running":
+      return "First test run on the posted commit: running.";
+    case "passed":
+      return counts === null ? "First test run on the posted commit: passed." : `${counts.passed} of ${counts.passed + counts.failed} tests passed on the posted commit.`;
+    case "failed":
+      return counts === null ? "Some tests failed on the posted commit." : `${counts.failed} of ${counts.passed + counts.failed} tests failed on the posted commit.`;
+    case "could-not-run":
+      return "First test run on the posted commit: could not run.";
+    default:
+      return null;
+  }
 }
 function baselineLine({ baselineStatus, baselineSha, testBudgetMinutes } = {}) {
   const at = typeof baselineSha === "string" ? ` at ${baselineSha.slice(0, 12)}` : "";
@@ -41298,7 +41879,7 @@ async function resolveBounty(arg) {
     if (freshPool) job = findByShortRefInPool(freshPool, arg);
   }
   if (job) {
-    let testBudgetMinutes, baselineStatus, baselineSha, reviewMode;
+    let testBudgetMinutes, baselineStatus, baselineSha, reviewMode, firstTestRun;
     ({
       bountyId,
       title,
@@ -41313,14 +41894,17 @@ async function resolveBounty(arg) {
       testBudgetMinutes,
       baselineStatus,
       baselineSha,
-      reviewMode
+      reviewMode,
+      firstTestRun
     } = extractClaimableFields(job));
     baseline = {
       ...testBudgetMinutes === void 0 ? {} : { testBudgetMinutes },
       ...baselineStatus === void 0 ? {} : { baselineStatus },
       ...baselineSha === void 0 ? {} : { baselineSha },
       // TERM-1344. Rides with the baseline fields: index-only, and no key when absent.
-      ...reviewMode === void 0 ? {} : { reviewMode }
+      ...reviewMode === void 0 ? {} : { reviewMode },
+      // TERM-1351 PR2. Same convention: index-only, no key when absent or malformed.
+      ...firstTestRun === void 0 ? {} : { firstTestRun }
     };
     indexNativeId = bountyId;
   } else {
@@ -44256,7 +44840,9 @@ function sectionKey(pkg, section) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return JSON.stringify(value ?? null);
   }
-  return JSON.stringify(Object.keys(value).sort().map((k) => [k, value[k]]));
+  return JSON.stringify(
+    Object.keys(value).sort().map((k) => [k, value[k]])
+  );
 }
 async function patchChangesDependencies(wt, base, touched) {
   for (const path5 of touched) {
@@ -44264,7 +44850,8 @@ async function patchChangesDependencies(wt, base, touched) {
     const before = await packageJsonAt(wt, base, path5);
     const after = await packageJsonAt(wt, "HEAD", path5);
     if (before === null || after === null) continue;
-    if (DEPENDENCY_SECTIONS2.some((s) => sectionKey(before, s) !== sectionKey(after, s))) return true;
+    if (DEPENDENCY_SECTIONS2.some((s) => sectionKey(before, s) !== sectionKey(after, s)))
+      return true;
   }
   return false;
 }
@@ -45926,6 +46513,7 @@ export {
   fetchFounderApprovals,
   findClaimableByShortRef,
   findClaimableInCache,
+  firstTestRunLabel,
   fmtAge,
   fmtContestedWarning,
   founderClaimStanding,
