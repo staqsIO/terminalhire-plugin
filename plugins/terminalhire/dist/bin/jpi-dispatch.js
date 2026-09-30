@@ -244,6 +244,28 @@ var init_api_base = __esm({
   }
 });
 
+// src/state-dir-pin.ts
+import { homedir as homedir2 } from "os";
+import { join as join3 } from "path";
+function pinStateDirToApiBase(env = process.env) {
+  if (env["TERMINALHIRE_DIR"]) return null;
+  let base;
+  try {
+    base = resolveApiBase(env);
+  } catch {
+    return null;
+  }
+  if (base !== DEV_API_BASE) return null;
+  env["TERMINALHIRE_DIR"] = env["TERMINALHIRE_DIR"] || join3(homedir2(), DEV_STATE_DIR_NAME);
+  return env["TERMINALHIRE_DIR"];
+}
+var init_state_dir_pin = __esm({
+  "src/state-dir-pin.ts"() {
+    "use strict";
+    init_api_base();
+  }
+});
+
 // src/state-dir.ts
 var state_dir_exports = {};
 __export(state_dir_exports, {
@@ -337,6 +359,436 @@ var init_state_dir = __esm({
   }
 });
 
+// src/test-race-barrier.ts
+import { closeSync as closeSync2, constants as constants2, existsSync as existsSync2, lstatSync, openSync as openSync2 } from "fs";
+import { join as join4 } from "path";
+function syncSleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function waitForTestRaceBarrier(phase) {
+  const root = process.env[ENV_VAR];
+  if (!root) return;
+  const phaseDir = join4(root, phase);
+  if (!existsSync2(phaseDir)) return;
+  const readyFile = join4(phaseDir, `ready-${process.pid}`);
+  const goFile = join4(phaseDir, "go");
+  const noFollow = constants2.O_NOFOLLOW ?? 0;
+  if (lstatSync(readyFile, { throwIfNoEntry: false })) {
+    throw new Error(
+      `terminalhire: test race barrier "${phase}" found something already at its ready marker path ${readyFile} (regular file or symlink) \u2014 refusing rather than following or overwriting whatever is already there (this only fires under ${ENV_VAR}, never in production).`
+    );
+  }
+  let readyFd;
+  try {
+    readyFd = openSync2(
+      readyFile,
+      constants2.O_CREAT | constants2.O_EXCL | constants2.O_WRONLY | noFollow
+    );
+  } catch (err) {
+    throw new Error(
+      `terminalhire: test race barrier "${phase}" could not create its ready marker at ${readyFile} (${err instanceof Error ? err.message : String(err)}) \u2014 refusing rather than blocking on or writing through whatever is already there (this only fires under ${ENV_VAR}, never in production).`
+    );
+  }
+  closeSync2(readyFd);
+  const deadline = Date.now() + 3e4;
+  while (!existsSync2(goFile)) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `terminalhire: test race barrier "${phase}" timed out waiting for ${goFile} (the test process never released it \u2014 this only fires under ${ENV_VAR}, never in production).`
+      );
+    }
+    syncSleepMs(2);
+  }
+}
+var ENV_VAR;
+var init_test_race_barrier = __esm({
+  "src/test-race-barrier.ts"() {
+    "use strict";
+    ENV_VAR = "TERMINALHIRE_TEST_RACE_BARRIER_DIR";
+  }
+});
+
+// src/shared-key.ts
+import { randomBytes } from "crypto";
+import { readFileSync as readFileSync2, writeFileSync, existsSync as existsSync3, linkSync, unlinkSync } from "fs";
+import { join as join5 } from "path";
+import { homedir as homedir3 } from "os";
+function isValidKeyHex(value) {
+  return KEY_HEX_RE.test(value);
+}
+function readKeyFileOrThrow() {
+  const raw = readFileSync2(KEY_FILE, "utf8").trim();
+  if (!isValidKeyHex(raw)) {
+    throw new Error(
+      `terminalhire: the shared encryption key at ${KEY_FILE} is not in the expected format (expected exactly ${KEY_BYTES * 2} lowercase-hex characters \u2014 a ${KEY_BYTES}-byte key).
+This key decrypts the GitHub token, local profile, and chat identity stores under ~/.terminalhire \u2014 it should never be hand-edited.
+Recovery: if you intend to reset it, delete the file yourself (this INVALIDATES every encrypted store under ~/.terminalhire, which will need to be re-created/re-authenticated):
+  rm ${KEY_FILE}`
+    );
+  }
+  return Buffer.from(raw, "hex");
+}
+function publishKeyBlob(key) {
+  const tmpFile = `${KEY_FILE}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync(tmpFile, key.toString("hex"), { encoding: "utf8", mode: 384, flag: "wx" });
+    try {
+      linkSync(tmpFile, KEY_FILE);
+      return true;
+    } catch (err) {
+      if (err?.code === "EEXIST") {
+        return false;
+      }
+      throw err;
+    }
+  } finally {
+    try {
+      unlinkSync(tmpFile);
+    } catch {
+    }
+  }
+}
+function loadOrCreateSharedKey() {
+  ensureStateDirForSecret(TERMINALHIRE_DIR);
+  if (existsSync3(KEY_FILE)) {
+    return readKeyFileOrThrow();
+  }
+  waitForTestRaceBarrier("key");
+  const key = randomBytes(KEY_BYTES);
+  if (publishKeyBlob(key)) {
+    return key;
+  }
+  return readKeyFileOrThrow();
+}
+function __publishKeyBlobForTests(key) {
+  return publishKeyBlob(key);
+}
+var TERMINALHIRE_DIR, KEY_FILE, KEY_BYTES, KEY_HEX_RE;
+var init_shared_key = __esm({
+  "src/shared-key.ts"() {
+    "use strict";
+    init_state_dir();
+    init_test_race_barrier();
+    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join5(homedir3(), ".terminalhire");
+    KEY_FILE = join5(TERMINALHIRE_DIR, "key");
+    KEY_BYTES = 32;
+    KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
+  }
+});
+
+// src/crypto-store.ts
+import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, existsSync as existsSync4, renameSync, rmSync, readdirSync } from "fs";
+import { join as join6, dirname, basename as basename2 } from "path";
+import { createRequire } from "module";
+function encrypt(plaintext, key) {
+  const iv = randomBytes2(IV_BYTES);
+  const cipher = createCipheriv(ALGO, key, iv);
+  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return {
+    iv: iv.toString("hex"),
+    tag: tag.toString("hex"),
+    ciphertext: ct.toString("hex")
+  };
+}
+function decrypt(blob, key) {
+  const decipher = createDecipheriv(ALGO, key, Buffer.from(blob.iv, "hex"));
+  decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
+  const plain = Buffer.concat([
+    decipher.update(Buffer.from(blob.ciphertext, "hex")),
+    decipher.final()
+  ]);
+  return plain.toString("utf8");
+}
+function skipKeychain() {
+  return process.env.TERMINALHIRE_NO_KEYCHAIN !== void 0 || process.env.CI !== void 0 || process.env.VITEST !== void 0 || process.env.NODE_ENV === "test";
+}
+async function tryLoadFromKeytar() {
+  if (forceKeytarUnavailableForTests || skipKeychain()) return null;
+  try {
+    const kt = createRequire(import.meta.url)("keytar");
+    const stored = await kt.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
+    if (stored) {
+      return Buffer.from(stored, "hex");
+    }
+    const key = randomBytes2(KEY_BYTES);
+    await kt.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, key.toString("hex"));
+    return key;
+  } catch {
+    return null;
+  }
+}
+function warnStderr(message2) {
+  process.stderr.write(`${message2}
+`);
+}
+function makeWarnOnce() {
+  const seen = /* @__PURE__ */ new Set();
+  return (message2) => {
+    if (seen.has(message2)) return;
+    seen.add(message2);
+    warnStderr(message2);
+  };
+}
+function atomicWriteFileSync(filePath, content) {
+  const dir = dirname(filePath);
+  ensureStateDirForSecret(dir);
+  const tmp = join6(
+    dir,
+    `.${basename2(filePath)}.tmp-${process.pid}-${randomBytes2(6).toString("hex")}`
+  );
+  writeFileSync2(tmp, content, { encoding: "utf8", mode: 384, flag: "wx" });
+  renameSync(tmp, filePath);
+}
+async function deleteKey() {
+  const stateDir5 = dirname(KEY_FILE);
+  let encFiles;
+  try {
+    encFiles = readdirSync(stateDir5).filter((f) => f.endsWith(".enc"));
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+    encFiles = [];
+  }
+  for (const name of encFiles) {
+    try {
+      rmSync(join6(stateDir5, name));
+    } catch (e) {
+      const code = e.code;
+      if (code !== "ENOENT") {
+        throw new Error(
+          `could not delete ${name} (${code ?? "unknown error"}). Your encryption key was NOT deleted, so nothing has been orphaned. Close any other running terminalhire process and re-run \u2014 repeating the delete is safe.`,
+          { cause: e }
+        );
+      }
+    }
+  }
+  if (!forceKeytarUnavailableForTests && !skipKeychain()) {
+    try {
+      const kt = createRequire(import.meta.url)("keytar");
+      await kt.deletePassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
+    } catch {
+    }
+  }
+  try {
+    rmSync(KEY_FILE);
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+  }
+}
+async function resolveKey(filePath, opts, warnOnce) {
+  if (opts.keyPolicy === "keychain-required") {
+    const key = await tryLoadFromKeytar();
+    if (!key) {
+      warnOnce(
+        `crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`
+      );
+      return null;
+    }
+    return key;
+  }
+  return loadOrCreateSharedKey();
+}
+function createEncryptedStore(filePath, opts) {
+  const warnOnce = makeWarnOnce();
+  async function read() {
+    const key = await resolveKey(filePath, opts, warnOnce);
+    if (!key) return opts.blank();
+    if (!existsSync4(filePath)) return opts.blank();
+    try {
+      const raw = readFileSync3(filePath, "utf8");
+      const blob = JSON.parse(raw);
+      const plaintext = decrypt(blob, key);
+      return JSON.parse(plaintext);
+    } catch {
+      warnOnce(`crypto-store: failed to decrypt ${filePath} \u2014 returning blank`);
+      return opts.blank();
+    }
+  }
+  async function write(value) {
+    const key = await resolveKey(filePath, opts, warnOnce);
+    if (!key) return;
+    const blob = encrypt(JSON.stringify(value), key);
+    atomicWriteFileSync(filePath, JSON.stringify(blob, null, 2));
+  }
+  return { read, write };
+}
+var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO, IV_BYTES, forceKeytarUnavailableForTests;
+var init_crypto_store = __esm({
+  "src/crypto-store.ts"() {
+    "use strict";
+    init_state_dir();
+    init_shared_key();
+    KEYTAR_SERVICE = "terminalhire";
+    KEYTAR_ACCOUNT = "profile-key";
+    ALGO = "aes-256-gcm";
+    IV_BYTES = 12;
+    forceKeytarUnavailableForTests = false;
+  }
+});
+
+// src/founder-connector.ts
+var founder_connector_exports = {};
+__export(founder_connector_exports, {
+  FounderMcpError: () => FounderMcpError,
+  callFounderTool: () => callFounderTool,
+  clearFounderConnector: () => clearFounderConnector,
+  founderConnectorFilePath: () => founderConnectorFilePath,
+  readFounderConnector: () => readFounderConnector,
+  writeFounderConnector: () => writeFounderConnector
+});
+import { homedir as homedir4 } from "os";
+import { join as join7 } from "path";
+import { existsSync as existsSync5, rmSync as rmSync2 } from "fs";
+function terminalhireDir() {
+  return process.env.TERMINALHIRE_DIR || join7(homedir4(), ".terminalhire");
+}
+function founderConnectorFilePath() {
+  return join7(terminalhireDir(), "founder-connector.enc");
+}
+function store() {
+  return createEncryptedStore(founderConnectorFilePath(), {
+    blank: () => ({ records: {} }),
+    keyPolicy: "keytar-first-file-fallback"
+  });
+}
+async function readAll() {
+  const data = await store().read();
+  const records = data?.records;
+  return records && typeof records === "object" ? { ...records } : {};
+}
+async function writeFounderConnector(record3) {
+  const records = await readAll();
+  records[record3.host] = record3;
+  await store().write({ records });
+}
+async function readFounderConnector(host) {
+  const record3 = (await readAll())[host];
+  if (!record3 || typeof record3.token !== "string" || record3.host !== host) return null;
+  return record3;
+}
+async function clearFounderConnector(host) {
+  const records = await readAll();
+  delete records[host];
+  if (Object.keys(records).length > 0) {
+    await store().write({ records });
+    return;
+  }
+  const p = founderConnectorFilePath();
+  if (existsSync5(p)) rmSync2(p, { force: true });
+}
+async function callFounderTool(base, token, name, args5, fetchImpl = globalThis.fetch) {
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  let res;
+  try {
+    res = await fetchImpl(`${base}/api/founder/mcp`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name, arguments: args5 }
+      }),
+      signal: AbortSignal.timeout(3e4)
+    });
+  } catch (error3) {
+    throw new FounderMcpError(
+      `could not reach ${base}: ${error3 instanceof Error ? error3.message : String(error3)}`
+    );
+  }
+  if (res.status === 401) {
+    return { unauthorized: true, isError: true, text: "", structured: {} };
+  }
+  if (!res.ok) throw new FounderMcpError(`${base} answered ${res.status}`);
+  const body = await res.json().catch(() => null);
+  const error2 = body?.["error"];
+  if (error2) {
+    throw new FounderMcpError(typeof error2.message === "string" ? error2.message : "protocol error");
+  }
+  const raw = body?.["result"];
+  if (typeof raw !== "object" || raw === null) {
+    throw new FounderMcpError(`${base} sent a response this CLI cannot read`);
+  }
+  const result = raw;
+  const content = Array.isArray(result["content"]) ? result["content"] : [];
+  const first = content[0];
+  return {
+    unauthorized: false,
+    isError: result["isError"] === true,
+    text: typeof first?.text === "string" ? first.text : "",
+    structured: typeof result["structuredContent"] === "object" && result["structuredContent"] !== null ? result["structuredContent"] : {}
+  };
+}
+var FounderMcpError;
+var init_founder_connector = __esm({
+  "src/founder-connector.ts"() {
+    "use strict";
+    init_crypto_store();
+    FounderMcpError = class extends Error {
+    };
+  }
+});
+
+// bin/jpi-connector-header.js
+var jpi_connector_header_exports = {};
+__export(jpi_connector_header_exports, {
+  connectorHeaderHost: () => connectorHeaderHost,
+  run: () => run
+});
+function connectorHeaderHost(argv, env = process.env) {
+  const i = argv.indexOf("--host");
+  let raw = i !== -1 ? argv[i + 1] : env["CLAUDE_CODE_MCP_SERVER_URL"];
+  if (typeof raw === "string" && raw.trim() !== "") {
+    try {
+      raw = new URL(raw).origin;
+    } catch {
+      return null;
+    }
+    try {
+      return resolveApiBase({ ...env, TERMINALHIRE_API_URL: raw });
+    } catch {
+      return null;
+    }
+  }
+  try {
+    return resolveApiBase(env);
+  } catch {
+    return null;
+  }
+}
+async function run(argv = process.argv.slice(3)) {
+  const host = connectorHeaderHost(argv);
+  if (!host) {
+    process.stderr.write("terminalhire connector-header: no allowed host\n");
+    process.exitCode = 1;
+    return;
+  }
+  const pinned = { ...process.env, TERMINALHIRE_API_URL: host };
+  pinStateDirToApiBase(pinned);
+  if (pinned["TERMINALHIRE_DIR"]) process.env["TERMINALHIRE_DIR"] = pinned["TERMINALHIRE_DIR"];
+  const { readFounderConnector: readFounderConnector2 } = await Promise.resolve().then(() => (init_founder_connector(), founder_connector_exports));
+  const record3 = await readFounderConnector2(host).catch(() => null);
+  if (!record3) {
+    process.stderr.write(
+      `terminalhire connector-header: no connector for ${host}; run \`terminalhire setup\`
+`
+    );
+    process.exitCode = 1;
+    return;
+  }
+  process.stdout.write(`${JSON.stringify({ Authorization: `Bearer ${record3.token}` })}
+`);
+}
+var init_jpi_connector_header = __esm({
+  "bin/jpi-connector-header.js"() {
+    "use strict";
+    init_api_base();
+    init_state_dir_pin();
+  }
+});
+
 // src/web-session.ts
 var web_session_exports = {};
 __export(web_session_exports, {
@@ -353,14 +805,14 @@ __export(web_session_exports, {
   withSessionDeps: () => withSessionDeps,
   writeWebSessionFile: () => writeWebSessionFile
 });
-import { chmodSync, existsSync as existsSync2, readFileSync as readFileSync2, rmSync, writeFileSync } from "fs";
-import { homedir as homedir3 } from "os";
-import { join as join4 } from "path";
-function terminalhireDir() {
-  return process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
+import { chmodSync, existsSync as existsSync6, readFileSync as readFileSync4, rmSync as rmSync3, writeFileSync as writeFileSync3 } from "fs";
+import { homedir as homedir5 } from "os";
+import { join as join8 } from "path";
+function terminalhireDir2() {
+  return process.env.TERMINALHIRE_DIR || join8(homedir5(), ".terminalhire");
 }
 function webSessionFilePath() {
-  return join4(terminalhireDir(), "web-session");
+  return join8(terminalhireDir2(), "web-session");
 }
 function parseWebSessionFile(raw) {
   const trimmed = raw.trim();
@@ -380,8 +832,8 @@ function parseWebSessionFile(raw) {
 function readWebSessionRecord() {
   try {
     const path6 = webSessionFilePath();
-    if (!existsSync2(path6)) return null;
-    return parseWebSessionFile(readFileSync2(path6, "utf8"));
+    if (!existsSync6(path6)) return null;
+    return parseWebSessionFile(readFileSync4(path6, "utf8"));
   } catch {
     return null;
   }
@@ -450,10 +902,10 @@ function readWebSessionCookie(apiBase) {
   return webSessionCookieForHost(apiBase).cookie;
 }
 function writeWebSessionFile(token, host) {
-  ensureStateDirForSecret(terminalhireDir());
+  ensureStateDirForSecret(terminalhireDir2());
   const path6 = webSessionFilePath();
   const body = typeof host === "string" && host.length > 0 ? JSON.stringify({ v: 1, host, token }) : token;
-  writeFileSync(path6, body, { mode: 384, encoding: "utf8" });
+  writeFileSync3(path6, body, { mode: 384, encoding: "utf8" });
   try {
     chmodSync(path6, 384);
   } catch {
@@ -461,7 +913,7 @@ function writeWebSessionFile(token, host) {
 }
 function clearWebSessionFile() {
   try {
-    rmSync(webSessionFilePath());
+    rmSync3(webSessionFilePath());
   } catch {
   }
 }
@@ -490,13 +942,13 @@ __export(config_exports, {
   readConfig: () => readConfig,
   writeConfig: () => writeConfig
 });
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, existsSync as existsSync3 } from "fs";
-import { join as join5 } from "path";
-import { homedir as homedir4 } from "os";
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, existsSync as existsSync7 } from "fs";
+import { join as join9 } from "path";
+import { homedir as homedir6 } from "os";
 function readConfig() {
   try {
-    if (!existsSync3(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
-    const raw = readFileSync3(CONFIG_FILE, "utf8");
+    if (!existsSync7(CONFIG_FILE)) return { ...DEFAULT_CONFIG };
+    const raw = readFileSync5(CONFIG_FILE, "utf8");
     const parsed = JSON.parse(raw);
     return { ...DEFAULT_CONFIG, ...parsed };
   } catch {
@@ -504,7 +956,7 @@ function readConfig() {
   }
 }
 function writeConfig(config2) {
-  ensureStateDir(TERMINALHIRE_DIR);
+  ensureStateDir(TERMINALHIRE_DIR2);
   const current = readConfig();
   const merged = { ...current, ...config2 };
   if ("contributePrompted" in merged) {
@@ -513,7 +965,7 @@ function writeConfig(config2) {
     }
     delete merged.contributePrompted;
   }
-  writeFileSync2(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  writeFileSync4(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function parseNudgeMode(raw) {
   if (raw === "session" || raw === "always") return raw;
@@ -569,13 +1021,13 @@ function isBetaOptIn() {
 function isFounderBountyNotifyEnabled() {
   return readConfig().founderBountyNotify === true;
 }
-var TERMINALHIRE_DIR, CONFIG_FILE, DEFAULT_CONFIG;
+var TERMINALHIRE_DIR2, CONFIG_FILE, DEFAULT_CONFIG;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join5(homedir4(), ".terminalhire");
-    CONFIG_FILE = join5(TERMINALHIRE_DIR, "config.json");
+    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join9(homedir6(), ".terminalhire");
+    CONFIG_FILE = join9(TERMINALHIRE_DIR2, "config.json");
     DEFAULT_CONFIG = {
       nudge: "session",
       peerConnect: false,
@@ -613,9 +1065,9 @@ __export(protocol_exports, {
   writeClaimLauncher: () => writeClaimLauncher
 });
 import { spawn, spawnSync } from "child_process";
-import { existsSync as existsSync4, mkdirSync as mkdirSync2, readFileSync as readFileSync4, rmSync as rmSync2, writeFileSync as writeFileSync3, renameSync } from "fs";
-import { homedir as homedir5 } from "os";
-import { join as join6 } from "path";
+import { existsSync as existsSync8, mkdirSync as mkdirSync2, readFileSync as readFileSync6, rmSync as rmSync4, writeFileSync as writeFileSync5, renameSync as renameSync2 } from "fs";
+import { homedir as homedir7 } from "os";
+import { join as join10 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 function parseClaimUrl(raw) {
   if (typeof raw !== "string") return null;
@@ -628,14 +1080,14 @@ function parseClaimUrl(raw) {
 }
 function defaultDispatchPath() {
   const here = fileURLToPath2(new URL(".", import.meta.url));
-  return join6(here, "..", "bin", "jpi-dispatch.js");
+  return join10(here, "..", "bin", "jpi-dispatch.js");
 }
 function defaultProtocolDeps() {
   return {
     platform: process.platform,
     spawnSync: (command, args5, options) => spawnSync(command, args5, options),
     spawn: (command, args5, options) => spawn(command, args5, options),
-    existsSync: (path6) => existsSync4(path6),
+    existsSync: (path6) => existsSync8(path6),
     mkdirSync: (path6) => {
       mkdirSync2(path6, { recursive: true });
     },
@@ -646,19 +1098,19 @@ function defaultProtocolDeps() {
       ensureStateDirForSecret(path6);
     },
     writeFileSync: (path6, contents, mode) => {
-      writeFileSync3(path6, contents, mode === void 0 ? "utf8" : { encoding: "utf8", mode });
+      writeFileSync5(path6, contents, mode === void 0 ? "utf8" : { encoding: "utf8", mode });
     },
-    readFileSync: (path6) => readFileSync4(path6, "utf8"),
+    readFileSync: (path6) => readFileSync6(path6, "utf8"),
     rmSync: (path6) => {
       try {
-        rmSync2(path6, { recursive: true, force: true });
+        rmSync4(path6, { recursive: true, force: true });
       } catch {
       }
     },
     renameSync: (from, to) => {
-      renameSync(from, to);
+      renameSync2(from, to);
     },
-    homedir: homedir5,
+    homedir: homedir7,
     env: process.env,
     execPath: process.execPath,
     dispatchPath: defaultDispatchPath(),
@@ -675,7 +1127,7 @@ function defaultProtocolDeps() {
   };
 }
 function stateDir(deps) {
-  return deps.env.TERMINALHIRE_DIR || join6(deps.homedir(), ".terminalhire");
+  return deps.env.TERMINALHIRE_DIR || join10(deps.homedir(), ".terminalhire");
 }
 function escapeAppleScriptString(s) {
   return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -773,7 +1225,7 @@ function printClaimCommand(raw, deps = defaultProtocolDeps()) {
   deps.exit(0);
 }
 function launcherPath(token, deps) {
-  return join6(stateDir(deps), `claim-${token}.command`);
+  return join10(stateDir(deps), `claim-${token}.command`);
 }
 function buildLauncherScript(token, deps) {
   return ["#!/bin/sh", `exec ${buildPreviewShellCommand(token, deps)}`, ""].join("\n");
@@ -802,9 +1254,9 @@ function writeClaimLauncher(raw, deps = defaultProtocolDeps()) {
   deps.exit(0);
 }
 function darwinAppPaths(deps) {
-  const appDir = join6(deps.homedir(), "Applications");
-  const appPath = join6(appDir, "Terminalhire Handler.app");
-  const plistPath = join6(appPath, "Contents", "Info.plist");
+  const appDir = join10(deps.homedir(), "Applications");
+  const appPath = join10(appDir, "Terminalhire Handler.app");
+  const plistPath = join10(appPath, "Contents", "Info.plist");
   return { appDir, appPath, plistPath };
 }
 function darwinRegister(deps) {
@@ -812,7 +1264,7 @@ function darwinRegister(deps) {
   deps.ensureStateDirForSecret(dir);
   const { appDir, appPath, plistPath } = darwinAppPaths(deps);
   deps.mkdirSync(appDir);
-  const scriptPath = join6(dir, "handler.applescript");
+  const scriptPath = join10(dir, "handler.applescript");
   deps.writeFileSync(
     scriptPath,
     buildAppleScriptHandler(
@@ -929,10 +1381,10 @@ function win32Status(deps) {
   return { registered, appExists: registered };
 }
 function linuxDesktopDir(deps) {
-  return join6(deps.homedir(), ".local", "share", "applications");
+  return join10(deps.homedir(), ".local", "share", "applications");
 }
 function linuxDesktopFile(deps) {
-  return join6(linuxDesktopDir(deps), "terminalhire-handler.desktop");
+  return join10(linuxDesktopDir(deps), "terminalhire-handler.desktop");
 }
 function buildDesktopEntry(execPath, dispatchPath) {
   return [
@@ -979,7 +1431,7 @@ function linuxStatus(deps) {
   return { registered, appExists: exists };
 }
 function handlerTemplateVersionPath(deps) {
-  return join6(stateDir(deps), "handler-template-version");
+  return join10(stateDir(deps), "handler-template-version");
 }
 function readHandlerTemplateVersion(deps) {
   try {
@@ -1051,7 +1503,7 @@ function healStaleHandler(deps = defaultProtocolDeps()) {
   }
 }
 function pendingClaimsPath(deps) {
-  return join6(stateDir(deps), "pending-claims.json");
+  return join10(stateDir(deps), "pending-claims.json");
 }
 function readPendingClaims(deps) {
   try {
@@ -1204,18 +1656,18 @@ __export(version_nudge_exports, {
   recordNag: () => recordNag,
   shouldNag: () => shouldNag
 });
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, existsSync as existsSync5 } from "fs";
-import { join as join7 } from "path";
-import { homedir as homedir6 } from "os";
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, existsSync as existsSync9 } from "fs";
+import { join as join11 } from "path";
+import { homedir as homedir8 } from "os";
 import { fileURLToPath as fileURLToPath3 } from "url";
 function stateDir2() {
-  return process.env.TERMINALHIRE_DIR || join7(homedir6(), ".terminalhire");
+  return process.env.TERMINALHIRE_DIR || join11(homedir8(), ".terminalhire");
 }
 function indexCacheFile() {
-  return join7(stateDir2(), "index-cache.json");
+  return join11(stateDir2(), "index-cache.json");
 }
 function nudgeStateFile() {
-  return join7(stateDir2(), "version-nudge.json");
+  return join11(stateDir2(), "version-nudge.json");
 }
 function parseVersion(v) {
   if (typeof v !== "string") return null;
@@ -1240,12 +1692,12 @@ function buildStaleNudge(local, latest) {
 function readLocalVersion() {
   try {
     const candidates = [
-      join7(__dirname2, "..", "..", "package.json"),
-      join7(__dirname2, "..", "package.json")
+      join11(__dirname2, "..", "..", "package.json"),
+      join11(__dirname2, "..", "package.json")
     ];
     for (const p of candidates) {
-      if (existsSync5(p)) {
-        const pkg = JSON.parse(readFileSync5(p, "utf8"));
+      if (existsSync9(p)) {
+        const pkg = JSON.parse(readFileSync7(p, "utf8"));
         if (pkg.version) return pkg.version;
       }
     }
@@ -1255,7 +1707,7 @@ function readLocalVersion() {
 }
 function readLatestVersionFromCache() {
   try {
-    const cache = JSON.parse(readFileSync5(indexCacheFile(), "utf8"));
+    const cache = JSON.parse(readFileSync7(indexCacheFile(), "utf8"));
     const v = cache?.index?.cliVersion;
     return typeof v === "string" ? v : null;
   } catch {
@@ -1269,7 +1721,7 @@ function cachedStaleNudge(localVersion) {
 }
 function shouldNag(now = Date.now()) {
   try {
-    const state = JSON.parse(readFileSync5(nudgeStateFile(), "utf8"));
+    const state = JSON.parse(readFileSync7(nudgeStateFile(), "utf8"));
     const last = state?.lastNaggedAt;
     if (typeof last !== "number" || !Number.isFinite(last)) return true;
     return now - last >= NAG_INTERVAL_MS;
@@ -1280,7 +1732,7 @@ function shouldNag(now = Date.now()) {
 function recordNag(now = Date.now()) {
   try {
     ensureStateDir(stateDir2());
-    writeFileSync4(nudgeStateFile(), JSON.stringify({ lastNaggedAt: now }) + "\n", "utf8");
+    writeFileSync6(nudgeStateFile(), JSON.stringify({ lastNaggedAt: now }) + "\n", "utf8");
   } catch {
   }
 }
@@ -1351,131 +1803,14 @@ var init_open_url = __esm({
   }
 });
 
-// src/test-race-barrier.ts
-import { closeSync as closeSync2, constants as constants2, existsSync as existsSync6, lstatSync, openSync as openSync2 } from "fs";
-import { join as join8 } from "path";
-function syncSleepMs(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-function waitForTestRaceBarrier(phase) {
-  const root = process.env[ENV_VAR];
-  if (!root) return;
-  const phaseDir = join8(root, phase);
-  if (!existsSync6(phaseDir)) return;
-  const readyFile = join8(phaseDir, `ready-${process.pid}`);
-  const goFile = join8(phaseDir, "go");
-  const noFollow = constants2.O_NOFOLLOW ?? 0;
-  if (lstatSync(readyFile, { throwIfNoEntry: false })) {
-    throw new Error(
-      `terminalhire: test race barrier "${phase}" found something already at its ready marker path ${readyFile} (regular file or symlink) \u2014 refusing rather than following or overwriting whatever is already there (this only fires under ${ENV_VAR}, never in production).`
-    );
-  }
-  let readyFd;
-  try {
-    readyFd = openSync2(
-      readyFile,
-      constants2.O_CREAT | constants2.O_EXCL | constants2.O_WRONLY | noFollow
-    );
-  } catch (err) {
-    throw new Error(
-      `terminalhire: test race barrier "${phase}" could not create its ready marker at ${readyFile} (${err instanceof Error ? err.message : String(err)}) \u2014 refusing rather than blocking on or writing through whatever is already there (this only fires under ${ENV_VAR}, never in production).`
-    );
-  }
-  closeSync2(readyFd);
-  const deadline = Date.now() + 3e4;
-  while (!existsSync6(goFile)) {
-    if (Date.now() > deadline) {
-      throw new Error(
-        `terminalhire: test race barrier "${phase}" timed out waiting for ${goFile} (the test process never released it \u2014 this only fires under ${ENV_VAR}, never in production).`
-      );
-    }
-    syncSleepMs(2);
-  }
-}
-var ENV_VAR;
-var init_test_race_barrier = __esm({
-  "src/test-race-barrier.ts"() {
-    "use strict";
-    ENV_VAR = "TERMINALHIRE_TEST_RACE_BARRIER_DIR";
-  }
-});
-
-// src/shared-key.ts
-import { randomBytes } from "crypto";
-import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, existsSync as existsSync7, linkSync, unlinkSync } from "fs";
-import { join as join9 } from "path";
-import { homedir as homedir7 } from "os";
-function isValidKeyHex(value) {
-  return KEY_HEX_RE.test(value);
-}
-function readKeyFileOrThrow() {
-  const raw = readFileSync6(KEY_FILE, "utf8").trim();
-  if (!isValidKeyHex(raw)) {
-    throw new Error(
-      `terminalhire: the shared encryption key at ${KEY_FILE} is not in the expected format (expected exactly ${KEY_BYTES * 2} lowercase-hex characters \u2014 a ${KEY_BYTES}-byte key).
-This key decrypts the GitHub token, local profile, and chat identity stores under ~/.terminalhire \u2014 it should never be hand-edited.
-Recovery: if you intend to reset it, delete the file yourself (this INVALIDATES every encrypted store under ~/.terminalhire, which will need to be re-created/re-authenticated):
-  rm ${KEY_FILE}`
-    );
-  }
-  return Buffer.from(raw, "hex");
-}
-function publishKeyBlob(key) {
-  const tmpFile = `${KEY_FILE}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
-  try {
-    writeFileSync5(tmpFile, key.toString("hex"), { encoding: "utf8", mode: 384, flag: "wx" });
-    try {
-      linkSync(tmpFile, KEY_FILE);
-      return true;
-    } catch (err) {
-      if (err?.code === "EEXIST") {
-        return false;
-      }
-      throw err;
-    }
-  } finally {
-    try {
-      unlinkSync(tmpFile);
-    } catch {
-    }
-  }
-}
-function loadOrCreateSharedKey() {
-  ensureStateDirForSecret(TERMINALHIRE_DIR2);
-  if (existsSync7(KEY_FILE)) {
-    return readKeyFileOrThrow();
-  }
-  waitForTestRaceBarrier("key");
-  const key = randomBytes(KEY_BYTES);
-  if (publishKeyBlob(key)) {
-    return key;
-  }
-  return readKeyFileOrThrow();
-}
-function __publishKeyBlobForTests(key) {
-  return publishKeyBlob(key);
-}
-var TERMINALHIRE_DIR2, KEY_FILE, KEY_BYTES, KEY_HEX_RE;
-var init_shared_key = __esm({
-  "src/shared-key.ts"() {
-    "use strict";
-    init_state_dir();
-    init_test_race_barrier();
-    TERMINALHIRE_DIR2 = process.env.TERMINALHIRE_DIR || join9(homedir7(), ".terminalhire");
-    KEY_FILE = join9(TERMINALHIRE_DIR2, "key");
-    KEY_BYTES = 32;
-    KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
-  }
-});
-
 // src/github-auth.ts
 var github_auth_exports = {};
 __export(github_auth_exports, {
   GITHUB_SCOPE: () => GITHUB_SCOPE,
   __publishKeyBlobForTests: () => __publishKeyBlobForTests,
-  decrypt: () => decrypt,
+  decrypt: () => decrypt2,
   deleteGitHubToken: () => deleteGitHubToken,
-  encrypt: () => encrypt,
+  encrypt: () => encrypt2,
   githubTokenDisplayPath: () => githubTokenDisplayPath,
   hasGitHubToken: () => hasGitHubToken,
   loadKey: () => loadKey,
@@ -1485,26 +1820,26 @@ __export(github_auth_exports, {
   runDeviceFlow: () => runDeviceFlow,
   writeGitHubToken: () => writeGitHubToken
 });
-import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
-import { readFileSync as readFileSync7, writeFileSync as writeFileSync6, existsSync as existsSync8, rmSync as rmSync3, renameSync as renameSync2 } from "fs";
-import { join as join10, sep } from "path";
-import { homedir as homedir8 } from "os";
+import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes3 } from "crypto";
+import { readFileSync as readFileSync8, writeFileSync as writeFileSync7, existsSync as existsSync10, rmSync as rmSync5, renameSync as renameSync3 } from "fs";
+import { join as join12, sep } from "path";
+import { homedir as homedir9 } from "os";
 function githubTokenDisplayPath() {
-  const home = homedir8();
+  const home = homedir9();
   return TOKEN_FILE.startsWith(home + sep) ? `~${TOKEN_FILE.slice(home.length)}` : TOKEN_FILE;
 }
 async function loadKey() {
   return loadOrCreateSharedKey();
 }
-function encrypt(plaintext, key) {
-  const iv = randomBytes2(IV_BYTES);
-  const cipher = createCipheriv(ALGO, key, iv);
+function encrypt2(plaintext, key) {
+  const iv = randomBytes3(IV_BYTES2);
+  const cipher = createCipheriv2(ALGO2, key, iv);
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return { iv: iv.toString("hex"), tag: tag.toString("hex"), ciphertext: ct.toString("hex") };
 }
-function decrypt(blob, key) {
-  const decipher = createDecipheriv(ALGO, key, Buffer.from(blob.iv, "hex"));
+function decrypt2(blob, key) {
+  const decipher = createDecipheriv2(ALGO2, key, Buffer.from(blob.iv, "hex"));
   decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
   const plain = Buffer.concat([
     decipher.update(Buffer.from(blob.ciphertext, "hex")),
@@ -1513,12 +1848,12 @@ function decrypt(blob, key) {
   return plain.toString("utf8");
 }
 async function readGitHubToken() {
-  if (!existsSync8(TOKEN_FILE)) return void 0;
+  if (!existsSync10(TOKEN_FILE)) return void 0;
   try {
     const key = await loadKey();
-    const raw = readFileSync7(TOKEN_FILE, "utf8");
+    const raw = readFileSync8(TOKEN_FILE, "utf8");
     const blob = JSON.parse(raw);
-    return decrypt(blob, key);
+    return decrypt2(blob, key);
   } catch {
     return void 0;
   }
@@ -1526,18 +1861,18 @@ async function readGitHubToken() {
 async function writeGitHubToken(token) {
   ensureStateDirForSecret(TERMINALHIRE_DIR3);
   const key = await loadKey();
-  const blob = encrypt(token, key);
-  const tmpFile = `${TOKEN_FILE}.${process.pid}.${randomBytes2(6).toString("hex")}.tmp`;
+  const blob = encrypt2(token, key);
+  const tmpFile = `${TOKEN_FILE}.${process.pid}.${randomBytes3(6).toString("hex")}.tmp`;
   try {
-    writeFileSync6(tmpFile, JSON.stringify(blob, null, 2), {
+    writeFileSync7(tmpFile, JSON.stringify(blob, null, 2), {
       encoding: "utf8",
       mode: 384,
       flag: "wx"
     });
-    renameSync2(tmpFile, TOKEN_FILE);
+    renameSync3(tmpFile, TOKEN_FILE);
   } catch (err) {
     try {
-      rmSync3(tmpFile, { force: true });
+      rmSync5(tmpFile, { force: true });
     } catch {
     }
     throw err;
@@ -1545,12 +1880,12 @@ async function writeGitHubToken(token) {
 }
 async function deleteGitHubToken() {
   try {
-    rmSync3(TOKEN_FILE);
+    rmSync5(TOKEN_FILE);
   } catch {
   }
 }
 async function hasGitHubToken() {
-  return existsSync8(TOKEN_FILE);
+  return existsSync10(TOKEN_FILE);
 }
 async function runDeviceFlow() {
   if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
@@ -1683,17 +2018,17 @@ async function requireStoredLogin() {
 function sleep(ms) {
   return new Promise((resolve9) => setTimeout(resolve9, ms));
 }
-var TERMINALHIRE_DIR3, TOKEN_FILE, ALGO, IV_BYTES, GITHUB_SCOPE, DEVICE_CODE_URL, ACCESS_TOKEN_URL, BAKED_IN_CLIENT_ID, MOCK_TOKEN, MOCK_LOGIN;
+var TERMINALHIRE_DIR3, TOKEN_FILE, ALGO2, IV_BYTES2, GITHUB_SCOPE, DEVICE_CODE_URL, ACCESS_TOKEN_URL, BAKED_IN_CLIENT_ID, MOCK_TOKEN, MOCK_LOGIN;
 var init_github_auth = __esm({
   "src/github-auth.ts"() {
     "use strict";
     init_state_dir();
     init_shared_key();
     init_shared_key();
-    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join10(homedir8(), ".terminalhire");
-    TOKEN_FILE = join10(TERMINALHIRE_DIR3, "github-token.enc");
-    ALGO = "aes-256-gcm";
-    IV_BYTES = 12;
+    TERMINALHIRE_DIR3 = process.env.TERMINALHIRE_DIR || join12(homedir9(), ".terminalhire");
+    TOKEN_FILE = join12(TERMINALHIRE_DIR3, "github-token.enc");
+    ALGO2 = "aes-256-gcm";
+    IV_BYTES2 = 12;
     GITHUB_SCOPE = "read:user";
     DEVICE_CODE_URL = "https://github.com/login/device/code";
     ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
@@ -4796,14 +5131,14 @@ async function mapWithConcurrency(items, limit2, fn) {
   if (items.length === 0) return results;
   const workers = Math.max(1, Math.min(Math.floor(limit2) || 1, items.length));
   let next = 0;
-  async function run32() {
+  async function run34() {
     for (; ; ) {
       const i = next++;
       if (i >= items.length) return;
       results[i] = await fn(items[i], i);
     }
   }
-  await Promise.all(Array.from({ length: workers }, run32));
+  await Promise.all(Array.from({ length: workers }, run34));
   return results;
 }
 var init_concurrency = __esm({
@@ -6549,21 +6884,21 @@ var init_feeds = __esm({
 });
 
 // ../../packages/core/src/partners.ts
-import { readFileSync as readFileSync8 } from "fs";
-import { join as join11 } from "path";
+import { readFileSync as readFileSync9 } from "fs";
+import { join as join13 } from "path";
 import { fileURLToPath as fileURLToPath4 } from "url";
 function resolveDataPath() {
   try {
     const dir = fileURLToPath4(new URL("../../../data", import.meta.url));
-    return join11(dir, "partner-roles.json");
+    return join13(dir, "partner-roles.json");
   } catch {
-    return join11(process.cwd(), "data", "partner-roles.json");
+    return join13(process.cwd(), "data", "partner-roles.json");
   }
 }
 function loadPartnerRoles() {
   const filePath = resolveDataPath();
   try {
-    const raw = readFileSync8(filePath, "utf-8");
+    const raw = readFileSync9(filePath, "utf-8");
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
       console.warn("[partners] partner-roles.json is not an array \u2014 skipping");
@@ -7180,7 +7515,7 @@ function createHasher(hashCons) {
   hashC.create = () => hashCons();
   return hashC;
 }
-function randomBytes3(bytesLength = 32) {
+function randomBytes4(bytesLength = 32) {
   if (crypto && typeof crypto.getRandomValues === "function") {
     return crypto.getRandomValues(new Uint8Array(bytesLength));
   }
@@ -8605,7 +8940,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   });
   const { prehash } = eddsaOpts;
   const { BASE, Fp: Fp2, Fn: Fn2 } = Point;
-  const randomBytes17 = eddsaOpts.randomBytes || randomBytes3;
+  const randomBytes18 = eddsaOpts.randomBytes || randomBytes4;
   const adjustScalarBytes2 = eddsaOpts.adjustScalarBytes || ((bytes) => bytes);
   const domain = eddsaOpts.domain || ((data, ctx, phflag) => {
     _abool2(phflag, "phflag");
@@ -8687,7 +9022,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
     signature: 2 * _size2,
     seed: _size2
   };
-  function randomSecretKey(seed = randomBytes17(lengths.seed)) {
+  function randomSecretKey(seed = randomBytes18(lengths.seed)) {
     return _abytes2(seed, lengths.seed, "seed");
   }
   function keygen(seed) {
@@ -8883,7 +9218,7 @@ function montgomery(curveDef) {
   const is25519 = type === "x25519";
   if (!is25519 && type !== "x448")
     throw new Error("invalid type");
-  const randomBytes_ = rand || randomBytes3;
+  const randomBytes_ = rand || randomBytes4;
   const montgomeryBits = is25519 ? 255 : 448;
   const fieldLen = is25519 ? 32 : 56;
   const Gu = is25519 ? BigInt(9) : BigInt(5);
@@ -10022,7 +10357,7 @@ var init_chacha = __esm({
 });
 
 // ../../packages/core/src/chatCrypto.ts
-import { hkdfSync, createHash, randomBytes as randomBytes4 } from "crypto";
+import { hkdfSync, createHash, randomBytes as randomBytes5 } from "crypto";
 function bytesToHex2(bytes) {
   return Buffer.from(bytes).toString("hex");
 }
@@ -10051,7 +10386,7 @@ function deriveSharedKey(myPrivateKey, peerPublicKey) {
 }
 function encryptMessage(plaintext, myPrivateKey, peerPublicKey) {
   const key = deriveSharedKey(myPrivateKey, peerPublicKey);
-  const nonce = new Uint8Array(randomBytes4(NONCE_BYTES));
+  const nonce = new Uint8Array(randomBytes5(NONCE_BYTES));
   const cipher = xchacha20poly1305(key, nonce);
   const ct = cipher.encrypt(new Uint8Array(Buffer.from(plaintext, "utf8")));
   return { ciphertext: bytesToB64(ct), nonce: bytesToB64(nonce) };
@@ -11938,7 +12273,7 @@ async function runAcceptanceAuditBatch(opts) {
   const budgetMs = Math.min(opts.budgetMs ?? DEFAULT_BUDGET_MS, MAX_BUDGET_MS);
   const maxPages = opts.maxPagesPerBatch ?? DEFAULT_MAX_PAGES;
   const gates = opts.gates ?? { minStars: MIN_STARS, minContributors: MIN_CONTRIBUTORS };
-  const sleep6 = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const sleep7 = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   const cache = opts.cache ?? /* @__PURE__ */ new Map();
   const deadline = now() + budgetMs;
   const entries = opts.ledger.entries.map((e) => ({
@@ -12025,7 +12360,7 @@ async function runAcceptanceAuditBatch(opts) {
         progressed = true;
         if (audit.pageRetries < MAX_PAGE_RETRIES) {
           audit.pageRetries += 1;
-          await sleep6(REQ_GAP_MS * (audit.pageRetries + 1));
+          await sleep7(REQ_GAP_MS * (audit.pageRetries + 1));
           continue batch;
         }
         audit.coverage = "partial";
@@ -12066,7 +12401,7 @@ async function runAcceptanceAuditBatch(opts) {
         progressed = true;
         continue;
       }
-      await sleep6(REQ_GAP_MS);
+      await sleep7(REQ_GAP_MS);
       if (now() >= deadline) {
         audit.pendingIndex = idx;
         outcome = "advanced";
@@ -12118,7 +12453,7 @@ async function runAcceptanceAuditBatch(opts) {
   const enrichable = entries.filter((e) => e.maintainerReviewed === void 0).sort((a, b) => a.mergedAt < b.mergedAt ? 1 : a.mergedAt > b.mergedAt ? -1 : 0).slice(0, MAX_ENRICH_PRS);
   for (const e of enrichable) {
     if (now() >= deadline) break;
-    await sleep6(REQ_GAP_MS);
+    await sleep7(REQ_GAP_MS);
     if (now() >= deadline) break;
     const r = await enrichMaintainerReviewed(e.url, opts.token);
     if (r.transient) break;
@@ -12443,157 +12778,6 @@ var init_src = __esm({
   }
 });
 
-// src/crypto-store.ts
-import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes as randomBytes5 } from "crypto";
-import { readFileSync as readFileSync9, writeFileSync as writeFileSync7, existsSync as existsSync9, renameSync as renameSync3, rmSync as rmSync4, readdirSync } from "fs";
-import { join as join12, dirname, basename as basename2 } from "path";
-import { createRequire } from "module";
-function encrypt2(plaintext, key) {
-  const iv = randomBytes5(IV_BYTES2);
-  const cipher = createCipheriv2(ALGO2, key, iv);
-  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return {
-    iv: iv.toString("hex"),
-    tag: tag.toString("hex"),
-    ciphertext: ct.toString("hex")
-  };
-}
-function decrypt2(blob, key) {
-  const decipher = createDecipheriv2(ALGO2, key, Buffer.from(blob.iv, "hex"));
-  decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
-  const plain = Buffer.concat([
-    decipher.update(Buffer.from(blob.ciphertext, "hex")),
-    decipher.final()
-  ]);
-  return plain.toString("utf8");
-}
-function skipKeychain() {
-  return process.env.TERMINALHIRE_NO_KEYCHAIN !== void 0 || process.env.CI !== void 0 || process.env.VITEST !== void 0 || process.env.NODE_ENV === "test";
-}
-async function tryLoadFromKeytar() {
-  if (forceKeytarUnavailableForTests || skipKeychain()) return null;
-  try {
-    const kt = createRequire(import.meta.url)("keytar");
-    const stored = await kt.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
-    if (stored) {
-      return Buffer.from(stored, "hex");
-    }
-    const key = randomBytes5(KEY_BYTES);
-    await kt.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, key.toString("hex"));
-    return key;
-  } catch {
-    return null;
-  }
-}
-function warnStderr(message2) {
-  process.stderr.write(`${message2}
-`);
-}
-function makeWarnOnce() {
-  const seen = /* @__PURE__ */ new Set();
-  return (message2) => {
-    if (seen.has(message2)) return;
-    seen.add(message2);
-    warnStderr(message2);
-  };
-}
-function atomicWriteFileSync(filePath, content) {
-  const dir = dirname(filePath);
-  ensureStateDirForSecret(dir);
-  const tmp = join12(
-    dir,
-    `.${basename2(filePath)}.tmp-${process.pid}-${randomBytes5(6).toString("hex")}`
-  );
-  writeFileSync7(tmp, content, { encoding: "utf8", mode: 384, flag: "wx" });
-  renameSync3(tmp, filePath);
-}
-async function deleteKey() {
-  const stateDir5 = dirname(KEY_FILE);
-  let encFiles;
-  try {
-    encFiles = readdirSync(stateDir5).filter((f) => f.endsWith(".enc"));
-  } catch (e) {
-    if (e.code !== "ENOENT") throw e;
-    encFiles = [];
-  }
-  for (const name of encFiles) {
-    try {
-      rmSync4(join12(stateDir5, name));
-    } catch (e) {
-      const code = e.code;
-      if (code !== "ENOENT") {
-        throw new Error(
-          `could not delete ${name} (${code ?? "unknown error"}). Your encryption key was NOT deleted, so nothing has been orphaned. Close any other running terminalhire process and re-run \u2014 repeating the delete is safe.`,
-          { cause: e }
-        );
-      }
-    }
-  }
-  if (!forceKeytarUnavailableForTests && !skipKeychain()) {
-    try {
-      const kt = createRequire(import.meta.url)("keytar");
-      await kt.deletePassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
-    } catch {
-    }
-  }
-  try {
-    rmSync4(KEY_FILE);
-  } catch (e) {
-    if (e.code !== "ENOENT") throw e;
-  }
-}
-async function resolveKey(filePath, opts, warnOnce) {
-  if (opts.keyPolicy === "keychain-required") {
-    const key = await tryLoadFromKeytar();
-    if (!key) {
-      warnOnce(
-        `crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`
-      );
-      return null;
-    }
-    return key;
-  }
-  return loadOrCreateSharedKey();
-}
-function createEncryptedStore(filePath, opts) {
-  const warnOnce = makeWarnOnce();
-  async function read() {
-    const key = await resolveKey(filePath, opts, warnOnce);
-    if (!key) return opts.blank();
-    if (!existsSync9(filePath)) return opts.blank();
-    try {
-      const raw = readFileSync9(filePath, "utf8");
-      const blob = JSON.parse(raw);
-      const plaintext = decrypt2(blob, key);
-      return JSON.parse(plaintext);
-    } catch {
-      warnOnce(`crypto-store: failed to decrypt ${filePath} \u2014 returning blank`);
-      return opts.blank();
-    }
-  }
-  async function write(value) {
-    const key = await resolveKey(filePath, opts, warnOnce);
-    if (!key) return;
-    const blob = encrypt2(JSON.stringify(value), key);
-    atomicWriteFileSync(filePath, JSON.stringify(blob, null, 2));
-  }
-  return { read, write };
-}
-var KEYTAR_SERVICE, KEYTAR_ACCOUNT, ALGO2, IV_BYTES2, forceKeytarUnavailableForTests;
-var init_crypto_store = __esm({
-  "src/crypto-store.ts"() {
-    "use strict";
-    init_state_dir();
-    init_shared_key();
-    KEYTAR_SERVICE = "terminalhire";
-    KEYTAR_ACCOUNT = "profile-key";
-    ALGO2 = "aes-256-gcm";
-    IV_BYTES2 = 12;
-    forceKeytarUnavailableForTests = false;
-  }
-});
-
 // src/profile.ts
 var profile_exports = {};
 __export(profile_exports, {
@@ -12610,8 +12794,8 @@ __export(profile_exports, {
   removeSavedJob: () => removeSavedJob,
   writeProfile: () => writeProfile
 });
-import { join as join13 } from "path";
-import { homedir as homedir9 } from "os";
+import { join as join14 } from "path";
+import { homedir as homedir10 } from "os";
 function blankProfile() {
   return {
     version: 3,
@@ -12744,8 +12928,8 @@ var init_profile = __esm({
     "use strict";
     init_src();
     init_crypto_store();
-    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join13(homedir9(), ".terminalhire");
-    PROFILE_FILE = join13(TERMINALHIRE_DIR4, "profile.enc");
+    TERMINALHIRE_DIR4 = process.env.TERMINALHIRE_DIR || join14(homedir10(), ".terminalhire");
+    PROFILE_FILE = join14(TERMINALHIRE_DIR4, "profile.enc");
     profileStore = createEncryptedStore(PROFILE_FILE, {
       blank: blankProfile,
       keyPolicy: "keytar-first-file-fallback"
@@ -12803,9 +12987,9 @@ async function maybePromptPeerConnect({
   isInteractive = Boolean(process.stdin.isTTY && process.stdout.isTTY),
   login,
   openUrl = openInBrowser,
-  ask: ask5
+  ask: ask6
 } = {}) {
-  const promptOnce = ask5 ? async (q) => String(await ask5(q) ?? "").trim().toLowerCase() : async (q) => {
+  const promptOnce = ask6 ? async (q) => String(await ask6(q) ?? "").trim().toLowerCase() : async (q) => {
     const rl = createInterface({ input, output });
     const a = await new Promise((resolve9) => {
       rl.question(q, (x) => {
@@ -12907,9 +13091,9 @@ var init_peer_connect_prompt = __esm({
 // bin/jpi-login.js
 var jpi_login_exports = {};
 __export(jpi_login_exports, {
-  run: () => run
+  run: () => run2
 });
-async function run() {
+async function run2() {
   const subcommand = process.argv[2];
   if (subcommand === "logout") {
     await runLogout();
@@ -12937,9 +13121,9 @@ async function runLogin() {
     let ghProfile;
     if (process.env["TERMINALHIRE_GITHUB_MOCK"] === "1" || process.env["JPI_GITHUB_MOCK"] === "1") {
       const { fileURLToPath: fileURLToPath16 } = await import("url");
-      const { join: join65 } = await import("path");
+      const { join: join66 } = await import("path");
       const __dirname10 = fileURLToPath16(new URL(".", import.meta.url));
-      const fixturePath = join65(__dirname10, "../../fixtures/github-sample.json");
+      const fixturePath = join66(__dirname10, "../../fixtures/github-sample.json");
       const { readFileSync: readFileSync44 } = await import("fs");
       ghProfile = JSON.parse(readFileSync44(fixturePath, "utf8"));
     } else {
@@ -13097,15 +13281,15 @@ import {
   readFileSync as readFileSync10,
   writeFileSync as writeFileSync8,
   renameSync as renameSync4,
-  existsSync as existsSync10,
+  existsSync as existsSync11,
   copyFileSync,
   openSync as openSync3,
   closeSync as closeSync3,
   unlinkSync as unlinkSync2,
   statSync
 } from "fs";
-import { join as join14, dirname as dirname2 } from "path";
-import { homedir as homedir10 } from "os";
+import { join as join15, dirname as dirname2 } from "path";
+import { homedir as homedir11 } from "os";
 function statusFilePath() {
   return STATUS_FILE;
 }
@@ -13139,7 +13323,7 @@ function withLock(fn, deps = {}) {
     unlinkSync: unlink2 = unlinkSync2,
     statSync: stat2 = statSync,
     ensureDir = ensureStateDir,
-    sleep: sleep6 = sleepMs,
+    sleep: sleep7 = sleepMs,
     now = Date.now,
     platform = process.platform,
     lockFile = LOCK_FILE
@@ -13170,7 +13354,7 @@ function withLock(fn, deps = {}) {
         } catch {
         }
       }
-      sleep6(backoff3);
+      sleep7(backoff3);
       backoff3 = Math.min(backoff3 * 2, LOCK_SLEEP_MAX_MS);
       continue;
     }
@@ -13189,7 +13373,7 @@ function withLock(fn, deps = {}) {
   }
 }
 function readStatusMap() {
-  if (!existsSync10(STATUS_FILE)) return {};
+  if (!existsSync11(STATUS_FILE)) return {};
   let raw;
   try {
     raw = readFileSync10(STATUS_FILE, "utf8");
@@ -13233,8 +13417,8 @@ var init_job_status_store = __esm({
     "use strict";
     init_src();
     init_state_dir();
-    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join14(homedir10(), ".terminalhire");
-    STATUS_FILE = join14(TERMINALHIRE_DIR5, "job-status.json");
+    TERMINALHIRE_DIR5 = process.env.TERMINALHIRE_DIR || join15(homedir11(), ".terminalhire");
+    STATUS_FILE = join15(TERMINALHIRE_DIR5, "job-status.json");
     LOCK_FILE = `${STATUS_FILE}.lock`;
     BAK_FILE = `${STATUS_FILE}.bak`;
     LOCK_STALE_MS = 2e3;
@@ -13252,8 +13436,8 @@ __export(cache_store_exports, {
   writeIndexCache: () => writeIndexCache
 });
 import { readFileSync as readFileSync11, writeFileSync as writeFileSync9, renameSync as renameSync5 } from "fs";
-import { join as join15 } from "path";
-import { homedir as homedir11 } from "os";
+import { join as join16 } from "path";
+import { homedir as homedir12 } from "os";
 function readCacheEntry() {
   try {
     return JSON.parse(readFileSync11(INDEX_CACHE_FILE, "utf8"));
@@ -13283,8 +13467,8 @@ var init_cache_store = __esm({
   "bin/cache-store.js"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join15(homedir11(), ".terminalhire");
-    INDEX_CACHE_FILE = join15(TERMINALHIRE_DIR6, "index-cache.json");
+    TERMINALHIRE_DIR6 = process.env.TERMINALHIRE_DIR || join16(homedir12(), ".terminalhire");
+    INDEX_CACHE_FILE = join16(TERMINALHIRE_DIR6, "index-cache.json");
     SCHEMA_VERSION2 = 1;
     tmpCounter = 0;
   }
@@ -13476,7 +13660,7 @@ var init_sanitize = __esm({
 import {
   readFileSync as readFileSync12,
   writeFileSync as writeFileSync10,
-  existsSync as existsSync11,
+  existsSync as existsSync12,
   mkdirSync as mkdirSync3,
   renameSync as renameSync6,
   openSync as openSync4,
@@ -13489,24 +13673,24 @@ import {
   readlinkSync,
   unlinkSync as unlinkSync3
 } from "fs";
-import { join as join16, dirname as dirname3, basename as basename3, resolve, isAbsolute } from "path";
-import { homedir as homedir12 } from "os";
+import { join as join17, dirname as dirname3, basename as basename3, resolve, isAbsolute } from "path";
+import { homedir as homedir13 } from "os";
 function thDir() {
-  const raw = process.env["TERMINALHIRE_DIR"] || join16(homedir12(), ".terminalhire");
+  const raw = process.env["TERMINALHIRE_DIR"] || join17(homedir13(), ".terminalhire");
   return resolve(raw);
 }
 function claudeSettingsPath() {
-  return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join16(homedir12(), ".claude", "settings.json");
+  return process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join17(homedir13(), ".claude", "settings.json");
 }
 function spinnerStateFilePath() {
-  return join16(thDir(), "spinner-state.json");
+  return join17(thDir(), "spinner-state.json");
 }
 function writingFromDevStateDir() {
   return isDevStateDir(process.env["TERMINALHIRE_DIR"]);
 }
 function readJson(path6, fallback) {
   try {
-    return existsSync11(path6) ? JSON.parse(readFileSync12(path6, "utf8")) : fallback;
+    return existsSync12(path6) ? JSON.parse(readFileSync12(path6, "utf8")) : fallback;
   } catch {
     return fallback;
   }
@@ -13546,7 +13730,7 @@ function resolveTarget(path6) {
         break;
       }
       const dest = readlinkSync(cur);
-      next = isAbsolute(dest) ? dest : join16(dirname3(cur), dest);
+      next = isAbsolute(dest) ? dest : join17(dirname3(cur), dest);
     } catch {
       settled = true;
       break;
@@ -13556,7 +13740,7 @@ function resolveTarget(path6) {
   if (!settled) return null;
   if (cur !== path6) return cur;
   try {
-    return join16(realpathSync(dirname3(path6)), basename3(path6));
+    return join17(realpathSync(dirname3(path6)), basename3(path6));
   } catch {
     return path6;
   }
@@ -13798,9 +13982,9 @@ var init_spinner_io = __esm({
 });
 
 // bin/spinner-config.js
-import { join as join17 } from "path";
+import { join as join18 } from "path";
 function configFilePath() {
-  return join17(thDir(), "config.json");
+  return join18(thDir(), "config.json");
 }
 function readSpinnerConfig() {
   const CONFIG_FILE4 = configFilePath();
@@ -13838,14 +14022,14 @@ __export(spinner_seen_exports, {
   seenFilePath: () => seenFilePath
 });
 import { readFileSync as readFileSync13, writeFileSync as writeFileSync11, renameSync as renameSync7 } from "fs";
-import { join as join18, dirname as dirname4 } from "path";
-import { homedir as homedir13 } from "os";
+import { join as join19, dirname as dirname4 } from "path";
+import { homedir as homedir14 } from "os";
 function isAtCapacity(history) {
   return Object.keys(history?.entries ?? {}).length >= SEEN_MAX_ENTRIES;
 }
 function seenFilePath() {
-  const dir = process.env["TERMINALHIRE_DIR"] || join18(homedir13(), ".terminalhire");
-  return join18(dir, "seen-history.json");
+  const dir = process.env["TERMINALHIRE_DIR"] || join19(homedir14(), ".terminalhire");
+  return join19(dir, "seen-history.json");
 }
 function atomicWriteJson3(path6, obj) {
   ensureStateDir(dirname4(path6));
@@ -14444,13 +14628,13 @@ __export(pulse_prompt_exports, {
   maybeAskPulse: () => maybeAskPulse
 });
 import { createInterface as createInterface2 } from "readline";
-import { readFileSync as readFileSync14, existsSync as existsSync12 } from "fs";
-import { join as join19 } from "path";
+import { readFileSync as readFileSync14, existsSync as existsSync13 } from "fs";
+import { join as join20 } from "path";
 import { fileURLToPath as fileURLToPath5 } from "url";
 function readLocalVersion2() {
   try {
-    for (const p of [join19(__dirname3, "..", "..", "package.json"), join19(__dirname3, "..", "package.json")]) {
-      if (existsSync12(p)) {
+    for (const p of [join20(__dirname3, "..", "..", "package.json"), join20(__dirname3, "..", "package.json")]) {
+      if (existsSync13(p)) {
         const pkg = JSON.parse(readFileSync14(p, "utf8"));
         if (pkg.version) return pkg.version;
       }
@@ -14477,7 +14661,7 @@ async function maybeAskPulse() {
   }
   writeConfig({ lastPulseAskAt: (/* @__PURE__ */ new Date()).toISOString() });
   const rl = createInterface2({ input: process.stdin, output: process.stdout });
-  const ask5 = (question) => new Promise((resolve9) => {
+  const ask6 = (question) => new Promise((resolve9) => {
     const onClose = () => resolve9(null);
     rl.once("close", onClose);
     rl.question(question, (answer2) => {
@@ -14485,7 +14669,7 @@ async function maybeAskPulse() {
       resolve9((answer2 || "").trim());
     });
   });
-  const answer = await ask5(
+  const answer = await ask6(
     "  \u2726 Quick pulse \u2014 how's terminalhire? 0\u20133 (Enter skips; a reply sends ONLY the score + CLI version/OS): "
   );
   rl.close();
@@ -14537,12 +14721,12 @@ __export(jpi_jobs_exports, {
   applyStatusView: () => applyStatusView,
   getJobMatches: () => getJobMatches,
   recordShown: () => recordShown,
-  run: () => run2,
+  run: () => run3,
   statusLabel: () => statusLabel
 });
 import { readFileSync as readFileSync15 } from "fs";
-import { join as join20 } from "path";
-import { homedir as homedir14 } from "os";
+import { join as join21 } from "path";
+import { homedir as homedir15 } from "os";
 import { createInterface as createInterface3 } from "readline";
 import { fileURLToPath as fileURLToPath6 } from "url";
 function isRotatingView() {
@@ -14803,7 +14987,7 @@ async function getJobMatches({ quiet = false, offline = false } = {}) {
   }
   return { status: "ok", ranked, bountyCount, profile };
 }
-async function run2() {
+async function run3() {
   try {
     if (args[0] === "mark") {
       handleMark();
@@ -14950,8 +15134,8 @@ var init_jpi_jobs = __esm({
     init_sanitize();
     init_api_base();
     __dirname4 = fileURLToPath6(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join20(homedir14(), ".terminalhire");
-    INDEX_CACHE_FILE2 = join20(TERMINALHIRE_DIR7, "index-cache.json");
+    TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join21(homedir15(), ".terminalhire");
+    INDEX_CACHE_FILE2 = join21(TERMINALHIRE_DIR7, "index-cache.json");
     INDEX_TTL_MS = 15 * 60 * 1e3;
     API_URL = resolveApiBase();
     DEFAULT_LIMIT = 10;
@@ -14975,8 +15159,8 @@ var init_jpi_jobs = __esm({
 
 // bin/directory.js
 import { readFileSync as readFileSync16, writeFileSync as writeFileSync12, renameSync as renameSync8 } from "fs";
-import { join as join21 } from "path";
-import { homedir as homedir15 } from "os";
+import { join as join22 } from "path";
+import { homedir as homedir16 } from "os";
 function readDirectoryCache() {
   try {
     const entry = JSON.parse(readFileSync16(DIRECTORY_CACHE_FILE, "utf8"));
@@ -15063,9 +15247,9 @@ var init_directory2 = __esm({
     "use strict";
     init_state_dir();
     init_api_base();
-    TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join21(homedir15(), ".terminalhire");
-    DIRECTORY_CACHE_FILE = join21(TERMINALHIRE_DIR8, "directory-cache.json");
-    PROJECT_FILE = join21(TERMINALHIRE_DIR8, "project.json");
+    TERMINALHIRE_DIR8 = process.env.TERMINALHIRE_DIR || join22(homedir16(), ".terminalhire");
+    DIRECTORY_CACHE_FILE = join22(TERMINALHIRE_DIR8, "directory-cache.json");
+    PROJECT_FILE = join22(TERMINALHIRE_DIR8, "project.json");
     INDEX_TTL_MS2 = 15 * 60 * 1e3;
     API_URL2 = resolveApiBase();
   }
@@ -15263,7 +15447,7 @@ var jpi_devs_exports = {};
 __export(jpi_devs_exports, {
   getDevs: () => getDevs,
   reportMatched: () => reportMatched,
-  run: () => run3
+  run: () => run4
 });
 import { createInterface as createInterface4 } from "readline";
 function prompt2(question) {
@@ -15329,7 +15513,7 @@ async function getDevs({ quiet = false, offline = false } = {}) {
   if (results.length === 0) return { status: "no-matches", fp };
   return { status: "ok", results, fp };
 }
-async function run3() {
+async function run4() {
   try {
     const result = await getDevs();
     switch (result.status) {
@@ -15400,11 +15584,11 @@ var init_jpi_devs = __esm({
 // bin/jpi-project.js
 var jpi_project_exports = {};
 __export(jpi_project_exports, {
-  run: () => run4
+  run: () => run5
 });
 import { readFileSync as readFileSync17 } from "fs";
-import { join as join22 } from "path";
-import { homedir as homedir16 } from "os";
+import { join as join23 } from "path";
+import { homedir as homedir17 } from "os";
 import { createInterface as createInterface5 } from "readline";
 function readProject2() {
   try {
@@ -15434,7 +15618,7 @@ function splitDeclaration(line) {
 function tokenize5(skillsRaw) {
   return skillsRaw.split(/[,/]|\s+/).map((t) => t.trim()).filter(Boolean);
 }
-async function run4() {
+async function run5() {
   try {
     if (SHOW) {
       const existing = readProject2();
@@ -15539,8 +15723,8 @@ var init_jpi_project = __esm({
   "bin/jpi-project.js"() {
     "use strict";
     init_directory2();
-    TERMINALHIRE_DIR9 = process.env.TERMINALHIRE_DIR || join22(homedir16(), ".terminalhire");
-    PROJECT_FILE2 = join22(TERMINALHIRE_DIR9, "project.json");
+    TERMINALHIRE_DIR9 = process.env.TERMINALHIRE_DIR || join23(homedir17(), ".terminalhire");
+    PROJECT_FILE2 = join23(TERMINALHIRE_DIR9, "project.json");
     args3 = process.argv.slice(2);
     SHOW = args3.includes("--show");
     declarationArg = args3.filter((a) => !a.startsWith("--")).join(" ").trim();
@@ -15593,13 +15777,13 @@ __export(repo_experience_exports, {
   recordPolicySnapshot: () => recordPolicySnapshot,
   writeTombstone: () => writeTombstone
 });
-import { join as join23 } from "path";
-import { homedir as homedir17 } from "os";
+import { join as join24 } from "path";
+import { homedir as homedir18 } from "os";
 function blankFile() {
   return { version: 1, repos: {} };
 }
 function __setStoreForTests(testStore) {
-  activeStore = testStore ?? store;
+  activeStore = testStore ?? store2;
 }
 function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
@@ -15795,23 +15979,23 @@ function briefingLines(params) {
   }
   return lines;
 }
-var TERMINALHIRE_DIR10, REPO_EXPERIENCE_FILE, MAX_REPOS, MAX_CULTURE_SAMPLES, MAX_NOTES, MAX_BACKFILL, store, activeStore;
+var TERMINALHIRE_DIR10, REPO_EXPERIENCE_FILE, MAX_REPOS, MAX_CULTURE_SAMPLES, MAX_NOTES, MAX_BACKFILL, store2, activeStore;
 var init_repo_experience = __esm({
   "src/repo-experience.ts"() {
     "use strict";
     init_crypto_store();
     init_profile();
-    TERMINALHIRE_DIR10 = process.env.TERMINALHIRE_DIR || join23(homedir17(), ".terminalhire");
-    REPO_EXPERIENCE_FILE = join23(TERMINALHIRE_DIR10, "repo-experience.enc");
+    TERMINALHIRE_DIR10 = process.env.TERMINALHIRE_DIR || join24(homedir18(), ".terminalhire");
+    REPO_EXPERIENCE_FILE = join24(TERMINALHIRE_DIR10, "repo-experience.enc");
     MAX_REPOS = 100;
     MAX_CULTURE_SAMPLES = 12;
     MAX_NOTES = 10;
     MAX_BACKFILL = 50;
-    store = createEncryptedStore(REPO_EXPERIENCE_FILE, {
+    store2 = createEncryptedStore(REPO_EXPERIENCE_FILE, {
       blank: blankFile,
       keyPolicy: "keychain-required"
     });
-    activeStore = store;
+    activeStore = store2;
   }
 });
 
@@ -15842,13 +16026,13 @@ import {
   writeFileSync as writeFileSync13,
   mkdirSync as mkdirSync4,
   renameSync as renameSync9,
-  existsSync as existsSync13,
-  rmSync as rmSync5,
+  existsSync as existsSync14,
+  rmSync as rmSync6,
   statSync as statSync3
 } from "fs";
 import { randomBytes as randomBytes6 } from "crypto";
-import { join as join24 } from "path";
-import { homedir as homedir18 } from "os";
+import { join as join25 } from "path";
+import { homedir as homedir19 } from "os";
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -15862,7 +16046,7 @@ function withClaimsLock(fn) {
     } catch {
       try {
         if (Date.now() - statSync3(LOCK_DIR).mtimeMs > LOCK_STALE_MS2) {
-          rmSync5(LOCK_DIR, { recursive: true, force: true });
+          rmSync6(LOCK_DIR, { recursive: true, force: true });
           continue;
         }
       } catch {
@@ -15878,7 +16062,7 @@ function withClaimsLock(fn) {
   try {
     return fn();
   } finally {
-    rmSync5(LOCK_DIR, { recursive: true, force: true });
+    rmSync6(LOCK_DIR, { recursive: true, force: true });
   }
 }
 function claimTurn(state) {
@@ -15925,7 +16109,7 @@ function normalizeClaim(c) {
 }
 function readClaims() {
   try {
-    if (!existsSync13(CLAIMS_FILE)) return [];
+    if (!existsSync14(CLAIMS_FILE)) return [];
     const data = JSON.parse(readFileSync18(CLAIMS_FILE, "utf8"));
     const claims = Array.isArray(data?.claims) ? data.claims : [];
     return claims.map(normalizeClaim);
@@ -15946,7 +16130,7 @@ function writeClaims(claims) {
     renameSync9(tmp, CLAIMS_FILE);
   } catch (err) {
     try {
-      rmSync5(tmp, { force: true });
+      rmSync6(tmp, { force: true });
     } catch {
     }
     throw err;
@@ -16066,8 +16250,8 @@ var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join24(homedir18(), ".terminalhire");
-    CLAIMS_FILE = join24(TERMINALHIRE_DIR11, "claims.json");
+    TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join25(homedir19(), ".terminalhire");
+    CLAIMS_FILE = join25(TERMINALHIRE_DIR11, "claims.json");
     LOCK_DIR = `${CLAIMS_FILE}.lock`;
     LOCK_STALE_MS2 = Number(process.env.TERMINALHIRE_LOCK_STALE_MS) || 1e4;
     LOCK_RETRY_MS = Number(process.env.TERMINALHIRE_LOCK_RETRY_MS) || 25;
@@ -16193,14 +16377,14 @@ __export(jpi_decline_exports, {
   sendDecline: () => sendDecline
 });
 import { createInterface as createInterface6 } from "readline";
-import { existsSync as existsSync14, readFileSync as readFileSync19, writeFileSync as writeFileSync14, rmSync as rmSync6 } from "fs";
-import { homedir as homedir19 } from "os";
-import { join as join25 } from "path";
-function terminalhireDir2() {
-  return process.env.TERMINALHIRE_DIR || join25(homedir19(), ".terminalhire");
+import { existsSync as existsSync15, readFileSync as readFileSync19, writeFileSync as writeFileSync14, rmSync as rmSync7 } from "fs";
+import { homedir as homedir20 } from "os";
+import { join as join26 } from "path";
+function terminalhireDir3() {
+  return process.env.TERMINALHIRE_DIR || join26(homedir20(), ".terminalhire");
 }
 function consentFilePath() {
-  return join25(terminalhireDir2(), "decline-consent");
+  return join26(terminalhireDir3(), "decline-consent");
 }
 function postingIdFromJobId(jobId) {
   const id = String(jobId ?? "");
@@ -16246,20 +16430,20 @@ function prompt3(question) {
 }
 function hasDeclineConsent() {
   try {
-    return existsSync14(consentFilePath()) && readFileSync19(consentFilePath(), "utf8").trim() === "yes";
+    return existsSync15(consentFilePath()) && readFileSync19(consentFilePath(), "utf8").trim() === "yes";
   } catch {
     return false;
   }
 }
 function forgetDeclineConsent() {
   try {
-    rmSync6(consentFilePath());
+    rmSync7(consentFilePath());
   } catch {
   }
 }
 async function grantDeclineConsent() {
   const { ensureStateDir: ensureStateDir2 } = await Promise.resolve().then(() => (init_state_dir(), state_dir_exports));
-  ensureStateDir2(terminalhireDir2());
+  ensureStateDir2(terminalhireDir3());
   writeFileSync14(consentFilePath(), "yes\n", "utf8");
 }
 async function ensureDeclineConsent(bountyId, reason) {
@@ -16323,10 +16507,10 @@ Could not send that (${res.status}). Nothing else was sent.`);
     return false;
   }
 }
-async function runDeclinePrompt(bountyId, { ask: ask5 = prompt3 } = {}) {
+async function runDeclinePrompt(bountyId, { ask: ask6 = prompt3 } = {}) {
   console.log("\nWhy are you passing? The poster sees a count, never your name.");
   for (const c of DECLINE_CHOICES) console.log(`  ${c.key}. ${c.label}`);
-  const pick2 = await ask5("\nEnter a number, or press Enter to skip: ");
+  const pick2 = await ask6("\nEnter a number, or press Enter to skip: ");
   const reason = reasonForKey(pick2);
   if (!reason) return false;
   return sendDecline(bountyId, reason);
@@ -16360,12 +16544,12 @@ __export(jpi_bounties_exports, {
   printBounty: () => printBounty,
   projectMarkerLine: () => projectMarkerLine,
   rankBounties: () => rankBounties,
-  run: () => run5,
+  run: () => run6,
   wrapIndented: () => wrapIndented
 });
 import { readFileSync as readFileSync20 } from "fs";
-import { join as join26 } from "path";
-import { homedir as homedir20 } from "os";
+import { join as join27 } from "path";
+import { homedir as homedir21 } from "os";
 import { createInterface as createInterface7 } from "readline";
 function readIndexCache2() {
   try {
@@ -16583,7 +16767,7 @@ async function getBounties({ quiet = false, offline = false, priced = PRICED_ONL
   const matchedCount = bounties.filter((j) => score(j) > 0).length;
   return { status: "ok", bounties, ranked, matchedCount, continuityByRepo };
 }
-async function run5() {
+async function run6() {
   try {
     if (args4.length === 0) {
       try {
@@ -16722,8 +16906,8 @@ var init_jpi_bounties = __esm({
     init_api_base();
     init_review_mode_copy();
     init_founder_pin();
-    TERMINALHIRE_DIR12 = process.env.TERMINALHIRE_DIR || join26(homedir20(), ".terminalhire");
-    INDEX_CACHE_FILE3 = join26(TERMINALHIRE_DIR12, "index-cache.json");
+    TERMINALHIRE_DIR12 = process.env.TERMINALHIRE_DIR || join27(homedir21(), ".terminalhire");
+    INDEX_CACHE_FILE3 = join27(TERMINALHIRE_DIR12, "index-cache.json");
     INDEX_TTL_MS3 = 15 * 60 * 1e3;
     API_URL4 = resolveApiBase();
     RANK_MODE = process.env["TERMINALHIRE_BOUNTY_RANK"] ?? "winnability";
@@ -16964,11 +17148,11 @@ __export(jpi_contribute_exports, {
   mergeContribDedup: () => mergeContribDedup,
   rankContributions: () => rankContributions,
   renderRow: () => renderRow,
-  run: () => run6
+  run: () => run7
 });
 import { readFileSync as readFileSync21, writeFileSync as writeFileSync15, renameSync as renameSync10 } from "fs";
-import { join as join27 } from "path";
-import { homedir as homedir21 } from "os";
+import { join as join28 } from "path";
+import { homedir as homedir22 } from "os";
 import { createHash as createHash3, randomBytes as randomBytes7 } from "crypto";
 function readIndexCache3() {
   try {
@@ -17267,7 +17451,7 @@ async function runScoped(repoFullName, { log, fetchImpl, useCache, opts }) {
   if (sharedIndexNote) log(`
   ${sharedIndexNote}`);
 }
-async function run6(opts = {}) {
+async function run7(opts = {}) {
   const log = opts.log ?? console.log;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   const useCache = opts.fetchImpl == null;
@@ -17369,12 +17553,12 @@ var init_jpi_contribute = __esm({
     init_sanitize();
     init_contribute_repo();
     init_api_base();
-    TERMINALHIRE_DIR13 = process.env.TERMINALHIRE_DIR || join27(homedir21(), ".terminalhire");
-    INDEX_CACHE_FILE4 = join27(TERMINALHIRE_DIR13, "index-cache.json");
+    TERMINALHIRE_DIR13 = process.env.TERMINALHIRE_DIR || join28(homedir22(), ".terminalhire");
+    INDEX_CACHE_FILE4 = join28(TERMINALHIRE_DIR13, "index-cache.json");
     INDEX_TTL_MS4 = 15 * 60 * 1e3;
     API_URL5 = resolveApiBase();
     CONTINUITY_RANK_DISABLED2 = process.env["TERMINALHIRE_NO_CONTINUITY_RANK"] === "1";
-    LOCAL_CONTRIB_CACHE_FILE = join27(TERMINALHIRE_DIR13, "contribute-local-cache.json");
+    LOCAL_CONTRIB_CACHE_FILE = join28(TERMINALHIRE_DIR13, "contribute-local-cache.json");
     LOCAL_DISCOVERY_TTL_MS = 6 * 60 * 60 * 1e3;
     LOCAL_DISCOVERY_RETRY_TTL_MS = 15 * 60 * 1e3;
     LOCAL_DISCOVERY_BUDGET_MS = 12e3;
@@ -17614,8 +17798,8 @@ __export(policy_acks_exports, {
   rememberPolicyAck: () => rememberPolicyAck
 });
 import { lstatSync as lstatSync3, readFileSync as readFileSync22, writeFileSync as writeFileSync16 } from "fs";
-import { join as join28 } from "path";
-import { homedir as homedir22 } from "os";
+import { join as join29 } from "path";
+import { homedir as homedir23 } from "os";
 function isSymlink(path6) {
   try {
     return lstatSync3(path6).isSymbolicLink();
@@ -17669,8 +17853,8 @@ var init_policy_acks = __esm({
   "src/policy-acks.ts"() {
     "use strict";
     init_state_dir();
-    TERMINALHIRE_DIR14 = process.env.TERMINALHIRE_DIR || join28(homedir22(), ".terminalhire");
-    ACKS_FILE = join28(TERMINALHIRE_DIR14, "policy-acks.json");
+    TERMINALHIRE_DIR14 = process.env.TERMINALHIRE_DIR || join29(homedir23(), ".terminalhire");
+    ACKS_FILE = join29(TERMINALHIRE_DIR14, "policy-acks.json");
     REMEMBERABLE_VERDICTS = /* @__PURE__ */ new Set(["ai-mentioned", "disclosure-required"]);
     HEX64 = /^[0-9a-f]{64}$/;
     POLICY_ACKS_FILE = ACKS_FILE;
@@ -17705,34 +17889,34 @@ __export(claim_push_bg_exports, {
   writePushTokenEnc: () => writePushTokenEnc
 });
 import { createHash as createHash4 } from "crypto";
-import { readFileSync as readFileSync23, writeFileSync as writeFileSync17, existsSync as existsSync15, rmSync as rmSync7 } from "fs";
-import { join as join29 } from "path";
-import { homedir as homedir23 } from "os";
+import { readFileSync as readFileSync23, writeFileSync as writeFileSync17, existsSync as existsSync16, rmSync as rmSync8 } from "fs";
+import { join as join30 } from "path";
+import { homedir as homedir24 } from "os";
 async function writePushTokenEnc(rawToken) {
   ensureStateDirForSecret(TERMINALHIRE_DIR15);
   const key = await loadKey();
-  const blob = encrypt(rawToken, key);
+  const blob = encrypt2(rawToken, key);
   writeFileSync17(CLAIM_PUSH_TOKEN_FILE, JSON.stringify(blob, null, 2), { encoding: "utf8" });
 }
 async function readPushTokenEnc() {
-  if (!existsSync15(CLAIM_PUSH_TOKEN_FILE)) return void 0;
+  if (!existsSync16(CLAIM_PUSH_TOKEN_FILE)) return void 0;
   try {
     const key = await loadKey();
     const blob = JSON.parse(readFileSync23(CLAIM_PUSH_TOKEN_FILE, "utf8"));
-    return decrypt(blob, key);
+    return decrypt2(blob, key);
   } catch {
     return void 0;
   }
 }
 function clearPushTokenEnc() {
   try {
-    rmSync7(CLAIM_PUSH_TOKEN_FILE);
+    rmSync8(CLAIM_PUSH_TOKEN_FILE);
   } catch {
   }
 }
 function readAutoMarker() {
   try {
-    return existsSync15(CLAIM_PUSH_AUTO_MARKER) ? JSON.parse(readFileSync23(CLAIM_PUSH_AUTO_MARKER, "utf8")) : null;
+    return existsSync16(CLAIM_PUSH_AUTO_MARKER) ? JSON.parse(readFileSync23(CLAIM_PUSH_AUTO_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
@@ -17743,7 +17927,7 @@ function writeAutoMarker(marker) {
 }
 function clearAutoMarker() {
   try {
-    rmSync7(CLAIM_PUSH_AUTO_MARKER);
+    rmSync8(CLAIM_PUSH_AUTO_MARKER);
   } catch {
   }
 }
@@ -17793,13 +17977,13 @@ async function shouldNudgeUnpushed() {
     const currentHash = computeSnapshotHash(pushed);
     let manual = null;
     try {
-      manual = existsSync15(CLAIM_PUSH_MANUAL_MARKER) ? JSON.parse(readFileSync23(CLAIM_PUSH_MANUAL_MARKER, "utf8")) : null;
+      manual = existsSync16(CLAIM_PUSH_MANUAL_MARKER) ? JSON.parse(readFileSync23(CLAIM_PUSH_MANUAL_MARKER, "utf8")) : null;
     } catch {
       manual = null;
     }
     return unpushedNudgeGate({
-      autoMarkerExists: existsSync15(CLAIM_PUSH_AUTO_MARKER),
-      tokenFileExists: existsSync15(CLAIM_PUSH_TOKEN_FILE),
+      autoMarkerExists: existsSync16(CLAIM_PUSH_AUTO_MARKER),
+      tokenFileExists: existsSync16(CLAIM_PUSH_TOKEN_FILE),
       manualMarkerExists: !!manual,
       lastSnapshotHash: manual?.lastSnapshotHash ?? null,
       currentHash,
@@ -17811,7 +17995,7 @@ async function shouldNudgeUnpushed() {
 }
 function readHeartbeatState() {
   try {
-    return existsSync15(CLAIM_HEARTBEAT_FILE) ? JSON.parse(readFileSync23(CLAIM_HEARTBEAT_FILE, "utf8")) : {};
+    return existsSync16(CLAIM_HEARTBEAT_FILE) ? JSON.parse(readFileSync23(CLAIM_HEARTBEAT_FILE, "utf8")) : {};
   } catch {
     return {};
   }
@@ -17859,7 +18043,7 @@ async function postClaimHeartbeat({ bountyId, claimId, now = Date.now() } = {}) 
     const marker = readAutoMarker();
     const gate2 = heartbeatGate({
       autoMarkerExists: Boolean(marker && marker.autoConsentedAt),
-      tokenFileExists: existsSync15(CLAIM_PUSH_TOKEN_FILE),
+      tokenFileExists: existsSync16(CLAIM_PUSH_TOKEN_FILE),
       consentVersion: marker?.version,
       bountyId,
       claimId,
@@ -17884,7 +18068,7 @@ async function postClaimHeartbeat({ bountyId, claimId, now = Date.now() } = {}) 
 }
 async function runBackgroundClaimPush({ now = Date.now() } = {}) {
   try {
-    if (!existsSync15(CLAIM_PUSH_AUTO_MARKER) || !existsSync15(CLAIM_PUSH_TOKEN_FILE)) {
+    if (!existsSync16(CLAIM_PUSH_AUTO_MARKER) || !existsSync16(CLAIM_PUSH_TOKEN_FILE)) {
       return { pushed: false, reason: "not-opted-in" };
     }
     const marker = readAutoMarker();
@@ -17935,15 +18119,15 @@ var init_claim_push_bg = __esm({
     init_github_auth();
     init_state_dir();
     init_api_base();
-    TERMINALHIRE_DIR15 = process.env.TERMINALHIRE_DIR || join29(homedir23(), ".terminalhire");
-    CLAIM_PUSH_AUTO_MARKER = join29(TERMINALHIRE_DIR15, "claim-push-auto.json");
-    CLAIM_PUSH_TOKEN_FILE = join29(TERMINALHIRE_DIR15, "claim-push-token.enc");
-    CLAIM_PUSH_MANUAL_MARKER = join29(TERMINALHIRE_DIR15, "claim-push.json");
+    TERMINALHIRE_DIR15 = process.env.TERMINALHIRE_DIR || join30(homedir24(), ".terminalhire");
+    CLAIM_PUSH_AUTO_MARKER = join30(TERMINALHIRE_DIR15, "claim-push-auto.json");
+    CLAIM_PUSH_TOKEN_FILE = join30(TERMINALHIRE_DIR15, "claim-push-token.enc");
+    CLAIM_PUSH_MANUAL_MARKER = join30(TERMINALHIRE_DIR15, "claim-push.json");
     CLAIM_SYNC_BASE = resolveApiBase();
     warnSharedCredentialsIfNonProd(CLAIM_SYNC_BASE);
     AUTO_CONSENT_VERSION = 3;
     AUTO_PUSH_THROTTLE_MS = 24 * 60 * 60 * 1e3;
-    CLAIM_HEARTBEAT_FILE = join29(TERMINALHIRE_DIR15, "claim-heartbeat.json");
+    CLAIM_HEARTBEAT_FILE = join30(TERMINALHIRE_DIR15, "claim-heartbeat.json");
     HEARTBEAT_MIN_INTERVAL_MS = 3e4;
     HEARTBEAT_MIN_CONSENT_VERSION = 3;
   }
@@ -31041,13 +31225,13 @@ async function* consumeHop(args5) {
         if (p.delta.stop_reason === "refusal") {
           const details = p.delta.stop_details?.type === "refusal" ? p.delta.stop_details : null;
           if (details?.fallback_credit_token && hasNext) {
-            const usage2 = backfill(p.usage, startUsage);
+            const usage3 = backfill(p.usage, startUsage);
             yield* tracker.closeOpenBlocks();
             return {
               refused: {
                 token: details.fallback_credit_token,
                 hasPrefillClaim: details.fallback_has_prefill_claim === true,
-                usage: usage2,
+                usage: usage3,
                 stopDetails: details
               },
               model,
@@ -31070,12 +31254,12 @@ async function* consumeHop(args5) {
           }
         }
         if (splice) {
-          const usage2 = backfill(p.usage, startUsage);
-          usage2.iterations = [
+          const usage3 = backfill(p.usage, startUsage);
+          usage3.iterations = [
             ...splice.iterations,
-            toIterationUsage("fallback_message", splice.model, usage2)
+            toIterationUsage("fallback_message", splice.model, usage3)
           ];
-          p.usage = usage2;
+          p.usage = usage3;
           yield emit("message_delta", p);
           continue;
         }
@@ -31297,8 +31481,8 @@ __export(repo_policy_semantic_exports, {
   quoteFound: () => quoteFound
 });
 import { createHash as createHash5 } from "crypto";
-import { homedir as homedir24 } from "os";
-import { join as join33 } from "path";
+import { homedir as homedir25 } from "os";
+import { join as join34 } from "path";
 import { readFileSync as readFileSync24, writeFileSync as writeFileSync18 } from "fs";
 function quoteFound(quote, content) {
   const q = normalize3(quote);
@@ -31562,8 +31746,8 @@ var init_repo_policy_semantic = __esm({
     "use strict";
     init_policy_audit();
     init_state_dir();
-    TERMINALHIRE_DIR16 = process.env.TERMINALHIRE_DIR || join33(homedir24(), ".terminalhire");
-    CACHE_FILE = join33(TERMINALHIRE_DIR16, "semantic-policy-cache.json");
+    TERMINALHIRE_DIR16 = process.env.TERMINALHIRE_DIR || join34(homedir25(), ".terminalhire");
+    CACHE_FILE = join34(TERMINALHIRE_DIR16, "semantic-policy-cache.json");
     MIN_QUOTE_CHARS = 16;
     normalize3 = (s) => s.toLowerCase().replace(/\s+/g, " ").trim();
     SemanticAuditUnavailableError = class extends Error {
@@ -32021,9 +32205,9 @@ function readGoTestVerbose(out) {
     const invocations = [];
     const latest = /* @__PURE__ */ new Map();
     for (const l of block) {
-      const run32 = /^=== RUN {3}(\S+)$/.exec(l);
-      if (run32?.[1] !== void 0)
-        latest.set(run32[1], invocations.push(null) - 1);
+      const run34 = /^=== RUN {3}(\S+)$/.exec(l);
+      if (run34?.[1] !== void 0)
+        latest.set(run34[1], invocations.push(null) - 1);
       const frame = /^--- (PASS|FAIL|SKIP): (\S+) \(\d+\.\d+s\)$/.exec(l);
       if (frame?.[2] !== void 0 && !latest.has(frame[2]) && everOpen.has(frame[2])) {
         nested = true;
@@ -32406,9 +32590,9 @@ var init_classify2 = __esm({
           let passed = 0;
           let failed = 0;
           for (const m of lines) {
-            const [run32, failures, errors, skipped] = [m[1], m[2], m[3], m[4]].map(Number);
+            const [run34, failures, errors, skipped] = [m[1], m[2], m[3], m[4]].map(Number);
             failed += failures + errors;
-            passed += Math.max(0, run32 - failures - errors - skipped);
+            passed += Math.max(0, run34 - failures - errors - skipped);
           }
           return { tests_passed: passed, tests_failed: failed };
         }
@@ -32690,7 +32874,7 @@ var init_classify2 = __esm({
 });
 
 // ../../packages/containment/dist/env.js
-import { homedir as homedir25 } from "os";
+import { homedir as homedir26 } from "os";
 import { posix } from "path";
 function realHomeCandidates(source) {
   const candidates = [];
@@ -32699,7 +32883,7 @@ function realHomeCandidates(source) {
     candidates.push(fromEnv);
   let fromOs;
   try {
-    fromOs = homedir25();
+    fromOs = homedir26();
   } catch {
     fromOs = void 0;
   }
@@ -32734,27 +32918,27 @@ function scrubEnv(source, opts) {
   env["PATH"] = [...opts.toolPaths ?? [], ...BASE_PATH].join(":");
   env["HOME"] = jailHome;
   env["TMPDIR"] = tmpDir;
-  env["XDG_CONFIG_HOME"] = join34(jailHome, ".config");
-  env["XDG_CACHE_HOME"] = join34(jailHome, ".cache");
-  env["XDG_DATA_HOME"] = join34(jailHome, ".local", "share");
-  env["GIT_CONFIG_GLOBAL"] = join34(jailHome, ".gitconfig");
+  env["XDG_CONFIG_HOME"] = join35(jailHome, ".config");
+  env["XDG_CACHE_HOME"] = join35(jailHome, ".cache");
+  env["XDG_DATA_HOME"] = join35(jailHome, ".local", "share");
+  env["GIT_CONFIG_GLOBAL"] = join35(jailHome, ".gitconfig");
   env["GIT_CONFIG_SYSTEM"] = "/dev/null";
   env["GIT_TERMINAL_PROMPT"] = "0";
   env["GIT_ASKPASS"] = "/usr/bin/false";
   env["SSH_ASKPASS"] = "/usr/bin/false";
-  env["npm_config_userconfig"] = join34(jailHome, ".npmrc");
-  env["npm_config_cache"] = join34(jailHome, ".npm");
+  env["npm_config_userconfig"] = join35(jailHome, ".npmrc");
+  env["npm_config_cache"] = join35(jailHome, ".npm");
   env["npm_config_update_notifier"] = "false";
   env["npm_config_fund"] = "false";
   env["npm_config_audit"] = "false";
-  env["GOPATH"] = join34(jailHome, "go");
-  env["GOMODCACHE"] = join34(jailHome, "go", "pkg", "mod");
-  env["GOCACHE"] = join34(jailHome, ".cache", "go-build");
+  env["GOPATH"] = join35(jailHome, "go");
+  env["GOMODCACHE"] = join35(jailHome, "go", "pkg", "mod");
+  env["GOCACHE"] = join35(jailHome, ".cache", "go-build");
   env["GOFLAGS"] = "-modcacherw";
-  env["CARGO_HOME"] = join34(jailHome, ".cargo");
-  env["MAVEN_OPTS"] = `-Dmaven.repo.local=${join34(jailHome, ".m2", "repository")}`;
-  env["GRADLE_USER_HOME"] = join34(jailHome, ".gradle");
-  const bundle = join34(jailHome, ".bundle");
+  env["CARGO_HOME"] = join35(jailHome, ".cargo");
+  env["MAVEN_OPTS"] = `-Dmaven.repo.local=${join35(jailHome, ".m2", "repository")}`;
+  env["GRADLE_USER_HOME"] = join35(jailHome, ".gradle");
+  const bundle = join35(jailHome, ".bundle");
   env["GEM_HOME"] = bundle;
   env["BUNDLE_PATH"] = bundle;
   env["BUNDLE_APP_CONFIG"] = bundle;
@@ -32785,11 +32969,11 @@ function auditEnv(env) {
   }
   return leaks;
 }
-var join34, ENV_ALLOWLIST, BASE_PATH, DEAD_PROXY, SandboxEnvError, FORBIDDEN_EXTRA;
+var join35, ENV_ALLOWLIST, BASE_PATH, DEAD_PROXY, SandboxEnvError, FORBIDDEN_EXTRA;
 var init_env2 = __esm({
   "../../packages/containment/dist/env.js"() {
     "use strict";
-    join34 = posix.join;
+    join35 = posix.join;
     ENV_ALLOWLIST = ["LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM"];
     BASE_PATH = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
     DEAD_PROXY = "http://127.0.0.1:1";
@@ -32809,8 +32993,8 @@ var init_reap = __esm({
 
 // ../../packages/containment/dist/fence.js
 import { spawn as spawn3, spawnSync as spawnSync3 } from "child_process";
-import { existsSync as existsSync16, lchownSync, lstatSync as lstatSync4, mkdirSync as mkdirSync5, readdirSync as readdirSync2, realpathSync as realpathSync2, statSync as statSync4, writeFileSync as writeFileSync19 } from "fs";
-import { basename as basename6, dirname as dirname8, isAbsolute as isAbsolute4, join as join35, posix as posix2, resolve as resolve5, sep as sep5 } from "path";
+import { existsSync as existsSync17, lchownSync, lstatSync as lstatSync4, mkdirSync as mkdirSync5, readdirSync as readdirSync2, realpathSync as realpathSync2, statSync as statSync4, writeFileSync as writeFileSync19 } from "fs";
+import { basename as basename6, dirname as dirname8, isAbsolute as isAbsolute4, join as join36, posix as posix2, resolve as resolve5, sep as sep5 } from "path";
 import { fileURLToPath as fileURLToPath7 } from "url";
 function canonical(path6, label) {
   if (!isAbsolute4(path6)) {
@@ -32874,7 +33058,7 @@ function chownTree(dir, user) {
     lchownSync(p, user.uid, user.gid);
     if (lstatSync4(p).isDirectory()) {
       for (const entry of readdirSync2(p))
-        stack.push(join35(p, entry));
+        stack.push(join36(p, entry));
     }
   }
 }
@@ -32883,7 +33067,7 @@ function canonicalPath(p) {
   const tail2 = [];
   for (; ; ) {
     try {
-      return join35(realpathSync2.native(head), ...tail2.reverse());
+      return join36(realpathSync2.native(head), ...tail2.reverse());
     } catch {
       const up = dirname8(head);
       if (up === head)
@@ -32968,10 +33152,10 @@ function assertNoForeignLinks(paths) {
 function buildJail(root, guestUser, io = {}) {
   const ids2 = io.ids === void 0 ? hostIds() : io.ids;
   const guest = guestUser ?? localGuestUser(ids2);
-  const jail = join35(root, JAIL_SEGMENT);
-  const tmp = join35(root, JAIL_TMP_SEGMENT);
-  const dirs = [jail, tmp, join35(jail, ".config"), join35(jail, ".cache"), join35(jail, ".npm")];
-  const files = [".npmrc", JAIL_PASSWD_FILE, JAIL_GROUP_FILE, ".gitconfig"].map((f) => join35(jail, f));
+  const jail = join36(root, JAIL_SEGMENT);
+  const tmp = join36(root, JAIL_TMP_SEGMENT);
+  const dirs = [jail, tmp, join36(jail, ".config"), join36(jail, ".cache"), join36(jail, ".npm")];
+  const files = [".npmrc", JAIL_PASSWD_FILE, JAIL_GROUP_FILE, ".gitconfig"].map((f) => join36(jail, f));
   assertHoldsNoRealHome(root, "the jail root", "buildJail");
   assertNoForeignLinks([...dirs, ...files]);
   assertHoldsNoRealHome(jail, "the jail directory", "buildJail");
@@ -32979,10 +33163,10 @@ function buildJail(root, guestUser, io = {}) {
   for (const dir of dirs) {
     mkdirSync5(dir, { recursive: true });
   }
-  writeFileSync19(join35(jail, ".npmrc"), "", "utf8");
-  writeFileSync19(join35(jail, JAIL_PASSWD_FILE), guest ? jailPasswd(guest.uid, guest.gid) : jailPasswd(null, null), "utf8");
-  writeFileSync19(join35(jail, JAIL_GROUP_FILE), guest ? jailGroup(guest.gid) : jailGroup(null), "utf8");
-  writeFileSync19(join35(jail, ".gitconfig"), '[user]\n	name = sandbox\n	email = sandbox@localhost\n[safe]\n	directory = *\n[url "https://github.com/"]\n	insteadOf = ssh://git@github.com/\n	insteadOf = git@github.com:\n', "utf8");
+  writeFileSync19(join36(jail, ".npmrc"), "", "utf8");
+  writeFileSync19(join36(jail, JAIL_PASSWD_FILE), guest ? jailPasswd(guest.uid, guest.gid) : jailPasswd(null, null), "utf8");
+  writeFileSync19(join36(jail, JAIL_GROUP_FILE), guest ? jailGroup(guest.gid) : jailGroup(null), "utf8");
+  writeFileSync19(join36(jail, ".gitconfig"), '[user]\n	name = sandbox\n	email = sandbox@localhost\n[safe]\n	directory = *\n[url "https://github.com/"]\n	insteadOf = ssh://git@github.com/\n	insteadOf = git@github.com:\n', "utf8");
   if (ids2?.uid === 0 && guest && guest.uid !== 0) {
     const chown = io.chown ?? chownTree;
     chown(jail, guest);
@@ -33277,8 +33461,8 @@ var init_egressProxy = __esm({
 
 // ../../packages/containment/dist/container.js
 import { fileURLToPath as fileURLToPath8 } from "url";
-import { dirname as dirname9, join as join36 } from "path";
-import { chmodSync as chmodSync2, copyFileSync as copyFileSync2, existsSync as existsSync17, mkdtempSync, rmSync as rmSync8, statSync as statSync5 } from "fs";
+import { dirname as dirname9, join as join37 } from "path";
+import { chmodSync as chmodSync2, copyFileSync as copyFileSync2, existsSync as existsSync18, mkdtempSync, rmSync as rmSync9, statSync as statSync5 } from "fs";
 import { isIPv4 } from "net";
 import { tmpdir } from "os";
 function scrubEnvPathsFor(containmentKind, host) {
@@ -33446,7 +33630,7 @@ function guestIdentityMounts(spec) {
     return [];
   const domain = pathDomainOf(spec);
   const resolve9 = resolverFor(domain);
-  const under = domain === "venue" ? venueJoin : join36;
+  const under = domain === "venue" ? venueJoin : join37;
   const jail = resolve9(spec.jail, "jail");
   const passwd = resolve9(under(jail, JAIL_PASSWD_FILE), "the jail passwd file");
   const group = resolve9(under(jail, JAIL_GROUP_FILE), "the jail group file");
@@ -33648,8 +33832,8 @@ function dockerSync(d, args5, timeoutMs = DOCKER_TIMEOUT_MS) {
   };
 }
 function pickProxyDir(baseDir) {
-  const scoped = join36(baseDir, "proxy");
-  if (existsSync17(join36(scoped, "proxyEntry.js")))
+  const scoped = join37(baseDir, "proxy");
+  if (existsSync18(join37(scoped, "proxyEntry.js")))
     return scoped;
   return baseDir;
 }
@@ -33657,22 +33841,22 @@ function resolveProxyCodeSource() {
   return pickProxyDir(dirname9(fileURLToPath8(import.meta.url)));
 }
 function stageProxyCode(source = resolveProxyCodeSource()) {
-  const missing = PROXY_FILES.map((f) => join36(source, f)).filter((p) => !existsSync17(p));
+  const missing = PROXY_FILES.map((f) => join37(source, f)).filter((p) => !existsSync18(p));
   if (missing.length > 0) {
     throw new FenceError(`the egress proxy is missing from this install: ${missing.join(", ")} not found. Reinstall the CLI, or update the Claude Code plugin.`);
   }
-  const dir = mkdtempSync(join36(tmpdir(), "th-proxy-"));
+  const dir = mkdtempSync(join37(tmpdir(), "th-proxy-"));
   try {
     for (const file of PROXY_FILES) {
-      copyFileSync2(join36(source, file), join36(dir, file));
+      copyFileSync2(join37(source, file), join37(dir, file));
     }
     for (const file of PROXY_FILES) {
-      chmodSync2(join36(dir, file), 420);
+      chmodSync2(join37(dir, file), 420);
     }
     chmodSync2(dir, 493);
   } catch (err) {
     try {
-      rmSync8(dir, { recursive: true, force: true });
+      rmSync9(dir, { recursive: true, force: true });
     } catch {
     }
     throw err;
@@ -33681,7 +33865,7 @@ function stageProxyCode(source = resolveProxyCodeSource()) {
     dir,
     cleanup: () => {
       try {
-        rmSync8(dir, { recursive: true, force: true });
+        rmSync9(dir, { recursive: true, force: true });
       } catch {
       }
     }
@@ -33770,7 +33954,7 @@ async function startProxySidecar(d, allow, idBase, staged, labels) {
     if (!dockerSync(d, ["network", "create", ...label, netExt]).ok) {
       throw new FenceError(`could not create the egress network ${netExt}`);
     }
-    const run32 = dockerSync(d, [
+    const run34 = dockerSync(d, [
       "run",
       "-d",
       `--name=${proxyName}`,
@@ -33793,9 +33977,9 @@ async function startProxySidecar(d, allow, idBase, staged, labels) {
       "node",
       `${SIDECAR_CODE_GUEST}/proxyEntry.js`
     ], 3e4);
-    if (!run32.ok) {
-      const reason = `could not start the proxy sidecar: ${run32.stderr.trim()}`;
-      if (run32.timedOut || /no space left on device/i.test(run32.stderr)) {
+    if (!run34.ok) {
+      const reason = `could not start the proxy sidecar: ${run34.stderr.trim()}`;
+      if (run34.timedOut || /no space left on device/i.test(run34.stderr)) {
         throw new ContainmentRefusalError(reason);
       }
       throw new FenceError(reason);
@@ -33989,8 +34173,8 @@ var init_containerLocal = __esm({
 
 // ../../packages/containment/dist/capture.js
 import { createHash as createHash7 } from "crypto";
-import { closeSync as closeSync5, constants as constants4, copyFileSync as copyFileSync3, existsSync as existsSync18, lstatSync as lstatSync5, mkdirSync as mkdirSync6, openSync as openSync5, readdirSync as readdirSync3, readFileSync as readFileSync25, writeFileSync as writeFileSync20 } from "fs";
-import { dirname as dirname10, isAbsolute as isAbsolute5, join as join37, resolve as resolve6, sep as sep6 } from "path";
+import { closeSync as closeSync5, constants as constants4, copyFileSync as copyFileSync3, existsSync as existsSync19, lstatSync as lstatSync5, mkdirSync as mkdirSync6, openSync as openSync5, readdirSync as readdirSync3, readFileSync as readFileSync25, writeFileSync as writeFileSync20 } from "fs";
+import { dirname as dirname10, isAbsolute as isAbsolute5, join as join38, resolve as resolve6, sep as sep6 } from "path";
 import { fileURLToPath as fileURLToPath9 } from "url";
 function captureRecipeHash(recipe = CAPTURE_DOCKERFILE) {
   return createHash7("sha256").update(recipe).digest("hex").slice(0, 16);
@@ -34122,8 +34306,8 @@ function captureOutDir(o) {
 }
 function resolveCaptureCodeSource() {
   const here = dirname10(fileURLToPath9(import.meta.url));
-  const scoped = join37(here, "capture");
-  return existsSync18(join37(scoped, "captureEntry.js")) ? scoped : here;
+  const scoped = join38(here, "capture");
+  return existsSync19(join38(scoped, "captureEntry.js")) ? scoped : here;
 }
 function ensureCaptureImage(docker3, workDir, timeoutMs = 6e5) {
   const image = captureImageTag();
@@ -34133,9 +34317,9 @@ function ensureCaptureImage(docker3, workDir, timeoutMs = 6e5) {
   }).status === 0) {
     return { image, built: false };
   }
-  const context = join37(workDir, "capture-image");
+  const context = join38(workDir, "capture-image");
   mkdirSync6(context, { recursive: true });
-  writeFileSync20(join37(context, "Dockerfile"), CAPTURE_DOCKERFILE);
+  writeFileSync20(join38(context, "Dockerfile"), CAPTURE_DOCKERFILE);
   const res = docker3.sync(["build", "--quiet", `--tag=${image}`, context], {
     timeoutMs: timeoutWithin(timeoutMs, deadline)
   });
@@ -34145,9 +34329,9 @@ function ensureCaptureImage(docker3, workDir, timeoutMs = 6e5) {
   return { image, built: true };
 }
 function stageCaptureCode(workDir) {
-  const dir = join37(workDir, "capture-code");
+  const dir = join38(workDir, "capture-code");
   mkdirSync6(dir, { recursive: true });
-  copyFileSync3(join37(resolveCaptureCodeSource(), "captureEntry.js"), join37(dir, "captureEntry.js"));
+  copyFileSync3(join38(resolveCaptureCodeSource(), "captureEntry.js"), join38(dir, "captureEntry.js"));
   return dir;
 }
 async function runCapture(docker3, o, timeoutMs, signal, deadline) {
@@ -34208,8 +34392,8 @@ async function runCapture(docker3, o, timeoutMs, signal, deadline) {
       o.onTiming?.("readback", Date.now() - readbackStarted);
     }
   }
-  const manifestPath = join37(captureOutDir(o), "manifest.json");
-  if (!existsSync18(manifestPath)) {
+  const manifestPath = join38(captureOutDir(o), "manifest.json");
+  if (!existsSync19(manifestPath)) {
     return failed(`the screenshot container exited ${String(code)} without a manifest: ${stderr.trim().slice(-400)}`);
   }
   try {
@@ -34377,7 +34561,7 @@ function untarSafely(buf, localDir, maxBytes) {
   }
   const kinds = /* @__PURE__ */ new Map();
   for (const e of entries) {
-    const target = join37(root, e.rel);
+    const target = join38(root, e.rel);
     if (!target.startsWith(root + sep6))
       throw new Error(`refusing ${JSON.stringify(e.rel)}: outside ${root}`);
     const kind = e.body === null ? "dir" : "file";
@@ -34394,7 +34578,7 @@ function untarSafely(buf, localDir, maxBytes) {
     }
   }
   for (const e of entries) {
-    const target = join37(root, e.rel);
+    const target = join38(root, e.rel);
     if (e.body === null) {
       realDirs(root, e.rel);
     } else {
@@ -34413,7 +34597,7 @@ function realDirs(root, rel) {
   for (const part of rel.split("/")) {
     if (part === "" || part === ".")
       continue;
-    at = join37(at, part);
+    at = join38(at, part);
     let st;
     try {
       st = lstatSync5(at);
@@ -34517,16 +34701,16 @@ function census(docker3, label) {
 function censusReport(docker3, label) {
   const filter = `label=${label}`;
   const failures = [];
-  const ask5 = (args5) => {
+  const ask6 = (args5) => {
     const q = query(docker3, args5);
     if (q.failure !== null)
       failures.push(q.failure);
     return q.ids;
   };
   const taken = {
-    containers: ask5(["ps", "-aq", "--filter", filter]),
-    volumes: ask5(["volume", "ls", "-q", "--filter", filter]),
-    networks: ask5(["network", "ls", "-q", "--filter", filter])
+    containers: ask6(["ps", "-aq", "--filter", filter]),
+    volumes: ask6(["volume", "ls", "-q", "--filter", filter]),
+    networks: ask6(["network", "ls", "-q", "--filter", filter])
   };
   return failures.length === 0 ? { observed: true, census: taken, unobservedReason: null } : { observed: false, census: taken, unobservedReason: failures.join("; ") };
 }
@@ -34678,7 +34862,7 @@ var init_previewRegistry = __esm({
 // ../../packages/envrun/dist/preview.js
 import { randomBytes as randomBytes8 } from "crypto";
 import { mkdirSync as mkdirSync7, writeFileSync as writeFileSync21 } from "fs";
-import { join as join38 } from "path";
+import { join as join39 } from "path";
 function docker(client, args5, timeoutMs = 6e4) {
   const res = client.sync([...args5], { timeoutMs });
   return {
@@ -34741,7 +34925,7 @@ async function startPreview(req) {
   const probeHost = WILDCARD_BINDS.has(bindAddress) ? "127.0.0.1" : bindAddress;
   const probeAuthority = probeHost.includes(":") ? `[${probeHost}]` : probeHost;
   mkdirSync7(req.scratchDir, { recursive: true });
-  const docPath = join38(req.scratchDir, "preview-run.json");
+  const docPath = join39(req.scratchDir, "preview-run.json");
   writeFileSync21(docPath, JSON.stringify(req.document, null, 2), "utf8");
   const teardown = () => {
     livePreviews.deregister(client, container);
@@ -34756,7 +34940,7 @@ async function startPreview(req) {
   };
   const startedAt = Date.now();
   try {
-    const run32 = docker(client, [
+    const run34 = docker(client, [
       "run",
       "-d",
       "--init",
@@ -34783,8 +34967,8 @@ async function startPreview(req) {
       "-e",
       SERVER_SOURCE
     ]);
-    if (!run32.ok) {
-      throw new PreviewError(`could not start the preview container: ${run32.stderr.trim()}`);
+    if (!run34.ok) {
+      throw new PreviewError(`could not start the preview container: ${run34.stderr.trim()}`);
     }
     const deadline = Date.now() + (req.readyTimeoutMs ?? 6e4);
     let hostPort = null;
@@ -34936,11 +35120,11 @@ http
 
 // ../../packages/envrun/dist/venue.js
 import { randomBytes as randomBytes9 } from "crypto";
-import { join as join39 } from "path";
+import { join as join40 } from "path";
 function localJailPaths(scratchRoot) {
   return {
-    jail: join39(scratchRoot, JAIL_SEGMENT),
-    tmp: join39(scratchRoot, JAIL_TMP_SEGMENT)
+    jail: join40(scratchRoot, JAIL_SEGMENT),
+    tmp: join40(scratchRoot, JAIL_TMP_SEGMENT)
   };
 }
 function localVenue() {
@@ -36579,8 +36763,8 @@ function inspectRunDigest(docker3, image, log) {
   log(digest === null ? `image digest: ${String(parsed.length)} RepoDigest(s) for ${image}, none alone names its repository; running by name` : `image digest: running the test step as ${digest}`);
   return digest;
 }
-function classifySingleRun(run32) {
-  return classifyVerification(run32).outcome;
+function classifySingleRun(run34) {
+  return classifyVerification(run34).outcome;
 }
 function testStepEnv(env, runtime) {
   if (runtime !== "go")
@@ -38830,17 +39014,17 @@ var init_gcpPlacement = __esm({
 });
 
 // ../../packages/envrun/dist/emptyGitConfig.js
-import { mkdtempSync as mkdtempSync2, rmSync as rmSync9, writeFileSync as writeFileSync22 } from "fs";
+import { mkdtempSync as mkdtempSync2, rmSync as rmSync10, writeFileSync as writeFileSync22 } from "fs";
 import { tmpdir as tmpdir2 } from "os";
-import { join as join40 } from "path";
+import { join as join41 } from "path";
 function emptyGitConfig() {
   if (emptyGitConfigFile !== void 0)
     return emptyGitConfigFile;
   let dir;
   let file;
   try {
-    dir = mkdtempSync2(join40(tmpdir2(), "th-run-nogitconfig-"));
-    file = join40(dir, "config");
+    dir = mkdtempSync2(join41(tmpdir2(), "th-run-nogitconfig-"));
+    file = join41(dir, "config");
     writeFileSync22(file, "", { mode: 384 });
   } catch (err) {
     throw new RunRefusalError("could not create the empty git config this run points GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM at, so git would read the configuration \u2014 and the credential helpers \u2014 on this machine instead. That is our environment failing, not your tests: check that the temp directory is writable.", { cause: err });
@@ -38848,7 +39032,7 @@ function emptyGitConfig() {
   emptyGitConfigFile = file;
   process.once("exit", () => {
     try {
-      rmSync9(dir, { recursive: true, force: true });
+      rmSync10(dir, { recursive: true, force: true });
     } catch {
     }
   });
@@ -38865,7 +39049,7 @@ var init_emptyGitConfig = __esm({
 // ../../packages/envrun/dist/hostedVenue.js
 import { spawn as spawn5, spawnSync as spawnSync6 } from "child_process";
 import { createHash as createHash13, X509Certificate } from "crypto";
-import { chmodSync as chmodSync3, existsSync as existsSync19, mkdtempSync as mkdtempSync3, readFileSync as readFileSync26, rmSync as rmSync10, writeFileSync as writeFileSync23 } from "fs";
+import { chmodSync as chmodSync3, existsSync as existsSync20, mkdtempSync as mkdtempSync3, readFileSync as readFileSync26, rmSync as rmSync11, writeFileSync as writeFileSync23 } from "fs";
 import { request as httpsRequest } from "https";
 import { createServer } from "net";
 import { posix as posix3 } from "path";
@@ -38911,19 +39095,19 @@ function decodeMaybe(url) {
 }
 function dispatchedGitBinary() {
   for (const candidate of DISPATCHED_GIT_CANDIDATES) {
-    if (existsSync19(candidate))
+    if (existsSync20(candidate))
       return candidate;
   }
   return "git";
 }
 function dispatchedProbeEnv(cloneDir, base) {
-  const gitDir = join41(cloneDir, ".git");
+  const gitDir = join42(cloneDir, ".git");
   return {
     ...base,
     GIT_DIR: gitDir,
     GIT_WORK_TREE: cloneDir,
-    GIT_INDEX_FILE: join41(gitDir, "index"),
-    GIT_OBJECT_DIRECTORY: join41(gitDir, "objects"),
+    GIT_INDEX_FILE: join42(gitDir, "index"),
+    GIT_OBJECT_DIRECTORY: join42(gitDir, "objects"),
     GIT_ALTERNATE_OBJECT_DIRECTORIES: "",
     GIT_COMMON_DIR: gitDir,
     GIT_NAMESPACE: "",
@@ -39724,8 +39908,8 @@ function makeClientTls(io, allocated, vm) {
       throw new HostedVenueError(`the directory ${dir} holding ${vm}'s client key could not be removed and is left behind: ${describeErr(err)}`);
     }
   });
-  const certPath = join41(dir, "client.pem");
-  const keyPath = join41(dir, "client-key.pem");
+  const certPath = join42(dir, "client.pem");
+  const keyPath = join42(dir, "client-key.pem");
   const made = io.exec("openssl", clientCertArgv(keyPath, certPath), OPENSSL_TIMEOUT_MS, {});
   if (!made.ok) {
     throw new HostedVenueError(`could not make ${vm}'s client certificate with openssl: ${execDetail(made).slice(0, 300)}`, "ours");
@@ -39811,7 +39995,7 @@ async function reachConfidentialSpace(a) {
   if (!verdict.ok) {
     throw new HostedVenueError(`${vm} presented an attestation this lease refuses (${verdict.reason}): ${verdict.detail}`);
   }
-  const caPath = join41(a.tls.dir, "venue.pem");
+  const caPath = join42(a.tls.dir, "venue.pem");
   try {
     io.writeFile(caPath, venuePem);
   } catch (err) {
@@ -39990,7 +40174,7 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
           throw new HostedVenueError(`the tunnel socket directory ${socketDir} could not be removed and is left behind: ${describeErr(err)}`);
         }
       });
-      const socketPath = join41(socketDir, VENUE_SOCKET_NAME);
+      const socketPath = join42(socketDir, VENUE_SOCKET_NAME);
       if (io.exists(socketPath)) {
         throw new HostedVenueError(`something already exists at ${socketPath}, inside a directory created seconds ago for this run alone. Refusing rather than clearing it: the tunnel would carry the whole run over a path we cannot account for`, "ours");
       }
@@ -40241,18 +40425,18 @@ function makeLease(p) {
           throw new HostedVenueError(`could not stage ${from} onto ${p.vm}: ${execDetail(res).slice(0, 300)}`);
         }
       };
-      const localJail = join41(local.scratchRoot, JAIL_SEGMENT);
-      const localTmp = join41(local.scratchRoot, JAIL_TMP_SEGMENT);
+      const localJail = join42(local.scratchRoot, JAIL_SEGMENT);
+      const localTmp = join42(local.scratchRoot, JAIL_TMP_SEGMENT);
       const required2 = [
         localTmp,
-        join41(localJail, JAIL_PASSWD_FILE),
-        join41(localJail, JAIL_GROUP_FILE)
+        join42(localJail, JAIL_PASSWD_FILE),
+        join42(localJail, JAIL_GROUP_FILE)
       ];
       const missing = required2.filter((path6) => !p.io.exists(path6));
       if (missing.length > 0) {
         throw new HostedVenueError(`refusing to stage ${local.scratchRoot} onto ${p.vm}: the jail at ${localJail} is incomplete \u2014 missing ${missing.join(", ")}. buildJail must run to completion before stage(), or the venue mounts a directory with no identity database.`);
       }
-      const gitConfigPath = join41(local.cloneDir, ".git", "config");
+      const gitConfigPath = join42(local.cloneDir, ".git", "config");
       let gitConfig;
       try {
         gitConfig = p.io.readTextIfPresent(gitConfigPath);
@@ -40403,7 +40587,7 @@ function makeLease(p) {
     }
   };
 }
-var join41, SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, DELETE_RETRY_DELAY_MS, DELETE_RETRY_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, GCLOUD_HOME_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, VOLUME_CREATE_TIMEOUT_MS, EXEC_PROBE_TIMEOUT_MS, POPULATE_TIMEOUT_MS, STAGE_PROOF_PREFIX, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING, STOCKOUT_RETRY_DELAYS_MS, CS_ATTEST_PORT, CS_DOCKER_PORT, CS_READY_BUDGET_MS, CS_ATTEST_TIMEOUT_MS, CS_PULL_TIMEOUT_MS, CS_ATTEST_INTERVAL_MS, OPENSSL_TIMEOUT_MS, CS_RUN_ARGS, CS_GUEST_USER, CS_STAGE_ROOT, CLIENT_CERT_STAND_IN;
+var join42, SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, DELETE_RETRY_DELAY_MS, DELETE_RETRY_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, GCLOUD_HOME_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, VOLUME_CREATE_TIMEOUT_MS, EXEC_PROBE_TIMEOUT_MS, POPULATE_TIMEOUT_MS, STAGE_PROOF_PREFIX, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING, STOCKOUT_RETRY_DELAYS_MS, CS_ATTEST_PORT, CS_DOCKER_PORT, CS_READY_BUDGET_MS, CS_ATTEST_TIMEOUT_MS, CS_PULL_TIMEOUT_MS, CS_ATTEST_INTERVAL_MS, OPENSSL_TIMEOUT_MS, CS_RUN_ARGS, CS_GUEST_USER, CS_STAGE_ROOT, CLIENT_CERT_STAND_IN;
 var init_hostedVenue = __esm({
   "../../packages/envrun/dist/hostedVenue.js"() {
     "use strict";
@@ -40415,7 +40599,7 @@ var init_hostedVenue = __esm({
     init_labels();
     init_venueProof();
     init_venue();
-    ({ join: join41 } = posix3);
+    ({ join: join42 } = posix3);
     SSH_READY_BUDGET_MS = 18e4;
     SSH_PROBE_INTERVAL_MS = 5e3;
     SSH_PROBE_TIMEOUT_MS = 25e3;
@@ -40504,22 +40688,22 @@ var init_hostedVenue = __esm({
       },
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
       now: () => Date.now(),
-      exists: (path6) => existsSync19(path6),
+      exists: (path6) => existsSync20(path6),
       makePrivateDir: () => {
-        const dir = mkdtempSync3(join41(tmpdir3(), SOCKET_DIR_PREFIX));
+        const dir = mkdtempSync3(join42(tmpdir3(), SOCKET_DIR_PREFIX));
         chmodSync3(dir, 448);
         return dir;
       },
       removeTree: (path6) => {
-        rmSync10(path6, { recursive: true, force: true });
+        rmSync11(path6, { recursive: true, force: true });
       },
       makeGcloudHome: () => {
-        const dir = mkdtempSync3(join41(tmpdir3(), GCLOUD_HOME_PREFIX));
+        const dir = mkdtempSync3(join42(tmpdir3(), GCLOUD_HOME_PREFIX));
         chmodSync3(dir, 448);
         return dir;
       },
       removeGcloudHome: (path6) => {
-        rmSync10(path6, { recursive: true, force: true });
+        rmSync11(path6, { recursive: true, force: true });
       },
       dockerFor: (socketPath) => remoteDockerClient(`unix://${socketPath}`),
       classifyDaemon: (docker3, timeoutMs) => classifyVenueDaemon(docker3, void 0, timeoutMs),
@@ -42142,9 +42326,9 @@ var init_references = __esm({
 
 // ../../packages/envspec/dist/repo.js
 import { readdirSync as readdirSync4, readFileSync as readFileSync27, realpathSync as realpathSync3, statSync as statSync6 } from "fs";
-import { join as join42, relative as relative2, sep as sep7 } from "path";
+import { join as join43, relative as relative2, sep as sep7 } from "path";
 function createRepoReader(repoPath) {
-  const resolveIn = (relativePath) => relativePath === "" ? repoPath : join42(repoPath, relativePath);
+  const resolveIn = (relativePath) => relativePath === "" ? repoPath : join43(repoPath, relativePath);
   const toPosix = (absolute) => relative2(repoPath, absolute).split(sep7).join("/");
   let realRoot;
   const rootPrefix = () => {
@@ -42203,7 +42387,7 @@ function createRepoReader(repoPath) {
       for (const name of names.slice().sort()) {
         if (SKIP_DIRECTORIES.has(name))
           continue;
-        const child = join42(dir, name);
+        const child = join43(dir, name);
         const st = statOf(toPosix(child));
         if (st === null)
           continue;
@@ -42858,10 +43042,10 @@ function planPreview(repo) {
     };
   }
   const scripts = scriptsOf(pkg);
-  const run32 = scriptRunner(repo);
-  const build = scripts.has("build") ? `${run32} build` : null;
+  const run34 = scriptRunner(repo);
+  const build = scripts.has("build") ? `${run34} build` : null;
   const serveName = SERVE_SCRIPTS.find((name) => scripts.has(name));
-  const serve = serveName === void 0 ? null : `${run32} ${serveName}`;
+  const serve = serveName === void 0 ? null : `${run34} ${serveName}`;
   const anyHtml = rootHtml || hasIndexHtml(repo);
   if (serve === null && !anyHtml) {
     return {
@@ -42936,7 +43120,7 @@ var init_dist3 = __esm({
 // ../../packages/envrun/dist/screenshots.js
 import { randomBytes as randomBytes13 } from "crypto";
 import { copyFileSync as copyFileSync4, mkdirSync as mkdirSync8 } from "fs";
-import { join as join43 } from "path";
+import { join as join44 } from "path";
 function tooBigNote(items) {
   const mib = (b) => `${(b / (1024 * 1024)).toFixed(1)} MiB`;
   const named = items.map((i) => `${i.route} ${i.viewport}/${i.scheme} (${mib(i.bytes)})`);
@@ -43032,7 +43216,7 @@ async function takeScreenshots(ctx, deps) {
         if (item.bytes > SCREENSHOT_UPLOAD_MAX_BYTES)
           continue;
         const file = `${side}/${item.file}`;
-        deps.copy(join43(got.outDir, item.file), join43(ctx.outDir, file));
+        deps.copy(join44(got.outDir, item.file), join44(ctx.outDir, file));
         items.push({ ...item, side, file });
       }
       for (const note of got.notes)
@@ -43164,7 +43348,7 @@ async function captureSide(ctx, deps, side, tree, plan, image, code, routes) {
     const volume = await fill(ctx, venue, dir, purpose);
     return { volume, localDir: dir, helperImage: venue.helperImage };
   };
-  const staticOut = join43(ctx.workDir, side, "static");
+  const staticOut = join44(ctx.workDir, side, "static");
   deps.mkdir(staticOut);
   const shot = await deps.runCapture(lease.docker, {
     image,
@@ -43223,7 +43407,7 @@ async function captureSide(ctx, deps, side, tree, plan, image, code, routes) {
     }
     if (appId === null)
       return skip(`the serve script (${plan.serveCommand}) did not start a container`);
-    const serverOut = join43(ctx.workDir, side, "server");
+    const serverOut = join44(ctx.workDir, side, "server");
     deps.mkdir(serverOut);
     const served = await deps.runCapture(lease.docker, {
       image,
@@ -43406,7 +43590,7 @@ var init_screenshots = __esm({
       stageCode: stageCaptureCode,
       plan: (dir) => planPreview(createRepoReader(dir)),
       copy: (from, to) => {
-        mkdirSync8(join43(to, ".."), { recursive: true });
+        mkdirSync8(join44(to, ".."), { recursive: true });
         copyFileSync4(from, to);
       },
       mkdir: (dir) => mkdirSync8(dir, { recursive: true, mode: 511 }),
@@ -43426,14 +43610,14 @@ var init_screenshots = __esm({
 
 // ../../packages/envrun/dist/gradleTestSummary.js
 import { mkdirSync as mkdirSync9, writeFileSync as writeFileSync24 } from "fs";
-import { join as join44 } from "path";
+import { join as join45 } from "path";
 function stageGradleTestSummary(jailHome, guestUser, io = {}) {
-  const dir = join44(jailHome, ".gradle", "init.d");
+  const dir = join45(jailHome, ".gradle", "init.d");
   mkdirSync9(dir, { recursive: true });
-  writeFileSync24(join44(dir, "terminalhire-test-summary.gradle"), GRADLE_TEST_SUMMARY_INIT);
+  writeFileSync24(join45(dir, "terminalhire-test-summary.gradle"), GRADLE_TEST_SUMMARY_INIT);
   const ids2 = io.ids === void 0 ? hostIds() : io.ids;
   if (ids2?.uid === 0 && guestUser && guestUser.uid !== 0) {
-    (io.chown ?? chownTree)(join44(jailHome, ".gradle"), guestUser);
+    (io.chown ?? chownTree)(join45(jailHome, ".gradle"), guestUser);
   }
 }
 var GRADLE_TEST_MARKER, GRADLE_TEST_SUMMARY_INIT;
@@ -43460,10 +43644,10 @@ allprojects {
 
 // ../../packages/envrun/dist/thrun.js
 import { execFileSync, spawnSync as spawnSync7 } from "child_process";
-import { closeSync as closeSync6, constants as fsConstants, existsSync as existsSync20, fstatSync as fstatSync2, lstatSync as lstatSync6, mkdirSync as mkdirSync10, mkdtempSync as mkdtempSync4, openSync as openSync6, readSync, rmSync as rmSync11 } from "fs";
+import { closeSync as closeSync6, constants as fsConstants, existsSync as existsSync21, fstatSync as fstatSync2, lstatSync as lstatSync6, mkdirSync as mkdirSync10, mkdtempSync as mkdtempSync4, openSync as openSync6, readSync, rmSync as rmSync12 } from "fs";
 import { randomUUID as randomUUID3 } from "crypto";
 import { tmpdir as tmpdir4 } from "os";
-import { join as join45 } from "path";
+import { join as join46 } from "path";
 function git(repoDir, args5, allowNonZero = false) {
   const res = spawnSync7("git", [...args5], {
     cwd: repoDir,
@@ -43478,7 +43662,7 @@ function git(repoDir, args5, allowNonZero = false) {
   return res.stdout ?? "";
 }
 function collectWorkingDiff(repoDir, opts = {}) {
-  if (!existsSync20(join45(repoDir, ".git"))) {
+  if (!existsSync21(join46(repoDir, ".git"))) {
     throw new ThRunError(`${repoDir} is not a git checkout (no .git). \`th run\` ships the working diff, so it needs a repository to read one from.`);
   }
   const headSha = git(repoDir, ["rev-parse", "HEAD"]).trim();
@@ -43535,7 +43719,7 @@ function readLockfileBytes(file, path6) {
 function lockfileContentRefusals(cloneDir, before) {
   const refusals = [];
   for (const [path6, base] of before) {
-    const post = readLockfileBytes(join45(cloneDir, path6), path6);
+    const post = readLockfileBytes(join46(cloneDir, path6), path6);
     const problem = "refusal" in base ? base.refusal : "refusal" in post ? post.refusal : null;
     if (problem !== null) {
       refusals.push({ code: "lockfile", path: path6, detail: problem });
@@ -43679,14 +43863,14 @@ function credentialFreeHome() {
     return credentialFreeHomeDir;
   let made;
   try {
-    made = mkdtempSync4(join45(tmpdir4(), "th-run-nohome-"));
+    made = mkdtempSync4(join46(tmpdir4(), "th-run-nohome-"));
   } catch (err) {
     throw new RunRefusalError("could not create the empty directory this clone uses as its home, so the clone would read the credentials on this machine instead. That is our environment failing, not your tests: check that the temp directory is writable.", { cause: err });
   }
   credentialFreeHomeDir = made;
   process.once("exit", () => {
     try {
-      rmSync11(made, { recursive: true, force: true });
+      rmSync12(made, { recursive: true, force: true });
     } catch {
     }
   });
@@ -43729,7 +43913,7 @@ function changedPathsOrThrow(cloneDir, from, log, timeoutMs) {
     log(`could not fetch the claim's parent (exit ${String(err.status ?? "?")}); the screenshot gate will treat the changed paths as unknown`);
     return null;
   } finally {
-    rmSync11(join45(cloneDir, ".git", "FETCH_HEAD"), { force: true });
+    rmSync12(join46(cloneDir, ".git", "FETCH_HEAD"), { force: true });
   }
   try {
     return git3(["diff", "--name-only", "-z", `${sha}^`, sha, "--"]).split("\0").filter((p) => p !== "");
@@ -43796,13 +43980,13 @@ function cloneTargetAtUnguarded(opts) {
     stdio: "pipe",
     env: gitCloneEnv(opts.auth)
   });
-  const run32 = (args5) => {
+  const run34 = (args5) => {
     runOut(args5);
   };
-  run32(["init", "-q"]);
-  run32(["remote", "add", "origin", source]);
+  run34(["init", "-q"]);
+  run34(["remote", "add", "origin", source]);
   try {
-    run32(["fetch", "-q", "--depth", "1", "origin", "--end-of-options", opts.sha]);
+    run34(["fetch", "-q", "--depth", "1", "origin", "--end-of-options", opts.sha]);
   } catch (err) {
     const stderr = String(err.stderr ?? "");
     if (endOfOptionsUnsupported(stderr)) {
@@ -43818,17 +44002,17 @@ function cloneTargetAtUnguarded(opts) {
     }
     throw new CloneUnavailableError(`we could not fetch ${opts.sha.slice(0, 12)} from ${opts.url}. Nothing ran, so this says nothing about the code \u2014 our environment could not obtain it.`, { cause: err });
   }
-  run32(["checkout", "-q", "FETCH_HEAD"]);
+  run34(["checkout", "-q", "FETCH_HEAD"]);
   const head = runOut(["rev-parse", "HEAD"]).trim();
   if (head !== opts.sha) {
     throw new ThRunError(`the target checkout is at ${head}, not the requested ${opts.sha}. Refusing to verify against a commit the result would misattribute.`);
   }
-  scrubCloneSource(opts.dest, run32);
+  scrubCloneSource(opts.dest, run34);
   return head;
 }
-function scrubCloneSource(dest, run32) {
-  run32(["remote", "remove", "origin"]);
-  rmSync11(join45(dest, ".git", "FETCH_HEAD"), { force: true });
+function scrubCloneSource(dest, run34) {
+  run34(["remote", "remove", "origin"]);
+  rmSync12(join46(dest, ".git", "FETCH_HEAD"), { force: true });
 }
 function publishableTarget(url) {
   if (separatorInTarget(url) !== null)
@@ -44301,9 +44485,9 @@ async function runVerification(req, ctx) {
       venueIdentity: null
     };
   }
-  const stage = join45(req.scratchRoot, runId);
-  const cloneDir = join45(stage, "clone");
-  const scratch = join45(stage, "scratch");
+  const stage = join46(req.scratchRoot, runId);
+  const cloneDir = join46(stage, "clone");
+  const scratch = join46(stage, "scratch");
   mkdirSync10(scratch, { recursive: true });
   assertSafeTargetSha(req.targetSha);
   progress("clone", `${publishableTarget(req.targetRepo)} @ ${req.targetSha.slice(0, 12)}`);
@@ -44328,7 +44512,7 @@ async function runVerification(req, ctx) {
     for (const path6 of pre.touchedPaths) {
       if (supportedLockfile(path6.split("/").pop() ?? "") === null)
         continue;
-      lockfileBase.set(path6, readLockfileBytes(join45(cloneDir, path6), path6));
+      lockfileBase.set(path6, readLockfileBytes(join46(cloneDir, path6), path6));
     }
   }
   if (diff2 !== null) {
@@ -44410,7 +44594,7 @@ async function runVerification(req, ctx) {
     const venuePaths = await lease.stage({
       cloneDir,
       scratchRoot: scratch,
-      previewDir: join45(stage, "preview"),
+      previewDir: join46(stage, "preview"),
       // On a dispatched run the commit is the statement of what was tested, so
       // it rides with the tree and the venue seam refuses a tree that is not
       // that commit (design §6 item 4, TERM-892 — the guard lives in
@@ -44542,7 +44726,7 @@ async function runVerification(req, ctx) {
           ...labels ? { labels } : {},
           routes: req.screenshots.routes ?? ["/"],
           outDir: req.screenshots.outDir,
-          workDir: join45(stage, "screenshots"),
+          workDir: join46(stage, "screenshots"),
           runId,
           progress
         }
@@ -44654,9 +44838,9 @@ function deferScreenshots(take, release, routes) {
   return Object.assign(finish, { abandon });
 }
 async function prepareBaseTree(o) {
-  const root = join45(o.stage, "base");
-  const cloneDir = join45(root, "clone");
-  const scratch = join45(root, "scratch");
+  const root = join46(o.stage, "base");
+  const cloneDir = join46(root, "clone");
+  const scratch = join46(root, "scratch");
   mkdirSync10(scratch, { recursive: true });
   cloneTargetAt({
     url: o.targetRepo,
@@ -44676,7 +44860,7 @@ async function prepareBaseTree(o) {
     const paths = await lease.stage({
       cloneDir,
       scratchRoot: scratch,
-      previewDir: join45(root, "preview")
+      previewDir: join46(root, "preview")
     });
     return {
       tree: {
@@ -45133,7 +45317,7 @@ function startDatabase(req) {
     if (!vol.ok) {
       throw new DbStackError(`could not create the data volume ${volume}: ${vol.stderr.trim()}`);
     }
-    const run32 = docker2([
+    const run34 = docker2([
       "run",
       "-d",
       `--name=${container}`,
@@ -45181,8 +45365,8 @@ function startDatabase(req) {
       "-c",
       "full_page_writes=off"
     ], 6e4);
-    if (!run32.ok) {
-      throw new DbStackError(`could not start the database container: ${run32.stderr.trim()}`);
+    if (!run34.ok) {
+      throw new DbStackError(`could not start the database container: ${run34.stderr.trim()}`);
     }
     const ready = waitForPostgres(container, creds, req.readyTimeoutMs ?? 9e4);
     if (!ready.ok) {
@@ -46095,7 +46279,7 @@ __export(jpi_claim_exports, {
   reviewModeLine: () => reviewModeLine,
   reviseRecoveryCommand: () => reviseRecoveryCommand,
   revokeFailureAction: () => revokeFailureAction,
-  run: () => run7,
+  run: () => run8,
   runsGiveUpMessage: () => runsGiveUpMessage,
   safeSliceRelPath: () => safeSliceRelPath,
   selectCompetingPrs: () => selectCompetingPrs,
@@ -46124,19 +46308,19 @@ import {
   mkdirSync as mkdirSync12,
   mkdtempSync as mkdtempSync5,
   renameSync as renameSync11,
-  existsSync as existsSync21,
+  existsSync as existsSync22,
   lstatSync as lstatSync7,
   realpathSync as realpathSync4,
-  rmSync as rmSync12,
+  rmSync as rmSync13,
   readdirSync as readdirSync5,
   statSync as statSync7,
   openSync as openSync7,
   readSync as readSync2,
   closeSync as closeSync7
 } from "fs";
-import { join as join46, dirname as dirname11, isAbsolute as isAbsolute6, resolve as pathResolve } from "path";
+import { join as join47, dirname as dirname11, isAbsolute as isAbsolute6, resolve as pathResolve } from "path";
 import { createHash as createHash14 } from "crypto";
-import { homedir as homedir26, hostname as osHostname } from "os";
+import { homedir as homedir27, hostname as osHostname } from "os";
 import { execFile as execFile3, execFileSync as execFileSync2, spawnSync as spawnSync9 } from "child_process";
 import { promisify as promisify3 } from "util";
 import { createInterface as createInterface9 } from "readline";
@@ -46415,7 +46599,7 @@ function pickExistingPr(prListJson, ghUser) {
   return match2 && typeof match2.url === "string" ? match2.url : null;
 }
 function readClaimablePool() {
-  if (!existsSync21(INDEX_CACHE_FILE5)) return [];
+  if (!existsSync22(INDEX_CACHE_FILE5)) return [];
   const entry = JSON.parse(readFileSync28(INDEX_CACHE_FILE5, "utf8"));
   const bounties = (entry?.index?.jobs ?? []).filter((j) => j.source === "bounty");
   const contributions = (entry?.index?.contribute ?? []).filter((j) => j.source === "contribute");
@@ -48549,7 +48733,7 @@ async function cmdAttach(id, worktree, branch) {
 function workDirFor(repoFullName, issueNumber) {
   const [owner, repo] = String(repoFullName).split("/");
   const suffix = issueNumber ? `-${issueNumber}` : "";
-  return join46(homedir26(), "terminalhire", "work", `${owner}-${repo}${suffix}`);
+  return join47(homedir27(), "terminalhire", "work", `${owner}-${repo}${suffix}`);
 }
 function startBranchFor(repoFullName, issueNumber) {
   const repo = String(repoFullName).split("/")[1] || "claim";
@@ -48609,7 +48793,7 @@ Nothing started \u2014 '${answer}' is not one of 1-${startable.length}.`);
   return { id: startable[n - 1].id, approvalsChecked, approvalsUnavailable };
 }
 async function watchForSliceDelivery(id, flags, deps = {}) {
-  const sleep6 = deps.sleep ?? claimSleep;
+  const sleep7 = deps.sleep ?? claimSleep;
   const attempt2 = deps.attempt ?? attemptSliceDelivery;
   const attempts = deps.attempts ?? RUNS_POLL_ATTEMPTS;
   const intervalMs = deps.intervalMs ?? RUNS_POLL_INTERVAL_MS;
@@ -48620,7 +48804,7 @@ async function watchForSliceDelivery(id, flags, deps = {}) {
   );
   let last = { outcome: "pending" };
   for (let i = 1; i <= attempts; i++) {
-    await sleep6(intervalMs);
+    await sleep7(intervalMs);
     last = await attempt2(id, flags);
     if (last.outcome === "pending") {
       console.log(`  \u2026 still pending (check ${i}/${attempts})`);
@@ -48798,14 +48982,14 @@ terminalhire claim: not started \u2014 starting forks ${claim.repoFullName} to y
   }
   const issueNumber = (parseGitHubUrl(claim.issueUrl) || {}).number;
   const destDir = workDirFor(claim.repoFullName, issueNumber);
-  if (existsSync21(destDir)) {
+  if (existsSync22(destDir)) {
     console.error(
       `terminalhire claim: ${destDir} already exists \u2014 refusing to clobber it.
   Remove it and retry, or attach it: terminalhire claim attach ${id} --worktree ${destDir} --branch <branch>`
     );
     process.exit(1);
   }
-  mkdirSync12(join46(homedir26(), "terminalhire", "work"), { recursive: true });
+  mkdirSync12(join47(homedir27(), "terminalhire", "work"), { recursive: true });
   const { createProgress: createProgress2, parseGitProgress: parseGitProgress2, splitProgressChunk: splitProgressChunk2, shStream: shStream2 } = await Promise.resolve().then(() => (init_progress(), progress_exports));
   const progress = createProgress2();
   let forkFullName;
@@ -48835,7 +49019,7 @@ terminalhire claim: not started \u2014 starting forks ${claim.repoFullName} to y
   } catch (err) {
     progress.fail();
     try {
-      rmSync12(destDir, { recursive: true, force: true });
+      rmSync13(destDir, { recursive: true, force: true });
     } catch {
     }
     console.error(
@@ -48931,7 +49115,7 @@ function founderPostingIdOf(claim) {
 }
 function sliceWorkDirFor(claimLocalId) {
   const safe = String(claimLocalId).replace(/[^A-Za-z0-9._-]/g, "-");
-  return join46(homedir26(), "terminalhire", "work", `slice-${safe}`);
+  return join47(homedir27(), "terminalhire", "work", `slice-${safe}`);
 }
 function assertNoBooleanPath(dest, flagName) {
   const last = String(dest).split(/[\\/]/).filter(Boolean).pop();
@@ -48943,7 +49127,7 @@ function assertNoBooleanPath(dest, flagName) {
   return dest;
 }
 function resolveDeliveryDir(flags, claimLocalId, { existsFn, readdirFn } = {}) {
-  const exists = existsFn ?? existsSync21;
+  const exists = existsFn ?? existsSync22;
   const readdir3 = readdirFn ?? readdirSync5;
   let probing = null;
   try {
@@ -49048,7 +49232,7 @@ function writeSliceFiles(destDir, files) {
   const unavailable = [];
   for (const f of files) {
     if (typeof f.content === "string") {
-      const abs = join46(destDir, f.path);
+      const abs = join47(destDir, f.path);
       mkdirSync12(dirname11(abs), { recursive: true });
       writeFileSync25(abs, f.content, "utf8");
       written.push(f.path);
@@ -49079,7 +49263,7 @@ function writeDeliveredBrief(destDir, spec) {
 function ensureExcludedPackDir(destDir) {
   let occupant = null;
   try {
-    occupant = lstatSync7(join46(destDir, BRIEF_DIR));
+    occupant = lstatSync7(join47(destDir, BRIEF_DIR));
   } catch (err) {
     if (err?.code !== "ENOENT") {
       return {
@@ -49094,9 +49278,9 @@ function ensureExcludedPackDir(destDir) {
       reason: `${BRIEF_DIR}/ already exists in the delivered tree, and excluding it would hide that content from your patch`
     };
   }
-  const excludeFile = join46(destDir, ".git", "info", "exclude");
+  const excludeFile = join47(destDir, ".git", "info", "exclude");
   try {
-    const existing = existsSync21(excludeFile) ? readFileSync28(excludeFile, "utf8") : "";
+    const existing = existsSync22(excludeFile) ? readFileSync28(excludeFile, "utf8") : "";
     if (!existing.split("\n").includes(BRIEF_EXCLUDE_LINE)) {
       mkdirSync12(dirname11(excludeFile), { recursive: true });
       writeFileSync25(
@@ -49113,7 +49297,7 @@ function ensureExcludedPackDir(destDir) {
 }
 function writePackFile(destDir, relPath, content, what) {
   try {
-    const abs = join46(destDir, relPath);
+    const abs = join47(destDir, relPath);
     mkdirSync12(dirname11(abs), { recursive: true });
     writeFileSync25(abs, content, { encoding: "utf8", flag: "wx" });
   } catch (err) {
@@ -49266,18 +49450,18 @@ function buildPatchSubmission({
   if (screenshots !== null) body.screenshots = screenshots;
   return body;
 }
-function renderRunView(run32, message2, extra = {}) {
+function renderRunView(run34, message2, extra = {}) {
   const lines = [];
-  const sha = run32.commitSha ? String(run32.commitSha).slice(0, 10) : null;
-  lines.push(`  run:        ${run32.branch ?? "(no branch)"}${sha ? ` @ ${sha}` : ""}`);
+  const sha = run34.commitSha ? String(run34.commitSha).slice(0, 10) : null;
+  lines.push(`  run:        ${run34.branch ?? "(no branch)"}${sha ? ` @ ${sha}` : ""}`);
   lines.push(
-    `  status:     ${terminalSafeInline(run32.status)}${run32.conclusion ? ` \xB7 conclusion: ${terminalSafeInline(run32.conclusion)}` : ""}`
+    `  status:     ${terminalSafeInline(run34.status)}${run34.conclusion ? ` \xB7 conclusion: ${terminalSafeInline(run34.conclusion)}` : ""}`
   );
-  const claimState = extra.claimState ?? run32.claimState;
-  const unverifiedCause = extra.unverifiedCause ?? run32.unverifiedCause;
-  const resetAt = extra.resetAt ?? run32.resetAt;
-  const rateLimitCap = extra.rateLimitCap ?? run32.rateLimitCap ?? 5;
-  const rateLimitCount = extra.rateLimitCount ?? run32.rateLimitCount;
+  const claimState = extra.claimState ?? run34.claimState;
+  const unverifiedCause = extra.unverifiedCause ?? run34.unverifiedCause;
+  const resetAt = extra.resetAt ?? run34.resetAt;
+  const rateLimitCap = extra.rateLimitCap ?? run34.rateLimitCap ?? 5;
+  const rateLimitCount = extra.rateLimitCount ?? run34.rateLimitCount;
   if (claimState) {
     const stateText = claimState === "poster-review" ? HISTORY_LINE : terminalSafeInline(claimState);
     lines.push(`  state:      ${stateText}`);
@@ -49291,15 +49475,15 @@ function renderRunView(run32, message2, extra = {}) {
       `  rate limit: ${rateLimitCount ?? 5}/${rateLimitCap} runs in 24h cap reached${resetStr}`
     );
   }
-  if (Array.isArray(run32.failingJobs) && run32.failingJobs.length > 0) {
-    lines.push(`  failing:    ${run32.failingJobs.map(terminalSafeInline).join(", ")}`);
+  if (Array.isArray(run34.failingJobs) && run34.failingJobs.length > 0) {
+    lines.push(`  failing:    ${run34.failingJobs.map(terminalSafeInline).join(", ")}`);
   }
-  if (run32.previewUrl) lines.push(`  preview:    ${terminalSafeInline(run32.previewUrl)}`);
-  if (run32.roundTrips != null) lines.push(`  round trips: ${run32.roundTrips}`);
-  if (run32.passMeaning) lines.push(`  ${terminalSafeInline(run32.passMeaning)}`);
-  if (run32.logTail) {
+  if (run34.previewUrl) lines.push(`  preview:    ${terminalSafeInline(run34.previewUrl)}`);
+  if (run34.roundTrips != null) lines.push(`  round trips: ${run34.roundTrips}`);
+  if (run34.passMeaning) lines.push(`  ${terminalSafeInline(run34.passMeaning)}`);
+  if (run34.logTail) {
     lines.push("  \u2500\u2500 log tail \u2500\u2500");
-    for (const l of terminalSafeLines(run32.logTail)) lines.push(`  \u2502 ${l}`);
+    for (const l of terminalSafeLines(run34.logTail)) lines.push(`  \u2502 ${l}`);
   }
   if (message2) lines.push(`  ${message2}`);
   return lines.join("\n");
@@ -49347,7 +49531,7 @@ async function watchRunsLoop({
   fetchOnce,
   attempts = RUNS_POLL_ATTEMPTS,
   intervalMs = RUNS_POLL_INTERVAL_MS,
-  sleep: sleep6 = claimSleep,
+  sleep: sleep7 = claimSleep,
   log = console.log
 }) {
   for (let i = 1; i <= attempts; i++) {
@@ -49363,7 +49547,7 @@ async function watchRunsLoop({
       log(renderRunView(r.run, r.message, r));
       if (isTerminalRunStatus(r.run.status, r.claimState)) return { outcome: "done", run: r.run };
     }
-    if (i < attempts) await sleep6(intervalMs);
+    if (i < attempts) await sleep7(intervalMs);
   }
   log(runsGiveUpMessage(id, attempts, intervalMs));
   return { outcome: "gave-up" };
@@ -50517,11 +50701,11 @@ async function cmdSubmit(id, flags = {}) {
   const head = `${ghUser}:${claim.branch}`;
   const title = flags.title || claim.title;
   const noBody = Boolean(flags["no-body"]);
-  const prBodyPath = join46(wt, "PR-BODY.md");
+  const prBodyPath = join47(wt, "PR-BODY.md");
   const bodySource = pickBodySource({
     bodyFileFlag: flags["body-file"],
     noBody,
-    prBodyExists: existsSync21(prBodyPath)
+    prBodyExists: existsSync22(prBodyPath)
   });
   let bodyText;
   let bodyDescr;
@@ -50750,7 +50934,7 @@ function claimSleep(ms) {
 }
 function readClaimPushMarker() {
   try {
-    return existsSync21(CLAIM_PUSH_MARKER) ? JSON.parse(readFileSync28(CLAIM_PUSH_MARKER, "utf8")) : null;
+    return existsSync22(CLAIM_PUSH_MARKER) ? JSON.parse(readFileSync28(CLAIM_PUSH_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
@@ -50761,7 +50945,7 @@ function writeClaimPushMarker(marker) {
 }
 function clearClaimPushMarker() {
   try {
-    rmSync12(CLAIM_PUSH_MARKER);
+    rmSync13(CLAIM_PUSH_MARKER);
   } catch {
   }
 }
@@ -51595,7 +51779,7 @@ async function cmdResolve(id, flags = {}, deps = {}) {
   log("");
   return 0;
 }
-async function run7() {
+async function run8() {
   const verb = process.argv[2];
   const rawArgs = process.argv.slice(3).map((a) => a === "-y" ? "--yes" : a);
   const { flags, positional } = parseArgs(rawArgs);
@@ -51710,10 +51894,10 @@ var init_jpi_claim = __esm({
     init_founder_verdict_sync();
     init_founder_note_sync();
     init_review_mode_copy();
-    TERMINALHIRE_DIR17 = process.env.TERMINALHIRE_DIR || join46(homedir26(), ".terminalhire");
-    INDEX_CACHE_FILE5 = join46(TERMINALHIRE_DIR17, "index-cache.json");
-    CLAIM_PUSH_MARKER = join46(TERMINALHIRE_DIR17, "claim-push.json");
-    REPO_CONTINUITY_NUDGE_MARKER = join46(TERMINALHIRE_DIR17, "repo-continuity-nudged.json");
+    TERMINALHIRE_DIR17 = process.env.TERMINALHIRE_DIR || join47(homedir27(), ".terminalhire");
+    INDEX_CACHE_FILE5 = join47(TERMINALHIRE_DIR17, "index-cache.json");
+    CLAIM_PUSH_MARKER = join47(TERMINALHIRE_DIR17, "claim-push.json");
+    REPO_CONTINUITY_NUDGE_MARKER = join47(TERMINALHIRE_DIR17, "repo-continuity-nudged.json");
     API_URL6 = resolveApiBase();
     CLAIM_SYNC_BASE4 = API_URL6;
     CLAIM_CONSENT_VERSION = 1;
@@ -52016,20 +52200,20 @@ var init_secretScan = __esm({
 // src/posting-drafts.ts
 import {
   chmodSync as chmodSync4,
-  existsSync as existsSync22,
+  existsSync as existsSync23,
   readFileSync as readFileSync29,
   renameSync as renameSync12,
-  rmSync as rmSync13,
+  rmSync as rmSync14,
   writeFileSync as writeFileSync26
 } from "fs";
-import { homedir as homedir27 } from "os";
-import { join as join47 } from "path";
+import { homedir as homedir28 } from "os";
+import { join as join48 } from "path";
 import { randomUUID as randomUUID4 } from "crypto";
 function stateDir3() {
-  return process.env["TERMINALHIRE_DIR"] || join47(homedir27(), ".terminalhire");
+  return process.env["TERMINALHIRE_DIR"] || join48(homedir28(), ".terminalhire");
 }
 function postingDraftFilePath() {
-  return join47(stateDir3(), "posting-drafts.json");
+  return join48(stateDir3(), "posting-drafts.json");
 }
 function blankFile2() {
   return { version: 1, drafts: [] };
@@ -52069,7 +52253,7 @@ function writeFile(file) {
     }
   } finally {
     try {
-      rmSync13(tmp);
+      rmSync14(tmp);
     } catch {
     }
   }
@@ -52261,7 +52445,7 @@ function dedupe(found) {
     return true;
   });
 }
-function preparePostingSubmission(draft, currentHome = homedir27()) {
+function preparePostingSubmission(draft, currentHome = homedir28()) {
   const keptPaths = [];
   const found = [];
   for (const path6 of draft.changedPaths) {
@@ -52332,14 +52516,22 @@ var init_posting_drafts = __esm({
 // bin/jpi-post.js
 var jpi_post_exports = {};
 __export(jpi_post_exports, {
+  acknowledgmentFrom: () => acknowledgmentFrom,
   captureRepository: () => captureRepository,
   parsePostArgs: () => parsePostArgs,
-  run: () => run8
+  run: () => run9
 });
-import { existsSync as existsSync23, readFileSync as readFileSync30 } from "fs";
+import { existsSync as existsSync24, readFileSync as readFileSync30 } from "fs";
 import { spawnSync as spawnSync10 } from "child_process";
 import { createInterface as createInterface10 } from "readline";
-import { basename as basename8, join as join48 } from "path";
+import { basename as basename8, join as join49 } from "path";
+function connectorBase() {
+  try {
+    return resolveOAuthBase();
+  } catch {
+    return null;
+  }
+}
 function parsePostArgs(argv) {
   const flags = {};
   const positional = [];
@@ -52381,15 +52573,15 @@ function ownerRepo(remote) {
 }
 function detectStack(cwd) {
   const stack = [];
-  if (existsSync23(join48(cwd, "package.json"))) stack.push("node");
-  if (existsSync23(join48(cwd, "next.config.js")) || existsSync23(join48(cwd, "next.config.mjs"))) {
+  if (existsSync24(join49(cwd, "package.json"))) stack.push("node");
+  if (existsSync24(join49(cwd, "next.config.js")) || existsSync24(join49(cwd, "next.config.mjs"))) {
     stack.push("next.js");
   }
-  if (existsSync23(join48(cwd, "pyproject.toml")) || existsSync23(join48(cwd, "requirements.txt"))) {
+  if (existsSync24(join49(cwd, "pyproject.toml")) || existsSync24(join49(cwd, "requirements.txt"))) {
     stack.push("python");
   }
-  if (existsSync23(join48(cwd, "Cargo.toml"))) stack.push("rust");
-  if (existsSync23(join48(cwd, "go.mod"))) stack.push("go");
+  if (existsSync24(join49(cwd, "Cargo.toml"))) stack.push("rust");
+  if (existsSync24(join49(cwd, "go.mod"))) stack.push("go");
   return stack;
 }
 function captureRepository(cwd = process.cwd()) {
@@ -52473,11 +52665,15 @@ Usage:
   terminalhire post edit <draft-id> [--title "..."] [--symptom "..."] [--repo owner/name]
                          [--command "..."] [--output-file path] [--with-context "..."]
   terminalhire post submit <draft-id>
+  terminalhire post publish <server-draft-id> --price <usd> [--repo owner/name] [--title "..."]
+                            [--outcome "..."] [--scope "..."] [--acceptance "..."]
   terminalhire post list
   terminalhire post withdraw <draft-id>
 
-Draft, show, edit, list, and withdraw are local-only. Submit requires a human at
-an interactive terminal and creates an unowned web draft; the browser publishes it.`);
+Draft, show, edit, list, and withdraw are local-only. Submit and publish require a
+human at an interactive terminal. Without \`terminalhire setup\`, submit creates an
+unowned web draft and the browser publishes it. With a connector you approved to act
+for you, submit saves the draft to your account and publish puts it live here.`);
 }
 async function ask2(question) {
   const rl = createInterface10({ input: process.stdin, output: process.stdout });
@@ -52568,36 +52764,130 @@ async function runSubmit(id) {
     process.exitCode = 1;
     return;
   }
-  let response;
-  try {
-    response = await fetch(`${API_URL7}/api/founder/mcp`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: draft.id,
-        method: "tools/call",
-        params: { name: "draft_posting", arguments: prepared.posting }
-      }),
-      signal: AbortSignal.timeout(1e4)
-    });
-  } catch (error2) {
-    throw new Error(`submit failed: ${error2 instanceof Error ? error2.message : String(error2)}`);
+  const base = connectorBase();
+  let connector = base ? await readFounderConnector(base) : null;
+  let result = await callFounderTool(
+    connector ? base : API_URL7,
+    connector?.token ?? null,
+    "draft_posting",
+    prepared.posting
+  );
+  if (result.unauthorized && connector) {
+    await clearFounderConnector(base);
+    connector = null;
+    console.log(
+      "\n  The server no longer accepts this terminal\u2019s connector, so it was removed. Sending the draft\n  without it; run `terminalhire setup` to connect again."
+    );
+    result = await callFounderTool(API_URL7, null, "draft_posting", prepared.posting);
   }
-  if (!response.ok) throw new Error(`submit failed: server returned ${response.status}`);
-  const body = await response.json();
-  if (body?.error) throw new Error(`submit failed: ${body.error.message ?? "protocol error"}`);
-  if (body?.result?.isError) {
-    throw new Error(body.result.content?.[0]?.text ?? "server refused the draft");
-  }
-  const text = body?.result?.content?.[0]?.text;
-  if (typeof text !== "string") throw new Error("submit failed: server returned no confirmation");
-  console.log(`
-${text}
+  if (result.unauthorized) throw new Error("the server refused the draft (401)");
+  if (result.isError) throw new Error(result.text || "server refused the draft");
+  const draftId = typeof result.structured.draftId === "string" ? result.structured.draftId : null;
+  const confirmUrl = typeof result.structured.confirmUrl === "string" ? result.structured.confirmUrl : null;
+  if (!draftId && !result.text) throw new Error("submit failed: server returned no confirmation");
+  console.log("\n  Draft saved. Nothing is visible to developers until it is published.");
+  if (connector?.canWrite && draftId) {
+    console.log(`  Publish it from here: terminalhire post publish ${draftId} --price <usd>`);
+    if (confirmUrl) console.log(`  Or review and confirm it in the browser: ${confirmUrl}
 `);
+    return;
+  }
+  if (confirmUrl) console.log(`  Review and confirm it here: ${confirmUrl}`);
+  else console.log(`
+${result.text}`);
   console.log("  The posting is still not public. Open the link, sign in, review, and confirm it.\n");
 }
-async function run8() {
+function acknowledgmentFrom(structured) {
+  if (structured.kind === "full-tree") {
+    const { repoFullName, baseSha, noticeToken, noticeVersion } = structured;
+    if ([repoFullName, baseSha, noticeToken, noticeVersion].every((v) => typeof v === "string")) {
+      return {
+        fullTreeAckRepoFullName: repoFullName,
+        fullTreeAckBaseSha: baseSha,
+        fullTreeAckVersion: noticeVersion,
+        fullTreeAckNoticeToken: noticeToken
+      };
+    }
+    return null;
+  }
+  if (structured.kind === "slice") {
+    const { excludedCount, totalCount } = structured;
+    if (Number.isInteger(excludedCount) && Number.isInteger(totalCount)) {
+      return { excludedCount, totalCount };
+    }
+  }
+  return null;
+}
+async function runPublish(draftId, flags) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    console.error("  Refused \u2014 publish requires a human at an interactive terminal. Nothing was sent.\n");
+    process.exitCode = 1;
+    return;
+  }
+  const base = connectorBase();
+  const connector = base ? await readFounderConnector(base) : null;
+  if (!connector) {
+    throw new Error("publishing from the terminal needs a connector; run `terminalhire setup` first");
+  }
+  if (!connector.canWrite) {
+    throw new Error(
+      "this connector was approved without \u201Cact on my behalf\u201D; run `terminalhire setup --reconnect` and tick it"
+    );
+  }
+  const price = Number(flags.price);
+  if (!Number.isInteger(price) || price <= 0) throw new Error("publish needs --price in whole US dollars");
+  const repo = typeof flags.repo === "string" ? flags.repo.trim() : captureRepository().repo;
+  if (!repo) throw new Error("publish needs --repo owner/name (none detected from this directory)");
+  const args5 = { draftId, repoFullName: repo, priceUsd: price };
+  if (typeof flags.title === "string") args5.title = flags.title;
+  const brief = {};
+  for (const key of ["outcome", "scope", "acceptance"]) {
+    if (typeof flags[key] === "string" && flags[key].trim()) brief[key] = flags[key];
+  }
+  if (Object.keys(brief).length) args5.publicBrief = brief;
+  const first = await callFounderTool(base, connector.token, "confirm_posting", args5);
+  if (first.unauthorized) throw new Error("the server no longer accepts this connector; run `terminalhire setup`");
+  if (first.isError || first.structured.refused) {
+    console.error(`
+  ${first.text}
+`);
+    process.exitCode = 1;
+    return;
+  }
+  if (first.structured.awaitingAcknowledgement !== true) {
+    console.log(`
+  ${first.text}
+`);
+    return;
+  }
+  const ack = acknowledgmentFrom(first.structured);
+  if (!ack) throw new Error("the server asked for an acknowledgment this CLI does not recognise; nothing was published");
+  const notice = first.structured.personNotice;
+  if (typeof notice !== "string" || notice.trim() === "") {
+    throw new Error("the server sent no notice to show you; nothing was published");
+  }
+  console.log(`
+${notice.trim()}
+`);
+  const answer = await ask2("  Type yes to publish on these terms: ");
+  if (answer !== "yes") {
+    console.log("\n  Not published. The draft is unchanged.\n");
+    return;
+  }
+  const second = await callFounderTool(base, connector.token, "confirm_posting", { ...args5, ...ack });
+  if (second.unauthorized) throw new Error("the server no longer accepts this connector; run `terminalhire setup`");
+  if (second.isError || second.structured.refused || second.structured.awaitingAcknowledgement) {
+    console.error(`
+  ${second.text}
+`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`
+  ${second.text}
+`);
+}
+async function run9() {
   try {
     const raw = process.argv.slice(2);
     if (raw[0] === "post") raw.shift();
@@ -52640,6 +52930,7 @@ async function run8() {
       return;
     }
     if (verb === "submit") return await runSubmit(id);
+    if (verb === "publish") return await runPublish(id, flags);
     throw new Error(`unknown verb: ${verb}`);
   } catch (error2) {
     console.error(`terminalhire post: ${error2 instanceof Error ? error2.message : String(error2)}`);
@@ -52652,6 +52943,7 @@ var init_jpi_post = __esm({
     "use strict";
     init_posting_drafts();
     init_api_base();
+    init_founder_connector();
     API_URL7 = resolveApiBase();
     VALUE_FLAGS2 = /* @__PURE__ */ new Set([
       "title",
@@ -52661,15 +52953,1075 @@ var init_jpi_post = __esm({
       "command",
       "output",
       "output-file",
-      "with-context"
+      "with-context",
+      "price",
+      "outcome",
+      "scope",
+      "acceptance"
     ]);
+  }
+});
+
+// src/founder-oauth.ts
+import { createServer as createServer2 } from "http";
+import { createHash as createHash15, randomBytes as randomBytes15 } from "crypto";
+function pkceChallenge(verifier) {
+  return createHash15("sha256").update(verifier).digest("base64url");
+}
+function createPkcePair() {
+  const verifier = randomBytes15(32).toString("base64url");
+  return { verifier, challenge: pkceChallenge(verifier) };
+}
+function resolveOAuthCallback(rawUrl, expectedState) {
+  let u;
+  try {
+    u = new URL(rawUrl, "http://127.0.0.1");
+  } catch {
+    return { ok: false, reason: "bad_url" };
+  }
+  if (u.pathname !== "/callback") return null;
+  const state = u.searchParams.get("state");
+  if (!state || state !== expectedState) return { ok: false, reason: "state_mismatch" };
+  if (u.searchParams.get("error")) return { ok: false, reason: "denied" };
+  const code = u.searchParams.get("code");
+  if (!code) return { ok: false, reason: "missing_code" };
+  return { ok: true, code };
+}
+function startOAuthLoopback(expectedState, timeoutMs, host = "127.0.0.1") {
+  return new Promise((resolveHandle, rejectHandle) => {
+    let settle;
+    const result = new Promise((res) => {
+      settle = res;
+    });
+    let done2 = false;
+    const finish = (r) => {
+      if (done2) return;
+      done2 = true;
+      clearTimeout(timer);
+      settle(r);
+      setImmediate(() => {
+        try {
+          server.close();
+        } catch {
+        }
+      });
+    };
+    const server = createServer2((req, res) => {
+      const outcome = resolveOAuthCallback(req.url ?? "", expectedState);
+      if (outcome === null) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      if (!outcome.ok && (outcome.reason === "state_mismatch" || outcome.reason === "bad_url")) {
+        res.writeHead(400);
+        res.end();
+        return;
+      }
+      res.writeHead(outcome.ok ? 200 : 400, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(outcome.ok ? DONE_HTML : FAILED_HTML);
+      finish(outcome);
+    });
+    const timer = setTimeout(() => finish({ ok: false, reason: "timeout" }), timeoutMs);
+    if (typeof timer.unref === "function") timer.unref();
+    let listening = false;
+    server.on("error", (err) => {
+      if (!listening) rejectHandle(err);
+      else finish({ ok: false, reason: "listen_error" });
+    });
+    server.listen(0, host, () => {
+      listening = true;
+      const addr = server.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      resolveHandle({
+        port,
+        result,
+        close: () => {
+          clearTimeout(timer);
+          try {
+            server.close();
+          } catch {
+          }
+        }
+      });
+    });
+  });
+}
+async function registerClient(base, redirectUri, fetchImpl = globalThis.fetch) {
+  const res = await fetchImpl(`${base}/api/founder/mcp/oauth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ client_name: OAUTH_CLIENT_NAME, redirect_uris: [redirectUri] }),
+    signal: AbortSignal.timeout(15e3)
+  });
+  const body = await res.json().catch(() => ({}));
+  const clientId = body["client_id"];
+  if (!res.ok || typeof clientId !== "string") {
+    const why = typeof body["error_description"] === "string" ? body["error_description"] : res.status;
+    throw new FounderOAuthError(`could not register this terminal with ${base} (${why})`);
+  }
+  return clientId;
+}
+function authorizeUrl(base, p) {
+  const u = new URL("/api/founder/mcp/oauth/authorize", base);
+  u.searchParams.set("response_type", "code");
+  u.searchParams.set("client_id", p.clientId);
+  u.searchParams.set("redirect_uri", p.redirectUri);
+  u.searchParams.set("code_challenge", p.challenge);
+  u.searchParams.set("code_challenge_method", "S256");
+  u.searchParams.set("state", p.state);
+  return u.toString();
+}
+async function exchangeCode(base, p, fetchImpl = globalThis.fetch) {
+  const res = await fetchImpl(`${base}/api/founder/mcp/oauth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code: p.code,
+      client_id: p.clientId,
+      redirect_uri: p.redirectUri,
+      code_verifier: p.verifier
+    }).toString(),
+    signal: AbortSignal.timeout(15e3)
+  });
+  const body = await res.json().catch(() => ({}));
+  const token = body["access_token"];
+  if (!res.ok || typeof token !== "string") {
+    throw new FounderOAuthError("the approval could not be exchanged for a connector token");
+  }
+  const scope = typeof body["scope"] === "string" ? body["scope"] : "";
+  return { token, canWrite: scope.split(/\s+/).includes("mcp:write") };
+}
+async function runFounderOAuth(overrides) {
+  const deps = {
+    startLoopback: (state2, timeoutMs) => startOAuthLoopback(state2, timeoutMs),
+    openBrowser: (url) => {
+      void Promise.resolve().then(() => (init_open_url(), open_url_exports)).then((m) => m.openInBrowser(url)).catch(() => {
+      });
+    },
+    fetchImpl: globalThis.fetch,
+    onAuthorizeUrl: () => {
+    },
+    timeoutMs: OAUTH_TIMEOUT_MS,
+    randomState: () => randomBytes15(16).toString("hex"),
+    pkce: createPkcePair,
+    ...overrides
+  };
+  const state = deps.randomState();
+  const { verifier, challenge } = deps.pkce();
+  const handle = await deps.startLoopback(state, deps.timeoutMs);
+  try {
+    const redirectUri = `http://127.0.0.1:${handle.port}/callback`;
+    const clientId = await registerClient(deps.base, redirectUri, deps.fetchImpl);
+    const url = authorizeUrl(deps.base, { clientId, redirectUri, challenge, state });
+    deps.onAuthorizeUrl(url);
+    deps.openBrowser(url);
+    const outcome = await handle.result;
+    if (!outcome.ok || !outcome.code) {
+      throw new FounderOAuthError(REASON_TEXT[outcome.reason ?? "missing_code"]);
+    }
+    return await exchangeCode(
+      deps.base,
+      { code: outcome.code, clientId, redirectUri, verifier },
+      deps.fetchImpl
+    );
+  } finally {
+    handle.close();
+  }
+}
+var OAUTH_TIMEOUT_MS, OAUTH_CLIENT_NAME, DONE_HTML, FAILED_HTML, FounderOAuthError, REASON_TEXT;
+var init_founder_oauth = __esm({
+  "src/founder-oauth.ts"() {
+    "use strict";
+    OAUTH_TIMEOUT_MS = 3e5;
+    OAUTH_CLIENT_NAME = "terminalhire setup";
+    DONE_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>terminalhire</title></head>
+<body style="font-family:system-ui;padding:2rem;background:#0b0d10;color:#e6e6e6">
+<script>history.replaceState({},'','/');</script>
+<p>Approved. Go back to your terminal; you can close this tab.</p>
+</body></html>`;
+    FAILED_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>terminalhire</title></head>
+<body style="font-family:system-ui;padding:2rem;background:#0b0d10;color:#e6e6e6">
+<script>history.replaceState({},'','/');</script>
+<p>That did not work. Go back to your terminal and run <code>terminalhire setup</code> again.</p>
+</body></html>`;
+    FounderOAuthError = class extends Error {
+    };
+    REASON_TEXT = {
+      state_mismatch: "the browser came back with an answer this terminal did not ask for",
+      missing_code: "the browser came back without an approval code",
+      denied: "the approval was declined",
+      bad_url: "the browser came back with an unreadable address",
+      timeout: "no approval arrived in time",
+      listen_error: "the local listener stopped"
+    };
+  }
+});
+
+// bin/tui-core.js
+function sanitizeLine(text) {
+  return String(text).replace(ANSI_CSI, "").replace(ANSI_OSC, "").replace(ANSI_OTHER, "").replace(C0_C1_DEL, "");
+}
+function truncate(s, n) {
+  const t = String(s);
+  return t.length <= n ? t : `${t.slice(0, n - 1)}\u2026`;
+}
+function createRuntime({
+  input = typeof process !== "undefined" ? process.stdin : void 0,
+  output = typeof process !== "undefined" ? process.stdout : void 0,
+  signals = typeof process !== "undefined" ? process : void 0,
+  exit = (code) => process.exit(code),
+  mouse = false
+} = {}) {
+  let entered = false;
+  let cleaned = false;
+  function cleanup() {
+    if (cleaned) return;
+    cleaned = true;
+    entered = false;
+    try {
+      if (input && typeof input.setRawMode === "function") input.setRawMode(false);
+    } catch {
+    }
+    try {
+      if (input && typeof input.pause === "function") input.pause();
+    } catch {
+    }
+    try {
+      if (signals && typeof signals.removeListener === "function") {
+        signals.removeListener("SIGINT", onSignal);
+        signals.removeListener("SIGTERM", onSignal);
+        signals.removeListener("SIGHUP", onSignal);
+        signals.removeListener("uncaughtException", onUncaught);
+        signals.removeListener("unhandledRejection", onUncaught);
+        signals.removeListener("exit", onExitEvt);
+      }
+    } catch {
+    }
+    try {
+      if (output && typeof output.write === "function")
+        output.write((mouse ? MOUSE_OFF : "") + SHOW_CURSOR + EXIT_ALT);
+    } catch {
+    }
+  }
+  function onSignal() {
+    cleanup();
+    exit(130);
+  }
+  function onUncaught(err) {
+    cleanup();
+    throw err;
+  }
+  function onExitEvt() {
+    cleanup();
+  }
+  function enter() {
+    if (entered) return;
+    entered = true;
+    cleaned = false;
+    try {
+      if (input && typeof input.setRawMode === "function") input.setRawMode(true);
+    } catch {
+    }
+    try {
+      if (input && typeof input.resume === "function") input.resume();
+    } catch {
+    }
+    if (signals && typeof signals.on === "function") {
+      signals.on("SIGINT", onSignal);
+      signals.on("SIGTERM", onSignal);
+      signals.on("SIGHUP", onSignal);
+      signals.on("uncaughtException", onUncaught);
+      signals.on("unhandledRejection", onUncaught);
+      signals.on("exit", onExitEvt);
+    }
+    if (output && typeof output.write === "function")
+      output.write(ENTER_ALT + HIDE_CURSOR + (mouse ? MOUSE_ON : ""));
+  }
+  return {
+    enter,
+    cleanup,
+    get entered() {
+      return entered;
+    },
+    get cleaned() {
+      return cleaned;
+    }
+  };
+}
+function createBuffer(rows, cols) {
+  const n = Math.max(0, rows) * Math.max(0, cols);
+  const buf = new Array(n);
+  for (let i = 0; i < n; i++) buf[i] = { ch: " ", fg: null, bg: null, attr: null };
+  return buf;
+}
+function drawText(buf, cols, row, col, str, style = {}) {
+  if (row < 0 || col < 0 || col >= cols) return;
+  const maxLen = cols - col;
+  if (maxLen <= 0) return;
+  const points = Array.from(sanitizeLine(str));
+  const text = points.length <= maxLen ? points : points.slice(0, Math.max(0, maxLen - 1)).concat("\u2026");
+  const fg = style.fg ?? null;
+  const bg = style.bg ?? null;
+  const attr = style.attr ?? null;
+  for (let i = 0; i < text.length && col + i < cols; i++) {
+    const idx = row * cols + (col + i);
+    if (idx < 0 || idx >= buf.length) break;
+    buf[idx] = { ch: text[i], fg, bg, attr };
+  }
+}
+function cellNe(a, b) {
+  if (!a || !b) return true;
+  return a.ch !== b.ch || a.fg !== b.fg || a.bg !== b.bg || a.attr !== b.attr;
+}
+function diff(prev, next, cols) {
+  if (!Number.isInteger(cols) || cols <= 0) return [];
+  const ops = [];
+  const len = next.length;
+  let run34 = null;
+  for (let i = 0; i < len; i++) {
+    const col = i % cols;
+    const row = (i - col) / cols;
+    if (col === 0 && run34) {
+      ops.push(run34);
+      run34 = null;
+    }
+    if (cellNe(prev[i], next[i])) {
+      if (run34 && run34.row === row && run34.col + run34.run.length === col) {
+        run34.run.push(next[i]);
+      } else {
+        if (run34) ops.push(run34);
+        run34 = { row, col, run: [next[i]] };
+      }
+    } else if (run34) {
+      ops.push(run34);
+      run34 = null;
+    }
+  }
+  if (run34) ops.push(run34);
+  return ops;
+}
+function styleOf(cell) {
+  const pre = (cell.attr || "") + (cell.fg || "") + (cell.bg || "");
+  return pre;
+}
+function encode2(ops) {
+  if (!ops || ops.length === 0) return "";
+  let out = "";
+  let curRow = -1;
+  let curCol = -1;
+  for (const op of ops) {
+    if (!Number.isInteger(op.row) || !Number.isInteger(op.col)) continue;
+    if (op.row !== curRow || op.col !== curCol) {
+      out += `\x1B[${op.row + 1};${op.col + 1}H`;
+    }
+    for (const cell of op.run) {
+      const pre = styleOf(cell);
+      out += pre ? pre + cell.ch + RESET : cell.ch;
+    }
+    curRow = op.row;
+    curCol = op.col + op.run.length;
+  }
+  return out;
+}
+function createRenderer({
+  write,
+  output = typeof process !== "undefined" ? process.stdout : void 0,
+  rows,
+  cols
+} = {}) {
+  const doWrite = write || (output && output.write ? output.write.bind(output) : () => {
+  });
+  const fallback = readTermSize(output);
+  let _rows = Number.isInteger(rows) && rows > 0 ? rows : fallback.rows;
+  let _cols = Number.isInteger(cols) && cols > 0 ? cols : fallback.cols;
+  let prev = createBuffer(_rows, _cols);
+  return {
+    render(nextBuf) {
+      const s = encode2(diff(prev, nextBuf, _cols));
+      if (s) doWrite(s);
+      prev = nextBuf;
+    },
+    /** Drop the previous frame so the next render repaints every cell. */
+    invalidate() {
+      prev = [];
+    },
+    /** Adopt new dimensions and force a full redraw on the next render. */
+    resize(newRows, newCols) {
+      _rows = newRows;
+      _cols = newCols;
+      prev = [];
+    },
+    get rows() {
+      return _rows;
+    },
+    get cols() {
+      return _cols;
+    }
+  };
+}
+function clampOffset(offset, contentLen, viewH, scrolloff = 0) {
+  const so = Math.max(0, scrolloff | 0);
+  const maxOffset = Math.max(0, contentLen - viewH + so);
+  let o = Number.isFinite(offset) ? Math.trunc(offset) : 0;
+  if (o < 0) o = 0;
+  if (o > maxOffset) o = maxOffset;
+  return o;
+}
+function scrollUp(offset, contentLen, viewH, scrolloff = 0, by = 1) {
+  return clampOffset(offset - by, contentLen, viewH, scrolloff);
+}
+function scrollDown(offset, contentLen, viewH, scrolloff = 0, by = 1) {
+  return clampOffset(offset + by, contentLen, viewH, scrolloff);
+}
+function readTermSize(out) {
+  const o = out || (typeof process !== "undefined" ? process.stdout : void 0);
+  const cols = o && Number.isInteger(o.columns) && o.columns > 0 ? o.columns : 80;
+  const rows = o && Number.isInteger(o.rows) && o.rows > 0 ? o.rows : 24;
+  return { rows, cols };
+}
+function wireResize({ output = typeof process !== "undefined" ? process.stdout : void 0, onResize } = {}) {
+  const handler = () => {
+    if (typeof onResize === "function") onResize(readTermSize(output));
+  };
+  let unsubscribe = () => {
+  };
+  if (output && typeof output.on === "function") {
+    output.on("resize", handler);
+    unsubscribe = () => {
+      try {
+        if (typeof output.removeListener === "function") output.removeListener("resize", handler);
+      } catch {
+      }
+    };
+  } else if (typeof process !== "undefined" && typeof process.on === "function") {
+    process.on("SIGWINCH", handler);
+    unsubscribe = () => {
+      try {
+        process.removeListener("SIGWINCH", handler);
+      } catch {
+      }
+    };
+  }
+  return unsubscribe;
+}
+function detectColorLevel(env = {}, isTTY = false) {
+  const force = String(env.FORCE_COLOR ?? "");
+  const colorterm = String(env.COLORTERM ?? "").toLowerCase();
+  const term = String(env.TERM ?? "").toLowerCase();
+  if (force === "3") return "truecolor";
+  if (force === "2") return "256";
+  if (colorterm === "truecolor" || colorterm === "24bit") return "truecolor";
+  if (term.includes("256")) return "256";
+  if (env.NO_COLOR != null && env.NO_COLOR !== "" || term === "dumb" || term === "") return "16";
+  if (!isTTY && force === "") return "16";
+  return "16";
+}
+function degrade(role, level = "truecolor") {
+  const table = PALETTE[level] || PALETTE["16"];
+  return table[role] || "";
+}
+function hexToRgb(hex) {
+  const h = String(hex).replace(/^#/, "");
+  const n = parseInt(h, 16);
+  return { r: n >> 16 & 255, g: n >> 8 & 255, b: n & 255 };
+}
+function nearestCubeStep(v) {
+  let best = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < CUBE_STEPS.length; i++) {
+    const d = Math.abs(CUBE_STEPS[i] - v);
+    if (d < bestDist) {
+      bestDist = d;
+      best = i;
+    }
+  }
+  return best;
+}
+function rgbTo256(r, g, b) {
+  return 16 + 36 * nearestCubeStep(r) + 6 * nearestCubeStep(g) + nearestCubeStep(b);
+}
+function gradientFg(stops, t, level = "truecolor") {
+  if (level === "16") return degrade("accent-bright", level);
+  if (!Array.isArray(stops) || stops.length === 0) return "";
+  if (stops.length === 1) {
+    const { r: r2, g: g2, b: b2 } = hexToRgb(stops[0]);
+    return level === "256" ? `\x1B[38;5;${rgbTo256(r2, g2, b2)}m` : `\x1B[38;2;${r2};${g2};${b2}m`;
+  }
+  const clamped = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
+  const seg = clamped * (stops.length - 1);
+  const i0 = Math.min(stops.length - 2, Math.floor(seg));
+  const localT = seg - i0;
+  const c0 = hexToRgb(stops[i0]);
+  const c1 = hexToRgb(stops[i0 + 1]);
+  const r = Math.round(c0.r + (c1.r - c0.r) * localT);
+  const g = Math.round(c0.g + (c1.g - c0.g) * localT);
+  const b = Math.round(c0.b + (c1.b - c0.b) * localT);
+  return level === "256" ? `\x1B[38;5;${rgbTo256(r, g, b)}m` : `\x1B[38;2;${r};${g};${b}m`;
+}
+var HIDE_CURSOR, SHOW_CURSOR, ENTER_ALT, EXIT_ALT, MOUSE_ON, MOUSE_OFF, INVERSE, RESET, BOLD, KEY_CTRL_C, KEY_ESC, KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT, KEY_TAB, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, KEY_Q, KEY_DIGITS, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, PALETTE, COLOR_ROLES, CUBE_STEPS;
+var init_tui_core = __esm({
+  "bin/tui-core.js"() {
+    "use strict";
+    HIDE_CURSOR = "\x1B[?25l";
+    SHOW_CURSOR = "\x1B[?25h";
+    ENTER_ALT = "\x1B[?1049h";
+    EXIT_ALT = "\x1B[?1049l";
+    MOUSE_ON = "\x1B[?1000h\x1B[?1006h";
+    MOUSE_OFF = "\x1B[?1006l\x1B[?1000l";
+    INVERSE = "\x1B[7m";
+    RESET = "\x1B[0m";
+    BOLD = "\x1B[1m";
+    KEY_CTRL_C = "";
+    KEY_ESC = "\x1B";
+    KEY_UP = "\x1B[A";
+    KEY_DOWN = "\x1B[B";
+    KEY_RIGHT = "\x1B[C";
+    KEY_LEFT = "\x1B[D";
+    KEY_TAB = "	";
+    KEY_ENTER_A = "\r";
+    KEY_ENTER_B = "\n";
+    KEY_BACKSPACE_A = "\x7F";
+    KEY_BACKSPACE_B = "\b";
+    KEY_Q = "q";
+    KEY_DIGITS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+    ANSI_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+    ANSI_OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+    ANSI_OTHER = /\x1b[@-_]/g;
+    C0_C1_DEL = /[\x00-\x1f\x7f-\x9f]/g;
+    PALETTE = {
+      truecolor: {
+        bg: "\x1B[48;2;13;17;23m",
+        panel: "\x1B[48;2;22;27;34m",
+        rule: "\x1B[38;2;48;54;61m",
+        text: "\x1B[38;2;201;209;217m",
+        muted: "\x1B[38;2;125;133;144m",
+        accent: "\x1B[38;2;88;166;255m",
+        "accent-bright": "\x1B[38;2;121;192;255m",
+        green: "\x1B[38;2;63;185;80m",
+        amber: "\x1B[38;2;210;153;34m"
+      },
+      256: {
+        bg: "\x1B[48;5;233m",
+        panel: "\x1B[48;5;235m",
+        rule: "\x1B[38;5;240m",
+        text: "\x1B[38;5;252m",
+        muted: "\x1B[38;5;245m",
+        accent: "\x1B[38;5;75m",
+        "accent-bright": "\x1B[38;5;117m",
+        green: "\x1B[38;5;71m",
+        amber: "\x1B[38;5;178m"
+      },
+      16: {
+        bg: "\x1B[40m",
+        panel: "\x1B[100m",
+        rule: "\x1B[90m",
+        text: "\x1B[37m",
+        muted: "\x1B[90m",
+        accent: "\x1B[94m",
+        "accent-bright": "\x1B[96m",
+        green: "\x1B[92m",
+        amber: "\x1B[93m"
+      }
+    };
+    COLOR_ROLES = Object.keys(PALETTE.truecolor);
+    CUBE_STEPS = [0, 95, 135, 175, 215, 255];
+  }
+});
+
+// bin/jpi-setup.js
+var jpi_setup_exports = {};
+__export(jpi_setup_exports, {
+  GLYPH: () => GLYPH,
+  MAX_POLL_FAILURES: () => MAX_POLL_FAILURES,
+  STEPS: () => STEPS,
+  checklistRows: () => checklistRows,
+  connectorHelperCommand: () => connectorHelperCommand,
+  connectorServerName: () => connectorServerName,
+  isReady: () => isReady,
+  mcpAddJsonArgs: () => mcpAddJsonArgs,
+  mcpAddJsonLine: () => mcpAddJsonLine,
+  parseSetupArgs: () => parseSetupArgs,
+  requirementsFromResult: () => requirementsFromResult,
+  run: () => run10,
+  trackPoll: () => trackPoll,
+  waitPlain: () => waitPlain
+});
+import { spawnSync as spawnSync11 } from "child_process";
+import { createInterface as createInterface11 } from "readline";
+function checklistRows(requirements, waitingOn = null) {
+  if (requirements?.status !== "ok") {
+    return STEPS.map((s) => ({ key: s.key, label: s.label, state: "unavailable" }));
+  }
+  const outstanding = new Set(requirements.outstanding);
+  const undetermined = new Set(requirements.undetermined);
+  return STEPS.map((s) => {
+    let state = "done";
+    if (outstanding.has(s.code)) state = "todo";
+    else if (undetermined.has(s.code)) state = "unknown";
+    if (state !== "done" && s.key === waitingOn) state = "waiting";
+    return { key: s.key, label: s.label, state };
+  });
+}
+function requirementsFromResult(r, repo) {
+  if (r.unauthorized) return { status: "unauthorized" };
+  const { outstanding, undetermined } = r.structured;
+  const known = (list) => Array.isArray(list) && list.every((c) => KNOWN_CODES.has(c));
+  if (r.isError || !known(outstanding) || !known(undetermined)) {
+    return {
+      status: "unavailable",
+      message: r.text || "the server sent a checklist this CLI cannot read"
+    };
+  }
+  return {
+    status: "ok",
+    outstanding,
+    undetermined,
+    repo: typeof r.structured.repo === "string" ? r.structured.repo : repo
+  };
+}
+function trackPoll(failures, reqs, isDone) {
+  if (reqs.status === "unauthorized") return { failures, outcome: "revoked" };
+  if (reqs.status !== "ok") {
+    const n = failures + 1;
+    return { failures: n, outcome: n >= MAX_POLL_FAILURES ? "unavailable" : null };
+  }
+  return { failures: 0, outcome: isDone(reqs) ? "done" : null };
+}
+function connectorServerName(base) {
+  if (base === PROD_API_BASE || base === "https://www.terminalhire.com") {
+    return "terminalhire-founder";
+  }
+  if (base === DEV_API_BASE) return "terminalhire-founder-dev";
+  return "terminalhire-founder-local";
+}
+function connectorHelperCommand(base) {
+  return `terminalhire connector-header --host ${base}`;
+}
+function mcpAddJsonArgs(base) {
+  const config2 = {
+    type: "http",
+    url: `${base}/api/founder/mcp`,
+    headersHelper: connectorHelperCommand(base)
+  };
+  return ["mcp", "add-json", "--scope", "user", connectorServerName(base), JSON.stringify(config2)];
+}
+function mcpAddJsonLine(base) {
+  const [, , , , name, json] = mcpAddJsonArgs(base);
+  return `claude mcp add-json --scope user ${name} '${json}'`;
+}
+function parseSetupArgs(argv) {
+  const flags = { status: false, reconnect: false, repo: null, help: false };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--status") flags.status = true;
+    else if (a === "--reconnect") flags.reconnect = true;
+    else if (a === "--help" || a === "-h") flags.help = true;
+    else if (a === "--repo") {
+      const v = argv[i + 1];
+      if (!v || v.startsWith("--")) throw new Error("--repo requires owner/repo");
+      flags.repo = v;
+      i++;
+    } else throw new Error(`unknown option: ${a}`);
+  }
+  return flags;
+}
+function repoFromGit() {
+  const r = spawnSync11("git", ["remote", "get-url", "origin"], {
+    encoding: "utf8",
+    timeout: 5e3,
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+  if (r.status !== 0) return null;
+  const m = String(r.stdout || "").trim().match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/i);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+function onPath(cmd) {
+  const r = spawnSync11(cmd, ["--version"], { stdio: "ignore", timeout: 1e4 });
+  return !r.error && r.status === 0;
+}
+async function ask3(question) {
+  const rl = createInterface11({ input: process.stdin, output: process.stdout });
+  try {
+    return await new Promise((resolve9) => rl.question(question, (a) => resolve9(a.trim())));
+  } finally {
+    rl.close();
+  }
+}
+function openInBrowser2(url) {
+  void Promise.resolve().then(() => (init_open_url(), open_url_exports)).then((m) => m.openInBrowser(url)).catch(() => {
+  });
+}
+function plainChecklist(rows, log = console.log) {
+  for (const r of rows) {
+    const note = r.state === "unknown" ? " (name the repository with --repo)" : r.state === "unavailable" ? " (could not check)" : "";
+    log(`  ${GLYPH[r.state]} ${r.label}${note}`);
+  }
+}
+async function waitOnScreen({ title, hint, link, isDone, poll, rowsFor }) {
+  const level = detectColorLevel(process.env, true);
+  const indigo = gradientFg([INDIGO], 0, level);
+  const green = level === "16" ? degrade("green", level) : gradientFg([GREEN], 0, level);
+  const muted = degrade("muted", level);
+  const runtime = createRuntime();
+  const size = readTermSize(process.stdout);
+  const renderer = createRenderer({ rows: size.rows, cols: size.cols });
+  let tick = 0;
+  let outcome = null;
+  const onKey = (buf) => {
+    const k = buf.toString("utf8");
+    if (k === KEY_ENTER_A || k === KEY_ENTER_B) openInBrowser2(link);
+    else if (k === "s") outcome = "skip";
+    else if (k === "q" || k === KEY_CTRL_C) outcome = "quit";
+  };
+  const draw = (rows, note) => {
+    const { rows: h, cols: w } = readTermSize(process.stdout);
+    const buf = createBuffer(h, w);
+    drawText(buf, w, 1, 2, "terminalhire setup", { fg: indigo, attr: "\x1B[1m" });
+    drawText(buf, w, 3, 2, title, {});
+    let y = 5;
+    for (const r of rows) {
+      const glyph = r.state === "waiting" ? SPIN[tick % SPIN.length] : GLYPH[r.state];
+      const fg = r.state === "done" ? green : r.state === "waiting" ? indigo : muted;
+      drawText(buf, w, y, 4, `${glyph} ${r.label}`, { fg });
+      y++;
+    }
+    y++;
+    for (const line of hint) drawText(buf, w, y++, 2, line, { fg: muted });
+    if (note) drawText(buf, w, y++, 2, note, { fg: muted });
+    drawText(buf, w, y + 1, 2, "\u21B5 reopen link   s skip   q quit", { fg: muted });
+    renderer.render(buf);
+  };
+  runtime.enter();
+  process.stdin.on("data", onKey);
+  const started = Date.now();
+  let failures = 0;
+  let last = null;
+  const step = async () => {
+    const reqs = await poll();
+    if (reqs.status === "ok") last = reqs;
+    const t = trackPoll(failures, reqs, isDone);
+    failures = t.failures;
+    if (t.outcome) outcome = t.outcome;
+  };
+  try {
+    await step();
+    while (outcome === null) {
+      draw(
+        rowsFor(last),
+        failures > 0 ? `Could not reach the server (${failures} of ${MAX_POLL_FAILURES}); retrying.` : null
+      );
+      await sleep5(250);
+      tick++;
+      if (tick % Math.round(POLL_MS / 250) === 0) await step();
+      if (outcome === null && Date.now() - started > WAIT_LIMIT_MS) outcome = "timeout";
+    }
+    return outcome;
+  } finally {
+    process.stdin.removeListener("data", onKey);
+    runtime.cleanup();
+    process.stdout.write(RESET);
+  }
+}
+async function waitPlain({ title, link, isDone, poll }, {
+  sleepFn = sleep5,
+  now = Date.now,
+  log = console.log,
+  pollMs = POLL_MS,
+  limitMs = WAIT_LIMIT_MS
+} = {}) {
+  log(`
+  ${title}`);
+  if (link) log(`  \u2192 ${link}`);
+  log("  Waiting\u2026");
+  const started = now();
+  let failures = 0;
+  for (; ; ) {
+    const reqs = await poll();
+    const t = trackPoll(failures, reqs, isDone);
+    if (t.outcome) return t.outcome;
+    if (t.failures > failures)
+      log(`  Could not reach the server (${t.failures} of ${MAX_POLL_FAILURES}); retrying.`);
+    failures = t.failures;
+    if (now() - started > limitMs) return "timeout";
+    await sleepFn(pollMs);
+  }
+}
+function usage2() {
+  console.log(`
+Usage:
+  terminalhire setup [--repo owner/repo]   Sign in as a poster and finish what publishing needs
+  terminalhire setup --status              Print the checklist and exit
+  terminalhire setup --reconnect           Approve a new connector (for example, one that may act)
+
+--repo is needed when the GitHub App covers more than one of your repositories.
+The email step needs an interactive terminal.
+
+Signing in, the GitHub App, the card form and the email link happen in your browser.
+Accepting work and paying stay in the browser too.`);
+}
+async function runSetup() {
+  let flags;
+  try {
+    const raw = process.argv.slice(2);
+    if (raw[0] === "setup") raw.shift();
+    flags = parseSetupArgs(raw);
+  } catch (e) {
+    console.error(`terminalhire setup: ${e.message}`);
+    process.exitCode = 1;
+    return;
+  }
+  if (flags.help) return usage2();
+  let base;
+  try {
+    base = resolveOAuthBase();
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exitCode = 1;
+    return;
+  }
+  const tty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  const repo = flags.repo ?? repoFromGit();
+  let connector = flags.reconnect ? null : await readFounderConnector(base);
+  const requirementsNow = async () => {
+    try {
+      const r = await callFounderTool(
+        base,
+        connector.token,
+        "publish_requirements",
+        repo ? { repo } : {}
+      );
+      return requirementsFromResult(r, repo);
+    } catch (e) {
+      return { status: "unavailable", message: e instanceof Error ? e.message : String(e) };
+    }
+  };
+  const revoked = async () => {
+    await clearFounderConnector(base);
+    console.error(
+      "\n  This terminal\u2019s connector is no longer accepted, so it was removed. Run `terminalhire setup` again.\n"
+    );
+    process.exitCode = 1;
+  };
+  const unavailable = (reqs2) => {
+    plainChecklist(checklistRows(reqs2));
+    console.error(
+      `
+  Could not read your checklist: ${reqs2.message}. Run \`terminalhire setup\` again.
+`
+    );
+    process.exitCode = 1;
+  };
+  if (flags.status) {
+    if (!connector) {
+      console.log("\n  \u25CB Signed in as a poster \u2014 run `terminalhire setup`\n");
+      return;
+    }
+    const reqs2 = await requirementsNow();
+    if (reqs2.status === "unauthorized") {
+      console.log(
+        "\n  \u25CB Signed in as a poster \u2014 this connector was revoked; run `terminalhire setup`\n"
+      );
+      return;
+    }
+    console.log("\n  \u2713 Signed in as a poster");
+    if (reqs2.status !== "ok") return unavailable(reqs2);
+    plainChecklist(checklistRows(reqs2));
+    console.log("");
+    return;
+  }
+  if (flags.reconnect && await readFounderConnector(base)) {
+    console.log("\n  Your current connector stays valid until you remove it in the browser,");
+    console.log("  under Settings \u2192 Agent connections on your dashboard.");
+  }
+  if (!connector) {
+    console.log("\n  terminalhire setup \u2014 sign in as a poster");
+    console.log("  Your browser opens to sign in with GitHub and approve this terminal.");
+    console.log("  Tick \u201Cact on my behalf\u201D there if you want to publish from the terminal.");
+    try {
+      const grant = await runFounderOAuth({
+        base,
+        onAuthorizeUrl: (url) => console.log(`  If it does not open, paste this address:
+  \u2192 ${url}`)
+      });
+      connector = { ...grant, host: base, createdAt: (/* @__PURE__ */ new Date()).toISOString() };
+      await writeFounderConnector(connector);
+    } catch (e) {
+      console.error(`
+  Sign-in did not finish: ${e instanceof Error ? e.message : String(e)}
+`);
+      process.exitCode = 1;
+      return;
+    }
+    console.log("  \u2713 Signed in");
+  }
+  let reqs = await requirementsNow();
+  if (reqs.status === "unauthorized") return revoked();
+  if (reqs.status !== "ok") return unavailable(reqs);
+  if (!connector.canWrite) {
+    console.log("\n  This connector can read but not act, so the card and email steps and");
+    console.log("  publishing are not available from here. Run `terminalhire setup --reconnect`");
+    console.log("  and tick \u201Cact on my behalf\u201D to use them.\n");
+    plainChecklist(checklistRows(reqs));
+    console.log("");
+    return;
+  }
+  const poll = async () => {
+    const r = await requirementsNow();
+    if (r.status === "ok") reqs = r;
+    return r;
+  };
+  const stepDone = (key) => (r) => checklistRows(r).find((row) => row.key === key)?.state === "done";
+  const wait = async (key, title, hint, link) => {
+    const opts = {
+      title,
+      hint,
+      link,
+      isDone: stepDone(key),
+      poll,
+      rowsFor: (r) => checklistRows(r ?? reqs, key)
+    };
+    const outcome = tty ? await waitOnScreen(opts) : await waitPlain(opts);
+    if (outcome === "quit") {
+      console.log("\n  Stopped. Run `terminalhire setup` to pick up where you left off.\n");
+      return false;
+    }
+    if (outcome === "revoked") {
+      await revoked();
+      return false;
+    }
+    if (outcome === "unavailable") {
+      console.error(
+        `
+  Lost contact with ${base} ${MAX_POLL_FAILURES} times in a row. Nothing is lost; run \`terminalhire setup\` again to pick up here.
+`
+      );
+      process.exitCode = 1;
+      return false;
+    }
+    if (outcome === "timeout")
+      console.log("  Still waiting; run `terminalhire setup` again when it is done.");
+    return true;
+  };
+  if (["todo", "unknown"].includes(checklistRows(reqs).find((r) => r.key === "app")?.state)) {
+    const link = `${base}/api/founder/github/install?return=setup`;
+    openInBrowser2(link);
+    const hint = [
+      `Install the Terminalhire GitHub App on ${reqs.repo ?? "your repository"}.`,
+      "If you choose \u201COnly select repositories\u201D, include this one.",
+      ...reqs.repo ? [] : ["Installed on more than one? Run setup again with --repo owner/repo."]
+    ];
+    if (!await wait("app", "Install the GitHub App", hint, link)) return;
+  }
+  if (checklistRows(reqs).find((r) => r.key === "card")?.state === "todo") {
+    const started = await callFounderTool(base, connector.token, "start_card_setup", {});
+    if (started.unauthorized) return revoked();
+    const url = typeof started.structured.url === "string" ? started.structured.url : null;
+    if (!url) {
+      console.log(`
+  ${started.text || "Card setup is not available right now."}`);
+    } else {
+      openInBrowser2(url);
+      const hint = ["Enter the card on Stripe\u2019s page. Saving it charges nothing."];
+      if (!await wait("card", "Save a card", hint, url)) return;
+    }
+  }
+  if (checklistRows(reqs).find((r) => r.key === "email")?.state === "todo") {
+    if (!tty) {
+      console.log(
+        "\n  \u25CB A confirmed contact email \u2014 run `terminalhire setup` in a terminal to enter one."
+      );
+    } else {
+      const email2 = await ask3("\n  Email for notices about your postings: ");
+      const sent = email2 ? await callFounderTool(base, connector.token, "send_contact_confirmation", { email: email2 }) : null;
+      if (sent?.unauthorized) return revoked();
+      if (sent && !sent.isError) {
+        const hint = [`Click the link we sent to ${sent.structured.pendingEmail ?? email2}.`];
+        if (!await wait("email", "Confirm your email", hint, null)) return;
+      } else if (sent) {
+        console.log(`  ${sent.text}`);
+      }
+    }
+  }
+  const helperReady = onPath("terminalhire");
+  if (tty && onPath("claude") && helperReady) {
+    console.log("\n  Connect Claude Code so your AI can draft and publish for you:");
+    console.log(`  ${mcpAddJsonLine(base)}`);
+    console.log("  Claude Code will ask terminalhire for the key when it connects; the key");
+    console.log("  stays in terminalhire\u2019s encrypted store.");
+    const yes = (await ask3("  Run it? [y/N] ")).toLowerCase();
+    if (yes === "y" || yes === "yes") {
+      const r = spawnSync11("claude", mcpAddJsonArgs(base), { stdio: "inherit" });
+      console.log(
+        r.status === 0 ? "  \u2713 Connected" : "  Claude Code did not add it (it may already be there)."
+      );
+    }
+  } else if (!helperReady) {
+    console.log(
+      "\n  To connect Claude Code, install the CLI (`npm install -g terminalhire`), then run"
+    );
+    console.log("  `terminalhire setup` again, or run this yourself:");
+    console.log(`  ${mcpAddJsonLine(base)}`);
+  } else {
+    console.log(
+      "\n  To connect Claude Code, install it and run `terminalhire setup` again, or run:"
+    );
+    console.log(`  ${mcpAddJsonLine(base)}`);
+    console.log(
+      "  For another AI tool, create a connector in your dashboard under Settings \u2192 Agent connections."
+    );
+  }
+  reqs = await requirementsNow();
+  if (reqs.status === "unauthorized") return revoked();
+  console.log("\n  terminalhire setup");
+  console.log("  \u2713 Signed in as a poster");
+  if (reqs.status !== "ok") return unavailable(reqs);
+  plainChecklist(checklistRows(reqs));
+  console.log(
+    isReady(reqs) ? "\n  Ready to publish. Draft with `terminalhire post draft`, then `post submit` and `post publish`.\n" : "\n  Run `terminalhire setup` again to finish the rest.\n"
+  );
+}
+async function run10() {
+  try {
+    await runSetup();
+  } catch (e) {
+    console.error(`
+terminalhire setup: ${e instanceof Error ? e.message : String(e)}
+`);
+    process.exitCode = 1;
+  }
+}
+var POLL_MS, WAIT_LIMIT_MS, INDIGO, GREEN, STEPS, KNOWN_CODES, GLYPH, isReady, MAX_POLL_FAILURES, sleep5, SPIN;
+var init_jpi_setup = __esm({
+  "bin/jpi-setup.js"() {
+    "use strict";
+    init_api_base();
+    init_founder_oauth();
+    init_founder_connector();
+    init_tui_core();
+    POLL_MS = 3e3;
+    WAIT_LIMIT_MS = 15 * 6e4;
+    INDIGO = "#5e6ad2";
+    GREEN = "#4fb477";
+    STEPS = [
+      { key: "app", code: "app-required", label: "GitHub App on your repository" },
+      { key: "card", code: "card-required", label: "A saved card" },
+      { key: "email", code: "contact-required", label: "A confirmed contact email" }
+    ];
+    KNOWN_CODES = new Set(STEPS.map((s) => s.code));
+    GLYPH = { done: "\u2713", waiting: "\u25D0", todo: "\u25CB", unknown: "?", unavailable: "!" };
+    isReady = (reqs) => reqs?.status === "ok" && reqs.outstanding.length === 0 && reqs.undetermined.length === 0;
+    MAX_POLL_FAILURES = 3;
+    sleep5 = (ms) => new Promise((r) => setTimeout(r, ms));
+    SPIN = ["\u25D0", "\u25D3", "\u25D1", "\u25D2"];
   }
 });
 
 // bin/jpi-repo.js
 var jpi_repo_exports = {};
 __export(jpi_repo_exports, {
-  run: () => run9
+  run: () => run11
 });
 import { execFile as execFile4 } from "child_process";
 import { promisify as promisify4 } from "util";
@@ -52774,7 +54126,7 @@ async function cmdSync(repoFullName) {
   await recordBackfill2(repoFullName, entries);
   console.log(`Synced ${entries.length} merged PR${entries.length === 1 ? "" : "s"} for ${repoFullName}.`);
 }
-async function run9() {
+async function run11() {
   const args5 = process.argv.slice(2);
   const filtered = args5[0] === "repo" ? args5.slice(1) : args5;
   const [first, ...rest] = filtered;
@@ -52808,7 +54160,7 @@ var init_jpi_repo = __esm({
 // bin/recall-check.js
 import {
   closeSync as closeSync8,
-  existsSync as existsSync24,
+  existsSync as existsSync25,
   mkdirSync as mkdirSync13,
   openSync as openSync8,
   readFileSync as readFileSync31,
@@ -52818,16 +54170,16 @@ import {
   unlinkSync as unlinkSync4,
   writeFileSync as writeFileSync27
 } from "fs";
-import { homedir as homedir28 } from "os";
-import { basename as basename9, dirname as dirname12, join as join49 } from "path";
+import { homedir as homedir29 } from "os";
+import { basename as basename9, dirname as dirname12, join as join50 } from "path";
 function defaultUrl() {
   return process.env["TERMINALHIRE_RECALL_URL"] || RECALL_URL;
 }
 function stateDir4() {
-  return process.env["TERMINALHIRE_DIR"] || join49(homedir28(), ".terminalhire");
+  return process.env["TERMINALHIRE_DIR"] || join50(homedir29(), ".terminalhire");
 }
 function recallCachePath() {
-  return join49(stateDir4(), "recall.json");
+  return join50(stateDir4(), "recall.json");
 }
 async function fetchRecalls(url = defaultUrl()) {
   try {
@@ -52843,7 +54195,7 @@ async function fetchRecalls(url = defaultUrl()) {
 }
 function readSticky(version2, path6 = recallCachePath()) {
   try {
-    if (!existsSync24(path6)) return null;
+    if (!existsSync25(path6)) return null;
     const parsed = JSON.parse(readFileSync31(path6, "utf8"));
     const reason = parsed?.[version2];
     return typeof reason === "string" && reason.length > 0 ? reason : null;
@@ -52907,7 +54259,7 @@ function sweepTempFiles(path6) {
     const prefix = `${basename9(path6)}.`;
     for (const name of readdirSync6(dir)) {
       if (!name.startsWith(prefix) || !name.endsWith(".tmp")) continue;
-      const full = join49(dir, name);
+      const full = join50(dir, name);
       try {
         if (Date.now() - statSync8(full).mtimeMs > 6e4) unlinkSync4(full);
       } catch {
@@ -53008,20 +54360,20 @@ var jpi_run_exports = {};
 __export(jpi_run_exports, {
   once: () => once,
   resolveClaimContext: () => resolveClaimContext,
-  run: () => run10,
+  run: () => run12,
   screenshotsOption: () => screenshotsOption,
   testTimeoutMsForBudget: () => testTimeoutMsForBudget
 });
-import { existsSync as existsSync25, readFileSync as readFileSync32, realpathSync as realpathSync5 } from "fs";
+import { existsSync as existsSync26, readFileSync as readFileSync32, realpathSync as realpathSync5 } from "fs";
 import { execFileSync as execFileSync4 } from "child_process";
-import { join as join50, resolve as resolve7 } from "path";
-import { homedir as homedir29, tmpdir as tmpdir5 } from "os";
-import { mkdtempSync as mkdtempSync6, rmSync as rmSync14 } from "fs";
+import { join as join51, resolve as resolve7 } from "path";
+import { homedir as homedir30, tmpdir as tmpdir5 } from "os";
+import { mkdtempSync as mkdtempSync6, rmSync as rmSync15 } from "fs";
 function screenshotsOption(routeFlag, env = process.env) {
-  const base = env.TERMINALHIRE_DIR || join50(homedir29(), ".terminalhire");
+  const base = env.TERMINALHIRE_DIR || join51(homedir30(), ".terminalhire");
   const id = `${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}-${Math.random().toString(36).slice(2, 8)}`;
   const routes = routeFlag === void 0 || routeFlag === null ? ["/"] : String(routeFlag).split(",").map((r) => r.trim()).filter((r) => r !== "");
-  return { routes: routes.length === 0 ? ["/"] : routes, outDir: join50(base, "screenshots", id) };
+  return { routes: routes.length === 0 ? ["/"] : routes, outDir: join51(base, "screenshots", id) };
 }
 function parseArgs2(argv) {
   const out = { flags: {}, bools: /* @__PURE__ */ new Set() };
@@ -53045,7 +54397,7 @@ function parseArgs2(argv) {
 function runScratchRoot() {
   let root;
   try {
-    root = mkdtempSync6(join50(tmpdir5(), "th-run-"));
+    root = mkdtempSync6(join51(tmpdir5(), "th-run-"));
   } catch (err) {
     process.stderr.write(
       `terminalhire: could not create the temporary directory this run works in, so nothing was cloned and nothing was executed. That is our environment failing, not your tests: check that the temp directory is writable. (${String(err?.message ?? err)})
@@ -53058,7 +54410,7 @@ function runScratchRoot() {
     if (cleaned) return;
     cleaned = true;
     try {
-      rmSync14(root, { recursive: true, force: true });
+      rmSync15(root, { recursive: true, force: true });
     } catch {
     }
   };
@@ -53082,8 +54434,8 @@ async function loadEngine() {
   }
 }
 function readConfig2(localDir) {
-  const file = join50(localDir, ".th-run.json");
-  if (!existsSync25(file)) return {};
+  const file = join51(localDir, ".th-run.json");
+  if (!existsSync26(file)) return {};
   try {
     const parsed = JSON.parse(readFileSync32(file, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
@@ -53247,7 +54599,7 @@ Expiry and revocation are not built yet (TERM-350 phase 5); Ctrl-C is the only s
   }
   return engine.exitCodeFor(result);
 }
-async function run10() {
+async function run12() {
   const argv = process.argv.slice(2);
   const parsed = parseArgs2(argv);
   if (parsed.bools.has("help") || argv.length === 0) {
@@ -53423,7 +54775,7 @@ no credential. A delivery of only the files you were granted needs --target.
 Needs Docker running. Needs network for the first clone of a remote target.`;
     given = (value) => typeof value === "string" && value.trim() !== "";
     if (process.argv[1] && process.argv[1].endsWith("jpi-run.js")) {
-      run10().then((code) => process.exit(code ?? 0)).catch((err) => {
+      run12().then((code) => process.exit(code ?? 0)).catch((err) => {
         process.stderr.write(`${err && err.message ? err.message : String(err)}
 `);
         process.exit(1);
@@ -53437,9 +54789,9 @@ var jpi_update_exports = {};
 __export(jpi_update_exports, {
   decideUpdate: () => decideUpdate,
   pathIsInsidePluginRoot: () => pathIsInsidePluginRoot,
-  run: () => run11
+  run: () => run13
 });
-import { spawnSync as spawnSync11 } from "child_process";
+import { spawnSync as spawnSync12 } from "child_process";
 import { fileURLToPath as fileURLToPath10 } from "url";
 import path5 from "path";
 function decideUpdate({ local, latest, force = false, check = false } = {}) {
@@ -53499,7 +54851,7 @@ async function rehealProtocol() {
 }
 function runNpmInstall() {
   console.log(`running: npm install -g ${PACKAGE_SPEC}`);
-  const result = spawnSync11("npm", INSTALL_ARGS, {
+  const result = spawnSync12("npm", INSTALL_ARGS, {
     stdio: "inherit",
     shell: process.platform === "win32"
   });
@@ -53514,7 +54866,7 @@ function runNpmInstall() {
   console.log("\u2713 update complete \u2014 the new version is active on your next terminalhire run.");
   return 0;
 }
-async function run11(argv) {
+async function run13(argv) {
   try {
     const args5 = argv ?? [];
     const check = args5.includes("--check");
@@ -53716,7 +55068,7 @@ function finalize(build) {
   };
 }
 function reconstruct(files, opts = {}) {
-  const join65 = opts.joinSidechains !== false;
+  const join66 = opts.joinSidechains !== false;
   const mains = [];
   const sidechains = [];
   for (const file of files) {
@@ -53741,7 +55093,7 @@ function reconstruct(files, opts = {}) {
   }
   const orphanedSidechainPaths = [];
   const joinedPaths = /* @__PURE__ */ new Set();
-  if (join65) {
+  if (join66) {
     const sidechainsBySession = /* @__PURE__ */ new Map();
     for (const sc of sidechains) {
       const acc = sidechainsBySession.get(sc.sessionId) ?? [];
@@ -54011,12 +55363,12 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
       continue;
     }
     spansConsidered++;
-    let run32 = 0;
+    let run34 = 0;
     const closeChain = () => {
-      if (run32 > 0) {
+      if (run34 > 0) {
         recoveryChains++;
-        totalDepth += run32;
-        run32 = 0;
+        totalDepth += run34;
+        run34 = 0;
       }
     };
     for (const uuid2 of episode.mainNodeUuids) {
@@ -54025,9 +55377,9 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
         continue;
       }
       if (node.kind === "tool_result" /* ToolResult */ && node.isError) {
-        run32++;
-        if (run32 > maxConsecutiveErrors) {
-          maxConsecutiveErrors = run32;
+        run34++;
+        if (run34 > maxConsecutiveErrors) {
+          maxConsecutiveErrors = run34;
         }
       } else if (node.kind === "tool_result" /* ToolResult */ && !node.isError) {
         closeChain();
@@ -54077,9 +55429,9 @@ __export(trajectory_exports, {
   runTrajectory: () => runTrajectory,
   runTrajectoryPush: () => runTrajectoryPush
 });
-import { existsSync as existsSync26, readFileSync as readFileSync33, readdirSync as readdirSync7, writeFileSync as writeFileSync28 } from "fs";
-import { homedir as homedir30 } from "os";
-import { join as join51 } from "path";
+import { existsSync as existsSync27, readFileSync as readFileSync33, readdirSync as readdirSync7, writeFileSync as writeFileSync28 } from "fs";
+import { homedir as homedir31 } from "os";
+import { join as join52 } from "path";
 function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -54111,7 +55463,7 @@ function findJsonlFiles(dir) {
     return out;
   }
   for (const entry of entries) {
-    const full = join51(dir, entry.name);
+    const full = join52(dir, entry.name);
     if (entry.isDirectory()) {
       out.push(...findJsonlFiles(full));
     } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
@@ -54232,10 +55584,10 @@ function renderMarkdown(view) {
   return lines.join("\n");
 }
 function writeExportArtifacts(score, markdown) {
-  const dir = process.env.TERMINALHIRE_DIR || join51(homedir30(), ".terminalhire");
+  const dir = process.env.TERMINALHIRE_DIR || join52(homedir31(), ".terminalhire");
   ensureStateDir(dir);
-  const jsonPath = join51(dir, "trajectory-export.json");
-  const mdPath = join51(dir, "trajectory-export.md");
+  const jsonPath = join52(dir, "trajectory-export.json");
+  const mdPath = join52(dir, "trajectory-export.md");
   writeFileSync28(jsonPath, JSON.stringify(score, null, 2) + "\n", "utf8");
   writeFileSync28(mdPath, markdown, "utf8");
   return { jsonPath, mdPath };
@@ -54256,8 +55608,8 @@ function renderInward(allNodes, view, files) {
   console.log("");
 }
 function buildTrajectory() {
-  const projectsDir = join51(homedir30(), ".claude", "projects");
-  if (!existsSync26(projectsDir)) return null;
+  const projectsDir = join52(homedir31(), ".claude", "projects");
+  if (!existsSync27(projectsDir)) return null;
   const paths = findJsonlFiles(projectsDir);
   if (paths.length === 0) return null;
   const files = loadCorpus(paths);
@@ -54333,8 +55685,8 @@ function defaultPushDeps() {
       }
     },
     prompt: async (question) => {
-      const { createInterface: createInterface18 } = await import("readline");
-      const rl = createInterface18({ input: process.stdin, output: process.stdout });
+      const { createInterface: createInterface19 } = await import("readline");
+      const rl = createInterface19({ input: process.stdin, output: process.stdout });
       return new Promise((res) => {
         rl.question(question, (answer) => {
           rl.close();
@@ -54548,9 +55900,9 @@ var init_trajectory = __esm({
 // bin/jpi-trajectory.js
 var jpi_trajectory_exports = {};
 __export(jpi_trajectory_exports, {
-  run: () => run12
+  run: () => run14
 });
-async function run12() {
+async function run14() {
   try {
     const args5 = process.argv.slice(2);
     if (args5.includes("--push")) {
@@ -54603,8 +55955,8 @@ function defaultIntroDeps() {
       }
     },
     prompt: async (question) => {
-      const { createInterface: createInterface18 } = await import("readline");
-      const rl = createInterface18({ input: process.stdin, output: process.stdout });
+      const { createInterface: createInterface19 } = await import("readline");
+      const rl = createInterface19({ input: process.stdin, output: process.stdout });
       return new Promise((res) => {
         rl.question(question, (answer) => {
           rl.close();
@@ -55022,7 +56374,7 @@ var init_intro2 = __esm({
 // bin/jpi-intro.js
 var jpi_intro_exports = {};
 __export(jpi_intro_exports, {
-  run: () => run13
+  run: () => run15
 });
 function readOption(args5, name) {
   const i = args5.indexOf(name);
@@ -55030,7 +56382,7 @@ function readOption(args5, name) {
   const v = args5[i + 1];
   return typeof v === "string" && !v.startsWith("--") ? v : void 0;
 }
-async function run13() {
+async function run15() {
   try {
     const args5 = process.argv.slice(2);
     if (args5.includes("--list")) {
@@ -55070,19 +56422,19 @@ var init_jpi_intro = __esm({
 });
 
 // src/chat-keystore.ts
-import { existsSync as existsSync27, linkSync as linkSync2, readFileSync as readFileSync34, rmSync as rmSync15, unlinkSync as unlinkSync5, writeFileSync as writeFileSync29 } from "fs";
-import { randomBytes as randomBytes15 } from "crypto";
-import { homedir as homedir31 } from "os";
-import { join as join52 } from "path";
+import { existsSync as existsSync28, linkSync as linkSync2, readFileSync as readFileSync34, rmSync as rmSync16, unlinkSync as unlinkSync5, writeFileSync as writeFileSync29 } from "fs";
+import { randomBytes as randomBytes16 } from "crypto";
+import { homedir as homedir32 } from "os";
+import { join as join53 } from "path";
 async function loadOrCreateIdentity() {
   const key = await loadKey();
-  if (existsSync27(IDENTITY_FILE)) {
+  if (existsSync28(IDENTITY_FILE)) {
     return readIdentityFileOrThrow(key);
   }
   waitForTestRaceBarrier("identity");
   const keypair = generateIdentityKeypair();
   ensureStateDirForSecret(TERMINALHIRE_DIR18);
-  const blob = encrypt(JSON.stringify(keypair), key);
+  const blob = encrypt2(JSON.stringify(keypair), key);
   if (publishIdentityBlob(blob)) {
     return keypair;
   }
@@ -55097,7 +56449,7 @@ function readIdentityFileOrThrow(key) {
   try {
     const raw = readFileSync34(IDENTITY_FILE, "utf8");
     const blob = JSON.parse(raw);
-    const decrypted = decrypt(blob, key);
+    const decrypted = decrypt2(blob, key);
     const parsed = JSON.parse(decrypted);
     if (!isValidChatKeypairShape(parsed)) {
       throw new Error(
@@ -55115,7 +56467,7 @@ Recovery: if you intend to reset your chat identity, delete the file yourself an
   }
 }
 function publishIdentityBlob(blob) {
-  const tmpFile = `${IDENTITY_FILE}.${process.pid}.${randomBytes15(6).toString("hex")}.tmp`;
+  const tmpFile = `${IDENTITY_FILE}.${process.pid}.${randomBytes16(6).toString("hex")}.tmp`;
   try {
     writeFileSync29(tmpFile, JSON.stringify(blob, null, 2), {
       encoding: "utf8",
@@ -55146,19 +56498,19 @@ var init_chat_keystore = __esm({
     init_src();
     init_github_auth();
     init_state_dir();
-    TERMINALHIRE_DIR18 = process.env.TERMINALHIRE_DIR || join52(homedir31(), ".terminalhire");
-    IDENTITY_FILE = join52(TERMINALHIRE_DIR18, "chat-identity.enc");
+    TERMINALHIRE_DIR18 = process.env.TERMINALHIRE_DIR || join53(homedir32(), ".terminalhire");
+    IDENTITY_FILE = join53(TERMINALHIRE_DIR18, "chat-identity.enc");
     HEX64_RE = /^[0-9a-f]{64}$/;
   }
 });
 
 // src/chat-client.ts
-import { existsSync as existsSync28, readFileSync as readFileSync35, writeFileSync as writeFileSync30 } from "fs";
-import { homedir as homedir32 } from "os";
-import { join as join53 } from "path";
+import { existsSync as existsSync29, readFileSync as readFileSync35, writeFileSync as writeFileSync30 } from "fs";
+import { homedir as homedir33 } from "os";
+import { join as join54 } from "path";
 function defaultReadPeerPins() {
   try {
-    if (!existsSync28(PEERS_FILE)) return {};
+    if (!existsSync29(PEERS_FILE)) return {};
     const parsed = JSON.parse(readFileSync35(PEERS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
@@ -55364,8 +56716,8 @@ var init_chat_client = __esm({
     init_api_base();
     CHAT_BASE = resolveApiBase();
     GH_SESSION_COOKIE7 = "__jpi_gh_session";
-    TERMINALHIRE_DIR19 = process.env.TERMINALHIRE_DIR || join53(homedir32(), ".terminalhire");
-    PEERS_FILE = join53(TERMINALHIRE_DIR19, "chat-peers.json");
+    TERMINALHIRE_DIR19 = process.env.TERMINALHIRE_DIR || join54(homedir33(), ".terminalhire");
+    PEERS_FILE = join54(TERMINALHIRE_DIR19, "chat-peers.json");
     REQUEST_TIMEOUT_MS2 = 1e4;
     ChatNotLinkedError = class extends Error {
       constructor(message2 = missingSessionLines(null).join(" ")) {
@@ -55414,377 +56766,6 @@ var init_chat_client = __esm({
   }
 });
 
-// bin/tui-core.js
-function sanitizeLine(text) {
-  return String(text).replace(ANSI_CSI, "").replace(ANSI_OSC, "").replace(ANSI_OTHER, "").replace(C0_C1_DEL, "");
-}
-function truncate(s, n) {
-  const t = String(s);
-  return t.length <= n ? t : `${t.slice(0, n - 1)}\u2026`;
-}
-function createRuntime({
-  input = typeof process !== "undefined" ? process.stdin : void 0,
-  output = typeof process !== "undefined" ? process.stdout : void 0,
-  signals = typeof process !== "undefined" ? process : void 0,
-  exit = (code) => process.exit(code),
-  mouse = false
-} = {}) {
-  let entered = false;
-  let cleaned = false;
-  function cleanup() {
-    if (cleaned) return;
-    cleaned = true;
-    entered = false;
-    try {
-      if (input && typeof input.setRawMode === "function") input.setRawMode(false);
-    } catch {
-    }
-    try {
-      if (input && typeof input.pause === "function") input.pause();
-    } catch {
-    }
-    try {
-      if (signals && typeof signals.removeListener === "function") {
-        signals.removeListener("SIGINT", onSignal);
-        signals.removeListener("SIGTERM", onSignal);
-        signals.removeListener("SIGHUP", onSignal);
-        signals.removeListener("uncaughtException", onUncaught);
-        signals.removeListener("unhandledRejection", onUncaught);
-        signals.removeListener("exit", onExitEvt);
-      }
-    } catch {
-    }
-    try {
-      if (output && typeof output.write === "function")
-        output.write((mouse ? MOUSE_OFF : "") + SHOW_CURSOR + EXIT_ALT);
-    } catch {
-    }
-  }
-  function onSignal() {
-    cleanup();
-    exit(130);
-  }
-  function onUncaught(err) {
-    cleanup();
-    throw err;
-  }
-  function onExitEvt() {
-    cleanup();
-  }
-  function enter() {
-    if (entered) return;
-    entered = true;
-    cleaned = false;
-    try {
-      if (input && typeof input.setRawMode === "function") input.setRawMode(true);
-    } catch {
-    }
-    try {
-      if (input && typeof input.resume === "function") input.resume();
-    } catch {
-    }
-    if (signals && typeof signals.on === "function") {
-      signals.on("SIGINT", onSignal);
-      signals.on("SIGTERM", onSignal);
-      signals.on("SIGHUP", onSignal);
-      signals.on("uncaughtException", onUncaught);
-      signals.on("unhandledRejection", onUncaught);
-      signals.on("exit", onExitEvt);
-    }
-    if (output && typeof output.write === "function")
-      output.write(ENTER_ALT + HIDE_CURSOR + (mouse ? MOUSE_ON : ""));
-  }
-  return {
-    enter,
-    cleanup,
-    get entered() {
-      return entered;
-    },
-    get cleaned() {
-      return cleaned;
-    }
-  };
-}
-function createBuffer(rows, cols) {
-  const n = Math.max(0, rows) * Math.max(0, cols);
-  const buf = new Array(n);
-  for (let i = 0; i < n; i++) buf[i] = { ch: " ", fg: null, bg: null, attr: null };
-  return buf;
-}
-function drawText(buf, cols, row, col, str, style = {}) {
-  if (row < 0 || col < 0 || col >= cols) return;
-  const maxLen = cols - col;
-  if (maxLen <= 0) return;
-  const points = Array.from(sanitizeLine(str));
-  const text = points.length <= maxLen ? points : points.slice(0, Math.max(0, maxLen - 1)).concat("\u2026");
-  const fg = style.fg ?? null;
-  const bg = style.bg ?? null;
-  const attr = style.attr ?? null;
-  for (let i = 0; i < text.length && col + i < cols; i++) {
-    const idx = row * cols + (col + i);
-    if (idx < 0 || idx >= buf.length) break;
-    buf[idx] = { ch: text[i], fg, bg, attr };
-  }
-}
-function cellNe(a, b) {
-  if (!a || !b) return true;
-  return a.ch !== b.ch || a.fg !== b.fg || a.bg !== b.bg || a.attr !== b.attr;
-}
-function diff(prev, next, cols) {
-  if (!Number.isInteger(cols) || cols <= 0) return [];
-  const ops = [];
-  const len = next.length;
-  let run32 = null;
-  for (let i = 0; i < len; i++) {
-    const col = i % cols;
-    const row = (i - col) / cols;
-    if (col === 0 && run32) {
-      ops.push(run32);
-      run32 = null;
-    }
-    if (cellNe(prev[i], next[i])) {
-      if (run32 && run32.row === row && run32.col + run32.run.length === col) {
-        run32.run.push(next[i]);
-      } else {
-        if (run32) ops.push(run32);
-        run32 = { row, col, run: [next[i]] };
-      }
-    } else if (run32) {
-      ops.push(run32);
-      run32 = null;
-    }
-  }
-  if (run32) ops.push(run32);
-  return ops;
-}
-function styleOf(cell) {
-  const pre = (cell.attr || "") + (cell.fg || "") + (cell.bg || "");
-  return pre;
-}
-function encode2(ops) {
-  if (!ops || ops.length === 0) return "";
-  let out = "";
-  let curRow = -1;
-  let curCol = -1;
-  for (const op of ops) {
-    if (!Number.isInteger(op.row) || !Number.isInteger(op.col)) continue;
-    if (op.row !== curRow || op.col !== curCol) {
-      out += `\x1B[${op.row + 1};${op.col + 1}H`;
-    }
-    for (const cell of op.run) {
-      const pre = styleOf(cell);
-      out += pre ? pre + cell.ch + RESET : cell.ch;
-    }
-    curRow = op.row;
-    curCol = op.col + op.run.length;
-  }
-  return out;
-}
-function createRenderer({
-  write,
-  output = typeof process !== "undefined" ? process.stdout : void 0,
-  rows,
-  cols
-} = {}) {
-  const doWrite = write || (output && output.write ? output.write.bind(output) : () => {
-  });
-  const fallback = readTermSize(output);
-  let _rows = Number.isInteger(rows) && rows > 0 ? rows : fallback.rows;
-  let _cols = Number.isInteger(cols) && cols > 0 ? cols : fallback.cols;
-  let prev = createBuffer(_rows, _cols);
-  return {
-    render(nextBuf) {
-      const s = encode2(diff(prev, nextBuf, _cols));
-      if (s) doWrite(s);
-      prev = nextBuf;
-    },
-    /** Drop the previous frame so the next render repaints every cell. */
-    invalidate() {
-      prev = [];
-    },
-    /** Adopt new dimensions and force a full redraw on the next render. */
-    resize(newRows, newCols) {
-      _rows = newRows;
-      _cols = newCols;
-      prev = [];
-    },
-    get rows() {
-      return _rows;
-    },
-    get cols() {
-      return _cols;
-    }
-  };
-}
-function clampOffset(offset, contentLen, viewH, scrolloff = 0) {
-  const so = Math.max(0, scrolloff | 0);
-  const maxOffset = Math.max(0, contentLen - viewH + so);
-  let o = Number.isFinite(offset) ? Math.trunc(offset) : 0;
-  if (o < 0) o = 0;
-  if (o > maxOffset) o = maxOffset;
-  return o;
-}
-function scrollUp(offset, contentLen, viewH, scrolloff = 0, by = 1) {
-  return clampOffset(offset - by, contentLen, viewH, scrolloff);
-}
-function scrollDown(offset, contentLen, viewH, scrolloff = 0, by = 1) {
-  return clampOffset(offset + by, contentLen, viewH, scrolloff);
-}
-function readTermSize(out) {
-  const o = out || (typeof process !== "undefined" ? process.stdout : void 0);
-  const cols = o && Number.isInteger(o.columns) && o.columns > 0 ? o.columns : 80;
-  const rows = o && Number.isInteger(o.rows) && o.rows > 0 ? o.rows : 24;
-  return { rows, cols };
-}
-function wireResize({ output = typeof process !== "undefined" ? process.stdout : void 0, onResize } = {}) {
-  const handler = () => {
-    if (typeof onResize === "function") onResize(readTermSize(output));
-  };
-  let unsubscribe = () => {
-  };
-  if (output && typeof output.on === "function") {
-    output.on("resize", handler);
-    unsubscribe = () => {
-      try {
-        if (typeof output.removeListener === "function") output.removeListener("resize", handler);
-      } catch {
-      }
-    };
-  } else if (typeof process !== "undefined" && typeof process.on === "function") {
-    process.on("SIGWINCH", handler);
-    unsubscribe = () => {
-      try {
-        process.removeListener("SIGWINCH", handler);
-      } catch {
-      }
-    };
-  }
-  return unsubscribe;
-}
-function detectColorLevel(env = {}, isTTY = false) {
-  const force = String(env.FORCE_COLOR ?? "");
-  const colorterm = String(env.COLORTERM ?? "").toLowerCase();
-  const term = String(env.TERM ?? "").toLowerCase();
-  if (force === "3") return "truecolor";
-  if (force === "2") return "256";
-  if (colorterm === "truecolor" || colorterm === "24bit") return "truecolor";
-  if (term.includes("256")) return "256";
-  if (env.NO_COLOR != null && env.NO_COLOR !== "" || term === "dumb" || term === "") return "16";
-  if (!isTTY && force === "") return "16";
-  return "16";
-}
-function degrade(role, level = "truecolor") {
-  const table = PALETTE[level] || PALETTE["16"];
-  return table[role] || "";
-}
-function hexToRgb(hex) {
-  const h = String(hex).replace(/^#/, "");
-  const n = parseInt(h, 16);
-  return { r: n >> 16 & 255, g: n >> 8 & 255, b: n & 255 };
-}
-function nearestCubeStep(v) {
-  let best = 0;
-  let bestDist = Infinity;
-  for (let i = 0; i < CUBE_STEPS.length; i++) {
-    const d = Math.abs(CUBE_STEPS[i] - v);
-    if (d < bestDist) {
-      bestDist = d;
-      best = i;
-    }
-  }
-  return best;
-}
-function rgbTo256(r, g, b) {
-  return 16 + 36 * nearestCubeStep(r) + 6 * nearestCubeStep(g) + nearestCubeStep(b);
-}
-function gradientFg(stops, t, level = "truecolor") {
-  if (level === "16") return degrade("accent-bright", level);
-  if (!Array.isArray(stops) || stops.length === 0) return "";
-  if (stops.length === 1) {
-    const { r: r2, g: g2, b: b2 } = hexToRgb(stops[0]);
-    return level === "256" ? `\x1B[38;5;${rgbTo256(r2, g2, b2)}m` : `\x1B[38;2;${r2};${g2};${b2}m`;
-  }
-  const clamped = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
-  const seg = clamped * (stops.length - 1);
-  const i0 = Math.min(stops.length - 2, Math.floor(seg));
-  const localT = seg - i0;
-  const c0 = hexToRgb(stops[i0]);
-  const c1 = hexToRgb(stops[i0 + 1]);
-  const r = Math.round(c0.r + (c1.r - c0.r) * localT);
-  const g = Math.round(c0.g + (c1.g - c0.g) * localT);
-  const b = Math.round(c0.b + (c1.b - c0.b) * localT);
-  return level === "256" ? `\x1B[38;5;${rgbTo256(r, g, b)}m` : `\x1B[38;2;${r};${g};${b}m`;
-}
-var HIDE_CURSOR, SHOW_CURSOR, ENTER_ALT, EXIT_ALT, MOUSE_ON, MOUSE_OFF, INVERSE, RESET, BOLD, KEY_CTRL_C, KEY_ESC, KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT, KEY_TAB, KEY_ENTER_A, KEY_ENTER_B, KEY_BACKSPACE_A, KEY_BACKSPACE_B, KEY_Q, KEY_DIGITS, ANSI_CSI, ANSI_OSC, ANSI_OTHER, C0_C1_DEL, PALETTE, COLOR_ROLES, CUBE_STEPS;
-var init_tui_core = __esm({
-  "bin/tui-core.js"() {
-    "use strict";
-    HIDE_CURSOR = "\x1B[?25l";
-    SHOW_CURSOR = "\x1B[?25h";
-    ENTER_ALT = "\x1B[?1049h";
-    EXIT_ALT = "\x1B[?1049l";
-    MOUSE_ON = "\x1B[?1000h\x1B[?1006h";
-    MOUSE_OFF = "\x1B[?1006l\x1B[?1000l";
-    INVERSE = "\x1B[7m";
-    RESET = "\x1B[0m";
-    BOLD = "\x1B[1m";
-    KEY_CTRL_C = "";
-    KEY_ESC = "\x1B";
-    KEY_UP = "\x1B[A";
-    KEY_DOWN = "\x1B[B";
-    KEY_RIGHT = "\x1B[C";
-    KEY_LEFT = "\x1B[D";
-    KEY_TAB = "	";
-    KEY_ENTER_A = "\r";
-    KEY_ENTER_B = "\n";
-    KEY_BACKSPACE_A = "\x7F";
-    KEY_BACKSPACE_B = "\b";
-    KEY_Q = "q";
-    KEY_DIGITS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
-    ANSI_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
-    ANSI_OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
-    ANSI_OTHER = /\x1b[@-_]/g;
-    C0_C1_DEL = /[\x00-\x1f\x7f-\x9f]/g;
-    PALETTE = {
-      truecolor: {
-        bg: "\x1B[48;2;13;17;23m",
-        panel: "\x1B[48;2;22;27;34m",
-        rule: "\x1B[38;2;48;54;61m",
-        text: "\x1B[38;2;201;209;217m",
-        muted: "\x1B[38;2;125;133;144m",
-        accent: "\x1B[38;2;88;166;255m",
-        "accent-bright": "\x1B[38;2;121;192;255m",
-        green: "\x1B[38;2;63;185;80m",
-        amber: "\x1B[38;2;210;153;34m"
-      },
-      256: {
-        bg: "\x1B[48;5;233m",
-        panel: "\x1B[48;5;235m",
-        rule: "\x1B[38;5;240m",
-        text: "\x1B[38;5;252m",
-        muted: "\x1B[38;5;245m",
-        accent: "\x1B[38;5;75m",
-        "accent-bright": "\x1B[38;5;117m",
-        green: "\x1B[38;5;71m",
-        amber: "\x1B[38;5;178m"
-      },
-      16: {
-        bg: "\x1B[40m",
-        panel: "\x1B[100m",
-        rule: "\x1B[90m",
-        text: "\x1B[37m",
-        muted: "\x1B[90m",
-        accent: "\x1B[94m",
-        "accent-bright": "\x1B[96m",
-        green: "\x1B[92m",
-        amber: "\x1B[93m"
-      }
-    };
-    COLOR_ROLES = Object.keys(PALETTE.truecolor);
-    CUBE_STEPS = [0, 95, 135, 175, 215, 255];
-  }
-});
-
 // bin/jpi-chat-read.js
 var jpi_chat_read_exports = {};
 __export(jpi_chat_read_exports, {
@@ -55801,16 +56782,16 @@ __export(jpi_chat_read_exports, {
   syncUnreadBadge: () => syncUnreadBadge,
   writeReadCursor: () => writeReadCursor
 });
-import { existsSync as existsSync29, readFileSync as readFileSync36, writeFileSync as writeFileSync31 } from "fs";
-import { homedir as homedir33 } from "os";
-import { join as join54 } from "path";
+import { existsSync as existsSync30, readFileSync as readFileSync36, writeFileSync as writeFileSync31 } from "fs";
+import { homedir as homedir34 } from "os";
+import { join as join55 } from "path";
 async function syncUnreadBadge(deps = {}) {
   const readCookie = deps.readCookie ?? readWebSessionCookie;
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   const cacheFile = deps.cacheFile ?? INDEX_CACHE_FILE6;
   try {
     const cookie = readCookie(CHAT_BASE2);
-    if (!cookie || !existsSync29(cacheFile)) return;
+    if (!cookie || !existsSync30(cacheFile)) return;
     const res = await fetchImpl(`${CHAT_BASE2}/api/chat/inbox`, {
       method: "GET",
       headers: { Cookie: `${GH_SESSION_COOKIE8}=${cookie}` },
@@ -55831,7 +56812,7 @@ async function syncUnreadBadge(deps = {}) {
 }
 function readReadCursors() {
   try {
-    if (!existsSync29(READS_FILE)) return {};
+    if (!existsSync30(READS_FILE)) return {};
     const parsed = JSON.parse(readFileSync36(READS_FILE, "utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const out = {};
@@ -56215,9 +57196,9 @@ var init_jpi_chat_read = __esm({
     init_api_base();
     CHAT_BASE2 = resolveApiBase();
     GH_SESSION_COOKIE8 = "__jpi_gh_session";
-    TERMINALHIRE_DIR20 = process.env.TERMINALHIRE_DIR || join54(homedir33(), ".terminalhire");
-    READS_FILE = join54(TERMINALHIRE_DIR20, "chat-reads.json");
-    INDEX_CACHE_FILE6 = join54(TERMINALHIRE_DIR20, "index-cache.json");
+    TERMINALHIRE_DIR20 = process.env.TERMINALHIRE_DIR || join55(homedir34(), ".terminalhire");
+    READS_FILE = join55(TERMINALHIRE_DIR20, "chat-reads.json");
+    INDEX_CACHE_FILE6 = join55(TERMINALHIRE_DIR20, "index-cache.json");
     REACHABLE_DISPLAY = { shareActivity: false, optin: false, lastSeen: null };
   }
 });
@@ -56227,7 +57208,7 @@ var jpi_inbox_exports = {};
 __export(jpi_inbox_exports, {
   defaultDecideIntro: () => defaultDecideIntro,
   formatInbox: () => formatInbox,
-  run: () => run14,
+  run: () => run16,
   runInboxPane: () => runInboxPane,
   runInboxTui: () => runInboxTui,
   sortConversations: () => sortConversations
@@ -56686,7 +57667,7 @@ async function runInboxTui(deps = {}) {
   }
   return { ok: true };
 }
-async function run14(opts = {}) {
+async function run16(opts = {}) {
   const {
     isTTY = process.stdout.isTTY,
     input = process.stdin,
@@ -56748,20 +57729,20 @@ __export(jpi_chat_exports, {
   formatThread: () => formatThread,
   readCachedSessionCase: () => readCachedSessionCase,
   relativeTime: () => relativeTime2,
-  run: () => run15,
+  run: () => run17,
   runBlockCommand: () => runBlockCommand,
   runChatPane: () => runChatPane,
   runNoticePane: () => runNoticePane,
   runShareActivityCommand: () => runShareActivityCommand,
   sanitizeLine: () => sanitizeLine
 });
-import { createInterface as createInterface11 } from "readline";
-import { existsSync as existsSync30, readFileSync as readFileSync37 } from "fs";
-import { homedir as homedir34 } from "os";
-import { join as join55 } from "path";
+import { createInterface as createInterface12 } from "readline";
+import { existsSync as existsSync31, readFileSync as readFileSync37 } from "fs";
+import { homedir as homedir35 } from "os";
+import { join as join56 } from "path";
 function defaultPromptAck({ input = process.stdin, output = process.stdout } = {}) {
   if (!input || input.isTTY !== true) return Promise.resolve(false);
-  const rl = createInterface11({ input, output });
+  const rl = createInterface12({ input, output });
   return new Promise((resolve9) => {
     rl.question("  Press Enter to acknowledge and continue (Ctrl-C to cancel): ", () => {
       rl.close();
@@ -56942,11 +57923,11 @@ function mergeMessages(existing, incoming) {
 }
 function readCachedSessionCase() {
   try {
-    const p = join55(
-      process.env.TERMINALHIRE_DIR || join55(homedir34(), ".terminalhire"),
+    const p = join56(
+      process.env.TERMINALHIRE_DIR || join56(homedir35(), ".terminalhire"),
       "index-cache.json"
     );
-    if (!existsSync30(p)) return null;
+    if (!existsSync31(p)) return null;
     const cache = JSON.parse(readFileSync37(p, "utf8"));
     return sessionCase(cache, { stale: cache?.sessionStale === true });
   } catch {
@@ -57574,7 +58555,7 @@ async function runShareActivityCommand(opts = {}) {
   }
   return { ok: true, share };
 }
-async function run15() {
+async function run17() {
   const args5 = process.argv.slice(2);
   let login;
   let limit2 = 8;
@@ -57692,7 +58673,7 @@ var init_jpi_chat = __esm({
 // bin/jpi-hub.js
 var jpi_hub_exports = {};
 __export(jpi_hub_exports, {
-  run: () => run16,
+  run: () => run18,
   runHubTui: () => runHubTui
 });
 function stubRows(paneName) {
@@ -58668,7 +59649,7 @@ function printStatic(output = process.stdout) {
   out("  Panes: " + PANES.map((p) => sanitizeLine(p)).join(" \xB7 ") + "\n\n");
   out("  Run `terminalhire hub` in an interactive terminal to launch the full-screen hub.\n\n");
 }
-async function run16(opts = {}) {
+async function run18(opts = {}) {
   const {
     isTTY = process.stdout.isTTY,
     input = process.stdin,
@@ -58758,16 +59739,16 @@ __export(mcp_config_exports, {
   tomlSnippet: () => tomlSnippet,
   writeServerToFile: () => writeServerToFile
 });
-import { homedir as homedir35 } from "os";
-import { join as join56 } from "path";
-import { existsSync as existsSync31, readFileSync as readFileSync38, copyFileSync as copyFileSync5, writeFileSync as writeFileSync32, mkdirSync as mkdirSync14 } from "fs";
+import { homedir as homedir36 } from "os";
+import { join as join57 } from "path";
+import { existsSync as existsSync32, readFileSync as readFileSync38, copyFileSync as copyFileSync5, writeFileSync as writeFileSync32, mkdirSync as mkdirSync14 } from "fs";
 import { dirname as dirname13 } from "path";
 function serverEntry() {
   return { command: SERVER_COMMAND, args: [...SERVER_ARGS] };
 }
-function hostConfigPath(host, home = homedir35()) {
+function hostConfigPath(host, home = homedir36()) {
   if (!host || !Array.isArray(host.relPath)) return null;
-  return join56(home, ...host.relPath);
+  return join57(home, ...host.relPath);
 }
 function jsonSnippet(host) {
   const entry = serverEntry();
@@ -58851,7 +59832,7 @@ function mergeServerIntoJson(existingText, serversKey, entry = serverEntry()) {
 `, added: !already };
 }
 function writeServerToFile(configPath, serversKey, entry = serverEntry()) {
-  const fileExists = existsSync31(configPath);
+  const fileExists = existsSync32(configPath);
   const existingText = fileExists ? readFileSync38(configPath, "utf8") : "";
   const merged = mergeServerIntoJson(existingText, serversKey, entry);
   if (!merged.ok) {
@@ -58869,9 +59850,9 @@ function writeServerToFile(configPath, serversKey, entry = serverEntry()) {
   return { status: "written", backupPath, added: merged.added };
 }
 async function initMcpStep({
-  ask: ask5,
+  ask: ask6,
   isTTY = process.stdin.isTTY,
-  home = homedir35(),
+  home = homedir36(),
   out = console.log
 } = {}) {
   out("  Expose your LOCAL matches and claim ledger to your editor / CLI as an MCP server.");
@@ -58886,7 +59867,7 @@ async function initMcpStep({
     out("  `terminalhire init` again in a real terminal to merge them for you.");
     return;
   }
-  const top = await ask5(
+  const top = await ask6(
     "  Set up terminalhire as an MCP server for a detected editor/CLI now? [y/N]: "
   );
   const proceed = top === "y" || top === "yes";
@@ -58896,7 +59877,7 @@ async function initMcpStep({
     return;
   }
   const writableHosts = HOSTS.filter((h) => h.writable);
-  const detected = writableHosts.filter((h) => existsSync31(hostConfigPath(h, home)));
+  const detected = writableHosts.filter((h) => existsSync32(hostConfigPath(h, home)));
   if (detected.length === 0) {
     out("");
     out("  No editor/CLI config detected (looked for ~/.cursor/mcp.json, ~/.gemini/settings.json).");
@@ -58904,7 +59885,7 @@ async function initMcpStep({
   } else {
     for (const host of detected) {
       const configPath = hostConfigPath(host, home);
-      const answer = await ask5(`  Add terminalhire to ${host.label} (${configPath})? [y/N]: `);
+      const answer = await ask6(`  Add terminalhire to ${host.label} (${configPath})? [y/N]: `);
       if (answer !== "y" && answer !== "yes") {
         out(`  Skipped ${host.label} \u2014 unchanged.`);
         continue;
@@ -59041,10 +60022,10 @@ function probesFor(requirements) {
   }
   return out;
 }
-async function probeLocalSetup(requirements, { run: run32 = runProbe, timeoutMs = PROBE_TIMEOUT_MS3, platform = process.platform } = {}) {
+async function probeLocalSetup(requirements, { run: run34 = runProbe, timeoutMs = PROBE_TIMEOUT_MS3, platform = process.platform } = {}) {
   const probes = probesFor(requirements);
   const shell = platform === "win32";
-  const results = await Promise.all(probes.map((p) => run32(p.file, p.args, timeoutMs, { shell })));
+  const results = await Promise.all(probes.map((p) => run34(p.file, p.args, timeoutMs, { shell })));
   const have = [];
   const missing = [];
   probes.forEach((p, i) => {
@@ -81181,7 +82162,7 @@ __export(jpi_mcp_exports, {
   contributeResult: () => contributeResult,
   inboxResult: () => inboxResult,
   jobsResult: () => jobsResult,
-  run: () => run17
+  run: () => run19
 });
 function clampLimit(limit2) {
   const n = Number(limit2);
@@ -81556,8 +82537,8 @@ async function claimRecordResult(args5 = {}) {
 async function claimWorkspaceResult(args5 = {}) {
   try {
     const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
-    const { existsSync: existsSync38, readFileSync: readFileSync44, lstatSync: lstatSync8 } = await import("fs");
-    const { join: join65 } = await import("path");
+    const { existsSync: existsSync39, readFileSync: readFileSync44, lstatSync: lstatSync8 } = await import("fs");
+    const { join: join66 } = await import("path");
     const { BRIEF_REL_PATH: BRIEF_REL_PATH2, VERIFY_REL_PATH: VERIFY_REL_PATH2, AGENTS_REL_PATH: AGENTS_REL_PATH2, sha256OfUtf8: sha256OfUtf82 } = await Promise.resolve().then(() => (init_jpi_claim(), jpi_claim_exports));
     const packPaths = (c) => {
       const p = {};
@@ -81570,7 +82551,7 @@ async function claimWorkspaceResult(args5 = {}) {
         if (c.workspacePack?.[member] !== true) continue;
         const digest = c.packDigests?.[member];
         if (typeof digest !== "string" || digest === "") continue;
-        const abs = join65(c.worktreePath, rel);
+        const abs = join66(c.worktreePath, rel);
         try {
           const st = lstatSync8(abs);
           if (!st.isFile() || st.size > 1024 * 1024) continue;
@@ -81589,7 +82570,7 @@ async function claimWorkspaceResult(args5 = {}) {
           hint: `No workspace has been delivered for this claim yet. A human runs: terminalhire claim start ${c.id} --watch`
         };
       }
-      if (!existsSync38(c.worktreePath) || !existsSync38(join65(c.worktreePath, ".git"))) {
+      if (!existsSync39(c.worktreePath) || !existsSync39(join66(c.worktreePath, ".git"))) {
         return {
           status: "not_ready",
           claimId: c.id,
@@ -81647,7 +82628,7 @@ async function claimWorkspaceResult(args5 = {}) {
       }
       return workspaceAnswer(matches[0]);
     }
-    const withWorkspace = all.filter((c) => c.worktreePath && existsSync38(c.worktreePath));
+    const withWorkspace = all.filter((c) => c.worktreePath && existsSync39(c.worktreePath));
     if (withWorkspace.length === 1) return workspaceAnswer(withWorkspace[0]);
     if (withWorkspace.length > 1) {
       return {
@@ -81700,18 +82681,18 @@ function buildToolResult(name, args5, entry, contributeEnabled, order = {}) {
       return { status: "error", hint: `Unknown tool: ${name}` };
   }
 }
-async function run17() {
+async function run19() {
   const { Server: Server2 } = await Promise.resolve().then(() => (init_server2(), server_exports));
   const { StdioServerTransport: StdioServerTransport2 } = await Promise.resolve().then(() => (init_stdio2(), stdio_exports));
   const { ListToolsRequestSchema: ListToolsRequestSchema2, CallToolRequestSchema: CallToolRequestSchema2 } = await Promise.resolve().then(() => (init_types5(), types_exports));
   let version2 = "0.0.0";
   try {
-    const { readFileSync: readFileSync44, existsSync: existsSync38 } = await import("fs");
-    const { join: join65 } = await import("path");
+    const { readFileSync: readFileSync44, existsSync: existsSync39 } = await import("fs");
+    const { join: join66 } = await import("path");
     const { fileURLToPath: fileURLToPath16 } = await import("url");
     const here = fileURLToPath16(new URL(".", import.meta.url));
-    for (const p of [join65(here, "..", "..", "package.json"), join65(here, "..", "package.json")]) {
-      if (existsSync38(p)) {
+    for (const p of [join66(here, "..", "..", "package.json"), join66(here, "..", "package.json")]) {
+      if (existsSync39(p)) {
         const pkg = JSON.parse(readFileSync44(p, "utf8"));
         if (pkg.version) {
           version2 = pkg.version;
@@ -81889,7 +82870,7 @@ __export(jpi_mcp_chat_exports, {
   buildReplyPrompt: () => buildReplyPrompt,
   chargeIfAllowed: () => chargeIfAllowed,
   createRateState: () => createRateState,
-  run: () => run18,
+  run: () => run20,
   runReply: () => runReply
 });
 function createRateState() {
@@ -82005,18 +82986,18 @@ async function runReply(opts = {}) {
   if (sent && sent.ok) return { status: "sent", messagesShown: messages.length };
   return { status: "error", messagesShown: messages.length };
 }
-async function run18() {
+async function run20() {
   const { Server: Server2 } = await Promise.resolve().then(() => (init_server2(), server_exports));
   const { StdioServerTransport: StdioServerTransport2 } = await Promise.resolve().then(() => (init_stdio2(), stdio_exports));
   const { ListToolsRequestSchema: ListToolsRequestSchema2, CallToolRequestSchema: CallToolRequestSchema2 } = await Promise.resolve().then(() => (init_types5(), types_exports));
   let version2 = "0.0.0";
   try {
-    const { readFileSync: readFileSync44, existsSync: existsSync38 } = await import("fs");
-    const { join: join65 } = await import("path");
+    const { readFileSync: readFileSync44, existsSync: existsSync39 } = await import("fs");
+    const { join: join66 } = await import("path");
     const { fileURLToPath: fileURLToPath16 } = await import("url");
     const here = fileURLToPath16(new URL(".", import.meta.url));
-    for (const p of [join65(here, "..", "..", "package.json"), join65(here, "..", "package.json")]) {
-      if (existsSync38(p)) {
+    for (const p of [join66(here, "..", "..", "package.json"), join66(here, "..", "package.json")]) {
+      if (existsSync39(p)) {
         const pkg = JSON.parse(readFileSync44(p, "utf8"));
         if (pkg.version) {
           version2 = pkg.version;
@@ -82104,9 +83085,9 @@ var init_jpi_mcp_chat = __esm({
 // bin/jpi-connect.js
 var jpi_connect_exports = {};
 __export(jpi_connect_exports, {
-  run: () => run19
+  run: () => run21
 });
-async function run19() {
+async function run21() {
   const args5 = process.argv.slice(2).filter((a) => a !== "connect");
   if (args5.includes("--mute")) {
     writeConfig({ inboundNudgeMuted: true });
@@ -82147,8 +83128,8 @@ __export(link_exports, {
   runLink: () => runLink,
   runLinkLogout: () => runLinkLogout
 });
-import { createServer as createServer2 } from "http";
-import { randomBytes as randomBytes16 } from "crypto";
+import { createServer as createServer3 } from "http";
+import { randomBytes as randomBytes17 } from "crypto";
 function resolveLoopbackRequest(rawUrl, expectedNonce) {
   let u;
   try {
@@ -82181,10 +83162,10 @@ function defaultStartLoopback(expectedNonce, timeoutMs) {
         }
       });
     };
-    const server = createServer2((req, res) => {
+    const server = createServer3((req, res) => {
       const outcome = resolveLoopbackRequest(req.url ?? "", expectedNonce);
       res.writeHead(outcome.ok ? 200 : 400, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(outcome.ok ? LINKED_HTML : FAILED_HTML);
+      res.end(outcome.ok ? LINKED_HTML : FAILED_HTML2);
       finish(outcome);
     });
     const timer = setTimeout(() => finish({ ok: false, reason: "timeout" }), timeoutMs);
@@ -82213,7 +83194,7 @@ function defaultLinkDeps() {
       void Promise.resolve().then(() => (init_open_url(), open_url_exports)).then((m) => m.openInBrowser(url)).catch(() => {
       });
     },
-    generateNonce: () => randomBytes16(16).toString("hex"),
+    generateNonce: () => randomBytes17(16).toString("hex"),
     // LINK_BASE, not a re-resolve: the session must record the host this link
     // actually ran against, and re-reading the environment here could name a
     // different one if it changed mid-flow (TERM-970).
@@ -82345,7 +83326,7 @@ async function runLinkLogout(overrides) {
   }
   deps.exit(0);
 }
-var LINK_BASE3, GH_SESSION_COOKIE10, LINK_TIMEOUT_MS, LINKED_HTML, FAILED_HTML;
+var LINK_BASE3, GH_SESSION_COOKIE10, LINK_TIMEOUT_MS, LINKED_HTML, FAILED_HTML2;
 var init_link = __esm({
   "src/link.ts"() {
     "use strict";
@@ -82361,7 +83342,7 @@ var init_link = __esm({
 <p>CLI linked \u2014 you can close this tab.</p>
 <script>setTimeout(function(){window.close();},400);</script>
 </body></html>`;
-    FAILED_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>terminalhire</title></head>
+    FAILED_HTML2 = `<!doctype html><html><head><meta charset="utf-8"><title>terminalhire</title></head>
 <body style="font-family:system-ui;padding:2rem;background:#0b0d10;color:#e6e6e6">
 <script>history.replaceState({},'','/');</script>
 <p>Link failed \u2014 return to your terminal and run <code>terminalhire link</code> again.</p>
@@ -82372,9 +83353,9 @@ var init_link = __esm({
 // bin/jpi-link.js
 var jpi_link_exports = {};
 __export(jpi_link_exports, {
-  run: () => run20
+  run: () => run22
 });
-async function run20() {
+async function run22() {
   try {
     const args5 = process.argv.slice(2);
     if (args5.includes("--logout")) {
@@ -82410,7 +83391,7 @@ var init_jpi_link = __esm({
 // bin/jpi-protocol.js
 var jpi_protocol_exports = {};
 __export(jpi_protocol_exports, {
-  run: () => run21
+  run: () => run23
 });
 function printUsage() {
   console.log("");
@@ -82421,7 +83402,7 @@ function printUsage() {
   console.log("  status       Show whether claim links are currently registered");
   console.log("");
 }
-async function run21() {
+async function run23() {
   const args5 = process.argv.slice(2);
   const verb = args5[0];
   if (verb === "--help" || verb === "-h") {
@@ -82469,11 +83450,11 @@ var init_jpi_protocol = __esm({
 // bin/jpi-profile.js
 var jpi_profile_exports = {};
 __export(jpi_profile_exports, {
-  run: () => run22
+  run: () => run24
 });
-import { createInterface as createInterface12 } from "readline";
+import { createInterface as createInterface13 } from "readline";
 function prompt5(question) {
-  const rl = createInterface12({ input: process.stdin, output: process.stdout });
+  const rl = createInterface13({ input: process.stdin, output: process.stdout });
   return new Promise((resolve9) => {
     rl.question(question, (answer) => {
       rl.close();
@@ -82481,7 +83462,7 @@ function prompt5(question) {
     });
   });
 }
-async function run22() {
+async function run24() {
   const { readProfile: readProfile2, writeProfile: writeProfile2, deleteProfile: deleteProfile2, isBlankProfile: isBlankProfile2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
   const args5 = process.argv.slice(2);
   if (args5.includes("--show")) {
@@ -82576,7 +83557,7 @@ __export(signal_exports, {
 });
 import { readFileSync as readFileSync39, readdirSync as readdirSync8 } from "fs";
 import { execFileSync as execFileSync5 } from "child_process";
-import { join as join57 } from "path";
+import { join as join58 } from "path";
 function safeGit(args5, cwd) {
   try {
     return execFileSync5("git", ["-C", cwd, ...args5], {
@@ -82617,7 +83598,7 @@ function readFileSafe(path6) {
   }
 }
 function tokensFromPackageJson(cwd) {
-  const pkg = readJsonSafe(join57(cwd, "package.json"));
+  const pkg = readJsonSafe(join58(cwd, "package.json"));
   if (!pkg || typeof pkg !== "object") return [];
   const p = pkg;
   const deps = {
@@ -82631,9 +83612,9 @@ function workspaceMemberDirs(cwd) {
   const dirs = [cwd];
   for (const group of ["apps", "packages"]) {
     try {
-      const groupDir = join57(cwd, group);
+      const groupDir = join58(cwd, group);
       for (const e of readdirSync8(groupDir, { withFileTypes: true })) {
-        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join57(groupDir, e.name));
+        if (e.isDirectory() && !e.isSymbolicLink()) dirs.push(join58(groupDir, e.name));
       }
     } catch {
     }
@@ -82641,18 +83622,18 @@ function workspaceMemberDirs(cwd) {
   return dirs;
 }
 function tokensFromRequirementsTxt(cwd) {
-  const content = readFileSafe(join57(cwd, "requirements.txt"));
+  const content = readFileSafe(join58(cwd, "requirements.txt"));
   if (!content) return [];
   return content.split("\n").map((l) => l.trim().split(/[>=<!\[;]/)[0].trim().toLowerCase()).filter(Boolean);
 }
 function tokensFromGoMod(cwd) {
-  const content = readFileSafe(join57(cwd, "go.mod"));
+  const content = readFileSafe(join58(cwd, "go.mod"));
   if (!content) return [];
   const requires = Array.from(content.matchAll(/^\s+([^\s]+)\s+v/gm)).map((m) => m[1].split("/").pop() ?? "").filter(Boolean);
   return ["go", ...requires];
 }
 function tokensFromCargoToml(cwd) {
-  const content = readFileSafe(join57(cwd, "Cargo.toml"));
+  const content = readFileSafe(join58(cwd, "Cargo.toml"));
   if (!content) return [];
   const deps = [];
   let inDeps = false;
@@ -82673,7 +83654,7 @@ function tokensFromFileExtensions(cwd) {
   const tokens = [];
   const scanDirs = [cwd];
   try {
-    const srcDir = join57(cwd, "src");
+    const srcDir = join58(cwd, "src");
     readdirSync8(srcDir);
     scanDirs.push(srcDir);
   } catch {
@@ -82834,9 +83815,9 @@ var init_signal = __esm({
 // bin/jpi-learn.js
 var jpi_learn_exports = {};
 __export(jpi_learn_exports, {
-  run: () => run23
+  run: () => run25
 });
-async function run23() {
+async function run25() {
   try {
     const args5 = process.argv.slice(2);
     const cwdIdx = args5.indexOf("--cwd");
@@ -82863,7 +83844,7 @@ var init_jpi_learn = __esm({
     "use strict";
     isMain = process.argv[1]?.endsWith("jpi-learn.js") || process.argv[1]?.endsWith("jpi-learn");
     if (isMain) {
-      run23();
+      run25();
     }
   }
 });
@@ -82871,10 +83852,10 @@ var init_jpi_learn = __esm({
 // bin/jpi-config.js
 var jpi_config_exports = {};
 __export(jpi_config_exports, {
-  run: () => run24
+  run: () => run26
 });
-import { join as join58 } from "path";
-import { homedir as homedir36 } from "os";
+import { join as join59 } from "path";
+import { homedir as homedir37 } from "os";
 function parseNudgeMode2(raw) {
   if (raw === "session" || raw === "always") return raw;
   const m = /^every:(\d+)$/.exec(raw);
@@ -82887,7 +83868,7 @@ function printMixValues() {
   console.log("    balanced   \u2014 contribution-first default (contribute 10, roles ~10)");
   console.log("    credential \u2014 contribution-forward (contribute 12, roles ~8)");
 }
-async function run24() {
+async function run26() {
   const args5 = process.argv.slice(2);
   const filtered = args5[0] === "config" ? args5.slice(1) : args5;
   if (filtered[0] === "get" && filtered[1] === "mix") {
@@ -83061,23 +84042,23 @@ var init_jpi_config = __esm({
   "bin/jpi-config.js"() {
     "use strict";
     init_config();
-    TERMINALHIRE_DIR21 = process.env.TERMINALHIRE_DIR || join58(homedir36(), ".terminalhire");
-    CONFIG_FILE2 = join58(TERMINALHIRE_DIR21, "config.json");
+    TERMINALHIRE_DIR21 = process.env.TERMINALHIRE_DIR || join59(homedir37(), ".terminalhire");
+    CONFIG_FILE2 = join59(TERMINALHIRE_DIR21, "config.json");
   }
 });
 
 // bin/jpi-spinner.js
 var jpi_spinner_exports = {};
 __export(jpi_spinner_exports, {
-  run: () => run25
+  run: () => run27
 });
-import { readFileSync as readFileSync40, writeFileSync as writeFileSync33, copyFileSync as copyFileSync6, existsSync as existsSync32 } from "fs";
-import { join as join59 } from "path";
-import { homedir as homedir37 } from "os";
-import { createInterface as createInterface13 } from "readline";
+import { readFileSync as readFileSync40, writeFileSync as writeFileSync33, copyFileSync as copyFileSync6, existsSync as existsSync33 } from "fs";
+import { join as join60 } from "path";
+import { homedir as homedir38 } from "os";
+import { createInterface as createInterface14 } from "readline";
 function readConfig3() {
   try {
-    return existsSync32(CONFIG_FILE3) ? JSON.parse(readFileSync40(CONFIG_FILE3, "utf8")) : {};
+    return existsSync33(CONFIG_FILE3) ? JSON.parse(readFileSync40(CONFIG_FILE3, "utf8")) : {};
   } catch {
     return {};
   }
@@ -83088,14 +84069,14 @@ function writeConfig2(patch) {
   writeFileSync33(CONFIG_FILE3, JSON.stringify(merged, null, 2) + "\n", "utf8");
 }
 function backupSettings() {
-  if (!existsSync32(SETTINGS_PATH)) return null;
+  if (!existsSync33(SETTINGS_PATH)) return null;
   const ts = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
   const backupPath = `${SETTINGS_PATH}.terminalhire-backup-${ts}`;
   copyFileSync6(SETTINGS_PATH, backupPath);
   return backupPath;
 }
-function ask3(question) {
-  const rl = createInterface13({ input: process.stdin, output: process.stdout });
+function ask4(question) {
+  const rl = createInterface14({ input: process.stdin, output: process.stdout });
   return new Promise((res) => {
     rl.question(question, (answer) => {
       rl.close();
@@ -83118,7 +84099,7 @@ function attempt(fn) {
     return { skipped: true, reason: err && err.code || "write-failed", keptUserVerbs: 0 };
   }
 }
-async function run25() {
+async function run27() {
   const args5 = process.argv.slice(2).filter((a) => a !== "spinner");
   const has2 = (f) => args5.includes(f);
   const val = (f) => {
@@ -83287,7 +84268,7 @@ async function run25() {
     console.log("  terminalhire spinner --off    removes job verbs, restores your spinner");
     console.log("  (a timestamped backup of settings.json is taken now)");
     console.log("");
-    const answer = await ask3('Enable the spinner job surface? Type "yes" to continue: ');
+    const answer = await ask4('Enable the spinner job surface? Type "yes" to continue: ');
     if (answer !== "yes") {
       console.log("\nAborted \u2014 nothing changed.");
       process.exit(0);
@@ -83326,27 +84307,27 @@ var init_jpi_spinner = __esm({
     "use strict";
     init_spinner();
     init_state_dir();
-    TH_DIR = process.env["TERMINALHIRE_DIR"] || join59(homedir37(), ".terminalhire");
-    CONFIG_FILE3 = join59(TH_DIR, "config.json");
-    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join59(homedir37(), ".claude", "settings.json");
-    CACHE_FILE2 = join59(TH_DIR, "index-cache.json");
+    TH_DIR = process.env["TERMINALHIRE_DIR"] || join60(homedir38(), ".terminalhire");
+    CONFIG_FILE3 = join60(TH_DIR, "config.json");
+    SETTINGS_PATH = process.env["TERMINALHIRE_CLAUDE_SETTINGS"] || join60(homedir38(), ".claude", "settings.json");
+    CACHE_FILE2 = join60(TH_DIR, "index-cache.json");
   }
 });
 
 // bin/jpi-sync.js
 var jpi_sync_exports = {};
 __export(jpi_sync_exports, {
-  run: () => run26
+  run: () => run28
 });
-import { readFileSync as readFileSync41, writeFileSync as writeFileSync34, existsSync as existsSync33, rmSync as rmSync16 } from "fs";
-import { join as join60 } from "path";
-import { homedir as homedir38, hostname as osHostname2 } from "os";
-import { createInterface as createInterface14 } from "readline";
+import { readFileSync as readFileSync41, writeFileSync as writeFileSync34, existsSync as existsSync34, rmSync as rmSync17 } from "fs";
+import { join as join61 } from "path";
+import { homedir as homedir39, hostname as osHostname2 } from "os";
+import { createInterface as createInterface15 } from "readline";
 function oauthSyncBase() {
   return resolveOAuthBase();
 }
-function ask4(question) {
-  const rl = createInterface14({ input: process.stdin, output: process.stdout });
+function ask5(question) {
+  const rl = createInterface15({ input: process.stdin, output: process.stdout });
   return new Promise((res) => {
     rl.question(question, (answer) => {
       rl.close();
@@ -83356,7 +84337,7 @@ function ask4(question) {
 }
 function readMarker() {
   try {
-    return existsSync33(TIER1_MARKER) ? JSON.parse(readFileSync41(TIER1_MARKER, "utf8")) : null;
+    return existsSync34(TIER1_MARKER) ? JSON.parse(readFileSync41(TIER1_MARKER, "utf8")) : null;
   } catch {
     return null;
   }
@@ -83367,7 +84348,7 @@ function writeMarker(marker) {
 }
 function clearMarker() {
   try {
-    rmSync16(TIER1_MARKER);
+    rmSync17(TIER1_MARKER);
   } catch {
   }
 }
@@ -83413,7 +84394,7 @@ function renderPreview(fields) {
   console.log("  This is NOT required to use terminalhire.");
   console.log("");
 }
-function sleep5(ms) {
+function sleep6(ms) {
   return new Promise((res) => setTimeout(res, ms));
 }
 async function runPush() {
@@ -83429,7 +84410,7 @@ async function runPush() {
   const fields = buildConsentFields(profile);
   renderPreview(fields);
   await new Promise((resolve9) => {
-    const rl = createInterface14({ input: process.stdin, output: process.stdout });
+    const rl = createInterface15({ input: process.stdin, output: process.stdout });
     rl.question(
       "  Press Enter to open your browser to authorize + consent (or Ctrl-C to cancel)... ",
       () => {
@@ -83482,7 +84463,7 @@ async function runPush() {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   let proofToken = null;
   while (Date.now() < deadline) {
-    await sleep5(POLL_INTERVAL_MS);
+    await sleep6(POLL_INTERVAL_MS);
     let statusRes;
     try {
       statusRes = await fetch(
@@ -83599,7 +84580,7 @@ async function runDelete() {
   console.log("  This will hard-delete your synced profile from staqs (terminalhire.com)");
   console.log("  and remove the local consent marker. There is no soft-delete.");
   console.log("");
-  const answer = await ask4('  Delete your synced profile? Type "yes" to confirm: ');
+  const answer = await ask5('  Delete your synced profile? Type "yes" to confirm: ');
   if (answer !== "yes") {
     console.log("\n  Aborted \u2014 nothing was deleted.\n");
     process.exit(0);
@@ -83657,7 +84638,7 @@ async function runDelete() {
   clearMarker();
   console.log("\n  Synced profile deleted and local marker cleared.\n");
 }
-async function run26() {
+async function run28() {
   const args5 = process.argv.slice(2).filter((a) => a !== "sync");
   const has2 = (f) => args5.includes(f);
   if (has2("--push") || has2("--enable")) {
@@ -83692,8 +84673,8 @@ var init_jpi_sync = __esm({
     init_open_url();
     init_state_dir();
     init_api_base();
-    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join60(homedir38(), ".terminalhire");
-    TIER1_MARKER = join60(TH_DIR2, "tier1.json");
+    TH_DIR2 = process.env["TERMINALHIRE_DIR"] || join61(homedir39(), ".terminalhire");
+    TIER1_MARKER = join61(TH_DIR2, "tier1.json");
     API_URL8 = resolveApiBase();
     warnSharedCredentialsIfNonProd(API_URL8);
     POLL_INTERVAL_MS = 2e3;
@@ -83705,43 +84686,43 @@ var init_jpi_sync = __esm({
 // bin/jpi-init.js
 var jpi_init_exports = {};
 __export(jpi_init_exports, {
-  run: () => run27
+  run: () => run29
 });
-import { existsSync as existsSync34 } from "fs";
-import { join as join61, resolve as resolve8 } from "path";
+import { existsSync as existsSync35 } from "fs";
+import { join as join62, resolve as resolve8 } from "path";
 import { fileURLToPath as fileURLToPath11, pathToFileURL } from "url";
-import { createInterface as createInterface15 } from "readline";
-import { spawnSync as spawnSync12 } from "child_process";
+import { createInterface as createInterface16 } from "readline";
+import { spawnSync as spawnSync13 } from "child_process";
 function resolveScript(name) {
-  const distPath = resolve8(join61(__dirname5, "..", "..", "dist", "bin", `${name}.js`));
-  const legacyPath = resolve8(join61(__dirname5, `${name}.js`));
-  return existsSync34(distPath) ? distPath : legacyPath;
+  const distPath = resolve8(join62(__dirname5, "..", "..", "dist", "bin", `${name}.js`));
+  const legacyPath = resolve8(join62(__dirname5, `${name}.js`));
+  return existsSync35(distPath) ? distPath : legacyPath;
 }
 function resolveSrc(name) {
-  const distPath = resolve8(join61(__dirname5, "..", "..", "dist", "src", `${name}.js`));
-  const legacyPath = resolve8(join61(__dirname5, "..", "src", `${name}.js`));
-  return existsSync34(distPath) ? distPath : legacyPath;
+  const distPath = resolve8(join62(__dirname5, "..", "..", "dist", "src", `${name}.js`));
+  const legacyPath = resolve8(join62(__dirname5, "..", "src", `${name}.js`));
+  return existsSync35(distPath) ? distPath : legacyPath;
 }
 function resolveInstallJs() {
-  const fromDist = resolve8(join61(__dirname5, "..", "..", "install.js"));
-  const fromBin = resolve8(join61(__dirname5, "..", "install.js"));
-  if (existsSync34(fromDist)) return fromDist;
-  if (existsSync34(fromBin)) return fromBin;
+  const fromDist = resolve8(join62(__dirname5, "..", "..", "install.js"));
+  const fromBin = resolve8(join62(__dirname5, "..", "install.js"));
+  if (existsSync35(fromDist)) return fromDist;
+  if (existsSync35(fromBin)) return fromBin;
   return fromBin;
 }
 function resolveStatuslineInstallJs() {
-  const fromDist = resolve8(join61(__dirname5, "..", "..", "statusline-install.js"));
-  const fromBin = resolve8(join61(__dirname5, "..", "statusline-install.js"));
-  if (existsSync34(fromDist)) return fromDist;
-  if (existsSync34(fromBin)) return fromBin;
+  const fromDist = resolve8(join62(__dirname5, "..", "..", "statusline-install.js"));
+  const fromBin = resolve8(join62(__dirname5, "..", "statusline-install.js"));
+  if (existsSync35(fromDist)) return fromDist;
+  if (existsSync35(fromBin)) return fromBin;
   return fromBin;
 }
 function tokenizeInterest(raw) {
   return raw.split(/[,/]|\s+/).map((t) => t.trim()).filter(Boolean);
 }
-async function run27() {
-  const rl = createInterface15({ input: process.stdin, output: process.stdout });
-  const ask5 = (question) => new Promise((resolve9) => {
+async function run29() {
+  const rl = createInterface16({ input: process.stdin, output: process.stdout });
+  const ask6 = (question) => new Promise((resolve9) => {
     let answered = false;
     rl.question(question, (answer) => {
       answered = true;
@@ -83779,14 +84760,14 @@ async function run27() {
   console.log("  GitHub data enriches your local profile. Nothing leaves your machine");
   console.log("  until you explicitly consent to a specific lead.");
   console.log("");
-  const githubAnswer = await ask5("Sign in with GitHub now? [Y/n] (Enter = yes, n = stay local): ");
+  const githubAnswer = await ask6("Sign in with GitHub now? [Y/n] (Enter = yes, n = stay local): ");
   const doGitHub = githubAnswer === "" || githubAnswer === "y" || githubAnswer === "yes";
   if (doGitHub) {
     console.log("");
     console.log("  Starting GitHub device flow...");
     const loginScript = resolveScript("jpi-login");
     rl.pause();
-    const child = spawnSync12(process.execPath, [loginScript, "login"], {
+    const child = spawnSync13(process.execPath, [loginScript, "login"], {
       stdio: ["ignore", "inherit", "inherit"],
       env: { ...process.env, JPI_SKIP_PEER_PROMPT: "1" }
     });
@@ -83810,7 +84791,7 @@ async function run27() {
           login = prof?.github?.login;
         } catch {
         }
-        await maybePromptPeerConnect2({ ask: ask5, login });
+        await maybePromptPeerConnect2({ ask: ask6, login });
       } catch {
       }
     }
@@ -83824,7 +84805,7 @@ async function run27() {
   console.log("");
   console.log("  Fetching anonymous job index (no dev data sent)...");
   const jobsScript = resolveScript("jpi-jobs");
-  const seedChild = spawnSync12(process.execPath, [jobsScript, "--limit", "0"], {
+  const seedChild = spawnSync13(process.execPath, [jobsScript, "--limit", "0"], {
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, TERMINALHIRE_SEED_ONLY: "1" },
     timeout: 15e3
@@ -83840,7 +84821,7 @@ async function run27() {
   console.log("");
   console.log(`  ${INTEREST_PROMPT}`);
   console.log("");
-  const interestAnswer = await ask5("> ");
+  const interestAnswer = await ask6("> ");
   if (interestAnswer) {
     try {
       const { normalize: normalize4 } = await Promise.resolve().then(() => (init_src(), src_exports));
@@ -83867,7 +84848,7 @@ async function run27() {
   try {
     const installMod = await import(pathToFileURL(resolveInstallJs()).href);
     if (typeof installMod.installSpinner === "function") {
-      await installMod.installSpinner({ ask: ask5 });
+      await installMod.installSpinner({ ask: ask6 });
     } else {
       console.log("");
       console.log("  Hook installation unavailable in this build. Run manually: node install.js");
@@ -83889,7 +84870,7 @@ async function run27() {
   try {
     const statuslineMod = await import(pathToFileURL(resolveStatuslineInstallJs()).href);
     if (typeof statuslineMod.installStatusline === "function") {
-      await statuslineMod.installStatusline({ ask: ask5 });
+      await statuslineMod.installStatusline({ ask: ask6 });
     } else {
       console.log("");
       console.log(
@@ -83911,7 +84892,7 @@ async function run27() {
   console.log("");
   try {
     const { initMcpStep: initMcpStep2 } = await Promise.resolve().then(() => (init_mcp_config(), mcp_config_exports));
-    await initMcpStep2({ ask: ask5 });
+    await initMcpStep2({ ask: ask6 });
   } catch {
     console.log("");
     console.log("  MCP setup did not complete. Run manually: terminalhire mcp --print-config");
@@ -83927,7 +84908,7 @@ async function run27() {
     "  `terminalhire claim preview <token>`. Undo any time: terminalhire protocol unregister"
   );
   console.log("");
-  const protocolAnswer = await ask5("Register th:// claim links now? [Y/n] (Enter = yes): ");
+  const protocolAnswer = await ask6("Register th:// claim links now? [Y/n] (Enter = yes): ");
   const doProtocol = protocolAnswer === "" || protocolAnswer === "y" || protocolAnswer === "yes";
   if (doProtocol) {
     try {
@@ -84212,11 +85193,11 @@ var init_beta_nudge = __esm({
 // bin/jpi-refresh.js
 var jpi_refresh_exports = {};
 __export(jpi_refresh_exports, {
-  run: () => run28
+  run: () => run30
 });
 import { fileURLToPath as fileURLToPath12 } from "url";
 import { hostname, homedir as osHomedir } from "os";
-async function run28() {
+async function run30() {
   try {
     let index;
     let indexETag;
@@ -84733,15 +85714,15 @@ var init_jpi_refresh = __esm({
 // bin/jpi-save.js
 var jpi_save_exports = {};
 __export(jpi_save_exports, {
-  run: () => run29
+  run: () => run31
 });
-import { readFileSync as readFileSync42, existsSync as existsSync35 } from "fs";
-import { join as join62 } from "path";
-import { homedir as homedir39 } from "os";
+import { readFileSync as readFileSync42, existsSync as existsSync36 } from "fs";
+import { join as join63 } from "path";
+import { homedir as homedir40 } from "os";
 import { fileURLToPath as fileURLToPath13 } from "url";
 function findJobInCache(jobId) {
   try {
-    if (!existsSync35(INDEX_CACHE_FILE7)) return null;
+    if (!existsSync36(INDEX_CACHE_FILE7)) return null;
     const raw = readFileSync42(INDEX_CACHE_FILE7, "utf8");
     const entry = JSON.parse(raw);
     const jobs = entry?.index?.jobs ?? [];
@@ -84811,7 +85792,7 @@ async function cmdUnsave(jobId) {
     process.exit(1);
   }
 }
-async function run29() {
+async function run31() {
   const verb = process.argv[2];
   const jobId = process.argv[3];
   try {
@@ -84835,20 +85816,20 @@ var init_jpi_save = __esm({
   "bin/jpi-save.js"() {
     "use strict";
     __dirname7 = fileURLToPath13(new URL(".", import.meta.url));
-    TERMINALHIRE_DIR22 = process.env.TERMINALHIRE_DIR || join62(homedir39(), ".terminalhire");
-    INDEX_CACHE_FILE7 = join62(TERMINALHIRE_DIR22, "index-cache.json");
+    TERMINALHIRE_DIR22 = process.env.TERMINALHIRE_DIR || join63(homedir40(), ".terminalhire");
+    INDEX_CACHE_FILE7 = join63(TERMINALHIRE_DIR22, "index-cache.json");
   }
 });
 
 // bin/jpi-beta.js
 var jpi_beta_exports = {};
 __export(jpi_beta_exports, {
-  run: () => run30
+  run: () => run32
 });
-import { createInterface as createInterface16 } from "readline";
-async function run30() {
-  const rl = createInterface16({ input: process.stdin, output: process.stdout });
-  const ask5 = (question) => new Promise((resolve9) => {
+import { createInterface as createInterface17 } from "readline";
+async function run32() {
+  const rl = createInterface17({ input: process.stdin, output: process.stdout });
+  const ask6 = (question) => new Promise((resolve9) => {
     const onClose = () => resolve9(null);
     rl.once("close", onClose);
     rl.question(question, (answer) => {
@@ -84886,15 +85867,15 @@ async function run30() {
     console.log("      rough edges you find.");
     console.log("    \u2022 A spot on the founding-contributors wall.");
     console.log("");
-    const join65 = await ask5(
+    const join66 = await ask6(
       '  Type "yes" to join the beta as a Founding Contributor (anything else cancels): '
     );
-    if ((join65 || "").toLowerCase() !== "yes") {
+    if ((join66 || "").toLowerCase() !== "yes") {
       console.log("\n  No problem \u2014 nothing was sent. Run `terminalhire beta` any time.\n");
       rl.close();
       return;
     }
-    const listAns = await ask5("  List me publicly as a Founding Contributor? [y/N] (Enter = no): ");
+    const listAns = await ask6("  List me publicly as a Founding Contributor? [y/N] (Enter = no): ");
     listPublicly = ["y", "yes"].includes((listAns || "").toLowerCase());
   } else {
     console.log("\n  You've already opted in to the Terminalhire beta \u2014 checking your status\u2026");
@@ -84976,19 +85957,19 @@ var init_jpi_beta = __esm({
 // bin/jpi-feedback.js
 var jpi_feedback_exports = {};
 __export(jpi_feedback_exports, {
-  run: () => run31
+  run: () => run33
 });
-import { createInterface as createInterface17 } from "readline";
-import { readFileSync as readFileSync43, existsSync as existsSync36 } from "fs";
-import { join as join63 } from "path";
+import { createInterface as createInterface18 } from "readline";
+import { readFileSync as readFileSync43, existsSync as existsSync37 } from "fs";
+import { join as join64 } from "path";
 import { fileURLToPath as fileURLToPath14 } from "url";
 function readLocalVersion3() {
   try {
     for (const p of [
-      join63(__dirname8, "..", "..", "package.json"),
-      join63(__dirname8, "..", "package.json")
+      join64(__dirname8, "..", "..", "package.json"),
+      join64(__dirname8, "..", "package.json")
     ]) {
-      if (existsSync36(p)) {
+      if (existsSync37(p)) {
         const pkg = JSON.parse(readFileSync43(p, "utf8"));
         if (pkg.version) return pkg.version;
       }
@@ -84997,9 +85978,9 @@ function readLocalVersion3() {
   }
   return null;
 }
-async function run31() {
-  const rl = createInterface17({ input: process.stdin, output: process.stdout });
-  const ask5 = (question) => new Promise((resolve9) => {
+async function run33() {
+  const rl = createInterface18({ input: process.stdin, output: process.stdout });
+  const ask6 = (question) => new Promise((resolve9) => {
     const onClose = () => resolve9(null);
     rl.once("close", onClose);
     rl.question(question, (answer) => {
@@ -85019,7 +86000,7 @@ async function run31() {
   console.log("");
   console.log("  What is this about?");
   CATEGORY_LABELS.forEach((label, i) => console.log(`    ${i + 1}) ${label}`));
-  const catAns = await ask5("  Pick a category [1-6]: ");
+  const catAns = await ask6("  Pick a category [1-6]: ");
   const catIdx = Number.parseInt(catAns || "", 10);
   if (!(catIdx >= 1 && catIdx <= CATEGORIES.length)) {
     console.log("\n  Cancelled \u2014 no category picked, nothing was sent.\n");
@@ -85027,20 +86008,20 @@ async function run31() {
     return;
   }
   const category = CATEGORIES[catIdx - 1];
-  const tryingToDo = await ask5("  What were you trying to do? (Enter to skip): ");
-  const expectedVsActual = await ask5("  What did you expect vs. what happened? (Enter to skip): ");
+  const tryingToDo = await ask6("  What were you trying to do? (Enter to skip): ");
+  const expectedVsActual = await ask6("  What did you expect vs. what happened? (Enter to skip): ");
   const ratings = {};
   let almostQuit = null;
   let keepInstalled = null;
   if (fullForm) {
     console.log("  Rate 1\u20135 (Enter to skip any):");
     for (const key of RATING_KEYS) {
-      const ans = await ask5(`    ${key}: `);
+      const ans = await ask6(`    ${key}: `);
       const n = Number.parseInt(ans || "", 10);
       if (n >= 1 && n <= 5) ratings[key] = n;
     }
-    almostQuit = await ask5("  What almost made you quit / uninstall? (Enter to skip): ");
-    keepInstalled = await ask5("  Will you keep it installed? y/n + why (Enter to skip): ");
+    almostQuit = await ask6("  What almost made you quit / uninstall? (Enter to skip): ");
+    keepInstalled = await ask6("  Will you keep it installed? y/n + why (Enter to skip): ");
   }
   const payload = { category };
   if (tryingToDo) payload.tryingToDo = tryingToDo;
@@ -85056,7 +86037,7 @@ async function run31() {
   console.log("");
   for (const line of JSON.stringify(payload, null, 2).split("\n")) console.log(`    ${line}`);
   console.log("");
-  const confirm2 = await ask5('  Type "yes" to send this to the founder (anything else cancels): ');
+  const confirm2 = await ask6('  Type "yes" to send this to the founder (anything else cancels): ');
   rl.close();
   if ((confirm2 || "").toLowerCase() !== "yes") {
     console.log("\n  Cancelled \u2014 nothing was sent.\n");
@@ -85128,28 +86109,15 @@ var init_jpi_feedback = __esm({
 // bin/jpi-dispatch.js
 init_package_version();
 init_api_base();
+init_state_dir_pin();
 import { fileURLToPath as fileURLToPath15 } from "url";
-import { join as join64 } from "path";
-import { existsSync as existsSync37 } from "fs";
-
-// src/state-dir-pin.ts
-init_api_base();
-import { homedir as homedir2 } from "os";
-import { join as join3 } from "path";
-function pinStateDirToApiBase(env = process.env) {
-  if (env["TERMINALHIRE_DIR"]) return null;
-  let base;
-  try {
-    base = resolveApiBase(env);
-  } catch {
-    return null;
-  }
-  if (base !== DEV_API_BASE) return null;
-  env["TERMINALHIRE_DIR"] = env["TERMINALHIRE_DIR"] || join3(homedir2(), DEV_STATE_DIR_NAME);
-  return env["TERMINALHIRE_DIR"];
+import { join as join65 } from "path";
+import { existsSync as existsSync38 } from "fs";
+if (process.argv[2] === "connector-header") {
+  const mod2 = await Promise.resolve().then(() => (init_jpi_connector_header(), jpi_connector_header_exports));
+  await mod2.run();
+  process.exit(process.exitCode ?? 0);
 }
-
-// bin/jpi-dispatch.js
 pinStateDirToApiBase();
 var __dirname9 = fileURLToPath15(new URL(".", import.meta.url));
 function isVerbose() {
@@ -85188,6 +86156,11 @@ var SUBCOMMANDS = [
   "contribute",
   "claim",
   "post",
+  // TERM-1368 — poster onboarding: sign in, App, card, email, connect your AI.
+  "setup",
+  // Routed at the top of this file, before the state dir is pinned; listed here so the
+  // docs-surface check knows the docs may name it. Claude Code runs it, not a person.
+  "connector-header",
   "repo",
   "trajectory",
   "mirror",
@@ -85229,7 +86202,7 @@ var SUBCOMMANDS = [
 var firstArg = process.argv[2];
 if (!firstArg && !process.stdin.isTTY) {
   const { default: childProcess } = await import("child_process");
-  const nudgeScript = join64(__dirname9, "jpi.js");
+  const nudgeScript = join65(__dirname9, "jpi.js");
   const child = childProcess.spawnSync(process.execPath, [nudgeScript], {
     stdio: ["inherit", "inherit", "inherit"]
   });
@@ -85340,6 +86313,12 @@ if (!firstArg || firstArg === "help" || firstArg === "--help" || firstArg === "-
   );
   console.log(
     "  terminalhire claim audit <id> --remember    Opt this one audit into local per-repo memory"
+  );
+  console.log(
+    "  terminalhire setup                          Poster onboarding: sign in, GitHub App, card, email, connect your AI"
+  );
+  console.log(
+    "  terminalhire setup --status                 Print what publishing still needs, and exit"
   );
   console.log(
     "  terminalhire repo <owner/repo>               Show local craft-knowledge: continuity, calibration, notes"
@@ -85558,6 +86537,11 @@ if (firstArg === "post") {
   await mod2.run();
   process.exit(process.exitCode ?? 0);
 }
+if (firstArg === "setup") {
+  const mod2 = await Promise.resolve().then(() => (init_jpi_setup(), jpi_setup_exports));
+  await mod2.run();
+  process.exit(process.exitCode ?? 0);
+}
 if (firstArg === "repo") {
   const mod2 = await Promise.resolve().then(() => (init_jpi_repo(), jpi_repo_exports));
   await mod2.run();
@@ -85751,11 +86735,11 @@ if (firstArg === "statusline") {
     console.error("Usage: terminalhire statusline --on | --off");
     process.exit(1);
   }
-  const fromDist = join64(__dirname9, "..", "..", "statusline-install.js");
-  const fromBin = join64(__dirname9, "..", "statusline-install.js");
-  const installer = existsSync37(fromDist) ? fromDist : fromBin;
-  const { spawnSync: spawnSync13 } = await import("child_process");
-  const child = spawnSync13(process.execPath, uninstall ? [installer, "--uninstall"] : [installer], {
+  const fromDist = join65(__dirname9, "..", "..", "statusline-install.js");
+  const fromBin = join65(__dirname9, "..", "statusline-install.js");
+  const installer = existsSync38(fromDist) ? fromDist : fromBin;
+  const { spawnSync: spawnSync14 } = await import("child_process");
+  const child = spawnSync14(process.execPath, uninstall ? [installer, "--uninstall"] : [installer], {
     stdio: ["inherit", "inherit", "inherit"],
     env: process.env
   });

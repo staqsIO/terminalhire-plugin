@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 // bin/jpi-post.js
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
+import { existsSync as existsSync6, readFileSync as readFileSync4 } from "fs";
 import { spawnSync } from "child_process";
 import { createInterface } from "readline";
-import { basename as basename2, join as join3 } from "path";
+import { basename as basename3, join as join7 } from "path";
 
 // src/posting-drafts.ts
 import {
@@ -544,6 +544,8 @@ var ALLOWED_HOSTS = {
   localhost: "http:",
   "127.0.0.1": "http:"
 };
+var OAUTH_ALLOWED_ORIGINS = [PROD_API_BASE, DEV_API_BASE];
+var ALLOW_LOCAL_OAUTH_KEY = "TERMINALHIRE_ALLOW_LOCAL_OAUTH";
 var ALLOW_LOCAL_API_KEY = "TERMINALHIRE_ALLOW_LOCAL_API";
 var ALLOWED_DESCRIPTION = [
   PROD_API_BASE,
@@ -601,6 +603,14 @@ function resolveApiBase(env = process.env) {
   }
   return PROD_API_BASE;
 }
+function resolveOAuthBase(env = process.env) {
+  const base = resolveApiBase(env);
+  if (OAUTH_ALLOWED_ORIGINS.includes(base)) return base;
+  if (env[ALLOW_LOCAL_OAUTH_KEY] === "1") return base;
+  throw new ApiBaseError(
+    `terminalhire: the API base is ${base}, which is not a trusted origin for a browser sign-in. Point the CLI at ${DEV_API_BASE} for an end-to-end login, or set ${ALLOW_LOCAL_OAUTH_KEY}=1 (with ${ALLOW_LOCAL_API_KEY}=1) if you are running the web app locally on purpose. Refusing to open production sign-in while the API is local.`
+  );
+}
 function normalizeOverride(raw) {
   let url;
   try {
@@ -620,8 +630,312 @@ function normalizeOverride(raw) {
   return url.origin;
 }
 
+// src/founder-connector.ts
+import { homedir as homedir4 } from "os";
+import { join as join6 } from "path";
+import { existsSync as existsSync5, rmSync as rmSync3 } from "fs";
+
+// src/crypto-store.ts
+import { createCipheriv, createDecipheriv, randomBytes as randomBytes2 } from "crypto";
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, existsSync as existsSync4, renameSync as renameSync2, rmSync as rmSync2, readdirSync } from "fs";
+import { join as join5, dirname, basename as basename2 } from "path";
+import { createRequire } from "module";
+
+// src/shared-key.ts
+import { randomBytes } from "crypto";
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync3, linkSync, unlinkSync } from "fs";
+import { join as join4 } from "path";
+import { homedir as homedir3 } from "os";
+
+// src/test-race-barrier.ts
+import { closeSync as closeSync2, constants as constants2, existsSync as existsSync2, lstatSync, openSync as openSync2 } from "fs";
+import { join as join3 } from "path";
+var ENV_VAR = "TERMINALHIRE_TEST_RACE_BARRIER_DIR";
+function syncSleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function waitForTestRaceBarrier(phase) {
+  const root = process.env[ENV_VAR];
+  if (!root) return;
+  const phaseDir = join3(root, phase);
+  if (!existsSync2(phaseDir)) return;
+  const readyFile = join3(phaseDir, `ready-${process.pid}`);
+  const goFile = join3(phaseDir, "go");
+  const noFollow = constants2.O_NOFOLLOW ?? 0;
+  if (lstatSync(readyFile, { throwIfNoEntry: false })) {
+    throw new Error(
+      `terminalhire: test race barrier "${phase}" found something already at its ready marker path ${readyFile} (regular file or symlink) \u2014 refusing rather than following or overwriting whatever is already there (this only fires under ${ENV_VAR}, never in production).`
+    );
+  }
+  let readyFd;
+  try {
+    readyFd = openSync2(
+      readyFile,
+      constants2.O_CREAT | constants2.O_EXCL | constants2.O_WRONLY | noFollow
+    );
+  } catch (err) {
+    throw new Error(
+      `terminalhire: test race barrier "${phase}" could not create its ready marker at ${readyFile} (${err instanceof Error ? err.message : String(err)}) \u2014 refusing rather than blocking on or writing through whatever is already there (this only fires under ${ENV_VAR}, never in production).`
+    );
+  }
+  closeSync2(readyFd);
+  const deadline = Date.now() + 3e4;
+  while (!existsSync2(goFile)) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `terminalhire: test race barrier "${phase}" timed out waiting for ${goFile} (the test process never released it \u2014 this only fires under ${ENV_VAR}, never in production).`
+      );
+    }
+    syncSleepMs(2);
+  }
+}
+
+// src/shared-key.ts
+var TERMINALHIRE_DIR = process.env.TERMINALHIRE_DIR || join4(homedir3(), ".terminalhire");
+var KEY_FILE = join4(TERMINALHIRE_DIR, "key");
+var KEY_BYTES = 32;
+var KEY_HEX_RE = new RegExp(`^[0-9a-f]{${KEY_BYTES * 2}}$`);
+function isValidKeyHex(value) {
+  return KEY_HEX_RE.test(value);
+}
+function readKeyFileOrThrow() {
+  const raw = readFileSync2(KEY_FILE, "utf8").trim();
+  if (!isValidKeyHex(raw)) {
+    throw new Error(
+      `terminalhire: the shared encryption key at ${KEY_FILE} is not in the expected format (expected exactly ${KEY_BYTES * 2} lowercase-hex characters \u2014 a ${KEY_BYTES}-byte key).
+This key decrypts the GitHub token, local profile, and chat identity stores under ~/.terminalhire \u2014 it should never be hand-edited.
+Recovery: if you intend to reset it, delete the file yourself (this INVALIDATES every encrypted store under ~/.terminalhire, which will need to be re-created/re-authenticated):
+  rm ${KEY_FILE}`
+    );
+  }
+  return Buffer.from(raw, "hex");
+}
+function publishKeyBlob(key) {
+  const tmpFile = `${KEY_FILE}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync2(tmpFile, key.toString("hex"), { encoding: "utf8", mode: 384, flag: "wx" });
+    try {
+      linkSync(tmpFile, KEY_FILE);
+      return true;
+    } catch (err) {
+      if (err?.code === "EEXIST") {
+        return false;
+      }
+      throw err;
+    }
+  } finally {
+    try {
+      unlinkSync(tmpFile);
+    } catch {
+    }
+  }
+}
+function loadOrCreateSharedKey() {
+  ensureStateDirForSecret(TERMINALHIRE_DIR);
+  if (existsSync3(KEY_FILE)) {
+    return readKeyFileOrThrow();
+  }
+  waitForTestRaceBarrier("key");
+  const key = randomBytes(KEY_BYTES);
+  if (publishKeyBlob(key)) {
+    return key;
+  }
+  return readKeyFileOrThrow();
+}
+
+// src/crypto-store.ts
+var KEYTAR_SERVICE = "terminalhire";
+var KEYTAR_ACCOUNT = "profile-key";
+var ALGO = "aes-256-gcm";
+var IV_BYTES = 12;
+function encrypt(plaintext, key) {
+  const iv = randomBytes2(IV_BYTES);
+  const cipher = createCipheriv(ALGO, key, iv);
+  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return {
+    iv: iv.toString("hex"),
+    tag: tag.toString("hex"),
+    ciphertext: ct.toString("hex")
+  };
+}
+function decrypt(blob, key) {
+  const decipher = createDecipheriv(ALGO, key, Buffer.from(blob.iv, "hex"));
+  decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
+  const plain = Buffer.concat([
+    decipher.update(Buffer.from(blob.ciphertext, "hex")),
+    decipher.final()
+  ]);
+  return plain.toString("utf8");
+}
+var forceKeytarUnavailableForTests = false;
+function skipKeychain() {
+  return process.env.TERMINALHIRE_NO_KEYCHAIN !== void 0 || process.env.CI !== void 0 || process.env.VITEST !== void 0 || process.env.NODE_ENV === "test";
+}
+async function tryLoadFromKeytar() {
+  if (forceKeytarUnavailableForTests || skipKeychain()) return null;
+  try {
+    const kt = createRequire(import.meta.url)("keytar");
+    const stored = await kt.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
+    if (stored) {
+      return Buffer.from(stored, "hex");
+    }
+    const key = randomBytes2(KEY_BYTES);
+    await kt.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, key.toString("hex"));
+    return key;
+  } catch {
+    return null;
+  }
+}
+function warnStderr(message) {
+  process.stderr.write(`${message}
+`);
+}
+function makeWarnOnce() {
+  const seen = /* @__PURE__ */ new Set();
+  return (message) => {
+    if (seen.has(message)) return;
+    seen.add(message);
+    warnStderr(message);
+  };
+}
+function atomicWriteFileSync(filePath, content) {
+  const dir = dirname(filePath);
+  ensureStateDirForSecret(dir);
+  const tmp = join5(
+    dir,
+    `.${basename2(filePath)}.tmp-${process.pid}-${randomBytes2(6).toString("hex")}`
+  );
+  writeFileSync3(tmp, content, { encoding: "utf8", mode: 384, flag: "wx" });
+  renameSync2(tmp, filePath);
+}
+async function resolveKey(filePath, opts, warnOnce) {
+  if (opts.keyPolicy === "keychain-required") {
+    const key = await tryLoadFromKeytar();
+    if (!key) {
+      warnOnce(
+        `crypto-store: OS keychain unavailable \u2014 store at ${filePath} is disabled (no plaintext key file will be written)`
+      );
+      return null;
+    }
+    return key;
+  }
+  return loadOrCreateSharedKey();
+}
+function createEncryptedStore(filePath, opts) {
+  const warnOnce = makeWarnOnce();
+  async function read() {
+    const key = await resolveKey(filePath, opts, warnOnce);
+    if (!key) return opts.blank();
+    if (!existsSync4(filePath)) return opts.blank();
+    try {
+      const raw = readFileSync3(filePath, "utf8");
+      const blob = JSON.parse(raw);
+      const plaintext = decrypt(blob, key);
+      return JSON.parse(plaintext);
+    } catch {
+      warnOnce(`crypto-store: failed to decrypt ${filePath} \u2014 returning blank`);
+      return opts.blank();
+    }
+  }
+  async function write(value) {
+    const key = await resolveKey(filePath, opts, warnOnce);
+    if (!key) return;
+    const blob = encrypt(JSON.stringify(value), key);
+    atomicWriteFileSync(filePath, JSON.stringify(blob, null, 2));
+  }
+  return { read, write };
+}
+
+// src/founder-connector.ts
+function terminalhireDir() {
+  return process.env.TERMINALHIRE_DIR || join6(homedir4(), ".terminalhire");
+}
+function founderConnectorFilePath() {
+  return join6(terminalhireDir(), "founder-connector.enc");
+}
+function store() {
+  return createEncryptedStore(founderConnectorFilePath(), {
+    blank: () => ({ records: {} }),
+    keyPolicy: "keytar-first-file-fallback"
+  });
+}
+async function readAll() {
+  const data = await store().read();
+  const records = data?.records;
+  return records && typeof records === "object" ? { ...records } : {};
+}
+async function readFounderConnector(host) {
+  const record = (await readAll())[host];
+  if (!record || typeof record.token !== "string" || record.host !== host) return null;
+  return record;
+}
+async function clearFounderConnector(host) {
+  const records = await readAll();
+  delete records[host];
+  if (Object.keys(records).length > 0) {
+    await store().write({ records });
+    return;
+  }
+  const p = founderConnectorFilePath();
+  if (existsSync5(p)) rmSync3(p, { force: true });
+}
+var FounderMcpError = class extends Error {
+};
+async function callFounderTool(base, token, name, args, fetchImpl = globalThis.fetch) {
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  let res;
+  try {
+    res = await fetchImpl(`${base}/api/founder/mcp`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name, arguments: args }
+      }),
+      signal: AbortSignal.timeout(3e4)
+    });
+  } catch (error2) {
+    throw new FounderMcpError(
+      `could not reach ${base}: ${error2 instanceof Error ? error2.message : String(error2)}`
+    );
+  }
+  if (res.status === 401) {
+    return { unauthorized: true, isError: true, text: "", structured: {} };
+  }
+  if (!res.ok) throw new FounderMcpError(`${base} answered ${res.status}`);
+  const body = await res.json().catch(() => null);
+  const error = body?.["error"];
+  if (error) {
+    throw new FounderMcpError(typeof error.message === "string" ? error.message : "protocol error");
+  }
+  const raw = body?.["result"];
+  if (typeof raw !== "object" || raw === null) {
+    throw new FounderMcpError(`${base} sent a response this CLI cannot read`);
+  }
+  const result = raw;
+  const content = Array.isArray(result["content"]) ? result["content"] : [];
+  const first = content[0];
+  return {
+    unauthorized: false,
+    isError: result["isError"] === true,
+    text: typeof first?.text === "string" ? first.text : "",
+    structured: typeof result["structuredContent"] === "object" && result["structuredContent"] !== null ? result["structuredContent"] : {}
+  };
+}
+
 // bin/jpi-post.js
 var API_URL = resolveApiBase();
+function connectorBase() {
+  try {
+    return resolveOAuthBase();
+  } catch {
+    return null;
+  }
+}
 var VALUE_FLAGS = /* @__PURE__ */ new Set([
   "title",
   "symptom",
@@ -630,7 +944,11 @@ var VALUE_FLAGS = /* @__PURE__ */ new Set([
   "command",
   "output",
   "output-file",
-  "with-context"
+  "with-context",
+  "price",
+  "outcome",
+  "scope",
+  "acceptance"
 ]);
 function parsePostArgs(argv) {
   const flags = {};
@@ -673,15 +991,15 @@ function ownerRepo(remote) {
 }
 function detectStack(cwd) {
   const stack = [];
-  if (existsSync2(join3(cwd, "package.json"))) stack.push("node");
-  if (existsSync2(join3(cwd, "next.config.js")) || existsSync2(join3(cwd, "next.config.mjs"))) {
+  if (existsSync6(join7(cwd, "package.json"))) stack.push("node");
+  if (existsSync6(join7(cwd, "next.config.js")) || existsSync6(join7(cwd, "next.config.mjs"))) {
     stack.push("next.js");
   }
-  if (existsSync2(join3(cwd, "pyproject.toml")) || existsSync2(join3(cwd, "requirements.txt"))) {
+  if (existsSync6(join7(cwd, "pyproject.toml")) || existsSync6(join7(cwd, "requirements.txt"))) {
     stack.push("python");
   }
-  if (existsSync2(join3(cwd, "Cargo.toml"))) stack.push("rust");
-  if (existsSync2(join3(cwd, "go.mod"))) stack.push("go");
+  if (existsSync6(join7(cwd, "Cargo.toml"))) stack.push("rust");
+  if (existsSync6(join7(cwd, "go.mod"))) stack.push("go");
   return stack;
 }
 function captureRepository(cwd = process.cwd()) {
@@ -724,9 +1042,9 @@ function captureRepository(cwd = process.cwd()) {
 function readFlagOrFile(flags, valueKey, fileKey) {
   if (typeof flags[fileKey] === "string") {
     try {
-      return { value: readFileSync2(flags[fileKey], "utf8"), failure: null };
+      return { value: readFileSync4(flags[fileKey], "utf8"), failure: null };
     } catch {
-      return { value: null, failure: `could not read ${basename2(flags[fileKey])}` };
+      return { value: null, failure: `could not read ${basename3(flags[fileKey])}` };
     }
   }
   return { value: typeof flags[valueKey] === "string" ? flags[valueKey] : null, failure: null };
@@ -765,11 +1083,15 @@ Usage:
   terminalhire post edit <draft-id> [--title "..."] [--symptom "..."] [--repo owner/name]
                          [--command "..."] [--output-file path] [--with-context "..."]
   terminalhire post submit <draft-id>
+  terminalhire post publish <server-draft-id> --price <usd> [--repo owner/name] [--title "..."]
+                            [--outcome "..."] [--scope "..."] [--acceptance "..."]
   terminalhire post list
   terminalhire post withdraw <draft-id>
 
-Draft, show, edit, list, and withdraw are local-only. Submit requires a human at
-an interactive terminal and creates an unowned web draft; the browser publishes it.`);
+Draft, show, edit, list, and withdraw are local-only. Submit and publish require a
+human at an interactive terminal. Without \`terminalhire setup\`, submit creates an
+unowned web draft and the browser publishes it. With a connector you approved to act
+for you, submit saves the draft to your account and publish puts it live here.`);
 }
 async function ask(question) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -860,34 +1182,128 @@ async function runSubmit(id) {
     process.exitCode = 1;
     return;
   }
-  let response;
-  try {
-    response = await fetch(`${API_URL}/api/founder/mcp`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: draft.id,
-        method: "tools/call",
-        params: { name: "draft_posting", arguments: prepared.posting }
-      }),
-      signal: AbortSignal.timeout(1e4)
-    });
-  } catch (error) {
-    throw new Error(`submit failed: ${error instanceof Error ? error.message : String(error)}`);
+  const base = connectorBase();
+  let connector = base ? await readFounderConnector(base) : null;
+  let result = await callFounderTool(
+    connector ? base : API_URL,
+    connector?.token ?? null,
+    "draft_posting",
+    prepared.posting
+  );
+  if (result.unauthorized && connector) {
+    await clearFounderConnector(base);
+    connector = null;
+    console.log(
+      "\n  The server no longer accepts this terminal\u2019s connector, so it was removed. Sending the draft\n  without it; run `terminalhire setup` to connect again."
+    );
+    result = await callFounderTool(API_URL, null, "draft_posting", prepared.posting);
   }
-  if (!response.ok) throw new Error(`submit failed: server returned ${response.status}`);
-  const body = await response.json();
-  if (body?.error) throw new Error(`submit failed: ${body.error.message ?? "protocol error"}`);
-  if (body?.result?.isError) {
-    throw new Error(body.result.content?.[0]?.text ?? "server refused the draft");
-  }
-  const text = body?.result?.content?.[0]?.text;
-  if (typeof text !== "string") throw new Error("submit failed: server returned no confirmation");
-  console.log(`
-${text}
+  if (result.unauthorized) throw new Error("the server refused the draft (401)");
+  if (result.isError) throw new Error(result.text || "server refused the draft");
+  const draftId = typeof result.structured.draftId === "string" ? result.structured.draftId : null;
+  const confirmUrl = typeof result.structured.confirmUrl === "string" ? result.structured.confirmUrl : null;
+  if (!draftId && !result.text) throw new Error("submit failed: server returned no confirmation");
+  console.log("\n  Draft saved. Nothing is visible to developers until it is published.");
+  if (connector?.canWrite && draftId) {
+    console.log(`  Publish it from here: terminalhire post publish ${draftId} --price <usd>`);
+    if (confirmUrl) console.log(`  Or review and confirm it in the browser: ${confirmUrl}
 `);
+    return;
+  }
+  if (confirmUrl) console.log(`  Review and confirm it here: ${confirmUrl}`);
+  else console.log(`
+${result.text}`);
   console.log("  The posting is still not public. Open the link, sign in, review, and confirm it.\n");
+}
+function acknowledgmentFrom(structured) {
+  if (structured.kind === "full-tree") {
+    const { repoFullName, baseSha, noticeToken, noticeVersion } = structured;
+    if ([repoFullName, baseSha, noticeToken, noticeVersion].every((v) => typeof v === "string")) {
+      return {
+        fullTreeAckRepoFullName: repoFullName,
+        fullTreeAckBaseSha: baseSha,
+        fullTreeAckVersion: noticeVersion,
+        fullTreeAckNoticeToken: noticeToken
+      };
+    }
+    return null;
+  }
+  if (structured.kind === "slice") {
+    const { excludedCount, totalCount } = structured;
+    if (Number.isInteger(excludedCount) && Number.isInteger(totalCount)) {
+      return { excludedCount, totalCount };
+    }
+  }
+  return null;
+}
+async function runPublish(draftId, flags) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    console.error("  Refused \u2014 publish requires a human at an interactive terminal. Nothing was sent.\n");
+    process.exitCode = 1;
+    return;
+  }
+  const base = connectorBase();
+  const connector = base ? await readFounderConnector(base) : null;
+  if (!connector) {
+    throw new Error("publishing from the terminal needs a connector; run `terminalhire setup` first");
+  }
+  if (!connector.canWrite) {
+    throw new Error(
+      "this connector was approved without \u201Cact on my behalf\u201D; run `terminalhire setup --reconnect` and tick it"
+    );
+  }
+  const price = Number(flags.price);
+  if (!Number.isInteger(price) || price <= 0) throw new Error("publish needs --price in whole US dollars");
+  const repo = typeof flags.repo === "string" ? flags.repo.trim() : captureRepository().repo;
+  if (!repo) throw new Error("publish needs --repo owner/name (none detected from this directory)");
+  const args = { draftId, repoFullName: repo, priceUsd: price };
+  if (typeof flags.title === "string") args.title = flags.title;
+  const brief = {};
+  for (const key of ["outcome", "scope", "acceptance"]) {
+    if (typeof flags[key] === "string" && flags[key].trim()) brief[key] = flags[key];
+  }
+  if (Object.keys(brief).length) args.publicBrief = brief;
+  const first = await callFounderTool(base, connector.token, "confirm_posting", args);
+  if (first.unauthorized) throw new Error("the server no longer accepts this connector; run `terminalhire setup`");
+  if (first.isError || first.structured.refused) {
+    console.error(`
+  ${first.text}
+`);
+    process.exitCode = 1;
+    return;
+  }
+  if (first.structured.awaitingAcknowledgement !== true) {
+    console.log(`
+  ${first.text}
+`);
+    return;
+  }
+  const ack = acknowledgmentFrom(first.structured);
+  if (!ack) throw new Error("the server asked for an acknowledgment this CLI does not recognise; nothing was published");
+  const notice = first.structured.personNotice;
+  if (typeof notice !== "string" || notice.trim() === "") {
+    throw new Error("the server sent no notice to show you; nothing was published");
+  }
+  console.log(`
+${notice.trim()}
+`);
+  const answer = await ask("  Type yes to publish on these terms: ");
+  if (answer !== "yes") {
+    console.log("\n  Not published. The draft is unchanged.\n");
+    return;
+  }
+  const second = await callFounderTool(base, connector.token, "confirm_posting", { ...args, ...ack });
+  if (second.unauthorized) throw new Error("the server no longer accepts this connector; run `terminalhire setup`");
+  if (second.isError || second.structured.refused || second.structured.awaitingAcknowledgement) {
+    console.error(`
+  ${second.text}
+`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`
+  ${second.text}
+`);
 }
 async function run() {
   try {
@@ -932,6 +1348,7 @@ async function run() {
       return;
     }
     if (verb === "submit") return await runSubmit(id);
+    if (verb === "publish") return await runPublish(id, flags);
     throw new Error(`unknown verb: ${verb}`);
   } catch (error) {
     console.error(`terminalhire post: ${error instanceof Error ? error.message : String(error)}`);
@@ -939,6 +1356,7 @@ async function run() {
   }
 }
 export {
+  acknowledgmentFrom,
   captureRepository,
   parsePostArgs,
   run
