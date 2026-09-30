@@ -15565,6 +15565,17 @@ var init_payout_split = __esm({
   }
 });
 
+// bin/review-mode-copy.js
+var POSTER_REVIEWED, CLAIMANT_NOTICE, HISTORY_LINE;
+var init_review_mode_copy = __esm({
+  "bin/review-mode-copy.js"() {
+    "use strict";
+    POSTER_REVIEWED = "poster";
+    CLAIMANT_NOTICE = "The poster reviews this work by hand. We don't run tests on it.";
+    HISTORY_LINE = "Submitted for the poster's review.";
+  }
+});
+
 // src/repo-experience.ts
 var repo_experience_exports = {};
 __export(repo_experience_exports, {
@@ -16451,6 +16462,9 @@ ${i + 1}. ${linkTitle(job.title, job.url)} [${ref}]`);
   );
   const marker = projectMarkerLine(b);
   if (marker) console.log(`   ${marker}`);
+  if (b.bountySource === "founder" && b.reviewMode === POSTER_REVIEWED) {
+    console.log(`   ${CLAIMANT_NOTICE}`);
+  }
   if (reason) console.log(`   ${reason}`);
   if (continuityNote) console.log(`   ${continuityNote}`);
   if (b.publicSummary) {
@@ -16706,6 +16720,7 @@ var init_jpi_bounties = __esm({
     init_index_revalidate();
     init_sanitize();
     init_api_base();
+    init_review_mode_copy();
     init_founder_pin();
     TERMINALHIRE_DIR12 = process.env.TERMINALHIRE_DIR || join26(homedir20(), ".terminalhire");
     INDEX_CACHE_FILE3 = join26(TERMINALHIRE_DIR12, "index-cache.json");
@@ -45527,6 +45542,7 @@ __export(jpi_claim_exports, {
   resolveBounty: () => resolveBounty,
   resolveDeliveryDir: () => resolveDeliveryDir,
   resolveSubmitWorktree: () => resolveSubmitWorktree,
+  reviewModeLine: () => reviewModeLine,
   reviseRecoveryCommand: () => reviseRecoveryCommand,
   revokeFailureAction: () => revokeFailureAction,
   run: () => run7,
@@ -45994,8 +46010,14 @@ function extractClaimableFields(job) {
     // poster saw. Null when the index carries none.
     runRequirements: b.runRequirements && typeof b.runRequirements === "object" ? b.runRequirements : null,
     // TERM-1308. Present only when the index row carries them; no key otherwise.
-    ...b.bountySource === "founder" ? baselineFields(b) : {}
+    ...b.bountySource === "founder" ? baselineFields(b) : {},
+    // TERM-1344. The index carries `reviewMode` only for a poster-reviewed posting; any
+    // other value is dropped rather than carried, the same as a malformed baseline field.
+    ...b.bountySource === "founder" && b.reviewMode === POSTER_REVIEWED ? { reviewMode: POSTER_REVIEWED } : {}
   };
+}
+function reviewModeLine(b) {
+  return b?.reviewMode === POSTER_REVIEWED ? CLAIMANT_NOTICE : null;
 }
 function parseGitHubUrl(url) {
   const m = String(url ?? "").match(/github\.com\/([^/]+)\/([^/]+)\/(?:issues|pull)\/(\d+)/);
@@ -46602,7 +46624,7 @@ async function resolveBounty(arg) {
     if (freshPool) job = findByShortRefInPool(freshPool, arg);
   }
   if (job) {
-    let testBudgetMinutes, baselineStatus, baselineSha;
+    let testBudgetMinutes, baselineStatus, baselineSha, reviewMode;
     ({
       bountyId,
       title,
@@ -46616,12 +46638,15 @@ async function resolveBounty(arg) {
       runRequirements,
       testBudgetMinutes,
       baselineStatus,
-      baselineSha
+      baselineSha,
+      reviewMode
     } = extractClaimableFields(job));
     baseline = {
       ...testBudgetMinutes === void 0 ? {} : { testBudgetMinutes },
       ...baselineStatus === void 0 ? {} : { baselineStatus },
-      ...baselineSha === void 0 ? {} : { baselineSha }
+      ...baselineSha === void 0 ? {} : { baselineSha },
+      // TERM-1344. Rides with the baseline fields: index-only, and no key when absent.
+      ...reviewMode === void 0 ? {} : { reviewMode }
     };
     indexNativeId = bountyId;
   } else {
@@ -47381,6 +47406,8 @@ async function cmdPreview(arg, { json } = {}) {
         contested: isContested(b),
         // TERM-1308. The posting's test budget and baseline, only when the index carried them.
         ...baselineFields(b),
+        // TERM-1344. Only for a poster-reviewed posting; absent means tests.
+        ...b.reviewMode === POSTER_REVIEWED ? { reviewMode: POSTER_REVIEWED } : {},
         // Absent on a founder posting — see the scan above. A consumer must read
         // "no policy key" as "no policy step exists here", never as "clean".
         ...policy ? {
@@ -47411,8 +47438,8 @@ async function cmdPreview(arg, { json } = {}) {
   console.log(fmtOpenPRsLine(b));
   const previewContested = fmtContestedWarning(b);
   if (previewContested) console.log(previewContested);
-  const previewBaseline = baselineLine(b);
-  if (previewBaseline) console.log(`  tests:  ${previewBaseline}`);
+  const previewTests = reviewModeLine(b) ?? baselineLine(b);
+  if (previewTests) console.log(`  tests:  ${previewTests}`);
   if (policy) printPolicySection(policy);
   if (process.stdout.isTTY) {
     try {
@@ -48668,7 +48695,8 @@ function renderRunView(run32, message2, extra = {}) {
   const rateLimitCap = extra.rateLimitCap ?? run32.rateLimitCap ?? 5;
   const rateLimitCount = extra.rateLimitCount ?? run32.rateLimitCount;
   if (claimState) {
-    lines.push(`  state:      ${terminalSafeInline(claimState)}`);
+    const stateText = claimState === "poster-review" ? HISTORY_LINE : terminalSafeInline(claimState);
+    lines.push(`  state:      ${stateText}`);
   }
   if (unverifiedCause) {
     lines.push(`  cause:      ${terminalSafeInline(unverifiedCause)}`);
@@ -48714,7 +48742,8 @@ function renderClaimHistory(attempts, timeline) {
   for (const a of runs) {
     const sha = a.commitSha ? String(a.commitSha).slice(0, 10) : "";
     const jobs = Array.isArray(a.failingJobs) && a.failingJobs.length > 0 ? ` \u2014 ${a.failingJobs.map(terminalSafeInline).join(", ")}` : "";
-    const outcome = a.conclusion ? `checks ${terminalSafeInline(a.conclusion)}${jobs}` : a.status === "no-ci" ? "no checks ran" : "checks running";
+    const note = typeof a.note === "string" ? terminalSafeInline(a.note).trim() : "";
+    const outcome = a.conclusion ? `checks ${terminalSafeInline(a.conclusion)}${jobs}` : note !== "" ? note : a.status === "no-ci" ? "no checks ran" : "checks running";
     lines.push(`  attempt ${a.attemptNumber}  ${sha}  ${outcome}  ${shortWhen(a.at)}`);
   }
   for (const e of told) {
@@ -51093,6 +51122,7 @@ var init_jpi_claim = __esm({
     init_claim_push_bg();
     init_founder_verdict_sync();
     init_founder_note_sync();
+    init_review_mode_copy();
     TERMINALHIRE_DIR17 = process.env.TERMINALHIRE_DIR || join46(homedir26(), ".terminalhire");
     INDEX_CACHE_FILE5 = join46(TERMINALHIRE_DIR17, "index-cache.json");
     CLAIM_PUSH_MARKER = join46(TERMINALHIRE_DIR17, "claim-push.json");

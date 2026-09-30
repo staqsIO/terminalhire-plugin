@@ -40197,6 +40197,13 @@ async function syncFounderVerdicts({
 
 // bin/jpi-claim.js
 init_founder_note_sync();
+
+// bin/review-mode-copy.js
+var POSTER_REVIEWED = "poster";
+var CLAIMANT_NOTICE = "The poster reviews this work by hand. We don't run tests on it.";
+var HISTORY_LINE = "Submitted for the poster's review.";
+
+// bin/jpi-claim.js
 var TERMINALHIRE_DIR11 = process.env.TERMINALHIRE_DIR || join31(homedir14(), ".terminalhire");
 var INDEX_CACHE_FILE2 = join31(TERMINALHIRE_DIR11, "index-cache.json");
 var CLAIM_PUSH_MARKER = join31(TERMINALHIRE_DIR11, "claim-push.json");
@@ -40666,8 +40673,14 @@ function extractClaimableFields(job) {
     // poster saw. Null when the index carries none.
     runRequirements: b.runRequirements && typeof b.runRequirements === "object" ? b.runRequirements : null,
     // TERM-1308. Present only when the index row carries them; no key otherwise.
-    ...b.bountySource === "founder" ? baselineFields(b) : {}
+    ...b.bountySource === "founder" ? baselineFields(b) : {},
+    // TERM-1344. The index carries `reviewMode` only for a poster-reviewed posting; any
+    // other value is dropped rather than carried, the same as a malformed baseline field.
+    ...b.bountySource === "founder" && b.reviewMode === POSTER_REVIEWED ? { reviewMode: POSTER_REVIEWED } : {}
   };
+}
+function reviewModeLine(b) {
+  return b?.reviewMode === POSTER_REVIEWED ? CLAIMANT_NOTICE : null;
 }
 function parseGitHubUrl(url) {
   const m = String(url ?? "").match(/github\.com\/([^/]+)\/([^/]+)\/(?:issues|pull)\/(\d+)/);
@@ -41285,7 +41298,7 @@ async function resolveBounty(arg) {
     if (freshPool) job = findByShortRefInPool(freshPool, arg);
   }
   if (job) {
-    let testBudgetMinutes, baselineStatus, baselineSha;
+    let testBudgetMinutes, baselineStatus, baselineSha, reviewMode;
     ({
       bountyId,
       title,
@@ -41299,12 +41312,15 @@ async function resolveBounty(arg) {
       runRequirements,
       testBudgetMinutes,
       baselineStatus,
-      baselineSha
+      baselineSha,
+      reviewMode
     } = extractClaimableFields(job));
     baseline = {
       ...testBudgetMinutes === void 0 ? {} : { testBudgetMinutes },
       ...baselineStatus === void 0 ? {} : { baselineStatus },
-      ...baselineSha === void 0 ? {} : { baselineSha }
+      ...baselineSha === void 0 ? {} : { baselineSha },
+      // TERM-1344. Rides with the baseline fields: index-only, and no key when absent.
+      ...reviewMode === void 0 ? {} : { reviewMode }
     };
     indexNativeId = bountyId;
   } else {
@@ -42089,6 +42105,8 @@ async function cmdPreview(arg, { json } = {}) {
         contested: isContested(b),
         // TERM-1308. The posting's test budget and baseline, only when the index carried them.
         ...baselineFields(b),
+        // TERM-1344. Only for a poster-reviewed posting; absent means tests.
+        ...b.reviewMode === POSTER_REVIEWED ? { reviewMode: POSTER_REVIEWED } : {},
         // Absent on a founder posting — see the scan above. A consumer must read
         // "no policy key" as "no policy step exists here", never as "clean".
         ...policy ? {
@@ -42119,8 +42137,8 @@ async function cmdPreview(arg, { json } = {}) {
   console.log(fmtOpenPRsLine(b));
   const previewContested = fmtContestedWarning(b);
   if (previewContested) console.log(previewContested);
-  const previewBaseline = baselineLine(b);
-  if (previewBaseline) console.log(`  tests:  ${previewBaseline}`);
+  const previewTests = reviewModeLine(b) ?? baselineLine(b);
+  if (previewTests) console.log(`  tests:  ${previewTests}`);
   if (policy) printPolicySection(policy);
   if (process.stdout.isTTY) {
     try {
@@ -43393,7 +43411,8 @@ function renderRunView(run2, message2, extra = {}) {
   const rateLimitCap = extra.rateLimitCap ?? run2.rateLimitCap ?? 5;
   const rateLimitCount = extra.rateLimitCount ?? run2.rateLimitCount;
   if (claimState) {
-    lines.push(`  state:      ${terminalSafeInline(claimState)}`);
+    const stateText = claimState === "poster-review" ? HISTORY_LINE : terminalSafeInline(claimState);
+    lines.push(`  state:      ${stateText}`);
   }
   if (unverifiedCause) {
     lines.push(`  cause:      ${terminalSafeInline(unverifiedCause)}`);
@@ -43452,7 +43471,8 @@ function renderClaimHistory(attempts, timeline) {
   for (const a of runs) {
     const sha = a.commitSha ? String(a.commitSha).slice(0, 10) : "";
     const jobs = Array.isArray(a.failingJobs) && a.failingJobs.length > 0 ? ` \u2014 ${a.failingJobs.map(terminalSafeInline).join(", ")}` : "";
-    const outcome = a.conclusion ? `checks ${terminalSafeInline(a.conclusion)}${jobs}` : a.status === "no-ci" ? "no checks ran" : "checks running";
+    const note = typeof a.note === "string" ? terminalSafeInline(a.note).trim() : "";
+    const outcome = a.conclusion ? `checks ${terminalSafeInline(a.conclusion)}${jobs}` : note !== "" ? note : a.status === "no-ci" ? "no checks ran" : "checks running";
     lines.push(`  attempt ${a.attemptNumber}  ${sha}  ${outcome}  ${shortWhen(a.at)}`);
   }
   for (const e of told) {
@@ -45944,6 +45964,7 @@ export {
   resolveBounty,
   resolveDeliveryDir,
   resolveSubmitWorktree,
+  reviewModeLine,
   reviseRecoveryCommand,
   revokeFailureAction,
   run,

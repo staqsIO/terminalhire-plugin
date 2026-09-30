@@ -12500,6 +12500,12 @@ function linkTitle(title, url) {
 
 // bin/jpi-bounties.js
 init_api_base();
+
+// bin/review-mode-copy.js
+var POSTER_REVIEWED = "poster";
+var CLAIMANT_NOTICE = "The poster reviews this work by hand. We don't run tests on it.";
+
+// bin/jpi-bounties.js
 init_founder_pin();
 var TERMINALHIRE_DIR7 = process.env.TERMINALHIRE_DIR || join13(homedir10(), ".terminalhire");
 var INDEX_CACHE_FILE2 = join13(TERMINALHIRE_DIR7, "index-cache.json");
@@ -12614,6 +12620,9 @@ ${i + 1}. ${linkTitle(job.title, job.url)} [${ref}]`);
   );
   const marker = projectMarkerLine(b);
   if (marker) console.log(`   ${marker}`);
+  if (b.bountySource === "founder" && b.reviewMode === POSTER_REVIEWED) {
+    console.log(`   ${CLAIMANT_NOTICE}`);
+  }
   if (reason) console.log(`   ${reason}`);
   if (continuityNote) console.log(`   ${continuityNote}`);
   if (b.publicSummary) {
