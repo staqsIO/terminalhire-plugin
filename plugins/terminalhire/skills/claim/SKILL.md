@@ -155,6 +155,8 @@ once the claim is `ready`. It prints the preflight card first; at a real termina
 asks y/N, in your session it proceeds, and for a posting the developer confirms their
 identity once in the browser before anything leaves the machine.
 
+If your change adds, removes or updates a dependency in package.json, include the updated package-lock.json (v2 or v3) or yarn.lock (v1) in the same patch. Without it, the install runs without its frozen-lockfile check.
+
 **Attaching your own screenshots (first-party postings only):** run the app and take the
 pictures that show the change with Playwright (the `browser_take_screenshot` tool, or
 `npx playwright screenshot <url> <file>`), or reuse the ones the `run` verb took (its

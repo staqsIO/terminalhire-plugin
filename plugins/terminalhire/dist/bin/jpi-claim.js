@@ -31049,7 +31049,8 @@ var init_result = __esm({
       "leakState",
       "venue",
       "refusalOrigin",
-      "stoppedAt"
+      "stoppedAt",
+      "installFrozen"
     ];
     RENDER_NONE = null;
     FIELD_VIEWS = {
@@ -31114,7 +31115,10 @@ var init_result = __esm({
       // side refused in words a developer reads.
       refusalOrigin: RENDER_NONE,
       // Only when the run did not pass: on a green run "the last step" is just the last step.
-      stoppedAt: (r) => r.stoppedAt === null || r.outcome === "completed" ? null : `last step    ${r.stoppedAt} (the last package script named in the output)`
+      stoppedAt: (r) => r.stoppedAt === null || r.outcome === "completed" ? null : `last step    ${r.stoppedAt} (the last package script named in the output)`,
+      // The run already prints the unfrozen note while it runs (`installUnfrozenNote`); this is
+      // the record of it for the worker and the intake.
+      installFrozen: RENDER_NONE
     };
   }
 });
@@ -35152,6 +35156,10 @@ function nodeInstallCommand(repo) {
   return null;
 }
 function lockfileGaps(repo) {
+  const read = readLockfileGaps(repo);
+  return read === null || read.missing.length === 0 ? null : { lockfile: read.lockfile, missing: read.missing };
+}
+function readLockfileGaps(repo) {
   const pkg = readJsonObject(repo, "package.json");
   if (pkg === null)
     return null;
@@ -35178,7 +35186,7 @@ function lockfileGaps(repo) {
         missing.push(`${n}@${r} (${dir})`);
     }
   }
-  return missing.length === 0 ? null : { lockfile, missing };
+  return { lockfile, missing, rootRead: rootListing !== null };
 }
 function wantedDependencies(pkg) {
   const wanted = [];
@@ -37679,7 +37687,9 @@ function refusedRun(fields) {
     venue: null,
     refusalOrigin: fields.origin,
     // No test step ran, so there is no output to read a step from.
-    stoppedAt: null
+    stoppedAt: null,
+    // Refused before any install step ran.
+    installFrozen: null
   };
 }
 function refusalOriginOf(refusal2) {
@@ -37763,7 +37773,29 @@ function installUnfrozenNote(spec) {
   const u = spec.installUnfrozen;
   if (u === void 0)
     return null;
-  return `${u.lockfile} does not list ${u.missing.join(", ")}, so the install ran as \`${String(spec.installCommand)}\` without its frozen-lockfile check. Regenerate ${u.lockfile} before merging.`;
+  return `${u.lockfile} does not list ${u.missing.join(", ")}, so the install ran as \`${String(spec.installCommand)}\` without its frozen-lockfile check. Include the updated ${u.lockfile} in the patch, or regenerate it before merging.`;
+}
+function isFrozenInstallCommand(command) {
+  const lead = /^(?:(?:sudo|time)\s+|env(?:\s+[A-Za-z_]\w*=\S*)*\s+)*/.exec(command)?.[0] ?? "";
+  const install = command.slice(lead.length).split(/;|&&|\|\|/)[0]?.trim() ?? "";
+  if (/^npm ci(\s|$)/.test(install))
+    return true;
+  if (/^(yarn|pnpm|bun)\b/.test(install) && /\s--frozen-lockfile(?=\s|$)/.test(install)) {
+    return true;
+  }
+  return /^yarn\b/.test(install) && /\s--immutable(?=\s|$)/.test(install);
+}
+function installFrozenFor(spec, install) {
+  if (install === null)
+    return null;
+  const launched = install.exitCode !== INSTALL_NEVER_STARTED && (install.exitCode !== null || install.timedOut);
+  if (!launched)
+    return null;
+  if (spec.runtime !== "node")
+    return null;
+  if (spec.installUnfrozen !== void 0)
+    return false;
+  return isFrozenInstallCommand(install.command);
 }
 async function verifyWorkingDiff(req) {
   const ctx = {
@@ -38132,7 +38164,8 @@ async function runVerification(req, ctx) {
       // A run that reached a verdict was not refused, so neither side refused it.
       refusalOrigin: null,
       // Read from the full test output, not `outputTail`, which is an excerpt.
-      stoppedAt: readStoppedAt(verdict.test?.stdout ?? "", verdict.test?.stderr ?? "")
+      stoppedAt: readStoppedAt(verdict.test?.stdout ?? "", verdict.test?.stderr ?? ""),
+      installFrozen: installFrozenFor(spec, verdict.install)
     };
     let later = null;
     if (req.screenshots !== void 0) {
@@ -38331,7 +38364,7 @@ async function prepareBaseTree(o) {
     throw err;
   }
 }
-var ThRunError, OUTPUT_TAIL_BYTES, LOCKFILE_READ_CAP, FULL_COMMIT_ID, ALLOWED_URL_SCHEMES, SCP_STYLE, URL_SCHEME, WINDOWS_ABSOLUTE, UNC_PATH, TRANSPORT_REASON, SHA_REASON, FULL_SHA, MIN_GIT_VERSION_FOR_END_OF_OPTIONS, CloneUnavailableError, GIT_ENV_ALLOWLIST, credentialFreeHomeDir, SSH_ISOLATION_ARGS, WITHHELD_SEGMENT, UNPARSEABLE_TARGET, DEFERRED_GATE_TIMEOUT_MS, FAILURE_LINE, REDACTED_TARGET_REPO, REDACTED_TARGET_SHA;
+var ThRunError, OUTPUT_TAIL_BYTES, LOCKFILE_READ_CAP, FULL_COMMIT_ID, ALLOWED_URL_SCHEMES, SCP_STYLE, URL_SCHEME, WINDOWS_ABSOLUTE, UNC_PATH, TRANSPORT_REASON, SHA_REASON, FULL_SHA, MIN_GIT_VERSION_FOR_END_OF_OPTIONS, CloneUnavailableError, GIT_ENV_ALLOWLIST, credentialFreeHomeDir, SSH_ISOLATION_ARGS, WITHHELD_SEGMENT, UNPARSEABLE_TARGET, DEFERRED_GATE_TIMEOUT_MS, FAILURE_LINE, REDACTED_TARGET_REPO, REDACTED_TARGET_SHA, INSTALL_NEVER_STARTED;
 var init_thrun = __esm({
   "../../packages/envrun/dist/thrun.js"() {
     "use strict";
@@ -38420,6 +38453,7 @@ var init_thrun = __esm({
     FAILURE_LINE = /^(?:[ \t]*(?:not ok |FAILED |FAIL )|E {3}|# fail [1-9])/m;
     REDACTED_TARGET_REPO = "(refused before the target was accepted)";
     REDACTED_TARGET_SHA = "(refused)";
+    INSTALL_NEVER_STARTED = 125;
   }
 });
 
@@ -39321,6 +39355,7 @@ __export(dist_exports, {
   imageRepo: () => imageRepo,
   imageVariantFor: () => imageVariantFor,
   installCommandFor: () => installCommandFor,
+  installFrozenFor: () => installFrozenFor,
   installLocalMigrationTooling: () => installLocalMigrationTooling,
   installUnfrozenNote: () => installUnfrozenNote,
   isBookkeepingTable: () => isBookkeepingTable,
@@ -44169,6 +44204,67 @@ async function uploadClaimScreenshots(intake, uploads) {
     );
   }
 }
+var DEPENDENCY_SECTIONS2 = [
+  "dependencies",
+  "devDependencies",
+  "optionalDependencies",
+  "peerDependencies"
+];
+var SENDABLE_LOCKFILES = [
+  ["package-lock.json", "npm install"],
+  ["yarn.lock", "yarn install"]
+];
+async function packageJsonAt(wt, rev, path5) {
+  let text;
+  try {
+    ({ stdout: text } = await pExecFile("git", ["-C", wt, "show", `${rev}:${path5}`], {
+      shell: false,
+      maxBuffer: 16 * 1024 * 1024
+    }));
+  } catch {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(String(text));
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function sectionKey(pkg, section) {
+  const value = pkg[section];
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return JSON.stringify(value ?? null);
+  }
+  return JSON.stringify(Object.keys(value).sort().map((k) => [k, value[k]]));
+}
+async function patchChangesDependencies(wt, base, touched) {
+  for (const path5 of touched) {
+    if (path5.split("/").pop() !== "package.json") continue;
+    const before = await packageJsonAt(wt, base, path5);
+    const after = await packageJsonAt(wt, "HEAD", path5);
+    if (before === null || after === null) continue;
+    if (DEPENDENCY_SECTIONS2.some((s) => sectionKey(before, s) !== sectionKey(after, s))) return true;
+  }
+  return false;
+}
+async function dependencyLockfileWarnings(wt, base, touched) {
+  if (!await patchChangesDependencies(wt, base, touched)) return [];
+  const warnings = [];
+  for (const [lockfile, cmd] of SENDABLE_LOCKFILES) {
+    let present;
+    try {
+      present = (await sh("git", ["-C", wt, "ls-tree", "--name-only", base, "--", lockfile])).trim() === lockfile;
+    } catch {
+      present = false;
+    }
+    if (!present || touched.includes(lockfile)) continue;
+    warnings.push(
+      `  \u26A0 package.json changes dependencies, but ${lockfile} is not in this patch. The run will install without its frozen-lockfile check. Run \`${cmd}\` and commit ${lockfile} to keep it frozen.`
+    );
+  }
+  return warnings;
+}
 async function submitFounderPatch({ claims, claim, id, wt, flags }) {
   let roots;
   try {
@@ -44219,6 +44315,9 @@ async function submitFounderPatch({ claims, claim, id, wt, flags }) {
     );
     process.exit(1);
   }
+  const lockfileWarnings = await dependencyLockfileWarnings(wt, base, touched);
+  if (lockfileWarnings.length > 0) console.log(`
+${lockfileWarnings.join("\n")}`);
   const authorName = await sh("git", ["-C", wt, "log", "-1", "--format=%an"]);
   const authorEmail = await sh("git", ["-C", wt, "log", "-1", "--format=%ae"]);
   const shots = flags.screenshots === void 0 ? null : loadClaimScreenshots(flags.screenshots);

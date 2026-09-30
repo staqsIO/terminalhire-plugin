@@ -36824,7 +36824,8 @@ var init_result = __esm({
       "leakState",
       "venue",
       "refusalOrigin",
-      "stoppedAt"
+      "stoppedAt",
+      "installFrozen"
     ];
     RENDER_NONE = null;
     FIELD_VIEWS = {
@@ -36889,7 +36890,10 @@ var init_result = __esm({
       // side refused in words a developer reads.
       refusalOrigin: RENDER_NONE,
       // Only when the run did not pass: on a green run "the last step" is just the last step.
-      stoppedAt: (r) => r.stoppedAt === null || r.outcome === "completed" ? null : `last step    ${r.stoppedAt} (the last package script named in the output)`
+      stoppedAt: (r) => r.stoppedAt === null || r.outcome === "completed" ? null : `last step    ${r.stoppedAt} (the last package script named in the output)`,
+      // The run already prints the unfrozen note while it runs (`installUnfrozenNote`); this is
+      // the record of it for the worker and the intake.
+      installFrozen: RENDER_NONE
     };
   }
 });
@@ -40927,6 +40931,10 @@ function nodeInstallCommand(repo) {
   return null;
 }
 function lockfileGaps(repo) {
+  const read = readLockfileGaps(repo);
+  return read === null || read.missing.length === 0 ? null : { lockfile: read.lockfile, missing: read.missing };
+}
+function readLockfileGaps(repo) {
   const pkg = readJsonObject(repo, "package.json");
   if (pkg === null)
     return null;
@@ -40953,7 +40961,7 @@ function lockfileGaps(repo) {
         missing.push(`${n}@${r} (${dir})`);
     }
   }
-  return missing.length === 0 ? null : { lockfile, missing };
+  return { lockfile, missing, rootRead: rootListing !== null };
 }
 function wantedDependencies(pkg) {
   const wanted = [];
@@ -43454,7 +43462,9 @@ function refusedRun(fields) {
     venue: null,
     refusalOrigin: fields.origin,
     // No test step ran, so there is no output to read a step from.
-    stoppedAt: null
+    stoppedAt: null,
+    // Refused before any install step ran.
+    installFrozen: null
   };
 }
 function refusalOriginOf(refusal2) {
@@ -43538,7 +43548,29 @@ function installUnfrozenNote(spec) {
   const u = spec.installUnfrozen;
   if (u === void 0)
     return null;
-  return `${u.lockfile} does not list ${u.missing.join(", ")}, so the install ran as \`${String(spec.installCommand)}\` without its frozen-lockfile check. Regenerate ${u.lockfile} before merging.`;
+  return `${u.lockfile} does not list ${u.missing.join(", ")}, so the install ran as \`${String(spec.installCommand)}\` without its frozen-lockfile check. Include the updated ${u.lockfile} in the patch, or regenerate it before merging.`;
+}
+function isFrozenInstallCommand(command) {
+  const lead = /^(?:(?:sudo|time)\s+|env(?:\s+[A-Za-z_]\w*=\S*)*\s+)*/.exec(command)?.[0] ?? "";
+  const install = command.slice(lead.length).split(/;|&&|\|\|/)[0]?.trim() ?? "";
+  if (/^npm ci(\s|$)/.test(install))
+    return true;
+  if (/^(yarn|pnpm|bun)\b/.test(install) && /\s--frozen-lockfile(?=\s|$)/.test(install)) {
+    return true;
+  }
+  return /^yarn\b/.test(install) && /\s--immutable(?=\s|$)/.test(install);
+}
+function installFrozenFor(spec, install) {
+  if (install === null)
+    return null;
+  const launched = install.exitCode !== INSTALL_NEVER_STARTED && (install.exitCode !== null || install.timedOut);
+  if (!launched)
+    return null;
+  if (spec.runtime !== "node")
+    return null;
+  if (spec.installUnfrozen !== void 0)
+    return false;
+  return isFrozenInstallCommand(install.command);
 }
 async function verifyWorkingDiff(req) {
   const ctx = {
@@ -43907,7 +43939,8 @@ async function runVerification(req, ctx) {
       // A run that reached a verdict was not refused, so neither side refused it.
       refusalOrigin: null,
       // Read from the full test output, not `outputTail`, which is an excerpt.
-      stoppedAt: readStoppedAt(verdict.test?.stdout ?? "", verdict.test?.stderr ?? "")
+      stoppedAt: readStoppedAt(verdict.test?.stdout ?? "", verdict.test?.stderr ?? ""),
+      installFrozen: installFrozenFor(spec, verdict.install)
     };
     let later = null;
     if (req.screenshots !== void 0) {
@@ -44106,7 +44139,7 @@ async function prepareBaseTree(o) {
     throw err;
   }
 }
-var ThRunError, OUTPUT_TAIL_BYTES, LOCKFILE_READ_CAP, FULL_COMMIT_ID, ALLOWED_URL_SCHEMES, SCP_STYLE, URL_SCHEME, WINDOWS_ABSOLUTE, UNC_PATH, TRANSPORT_REASON, SHA_REASON, FULL_SHA, MIN_GIT_VERSION_FOR_END_OF_OPTIONS, CloneUnavailableError, GIT_ENV_ALLOWLIST, credentialFreeHomeDir, SSH_ISOLATION_ARGS, WITHHELD_SEGMENT, UNPARSEABLE_TARGET, DEFERRED_GATE_TIMEOUT_MS, FAILURE_LINE, REDACTED_TARGET_REPO, REDACTED_TARGET_SHA;
+var ThRunError, OUTPUT_TAIL_BYTES, LOCKFILE_READ_CAP, FULL_COMMIT_ID, ALLOWED_URL_SCHEMES, SCP_STYLE, URL_SCHEME, WINDOWS_ABSOLUTE, UNC_PATH, TRANSPORT_REASON, SHA_REASON, FULL_SHA, MIN_GIT_VERSION_FOR_END_OF_OPTIONS, CloneUnavailableError, GIT_ENV_ALLOWLIST, credentialFreeHomeDir, SSH_ISOLATION_ARGS, WITHHELD_SEGMENT, UNPARSEABLE_TARGET, DEFERRED_GATE_TIMEOUT_MS, FAILURE_LINE, REDACTED_TARGET_REPO, REDACTED_TARGET_SHA, INSTALL_NEVER_STARTED;
 var init_thrun = __esm({
   "../../packages/envrun/dist/thrun.js"() {
     "use strict";
@@ -44195,6 +44228,7 @@ var init_thrun = __esm({
     FAILURE_LINE = /^(?:[ \t]*(?:not ok |FAILED |FAIL )|E {3}|# fail [1-9])/m;
     REDACTED_TARGET_REPO = "(refused before the target was accepted)";
     REDACTED_TARGET_SHA = "(refused)";
+    INSTALL_NEVER_STARTED = 125;
   }
 });
 
@@ -45096,6 +45130,7 @@ __export(dist_exports, {
   imageRepo: () => imageRepo,
   imageVariantFor: () => imageVariantFor,
   installCommandFor: () => installCommandFor,
+  installFrozenFor: () => installFrozenFor,
   installLocalMigrationTooling: () => installLocalMigrationTooling,
   installUnfrozenNote: () => installUnfrozenNote,
   isBookkeepingTable: () => isBookkeepingTable,
@@ -49429,6 +49464,57 @@ async function uploadClaimScreenshots(intake, uploads) {
     );
   }
 }
+async function packageJsonAt(wt, rev, path6) {
+  let text;
+  try {
+    ({ stdout: text } = await pExecFile("git", ["-C", wt, "show", `${rev}:${path6}`], {
+      shell: false,
+      maxBuffer: 16 * 1024 * 1024
+    }));
+  } catch {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(String(text));
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function sectionKey(pkg, section2) {
+  const value = pkg[section2];
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return JSON.stringify(value ?? null);
+  }
+  return JSON.stringify(Object.keys(value).sort().map((k) => [k, value[k]]));
+}
+async function patchChangesDependencies(wt, base, touched) {
+  for (const path6 of touched) {
+    if (path6.split("/").pop() !== "package.json") continue;
+    const before = await packageJsonAt(wt, base, path6);
+    const after = await packageJsonAt(wt, "HEAD", path6);
+    if (before === null || after === null) continue;
+    if (DEPENDENCY_SECTIONS2.some((s) => sectionKey(before, s) !== sectionKey(after, s))) return true;
+  }
+  return false;
+}
+async function dependencyLockfileWarnings(wt, base, touched) {
+  if (!await patchChangesDependencies(wt, base, touched)) return [];
+  const warnings = [];
+  for (const [lockfile, cmd] of SENDABLE_LOCKFILES) {
+    let present;
+    try {
+      present = (await sh("git", ["-C", wt, "ls-tree", "--name-only", base, "--", lockfile])).trim() === lockfile;
+    } catch {
+      present = false;
+    }
+    if (!present || touched.includes(lockfile)) continue;
+    warnings.push(
+      `  \u26A0 package.json changes dependencies, but ${lockfile} is not in this patch. The run will install without its frozen-lockfile check. Run \`${cmd}\` and commit ${lockfile} to keep it frozen.`
+    );
+  }
+  return warnings;
+}
 async function submitFounderPatch({ claims, claim, id, wt, flags }) {
   let roots;
   try {
@@ -49479,6 +49565,9 @@ async function submitFounderPatch({ claims, claim, id, wt, flags }) {
     );
     process.exit(1);
   }
+  const lockfileWarnings = await dependencyLockfileWarnings(wt, base, touched);
+  if (lockfileWarnings.length > 0) console.log(`
+${lockfileWarnings.join("\n")}`);
   const authorName = await sh("git", ["-C", wt, "log", "-1", "--format=%an"]);
   const authorEmail = await sh("git", ["-C", wt, "log", "-1", "--format=%ae"]);
   const shots = flags.screenshots === void 0 ? null : loadClaimScreenshots(flags.screenshots);
@@ -50988,7 +51077,7 @@ async function run7() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR17, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL6, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, CLAIM_SYNC_WRITE_TIMEOUT_MS, GH_API3, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, BASELINE_STATUSES, MIN_TEST_BUDGET_MINUTES, MAX_TEST_BUDGET_MINUTES, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, CLOSED_STATES, GH_SESSION_COOKIE4, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, OPENABLE_AGENTS, BRIEF_DIR, BRIEF_REL_PATH, VERIFY_REL_PATH, AGENTS_REL_PATH, BRIEF_EXCLUDE_LINE, PACK_SAFE_ID, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3, FOUNDER_POSTING_ID, CLAIM_SCREENSHOT_PUT_TIMEOUT_MS, CLAIM_RESOLUTION_REASONS, SETUP_FAILED_REQUIREMENTS, POSTING_LEVEL_RESOLUTION_REASONS, RESOLUTION_REASON_BLURB;
+var TERMINALHIRE_DIR17, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL6, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, CLAIM_SYNC_WRITE_TIMEOUT_MS, GH_API3, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, BASELINE_STATUSES, MIN_TEST_BUDGET_MINUTES, MAX_TEST_BUDGET_MINUTES, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, CLOSED_STATES, GH_SESSION_COOKIE4, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, OPENABLE_AGENTS, BRIEF_DIR, BRIEF_REL_PATH, VERIFY_REL_PATH, AGENTS_REL_PATH, BRIEF_EXCLUDE_LINE, PACK_SAFE_ID, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3, FOUNDER_POSTING_ID, CLAIM_SCREENSHOT_PUT_TIMEOUT_MS, DEPENDENCY_SECTIONS2, SENDABLE_LOCKFILES, CLAIM_RESOLUTION_REASONS, SETUP_FAILED_REQUIREMENTS, POSTING_LEVEL_RESOLUTION_REASONS, RESOLUTION_REASON_BLURB;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
@@ -51121,6 +51210,16 @@ var init_jpi_claim = __esm({
     CONTROL_CHARS3 = /[\u0000-\u001F\u007F-\u009F]/g;
     FOUNDER_POSTING_ID = /^fb_[A-Za-z0-9_-]{1,80}$/;
     CLAIM_SCREENSHOT_PUT_TIMEOUT_MS = 2e4;
+    DEPENDENCY_SECTIONS2 = [
+      "dependencies",
+      "devDependencies",
+      "optionalDependencies",
+      "peerDependencies"
+    ];
+    SENDABLE_LOCKFILES = [
+      ["package-lock.json", "npm install"],
+      ["yarn.lock", "yarn install"]
+    ];
     CLAIM_RESOLUTION_REASONS = [
       "not-my-stack",
       "out-of-time",
