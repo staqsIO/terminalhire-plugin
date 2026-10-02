@@ -434,7 +434,7 @@ function consentFilePath() {
   return join3(terminalhireDir2(), "decline-consent");
 }
 var DECLINE_CHOICES = [
-  { key: "1", reason: "price_low", label: "the price is too low for the work" },
+  { key: "1", reason: "price_low", label: "the price is too low for the task" },
   { key: "2", reason: "scope_unclear", label: "I can't tell what \u201Cdone\u201D means" },
   { key: "3", reason: "repo_risky", label: "no tests or CI \u2014 I could not check my own work" },
   { key: "4", reason: "not_my_stack", label: "not my stack" },

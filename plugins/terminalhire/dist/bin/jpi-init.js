@@ -10927,7 +10927,7 @@ async function run() {
   console.log("");
   console.log("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
   console.log("\u2502           terminalhire init \u2014 one-command onboarding            \u2502");
-  console.log("\u2502      Developer jobs and paid bounties in Claude Code            \u2502");
+  console.log("\u2502      Developer jobs and paid tasks in Claude Code               \u2502");
   console.log("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518");
   console.log("");
   console.log("This will:");
@@ -11076,7 +11076,7 @@ async function run() {
   console.log("");
   console.log("Step 6/7 \u2014 Register terminalhire as an MCP server (optional)");
   console.log("");
-  console.log("  Exposes your LOCAL matches (jobs, bounties, contribute, inbox counts) to");
+  console.log("  Exposes your LOCAL matches (jobs, paid tasks, contribute, inbox counts) to");
   console.log("  a host LLM \u2014 VS Code, Cursor, Codex, Gemini, Claude Code. Read-only, zero");
   console.log("  network egress. Detected host configs are backed up before any merge, and");
   console.log("  an existing unrelated MCP server is never touched. Preview snippets any");
@@ -11092,7 +11092,7 @@ async function run() {
   console.log("");
   console.log("Step 7/7 \u2014 Register th:// claim links (optional)");
   console.log("");
-  console.log('  Lets a "Claim this bounty" link from terminalhire.com open straight into');
+  console.log('  Lets a "Claim this paid task" link from terminalhire.com open straight into');
   console.log("  this terminal (one-time OS registration; macOS may show an Automation");
   console.log("  prompt the first time a link is opened). Nothing is sent anywhere \u2014 it");
   console.log("  only wires th://claim/<token> links on this machine to a local, read-only");

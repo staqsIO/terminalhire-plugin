@@ -13280,7 +13280,7 @@ function classifyEmptyStatus({ preFilterCount, postFilterCount, priced }) {
   return "empty";
 }
 async function getBounties({ quiet = false, offline = false, priced = PRICED_ONLY } = {}) {
-  if (!quiet) console.log(`Fetching bounty index from ${API_URL2}/api/index...`);
+  if (!quiet) console.log(`Fetching paid task index from ${API_URL2}/api/index...`);
   const index = offline ? readIndexCache2() : await fetchIndex2(quiet);
   if (offline && !index) return { status: "no-cache" };
   let bounties = (index.jobs ?? []).filter((j) => j.source === "bounty");
@@ -13832,12 +13832,12 @@ function runHubTui({
     function bountiesRows(result) {
       switch (result && result.status) {
         case "no-cache":
-          return ["No cached bounty index \u2014 run `terminalhire bounties` once to fetch it."];
+          return ["No cached paid task index \u2014 run `terminalhire bounties` once to fetch it."];
         case "empty":
-          return ["No bounties available right now. Check back through the day."];
+          return ["No paid tasks available right now. Check back through the day."];
         case "demoted":
           return [
-            "Paid bounties paused \u2014 run `bounties --priced` to view them. Try Contribute or Jobs."
+            "Paid tasks paused \u2014 run `bounties --priced` to view them. Try Contribute or Jobs."
           ];
         case "ok":
           return result.bounties.map((job) => {
@@ -13849,7 +13849,7 @@ function runHubTui({
             return `${amt} \xB7 ${sanitizeLine(job.title)} \u2014 ${repo}${contend}`;
           });
         default:
-          return ["No bounties to show."];
+          return ["No paid tasks to show."];
       }
     }
     function devsRows(result) {
@@ -13931,7 +13931,7 @@ function runHubTui({
       const jobsCount = listState.Jobs.loaded && !listState.Jobs.error && listState.Jobs.result && listState.Jobs.result.status === "ok" ? listState.Jobs.result.ranked.length : null;
       const jobsLine = !listState.Jobs.loaded ? "Jobs: Loading\u2026" : listState.Jobs.error ? "Jobs: could not load" : `Jobs: ${jobsCount ?? 0} matching roles`;
       const bountiesCount = listState.Bounties.loaded && !listState.Bounties.error && listState.Bounties.result && listState.Bounties.result.status === "ok" ? listState.Bounties.result.bounties.length : null;
-      const bountiesLine = !listState.Bounties.loaded ? "Bounties: Loading\u2026" : listState.Bounties.error ? "Bounties: could not load" : `Bounties: ${bountiesCount ?? 0} available`;
+      const bountiesLine = !listState.Bounties.loaded ? "Paid tasks: Loading\u2026" : listState.Bounties.error ? "Paid tasks: could not load" : `Paid tasks: ${bountiesCount ?? 0} available`;
       const claimsLine = !claimsState.loaded ? "Claims: Loading\u2026" : claimsState.error ? "Claims: could not load" : `Claims: ${claimsState.rows.filter((c2) => c2.state !== "merged" && c2.state !== "abandoned").length} active`;
       const spark = claimsState.loaded && !claimsState.error ? sparkline(claimsState.rows) : "";
       const unread = homeUnreadCount();
@@ -14018,7 +14018,7 @@ function runHubTui({
         if (st.loaded && !st.error && st.result && st.result.status === "ok") {
           if (name === "Jobs") return `${st.result.ranked.length} roles matching your profile`;
           if (name === "Bounties")
-            return `${st.result.bounties.length} bounties you could knock out`;
+            return `${st.result.bounties.length} paid tasks you could knock out`;
           if (name === "Devs")
             return `${st.result.results.length} matches in the builder directory`;
         }

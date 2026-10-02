@@ -306,7 +306,7 @@ async function run() {
     }
     console.log(`  lead: ${cfg.surfaceLead ?? "auto"}  (auto derives from your open postings)`);
     console.log(
-      `  founder-notify: ${cfg.founderBountyNotify ? "on" : "off"}  (OS ping when a paid posted bounty drops; default off)`
+      `  founder-notify: ${cfg.founderBountyNotify ? "on" : "off"}  (OS ping when a paid task drops; default off)`
     );
     console.log(`  config file: ${CONFIG_FILE2}`);
     console.log("");
@@ -324,9 +324,9 @@ async function run() {
     );
     console.log("    off  \u2014 no peer matching, no directory fetch, no signal (default)");
     console.log("");
-    console.log("  Posted bounty OS notify (--founder-notify on|off):");
-    console.log("    on   \u2014 ping when a NEW claimable posted bounty appears (TERM-228)");
-    console.log("    off  \u2014 no OS toast for posted bounties (default)");
+    console.log("  Paid task OS notify (--founder-notify on|off):");
+    console.log("    on   \u2014 ping when a NEW claimable paid task appears (TERM-228)");
+    console.log("    off  \u2014 no OS toast for paid tasks (default)");
     console.log("");
     return;
   }
@@ -376,7 +376,7 @@ async function run() {
         updateIndexCache2({ founderPaidOsNotified: { ids } });
         console.log(`  founder-notify set to: on`);
         console.log(
-          `  (seeded ${ids.length} existing open bounty id(s) \u2014 only NEW ones will ping)`
+          `  (seeded ${ids.length} existing open paid task id(s) \u2014 only NEW ones will ping)`
         );
       } catch {
         console.log(`  founder-notify set to: on`);

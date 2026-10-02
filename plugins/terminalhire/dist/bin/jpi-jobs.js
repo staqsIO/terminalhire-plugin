@@ -13076,7 +13076,7 @@ async function run() {
     if (bountyCount > 0) {
       console.log(
         `
-\u26A1 ${bountyCount} bount${bountyCount === 1 ? "y" : "ies"} you could knock out today \u2014 run: terminalhire bounties`
+\u26A1 ${bountyCount} paid task${bountyCount === 1 ? "" : "s"} you could knock out today \u2014 run: terminalhire bounties`
       );
     }
     if (!process.stdin.isTTY) {

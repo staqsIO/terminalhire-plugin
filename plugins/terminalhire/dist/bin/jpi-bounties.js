@@ -12269,7 +12269,7 @@ var init_jpi_decline = __esm({
     "use strict";
     GH_SESSION_COOKIE = "__jpi_gh_session";
     DECLINE_CHOICES = [
-      { key: "1", reason: "price_low", label: "the price is too low for the work" },
+      { key: "1", reason: "price_low", label: "the price is too low for the task" },
       { key: "2", reason: "scope_unclear", label: "I can't tell what \u201Cdone\u201D means" },
       { key: "3", reason: "repo_risky", label: "no tests or CI \u2014 I could not check my own work" },
       { key: "4", reason: "not_my_stack", label: "not my stack" },
@@ -12563,10 +12563,10 @@ var EFFORT_LABEL = {
 };
 function founderClaimBlurb(amountUSD, paidWork) {
   if (paidWork === false) {
-    return "Claim it from here \u2014 this posting records a credential for the work, not a payment. Take it for the credential, not the money.";
+    return "Claim it from here \u2014 this posting records a credential for the task, not a payment. Take it for the credential, not the money.";
   }
   if (paidWork !== true) {
-    return "Claim it from here \u2014 this listing is missing its payment status, so it is not safe to say whether the work pays. Try `terminalhire refresh`; if it is still missing, do not count on being paid for this one.";
+    return "Claim it from here \u2014 this listing is missing its payment status, so it is not safe to say whether the task pays. Try `terminalhire refresh`; if it is still missing, do not count on being paid for this one.";
   }
   let share = "";
   if (typeof amountUSD === "number" && Number.isFinite(amountUSD) && amountUSD > 0) {
@@ -12692,7 +12692,7 @@ function classifyEmptyStatus({ preFilterCount, postFilterCount, priced }) {
   return "empty";
 }
 async function getBounties({ quiet = false, offline = false, priced = PRICED_ONLY } = {}) {
-  if (!quiet) console.log(`Fetching bounty index from ${API_URL}/api/index...`);
+  if (!quiet) console.log(`Fetching paid task index from ${API_URL}/api/index...`);
   const index = offline ? readIndexCache() : await fetchIndex(quiet);
   if (offline && !index) return { status: "no-cache" };
   let bounties = (index.jobs ?? []).filter((j) => j.source === "bounty");
@@ -12753,7 +12753,7 @@ async function run() {
           console.log("\n\u26A1 Your TerminalHire postings\n");
           if (!rows.length) {
             console.log(
-              "  No current posting data. Run `terminalhire refresh`, or lead with work:"
+              "  No current posting data. Run `terminalhire refresh`, or lead with jobs and paid tasks:"
             );
             console.log("  terminalhire config set lead dev\n");
           } else {
@@ -12764,7 +12764,7 @@ async function run() {
             });
             console.log("\n  Review and act: https://terminalhire.com/dashboard?tab=postings");
             console.log(
-              "  Lead with developer bounties instead: terminalhire config set lead dev\n"
+              "  Lead with paid tasks for developers instead: terminalhire config set lead dev\n"
             );
           }
           return;
@@ -12775,13 +12775,13 @@ async function run() {
     const result = await getBounties();
     if (result.status === "empty") {
       console.log(
-        "\nNo bounties available right now. Try again later \u2014 supply refreshes through the day."
+        "\nNo paid tasks available right now. Try again later \u2014 supply refreshes through the day."
       );
       return;
     }
     if (result.status === "demoted") {
       console.log(
-        "\nPaid bounties are paused by default. Run `bounties --priced` to view them, or `terminalhire contribute` for merge-ready open-source work."
+        "\nPaid tasks are paused by default. Run `bounties --priced` to view them, or `terminalhire contribute` for merge-ready open-source work."
       );
       return;
     }
@@ -12796,7 +12796,7 @@ async function run() {
     }
     console.log(
       `
-\u26A1 ${bounties.length} bount${bounties.length === 1 ? "y" : "ies"} you could knock out` + (matchedCount ? ` \u2014 ${matchedCount} matched to your profile` : "") + ` (local rank \u2014 no data sent)
+\u26A1 ${bounties.length} paid task${bounties.length === 1 ? "" : "s"} you could knock out` + (matchedCount ? ` \u2014 ${matchedCount} matched to your profile` : "") + ` (local rank \u2014 no data sent)
 `
     );
     for (let i = 0; i < shown.length; i++) {
@@ -12827,14 +12827,14 @@ async function run() {
     if (!SHOW_ALL && bounties.length > shown.length) {
       console.log(
         `
-\u2026and ${bounties.length - shown.length} more \u2014 run with --all to see every bounty.`
+\u2026and ${bounties.length - shown.length} more \u2014 run with --all to see every paid task.`
       );
     }
     if (!process.stdin.isTTY) return;
     console.log("\n" + "\u2500".repeat(70));
     const pick = await prompt2(
       `
-Enter a number to open a bounty's claim page, d<number> to say why you're passing, or press Enter to exit: `
+Enter a number to open a paid task's claim page, d<number> to say why you're passing, or press Enter to exit: `
     );
     const declineMatch = /^d\s*(\d+)$/i.exec(pick.trim());
     if (declineMatch) {
@@ -12860,7 +12860,7 @@ Enter a number to open a bounty's claim page, d<number> to say why you're passin
     }
     console.log(
       `
-Open this to claim/work the bounty (you go straight to the source \u2014 we never touch payment):
+Open this to claim and work on the paid task (you go straight to the source \u2014 we never touch payment):
   ${sanitizeText(chosen.bounty?.claimUrl ?? chosen.url)}`
     );
   } catch (err) {
