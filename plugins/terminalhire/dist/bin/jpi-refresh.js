@@ -12392,10 +12392,10 @@ function buildSessionStaleLine(sessionStale, sessionHostMismatch, staleHost = nu
   const c = sessionCase({ sessionHostMismatch, staleHost }, { stale: sessionStale === true });
   if (!c) return null;
   if (c.kind === "mismatch")
-    return `\u26A0 terminalhire: linked to ${hostLabel(c.linkedHost)}, polling ${hostLabel(c.currentHost)} \u2014 run: terminalhire link`;
+    return `\u26A0 TerminalHire: linked to ${hostLabel(c.linkedHost)}, polling ${hostLabel(c.currentHost)} \u2014 run: terminalhire link`;
   if (c.kind === "refused")
-    return `\u26A0 terminalhire: session was refused by ${hostLabel(c.host)} \u2014 run: terminalhire link`;
-  return "\u26A0 terminalhire: linked session expired \u2014 run: terminalhire link";
+    return `\u26A0 TerminalHire: session was refused by ${hostLabel(c.host)} \u2014 run: terminalhire link`;
+  return "\u26A0 TerminalHire: linked session expired \u2014 run: terminalhire link";
 }
 function buildUnpushedClaimsLine(unpushedClaims) {
   return unpushedClaims === true ? "\u26A0 new claims not yet on your dashboard \u2014 run: terminalhire claim --push --keep-updated" : null;
@@ -13396,9 +13396,9 @@ function formatFounderBountyNotifyBody(index, fireIds) {
     const j = byId.get(fireIds[0]);
     const amount = j && j.bounty && typeof j.bounty.amountUSD === "number" ? j.bounty.amountUSD : null;
     const price = typeof amount === "number" && Number.isFinite(amount) && amount > 0 ? `$${Math.round(amount)} ` : "";
-    return `${price}paid task available \u2014 run: terminalhire bounties`;
+    return `${price}paid task available \u2014 run: terminalhire work`;
   }
-  return `${fireIds.length} paid tasks available \u2014 run: terminalhire bounties`;
+  return `${fireIds.length} paid tasks available \u2014 run: terminalhire work`;
 }
 function escapeAppleScriptString(s) {
   return String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"');

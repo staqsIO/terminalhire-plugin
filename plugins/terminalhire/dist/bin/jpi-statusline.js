@@ -44,7 +44,8 @@ function sessionCase(entry, { stale }) {
   return { kind: "expired" };
 }
 function founderPaidCount(entry) {
-  const n = entry && entry.founderPaid && entry.founderPaid.count;
+  if (!entry || entry.surfaceLead === "founder") return 0;
+  const n = entry.founderPaid && entry.founderPaid.count;
   return typeof n === "number" && n > 0 ? n : 0;
 }
 function approvedClaimsCount(entry) {
@@ -114,13 +115,13 @@ function render() {
       // Names both hosts rather than picking one of two causes. This is the
       // line that used to read "session expired" for a session that was
       // alive on the host that minted it (TERM-970).
-      `\u26A0 terminalhire linked to ${hostLabel(session.linkedHost)}, polling ${hostLabel(session.currentHost)} \u2014 run: th link`
+      `\u26A0 TerminalHire linked to ${hostLabel(session.linkedHost)}, polling ${hostLabel(session.currentHost)} \u2014 run: th link`
     ) : session.kind === "refused" ? (
       // A legacy token records no host, so nothing disagrees and the cookie
       // is sent. Name the server that refused it instead of asserting an
       // expiry we cannot tell apart from a session minted elsewhere.
-      `\u26A0 terminalhire session was refused by ${hostLabel(session.host)} \u2014 run: th link`
-    ) : "\u26A0 terminalhire session expired \u2014 run: th link";
+      `\u26A0 TerminalHire session was refused by ${hostLabel(session.host)} \u2014 run: th link`
+    ) : "\u26A0 TerminalHire session expired \u2014 run: th link";
     const segments = [];
     if (approved > 0) segments.push(`\u2705 ${approved} approved \u2014 run: th claim start`);
     if (founderNotes > 0) {
@@ -128,14 +129,16 @@ function render() {
     }
     if (founderNeedsYou > 0) {
       segments.push(
-        `\u{1F9ED} ${founderNeedsYou} claim${founderNeedsYou === 1 ? "" : "s"} await your decision \u2014 run: /approvals or th bounties`
+        `\u{1F9ED} ${founderNeedsYou} claim${founderNeedsYou === 1 ? " awaits" : "s await"} your decision \u2014 run: /approvals or th work`
       );
     } else if (founderOpen > 0) {
       segments.push(
-        `\u{1F9ED} ${founderOpen} posting${founderOpen === 1 ? "" : "s"} open \u2014 run: th bounties`
+        `\u{1F9ED} ${founderOpen} paid task${founderOpen === 1 ? "" : "s"} open \u2014 run: th work`
       );
     }
-    if (paid > 0) segments.push(`\u{1F48E} ${paid} paid \u2014 run: th bounties`);
+    if (paid > 0) {
+      segments.push(`\u{1F48E} ${paid} paid task${paid === 1 ? "" : "s"} to claim \u2014 run: th work`);
+    }
     const conn = [];
     if (unread > 0) conn.push(`\u{1F4AC} ${unread} unread`);
     if (incoming > 0) conn.push(`\u2709 ${incoming} intro request${incoming === 1 ? "" : "s"}`);
@@ -146,7 +149,7 @@ function render() {
       segments.push(sessionLine);
     }
     const update = updateAvailable(entry);
-    if (update) segments.push(`\u2B06 terminalhire ${update} \u2014 run: th update`);
+    if (update) segments.push(`\u2B06 TerminalHire ${update} \u2014 run: th update`);
     return segments.join("  \xB7  ");
   } catch {
     return "";

@@ -39,9 +39,9 @@ function formatFounderBountyNotifyBody(index, fireIds) {
     const j = byId.get(fireIds[0]);
     const amount = j && j.bounty && typeof j.bounty.amountUSD === "number" ? j.bounty.amountUSD : null;
     const price = typeof amount === "number" && Number.isFinite(amount) && amount > 0 ? `$${Math.round(amount)} ` : "";
-    return `${price}paid task available \u2014 run: terminalhire bounties`;
+    return `${price}paid task available \u2014 run: terminalhire work`;
   }
-  return `${fireIds.length} paid tasks available \u2014 run: terminalhire bounties`;
+  return `${fireIds.length} paid tasks available \u2014 run: terminalhire work`;
 }
 function escapeAppleScriptString(s) {
   return String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"');

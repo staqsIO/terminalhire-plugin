@@ -1,6 +1,6 @@
 ---
 name: approvals
-description: Show a poster what is waiting on them — submitted changes on their own TerminalHire postings, the check results, any held patch — as one selectable list, and send a claim back for another pass with a note. Reads through the poster connector (the terminalhire-founder MCP server). Use when the user asks "are there any approvals?", "anything I need to approve?", "what's waiting on me?", reacts to the statusline's 🧭 decision badge, or asks to watch for new submissions ("keep an eye on my postings", "tell me when a submission comes in"). Accepting work and paying happen only in the browser.
+description: Show a poster what is waiting on them — submitted changes on their own TerminalHire postings, the check results, any held patch — as one selectable list, and send a claim back for another pass with a note. Reads through the poster connector (the terminalhire-founder MCP server). Use when the user asks "are there any approvals?", "anything I need to approve?", "what's waiting on me?", reacts to the statusline's 🧭 decision badge, or asks to watch for new submissions ("keep an eye on my postings", "tell me when a submission comes in"). Accepting work and paying happen only in the browser, or automatically on a posting that accepts work after a missed deadline.
 ---
 
 # terminalhire:approvals
@@ -116,7 +116,8 @@ Nothing the connector offers can. When something new is waiting, say so in one s
 message: the title, whether it is a submission to review (`verdict`) or a developer asking to
 start (`approval`), and the review link. That is the origin of `dashboardUrl` followed by
 `/dashboard/postings/<postingId>/claims/<claimId>`, or `/dashboard/postings/<postingId>`
-for an `approval` row. Say that deciding happens in the browser, signed in. If the poster
+for an `approval` row. Say that deciding happens in the browser, signed in, or automatically
+on a posting that accepts work after a missed deadline. If the poster
 then wants to go through it, leave the watch and use sections 3 to 5, where every reply
 waits on their say-so.
 
