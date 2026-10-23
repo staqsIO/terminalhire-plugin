@@ -2,7 +2,7 @@
 
 // bin/jpi-audits.js
 import { readFile, stat } from "fs/promises";
-import { basename as basename2, join as join3 } from "path";
+import { join as join3 } from "path";
 import { createInterface } from "readline/promises";
 
 // src/web-session.ts
@@ -359,15 +359,30 @@ function formatOrderList(rawOrders) {
   }
   return lines;
 }
-function cloneCommands(order) {
-  const dir = `./${basename2(order.repoFullName)}`;
-  return [
-    `git clone https://github.com/${order.repoFullName}.git ${dir}`,
-    `git -C ${dir} checkout --detach ${order.commitSha}`
-  ];
+function notHolder(order) {
+  return {
+    error: "not-holder",
+    message: order?.assignedLogin ? `${order.assignedLogin} holds this order; only its holder gets the code.` : `Nobody holds this order. Run \`terminalhire audits take ${order?.id}\`, then \`show\` again.`
+  };
 }
-function formatOrder(rawOrder) {
+function holdsOrder(order, login) {
+  return typeof order?.assignedLogin === "string" && typeof login === "string" && order.assignedLogin.toLowerCase() === login.toLowerCase();
+}
+function cloneLines(order, clone) {
+  if (clone.command) {
+    return [
+      "Clone at the paid commit (run it as one line, in a scratch directory):",
+      `  ${clone.command}`,
+      `  The token in that command expires at ${clone.expiresAt}. Until then it is also in your shell history and in the process list while the clone runs; do not paste it anywhere else. Run \`terminalhire audits show ${order.id}\` again for a fresh one.`
+    ];
+  }
+  const lines = [`Clone at the paid commit: not available (${clone.error}).`];
+  if (clone.message) lines.push(indent(clone.message));
+  return lines;
+}
+function formatOrder(rawOrder, rawClone = notHolder(rawOrder)) {
   const order = printable(rawOrder);
+  const clone = printable(rawClone);
   const a = order.answers;
   const lines = [
     `Order:      ${order.id} (${order.status})`,
@@ -391,7 +406,7 @@ function formatOrder(rawOrder) {
     if (a.units?.length) lines.push(`  Don't worry about: ${listWithMore(a.units, a.unitsMore)}`);
     if (a.notOurs?.length) lines.push(`  Not theirs: ${listWithMore(a.notOurs, a.notOursMore)}`);
   }
-  lines.push("", "Clone at the paid commit:", ...cloneCommands(order).map((c) => `  ${c}`));
+  lines.push("", ...cloneLines(order, clone));
   return lines;
 }
 function previewLines(preview) {
@@ -419,7 +434,10 @@ function publishedLines(result, apiBase, id) {
     const reason = EMAIL_REASONS.has(result.notification?.reason) ? result.notification.reason : ["skipped", "failed", "not-requested"].includes(result.notification?.status) ? result.notification.status : "unknown";
     lines.push(`Email not sent: ${reason}. Re-run with --notify to try again.`);
   }
-  lines.push("Cleanup:", "- Remove our repository access.");
+  lines.push(
+    "Cleanup:",
+    "- Nothing to remove on GitHub: you cloned with a one-hour token through the poster\u2019s App installation."
+  );
   if (result.deliveredAt) {
     const deadline = new Date(
       new Date(result.deliveredAt).getTime() + 7 * 864e5
@@ -518,15 +536,9 @@ async function runAudits(args, overrides = {}) {
       case "show": {
         const json = await call("GET", order(opts.id));
         const { cloneHint: _hint, ...rest } = json.order;
-        if (opts.json)
-          deps.out(
-            JSON.stringify(
-              { ...json, order: { ...rest, cloneCommands: cloneCommands(rest) } },
-              null,
-              2
-            )
-          );
-        else for (const line of formatOrder(json.order)) deps.out(line);
+        const clone = await cloneCredential(rest, json.login, call, order(opts.id));
+        if (opts.json) deps.out(JSON.stringify({ ...json, order: rest, clone }, null, 2));
+        else for (const line of formatOrder(rest, clone)) deps.out(line);
         return 0;
       }
       case "take": {
@@ -557,6 +569,29 @@ async function runAudits(args, overrides = {}) {
     return 1;
   }
   return 1;
+}
+async function cloneCredential(order, login, call, orderPath) {
+  if (!holdsOrder(order, login)) return notHolder(order);
+  let json;
+  try {
+    json = await call("POST", `${orderPath}/clone-token`, {});
+  } catch (error) {
+    if (error instanceof Refused && error.status !== 401) {
+      const body = error.body ?? {};
+      return {
+        error: typeof body.error === "string" ? body.error : `http-${error.status}`,
+        ...typeof body.message === "string" ? { message: body.message } : {}
+      };
+    }
+    throw error;
+  }
+  if (typeof json.cloneCommand !== "string" || typeof json.expiresAt !== "string")
+    throw new Failed("The server answered without a clone command. Try again shortly.");
+  if (/[\r\n\t]/.test(json.cloneCommand))
+    throw new Failed(
+      "The server answered with a clone command that is not one line. Try again shortly."
+    );
+  return { command: json.cloneCommand, expiresAt: json.expiresAt };
 }
 async function publish(opts, deps, call, orderPath, apiBase) {
   const files = await deps.loadFiles(opts.dir);
@@ -593,10 +628,11 @@ async function run(args = process.argv.slice(3)) {
 }
 export {
   USAGE,
-  cloneCommands,
+  cloneLines,
   formatOrder,
   formatOrderList,
   loadReportFiles,
+  notHolder,
   parseAuditsArgs,
   previewLines,
   publishedLines,

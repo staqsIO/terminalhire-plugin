@@ -15,7 +15,7 @@ Run every command through the bundled engine:
 node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" audits <command> --json
 ```
 
-`--json` puts JSON on stdout: the server's answer, plus `cloneCommands` from `show` and `{ preview, result }` from `publish`.
+`--json` puts JSON on stdout: the server's answer, plus `clone` from `show` and `{ preview, result }` from `publish`.
 
 - Exit 0: done.
 - Exit 1: a usage, network or server failure, or the server asking you to slow down (HTTP 408 or 429). Fix the command or wait, then retry.
@@ -44,16 +44,17 @@ node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" audits show <ao_id> --json
 
 ## 3. Clone at the paid commit
 
-From a scratch directory outside the reviewer's own projects, with the `./` kept so a name starting with `-` is never read as a git option:
+The reviewer is not a collaborator on the poster's repository and never needs to be. When the reviewer holds the order, `show` also returns `clone.command`: a clone of the paid commit through the poster's TerminalHire App installation, carrying a one-hour read-only token scoped to that repository. Run it as one line, from a scratch directory outside the reviewer's own projects, then confirm the commit:
 
 ```bash
 cd <scratch>
-git clone https://github.com/<repoFullName>.git ./<name>
-git -C ./<name> checkout --detach <commitSha>
+<clone.command>
 git -C ./<name> rev-parse HEAD
 ```
 
-The last line prints the commit you are about to read. It must equal `commitSha`; keep it for the publish steps. Review that commit and nothing newer. Do not install dependencies or run the project's scripts unless the reviewer asks.
+The last line prints the commit you are about to read. It must equal `order.commitSha`; keep it for the publish steps. Review that commit and nothing newer. Do not install dependencies or run the project's scripts unless the reviewer asks.
+
+The command holds a token that expires at `clone.expiresAt`. It is in this conversation's transcript once `show --json` returns it, and in the shell history and process list once it runs; it is read-only, one repository, one hour. Do not copy it anywhere else, and do not keep it in notes or in the report; run `show` again for a fresh one. When `show` returns `clone.error` instead, read `clone.message` to the reviewer: `not-holder` names who holds the order, or says to take it when nobody does; `no-installation` means the poster has to reinstall the App on the repository; `delivery-closed` means the report is delivered and our access ended, so a revision comes from the clone the reviewer already has.
 
 ## 4. Review
 
@@ -103,4 +104,4 @@ Report the URL and the email outcome it prints. To give an order back unfinished
 
 ## 8. Clean up
 
-The command prints the checklist. Delete the clone and every other copy of the repository within 7 days of the delivery date it prints, and tell the reviewer to remove our repository access.
+The command prints the checklist. Delete the clone and every other copy of the repository within 7 days of the delivery date it prints. There is no repository access to remove: the clone token expired within an hour, and the poster removes the App themselves.

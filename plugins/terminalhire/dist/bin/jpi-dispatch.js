@@ -37514,8 +37514,8 @@ var init_result = __esm({
 });
 
 // ../../packages/envrun/dist/lockfileCheck.js
-function supportedLockfile(basename11) {
-  return basename11 === "package-lock.json" || basename11 === "yarn.lock" ? basename11 : null;
+function supportedLockfile(basename10) {
+  return basename10 === "package-lock.json" || basename10 === "yarn.lock" ? basename10 : null;
 }
 function fail2(detail) {
   return { ok: false, detail };
@@ -52058,10 +52058,11 @@ var init_jpi_claim = __esm({
 var jpi_audits_exports = {};
 __export(jpi_audits_exports, {
   USAGE: () => USAGE,
-  cloneCommands: () => cloneCommands,
+  cloneLines: () => cloneLines,
   formatOrder: () => formatOrder,
   formatOrderList: () => formatOrderList,
   loadReportFiles: () => loadReportFiles,
+  notHolder: () => notHolder,
   parseAuditsArgs: () => parseAuditsArgs,
   previewLines: () => previewLines,
   publishedLines: () => publishedLines,
@@ -52069,7 +52070,7 @@ __export(jpi_audits_exports, {
   runAudits: () => runAudits
 });
 import { readFile as readFile2, stat as stat2 } from "fs/promises";
-import { basename as basename8, join as join48 } from "path";
+import { join as join48 } from "path";
 import { createInterface as createInterface10 } from "readline/promises";
 function parseAuditsArgs(args5) {
   const out = {
@@ -52203,15 +52204,30 @@ function formatOrderList(rawOrders) {
   }
   return lines;
 }
-function cloneCommands(order) {
-  const dir = `./${basename8(order.repoFullName)}`;
-  return [
-    `git clone https://github.com/${order.repoFullName}.git ${dir}`,
-    `git -C ${dir} checkout --detach ${order.commitSha}`
-  ];
+function notHolder(order) {
+  return {
+    error: "not-holder",
+    message: order?.assignedLogin ? `${order.assignedLogin} holds this order; only its holder gets the code.` : `Nobody holds this order. Run \`terminalhire audits take ${order?.id}\`, then \`show\` again.`
+  };
 }
-function formatOrder(rawOrder) {
+function holdsOrder(order, login) {
+  return typeof order?.assignedLogin === "string" && typeof login === "string" && order.assignedLogin.toLowerCase() === login.toLowerCase();
+}
+function cloneLines(order, clone2) {
+  if (clone2.command) {
+    return [
+      "Clone at the paid commit (run it as one line, in a scratch directory):",
+      `  ${clone2.command}`,
+      `  The token in that command expires at ${clone2.expiresAt}. Until then it is also in your shell history and in the process list while the clone runs; do not paste it anywhere else. Run \`terminalhire audits show ${order.id}\` again for a fresh one.`
+    ];
+  }
+  const lines = [`Clone at the paid commit: not available (${clone2.error}).`];
+  if (clone2.message) lines.push(indent(clone2.message));
+  return lines;
+}
+function formatOrder(rawOrder, rawClone = notHolder(rawOrder)) {
   const order = printable(rawOrder);
+  const clone2 = printable(rawClone);
   const a = order.answers;
   const lines = [
     `Order:      ${order.id} (${order.status})`,
@@ -52235,7 +52251,7 @@ function formatOrder(rawOrder) {
     if (a.units?.length) lines.push(`  Don't worry about: ${listWithMore(a.units, a.unitsMore)}`);
     if (a.notOurs?.length) lines.push(`  Not theirs: ${listWithMore(a.notOurs, a.notOursMore)}`);
   }
-  lines.push("", "Clone at the paid commit:", ...cloneCommands(order).map((c) => `  ${c}`));
+  lines.push("", ...cloneLines(order, clone2));
   return lines;
 }
 function previewLines(preview) {
@@ -52256,7 +52272,10 @@ function publishedLines(result, apiBase, id) {
     const reason = EMAIL_REASONS.has(result.notification?.reason) ? result.notification.reason : ["skipped", "failed", "not-requested"].includes(result.notification?.status) ? result.notification.status : "unknown";
     lines.push(`Email not sent: ${reason}. Re-run with --notify to try again.`);
   }
-  lines.push("Cleanup:", "- Remove our repository access.");
+  lines.push(
+    "Cleanup:",
+    "- Nothing to remove on GitHub: you cloned with a one-hour token through the poster\u2019s App installation."
+  );
   if (result.deliveredAt) {
     const deadline = new Date(
       new Date(result.deliveredAt).getTime() + 7 * 864e5
@@ -52346,15 +52365,9 @@ async function runAudits(args5, overrides = {}) {
       case "show": {
         const json = await call("GET", order(opts.id));
         const { cloneHint: _hint, ...rest } = json.order;
-        if (opts.json)
-          deps.out(
-            JSON.stringify(
-              { ...json, order: { ...rest, cloneCommands: cloneCommands(rest) } },
-              null,
-              2
-            )
-          );
-        else for (const line of formatOrder(json.order)) deps.out(line);
+        const clone2 = await cloneCredential(rest, json.login, call, order(opts.id));
+        if (opts.json) deps.out(JSON.stringify({ ...json, order: rest, clone: clone2 }, null, 2));
+        else for (const line of formatOrder(rest, clone2)) deps.out(line);
         return 0;
       }
       case "take": {
@@ -52385,6 +52398,29 @@ async function runAudits(args5, overrides = {}) {
     return 1;
   }
   return 1;
+}
+async function cloneCredential(order, login, call, orderPath) {
+  if (!holdsOrder(order, login)) return notHolder(order);
+  let json;
+  try {
+    json = await call("POST", `${orderPath}/clone-token`, {});
+  } catch (error2) {
+    if (error2 instanceof Refused && error2.status !== 401) {
+      const body = error2.body ?? {};
+      return {
+        error: typeof body.error === "string" ? body.error : `http-${error2.status}`,
+        ...typeof body.message === "string" ? { message: body.message } : {}
+      };
+    }
+    throw error2;
+  }
+  if (typeof json.cloneCommand !== "string" || typeof json.expiresAt !== "string")
+    throw new Failed("The server answered without a clone command. Try again shortly.");
+  if (/[\r\n\t]/.test(json.cloneCommand))
+    throw new Failed(
+      "The server answered with a clone command that is not one line. Try again shortly."
+    );
+  return { command: json.cloneCommand, expiresAt: json.expiresAt };
 }
 async function publish(opts, deps, call, orderPath, apiBase) {
   const files = await deps.loadFiles(opts.dir);
@@ -52954,7 +52990,7 @@ __export(jpi_post_exports, {
 import { existsSync as existsSync24, readFileSync as readFileSync30 } from "fs";
 import { spawnSync as spawnSync10 } from "child_process";
 import { createInterface as createInterface11 } from "readline";
-import { basename as basename9, join as join50 } from "path";
+import { basename as basename8, join as join50 } from "path";
 function connectorBase() {
   try {
     return resolveOAuthBase();
@@ -53056,7 +53092,7 @@ function readFlagOrFile(flags, valueKey, fileKey) {
     try {
       return { value: readFileSync30(flags[fileKey], "utf8"), failure: null };
     } catch {
-      return { value: null, failure: `could not read ${basename9(flags[fileKey])}` };
+      return { value: null, failure: `could not read ${basename8(flags[fileKey])}` };
     }
   }
   return { value: typeof flags[valueKey] === "string" ? flags[valueKey] : null, failure: null };
@@ -54601,7 +54637,7 @@ import {
   writeFileSync as writeFileSync27
 } from "fs";
 import { homedir as homedir29 } from "os";
-import { basename as basename10, dirname as dirname12, join as join51 } from "path";
+import { basename as basename9, dirname as dirname12, join as join51 } from "path";
 function defaultUrl() {
   return process.env["TERMINALHIRE_RECALL_URL"] || RECALL_URL;
 }
@@ -54686,7 +54722,7 @@ function mutateCache(path6, mutate) {
 function sweepTempFiles(path6) {
   try {
     const dir = dirname12(path6);
-    const prefix = `${basename10(path6)}.`;
+    const prefix = `${basename9(path6)}.`;
     for (const name of readdirSync6(dir)) {
       if (!name.startsWith(prefix) || !name.endsWith(".tmp")) continue;
       const full = join51(dir, name);
