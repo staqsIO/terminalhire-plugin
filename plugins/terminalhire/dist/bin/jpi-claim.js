@@ -29737,6 +29737,2326 @@ var init_npmScriptTimes = __esm({
   }
 });
 
+// ../../packages/envspec/dist/yaml.js
+function parseYaml(source, limits = {}) {
+  const lines = splitLines(source, limits.maxLineLength ?? Infinity);
+  const cursor = { lines, index: 0, depth: 0, maxDepth: limits.maxDepth ?? Infinity };
+  skipIgnorable(cursor);
+  if (cursor.index >= lines.length)
+    return null;
+  const value = parseNode(cursor, lines[cursor.index].indent);
+  skipIgnorable(cursor);
+  if (cursor.index < lines.length) {
+    const stray = lines[cursor.index];
+    throw new YamlUnsupportedError("trailing-content", stray.number, `content after the end of the top-level node ("${stray.text.slice(0, 24)}")`);
+  }
+  return value;
+}
+function splitLines(source, maxLineLength) {
+  const raw = source.replace(/\r\n/g, "\n").split("\n");
+  const out = [];
+  let sawDocumentStart = false;
+  for (let i = 0; i < raw.length; i += 1) {
+    const line = raw[i];
+    const number = i + 1;
+    if (line.length > maxLineLength) {
+      throw new YamlUnsupportedError("line-length", number, `line longer than ${maxLineLength} characters`);
+    }
+    const withoutIndent = line.replace(/^[ ]+/, "");
+    const indent = line.length - withoutIndent.length;
+    if (/^[ ]*\t/.test(line)) {
+      throw new YamlUnsupportedError("tab-indent", number, "tab used for indentation");
+    }
+    const trimmed = withoutIndent.trimEnd();
+    if (trimmed === "---") {
+      if (sawDocumentStart || out.some((l) => !l.ignorable)) {
+        throw new YamlUnsupportedError("multi-document", number, "multi-document stream (a second `---`)");
+      }
+      sawDocumentStart = true;
+      out.push({ indent, text: trimmed, number, ignorable: true });
+      continue;
+    }
+    if (trimmed === "...") {
+      throw new YamlUnsupportedError("document-end", number, "explicit document end (`...`)");
+    }
+    out.push({
+      indent,
+      text: trimmed,
+      number,
+      ignorable: trimmed === "" || trimmed.startsWith("#")
+    });
+  }
+  return out;
+}
+function skipIgnorable(cursor) {
+  while (cursor.index < cursor.lines.length && cursor.lines[cursor.index].ignorable) {
+    cursor.index += 1;
+  }
+}
+function peek(cursor) {
+  skipIgnorable(cursor);
+  return cursor.index < cursor.lines.length ? cursor.lines[cursor.index] : null;
+}
+function parseNode(cursor, indent) {
+  if (cursor.depth >= cursor.maxDepth) {
+    const at = peek(cursor);
+    throw new YamlUnsupportedError("depth", at?.number ?? 0, `nesting deeper than ${cursor.maxDepth}`);
+  }
+  cursor.depth += 1;
+  try {
+    return parseNodeAt(cursor, indent);
+  } finally {
+    cursor.depth -= 1;
+  }
+}
+function parseNodeAt(cursor, indent) {
+  const line = peek(cursor);
+  if (line === null)
+    return null;
+  if (line.text === "-" || line.text.startsWith("- "))
+    return parseSequence(cursor, indent);
+  if (line.text === "?" || line.text.startsWith("? ")) {
+    throw new YamlUnsupportedError("explicit-key", line.number, "explicit key syntax (`? `)");
+  }
+  if (KEY_PATTERN.test(line.text))
+    return parseMapping(cursor, indent);
+  cursor.index += 1;
+  return parseScalar(stripComment(line.text), line.number);
+}
+function parseSequence(cursor, indent) {
+  const items = [];
+  for (; ; ) {
+    const line = peek(cursor);
+    if (line === null || line.indent < indent)
+      break;
+    if (line.indent > indent) {
+      throw new YamlUnsupportedError("indent", line.number, `unexpected indentation inside a sequence (expected ${indent}, saw ${line.indent})`);
+    }
+    if (line.text !== "-" && !line.text.startsWith("- "))
+      break;
+    if (line.text === "-") {
+      cursor.index += 1;
+      const next = peek(cursor);
+      items.push(next !== null && next.indent > indent ? parseNode(cursor, next.indent) : null);
+      continue;
+    }
+    const afterDash = line.text.slice(1);
+    const extraSpaces = afterDash.length - afterDash.replace(/^[ ]+/, "").length;
+    const itemIndent = indent + 1 + extraSpaces;
+    cursor.lines[cursor.index] = {
+      indent: itemIndent,
+      text: afterDash.trimStart(),
+      number: line.number,
+      ignorable: false
+    };
+    items.push(parseNode(cursor, itemIndent));
+  }
+  return items;
+}
+function parseMapping(cursor, indent) {
+  const entries = [];
+  for (; ; ) {
+    const line = peek(cursor);
+    if (line === null || line.indent < indent)
+      break;
+    if (line.indent > indent) {
+      throw new YamlUnsupportedError("indent", line.number, `unexpected indentation inside a mapping (expected ${indent}, saw ${line.indent})`);
+    }
+    if (line.text.startsWith("- ") || line.text === "-")
+      break;
+    if (line.text.startsWith("? ")) {
+      throw new YamlUnsupportedError("explicit-key", line.number, "explicit key syntax (`? `)");
+    }
+    const match2 = KEY_PATTERN.exec(line.text);
+    if (match2 === null) {
+      throw new YamlUnsupportedError("not-a-mapping-entry", line.number, `expected \`key: value\` but read "${line.text.slice(0, 40)}"`);
+    }
+    const key = match2[1] ?? unescapeSingle(match2[2]) ?? match2[3] ?? "";
+    if (key.trim() === "<<") {
+      throw new YamlUnsupportedError("merge-key", line.number, "merge key (`<<:`)");
+    }
+    const inline = match2[4];
+    cursor.index += 1;
+    const inlineText = inline === void 0 ? "" : stripComment(inline);
+    let value;
+    if (/^[|>][-+]?[0-9]*$/.test(inlineText)) {
+      value = readBlockScalar(cursor, indent, inlineText, line.number);
+    } else if (inlineText === "") {
+      const next = peek(cursor);
+      value = next !== null && next.indent > indent ? parseNode(cursor, next.indent) : null;
+    } else {
+      value = parseInlineScalar(inlineText, line.number);
+    }
+    entries.push({ key: key.trim(), value });
+  }
+  return { kind: "map", entries };
+}
+function readBlockScalar(cursor, parentIndent, header, headerLine) {
+  const folded = header.startsWith(">");
+  const chomp = header.includes("-") ? "strip" : header.includes("+") ? "keep" : "clip";
+  const explicit = /[0-9]/.exec(header);
+  if (explicit !== null) {
+    throw new YamlUnsupportedError("explicit-indent-indicator", headerLine, `explicit block-scalar indentation indicator (\`${header}\`)`);
+  }
+  let contentIndent = -1;
+  const collected = [];
+  while (cursor.index < cursor.lines.length) {
+    const line = cursor.lines[cursor.index];
+    const blank = line.text === "";
+    if (!blank && line.indent <= parentIndent)
+      break;
+    if (contentIndent === -1 && !blank)
+      contentIndent = line.indent;
+    collected.push(blank ? "" : " ".repeat(Math.max(0, line.indent - contentIndent)) + line.text);
+    cursor.index += 1;
+  }
+  while (collected.length > 0 && collected[collected.length - 1] === "")
+    collected.pop();
+  if (collected.length === 0)
+    return "";
+  let body;
+  if (folded) {
+    body = collected.reduce((acc, cur, i) => {
+      if (i === 0)
+        return cur;
+      const prev = collected[i - 1];
+      const joinable = prev !== "" && cur !== "" && !cur.startsWith(" ") && !prev.startsWith(" ");
+      return acc + (joinable ? " " : "\n") + cur;
+    }, "");
+  } else {
+    body = collected.join("\n");
+  }
+  return chomp === "strip" ? body : body + "\n";
+}
+function stripComment(text) {
+  const trimmed = text.trim();
+  if (trimmed.startsWith('"') || trimmed.startsWith("'"))
+    return trimmed;
+  const at = trimmed.search(/\s#/);
+  return at === -1 ? trimmed : trimmed.slice(0, at).trimEnd();
+}
+function parseInlineScalar(text, lineNumber) {
+  if (text.startsWith("["))
+    return parseFlowSequence(text, lineNumber);
+  if (text.startsWith("{"))
+    return parseFlowMapping(text, lineNumber);
+  return parseScalar(text, lineNumber);
+}
+function parseScalar(text, lineNumber) {
+  if (text.startsWith("&") || text.startsWith("*")) {
+    throw new YamlUnsupportedError(text.startsWith("&") ? "anchor" : "alias", lineNumber, `${text.startsWith("&") ? "anchor" : "alias"} (\`${text.split(/\s/)[0]}\`)`);
+  }
+  if (text.startsWith("!")) {
+    throw new YamlUnsupportedError("tag", lineNumber, `tag (\`${text.split(/\s/)[0]}\`)`);
+  }
+  if (text === "~" || text === "null")
+    return null;
+  if (text.startsWith('"') && text.endsWith('"') && text.length >= 2) {
+    return unescapeDouble(text.slice(1, -1));
+  }
+  if (text.startsWith("'") && text.endsWith("'") && text.length >= 2) {
+    return text.slice(1, -1).replace(/''/g, "'");
+  }
+  return text;
+}
+function unescapeSingle(text) {
+  return text === void 0 ? void 0 : text.replace(/''/g, "'");
+}
+function unescapeDouble(text) {
+  return text.replace(/\\(["\\/nrt])/g, (_all, ch) => {
+    if (ch === "n")
+      return "\n";
+    if (ch === "r")
+      return "\r";
+    if (ch === "t")
+      return "	";
+    return ch;
+  });
+}
+function parseFlowSequence(text, lineNumber) {
+  if (!text.endsWith("]")) {
+    throw new YamlUnsupportedError("multiline-flow", lineNumber, "flow sequence spanning more than one line");
+  }
+  const inner = text.slice(1, -1).trim();
+  if (inner === "")
+    return [];
+  return splitFlowItems(inner, lineNumber).map((item) => parseScalar(item, lineNumber));
+}
+function parseFlowMapping(text, lineNumber) {
+  if (!text.endsWith("}")) {
+    throw new YamlUnsupportedError("multiline-flow", lineNumber, "flow mapping spanning more than one line");
+  }
+  const inner = text.slice(1, -1).trim();
+  if (inner === "")
+    return { kind: "map", entries: [] };
+  const entries = splitFlowItems(inner, lineNumber).map((item) => {
+    const at = item.indexOf(":");
+    if (at === -1) {
+      throw new YamlUnsupportedError("flow-mapping-entry", lineNumber, `flow mapping entry without a value ("${item}")`);
+    }
+    return {
+      key: (parseScalar(item.slice(0, at).trim(), lineNumber) ?? "").trim(),
+      value: parseScalar(item.slice(at + 1).trim(), lineNumber)
+    };
+  });
+  return { kind: "map", entries };
+}
+function splitFlowItems(inner, lineNumber) {
+  const items = [];
+  let current = "";
+  let quote = null;
+  let depth = 0;
+  for (const ch of inner) {
+    if (quote !== null) {
+      current += ch;
+      if (ch === quote)
+        quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === "[" || ch === "{")
+      depth += 1;
+    if (ch === "]" || ch === "}")
+      depth -= 1;
+    if (ch === "," && depth === 0) {
+      items.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  items.push(current.trim());
+  if (depth !== 0) {
+    throw new YamlUnsupportedError("flow-nesting", lineNumber, "unbalanced flow collection");
+  }
+  return items.filter((item) => item !== "");
+}
+function isMap(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isList(value) {
+  return Array.isArray(value);
+}
+function asString(value) {
+  return typeof value === "string" ? value : null;
+}
+function mapGet(value, key) {
+  if (!isMap(value))
+    return null;
+  for (const entry of value.entries) {
+    if (entry.key === key)
+      return entry.value;
+  }
+  return null;
+}
+function mapEntries(value) {
+  return isMap(value) ? value.entries : [];
+}
+function asStringList(value) {
+  if (typeof value === "string")
+    return [value];
+  if (isList(value)) {
+    return value.filter((item) => typeof item === "string");
+  }
+  return [];
+}
+var YamlUnsupportedError, KEY_PATTERN;
+var init_yaml = __esm({
+  "../../packages/envspec/dist/yaml.js"() {
+    "use strict";
+    YamlUnsupportedError = class extends Error {
+      line;
+      construct;
+      constructor(construct, line, detail) {
+        super(`unsupported YAML at line ${line}: ${detail}`);
+        this.name = "YamlUnsupportedError";
+        this.construct = construct;
+        this.line = line;
+      }
+    };
+    KEY_PATTERN = /^(?:"((?:[^"\\]|\\.)*)"|'((?:[^']|'')*)'|([^'":#][^:]*?))\s*:(?:\s+(.*))?$/;
+  }
+});
+
+// ../../packages/envspec/dist/database.js
+function findMigrations(repo) {
+  const out = /* @__PURE__ */ new Set();
+  for (const dir of MIGRATION_DIRS) {
+    for (const file of repo.listFiles(dir)) {
+      if (file.endsWith("migration_lock.toml"))
+        continue;
+      if (MIGRATION_EXTENSIONS.some((ext) => file.endsWith(ext)))
+        out.add(file);
+    }
+  }
+  return [...out].sort();
+}
+function findSeeds(repo) {
+  const out = /* @__PURE__ */ new Set();
+  for (const dir of SEED_DIRS) {
+    for (const name of repo.listNames(dir)) {
+      if (!SEED_BASENAME.test(name))
+        continue;
+      const path5 = dir === "" ? name : `${dir}/${name}`;
+      if (!repo.isDirectory(path5))
+        out.add(path5);
+    }
+  }
+  for (const tree of SEED_TREES) {
+    for (const file of repo.listFiles(tree))
+      out.add(file);
+  }
+  return [...out].sort();
+}
+function scanCompose(repo) {
+  for (const file of COMPOSE_FILES) {
+    const scan = scanComposeFile(repo, file);
+    if (scan !== null)
+      return scan;
+  }
+  return { services: [], file: null, unparsed: false };
+}
+function scanComposeFile(repo, file) {
+  {
+    const text = repo.readText(file);
+    if (text === null)
+      return null;
+    let document;
+    try {
+      document = parseYaml(text);
+    } catch {
+      return { services: [], file, unparsed: true };
+    }
+    const services = [];
+    for (const entry of mapEntries(mapGet(document, "services"))) {
+      const image = asString(mapGet(entry.value, "image"));
+      if (image === null)
+        continue;
+      const ports = /* @__PURE__ */ new Set();
+      for (const port of asStringList(mapGet(entry.value, "ports"))) {
+        const segments = port.split(":");
+        const parsed = Number.parseInt(segments[segments.length - 1], 10);
+        if (Number.isInteger(parsed))
+          ports.add(parsed);
+      }
+      services.push({
+        name: entry.key,
+        image,
+        ports: [...ports].sort((a, b) => a - b),
+        env: readComposeEnvironment(mapGet(entry.value, "environment")),
+        declaredIn: "compose"
+      });
+    }
+    return {
+      services: services.sort((a, b) => a.name.localeCompare(b.name)),
+      file,
+      unparsed: false
+    };
+  }
+}
+function readComposeEnvironment(node) {
+  const pairs = [];
+  if (isList(node)) {
+    for (const item of node) {
+      const text = asString(item);
+      if (text === null)
+        continue;
+      const at = text.indexOf("=");
+      if (at === -1)
+        continue;
+      pairs.push({ name: text.slice(0, at), value: text.slice(at + 1) });
+    }
+  } else {
+    for (const entry of mapEntries(node)) {
+      const value = asString(entry.value);
+      if (value !== null)
+        pairs.push({ name: entry.key, value });
+    }
+  }
+  return pairs.filter((pair) => !/\$\{/.test(pair.value)).sort((a, b) => a.name.localeCompare(b.name));
+}
+function devcontainerComposeFiles(repo) {
+  for (const path5 of [".devcontainer/devcontainer.json", ".devcontainer.json"]) {
+    const text = repo.readText(path5);
+    if (text === null)
+      continue;
+    const stripped = text.replace(/^\s*\/\/.*$/gm, "");
+    let parsed;
+    try {
+      parsed = JSON.parse(stripped);
+    } catch {
+      return [];
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+      return [];
+    const value = parsed["dockerComposeFile"];
+    if (typeof value === "string")
+      return [value];
+    if (Array.isArray(value))
+      return value.filter((item) => typeof item === "string");
+    return [];
+  }
+  return [];
+}
+var MIGRATION_DIRS, MIGRATION_EXTENSIONS, COMPOSE_FILES, SEED_BASENAME, SEED_DIRS, SEED_TREES;
+var init_database = __esm({
+  "../../packages/envspec/dist/database.js"() {
+    "use strict";
+    init_yaml();
+    MIGRATION_DIRS = [
+      "alembic/versions",
+      "db/migrate",
+      "db/migrations",
+      "migrations",
+      "prisma/migrations",
+      "sql/migrations",
+      "supabase/migrations"
+    ];
+    MIGRATION_EXTENSIONS = [".sql", ".py", ".rb", ".ts", ".js"];
+    COMPOSE_FILES = [
+      "compose.yaml",
+      "compose.yml",
+      "docker-compose.yaml",
+      "docker-compose.yml"
+    ];
+    SEED_BASENAME = /^seeds?\.(?:sql|ts|js|mjs|py|rb)$/;
+    SEED_DIRS = ["", "db", "prisma", "scripts", "supabase"];
+    SEED_TREES = ["db/seeds", "seeds", "supabase/seeds"];
+  }
+});
+
+// ../../packages/envspec/dist/semverRange.js
+function rangeAdmits(version, range) {
+  const locked = parseVersion(version);
+  if (locked === null || range.length > MAX_RANGE_LENGTH)
+    return null;
+  let unknown = false;
+  for (const alternative of range.split("||")) {
+    const interval = parseSet(alternative);
+    if (interval === null) {
+      unknown = true;
+      continue;
+    }
+    if (within(locked, interval))
+      return true;
+  }
+  return unknown ? null : false;
+}
+function parseVersion(text) {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z.-]+)?$/.exec(text.trim());
+  if (m === null || !NUMBER.test(m[1]) || !NUMBER.test(m[2]) || !NUMBER.test(m[3]))
+    return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+function parseSet(text) {
+  const set = text.trim();
+  if (set === "")
+    return { low: null, high: null };
+  const hyphen = /^(\S+)\s+-\s+(\S+)$/.exec(set);
+  if (hyphen !== null) {
+    const from = parsePartial(hyphen[1]);
+    const to = parsePartial(hyphen[2]);
+    if (from === null || to === null)
+      return null;
+    return intersect(atLeast(from), atMost(to));
+  }
+  const comparators = set.replace(/(<=|>=|<|>|=|~>|~|\^)\s+/g, "$1").split(/\s+/);
+  let interval = { low: null, high: null };
+  for (const comparator of comparators) {
+    const next = parseComparator(comparator);
+    if (next === null)
+      return null;
+    interval = intersect(interval, next);
+  }
+  return interval;
+}
+function parsePartial(text) {
+  const m = /^v?([^.]+)(?:\.([^.]+))?(?:\.([^.+]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(text);
+  if (m === null)
+    return null;
+  const parts = [];
+  let wild = false;
+  for (const part of [m[1], m[2], m[3]]) {
+    if (part === void 0 || /^[xX*]$/.test(part)) {
+      wild = true;
+      parts.push(null);
+      continue;
+    }
+    if (wild || !NUMBER.test(part))
+      return null;
+    parts.push(Number(part));
+  }
+  return { major: parts[0] ?? null, minor: parts[1] ?? null, patch: parts[2] ?? null };
+}
+function parseComparator(text) {
+  const m = /^(<=|>=|<|>|=|~>|~|\^)?(.*)$/.exec(text);
+  if (m === null)
+    return null;
+  const operator = m[1] ?? "";
+  const partial = parsePartial(m[2]);
+  if (partial === null)
+    return null;
+  const { major, minor, patch } = partial;
+  if (major === null) {
+    return operator === "" || operator === "=" || operator === ">=" ? { low: null, high: null } : null;
+  }
+  switch (operator) {
+    case "":
+    case "=":
+      return intersect(atLeast(partial), atMost(partial));
+    case ">=":
+      return atLeast(partial);
+    case "<=":
+      return atMost(partial);
+    case ">":
+      return { low: { at: bumpPartial(partial), inclusive: true }, high: null };
+    case "<":
+      return { low: null, high: { at: floor(partial), inclusive: false } };
+    case "~":
+    case "~>":
+      return {
+        low: { at: floor(partial), inclusive: true },
+        high: { at: minor === null ? [major + 1, 0, 0] : [major, minor + 1, 0], inclusive: false }
+      };
+    case "^": {
+      let high;
+      if (major > 0 || minor === null)
+        high = [major + 1, 0, 0];
+      else if (minor > 0 || patch === null)
+        high = [0, minor + 1, 0];
+      else
+        high = [0, 0, patch + 1];
+      return { low: { at: floor(partial), inclusive: true }, high: { at: high, inclusive: false } };
+    }
+    default:
+      return null;
+  }
+}
+function floor(p) {
+  return [p.major ?? 0, p.minor ?? 0, p.patch ?? 0];
+}
+function bumpPartial(p) {
+  const major = p.major ?? 0;
+  if (p.minor === null)
+    return [major + 1, 0, 0];
+  if (p.patch === null)
+    return [major, p.minor + 1, 0];
+  return [major, p.minor, p.patch + 1];
+}
+function atLeast(p) {
+  return p.major === null ? { low: null, high: null } : { low: { at: floor(p), inclusive: true }, high: null };
+}
+function atMost(p) {
+  if (p.major === null)
+    return { low: null, high: null };
+  if (p.patch !== null && p.minor !== null) {
+    return { low: null, high: { at: [p.major, p.minor, p.patch], inclusive: true } };
+  }
+  return { low: null, high: { at: bumpPartial(p), inclusive: false } };
+}
+function compare(a, b) {
+  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+}
+function intersect(a, b) {
+  const low = a.low === null ? b.low : b.low === null ? a.low : tighterLow(a.low, b.low);
+  const high = a.high === null ? b.high : b.high === null ? a.high : tighterHigh(a.high, b.high);
+  return { low, high };
+}
+function tighterLow(a, b) {
+  const c = compare(a.at, b.at);
+  if (c !== 0)
+    return c > 0 ? a : b;
+  return a.inclusive ? b : a;
+}
+function tighterHigh(a, b) {
+  const c = compare(a.at, b.at);
+  if (c !== 0)
+    return c < 0 ? a : b;
+  return a.inclusive ? b : a;
+}
+function within(v, interval) {
+  const { low, high } = interval;
+  if (low !== null) {
+    const c = compare(v, low.at);
+    if (c < 0 || c === 0 && !low.inclusive)
+      return false;
+  }
+  if (high !== null) {
+    const c = compare(v, high.at);
+    if (c > 0 || c === 0 && !high.inclusive)
+      return false;
+  }
+  return true;
+}
+var MAX_RANGE_LENGTH, NUMBER;
+var init_semverRange = __esm({
+  "../../packages/envspec/dist/semverRange.js"() {
+    "use strict";
+    MAX_RANGE_LENGTH = 1024;
+    NUMBER = /^(?:0|[1-9]\d{0,15})$/;
+  }
+});
+
+// ../../packages/envspec/dist/manifest.js
+function detectRuntime(repo) {
+  const candidates = [];
+  for (const entry of RUNTIME_MANIFESTS) {
+    if (entry.files.some((file) => repo.exists(file)))
+      candidates.push(entry.runtime);
+  }
+  if (repo.listNames("").some((name) => /\.(?:csproj|fsproj|sln)$/.test(name))) {
+    candidates.push("dotnet");
+  }
+  if (candidates.length === 0 && repo.listFiles("").some((f) => f.endsWith(".java"))) {
+    candidates.push("jvm");
+  }
+  if (!candidates.includes("cpp") && MAKEFILE_NAMES.some((file) => repo.exists(file)) && repo.listFiles("").some((f) => C_FAMILY_SOURCE.test(f))) {
+    candidates.push("cpp");
+  }
+  return { runtime: candidates[0] ?? "unknown", candidates };
+}
+function readJsonObject(repo, path5) {
+  const text = repo.readText(path5);
+  if (text === null)
+    return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+    return null;
+  return parsed;
+}
+function readStringField(object, key) {
+  if (object === null)
+    return null;
+  const value = object[key];
+  return typeof value === "string" ? value : null;
+}
+function readObjectField(object, key) {
+  if (object === null)
+    return null;
+  const value = object[key];
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return null;
+  return value;
+}
+function readNodeManifest(repo) {
+  const pkg = readJsonObject(repo, "package.json");
+  if (pkg === null)
+    return null;
+  return {
+    scripts: readObjectField(pkg, "scripts"),
+    enginesNode: readStringField(readObjectField(pkg, "engines"), "node")
+  };
+}
+function nodeTestCommand(manifest) {
+  const script = readStringField(manifest.scripts, "test");
+  if (script === null)
+    return null;
+  if (script.trim() === "" || NPM_PLACEHOLDER_TEST.test(script.trim()))
+    return null;
+  return "npm test";
+}
+function nodeInstallCommand(repo) {
+  if (repo.exists("package-lock.json"))
+    return { command: "npm ci", from: "lockfile" };
+  if (repo.exists("npm-shrinkwrap.json"))
+    return { command: "npm ci", from: "lockfile" };
+  if (repo.exists("yarn.lock"))
+    return { command: "yarn install --frozen-lockfile", from: "lockfile" };
+  if (repo.exists("pnpm-lock.yaml")) {
+    return { command: "pnpm install --frozen-lockfile", from: "lockfile" };
+  }
+  if (repo.exists("package.json"))
+    return { command: "npm install", from: "manifest" };
+  return null;
+}
+function lockfileGaps(repo) {
+  const read = readLockfileGaps(repo);
+  return read === null || read.missing.length === 0 ? null : { lockfile: read.lockfile, missing: read.missing };
+}
+function readLockfileGaps(repo) {
+  const pkg = readJsonObject(repo, "package.json");
+  if (pkg === null)
+    return null;
+  const lockfile = ["package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml"].find((name) => repo.exists(name));
+  if (lockfile === void 0)
+    return null;
+  const listingFor = lockfileListings(repo, pkg, lockfile);
+  if (listingFor === null)
+    return null;
+  const missing = [];
+  const rootListing = listingFor("");
+  if (rootListing !== null) {
+    for (const [n, r, sec] of wantedDependencies(pkg))
+      if (!rootListing(n, r, sec))
+        missing.push(`${n}@${r}`);
+  }
+  for (const dir of workspaceDirs(repo, pkg, lockfile)) {
+    const listing = listingFor(dir);
+    const manifest = readJsonObject(repo, `${dir}/package.json`);
+    if (listing === null || manifest === null)
+      continue;
+    for (const [n, r, sec] of wantedDependencies(manifest)) {
+      if (!listing(n, r, sec))
+        missing.push(`${n}@${r} (${dir})`);
+    }
+  }
+  return { lockfile, missing, rootRead: rootListing !== null };
+}
+function wantedDependencies(pkg) {
+  const wanted = [];
+  const optional = readObjectField(pkg, "optionalDependencies");
+  for (const section of DEPENDENCY_SECTIONS) {
+    const deps = readObjectField(pkg, section);
+    if (deps === null)
+      continue;
+    for (const [name, range] of Object.entries(deps)) {
+      if (section === "dependencies" && readStringField(optional, name) !== null)
+        continue;
+      if (typeof range === "string")
+        wanted.push([name, range, section]);
+    }
+  }
+  return wanted;
+}
+function lockfileListings(repo, pkg, lockfile) {
+  if (lockfile === "yarn.lock") {
+    const root = yarnLockListing(repo.readText(lockfile));
+    return root === null ? null : (dir) => dir === "" ? root : null;
+  }
+  if (lockfile === "pnpm-lock.yaml") {
+    const text = repo.readText(lockfile);
+    const importers = pnpmImporters(text);
+    const settings = pnpmSettings(text);
+    const overrides = pnpmOverrides(text);
+    if (importers === null || settings === null || overrides === null)
+      return null;
+    const honoured = sameOverrides(overrides, declaredPnpmOverrides(repo, pkg)) ? overrides : /* @__PURE__ */ new Map();
+    const withOverrides = (listing) => (name, range, section) => {
+      const override = honoured.get(name);
+      return listing(name, range, section) || override !== void 0 && listing(name, override, section);
+    };
+    const withSettings = (listing) => (name, range, section) => !settings.autoInstallPeers && section === "peerDependencies" || settings.excludeLinksFromLockfile && range.startsWith("link:") || listing(name, range, section);
+    const workspaceAware = text !== null && /^importers:/m.test(text);
+    return (dir) => {
+      const importer = importers.get(dir === "" ? "." : dir);
+      if (importer !== void 0)
+        return withSettings(withOverrides(pnpmImporterListing(importer)));
+      return dir === "" || !workspaceAware ? null : () => false;
+    };
+  }
+  return npmLockListings(repo, lockfile);
+}
+function npmLockListings(repo, lockfile) {
+  const lock = readJsonObject(repo, lockfile);
+  if (lock === null)
+    return null;
+  const packages = readObjectField(lock, "packages");
+  if (readObjectField(packages, "") !== null) {
+    return (dir) => {
+      const entry = readObjectField(packages, dir);
+      if (entry === null)
+        return () => false;
+      return (name, range) => DEPENDENCY_SECTIONS.some((s) => readStringField(readObjectField(entry, s), name) === range);
+    };
+  }
+  const v1 = readObjectField(lock, "dependencies");
+  if (v1 === null)
+    return null;
+  const root = (name, range) => {
+    const entry = readObjectField(v1, name);
+    if (entry === null)
+      return false;
+    const version = readStringField(entry, "version");
+    return version === null ? true : rangeAdmits(version, range) ?? true;
+  };
+  return (dir) => dir === "" ? root : null;
+}
+function workspaceDirs(repo, pkg, lockfile) {
+  let patterns;
+  if (lockfile === "pnpm-lock.yaml") {
+    const text = repo.readText("pnpm-workspace.yaml");
+    try {
+      patterns = text === null ? [] : asStringList(mapGet(parseYaml(text, PNPM_LIMITS), "packages"));
+    } catch (err) {
+      if (!(err instanceof YamlUnsupportedError))
+        throw err;
+      patterns = [];
+    }
+  } else {
+    const field = pkg["workspaces"];
+    patterns = Array.isArray(field) ? field : readObjectField(pkg, "workspaces")?.["packages"];
+  }
+  if (!Array.isArray(patterns))
+    return [];
+  const budget = { visits: 0 };
+  const included = /* @__PURE__ */ new Set();
+  const excluded = /* @__PURE__ */ new Set();
+  for (const raw of patterns) {
+    if (typeof raw !== "string")
+      continue;
+    const negated = raw.startsWith("!");
+    const pattern = (negated ? raw.slice(1) : raw).replace(/^\.\//, "").replace(/\/+$/, "");
+    const segments = pattern.split("/");
+    if (pattern === "" || /[{}[\]\\]/.test(pattern) || segments.some((s) => s === ".." || s === "." || s === "")) {
+      continue;
+    }
+    for (const dir of matchSegments(repo, "", segments, 0, budget))
+      (negated ? excluded : included).add(dir);
+  }
+  const manifestOf = (dir) => `${dir}/package.json`;
+  return [...included].filter((dir) => !excluded.has(dir) && dir !== "" && readJsonObject(repo, manifestOf(dir)) !== null).sort().slice(0, WORKSPACE_LIMITS.maxWorkspaces);
+}
+function matchSegments(repo, base, segments, depth, budget) {
+  if (segments.length === 0)
+    return [base];
+  if (depth > WORKSPACE_LIMITS.maxDepth || budget.visits >= WORKSPACE_LIMITS.maxVisits)
+    return [];
+  budget.visits += 1;
+  const [head, ...rest] = segments;
+  const at = (name) => base === "" ? name : `${base}/${name}`;
+  const children = () => repo.listNames(base).filter((n) => n !== "node_modules" && !n.startsWith(".") && repo.isDirectory(at(n)));
+  if (head === "**") {
+    return [
+      ...matchSegments(repo, base, rest, depth + 1, budget),
+      ...children().flatMap((n) => matchSegments(repo, at(n), segments, depth + 1, budget))
+    ];
+  }
+  if (!/[*?]/.test(head)) {
+    return head !== "node_modules" && repo.isDirectory(at(head)) ? matchSegments(repo, at(head), rest, depth + 1, budget) : [];
+  }
+  const re = new RegExp(`^${head.replace(/[.+^$()|]/g, "\\$&").replace(/\*/g, "[^/]*").replace(/\?/g, "[^/]")}$`);
+  return children().filter((n) => re.test(n)).flatMap((n) => matchSegments(repo, at(n), rest, depth + 1, budget));
+}
+function yarnLockListing(text) {
+  if (text === null || !/^(# yarn lockfile v1|__metadata:)/m.test(text))
+    return null;
+  const specs = /* @__PURE__ */ new Set();
+  for (const line of text.split(/\r?\n/)) {
+    if (line === "" || line.startsWith(" ") || line.startsWith("#") || !line.endsWith(":"))
+      continue;
+    for (const raw of line.slice(0, -1).split(",")) {
+      const spec = raw.trim().replace(/^"|"$/g, "");
+      specs.add(spec);
+      const berry = /^(@?[^@]+)@npm:(.+)$/.exec(spec);
+      if (berry !== null)
+        specs.add(`${berry[1]}@${berry[2]}`);
+    }
+  }
+  return (name, range) => specs.has(`${name}@${range}`);
+}
+function pnpmImporterListing(importer) {
+  return (name, range) => asString(mapGet(mapGet(importer, "specifiers"), name)) === range || PNPM_SECTIONS.some((section) => asString(mapGet(mapGet(mapGet(importer, section), name), "specifier")) === range);
+}
+function pnpmSettings(text) {
+  if (text === null)
+    return null;
+  const block = topLevelBlock(text.replace(/\r\n/g, "\n").split("\n"), "settings");
+  let node = null;
+  try {
+    node = block === null ? null : mapGet(parseYaml(block, PNPM_LIMITS), "settings");
+  } catch (err) {
+    if (err instanceof YamlUnsupportedError)
+      return null;
+    throw err;
+  }
+  return {
+    autoInstallPeers: asString(mapGet(node, "autoInstallPeers")) !== "false",
+    excludeLinksFromLockfile: asString(mapGet(node, "excludeLinksFromLockfile")) === "true"
+  };
+}
+function pnpmOverrides(text) {
+  if (text === null)
+    return null;
+  const block = topLevelBlock(text.replace(/\r\n/g, "\n").split("\n"), "overrides");
+  if (block === null)
+    return /* @__PURE__ */ new Map();
+  let node;
+  try {
+    node = mapGet(parseYaml(block, PNPM_LIMITS), "overrides");
+  } catch (err) {
+    if (err instanceof YamlUnsupportedError)
+      return null;
+    throw err;
+  }
+  if (node === null)
+    return /* @__PURE__ */ new Map();
+  if (!isMap(node))
+    return null;
+  const overrides = /* @__PURE__ */ new Map();
+  for (const { key, value } of node.entries) {
+    const spec = asString(value);
+    if (spec === null)
+      return null;
+    overrides.set(key, spec);
+  }
+  return overrides;
+}
+function declaredPnpmOverrides(repo, pkg) {
+  const sources = [
+    readObjectField(readObjectField(pkg, "pnpm"), "overrides"),
+    readObjectField(pkg, "resolutions")
+  ];
+  const workspace = repo.readText("pnpm-workspace.yaml");
+  if (workspace !== null) {
+    let node;
+    try {
+      node = mapGet(parseYaml(workspace, PNPM_LIMITS), "overrides");
+    } catch (err) {
+      if (err instanceof YamlUnsupportedError)
+        return null;
+      throw err;
+    }
+    if (node !== null && !isMap(node))
+      return null;
+    if (isMap(node))
+      sources.push(Object.fromEntries(node.entries.map((e) => [e.key, e.value])));
+  }
+  const declared = /* @__PURE__ */ new Map();
+  for (const source of sources) {
+    for (const [key, value] of Object.entries(source ?? {})) {
+      if (typeof value !== "string")
+        return null;
+      const seen = declared.get(key);
+      if (seen !== void 0 && seen !== value)
+        return null;
+      declared.set(key, value);
+    }
+  }
+  return declared;
+}
+function sameOverrides(a, b) {
+  return b !== null && a.size === b.size && [...a].every(([key, value]) => b.get(key) === value);
+}
+function pnpmImporters(text) {
+  if (text === null || !/^lockfileVersion:/m.test(text))
+    return null;
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  try {
+    const importers = topLevelBlock(lines, "importers");
+    if (importers !== null) {
+      const node = mapGet(parseYaml(importers, PNPM_LIMITS), "importers");
+      return isMap(node) ? new Map(node.entries.map((e) => [e.key, e.value])) : null;
+    }
+    const entries = [];
+    for (const key of [...PNPM_SECTIONS, "specifiers"]) {
+      const block = topLevelBlock(lines, key);
+      if (block !== null)
+        entries.push({ key, value: mapGet(parseYaml(block, PNPM_LIMITS), key) });
+    }
+    return /* @__PURE__ */ new Map([[".", { kind: "map", entries }]]);
+  } catch (err) {
+    if (err instanceof YamlUnsupportedError)
+      return null;
+    throw err;
+  }
+}
+function topLevelBlock(lines, key) {
+  const start = lines.findIndex((l) => l === `${key}:` || l.startsWith(`${key}: `));
+  if (start === -1)
+    return null;
+  let end = start + 1;
+  while (end < lines.length && (lines[end] === "" || /^[ \t#]/.test(lines[end])))
+    end += 1;
+  return lines.slice(start, end).join("\n");
+}
+function unfrozenInstall(command) {
+  const lead = /^(?:(?:sudo|time)\s+|env(?:\s+[A-Za-z_]\w*=\S*)*\s+)*/.exec(command)?.[0] ?? "";
+  const rest = command.slice(lead.length);
+  const end = installEnd(rest);
+  const head = rest.slice(0, end);
+  const tail2 = rest.slice(end);
+  const dropped = (flag) => head.replace(new RegExp(`\\s--${flag}(=\\S*)?(?=\\s|$)`, "g"), "");
+  if (/^npm ci(\s|$)/.test(head)) {
+    return lead + head.replace(/^npm ci/, "npm install --no-audit --no-fund") + tail2;
+  }
+  if (/^pnpm\b/.test(head)) {
+    if (/\s--no-frozen-lockfile(?=\s|$)/.test(head))
+      return command;
+    const bare = dropped("frozen-lockfile");
+    const withFlag = bare.replace(/^pnpm (install-test|install|it|i)(?=\s|$)/, "$& --no-frozen-lockfile");
+    if (withFlag !== bare)
+      return lead + withFlag + tail2;
+    return bare === head ? command : `${lead}${bare} --no-frozen-lockfile${tail2}`;
+  }
+  if (/^yarn\b/.test(head)) {
+    const bare = dropped("frozen-lockfile").replace(/\s--immutable(=\S*)?(?=\s|$)/g, "");
+    const assigns = lead === "" || /(^|\s)env(\s+[A-Za-z_]\w*=\S*)*\s+$/.test(lead);
+    return `${lead}${assigns ? "" : "env "}${YARN_MUTABLE} ${bare}${tail2}`;
+  }
+  return command;
+}
+function installEnd(command) {
+  let quote = null;
+  for (let i = 0; i < command.length; i += 1) {
+    const c = command[i];
+    if (quote !== null) {
+      if (c === quote)
+        quote = null;
+      else if (c === "\\" && quote === '"')
+        i += 1;
+      continue;
+    }
+    if (c === "\\") {
+      i += 1;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+    } else if (c === ";" || c === "&" && command[i + 1] === "&" || c === "|" && command[i + 1] === "|") {
+      return command.slice(0, i).trimEnd().length;
+    }
+  }
+  return command.length;
+}
+function pythonTestCommand(repo) {
+  const pyproject = repo.readText("pyproject.toml") ?? "";
+  if (pyproject.includes("[tool.pytest.ini_options]"))
+    return "pytest";
+  if (repo.exists("pytest.ini"))
+    return "pytest";
+  if ((repo.readText("tox.ini") ?? "").includes("pytest"))
+    return "pytest";
+  if ((repo.readText("setup.cfg") ?? "").includes("[tool:pytest]"))
+    return "pytest";
+  const declaresPytest = (text) => /(?:^|[\s"'[])pytest(?:[\s"'\]<>=~!,]|$)/m.test(text);
+  if (declaresPytest(pyproject))
+    return "pytest";
+  for (const name of ["requirements.txt", "requirements-dev.txt", "requirements/dev.txt"]) {
+    const text = repo.readText(name);
+    if (text !== null && declaresPytest(text))
+      return "pytest";
+  }
+  return null;
+}
+function toxTestenvDeps(repo) {
+  const text = repo.readText("tox.ini");
+  if (text === null)
+    return [];
+  const deps = [];
+  let inTestenv = false;
+  let inDeps = false;
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    const trimmed = line.trim();
+    if (trimmed.startsWith("[")) {
+      inTestenv = trimmed === "[testenv]";
+      inDeps = false;
+      continue;
+    }
+    if (!inTestenv)
+      continue;
+    const assignment = /^([A-Za-z0-9_]+)\s*=\s*(.*)$/.exec(trimmed);
+    if (assignment !== null && !/^\s/.test(line)) {
+      inDeps = assignment[1] === "deps";
+      if (inDeps && assignment[2] !== "")
+        deps.push(assignment[2]);
+      continue;
+    }
+    if (inDeps && trimmed !== "")
+      deps.push(trimmed);
+  }
+  return deps.filter((d) => REQUIREMENT_SPECIFIER.test(d));
+}
+function pytestIsDeclaredForInstall(repo) {
+  const names = /(?:^|[\s"'[])pytest(?:[\s"'\]<>=~!,]|$)/m;
+  if (names.test(repo.readText("pyproject.toml") ?? ""))
+    return true;
+  for (const name of ["requirements.txt", "requirements-dev.txt", "requirements/dev.txt"]) {
+    const text = repo.readText(name);
+    if (text !== null && names.test(text))
+      return true;
+  }
+  return false;
+}
+function pythonInstallCommand(repo) {
+  const base = basePythonInstallCommand(repo);
+  if (base === null || !base.startsWith("pip install "))
+    return base;
+  if (pythonTestCommand(repo) !== "pytest" || pytestIsDeclaredForInstall(repo))
+    return base;
+  const deps = toxTestenvDeps(repo);
+  if (deps.length === 0)
+    return base;
+  return `${base} && pip install ${deps.map((d) => `'${d}'`).join(" ")}`;
+}
+function basePythonInstallCommand(repo) {
+  if (repo.exists("poetry.lock"))
+    return "poetry install";
+  if (repo.exists("uv.lock"))
+    return "uv sync";
+  if (repo.exists("Pipfile.lock") || repo.exists("Pipfile"))
+    return "pipenv install --dev";
+  if (repo.exists("requirements.txt"))
+    return "pip install -r requirements.txt";
+  const pyproject = repo.readText("pyproject.toml");
+  if (pyproject !== null) {
+    return pyproject.includes("[tool.poetry]") ? "poetry install" : "pip install -e .";
+  }
+  return null;
+}
+function rehearse(command) {
+  const copy = '"$R/.terminalhire-rehearsal"';
+  const home = '"$R/.terminalhire-rehearsal-home"';
+  return `{ R="$HOME"; rm -rf ${copy} ${home}; mkdir -p ${home} && cp -R . ${copy} && (cd ${copy} && HOME=${home} GRADLE_USER_HOME="$R/.gradle" JAVA_TOOL_OPTIONS="$JAVA_TOOL_OPTIONS -Duser.home=$R/.terminalhire-rehearsal-home" ${command}); rm -rf ${copy} ${home}; true; }`;
+}
+function cmakeCode(text) {
+  return text.replace(/#\[(=*)\[[\s\S]*?\]\1\]/g, "").replace(/#.*$/gm, "");
+}
+function makeTargets(text) {
+  const targets = /* @__PURE__ */ new Set();
+  for (const line of text.split("\n")) {
+    if (line.startsWith("	"))
+      continue;
+    const rule = /^([^:=#\t][^:=#]*?)[ \t]*::?(?!:?=)/.exec(line);
+    if (rule)
+      for (const name of rule[1].trim().split(/\s+/))
+        targets.add(name);
+  }
+  return targets;
+}
+function cppCommands(repo) {
+  const cmake = repo.readText("CMakeLists.txt");
+  if (cmake !== null) {
+    return CMAKE_DECLARES_TESTS.test(cmakeCode(cmake)) ? {
+      install: "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON",
+      test: "cmake --build build --parallel && ctest --test-dir build --output-on-failure"
+    } : { install: null, test: null };
+  }
+  const meson = repo.readText("meson.build");
+  if (meson !== null) {
+    return /\btest\s*\(/.test(meson) ? { install: "meson setup build", test: "meson test -C build" } : { install: null, test: null };
+  }
+  const name = repo.listNames("").find((file) => MAKEFILE_NAMES.includes(file));
+  const makefile = name === void 0 ? null : repo.readText(name);
+  if (makefile !== null) {
+    const targets = makeTargets(makefile);
+    if (targets.has("test"))
+      return { install: null, test: "make test" };
+    if (targets.has("check"))
+      return { install: null, test: "make check" };
+  }
+  return { install: null, test: null };
+}
+function otherRuntimeCommands(repo, runtime) {
+  switch (runtime) {
+    case "go":
+      return {
+        // NOT `go mod download all`, and the reason is the egress allowlist
+        // rather than correctness (TERM-643). `all` widens the module graph to
+        // test-only dependencies of dependencies, and some of those zips are
+        // served by a redirect to `storage.googleapis.com`, which the install
+        // allowlist does not carry. Measured on Boeing/config-file-validator:
+        // `all` failed the install outright with `Forbidden` on that host, while
+        // the bare form fetches everything `go test ./...` needs once the module
+        // cache actually survives into the test step. Reaching for `all` here
+        // buys a broader graph at the price of granting every GCS bucket.
+        install: "go mod download",
+        // A go repo with no `_test.go` file anywhere has no suite to run.
+        test: repo.listFiles("").some((f) => f.endsWith("_test.go")) ? "go test ./..." : null
+      };
+    case "rust":
+      return { install: "cargo fetch", test: "cargo test" };
+    case "ruby": {
+      const gemfile = repo.readText("Gemfile") ?? "";
+      const test = gemfile.includes("rspec") ? "bundle exec rspec" : repo.exists("Rakefile") ? "bundle exec rake test" : null;
+      return { install: "bundle install", test };
+    }
+    case "dotnet":
+      return { install: "dotnet restore", test: "dotnet test" };
+    case "jvm": {
+      if (!JVM_BUILD_FILES.some((file) => repo.exists(file)))
+        return { install: null, test: null };
+      if (repo.exists("pom.xml")) {
+        return {
+          install: `mvn -B dependency:go-offline && ${rehearse('mvn -B test -Dmaven.test.failure.ignore=true -Dmaven.repo.local="$R/.m2/repository"')}`,
+          test: "mvn -B -o test"
+        };
+      }
+      const wrapper = repo.exists("gradlew") ? "./gradlew" : "gradle";
+      return {
+        install: `${wrapper} dependencies && ${rehearse(`${wrapper} test --continue`)}`,
+        // `--no-build-cache`: the rehearsal above can fill Gradle's build cache, and a
+        // test task restored FROM-CACHE runs nothing and prints no count.
+        test: `${wrapper} test --offline --no-build-cache`
+      };
+    }
+    case "cpp":
+      return cppCommands(repo);
+    default:
+      return { install: null, test: null };
+  }
+}
+function exactVersion(text) {
+  if (text === null)
+    return null;
+  const match2 = EXACT_VERSION.exec(text.trim());
+  return match2 === null ? null : match2[1];
+}
+function searchRuntimeVersion(repo, runtime) {
+  const sources = [];
+  const push = (label, raw) => {
+    sources.push({ label, raw: raw === null ? null : raw.trim() });
+  };
+  if (runtime === "node") {
+    push(".nvmrc", repo.readText(".nvmrc"));
+    push(".node-version", repo.readText(".node-version"));
+    push("package.json engines.node", readNodeManifest(repo)?.enginesNode ?? null);
+  } else if (runtime === "python") {
+    push(".python-version", repo.readText(".python-version"));
+    push("pyproject.toml requires-python", matchFirst(repo.readText("pyproject.toml"), /^requires-python\s*=\s*["']([^"']+)["']/m));
+  } else if (runtime === "go") {
+    push("go.mod go directive", matchFirst(repo.readText("go.mod"), /^go\s+(\d+(?:\.\d+){0,2})\s*$/m));
+  } else if (runtime === "rust") {
+    push("Cargo.toml rust-version", matchFirst(repo.readText("Cargo.toml"), /^rust-version\s*=\s*["']([^"']+)["']/m));
+  } else if (runtime === "ruby") {
+    push(".ruby-version", repo.readText(".ruby-version"));
+  } else if (runtime === "dotnet") {
+    push("global.json sdk.version", readStringField(readObjectField(readJsonObject(repo, "global.json"), "sdk"), "version"));
+  } else if (runtime === "jvm") {
+    const pom = repo.readText("pom.xml");
+    const gradle = repo.readText("build.gradle") ?? repo.readText("build.gradle.kts");
+    push("build.gradle toolchain languageVersion", javaMajor(matchFirst(gradle, /JavaLanguageVersion\.of\(\s*["']?(\d+)["']?\s*\)/) ?? matchFirst(gradle, /jvmToolchain\(\s*(\d+)\s*\)/)));
+    push(".java-version", javaMajor(repo.readText(".java-version")));
+    push("pom.xml maven.compiler.release", javaMajor(matchFirst(pom, /<maven\.compiler\.release>\s*([^<\s]+)\s*</)));
+    push("pom.xml java.version", javaMajor(matchFirst(pom, /<java\.version>\s*([^<\s]+)\s*</)));
+    push("pom.xml maven.compiler.source", javaMajor(matchFirst(pom, /<maven\.compiler\.source>\s*([^<\s]+)\s*</)));
+    push("build.gradle sourceCompatibility", javaMajor(matchFirst(gradle, /sourceCompatibility\s*=\s*JavaVersion\.VERSION_([\d_]+)/)?.replace("_", ".") ?? matchFirst(gradle, /sourceCompatibility\s*=\s*["']?([\d.]+)["']?/)));
+  }
+  let rangeFound = null;
+  for (const source of sources) {
+    if (source.raw === null || source.raw === "")
+      continue;
+    const exact = exactVersion(source.raw);
+    if (exact !== null)
+      return { version: exact, searched: sources.map((s) => s.label), rangeFound: null };
+    if (rangeFound === null)
+      rangeFound = source.raw;
+  }
+  return { version: null, searched: sources.map((s) => s.label), rangeFound };
+}
+function javaMajor(text) {
+  if (text === null)
+    return null;
+  const match2 = /^(?:1\.(\d+)|(\d+))(?:[._][\d_.]*)?$/.exec(text.trim());
+  if (match2 === null)
+    return null;
+  return match2[1] ?? match2[2] ?? null;
+}
+function matchFirst(text, pattern) {
+  if (text === null)
+    return null;
+  const match2 = pattern.exec(text);
+  return match2 === null ? null : match2[1];
+}
+var RUNTIME_MANIFESTS, MAKEFILE_NAMES, C_FAMILY_SOURCE, MANIFEST_FILENAMES, JVM_BUILD_FILES, NPM_PLACEHOLDER_TEST, DEPENDENCY_SECTIONS, WORKSPACE_LIMITS, PNPM_LIMITS, PNPM_SECTIONS, YARN_MUTABLE, REQUIREMENT_SPECIFIER, CPP_BUILD_FILES, CMAKE_DECLARES_TESTS, EXACT_VERSION;
+var init_manifest = __esm({
+  "../../packages/envspec/dist/manifest.js"() {
+    "use strict";
+    init_semverRange();
+    init_yaml();
+    RUNTIME_MANIFESTS = [
+      { runtime: "node", files: ["package.json"] },
+      { runtime: "python", files: ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"] },
+      { runtime: "go", files: ["go.mod"] },
+      { runtime: "rust", files: ["Cargo.toml"] },
+      { runtime: "jvm", files: ["pom.xml", "build.gradle", "build.gradle.kts"] },
+      { runtime: "ruby", files: ["Gemfile"] },
+      { runtime: "dotnet", files: [] },
+      // Last, so an earlier runtime keeps precedence: a Python package with a C
+      // extension built by CMake is still a Python repo, with cpp recorded second.
+      { runtime: "cpp", files: ["CMakeLists.txt", "meson.build"] }
+    ];
+    MAKEFILE_NAMES = ["GNUmakefile", "Makefile", "makefile"];
+    C_FAMILY_SOURCE = /\.(?:c|cc|cpp|cxx|h|hpp|hh)$/i;
+    MANIFEST_FILENAMES = RUNTIME_MANIFESTS.flatMap((m) => m.files).concat(["*.csproj", "*.fsproj", "*.sln"], MAKEFILE_NAMES).sort();
+    JVM_BUILD_FILES = ["build.gradle", "build.gradle.kts", "pom.xml"];
+    NPM_PLACEHOLDER_TEST = /^echo\s+["']?Error:\s*no test specified["']?\s*&&\s*exit\s+1$/;
+    DEPENDENCY_SECTIONS = [
+      "dependencies",
+      "devDependencies",
+      "optionalDependencies",
+      "peerDependencies"
+    ];
+    WORKSPACE_LIMITS = { maxDepth: 8, maxVisits: 2e3, maxWorkspaces: 200 };
+    PNPM_LIMITS = { maxDepth: 8, maxLineLength: 4096 };
+    PNPM_SECTIONS = ["dependencies", "devDependencies", "optionalDependencies"];
+    YARN_MUTABLE = "YARN_ENABLE_IMMUTABLE_INSTALLS=false";
+    REQUIREMENT_SPECIFIER = /^[A-Za-z0-9._-]+(\[[A-Za-z0-9._,-]+\])?([<>=!~]=?[A-Za-z0-9._*+-]+(,[<>=!~]=?[A-Za-z0-9._*+-]+)*)?$/;
+    CPP_BUILD_FILES = [
+      "CMakeLists.txt",
+      "meson.build",
+      ...MAKEFILE_NAMES
+    ];
+    CMAKE_DECLARES_TESTS = /\benable_testing\s*\(|\binclude\s*\(\s*CTest\s*\)|\badd_test\s*\(/;
+    EXACT_VERSION = /^v?(\d+(?:\.\d+){0,2})$/;
+  }
+});
+
+// ../../packages/envspec/dist/references.js
+function collectSecretReferences(node, basePath, boundNames) {
+  const bound = new Set(boundNames);
+  const reasons = /* @__PURE__ */ new Map();
+  for (const target of flattenStrings(node, basePath)) {
+    for (const match2 of target.text.matchAll(ACTIONS_SECRET)) {
+      const secret = match2[1];
+      record(reasons, {
+        kind: "secret-reference",
+        secret,
+        syntax: "actions-secret",
+        where: target.path,
+        detail: `${target.path} references the repository secret \`${secret}\`, which this derivation does not hold and will not substitute; a run that needs it cannot be reproduced offline`
+      });
+    }
+    for (const match2 of target.text.matchAll(SHELL_ENV)) {
+      const secret = match2[1];
+      if (bound.has(secret))
+        continue;
+      if (NON_SECRET_CONTEXT.test(match2[0]))
+        continue;
+      record(reasons, {
+        kind: "secret-reference",
+        secret,
+        syntax: "shell-env",
+        where: target.path,
+        detail: `${target.path} references the environment variable \`${secret}\`, which no \`env:\` block in scope binds to a literal value; its value would have to come from outside the repo`
+      });
+    }
+  }
+  return [...reasons.values()].sort((a, b) => a.secret.localeCompare(b.secret) || a.where.localeCompare(b.where));
+}
+function record(into, reason) {
+  const key = `${reason.syntax}:${reason.secret}`;
+  if (!into.has(key))
+    into.set(key, reason);
+}
+function flattenStrings(node, path5) {
+  const out = [];
+  const walk2 = (value, at) => {
+    if (typeof value === "string") {
+      out.push({ text: value, path: at });
+      return;
+    }
+    if (isList(value)) {
+      value.forEach((item, index) => walk2(item, `${at}[${index}]`));
+      return;
+    }
+    if (isMap(value)) {
+      for (const entry of value.entries)
+        walk2(entry.value, `${at}.${entry.key}`);
+    }
+  };
+  walk2(node, path5);
+  return out;
+}
+var ACTIONS_SECRET, SHELL_ENV, NON_SECRET_CONTEXT;
+var init_references = __esm({
+  "../../packages/envspec/dist/references.js"() {
+    "use strict";
+    init_yaml();
+    ACTIONS_SECRET = /\$\{\{\s*secrets\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+    SHELL_ENV = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+    NON_SECRET_CONTEXT = /^\$\{\{\s*(?:matrix|github|runner|job|steps|needs|inputs|env|vars|strategy)\./;
+  }
+});
+
+// ../../packages/envspec/dist/repo.js
+import { readdirSync as readdirSync4, readFileSync as readFileSync12, realpathSync as realpathSync2, statSync as statSync5 } from "fs";
+import { join as join24, relative as relative2, sep as sep7 } from "path";
+function createRepoReader(repoPath) {
+  const resolveIn = (relativePath) => relativePath === "" ? repoPath : join24(repoPath, relativePath);
+  const toPosix = (absolute) => relative2(repoPath, absolute).split(sep7).join("/");
+  let realRoot;
+  const rootPrefix = () => {
+    if (realRoot === void 0) {
+      try {
+        const real = realpathSync2(repoPath);
+        realRoot = real.endsWith(sep7) ? real : real + sep7;
+      } catch {
+        realRoot = null;
+      }
+    }
+    return realRoot;
+  };
+  const containedPath = (relativePath) => {
+    const prefix = rootPrefix();
+    if (prefix === null)
+      return null;
+    try {
+      const real = realpathSync2(resolveIn(relativePath));
+      return real + sep7 === prefix || real.startsWith(prefix) ? real : null;
+    } catch {
+      return null;
+    }
+  };
+  const readText = (relativePath) => {
+    const real = containedPath(relativePath);
+    if (real === null)
+      return null;
+    try {
+      return readFileSync12(real, "utf8");
+    } catch {
+      return null;
+    }
+  };
+  const statOf = (relativePath) => {
+    const real = containedPath(relativePath);
+    if (real === null)
+      return null;
+    try {
+      return statSync5(real);
+    } catch {
+      return null;
+    }
+  };
+  const listFiles = (relativeDir) => {
+    const out = [];
+    const walk2 = (dir, depth) => {
+      if (depth > MAX_DEPTH)
+        return;
+      let names;
+      try {
+        names = readdirSync4(dir);
+      } catch {
+        return;
+      }
+      for (const name of names.slice().sort()) {
+        if (SKIP_DIRECTORIES.has(name))
+          continue;
+        const child = join24(dir, name);
+        const st = statOf(toPosix(child));
+        if (st === null)
+          continue;
+        if (st.isDirectory()) {
+          walk2(child, depth + 1);
+          continue;
+        }
+        if (st.isFile())
+          out.push(toPosix(child));
+      }
+    };
+    const start = statOf(relativeDir);
+    if (start === null || !start.isDirectory())
+      return [];
+    walk2(resolveIn(relativeDir), 0);
+    return out.sort();
+  };
+  return {
+    readText,
+    exists: (relativePath) => statOf(relativePath) !== null,
+    isDirectory: (relativePath) => statOf(relativePath)?.isDirectory() === true,
+    listFiles,
+    listNames: (relativeDir) => {
+      const st = statOf(relativeDir);
+      if (st === null || !st.isDirectory())
+        return [];
+      let names;
+      try {
+        names = readdirSync4(resolveIn(relativeDir));
+      } catch {
+        return [];
+      }
+      const at = (name) => relativeDir === "" ? name : `${relativeDir}/${name}`;
+      return names.filter((name) => containedPath(at(name)) !== null).sort();
+    }
+  };
+}
+function normaliseWorkingDirectory(raw) {
+  if (raw.length > MAX_WORKING_DIRECTORY_LENGTH)
+    return null;
+  const segments = raw.replace(/\/+$/, "").split("/").filter((segment, index) => segment !== "." && !(index === 0 && segment === ""));
+  if (raw.startsWith("/") || segments.length > MAX_DEPTH)
+    return null;
+  const allowed = segments.every((segment) => DIRECTORY_SEGMENT.test(segment) && segment !== ".." && segment.toLowerCase() !== ".git");
+  return allowed ? segments.join("/") : null;
+}
+function scopedReader(repo, directory) {
+  const at = (path5) => path5 === "" || path5 === "." ? directory : `${directory}/${path5}`;
+  return {
+    readText: (path5) => repo.readText(at(path5)),
+    exists: (path5) => repo.exists(at(path5)),
+    isDirectory: (path5) => repo.isDirectory(at(path5)),
+    listNames: (path5) => repo.listNames(at(path5)),
+    listFiles: (path5) => repo.listFiles(at(path5)).map((file) => file.slice(directory.length + 1))
+  };
+}
+function commandInDirectory(command, directory) {
+  return directory === void 0 ? command : `cd ${directory} && ${command}`;
+}
+var SKIP_DIRECTORIES, MAX_DEPTH, MAX_WORKING_DIRECTORY_LENGTH, DIRECTORY_SEGMENT;
+var init_repo = __esm({
+  "../../packages/envspec/dist/repo.js"() {
+    "use strict";
+    SKIP_DIRECTORIES = /* @__PURE__ */ new Set([
+      ".git",
+      "node_modules",
+      "dist",
+      "build",
+      "target",
+      ".next",
+      ".venv",
+      "venv",
+      "__pycache__",
+      "vendor",
+      "coverage"
+    ]);
+    MAX_DEPTH = 8;
+    MAX_WORKING_DIRECTORY_LENGTH = 200;
+    DIRECTORY_SEGMENT = /^[A-Za-z0-9._][A-Za-z0-9._-]*$/;
+  }
+});
+
+// ../../packages/envspec/dist/workflow.js
+function scanWorkflows(repo) {
+  const jobs = [];
+  const fileReasons = [];
+  const filesRead = [];
+  const names = repo.listNames(WORKFLOW_DIR).filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"));
+  for (const name of names) {
+    const file = `${WORKFLOW_DIR}/${name}`;
+    const text = repo.readText(file);
+    if (text === null)
+      continue;
+    filesRead.push(file);
+    let document;
+    try {
+      document = parseYaml(text);
+    } catch (err) {
+      const detail = err instanceof YamlUnsupportedError ? `${file} uses ${err.construct} (line ${err.line}), which the workflow reader does not support, so no CI signal was taken from it` : `${file} could not be read as YAML, so no CI signal was taken from it`;
+      fileReasons.push({ kind: "unparsed-workflow", file, detail });
+      continue;
+    }
+    const workflowEnv = literalEnvNames(mapGet(document, "env"));
+    const workflowDirectory = defaultWorkingDirectory(document);
+    for (const jobEntry of mapEntries(mapGet(document, "jobs"))) {
+      jobs.push(readJob(file, jobEntry.key, jobEntry.value, workflowEnv, workflowDirectory));
+    }
+  }
+  return { jobs, fileReasons, filesRead };
+}
+function readJob(file, id, node, workflowEnv, workflowDirectory) {
+  const path5 = `jobs.${id}`;
+  const matrix = readMatrix(mapGet(mapGet(node, "strategy"), "matrix"));
+  const singletons = /* @__PURE__ */ new Map();
+  for (const dimension of matrix) {
+    if (dimension.values.length === 1)
+      singletons.set(dimension.key, dimension.values[0]);
+  }
+  const steps = [];
+  const rawSteps = mapGet(node, "steps");
+  if (isList(rawSteps)) {
+    rawSteps.forEach((step, index) => {
+      steps.push({
+        index,
+        name: asString(mapGet(step, "name")),
+        uses: asString(mapGet(step, "uses")),
+        run: asString(mapGet(step, "run")),
+        workingDirectory: asString(mapGet(step, "working-directory")),
+        withEntries: mapEntries(mapGet(step, "with")).map((entry) => entry.value),
+        withMap: mapGet(step, "with"),
+        path: `${path5}.steps[${index}]`
+      });
+    });
+  }
+  const { services, reasons } = readServices(file, path5, mapGet(node, "services"));
+  return {
+    id,
+    file,
+    runsOn: asStringList(mapGet(node, "runs-on")),
+    steps,
+    services,
+    matrix,
+    singletons,
+    literalEnvNames: [...workflowEnv, ...literalEnvNames(mapGet(node, "env"))].sort(),
+    defaultWorkingDirectory: defaultWorkingDirectory(node) ?? workflowDirectory,
+    reasons,
+    node,
+    path: path5
+  };
+}
+function defaultWorkingDirectory(node) {
+  return asString(mapGet(mapGet(mapGet(node, "defaults"), "run"), "working-directory"));
+}
+function readMatrix(node) {
+  const dimensions = [];
+  for (const entry of mapEntries(node)) {
+    if (entry.key === "include" || entry.key === "exclude") {
+      const count = isList(entry.value) ? entry.value.length : 1;
+      dimensions.push({ key: entry.key, values: Array.from({ length: count }, () => "unknown") });
+      continue;
+    }
+    const values = asStringList(entry.value);
+    if (values.length > 0)
+      dimensions.push({ key: entry.key, values });
+  }
+  return dimensions;
+}
+function readServices(file, jobPath, node) {
+  const services = [];
+  const reasons = [];
+  for (const entry of mapEntries(node)) {
+    const where = `${file} ${jobPath}.services.${entry.key}`;
+    const image = asString(mapGet(entry.value, "image"));
+    if (image === null) {
+      reasons.push({
+        kind: "service-image-undeclared",
+        service: entry.key,
+        where,
+        detail: `the service \`${entry.key}\` is declared in ${where} without an \`image:\`, so no container could be identified for it`
+      });
+      continue;
+    }
+    const ports = /* @__PURE__ */ new Set();
+    for (const port of asStringList(mapGet(entry.value, "ports"))) {
+      const segments = port.split(":");
+      const parsed = Number.parseInt(segments[segments.length - 1], 10);
+      if (Number.isInteger(parsed))
+        ports.add(parsed);
+    }
+    const env = [];
+    for (const pair of mapEntries(mapGet(entry.value, "env"))) {
+      const value = asString(pair.value);
+      if (value === null)
+        continue;
+      if (containsExpression(value)) {
+        continue;
+      }
+      env.push({ name: pair.key, value });
+    }
+    services.push({
+      name: entry.key,
+      image,
+      ports: [...ports].sort((a, b) => a - b),
+      env: env.sort((a, b) => a.name.localeCompare(b.name)),
+      declaredIn: "ci-workflow"
+    });
+  }
+  return { services: services.sort((a, b) => a.name.localeCompare(b.name)), reasons };
+}
+function literalEnvNames(node) {
+  return mapEntries(node).filter((entry) => {
+    const value = asString(entry.value);
+    return value !== null && !containsExpression(value);
+  }).map((entry) => entry.key);
+}
+function containsExpression(text) {
+  return /\$\{\{/.test(text) || /\$\{[A-Za-z_][A-Za-z0-9_]*\}/.test(text);
+}
+function reduceExpression(text, singletons) {
+  const reduced = text.replace(/\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}/g, (all, key) => {
+    const value = singletons.get(key);
+    return value === void 0 ? all : value;
+  });
+  return /\$\{\{/.test(reduced) ? null : reduced;
+}
+function findTestCommand(job) {
+  return findCommand(job, TEST_COMMAND_PATTERNS);
+}
+function findInstallCommand(job, accept = () => true) {
+  return findCommand(job, INSTALL_COMMAND_PATTERNS, accept);
+}
+function findCommand(job, patterns, accept = () => true) {
+  for (const step of job.steps) {
+    if (step.run === null)
+      continue;
+    const workingDirectory = step.workingDirectory ?? job.defaultWorkingDirectory;
+    if (!accept(workingDirectory))
+      continue;
+    const lines = step.run.split("\n");
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i].trim().replace(/\s*\\$/, "");
+      const bare = line.replace(/^(?:sudo|time|env)\s+/, "");
+      if (patterns.some((pattern) => pattern.test(bare))) {
+        return { command: line, where: `${job.file} ${step.path}.run`, workingDirectory };
+      }
+    }
+  }
+  return null;
+}
+function findActionInput(job, action, input) {
+  for (const step of job.steps) {
+    if (step.uses === null || !step.uses.startsWith(action))
+      continue;
+    const value = asString(mapGet(step.withMap, input));
+    if (value === null)
+      continue;
+    return { command: value, where: `${job.file} ${step.path}.with.${input}` };
+  }
+  return null;
+}
+function jobRunsTests(job) {
+  return findTestCommand(job) !== null;
+}
+function selectJob(jobs) {
+  const candidates = jobs.filter(jobRunsTests);
+  if (candidates.length === 0)
+    return null;
+  return candidates.find((job) => TEST_JOB_HINT.test(job.id)) ?? candidates[0];
+}
+var WORKFLOW_DIR, TEST_COMMAND_PATTERNS, INSTALL_COMMAND_PATTERNS, TEST_JOB_HINT;
+var init_workflow = __esm({
+  "../../packages/envspec/dist/workflow.js"() {
+    "use strict";
+    init_yaml();
+    WORKFLOW_DIR = ".github/workflows";
+    TEST_COMMAND_PATTERNS = [
+      /^npm\s+(?:run\s+)?test(?::[\w:-]+)?\b/,
+      /^(?:yarn|pnpm)\s+(?:run\s+)?test(?::[\w:-]+)?\b/,
+      /^(?:npx\s+)?(?:vitest|jest|mocha|ava)\b/,
+      /^(?:npx\s+)?playwright\s+test\b/,
+      /^(?:python[\d.]*\s+-m\s+)?pytest\b/,
+      /^py\.test\b/,
+      /^(?:tox|nox)\b/,
+      /^go\s+test\b/,
+      /^cargo\s+(?:test|nextest\s+run)\b/,
+      /^(?:bundle\s+exec\s+)?(?:rspec|rake\s+test)\b/,
+      /^(?:mvn|\.\/mvnw)\s+(?:[-\w:.=]+\s+)*test\b/,
+      /^(?:gradle|\.\/gradlew)\s+(?:[-\w:.=]+\s+)*(?:test|check)\b/,
+      /^dotnet\s+test\b/,
+      /^make\s+(?:test|check)\b/
+    ];
+    INSTALL_COMMAND_PATTERNS = [
+      /^npm\s+(?:ci|install)\b/,
+      /^yarn\s+(?:install\b|--frozen-lockfile\b|$)/,
+      /^pnpm\s+(?:install|i)\b/,
+      /^(?:python[\d.]*\s+-m\s+)?pip[\d.]*\s+install\b/,
+      /^(?:poetry|pipenv)\s+install\b/,
+      /^uv\s+(?:sync|pip\s+install)\b/,
+      /^go\s+mod\s+download\b/,
+      /^cargo\s+fetch\b/,
+      /^bundle\s+install\b/,
+      /^dotnet\s+restore\b/,
+      /^(?:mvn|\.\/mvnw)\s+dependency:go-offline\b/,
+      /^make\s+(?:install|deps)\b/
+    ];
+    TEST_JOB_HINT = /(?:^|[\W_])(?:test|tests|spec|specs|unit|check|ci)(?:$|[\W_])/i;
+  }
+});
+
+// ../../packages/envspec/dist/derive.js
+function deriveEnvironmentSpec(repoPath) {
+  return deriveFromReader(createRepoReader(repoPath));
+}
+function deriveFromReader(repo) {
+  const unresolved = [];
+  const derivedFrom = /* @__PURE__ */ new Set();
+  const rootDetection = detectRuntime(repo);
+  const workflows = scanWorkflows(repo);
+  const job = selectJob(workflows.jobs);
+  const testFromCi = job === null ? null : findTestCommand(job);
+  const located = locateProject(repo, rootDetection, testFromCi);
+  if (located.reason !== null)
+    unresolved.push(located.reason);
+  const directory = located.directory;
+  const project = directory === null ? repo : scopedReader(repo, directory);
+  const inProject = (path5) => directory === null ? path5 : `${directory}/${path5}`;
+  const notAtRoot = directory === null ? "" : ` (in \`${directory}\`)`;
+  const detection = directory === null ? rootDetection : detectRuntime(project);
+  const runtime = detection.runtime;
+  if (runtime === "unknown") {
+    unresolved.push({
+      kind: "unknown-runtime",
+      searched: MANIFEST_FILENAMES,
+      detail: `no ecosystem manifest was found at the repo root (looked for ${MANIFEST_FILENAMES.join(", ")}), so the language runtime could not be identified`
+    });
+  } else if (runtime !== "jvm" || JVM_BUILD_FILES.some((file) => project.exists(file))) {
+    derivedFrom.add("manifest");
+  }
+  if (detection.candidates.length > 1) {
+    unresolved.push({
+      kind: "multiple-runtimes",
+      candidates: detection.candidates,
+      chosen: runtime,
+      detail: `manifests for more than one ecosystem sit at ${directory === null ? "the repo root" : `\`${directory}\``} (${detection.candidates.join(", ")}); \`${runtime}\` was chosen by a fixed precedence, so the derived commands may target the wrong suite`
+    });
+  }
+  unresolved.push(...workflows.fileReasons);
+  if (job !== null) {
+    derivedFrom.add("ci-workflow");
+    unresolved.push(...job.reasons);
+    unresolved.push(...runnerReasons(job));
+    unresolved.push(...matrixReasons(job));
+    unresolved.push(...collectSecretReferences(job.node, `${job.file} ${job.path}`, job.literalEnvNames));
+  } else {
+    for (const candidate of workflows.jobs) {
+      unresolved.push(...collectSecretReferences(candidate.node, `${candidate.file} ${candidate.path}`, candidate.literalEnvNames));
+    }
+  }
+  let testCommand = null;
+  if (testFromCi !== null && job !== null) {
+    testCommand = reduceExpression(testFromCi.command, job.singletons);
+  }
+  if (testCommand === null) {
+    const fromManifest = manifestTestCommand(project, runtime);
+    if (fromManifest !== null) {
+      testCommand = fromManifest;
+      derivedFrom.add("manifest");
+    }
+  }
+  if (testCommand === null) {
+    unresolved.push({
+      kind: "no-test-command",
+      searched: testSearchPaths(runtime, workflows.filesRead),
+      detail: testFromCi === null ? `no test command could be derived${notAtRoot}: ${describeTestSearch(project, runtime, workflows.filesRead)}` : `a test step was found at ${testFromCi.where} but it depends on a matrix with more than one value, so it does not reduce to a single command`
+    });
+  }
+  const testDirectory = normaliseWorkingDirectory(testFromCi?.workingDirectory ?? ".");
+  const installInCi = job === null ? null : directory === null ? findInstallCommand(job) : findInstallCommand(job, (candidate) => normaliseWorkingDirectory(candidate ?? ".") === testDirectory);
+  const installFromCi = installInCi !== null && directory !== null && commandReaches(installInCi.command, directory) ? null : installInCi;
+  let installCommand = null;
+  if (installFromCi !== null && job !== null) {
+    installCommand = reduceExpression(installFromCi.command, job.singletons);
+  }
+  if (installCommand === null) {
+    const fallback = manifestInstallCommand(project, runtime);
+    if (fallback !== null) {
+      installCommand = fallback.command;
+      derivedFrom.add(fallback.from);
+    }
+  }
+  let installUnfrozen = null;
+  if (installCommand !== null && runtime === "node") {
+    const unfrozen = unfrozenInstall(installCommand);
+    const gaps = unfrozen === installCommand ? null : lockfileGaps(project);
+    if (gaps !== null) {
+      installCommand = unfrozen;
+      installUnfrozen = { lockfile: inProject(gaps.lockfile), missing: gaps.missing };
+    }
+  }
+  if (installCommand === null) {
+    unresolved.push({
+      kind: "no-install-command",
+      searched: installSearchPaths(runtime, workflows.filesRead),
+      detail: `no dependency install command could be derived for runtime \`${runtime}\`${notAtRoot}: neither a CI step nor a lockfile or manifest names one`
+    });
+  }
+  const version = deriveRuntimeVersion(repo, project, runtime, job);
+  if (version.value === null && runtime !== "unknown" && runtime !== "cpp") {
+    unresolved.push({
+      kind: "runtime-version-undeclared",
+      runtime,
+      searched: version.searched,
+      detail: version.rangeFound === null ? `the repo declares no ${runtime} version, so the container will use our default rather than a version the repo asked for` : `the only ${runtime} version declaration found is the range \`${version.rangeFound}\`, which names no single version; pinning one out of a range would choose an environment the repo never asked for`
+    });
+  }
+  let services = job?.services ?? [];
+  for (const reader of directory === null ? [repo] : [repo, project]) {
+    if (services.length > 0)
+      break;
+    const compose = scanCompose(reader);
+    if (compose.unparsed && compose.file !== null) {
+      const file = reader === repo ? compose.file : inProject(compose.file);
+      unresolved.push({
+        kind: "unparsed-workflow",
+        file,
+        detail: `${file} could not be read as YAML by the bounded compose reader, so no service declarations were taken from it`
+      });
+    }
+    services = compose.services;
+    if (services.length > 0)
+      derivedFrom.add("compose");
+  }
+  if (services.length === 0) {
+    for (const file of devcontainerComposeFiles(repo)) {
+      const scan = scanComposeFile(repo, file);
+      if (scan === null || scan.services.length === 0)
+        continue;
+      services = scan.services.map((service) => ({ ...service, declaredIn: "devcontainer" }));
+      derivedFrom.add("devcontainer");
+      break;
+    }
+  }
+  const migrations = findMigrations(project).map(inProject);
+  const seeds = findSeeds(project).map(inProject);
+  return {
+    runtime,
+    runtimeVersion: version.value,
+    installCommand,
+    ...installUnfrozen === null ? {} : { installUnfrozen },
+    testCommand,
+    ...directory === null ? {} : { workingDirectory: directory },
+    services,
+    migrations,
+    seeds,
+    derivedFrom: [...derivedFrom].sort(),
+    unresolved: sortReasons(unresolved)
+  };
+}
+function namesProject(repo, detection) {
+  return detection.candidates.some((runtime) => runtime !== "jvm") || JVM_BUILD_FILES.some((file) => repo.exists(file));
+}
+function holdsProject(repo) {
+  return namesProject(repo, detectRuntime(repo));
+}
+function commandReaches(command, directory) {
+  const words2 = command.split(/[\s=;&|()'"]+/);
+  return words2.some((word, index) => {
+    if (word.replace(/^\.\//, "").split("/")[0] !== directory)
+      return false;
+    return word.includes("/") || DIRECTORY_ARGUMENT.test(words2[index - 1] ?? "");
+  });
+}
+function locateProject(repo, rootDetection, test) {
+  if (namesProject(repo, rootDetection))
+    return AT_ROOT;
+  const named = test?.workingDirectory ?? null;
+  if (test !== null && named !== null) {
+    const unusable2 = (why) => ({
+      directory: null,
+      reason: {
+        kind: "working-directory-unresolved",
+        where: test.where,
+        detail: `the working directory of the test step at ${test.where} ${why}, so its commands were kept at the repo root`
+      }
+    });
+    const directory2 = normaliseWorkingDirectory(named);
+    if (directory2 === null)
+      return unusable2("is not a plain relative path inside the repo");
+    if (directory2 === "")
+      return AT_ROOT;
+    if (!repo.isDirectory(directory2))
+      return unusable2("is not a directory inside the repo");
+    if (!holdsProject(scopedReader(repo, directory2))) {
+      return unusable2("holds no ecosystem manifest");
+    }
+    return { directory: directory2, reason: null };
+  }
+  const candidates = repo.listNames("").filter((name) => !name.startsWith(".") && !SKIP_DIRECTORIES.has(name) && repo.isDirectory(name) && holdsProject(scopedReader(repo, name)));
+  if (candidates.length !== 1)
+    return AT_ROOT;
+  if (test !== null && commandReaches(test.command, candidates[0]))
+    return AT_ROOT;
+  const directory = normaliseWorkingDirectory(candidates[0]);
+  return directory === null || directory === "" ? AT_ROOT : { directory, reason: null };
+}
+function runnerReasons(job) {
+  const reasons = [];
+  for (const label of job.runsOn) {
+    if (label !== "self-hosted")
+      continue;
+    reasons.push({
+      kind: "self-hosted-runner",
+      label,
+      where: `${job.file} ${job.path}.runs-on`,
+      detail: `${job.file} ${job.path} runs on a self-hosted runner, so its environment is defined by a machine outside the repo and cannot be reproduced from the repo alone`
+    });
+  }
+  return reasons;
+}
+function matrixReasons(job) {
+  const reasons = [];
+  for (const dimension of job.matrix) {
+    if (dimension.values.length <= 1)
+      continue;
+    reasons.push({
+      kind: "irreducible-matrix",
+      dimension: dimension.key,
+      values: dimension.values,
+      where: `${job.file} ${job.path}.strategy.matrix.${dimension.key}`,
+      detail: `${job.file} ${job.path} runs a matrix over \`${dimension.key}\` with ${dimension.values.length} values (${dimension.values.join(", ")}); one container is one environment, so this cannot be reduced to a single choice without picking on the repo's behalf`
+    });
+  }
+  return reasons;
+}
+function manifestTestCommand(repo, runtime) {
+  if (runtime === "node") {
+    const manifest = readNodeManifest(repo);
+    return manifest === null ? null : nodeTestCommand(manifest);
+  }
+  if (runtime === "python")
+    return pythonTestCommand(repo);
+  return otherRuntimeCommands(repo, runtime).test;
+}
+function manifestInstallCommand(repo, runtime) {
+  if (runtime === "node") {
+    const node = nodeInstallCommand(repo);
+    return node === null ? null : { command: node.command, from: node.from };
+  }
+  if (runtime === "python") {
+    const python = pythonInstallCommand(repo);
+    return python === null ? null : { command: python, from: "manifest" };
+  }
+  const other = otherRuntimeCommands(repo, runtime).install;
+  return other === null ? null : { command: other, from: "manifest" };
+}
+function deriveRuntimeVersion(repo, project, runtime, job) {
+  const setup = SETUP_ACTIONS[runtime];
+  const searched = [];
+  let rangeFound = null;
+  const pin = (raw) => runtime === "jvm" ? javaMajor(raw) : exactVersion(raw);
+  if (job !== null && setup !== void 0) {
+    const direct = findActionInput(job, setup.action, setup.input);
+    if (direct !== null) {
+      searched.push(`${job.file} ${setup.action} ${setup.input}`);
+      const reduced = reduceExpression(direct.command, job.singletons);
+      const exact = pin(reduced);
+      if (exact !== null)
+        return { value: exact, searched, rangeFound: null };
+      if (reduced !== null)
+        rangeFound = reduced;
+    }
+    const viaFile = findActionInput(job, setup.action, setup.fileInput);
+    if (viaFile !== null) {
+      searched.push(`${job.file} ${setup.action} ${setup.fileInput} -> ${viaFile.command}`);
+      const exact = pin(repo.readText(viaFile.command));
+      if (exact !== null)
+        return { value: exact, searched, rangeFound: null };
+    }
+  }
+  const fromFiles = searchRuntimeVersion(project, runtime);
+  return {
+    value: fromFiles.version,
+    searched: [...searched, ...fromFiles.searched],
+    rangeFound: rangeFound ?? fromFiles.rangeFound
+  };
+}
+function testSearchPaths(runtime, workflowFiles) {
+  const paths = [...workflowFiles];
+  if (workflowFiles.length === 0)
+    paths.push(".github/workflows (absent)");
+  if (runtime === "node")
+    paths.push("package.json scripts.test");
+  if (runtime === "python") {
+    paths.push("pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini", "requirements.txt");
+  }
+  if (runtime === "go")
+    paths.push("**/*_test.go");
+  if (runtime === "ruby")
+    paths.push("Gemfile", "Rakefile");
+  if (runtime === "jvm")
+    paths.push(...JVM_BUILD_FILES);
+  if (runtime === "cpp")
+    paths.push(...CPP_BUILD_FILES);
+  if (runtime === "unknown")
+    paths.push(...MANIFEST_FILENAMES);
+  return [...new Set(paths)].sort();
+}
+function describeTestSearch(repo, runtime, workflowFiles) {
+  const ciPart = workflowFiles.length === 0 ? "the repo has no GitHub Actions workflow" : `no job in ${workflowFiles.join(", ")} runs a recognised test command`;
+  if (runtime === "unknown") {
+    return `${ciPart}, and no ecosystem manifest identifies a runtime whose test convention we could apply`;
+  }
+  if (runtime === "node") {
+    const manifest = readNodeManifest(repo);
+    const hasScripts = manifest?.scripts !== null && manifest?.scripts !== void 0;
+    return `${ciPart}, and \`package.json\` ${hasScripts ? "declares no usable `test` script (an `npm init` placeholder that exits 1 does not count)" : "declares no `scripts` block"}`;
+  }
+  if (runtime === "python") {
+    return `${ciPart}, and nothing in the repo names a test runner \u2014 no \`[tool.pytest.ini_options]\`, no \`pytest.ini\`, and no pytest dependency in \`pyproject.toml\` or a requirements file`;
+  }
+  if (runtime === "jvm" && !JVM_BUILD_FILES.some((file) => repo.exists(file))) {
+    return `${ciPart}, and the repo has Java sources but no build file (${JVM_BUILD_FILES.join(", ")}), so there is no build to run tests with. Compiling the sources with \`javac\` alone would run no tests`;
+  }
+  if (runtime === "cpp")
+    return `${ciPart}, and ${describeCppSearch(repo)}`;
+  return `${ciPart}, and no ${runtime} test convention applies to this tree`;
+}
+function describeCppSearch(repo) {
+  const cmake = repo.readText("CMakeLists.txt");
+  if (cmake !== null && !CMAKE_DECLARES_TESTS.test(cmakeCode(cmake))) {
+    return "`CMakeLists.txt` registers no tests: no `enable_testing()`, `include(CTest)` or `add_test()`";
+  }
+  if (cmake === null && repo.exists("meson.build")) {
+    return "`meson.build` declares no `test()`";
+  }
+  const makefile = repo.listNames("").find((name) => MAKEFILE_NAMES.includes(name));
+  if (cmake === null && makefile !== void 0) {
+    return `\`${makefile}\` has no \`test\` or \`check\` target`;
+  }
+  return `no C/C++ test convention applies to this tree (looked in ${CPP_BUILD_FILES.join(", ")})`;
+}
+function installSearchPaths(runtime, workflowFiles) {
+  const paths = [...workflowFiles];
+  if (runtime === "node")
+    paths.push("package-lock.json", "pnpm-lock.yaml", "yarn.lock");
+  if (runtime === "python")
+    paths.push("poetry.lock", "pyproject.toml", "requirements.txt", "uv.lock");
+  if (runtime === "jvm")
+    paths.push(...JVM_BUILD_FILES);
+  if (runtime === "cpp")
+    paths.push(...CPP_BUILD_FILES);
+  if (runtime === "unknown")
+    paths.push(...MANIFEST_FILENAMES);
+  return [...new Set(paths)].sort();
+}
+function sortReasons(reasons) {
+  return reasons.slice().sort((a, b) => {
+    const byKind = KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind);
+    if (byKind !== 0)
+      return byKind;
+    return secondaryKey(a).localeCompare(secondaryKey(b));
+  });
+}
+function secondaryKey(reason) {
+  switch (reason.kind) {
+    case "secret-reference":
+      return `${reason.secret}:${reason.where}`;
+    case "irreducible-matrix":
+      return reason.dimension;
+    case "self-hosted-runner":
+      return reason.where;
+    case "service-image-undeclared":
+      return reason.service;
+    case "unparsed-workflow":
+      return reason.file;
+    default:
+      return "";
+  }
+}
+var SETUP_ACTIONS, AT_ROOT, DIRECTORY_ARGUMENT, KIND_ORDER;
+var init_derive = __esm({
+  "../../packages/envspec/dist/derive.js"() {
+    "use strict";
+    init_database();
+    init_manifest();
+    init_references();
+    init_repo();
+    init_workflow();
+    SETUP_ACTIONS = {
+      node: { action: "actions/setup-node", input: "node-version", fileInput: "node-version-file" },
+      python: {
+        action: "actions/setup-python",
+        input: "python-version",
+        fileInput: "python-version-file"
+      },
+      go: { action: "actions/setup-go", input: "go-version", fileInput: "go-version-file" },
+      ruby: { action: "ruby/setup-ruby", input: "ruby-version", fileInput: "ruby-version-file" },
+      dotnet: {
+        action: "actions/setup-dotnet",
+        input: "dotnet-version",
+        fileInput: "global-json-file"
+      },
+      jvm: { action: "actions/setup-java", input: "java-version", fileInput: "java-version-file" }
+    };
+    AT_ROOT = { directory: null, reason: null };
+    DIRECTORY_ARGUMENT = /^(?:cd|pushd|-C|--prefix|--cwd|--dir|--directory)$/;
+    KIND_ORDER = [
+      "no-test-command",
+      "no-install-command",
+      "unknown-runtime",
+      "working-directory-unresolved",
+      "multiple-runtimes",
+      "self-hosted-runner",
+      "irreducible-matrix",
+      "secret-reference",
+      "service-image-undeclared",
+      "unparsed-workflow",
+      "runtime-version-undeclared"
+    ];
+  }
+});
+
+// ../../packages/envspec/dist/preview.js
+function planPreview(repo) {
+  const rootHtml = repo.exists("index.html") && !repo.isDirectory("index.html");
+  if (!repo.exists("package.json")) {
+    if (rootHtml) {
+      return {
+        previewable: true,
+        buildCommand: null,
+        serveCommand: null,
+        rootHtml: true,
+        reason: "the repository has an index.html at its root"
+      };
+    }
+    return {
+      previewable: false,
+      reason: "the repository has no package.json and no index.html at its root"
+    };
+  }
+  const pkg = readJsonObject(repo, "package.json");
+  if (pkg === null) {
+    return { previewable: false, reason: "package.json could not be read as a JSON object" };
+  }
+  if (pkg.workspaces !== void 0 || repo.exists("pnpm-workspace.yaml")) {
+    return {
+      previewable: false,
+      reason: "the repository root is a workspace, and this version previews single-package repositories only"
+    };
+  }
+  const scripts = scriptsOf(pkg);
+  const run2 = scriptRunner(repo);
+  const build = scripts.has("build") ? `${run2} build` : null;
+  const serveName = SERVE_SCRIPTS.find((name) => scripts.has(name));
+  const serve = serveName === void 0 ? null : `${run2} ${serveName}`;
+  const anyHtml = rootHtml || hasIndexHtml(repo);
+  if (serve === null && !anyHtml) {
+    return {
+      previewable: false,
+      reason: "nothing here can be served: package.json has no preview, start, serve or dev script, and the repository has no index.html"
+    };
+  }
+  if (build === null && serve === null && !rootHtml) {
+    return {
+      previewable: false,
+      reason: "the only index.html is below the root, and package.json has no build or serve script to produce a site from it"
+    };
+  }
+  return {
+    previewable: true,
+    buildCommand: build,
+    serveCommand: serve,
+    rootHtml,
+    reason: build === null ? serve === null ? "the repository has an index.html at its root" : "package.json declares a way to serve the app" : "package.json declares a build script and a way to serve the app"
+  };
+}
+function scriptsOf(pkg) {
+  const scripts = pkg.scripts;
+  const names = /* @__PURE__ */ new Set();
+  if (typeof scripts !== "object" || scripts === null || Array.isArray(scripts))
+    return names;
+  for (const [name, body] of Object.entries(scripts)) {
+    if (typeof body === "string" && body.trim() !== "")
+      names.add(name);
+  }
+  return names;
+}
+function scriptRunner(repo) {
+  if (repo.exists("yarn.lock"))
+    return "yarn run";
+  if (repo.exists("pnpm-lock.yaml"))
+    return "pnpm run";
+  return "npm run";
+}
+function hasIndexHtml(repo) {
+  return repo.listFiles("").some((path5) => path5 === "index.html" || path5.endsWith("/index.html"));
+}
+var SERVE_SCRIPTS;
+var init_preview2 = __esm({
+  "../../packages/envspec/dist/preview.js"() {
+    "use strict";
+    init_manifest();
+    SERVE_SCRIPTS = ["preview", "start", "serve", "dev"];
+  }
+});
+
+// ../../packages/envspec/dist/runRequirements.js
+var init_runRequirements = __esm({
+  "../../packages/envspec/dist/runRequirements.js"() {
+    "use strict";
+    init_repo();
+  }
+});
+
+// ../../packages/envspec/dist/index.js
+var init_dist2 = __esm({
+  "../../packages/envspec/dist/index.js"() {
+    "use strict";
+    init_derive();
+    init_repo();
+    init_preview2();
+    init_runRequirements();
+    init_claimScreenshots();
+    init_yaml();
+  }
+});
+
 // ../../packages/attest/dist/types.js
 var IN_TOTO_STATEMENT_TYPE, ACCEPTANCE_RUN_PREDICATE_TYPE, IN_TOTO_PAYLOAD_TYPE, TEST_COMMAND_SOURCES;
 var init_types4 = __esm({
@@ -29838,7 +32158,7 @@ var init_aead = __esm({
 });
 
 // ../../packages/attest/dist/manifest.js
-var init_manifest = __esm({
+var init_manifest2 = __esm({
   "../../packages/attest/dist/manifest.js"() {
     "use strict";
     init_pae();
@@ -29851,7 +32171,7 @@ var init_manifest = __esm({
 var init_attestation = __esm({
   "../../packages/attest/dist/attestation.js"() {
     "use strict";
-    init_manifest();
+    init_manifest2();
     init_types4();
   }
 });
@@ -30230,13 +32550,13 @@ var init_verify = __esm({
   "../../packages/attest/dist/verify.js"() {
     "use strict";
     init_dsse();
-    init_manifest();
+    init_manifest2();
     init_types4();
   }
 });
 
 // ../../packages/attest/dist/index.js
-var init_dist2 = __esm({
+var init_dist3 = __esm({
   "../../packages/attest/dist/index.js"() {
     "use strict";
     init_types4();
@@ -30246,7 +32566,7 @@ var init_dist2 = __esm({
     init_dispatchedRun();
     init_sealedbox();
     init_aead();
-    init_manifest();
+    init_manifest2();
     init_attestation();
     init_nonce();
     init_gceIdentity();
@@ -30454,7 +32774,7 @@ var OUTCOME_TO_BUDGET, BASELINE_IS_A_VERDICT, CONTRADICTS_COUNTS, SOURCE_IS_SIGN
 var init_attestation2 = __esm({
   "../../packages/envrun/dist/attestation.js"() {
     "use strict";
-    init_dist2();
+    init_dist3();
     OUTCOME_TO_BUDGET = {
       completed: "completed",
       "tests-failed": "tests-failed",
@@ -30670,7 +32990,7 @@ function shapeFor(runtime, variant) {
     return JVM_GRADLE_IMAGE;
   return RUNTIME_IMAGES[runtime];
 }
-function atLeast(a, b) {
+function atLeast2(a, b) {
   const left = a.split(".").map(Number);
   const right = b.split(".").map(Number);
   const shared = Math.min(left.length, right.length);
@@ -30711,7 +33031,7 @@ function resolvePublishedImage(image, runtime, version, variant) {
   if (!imageDefinitelyAbsent(image))
     return image;
   const shape = shapeFor(runtime, variant);
-  if (shape && shape.declaredIsFloor && atLeast(shape.defaultVersion, version)) {
+  if (shape && shape.declaredIsFloor && atLeast2(shape.defaultVersion, version)) {
     return unversionedImage(shape);
   }
   throw new RunRefusalError(`the repo declares ${runtime} ${version}, and no image is published at ${image}` + (shape && shape.declaredIsFloor ? `. Our default is ${shape.defaultVersion}, which is OLDER than that, so falling back would run the repo under a toolchain it says it cannot use` : `. ${runtime} treats a declared version as an exact pin, not a minimum, so a different one is a different environment`) + ". Refusing rather than booting a version the repo did not ask for \u2014 that substitution is what made this class of failure unattributable (TERM-643). Pass an explicit image to override.", { origin: "repository" });
@@ -30849,6 +33169,7 @@ async function runEnvironmentSpec(req) {
         proxyCode,
         command: req.spec.installCommand,
         repoDir: req.repoDir,
+        workingDirectory: req.spec.workingDirectory,
         jail,
         tmp,
         pathDomain: req.lease.pathDomain,
@@ -30896,6 +33217,7 @@ async function runEnvironmentSpec(req) {
           profile: "offline",
           command: req.spec.testCommand,
           repoDir: req.repoDir,
+          workingDirectory: req.testFromRoot === true ? void 0 : req.spec.workingDirectory,
           jail,
           tmp,
           pathDomain: req.lease.pathDomain,
@@ -31012,6 +33334,7 @@ async function runStep(containment, r) {
   const res = await containment.run(spec, r.env, {
     timeoutMs: r.timeoutMs,
     image: r.image,
+    ...r.workingDirectory === void 0 ? {} : { cwd: `${r.repoDir}/${r.workingDirectory}` },
     ...r.labels ? { labels: r.labels } : {},
     ...r.proxyCode ? { proxyCode: r.proxyCode } : {},
     ...r.runtime === void 0 ? {} : { runtime: r.runtime },
@@ -31021,7 +33344,9 @@ async function runStep(containment, r) {
   return {
     step: r.step,
     profile: r.profile,
-    command: r.command,
+    // With its directory, because this is the command the run record and the signed statement
+    // carry: the same words from two directories are two different harnesses.
+    command: commandInDirectory(r.command, r.workingDirectory),
     argv: res.argv,
     exitCode: res.status,
     stdout: res.stdout,
@@ -31036,6 +33361,7 @@ var init_execute = __esm({
   "../../packages/envrun/dist/execute.js"() {
     "use strict";
     init_dist();
+    init_dist2();
     init_classify2();
     init_venueStorageWatch();
     init_attestation2();
@@ -31410,7 +33736,7 @@ var init_result = __esm({
   "../../packages/envrun/dist/result.js"() {
     "use strict";
     init_screenshotsResult();
-    init_dist2();
+    init_dist3();
     init_classify2();
     init_venueDescriptor();
     RUN_TEST_COMMAND_SOURCES = [
@@ -33015,7 +35341,7 @@ var DEFAULT_GCP_PROJECT, DEFAULT_GCP_ZONE, DEFAULT_GCP_BOOT_ZONES, DEFAULT_GCP_M
 var init_gcpPlacement = __esm({
   "../../packages/envrun/dist/gcpPlacement.js"() {
     "use strict";
-    init_dist2();
+    init_dist3();
     DEFAULT_GCP_PROJECT = "terminalhire-pool";
     DEFAULT_GCP_ZONE = "us-east1-b";
     DEFAULT_GCP_BOOT_ZONES = ["us-east1-b", "us-east1-c", "us-east1-d"];
@@ -33042,15 +35368,15 @@ var init_gcpPlacement = __esm({
 // ../../packages/envrun/dist/emptyGitConfig.js
 import { mkdtempSync as mkdtempSync2, rmSync as rmSync7, writeFileSync as writeFileSync13 } from "fs";
 import { tmpdir as tmpdir2 } from "os";
-import { join as join24 } from "path";
+import { join as join25 } from "path";
 function emptyGitConfig() {
   if (emptyGitConfigFile !== void 0)
     return emptyGitConfigFile;
   let dir;
   let file;
   try {
-    dir = mkdtempSync2(join24(tmpdir2(), "th-run-nogitconfig-"));
-    file = join24(dir, "config");
+    dir = mkdtempSync2(join25(tmpdir2(), "th-run-nogitconfig-"));
+    file = join25(dir, "config");
     writeFileSync13(file, "", { mode: 384 });
   } catch (err) {
     throw new RunRefusalError("could not create the empty git config this run points GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM at, so git would read the configuration \u2014 and the credential helpers \u2014 on this machine instead. That is our environment failing, not your tests: check that the temp directory is writable.", { cause: err });
@@ -33075,7 +35401,7 @@ var init_emptyGitConfig = __esm({
 // ../../packages/envrun/dist/hostedVenue.js
 import { spawn as spawn4, spawnSync as spawnSync5 } from "child_process";
 import { createHash as createHash12, X509Certificate } from "crypto";
-import { chmodSync as chmodSync3, existsSync as existsSync12, mkdtempSync as mkdtempSync3, readFileSync as readFileSync12, rmSync as rmSync8, writeFileSync as writeFileSync14 } from "fs";
+import { chmodSync as chmodSync3, existsSync as existsSync12, mkdtempSync as mkdtempSync3, readFileSync as readFileSync13, rmSync as rmSync8, writeFileSync as writeFileSync14 } from "fs";
 import { request as httpsRequest } from "https";
 import { createServer } from "net";
 import { posix as posix3 } from "path";
@@ -33127,13 +35453,13 @@ function dispatchedGitBinary() {
   return "git";
 }
 function dispatchedProbeEnv(cloneDir, base) {
-  const gitDir = join25(cloneDir, ".git");
+  const gitDir = join26(cloneDir, ".git");
   return {
     ...base,
     GIT_DIR: gitDir,
     GIT_WORK_TREE: cloneDir,
-    GIT_INDEX_FILE: join25(gitDir, "index"),
-    GIT_OBJECT_DIRECTORY: join25(gitDir, "objects"),
+    GIT_INDEX_FILE: join26(gitDir, "index"),
+    GIT_OBJECT_DIRECTORY: join26(gitDir, "objects"),
     GIT_ALTERNATE_OBJECT_DIRECTORIES: "",
     GIT_COMMON_DIR: gitDir,
     GIT_NAMESPACE: "",
@@ -33308,8 +35634,8 @@ function fetchAttestationOverTls(req) {
     let cert;
     let key;
     try {
-      cert = readFileSync12(req.certPath);
-      key = readFileSync12(req.keyPath);
+      cert = readFileSync13(req.certPath);
+      key = readFileSync13(req.keyPath);
     } catch (err) {
       settle({ ok: false, reason: `the client key could not be read: ${describeErr(err)}` });
       return;
@@ -33934,8 +36260,8 @@ function makeClientTls(io, allocated, vm) {
       throw new HostedVenueError(`the directory ${dir} holding ${vm}'s client key could not be removed and is left behind: ${describeErr(err)}`);
     }
   });
-  const certPath = join25(dir, "client.pem");
-  const keyPath = join25(dir, "client-key.pem");
+  const certPath = join26(dir, "client.pem");
+  const keyPath = join26(dir, "client-key.pem");
   const made = io.exec("openssl", clientCertArgv(keyPath, certPath), OPENSSL_TIMEOUT_MS, {});
   if (!made.ok) {
     throw new HostedVenueError(`could not make ${vm}'s client certificate with openssl: ${execDetail(made).slice(0, 300)}`, "ours");
@@ -34021,7 +36347,7 @@ async function reachConfidentialSpace(a) {
   if (!verdict.ok) {
     throw new HostedVenueError(`${vm} presented an attestation this lease refuses (${verdict.reason}): ${verdict.detail}`);
   }
-  const caPath = join25(a.tls.dir, "venue.pem");
+  const caPath = join26(a.tls.dir, "venue.pem");
   try {
     io.writeFile(caPath, venuePem);
   } catch (err) {
@@ -34200,7 +36526,7 @@ function hostedVenue(opts = {}, io = defaultHostedVenueIo) {
           throw new HostedVenueError(`the tunnel socket directory ${socketDir} could not be removed and is left behind: ${describeErr(err)}`);
         }
       });
-      const socketPath = join25(socketDir, VENUE_SOCKET_NAME);
+      const socketPath = join26(socketDir, VENUE_SOCKET_NAME);
       if (io.exists(socketPath)) {
         throw new HostedVenueError(`something already exists at ${socketPath}, inside a directory created seconds ago for this run alone. Refusing rather than clearing it: the tunnel would carry the whole run over a path we cannot account for`, "ours");
       }
@@ -34451,18 +36777,18 @@ function makeLease(p) {
           throw new HostedVenueError(`could not stage ${from} onto ${p.vm}: ${execDetail(res).slice(0, 300)}`);
         }
       };
-      const localJail = join25(local.scratchRoot, JAIL_SEGMENT);
-      const localTmp = join25(local.scratchRoot, JAIL_TMP_SEGMENT);
+      const localJail = join26(local.scratchRoot, JAIL_SEGMENT);
+      const localTmp = join26(local.scratchRoot, JAIL_TMP_SEGMENT);
       const required = [
         localTmp,
-        join25(localJail, JAIL_PASSWD_FILE),
-        join25(localJail, JAIL_GROUP_FILE)
+        join26(localJail, JAIL_PASSWD_FILE),
+        join26(localJail, JAIL_GROUP_FILE)
       ];
       const missing = required.filter((path5) => !p.io.exists(path5));
       if (missing.length > 0) {
         throw new HostedVenueError(`refusing to stage ${local.scratchRoot} onto ${p.vm}: the jail at ${localJail} is incomplete \u2014 missing ${missing.join(", ")}. buildJail must run to completion before stage(), or the venue mounts a directory with no identity database.`);
       }
-      const gitConfigPath = join25(local.cloneDir, ".git", "config");
+      const gitConfigPath = join26(local.cloneDir, ".git", "config");
       let gitConfig;
       try {
         gitConfig = p.io.readTextIfPresent(gitConfigPath);
@@ -34613,19 +36939,19 @@ function makeLease(p) {
     }
   };
 }
-var join25, SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, DELETE_RETRY_DELAY_MS, DELETE_RETRY_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, GCLOUD_HOME_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, VOLUME_CREATE_TIMEOUT_MS, EXEC_PROBE_TIMEOUT_MS, POPULATE_TIMEOUT_MS, STAGE_PROOF_PREFIX, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING, STOCKOUT_RETRY_DELAYS_MS, CS_ATTEST_PORT, CS_DOCKER_PORT, CS_READY_BUDGET_MS, CS_ATTEST_TIMEOUT_MS, CS_PULL_TIMEOUT_MS, CS_ATTEST_INTERVAL_MS, OPENSSL_TIMEOUT_MS, CS_RUN_ARGS, CS_GUEST_USER, CS_STAGE_ROOT, CLIENT_CERT_STAND_IN;
+var join26, SSH_READY_BUDGET_MS, SSH_PROBE_INTERVAL_MS, SSH_PROBE_TIMEOUT_MS, TUNNEL_BUDGET_MS, TUNNEL_POLL_INTERVAL_MS, GOOGLE_JWKS_URL, JWKS_FETCH_TIMEOUT_MS, CREDENTIAL_QUERY_PARAM, UNDECODABLE, STAGE_PUSH_TIMEOUT_MS, DISPATCHED_PROBE_TIMEOUT_MS, DISPATCHED_STATUS_ARGV, DISPATCHED_GIT_CANDIDATES, PROXY_CLEANUP_TIMEOUT_MS, OWNER_PROBE_TIMEOUT_MS, BOOT_TIMEOUT_MS, MKDIR_TIMEOUT_MS, DELETE_TIMEOUT_MS, DELETE_RETRY_DELAY_MS, DELETE_RETRY_TIMEOUT_MS, LOCAL_GCLOUD_TIMEOUT_MS, SERVICE_ACCOUNT_ACTIVATE_TIMEOUT_MS, SOCKET_DIR_PREFIX, GCLOUD_HOME_PREFIX, VENUE_SOCKET_NAME, HostedVenueError, VENUE_GCLOUD_CONFIG, SERVICE_ACCOUNT_SUFFIX, GCLOUD_PRINCIPAL_OVERRIDES, defaultHostedVenueIo, VENUE_SSH_USER, GCE_METADATA_IDENTITY_URL, COMPACT_JWT, VOLUME_CREATE_TIMEOUT_MS, EXEC_PROBE_TIMEOUT_MS, POPULATE_TIMEOUT_MS, STAGE_PROOF_PREFIX, IAP_NOT_READY, IAP_BACKEND_UNREACHABLE, IAP_DENIED, TERMINAL_GCP, INSTANCE_NOT_RUNNING, PREEMPTED, HOST_KEY_MISMATCH, SSH_KEY_NOT_READY, DAEMON_NOT_READY, SSH_NOT_ANSWERING, STOCKOUT_RETRY_DELAYS_MS, CS_ATTEST_PORT, CS_DOCKER_PORT, CS_READY_BUDGET_MS, CS_ATTEST_TIMEOUT_MS, CS_PULL_TIMEOUT_MS, CS_ATTEST_INTERVAL_MS, OPENSSL_TIMEOUT_MS, CS_RUN_ARGS, CS_GUEST_USER, CS_STAGE_ROOT, CLIENT_CERT_STAND_IN;
 var init_hostedVenue = __esm({
   "../../packages/envrun/dist/hostedVenue.js"() {
     "use strict";
     init_dist();
-    init_dist2();
+    init_dist3();
     init_gcpPlacement();
     init_execute();
     init_emptyGitConfig();
     init_labels();
     init_venueProof();
     init_venue();
-    ({ join: join25 } = posix3);
+    ({ join: join26 } = posix3);
     SSH_READY_BUDGET_MS = 18e4;
     SSH_PROBE_INTERVAL_MS = 5e3;
     SSH_PROBE_TIMEOUT_MS = 25e3;
@@ -34682,7 +37008,7 @@ var init_hostedVenue = __esm({
       pushTree: pushTreeWithTar,
       readTextIfPresent: (path5) => {
         try {
-          return readFileSync12(path5, "utf8");
+          return readFileSync13(path5, "utf8");
         } catch (err) {
           if (err.code === "ENOENT")
             return null;
@@ -34716,7 +37042,7 @@ var init_hostedVenue = __esm({
       now: () => Date.now(),
       exists: (path5) => existsSync12(path5),
       makePrivateDir: () => {
-        const dir = mkdtempSync3(join25(tmpdir3(), SOCKET_DIR_PREFIX));
+        const dir = mkdtempSync3(join26(tmpdir3(), SOCKET_DIR_PREFIX));
         chmodSync3(dir, 448);
         return dir;
       },
@@ -34724,7 +37050,7 @@ var init_hostedVenue = __esm({
         rmSync8(path5, { recursive: true, force: true });
       },
       makeGcloudHome: () => {
-        const dir = mkdtempSync3(join25(tmpdir3(), GCLOUD_HOME_PREFIX));
+        const dir = mkdtempSync3(join26(tmpdir3(), GCLOUD_HOME_PREFIX));
         chmodSync3(dir, 448);
         return dir;
       },
@@ -34918,2228 +37244,6 @@ var init_placement = __esm({
       hosted: "hosted-pool"
     };
     DEFAULT_PLACEMENT_KIND = "local-docker";
-  }
-});
-
-// ../../packages/envspec/dist/yaml.js
-function parseYaml(source, limits = {}) {
-  const lines = splitLines(source, limits.maxLineLength ?? Infinity);
-  const cursor = { lines, index: 0, depth: 0, maxDepth: limits.maxDepth ?? Infinity };
-  skipIgnorable(cursor);
-  if (cursor.index >= lines.length)
-    return null;
-  const value = parseNode(cursor, lines[cursor.index].indent);
-  skipIgnorable(cursor);
-  if (cursor.index < lines.length) {
-    const stray = lines[cursor.index];
-    throw new YamlUnsupportedError("trailing-content", stray.number, `content after the end of the top-level node ("${stray.text.slice(0, 24)}")`);
-  }
-  return value;
-}
-function splitLines(source, maxLineLength) {
-  const raw = source.replace(/\r\n/g, "\n").split("\n");
-  const out = [];
-  let sawDocumentStart = false;
-  for (let i = 0; i < raw.length; i += 1) {
-    const line = raw[i];
-    const number = i + 1;
-    if (line.length > maxLineLength) {
-      throw new YamlUnsupportedError("line-length", number, `line longer than ${maxLineLength} characters`);
-    }
-    const withoutIndent = line.replace(/^[ ]+/, "");
-    const indent = line.length - withoutIndent.length;
-    if (/^[ ]*\t/.test(line)) {
-      throw new YamlUnsupportedError("tab-indent", number, "tab used for indentation");
-    }
-    const trimmed = withoutIndent.trimEnd();
-    if (trimmed === "---") {
-      if (sawDocumentStart || out.some((l) => !l.ignorable)) {
-        throw new YamlUnsupportedError("multi-document", number, "multi-document stream (a second `---`)");
-      }
-      sawDocumentStart = true;
-      out.push({ indent, text: trimmed, number, ignorable: true });
-      continue;
-    }
-    if (trimmed === "...") {
-      throw new YamlUnsupportedError("document-end", number, "explicit document end (`...`)");
-    }
-    out.push({
-      indent,
-      text: trimmed,
-      number,
-      ignorable: trimmed === "" || trimmed.startsWith("#")
-    });
-  }
-  return out;
-}
-function skipIgnorable(cursor) {
-  while (cursor.index < cursor.lines.length && cursor.lines[cursor.index].ignorable) {
-    cursor.index += 1;
-  }
-}
-function peek(cursor) {
-  skipIgnorable(cursor);
-  return cursor.index < cursor.lines.length ? cursor.lines[cursor.index] : null;
-}
-function parseNode(cursor, indent) {
-  if (cursor.depth >= cursor.maxDepth) {
-    const at = peek(cursor);
-    throw new YamlUnsupportedError("depth", at?.number ?? 0, `nesting deeper than ${cursor.maxDepth}`);
-  }
-  cursor.depth += 1;
-  try {
-    return parseNodeAt(cursor, indent);
-  } finally {
-    cursor.depth -= 1;
-  }
-}
-function parseNodeAt(cursor, indent) {
-  const line = peek(cursor);
-  if (line === null)
-    return null;
-  if (line.text === "-" || line.text.startsWith("- "))
-    return parseSequence(cursor, indent);
-  if (line.text === "?" || line.text.startsWith("? ")) {
-    throw new YamlUnsupportedError("explicit-key", line.number, "explicit key syntax (`? `)");
-  }
-  if (KEY_PATTERN.test(line.text))
-    return parseMapping(cursor, indent);
-  cursor.index += 1;
-  return parseScalar(stripComment(line.text), line.number);
-}
-function parseSequence(cursor, indent) {
-  const items = [];
-  for (; ; ) {
-    const line = peek(cursor);
-    if (line === null || line.indent < indent)
-      break;
-    if (line.indent > indent) {
-      throw new YamlUnsupportedError("indent", line.number, `unexpected indentation inside a sequence (expected ${indent}, saw ${line.indent})`);
-    }
-    if (line.text !== "-" && !line.text.startsWith("- "))
-      break;
-    if (line.text === "-") {
-      cursor.index += 1;
-      const next = peek(cursor);
-      items.push(next !== null && next.indent > indent ? parseNode(cursor, next.indent) : null);
-      continue;
-    }
-    const afterDash = line.text.slice(1);
-    const extraSpaces = afterDash.length - afterDash.replace(/^[ ]+/, "").length;
-    const itemIndent = indent + 1 + extraSpaces;
-    cursor.lines[cursor.index] = {
-      indent: itemIndent,
-      text: afterDash.trimStart(),
-      number: line.number,
-      ignorable: false
-    };
-    items.push(parseNode(cursor, itemIndent));
-  }
-  return items;
-}
-function parseMapping(cursor, indent) {
-  const entries = [];
-  for (; ; ) {
-    const line = peek(cursor);
-    if (line === null || line.indent < indent)
-      break;
-    if (line.indent > indent) {
-      throw new YamlUnsupportedError("indent", line.number, `unexpected indentation inside a mapping (expected ${indent}, saw ${line.indent})`);
-    }
-    if (line.text.startsWith("- ") || line.text === "-")
-      break;
-    if (line.text.startsWith("? ")) {
-      throw new YamlUnsupportedError("explicit-key", line.number, "explicit key syntax (`? `)");
-    }
-    const match2 = KEY_PATTERN.exec(line.text);
-    if (match2 === null) {
-      throw new YamlUnsupportedError("not-a-mapping-entry", line.number, `expected \`key: value\` but read "${line.text.slice(0, 40)}"`);
-    }
-    const key = match2[1] ?? unescapeSingle(match2[2]) ?? match2[3] ?? "";
-    if (key.trim() === "<<") {
-      throw new YamlUnsupportedError("merge-key", line.number, "merge key (`<<:`)");
-    }
-    const inline = match2[4];
-    cursor.index += 1;
-    const inlineText = inline === void 0 ? "" : stripComment(inline);
-    let value;
-    if (/^[|>][-+]?[0-9]*$/.test(inlineText)) {
-      value = readBlockScalar(cursor, indent, inlineText, line.number);
-    } else if (inlineText === "") {
-      const next = peek(cursor);
-      value = next !== null && next.indent > indent ? parseNode(cursor, next.indent) : null;
-    } else {
-      value = parseInlineScalar(inlineText, line.number);
-    }
-    entries.push({ key: key.trim(), value });
-  }
-  return { kind: "map", entries };
-}
-function readBlockScalar(cursor, parentIndent, header, headerLine) {
-  const folded = header.startsWith(">");
-  const chomp = header.includes("-") ? "strip" : header.includes("+") ? "keep" : "clip";
-  const explicit = /[0-9]/.exec(header);
-  if (explicit !== null) {
-    throw new YamlUnsupportedError("explicit-indent-indicator", headerLine, `explicit block-scalar indentation indicator (\`${header}\`)`);
-  }
-  let contentIndent = -1;
-  const collected = [];
-  while (cursor.index < cursor.lines.length) {
-    const line = cursor.lines[cursor.index];
-    const blank = line.text === "";
-    if (!blank && line.indent <= parentIndent)
-      break;
-    if (contentIndent === -1 && !blank)
-      contentIndent = line.indent;
-    collected.push(blank ? "" : " ".repeat(Math.max(0, line.indent - contentIndent)) + line.text);
-    cursor.index += 1;
-  }
-  while (collected.length > 0 && collected[collected.length - 1] === "")
-    collected.pop();
-  if (collected.length === 0)
-    return "";
-  let body;
-  if (folded) {
-    body = collected.reduce((acc, cur, i) => {
-      if (i === 0)
-        return cur;
-      const prev = collected[i - 1];
-      const joinable = prev !== "" && cur !== "" && !cur.startsWith(" ") && !prev.startsWith(" ");
-      return acc + (joinable ? " " : "\n") + cur;
-    }, "");
-  } else {
-    body = collected.join("\n");
-  }
-  return chomp === "strip" ? body : body + "\n";
-}
-function stripComment(text) {
-  const trimmed = text.trim();
-  if (trimmed.startsWith('"') || trimmed.startsWith("'"))
-    return trimmed;
-  const at = trimmed.search(/\s#/);
-  return at === -1 ? trimmed : trimmed.slice(0, at).trimEnd();
-}
-function parseInlineScalar(text, lineNumber) {
-  if (text.startsWith("["))
-    return parseFlowSequence(text, lineNumber);
-  if (text.startsWith("{"))
-    return parseFlowMapping(text, lineNumber);
-  return parseScalar(text, lineNumber);
-}
-function parseScalar(text, lineNumber) {
-  if (text.startsWith("&") || text.startsWith("*")) {
-    throw new YamlUnsupportedError(text.startsWith("&") ? "anchor" : "alias", lineNumber, `${text.startsWith("&") ? "anchor" : "alias"} (\`${text.split(/\s/)[0]}\`)`);
-  }
-  if (text.startsWith("!")) {
-    throw new YamlUnsupportedError("tag", lineNumber, `tag (\`${text.split(/\s/)[0]}\`)`);
-  }
-  if (text === "~" || text === "null")
-    return null;
-  if (text.startsWith('"') && text.endsWith('"') && text.length >= 2) {
-    return unescapeDouble(text.slice(1, -1));
-  }
-  if (text.startsWith("'") && text.endsWith("'") && text.length >= 2) {
-    return text.slice(1, -1).replace(/''/g, "'");
-  }
-  return text;
-}
-function unescapeSingle(text) {
-  return text === void 0 ? void 0 : text.replace(/''/g, "'");
-}
-function unescapeDouble(text) {
-  return text.replace(/\\(["\\/nrt])/g, (_all, ch) => {
-    if (ch === "n")
-      return "\n";
-    if (ch === "r")
-      return "\r";
-    if (ch === "t")
-      return "	";
-    return ch;
-  });
-}
-function parseFlowSequence(text, lineNumber) {
-  if (!text.endsWith("]")) {
-    throw new YamlUnsupportedError("multiline-flow", lineNumber, "flow sequence spanning more than one line");
-  }
-  const inner = text.slice(1, -1).trim();
-  if (inner === "")
-    return [];
-  return splitFlowItems(inner, lineNumber).map((item) => parseScalar(item, lineNumber));
-}
-function parseFlowMapping(text, lineNumber) {
-  if (!text.endsWith("}")) {
-    throw new YamlUnsupportedError("multiline-flow", lineNumber, "flow mapping spanning more than one line");
-  }
-  const inner = text.slice(1, -1).trim();
-  if (inner === "")
-    return { kind: "map", entries: [] };
-  const entries = splitFlowItems(inner, lineNumber).map((item) => {
-    const at = item.indexOf(":");
-    if (at === -1) {
-      throw new YamlUnsupportedError("flow-mapping-entry", lineNumber, `flow mapping entry without a value ("${item}")`);
-    }
-    return {
-      key: (parseScalar(item.slice(0, at).trim(), lineNumber) ?? "").trim(),
-      value: parseScalar(item.slice(at + 1).trim(), lineNumber)
-    };
-  });
-  return { kind: "map", entries };
-}
-function splitFlowItems(inner, lineNumber) {
-  const items = [];
-  let current = "";
-  let quote = null;
-  let depth = 0;
-  for (const ch of inner) {
-    if (quote !== null) {
-      current += ch;
-      if (ch === quote)
-        quote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      current += ch;
-      continue;
-    }
-    if (ch === "[" || ch === "{")
-      depth += 1;
-    if (ch === "]" || ch === "}")
-      depth -= 1;
-    if (ch === "," && depth === 0) {
-      items.push(current.trim());
-      current = "";
-      continue;
-    }
-    current += ch;
-  }
-  items.push(current.trim());
-  if (depth !== 0) {
-    throw new YamlUnsupportedError("flow-nesting", lineNumber, "unbalanced flow collection");
-  }
-  return items.filter((item) => item !== "");
-}
-function isMap(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function isList(value) {
-  return Array.isArray(value);
-}
-function asString(value) {
-  return typeof value === "string" ? value : null;
-}
-function mapGet(value, key) {
-  if (!isMap(value))
-    return null;
-  for (const entry of value.entries) {
-    if (entry.key === key)
-      return entry.value;
-  }
-  return null;
-}
-function mapEntries(value) {
-  return isMap(value) ? value.entries : [];
-}
-function asStringList(value) {
-  if (typeof value === "string")
-    return [value];
-  if (isList(value)) {
-    return value.filter((item) => typeof item === "string");
-  }
-  return [];
-}
-var YamlUnsupportedError, KEY_PATTERN;
-var init_yaml = __esm({
-  "../../packages/envspec/dist/yaml.js"() {
-    "use strict";
-    YamlUnsupportedError = class extends Error {
-      line;
-      construct;
-      constructor(construct, line, detail) {
-        super(`unsupported YAML at line ${line}: ${detail}`);
-        this.name = "YamlUnsupportedError";
-        this.construct = construct;
-        this.line = line;
-      }
-    };
-    KEY_PATTERN = /^(?:"((?:[^"\\]|\\.)*)"|'((?:[^']|'')*)'|([^'":#][^:]*?))\s*:(?:\s+(.*))?$/;
-  }
-});
-
-// ../../packages/envspec/dist/database.js
-function findMigrations(repo) {
-  const out = /* @__PURE__ */ new Set();
-  for (const dir of MIGRATION_DIRS) {
-    for (const file of repo.listFiles(dir)) {
-      if (file.endsWith("migration_lock.toml"))
-        continue;
-      if (MIGRATION_EXTENSIONS.some((ext) => file.endsWith(ext)))
-        out.add(file);
-    }
-  }
-  return [...out].sort();
-}
-function findSeeds(repo) {
-  const out = /* @__PURE__ */ new Set();
-  for (const dir of SEED_DIRS) {
-    for (const name of repo.listNames(dir)) {
-      if (!SEED_BASENAME.test(name))
-        continue;
-      const path5 = dir === "" ? name : `${dir}/${name}`;
-      if (!repo.isDirectory(path5))
-        out.add(path5);
-    }
-  }
-  for (const tree of SEED_TREES) {
-    for (const file of repo.listFiles(tree))
-      out.add(file);
-  }
-  return [...out].sort();
-}
-function scanCompose(repo) {
-  for (const file of COMPOSE_FILES) {
-    const scan = scanComposeFile(repo, file);
-    if (scan !== null)
-      return scan;
-  }
-  return { services: [], file: null, unparsed: false };
-}
-function scanComposeFile(repo, file) {
-  {
-    const text = repo.readText(file);
-    if (text === null)
-      return null;
-    let document;
-    try {
-      document = parseYaml(text);
-    } catch {
-      return { services: [], file, unparsed: true };
-    }
-    const services = [];
-    for (const entry of mapEntries(mapGet(document, "services"))) {
-      const image = asString(mapGet(entry.value, "image"));
-      if (image === null)
-        continue;
-      const ports = /* @__PURE__ */ new Set();
-      for (const port of asStringList(mapGet(entry.value, "ports"))) {
-        const segments = port.split(":");
-        const parsed = Number.parseInt(segments[segments.length - 1], 10);
-        if (Number.isInteger(parsed))
-          ports.add(parsed);
-      }
-      services.push({
-        name: entry.key,
-        image,
-        ports: [...ports].sort((a, b) => a - b),
-        env: readComposeEnvironment(mapGet(entry.value, "environment")),
-        declaredIn: "compose"
-      });
-    }
-    return {
-      services: services.sort((a, b) => a.name.localeCompare(b.name)),
-      file,
-      unparsed: false
-    };
-  }
-}
-function readComposeEnvironment(node) {
-  const pairs = [];
-  if (isList(node)) {
-    for (const item of node) {
-      const text = asString(item);
-      if (text === null)
-        continue;
-      const at = text.indexOf("=");
-      if (at === -1)
-        continue;
-      pairs.push({ name: text.slice(0, at), value: text.slice(at + 1) });
-    }
-  } else {
-    for (const entry of mapEntries(node)) {
-      const value = asString(entry.value);
-      if (value !== null)
-        pairs.push({ name: entry.key, value });
-    }
-  }
-  return pairs.filter((pair) => !/\$\{/.test(pair.value)).sort((a, b) => a.name.localeCompare(b.name));
-}
-function devcontainerComposeFiles(repo) {
-  for (const path5 of [".devcontainer/devcontainer.json", ".devcontainer.json"]) {
-    const text = repo.readText(path5);
-    if (text === null)
-      continue;
-    const stripped = text.replace(/^\s*\/\/.*$/gm, "");
-    let parsed;
-    try {
-      parsed = JSON.parse(stripped);
-    } catch {
-      return [];
-    }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
-      return [];
-    const value = parsed["dockerComposeFile"];
-    if (typeof value === "string")
-      return [value];
-    if (Array.isArray(value))
-      return value.filter((item) => typeof item === "string");
-    return [];
-  }
-  return [];
-}
-var MIGRATION_DIRS, MIGRATION_EXTENSIONS, COMPOSE_FILES, SEED_BASENAME, SEED_DIRS, SEED_TREES;
-var init_database = __esm({
-  "../../packages/envspec/dist/database.js"() {
-    "use strict";
-    init_yaml();
-    MIGRATION_DIRS = [
-      "alembic/versions",
-      "db/migrate",
-      "db/migrations",
-      "migrations",
-      "prisma/migrations",
-      "sql/migrations",
-      "supabase/migrations"
-    ];
-    MIGRATION_EXTENSIONS = [".sql", ".py", ".rb", ".ts", ".js"];
-    COMPOSE_FILES = [
-      "compose.yaml",
-      "compose.yml",
-      "docker-compose.yaml",
-      "docker-compose.yml"
-    ];
-    SEED_BASENAME = /^seeds?\.(?:sql|ts|js|mjs|py|rb)$/;
-    SEED_DIRS = ["", "db", "prisma", "scripts", "supabase"];
-    SEED_TREES = ["db/seeds", "seeds", "supabase/seeds"];
-  }
-});
-
-// ../../packages/envspec/dist/semverRange.js
-function rangeAdmits(version, range) {
-  const locked = parseVersion(version);
-  if (locked === null || range.length > MAX_RANGE_LENGTH)
-    return null;
-  let unknown = false;
-  for (const alternative of range.split("||")) {
-    const interval = parseSet(alternative);
-    if (interval === null) {
-      unknown = true;
-      continue;
-    }
-    if (within(locked, interval))
-      return true;
-  }
-  return unknown ? null : false;
-}
-function parseVersion(text) {
-  const m = /^v?(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z.-]+)?$/.exec(text.trim());
-  if (m === null || !NUMBER.test(m[1]) || !NUMBER.test(m[2]) || !NUMBER.test(m[3]))
-    return null;
-  return [Number(m[1]), Number(m[2]), Number(m[3])];
-}
-function parseSet(text) {
-  const set = text.trim();
-  if (set === "")
-    return { low: null, high: null };
-  const hyphen = /^(\S+)\s+-\s+(\S+)$/.exec(set);
-  if (hyphen !== null) {
-    const from = parsePartial(hyphen[1]);
-    const to = parsePartial(hyphen[2]);
-    if (from === null || to === null)
-      return null;
-    return intersect(atLeast2(from), atMost(to));
-  }
-  const comparators = set.replace(/(<=|>=|<|>|=|~>|~|\^)\s+/g, "$1").split(/\s+/);
-  let interval = { low: null, high: null };
-  for (const comparator of comparators) {
-    const next = parseComparator(comparator);
-    if (next === null)
-      return null;
-    interval = intersect(interval, next);
-  }
-  return interval;
-}
-function parsePartial(text) {
-  const m = /^v?([^.]+)(?:\.([^.]+))?(?:\.([^.+]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(text);
-  if (m === null)
-    return null;
-  const parts = [];
-  let wild = false;
-  for (const part of [m[1], m[2], m[3]]) {
-    if (part === void 0 || /^[xX*]$/.test(part)) {
-      wild = true;
-      parts.push(null);
-      continue;
-    }
-    if (wild || !NUMBER.test(part))
-      return null;
-    parts.push(Number(part));
-  }
-  return { major: parts[0] ?? null, minor: parts[1] ?? null, patch: parts[2] ?? null };
-}
-function parseComparator(text) {
-  const m = /^(<=|>=|<|>|=|~>|~|\^)?(.*)$/.exec(text);
-  if (m === null)
-    return null;
-  const operator = m[1] ?? "";
-  const partial = parsePartial(m[2]);
-  if (partial === null)
-    return null;
-  const { major, minor, patch } = partial;
-  if (major === null) {
-    return operator === "" || operator === "=" || operator === ">=" ? { low: null, high: null } : null;
-  }
-  switch (operator) {
-    case "":
-    case "=":
-      return intersect(atLeast2(partial), atMost(partial));
-    case ">=":
-      return atLeast2(partial);
-    case "<=":
-      return atMost(partial);
-    case ">":
-      return { low: { at: bumpPartial(partial), inclusive: true }, high: null };
-    case "<":
-      return { low: null, high: { at: floor(partial), inclusive: false } };
-    case "~":
-    case "~>":
-      return {
-        low: { at: floor(partial), inclusive: true },
-        high: { at: minor === null ? [major + 1, 0, 0] : [major, minor + 1, 0], inclusive: false }
-      };
-    case "^": {
-      let high;
-      if (major > 0 || minor === null)
-        high = [major + 1, 0, 0];
-      else if (minor > 0 || patch === null)
-        high = [0, minor + 1, 0];
-      else
-        high = [0, 0, patch + 1];
-      return { low: { at: floor(partial), inclusive: true }, high: { at: high, inclusive: false } };
-    }
-    default:
-      return null;
-  }
-}
-function floor(p) {
-  return [p.major ?? 0, p.minor ?? 0, p.patch ?? 0];
-}
-function bumpPartial(p) {
-  const major = p.major ?? 0;
-  if (p.minor === null)
-    return [major + 1, 0, 0];
-  if (p.patch === null)
-    return [major, p.minor + 1, 0];
-  return [major, p.minor, p.patch + 1];
-}
-function atLeast2(p) {
-  return p.major === null ? { low: null, high: null } : { low: { at: floor(p), inclusive: true }, high: null };
-}
-function atMost(p) {
-  if (p.major === null)
-    return { low: null, high: null };
-  if (p.patch !== null && p.minor !== null) {
-    return { low: null, high: { at: [p.major, p.minor, p.patch], inclusive: true } };
-  }
-  return { low: null, high: { at: bumpPartial(p), inclusive: false } };
-}
-function compare(a, b) {
-  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
-}
-function intersect(a, b) {
-  const low = a.low === null ? b.low : b.low === null ? a.low : tighterLow(a.low, b.low);
-  const high = a.high === null ? b.high : b.high === null ? a.high : tighterHigh(a.high, b.high);
-  return { low, high };
-}
-function tighterLow(a, b) {
-  const c = compare(a.at, b.at);
-  if (c !== 0)
-    return c > 0 ? a : b;
-  return a.inclusive ? b : a;
-}
-function tighterHigh(a, b) {
-  const c = compare(a.at, b.at);
-  if (c !== 0)
-    return c < 0 ? a : b;
-  return a.inclusive ? b : a;
-}
-function within(v, interval) {
-  const { low, high } = interval;
-  if (low !== null) {
-    const c = compare(v, low.at);
-    if (c < 0 || c === 0 && !low.inclusive)
-      return false;
-  }
-  if (high !== null) {
-    const c = compare(v, high.at);
-    if (c > 0 || c === 0 && !high.inclusive)
-      return false;
-  }
-  return true;
-}
-var MAX_RANGE_LENGTH, NUMBER;
-var init_semverRange = __esm({
-  "../../packages/envspec/dist/semverRange.js"() {
-    "use strict";
-    MAX_RANGE_LENGTH = 1024;
-    NUMBER = /^(?:0|[1-9]\d{0,15})$/;
-  }
-});
-
-// ../../packages/envspec/dist/manifest.js
-function detectRuntime(repo) {
-  const candidates = [];
-  for (const entry of RUNTIME_MANIFESTS) {
-    if (entry.files.some((file) => repo.exists(file)))
-      candidates.push(entry.runtime);
-  }
-  if (repo.listNames("").some((name) => /\.(?:csproj|fsproj|sln)$/.test(name))) {
-    candidates.push("dotnet");
-  }
-  if (candidates.length === 0 && repo.listFiles("").some((f) => f.endsWith(".java"))) {
-    candidates.push("jvm");
-  }
-  if (!candidates.includes("cpp") && MAKEFILE_NAMES.some((file) => repo.exists(file)) && repo.listFiles("").some((f) => C_FAMILY_SOURCE.test(f))) {
-    candidates.push("cpp");
-  }
-  return { runtime: candidates[0] ?? "unknown", candidates };
-}
-function readJsonObject(repo, path5) {
-  const text = repo.readText(path5);
-  if (text === null)
-    return null;
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return null;
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
-    return null;
-  return parsed;
-}
-function readStringField(object, key) {
-  if (object === null)
-    return null;
-  const value = object[key];
-  return typeof value === "string" ? value : null;
-}
-function readObjectField(object, key) {
-  if (object === null)
-    return null;
-  const value = object[key];
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return null;
-  return value;
-}
-function readNodeManifest(repo) {
-  const pkg = readJsonObject(repo, "package.json");
-  if (pkg === null)
-    return null;
-  return {
-    scripts: readObjectField(pkg, "scripts"),
-    enginesNode: readStringField(readObjectField(pkg, "engines"), "node")
-  };
-}
-function nodeTestCommand(manifest) {
-  const script = readStringField(manifest.scripts, "test");
-  if (script === null)
-    return null;
-  if (script.trim() === "" || NPM_PLACEHOLDER_TEST.test(script.trim()))
-    return null;
-  return "npm test";
-}
-function nodeInstallCommand(repo) {
-  if (repo.exists("package-lock.json"))
-    return { command: "npm ci", from: "lockfile" };
-  if (repo.exists("npm-shrinkwrap.json"))
-    return { command: "npm ci", from: "lockfile" };
-  if (repo.exists("yarn.lock"))
-    return { command: "yarn install --frozen-lockfile", from: "lockfile" };
-  if (repo.exists("pnpm-lock.yaml")) {
-    return { command: "pnpm install --frozen-lockfile", from: "lockfile" };
-  }
-  if (repo.exists("package.json"))
-    return { command: "npm install", from: "manifest" };
-  return null;
-}
-function lockfileGaps(repo) {
-  const read = readLockfileGaps(repo);
-  return read === null || read.missing.length === 0 ? null : { lockfile: read.lockfile, missing: read.missing };
-}
-function readLockfileGaps(repo) {
-  const pkg = readJsonObject(repo, "package.json");
-  if (pkg === null)
-    return null;
-  const lockfile = ["package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml"].find((name) => repo.exists(name));
-  if (lockfile === void 0)
-    return null;
-  const listingFor = lockfileListings(repo, pkg, lockfile);
-  if (listingFor === null)
-    return null;
-  const missing = [];
-  const rootListing = listingFor("");
-  if (rootListing !== null) {
-    for (const [n, r, sec] of wantedDependencies(pkg))
-      if (!rootListing(n, r, sec))
-        missing.push(`${n}@${r}`);
-  }
-  for (const dir of workspaceDirs(repo, pkg, lockfile)) {
-    const listing = listingFor(dir);
-    const manifest = readJsonObject(repo, `${dir}/package.json`);
-    if (listing === null || manifest === null)
-      continue;
-    for (const [n, r, sec] of wantedDependencies(manifest)) {
-      if (!listing(n, r, sec))
-        missing.push(`${n}@${r} (${dir})`);
-    }
-  }
-  return { lockfile, missing, rootRead: rootListing !== null };
-}
-function wantedDependencies(pkg) {
-  const wanted = [];
-  const optional = readObjectField(pkg, "optionalDependencies");
-  for (const section of DEPENDENCY_SECTIONS) {
-    const deps = readObjectField(pkg, section);
-    if (deps === null)
-      continue;
-    for (const [name, range] of Object.entries(deps)) {
-      if (section === "dependencies" && readStringField(optional, name) !== null)
-        continue;
-      if (typeof range === "string")
-        wanted.push([name, range, section]);
-    }
-  }
-  return wanted;
-}
-function lockfileListings(repo, pkg, lockfile) {
-  if (lockfile === "yarn.lock") {
-    const root = yarnLockListing(repo.readText(lockfile));
-    return root === null ? null : (dir) => dir === "" ? root : null;
-  }
-  if (lockfile === "pnpm-lock.yaml") {
-    const text = repo.readText(lockfile);
-    const importers = pnpmImporters(text);
-    const settings = pnpmSettings(text);
-    const overrides = pnpmOverrides(text);
-    if (importers === null || settings === null || overrides === null)
-      return null;
-    const honoured = sameOverrides(overrides, declaredPnpmOverrides(repo, pkg)) ? overrides : /* @__PURE__ */ new Map();
-    const withOverrides = (listing) => (name, range, section) => {
-      const override = honoured.get(name);
-      return listing(name, range, section) || override !== void 0 && listing(name, override, section);
-    };
-    const withSettings = (listing) => (name, range, section) => !settings.autoInstallPeers && section === "peerDependencies" || settings.excludeLinksFromLockfile && range.startsWith("link:") || listing(name, range, section);
-    const workspaceAware = text !== null && /^importers:/m.test(text);
-    return (dir) => {
-      const importer = importers.get(dir === "" ? "." : dir);
-      if (importer !== void 0)
-        return withSettings(withOverrides(pnpmImporterListing(importer)));
-      return dir === "" || !workspaceAware ? null : () => false;
-    };
-  }
-  return npmLockListings(repo, lockfile);
-}
-function npmLockListings(repo, lockfile) {
-  const lock = readJsonObject(repo, lockfile);
-  if (lock === null)
-    return null;
-  const packages = readObjectField(lock, "packages");
-  if (readObjectField(packages, "") !== null) {
-    return (dir) => {
-      const entry = readObjectField(packages, dir);
-      if (entry === null)
-        return () => false;
-      return (name, range) => DEPENDENCY_SECTIONS.some((s) => readStringField(readObjectField(entry, s), name) === range);
-    };
-  }
-  const v1 = readObjectField(lock, "dependencies");
-  if (v1 === null)
-    return null;
-  const root = (name, range) => {
-    const entry = readObjectField(v1, name);
-    if (entry === null)
-      return false;
-    const version = readStringField(entry, "version");
-    return version === null ? true : rangeAdmits(version, range) ?? true;
-  };
-  return (dir) => dir === "" ? root : null;
-}
-function workspaceDirs(repo, pkg, lockfile) {
-  let patterns;
-  if (lockfile === "pnpm-lock.yaml") {
-    const text = repo.readText("pnpm-workspace.yaml");
-    try {
-      patterns = text === null ? [] : asStringList(mapGet(parseYaml(text, PNPM_LIMITS), "packages"));
-    } catch (err) {
-      if (!(err instanceof YamlUnsupportedError))
-        throw err;
-      patterns = [];
-    }
-  } else {
-    const field = pkg["workspaces"];
-    patterns = Array.isArray(field) ? field : readObjectField(pkg, "workspaces")?.["packages"];
-  }
-  if (!Array.isArray(patterns))
-    return [];
-  const budget = { visits: 0 };
-  const included = /* @__PURE__ */ new Set();
-  const excluded = /* @__PURE__ */ new Set();
-  for (const raw of patterns) {
-    if (typeof raw !== "string")
-      continue;
-    const negated = raw.startsWith("!");
-    const pattern = (negated ? raw.slice(1) : raw).replace(/^\.\//, "").replace(/\/+$/, "");
-    const segments = pattern.split("/");
-    if (pattern === "" || /[{}[\]\\]/.test(pattern) || segments.some((s) => s === ".." || s === "." || s === "")) {
-      continue;
-    }
-    for (const dir of matchSegments(repo, "", segments, 0, budget))
-      (negated ? excluded : included).add(dir);
-  }
-  const manifestOf = (dir) => `${dir}/package.json`;
-  return [...included].filter((dir) => !excluded.has(dir) && dir !== "" && readJsonObject(repo, manifestOf(dir)) !== null).sort().slice(0, WORKSPACE_LIMITS.maxWorkspaces);
-}
-function matchSegments(repo, base, segments, depth, budget) {
-  if (segments.length === 0)
-    return [base];
-  if (depth > WORKSPACE_LIMITS.maxDepth || budget.visits >= WORKSPACE_LIMITS.maxVisits)
-    return [];
-  budget.visits += 1;
-  const [head, ...rest] = segments;
-  const at = (name) => base === "" ? name : `${base}/${name}`;
-  const children = () => repo.listNames(base).filter((n) => n !== "node_modules" && !n.startsWith(".") && repo.isDirectory(at(n)));
-  if (head === "**") {
-    return [
-      ...matchSegments(repo, base, rest, depth + 1, budget),
-      ...children().flatMap((n) => matchSegments(repo, at(n), segments, depth + 1, budget))
-    ];
-  }
-  if (!/[*?]/.test(head)) {
-    return head !== "node_modules" && repo.isDirectory(at(head)) ? matchSegments(repo, at(head), rest, depth + 1, budget) : [];
-  }
-  const re = new RegExp(`^${head.replace(/[.+^$()|]/g, "\\$&").replace(/\*/g, "[^/]*").replace(/\?/g, "[^/]")}$`);
-  return children().filter((n) => re.test(n)).flatMap((n) => matchSegments(repo, at(n), rest, depth + 1, budget));
-}
-function yarnLockListing(text) {
-  if (text === null || !/^(# yarn lockfile v1|__metadata:)/m.test(text))
-    return null;
-  const specs = /* @__PURE__ */ new Set();
-  for (const line of text.split(/\r?\n/)) {
-    if (line === "" || line.startsWith(" ") || line.startsWith("#") || !line.endsWith(":"))
-      continue;
-    for (const raw of line.slice(0, -1).split(",")) {
-      const spec = raw.trim().replace(/^"|"$/g, "");
-      specs.add(spec);
-      const berry = /^(@?[^@]+)@npm:(.+)$/.exec(spec);
-      if (berry !== null)
-        specs.add(`${berry[1]}@${berry[2]}`);
-    }
-  }
-  return (name, range) => specs.has(`${name}@${range}`);
-}
-function pnpmImporterListing(importer) {
-  return (name, range) => asString(mapGet(mapGet(importer, "specifiers"), name)) === range || PNPM_SECTIONS.some((section) => asString(mapGet(mapGet(mapGet(importer, section), name), "specifier")) === range);
-}
-function pnpmSettings(text) {
-  if (text === null)
-    return null;
-  const block = topLevelBlock(text.replace(/\r\n/g, "\n").split("\n"), "settings");
-  let node = null;
-  try {
-    node = block === null ? null : mapGet(parseYaml(block, PNPM_LIMITS), "settings");
-  } catch (err) {
-    if (err instanceof YamlUnsupportedError)
-      return null;
-    throw err;
-  }
-  return {
-    autoInstallPeers: asString(mapGet(node, "autoInstallPeers")) !== "false",
-    excludeLinksFromLockfile: asString(mapGet(node, "excludeLinksFromLockfile")) === "true"
-  };
-}
-function pnpmOverrides(text) {
-  if (text === null)
-    return null;
-  const block = topLevelBlock(text.replace(/\r\n/g, "\n").split("\n"), "overrides");
-  if (block === null)
-    return /* @__PURE__ */ new Map();
-  let node;
-  try {
-    node = mapGet(parseYaml(block, PNPM_LIMITS), "overrides");
-  } catch (err) {
-    if (err instanceof YamlUnsupportedError)
-      return null;
-    throw err;
-  }
-  if (node === null)
-    return /* @__PURE__ */ new Map();
-  if (!isMap(node))
-    return null;
-  const overrides = /* @__PURE__ */ new Map();
-  for (const { key, value } of node.entries) {
-    const spec = asString(value);
-    if (spec === null)
-      return null;
-    overrides.set(key, spec);
-  }
-  return overrides;
-}
-function declaredPnpmOverrides(repo, pkg) {
-  const sources = [
-    readObjectField(readObjectField(pkg, "pnpm"), "overrides"),
-    readObjectField(pkg, "resolutions")
-  ];
-  const workspace = repo.readText("pnpm-workspace.yaml");
-  if (workspace !== null) {
-    let node;
-    try {
-      node = mapGet(parseYaml(workspace, PNPM_LIMITS), "overrides");
-    } catch (err) {
-      if (err instanceof YamlUnsupportedError)
-        return null;
-      throw err;
-    }
-    if (node !== null && !isMap(node))
-      return null;
-    if (isMap(node))
-      sources.push(Object.fromEntries(node.entries.map((e) => [e.key, e.value])));
-  }
-  const declared = /* @__PURE__ */ new Map();
-  for (const source of sources) {
-    for (const [key, value] of Object.entries(source ?? {})) {
-      if (typeof value !== "string")
-        return null;
-      const seen = declared.get(key);
-      if (seen !== void 0 && seen !== value)
-        return null;
-      declared.set(key, value);
-    }
-  }
-  return declared;
-}
-function sameOverrides(a, b) {
-  return b !== null && a.size === b.size && [...a].every(([key, value]) => b.get(key) === value);
-}
-function pnpmImporters(text) {
-  if (text === null || !/^lockfileVersion:/m.test(text))
-    return null;
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
-  try {
-    const importers = topLevelBlock(lines, "importers");
-    if (importers !== null) {
-      const node = mapGet(parseYaml(importers, PNPM_LIMITS), "importers");
-      return isMap(node) ? new Map(node.entries.map((e) => [e.key, e.value])) : null;
-    }
-    const entries = [];
-    for (const key of [...PNPM_SECTIONS, "specifiers"]) {
-      const block = topLevelBlock(lines, key);
-      if (block !== null)
-        entries.push({ key, value: mapGet(parseYaml(block, PNPM_LIMITS), key) });
-    }
-    return /* @__PURE__ */ new Map([[".", { kind: "map", entries }]]);
-  } catch (err) {
-    if (err instanceof YamlUnsupportedError)
-      return null;
-    throw err;
-  }
-}
-function topLevelBlock(lines, key) {
-  const start = lines.findIndex((l) => l === `${key}:` || l.startsWith(`${key}: `));
-  if (start === -1)
-    return null;
-  let end = start + 1;
-  while (end < lines.length && (lines[end] === "" || /^[ \t#]/.test(lines[end])))
-    end += 1;
-  return lines.slice(start, end).join("\n");
-}
-function unfrozenInstall(command) {
-  const lead = /^(?:(?:sudo|time)\s+|env(?:\s+[A-Za-z_]\w*=\S*)*\s+)*/.exec(command)?.[0] ?? "";
-  const rest = command.slice(lead.length);
-  const end = installEnd(rest);
-  const head = rest.slice(0, end);
-  const tail2 = rest.slice(end);
-  const dropped = (flag) => head.replace(new RegExp(`\\s--${flag}(=\\S*)?(?=\\s|$)`, "g"), "");
-  if (/^npm ci(\s|$)/.test(head)) {
-    return lead + head.replace(/^npm ci/, "npm install --no-audit --no-fund") + tail2;
-  }
-  if (/^pnpm\b/.test(head)) {
-    if (/\s--no-frozen-lockfile(?=\s|$)/.test(head))
-      return command;
-    const bare = dropped("frozen-lockfile");
-    const withFlag = bare.replace(/^pnpm (install-test|install|it|i)(?=\s|$)/, "$& --no-frozen-lockfile");
-    if (withFlag !== bare)
-      return lead + withFlag + tail2;
-    return bare === head ? command : `${lead}${bare} --no-frozen-lockfile${tail2}`;
-  }
-  if (/^yarn\b/.test(head)) {
-    const bare = dropped("frozen-lockfile").replace(/\s--immutable(=\S*)?(?=\s|$)/g, "");
-    const assigns = lead === "" || /(^|\s)env(\s+[A-Za-z_]\w*=\S*)*\s+$/.test(lead);
-    return `${lead}${assigns ? "" : "env "}${YARN_MUTABLE} ${bare}${tail2}`;
-  }
-  return command;
-}
-function installEnd(command) {
-  let quote = null;
-  for (let i = 0; i < command.length; i += 1) {
-    const c = command[i];
-    if (quote !== null) {
-      if (c === quote)
-        quote = null;
-      else if (c === "\\" && quote === '"')
-        i += 1;
-      continue;
-    }
-    if (c === "\\") {
-      i += 1;
-    } else if (c === '"' || c === "'") {
-      quote = c;
-    } else if (c === ";" || c === "&" && command[i + 1] === "&" || c === "|" && command[i + 1] === "|") {
-      return command.slice(0, i).trimEnd().length;
-    }
-  }
-  return command.length;
-}
-function pythonTestCommand(repo) {
-  const pyproject = repo.readText("pyproject.toml") ?? "";
-  if (pyproject.includes("[tool.pytest.ini_options]"))
-    return "pytest";
-  if (repo.exists("pytest.ini"))
-    return "pytest";
-  if ((repo.readText("tox.ini") ?? "").includes("pytest"))
-    return "pytest";
-  if ((repo.readText("setup.cfg") ?? "").includes("[tool:pytest]"))
-    return "pytest";
-  const declaresPytest = (text) => /(?:^|[\s"'[])pytest(?:[\s"'\]<>=~!,]|$)/m.test(text);
-  if (declaresPytest(pyproject))
-    return "pytest";
-  for (const name of ["requirements.txt", "requirements-dev.txt", "requirements/dev.txt"]) {
-    const text = repo.readText(name);
-    if (text !== null && declaresPytest(text))
-      return "pytest";
-  }
-  return null;
-}
-function toxTestenvDeps(repo) {
-  const text = repo.readText("tox.ini");
-  if (text === null)
-    return [];
-  const deps = [];
-  let inTestenv = false;
-  let inDeps = false;
-  for (const raw of text.split("\n")) {
-    const line = raw.replace(/\r$/, "");
-    const trimmed = line.trim();
-    if (trimmed.startsWith("[")) {
-      inTestenv = trimmed === "[testenv]";
-      inDeps = false;
-      continue;
-    }
-    if (!inTestenv)
-      continue;
-    const assignment = /^([A-Za-z0-9_]+)\s*=\s*(.*)$/.exec(trimmed);
-    if (assignment !== null && !/^\s/.test(line)) {
-      inDeps = assignment[1] === "deps";
-      if (inDeps && assignment[2] !== "")
-        deps.push(assignment[2]);
-      continue;
-    }
-    if (inDeps && trimmed !== "")
-      deps.push(trimmed);
-  }
-  return deps.filter((d) => REQUIREMENT_SPECIFIER.test(d));
-}
-function pytestIsDeclaredForInstall(repo) {
-  const names = /(?:^|[\s"'[])pytest(?:[\s"'\]<>=~!,]|$)/m;
-  if (names.test(repo.readText("pyproject.toml") ?? ""))
-    return true;
-  for (const name of ["requirements.txt", "requirements-dev.txt", "requirements/dev.txt"]) {
-    const text = repo.readText(name);
-    if (text !== null && names.test(text))
-      return true;
-  }
-  return false;
-}
-function pythonInstallCommand(repo) {
-  const base = basePythonInstallCommand(repo);
-  if (base === null || !base.startsWith("pip install "))
-    return base;
-  if (pythonTestCommand(repo) !== "pytest" || pytestIsDeclaredForInstall(repo))
-    return base;
-  const deps = toxTestenvDeps(repo);
-  if (deps.length === 0)
-    return base;
-  return `${base} && pip install ${deps.map((d) => `'${d}'`).join(" ")}`;
-}
-function basePythonInstallCommand(repo) {
-  if (repo.exists("poetry.lock"))
-    return "poetry install";
-  if (repo.exists("uv.lock"))
-    return "uv sync";
-  if (repo.exists("Pipfile.lock") || repo.exists("Pipfile"))
-    return "pipenv install --dev";
-  if (repo.exists("requirements.txt"))
-    return "pip install -r requirements.txt";
-  const pyproject = repo.readText("pyproject.toml");
-  if (pyproject !== null) {
-    return pyproject.includes("[tool.poetry]") ? "poetry install" : "pip install -e .";
-  }
-  return null;
-}
-function rehearse(command) {
-  const copy = '"$R/.terminalhire-rehearsal"';
-  const home = '"$R/.terminalhire-rehearsal-home"';
-  return `{ R="$HOME"; rm -rf ${copy} ${home}; mkdir -p ${home} && cp -R . ${copy} && (cd ${copy} && HOME=${home} GRADLE_USER_HOME="$R/.gradle" JAVA_TOOL_OPTIONS="$JAVA_TOOL_OPTIONS -Duser.home=$R/.terminalhire-rehearsal-home" ${command}); rm -rf ${copy} ${home}; true; }`;
-}
-function cmakeCode(text) {
-  return text.replace(/#\[(=*)\[[\s\S]*?\]\1\]/g, "").replace(/#.*$/gm, "");
-}
-function makeTargets(text) {
-  const targets = /* @__PURE__ */ new Set();
-  for (const line of text.split("\n")) {
-    if (line.startsWith("	"))
-      continue;
-    const rule = /^([^:=#\t][^:=#]*?)[ \t]*::?(?!:?=)/.exec(line);
-    if (rule)
-      for (const name of rule[1].trim().split(/\s+/))
-        targets.add(name);
-  }
-  return targets;
-}
-function cppCommands(repo) {
-  const cmake = repo.readText("CMakeLists.txt");
-  if (cmake !== null) {
-    return CMAKE_DECLARES_TESTS.test(cmakeCode(cmake)) ? {
-      install: "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON",
-      test: "cmake --build build --parallel && ctest --test-dir build --output-on-failure"
-    } : { install: null, test: null };
-  }
-  const meson = repo.readText("meson.build");
-  if (meson !== null) {
-    return /\btest\s*\(/.test(meson) ? { install: "meson setup build", test: "meson test -C build" } : { install: null, test: null };
-  }
-  const name = repo.listNames("").find((file) => MAKEFILE_NAMES.includes(file));
-  const makefile = name === void 0 ? null : repo.readText(name);
-  if (makefile !== null) {
-    const targets = makeTargets(makefile);
-    if (targets.has("test"))
-      return { install: null, test: "make test" };
-    if (targets.has("check"))
-      return { install: null, test: "make check" };
-  }
-  return { install: null, test: null };
-}
-function otherRuntimeCommands(repo, runtime) {
-  switch (runtime) {
-    case "go":
-      return {
-        // NOT `go mod download all`, and the reason is the egress allowlist
-        // rather than correctness (TERM-643). `all` widens the module graph to
-        // test-only dependencies of dependencies, and some of those zips are
-        // served by a redirect to `storage.googleapis.com`, which the install
-        // allowlist does not carry. Measured on Boeing/config-file-validator:
-        // `all` failed the install outright with `Forbidden` on that host, while
-        // the bare form fetches everything `go test ./...` needs once the module
-        // cache actually survives into the test step. Reaching for `all` here
-        // buys a broader graph at the price of granting every GCS bucket.
-        install: "go mod download",
-        // A go repo with no `_test.go` file anywhere has no suite to run.
-        test: repo.listFiles("").some((f) => f.endsWith("_test.go")) ? "go test ./..." : null
-      };
-    case "rust":
-      return { install: "cargo fetch", test: "cargo test" };
-    case "ruby": {
-      const gemfile = repo.readText("Gemfile") ?? "";
-      const test = gemfile.includes("rspec") ? "bundle exec rspec" : repo.exists("Rakefile") ? "bundle exec rake test" : null;
-      return { install: "bundle install", test };
-    }
-    case "dotnet":
-      return { install: "dotnet restore", test: "dotnet test" };
-    case "jvm": {
-      if (!JVM_BUILD_FILES.some((file) => repo.exists(file)))
-        return { install: null, test: null };
-      if (repo.exists("pom.xml")) {
-        return {
-          install: `mvn -B dependency:go-offline && ${rehearse('mvn -B test -Dmaven.test.failure.ignore=true -Dmaven.repo.local="$R/.m2/repository"')}`,
-          test: "mvn -B -o test"
-        };
-      }
-      const wrapper = repo.exists("gradlew") ? "./gradlew" : "gradle";
-      return {
-        install: `${wrapper} dependencies && ${rehearse(`${wrapper} test --continue`)}`,
-        // `--no-build-cache`: the rehearsal above can fill Gradle's build cache, and a
-        // test task restored FROM-CACHE runs nothing and prints no count.
-        test: `${wrapper} test --offline --no-build-cache`
-      };
-    }
-    case "cpp":
-      return cppCommands(repo);
-    default:
-      return { install: null, test: null };
-  }
-}
-function exactVersion(text) {
-  if (text === null)
-    return null;
-  const match2 = EXACT_VERSION.exec(text.trim());
-  return match2 === null ? null : match2[1];
-}
-function searchRuntimeVersion(repo, runtime) {
-  const sources = [];
-  const push = (label, raw) => {
-    sources.push({ label, raw: raw === null ? null : raw.trim() });
-  };
-  if (runtime === "node") {
-    push(".nvmrc", repo.readText(".nvmrc"));
-    push(".node-version", repo.readText(".node-version"));
-    push("package.json engines.node", readNodeManifest(repo)?.enginesNode ?? null);
-  } else if (runtime === "python") {
-    push(".python-version", repo.readText(".python-version"));
-    push("pyproject.toml requires-python", matchFirst(repo.readText("pyproject.toml"), /^requires-python\s*=\s*["']([^"']+)["']/m));
-  } else if (runtime === "go") {
-    push("go.mod go directive", matchFirst(repo.readText("go.mod"), /^go\s+(\d+(?:\.\d+){0,2})\s*$/m));
-  } else if (runtime === "rust") {
-    push("Cargo.toml rust-version", matchFirst(repo.readText("Cargo.toml"), /^rust-version\s*=\s*["']([^"']+)["']/m));
-  } else if (runtime === "ruby") {
-    push(".ruby-version", repo.readText(".ruby-version"));
-  } else if (runtime === "dotnet") {
-    push("global.json sdk.version", readStringField(readObjectField(readJsonObject(repo, "global.json"), "sdk"), "version"));
-  } else if (runtime === "jvm") {
-    const pom = repo.readText("pom.xml");
-    const gradle = repo.readText("build.gradle") ?? repo.readText("build.gradle.kts");
-    push("build.gradle toolchain languageVersion", javaMajor(matchFirst(gradle, /JavaLanguageVersion\.of\(\s*["']?(\d+)["']?\s*\)/) ?? matchFirst(gradle, /jvmToolchain\(\s*(\d+)\s*\)/)));
-    push(".java-version", javaMajor(repo.readText(".java-version")));
-    push("pom.xml maven.compiler.release", javaMajor(matchFirst(pom, /<maven\.compiler\.release>\s*([^<\s]+)\s*</)));
-    push("pom.xml java.version", javaMajor(matchFirst(pom, /<java\.version>\s*([^<\s]+)\s*</)));
-    push("pom.xml maven.compiler.source", javaMajor(matchFirst(pom, /<maven\.compiler\.source>\s*([^<\s]+)\s*</)));
-    push("build.gradle sourceCompatibility", javaMajor(matchFirst(gradle, /sourceCompatibility\s*=\s*JavaVersion\.VERSION_([\d_]+)/)?.replace("_", ".") ?? matchFirst(gradle, /sourceCompatibility\s*=\s*["']?([\d.]+)["']?/)));
-  }
-  let rangeFound = null;
-  for (const source of sources) {
-    if (source.raw === null || source.raw === "")
-      continue;
-    const exact = exactVersion(source.raw);
-    if (exact !== null)
-      return { version: exact, searched: sources.map((s) => s.label), rangeFound: null };
-    if (rangeFound === null)
-      rangeFound = source.raw;
-  }
-  return { version: null, searched: sources.map((s) => s.label), rangeFound };
-}
-function javaMajor(text) {
-  if (text === null)
-    return null;
-  const match2 = /^(?:1\.(\d+)|(\d+))(?:[._][\d_.]*)?$/.exec(text.trim());
-  if (match2 === null)
-    return null;
-  return match2[1] ?? match2[2] ?? null;
-}
-function matchFirst(text, pattern) {
-  if (text === null)
-    return null;
-  const match2 = pattern.exec(text);
-  return match2 === null ? null : match2[1];
-}
-var RUNTIME_MANIFESTS, MAKEFILE_NAMES, C_FAMILY_SOURCE, MANIFEST_FILENAMES, JVM_BUILD_FILES, NPM_PLACEHOLDER_TEST, DEPENDENCY_SECTIONS, WORKSPACE_LIMITS, PNPM_LIMITS, PNPM_SECTIONS, YARN_MUTABLE, REQUIREMENT_SPECIFIER, CPP_BUILD_FILES, CMAKE_DECLARES_TESTS, EXACT_VERSION;
-var init_manifest2 = __esm({
-  "../../packages/envspec/dist/manifest.js"() {
-    "use strict";
-    init_semverRange();
-    init_yaml();
-    RUNTIME_MANIFESTS = [
-      { runtime: "node", files: ["package.json"] },
-      { runtime: "python", files: ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"] },
-      { runtime: "go", files: ["go.mod"] },
-      { runtime: "rust", files: ["Cargo.toml"] },
-      { runtime: "jvm", files: ["pom.xml", "build.gradle", "build.gradle.kts"] },
-      { runtime: "ruby", files: ["Gemfile"] },
-      { runtime: "dotnet", files: [] },
-      // Last, so an earlier runtime keeps precedence: a Python package with a C
-      // extension built by CMake is still a Python repo, with cpp recorded second.
-      { runtime: "cpp", files: ["CMakeLists.txt", "meson.build"] }
-    ];
-    MAKEFILE_NAMES = ["GNUmakefile", "Makefile", "makefile"];
-    C_FAMILY_SOURCE = /\.(?:c|cc|cpp|cxx|h|hpp|hh)$/i;
-    MANIFEST_FILENAMES = RUNTIME_MANIFESTS.flatMap((m) => m.files).concat(["*.csproj", "*.fsproj", "*.sln"], MAKEFILE_NAMES).sort();
-    JVM_BUILD_FILES = ["build.gradle", "build.gradle.kts", "pom.xml"];
-    NPM_PLACEHOLDER_TEST = /^echo\s+["']?Error:\s*no test specified["']?\s*&&\s*exit\s+1$/;
-    DEPENDENCY_SECTIONS = [
-      "dependencies",
-      "devDependencies",
-      "optionalDependencies",
-      "peerDependencies"
-    ];
-    WORKSPACE_LIMITS = { maxDepth: 8, maxVisits: 2e3, maxWorkspaces: 200 };
-    PNPM_LIMITS = { maxDepth: 8, maxLineLength: 4096 };
-    PNPM_SECTIONS = ["dependencies", "devDependencies", "optionalDependencies"];
-    YARN_MUTABLE = "YARN_ENABLE_IMMUTABLE_INSTALLS=false";
-    REQUIREMENT_SPECIFIER = /^[A-Za-z0-9._-]+(\[[A-Za-z0-9._,-]+\])?([<>=!~]=?[A-Za-z0-9._*+-]+(,[<>=!~]=?[A-Za-z0-9._*+-]+)*)?$/;
-    CPP_BUILD_FILES = [
-      "CMakeLists.txt",
-      "meson.build",
-      ...MAKEFILE_NAMES
-    ];
-    CMAKE_DECLARES_TESTS = /\benable_testing\s*\(|\binclude\s*\(\s*CTest\s*\)|\badd_test\s*\(/;
-    EXACT_VERSION = /^v?(\d+(?:\.\d+){0,2})$/;
-  }
-});
-
-// ../../packages/envspec/dist/references.js
-function collectSecretReferences(node, basePath, boundNames) {
-  const bound = new Set(boundNames);
-  const reasons = /* @__PURE__ */ new Map();
-  for (const target of flattenStrings(node, basePath)) {
-    for (const match2 of target.text.matchAll(ACTIONS_SECRET)) {
-      const secret = match2[1];
-      record(reasons, {
-        kind: "secret-reference",
-        secret,
-        syntax: "actions-secret",
-        where: target.path,
-        detail: `${target.path} references the repository secret \`${secret}\`, which this derivation does not hold and will not substitute; a run that needs it cannot be reproduced offline`
-      });
-    }
-    for (const match2 of target.text.matchAll(SHELL_ENV)) {
-      const secret = match2[1];
-      if (bound.has(secret))
-        continue;
-      if (NON_SECRET_CONTEXT.test(match2[0]))
-        continue;
-      record(reasons, {
-        kind: "secret-reference",
-        secret,
-        syntax: "shell-env",
-        where: target.path,
-        detail: `${target.path} references the environment variable \`${secret}\`, which no \`env:\` block in scope binds to a literal value; its value would have to come from outside the repo`
-      });
-    }
-  }
-  return [...reasons.values()].sort((a, b) => a.secret.localeCompare(b.secret) || a.where.localeCompare(b.where));
-}
-function record(into, reason) {
-  const key = `${reason.syntax}:${reason.secret}`;
-  if (!into.has(key))
-    into.set(key, reason);
-}
-function flattenStrings(node, path5) {
-  const out = [];
-  const walk2 = (value, at) => {
-    if (typeof value === "string") {
-      out.push({ text: value, path: at });
-      return;
-    }
-    if (isList(value)) {
-      value.forEach((item, index) => walk2(item, `${at}[${index}]`));
-      return;
-    }
-    if (isMap(value)) {
-      for (const entry of value.entries)
-        walk2(entry.value, `${at}.${entry.key}`);
-    }
-  };
-  walk2(node, path5);
-  return out;
-}
-var ACTIONS_SECRET, SHELL_ENV, NON_SECRET_CONTEXT;
-var init_references = __esm({
-  "../../packages/envspec/dist/references.js"() {
-    "use strict";
-    init_yaml();
-    ACTIONS_SECRET = /\$\{\{\s*secrets\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
-    SHELL_ENV = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
-    NON_SECRET_CONTEXT = /^\$\{\{\s*(?:matrix|github|runner|job|steps|needs|inputs|env|vars|strategy)\./;
-  }
-});
-
-// ../../packages/envspec/dist/repo.js
-import { readdirSync as readdirSync4, readFileSync as readFileSync13, realpathSync as realpathSync2, statSync as statSync5 } from "fs";
-import { join as join26, relative as relative2, sep as sep7 } from "path";
-function createRepoReader(repoPath) {
-  const resolveIn = (relativePath) => relativePath === "" ? repoPath : join26(repoPath, relativePath);
-  const toPosix = (absolute) => relative2(repoPath, absolute).split(sep7).join("/");
-  let realRoot;
-  const rootPrefix = () => {
-    if (realRoot === void 0) {
-      try {
-        const real = realpathSync2(repoPath);
-        realRoot = real.endsWith(sep7) ? real : real + sep7;
-      } catch {
-        realRoot = null;
-      }
-    }
-    return realRoot;
-  };
-  const containedPath = (relativePath) => {
-    const prefix = rootPrefix();
-    if (prefix === null)
-      return null;
-    try {
-      const real = realpathSync2(resolveIn(relativePath));
-      return real + sep7 === prefix || real.startsWith(prefix) ? real : null;
-    } catch {
-      return null;
-    }
-  };
-  const readText = (relativePath) => {
-    const real = containedPath(relativePath);
-    if (real === null)
-      return null;
-    try {
-      return readFileSync13(real, "utf8");
-    } catch {
-      return null;
-    }
-  };
-  const statOf = (relativePath) => {
-    const real = containedPath(relativePath);
-    if (real === null)
-      return null;
-    try {
-      return statSync5(real);
-    } catch {
-      return null;
-    }
-  };
-  const listFiles = (relativeDir) => {
-    const out = [];
-    const walk2 = (dir, depth) => {
-      if (depth > MAX_DEPTH)
-        return;
-      let names;
-      try {
-        names = readdirSync4(dir);
-      } catch {
-        return;
-      }
-      for (const name of names.slice().sort()) {
-        if (SKIP_DIRECTORIES.has(name))
-          continue;
-        const child = join26(dir, name);
-        const st = statOf(toPosix(child));
-        if (st === null)
-          continue;
-        if (st.isDirectory()) {
-          walk2(child, depth + 1);
-          continue;
-        }
-        if (st.isFile())
-          out.push(toPosix(child));
-      }
-    };
-    const start = statOf(relativeDir);
-    if (start === null || !start.isDirectory())
-      return [];
-    walk2(resolveIn(relativeDir), 0);
-    return out.sort();
-  };
-  return {
-    readText,
-    exists: (relativePath) => statOf(relativePath) !== null,
-    isDirectory: (relativePath) => statOf(relativePath)?.isDirectory() === true,
-    listFiles,
-    listNames: (relativeDir) => {
-      const st = statOf(relativeDir);
-      if (st === null || !st.isDirectory())
-        return [];
-      let names;
-      try {
-        names = readdirSync4(resolveIn(relativeDir));
-      } catch {
-        return [];
-      }
-      const at = (name) => relativeDir === "" ? name : `${relativeDir}/${name}`;
-      return names.filter((name) => containedPath(at(name)) !== null).sort();
-    }
-  };
-}
-var SKIP_DIRECTORIES, MAX_DEPTH;
-var init_repo = __esm({
-  "../../packages/envspec/dist/repo.js"() {
-    "use strict";
-    SKIP_DIRECTORIES = /* @__PURE__ */ new Set([
-      ".git",
-      "node_modules",
-      "dist",
-      "build",
-      "target",
-      ".next",
-      ".venv",
-      "venv",
-      "__pycache__",
-      "vendor",
-      "coverage"
-    ]);
-    MAX_DEPTH = 8;
-  }
-});
-
-// ../../packages/envspec/dist/workflow.js
-function scanWorkflows(repo) {
-  const jobs = [];
-  const fileReasons = [];
-  const filesRead = [];
-  const names = repo.listNames(WORKFLOW_DIR).filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"));
-  for (const name of names) {
-    const file = `${WORKFLOW_DIR}/${name}`;
-    const text = repo.readText(file);
-    if (text === null)
-      continue;
-    filesRead.push(file);
-    let document;
-    try {
-      document = parseYaml(text);
-    } catch (err) {
-      const detail = err instanceof YamlUnsupportedError ? `${file} uses ${err.construct} (line ${err.line}), which the workflow reader does not support, so no CI signal was taken from it` : `${file} could not be read as YAML, so no CI signal was taken from it`;
-      fileReasons.push({ kind: "unparsed-workflow", file, detail });
-      continue;
-    }
-    const workflowEnv = literalEnvNames(mapGet(document, "env"));
-    for (const jobEntry of mapEntries(mapGet(document, "jobs"))) {
-      jobs.push(readJob(file, jobEntry.key, jobEntry.value, workflowEnv));
-    }
-  }
-  return { jobs, fileReasons, filesRead };
-}
-function readJob(file, id, node, workflowEnv) {
-  const path5 = `jobs.${id}`;
-  const matrix = readMatrix(mapGet(mapGet(node, "strategy"), "matrix"));
-  const singletons = /* @__PURE__ */ new Map();
-  for (const dimension of matrix) {
-    if (dimension.values.length === 1)
-      singletons.set(dimension.key, dimension.values[0]);
-  }
-  const steps = [];
-  const rawSteps = mapGet(node, "steps");
-  if (isList(rawSteps)) {
-    rawSteps.forEach((step, index) => {
-      steps.push({
-        index,
-        name: asString(mapGet(step, "name")),
-        uses: asString(mapGet(step, "uses")),
-        run: asString(mapGet(step, "run")),
-        withEntries: mapEntries(mapGet(step, "with")).map((entry) => entry.value),
-        withMap: mapGet(step, "with"),
-        path: `${path5}.steps[${index}]`
-      });
-    });
-  }
-  const { services, reasons } = readServices(file, path5, mapGet(node, "services"));
-  return {
-    id,
-    file,
-    runsOn: asStringList(mapGet(node, "runs-on")),
-    steps,
-    services,
-    matrix,
-    singletons,
-    literalEnvNames: [...workflowEnv, ...literalEnvNames(mapGet(node, "env"))].sort(),
-    reasons,
-    node,
-    path: path5
-  };
-}
-function readMatrix(node) {
-  const dimensions = [];
-  for (const entry of mapEntries(node)) {
-    if (entry.key === "include" || entry.key === "exclude") {
-      const count = isList(entry.value) ? entry.value.length : 1;
-      dimensions.push({ key: entry.key, values: Array.from({ length: count }, () => "unknown") });
-      continue;
-    }
-    const values = asStringList(entry.value);
-    if (values.length > 0)
-      dimensions.push({ key: entry.key, values });
-  }
-  return dimensions;
-}
-function readServices(file, jobPath, node) {
-  const services = [];
-  const reasons = [];
-  for (const entry of mapEntries(node)) {
-    const where = `${file} ${jobPath}.services.${entry.key}`;
-    const image = asString(mapGet(entry.value, "image"));
-    if (image === null) {
-      reasons.push({
-        kind: "service-image-undeclared",
-        service: entry.key,
-        where,
-        detail: `the service \`${entry.key}\` is declared in ${where} without an \`image:\`, so no container could be identified for it`
-      });
-      continue;
-    }
-    const ports = /* @__PURE__ */ new Set();
-    for (const port of asStringList(mapGet(entry.value, "ports"))) {
-      const segments = port.split(":");
-      const parsed = Number.parseInt(segments[segments.length - 1], 10);
-      if (Number.isInteger(parsed))
-        ports.add(parsed);
-    }
-    const env = [];
-    for (const pair of mapEntries(mapGet(entry.value, "env"))) {
-      const value = asString(pair.value);
-      if (value === null)
-        continue;
-      if (containsExpression(value)) {
-        continue;
-      }
-      env.push({ name: pair.key, value });
-    }
-    services.push({
-      name: entry.key,
-      image,
-      ports: [...ports].sort((a, b) => a - b),
-      env: env.sort((a, b) => a.name.localeCompare(b.name)),
-      declaredIn: "ci-workflow"
-    });
-  }
-  return { services: services.sort((a, b) => a.name.localeCompare(b.name)), reasons };
-}
-function literalEnvNames(node) {
-  return mapEntries(node).filter((entry) => {
-    const value = asString(entry.value);
-    return value !== null && !containsExpression(value);
-  }).map((entry) => entry.key);
-}
-function containsExpression(text) {
-  return /\$\{\{/.test(text) || /\$\{[A-Za-z_][A-Za-z0-9_]*\}/.test(text);
-}
-function reduceExpression(text, singletons) {
-  const reduced = text.replace(/\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}/g, (all, key) => {
-    const value = singletons.get(key);
-    return value === void 0 ? all : value;
-  });
-  return /\$\{\{/.test(reduced) ? null : reduced;
-}
-function findTestCommand(job) {
-  return findCommand(job, TEST_COMMAND_PATTERNS);
-}
-function findInstallCommand(job) {
-  return findCommand(job, INSTALL_COMMAND_PATTERNS);
-}
-function findCommand(job, patterns) {
-  for (const step of job.steps) {
-    if (step.run === null)
-      continue;
-    const lines = step.run.split("\n");
-    for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i].trim().replace(/\s*\\$/, "");
-      const bare = line.replace(/^(?:sudo|time|env)\s+/, "");
-      if (patterns.some((pattern) => pattern.test(bare))) {
-        return { command: line, where: `${job.file} ${step.path}.run` };
-      }
-    }
-  }
-  return null;
-}
-function findActionInput(job, action, input) {
-  for (const step of job.steps) {
-    if (step.uses === null || !step.uses.startsWith(action))
-      continue;
-    const value = asString(mapGet(step.withMap, input));
-    if (value === null)
-      continue;
-    return { command: value, where: `${job.file} ${step.path}.with.${input}` };
-  }
-  return null;
-}
-function jobRunsTests(job) {
-  return findTestCommand(job) !== null;
-}
-function selectJob(jobs) {
-  const candidates = jobs.filter(jobRunsTests);
-  if (candidates.length === 0)
-    return null;
-  return candidates.find((job) => TEST_JOB_HINT.test(job.id)) ?? candidates[0];
-}
-var WORKFLOW_DIR, TEST_COMMAND_PATTERNS, INSTALL_COMMAND_PATTERNS, TEST_JOB_HINT;
-var init_workflow = __esm({
-  "../../packages/envspec/dist/workflow.js"() {
-    "use strict";
-    init_yaml();
-    WORKFLOW_DIR = ".github/workflows";
-    TEST_COMMAND_PATTERNS = [
-      /^npm\s+(?:run\s+)?test(?::[\w:-]+)?\b/,
-      /^(?:yarn|pnpm)\s+(?:run\s+)?test(?::[\w:-]+)?\b/,
-      /^(?:npx\s+)?(?:vitest|jest|mocha|ava)\b/,
-      /^(?:npx\s+)?playwright\s+test\b/,
-      /^(?:python[\d.]*\s+-m\s+)?pytest\b/,
-      /^py\.test\b/,
-      /^(?:tox|nox)\b/,
-      /^go\s+test\b/,
-      /^cargo\s+(?:test|nextest\s+run)\b/,
-      /^(?:bundle\s+exec\s+)?(?:rspec|rake\s+test)\b/,
-      /^(?:mvn|\.\/mvnw)\s+(?:[-\w:.=]+\s+)*test\b/,
-      /^(?:gradle|\.\/gradlew)\s+(?:[-\w:.=]+\s+)*(?:test|check)\b/,
-      /^dotnet\s+test\b/,
-      /^make\s+(?:test|check)\b/
-    ];
-    INSTALL_COMMAND_PATTERNS = [
-      /^npm\s+(?:ci|install)\b/,
-      /^yarn\s+(?:install\b|--frozen-lockfile\b|$)/,
-      /^pnpm\s+(?:install|i)\b/,
-      /^(?:python[\d.]*\s+-m\s+)?pip[\d.]*\s+install\b/,
-      /^(?:poetry|pipenv)\s+install\b/,
-      /^uv\s+(?:sync|pip\s+install)\b/,
-      /^go\s+mod\s+download\b/,
-      /^cargo\s+fetch\b/,
-      /^bundle\s+install\b/,
-      /^dotnet\s+restore\b/,
-      /^(?:mvn|\.\/mvnw)\s+dependency:go-offline\b/,
-      /^make\s+(?:install|deps)\b/
-    ];
-    TEST_JOB_HINT = /(?:^|[\W_])(?:test|tests|spec|specs|unit|check|ci)(?:$|[\W_])/i;
-  }
-});
-
-// ../../packages/envspec/dist/derive.js
-function deriveEnvironmentSpec(repoPath) {
-  return deriveFromReader(createRepoReader(repoPath));
-}
-function deriveFromReader(repo) {
-  const unresolved = [];
-  const derivedFrom = /* @__PURE__ */ new Set();
-  const detection = detectRuntime(repo);
-  const runtime = detection.runtime;
-  if (runtime === "unknown") {
-    unresolved.push({
-      kind: "unknown-runtime",
-      searched: MANIFEST_FILENAMES,
-      detail: `no ecosystem manifest was found at the repo root (looked for ${MANIFEST_FILENAMES.join(", ")}), so the language runtime could not be identified`
-    });
-  } else if (runtime !== "jvm" || JVM_BUILD_FILES.some((file) => repo.exists(file))) {
-    derivedFrom.add("manifest");
-  }
-  if (detection.candidates.length > 1) {
-    unresolved.push({
-      kind: "multiple-runtimes",
-      candidates: detection.candidates,
-      chosen: runtime,
-      detail: `manifests for more than one ecosystem sit at the repo root (${detection.candidates.join(", ")}); \`${runtime}\` was chosen by a fixed precedence, so the derived commands may target the wrong suite`
-    });
-  }
-  const workflows = scanWorkflows(repo);
-  unresolved.push(...workflows.fileReasons);
-  const job = selectJob(workflows.jobs);
-  if (job !== null) {
-    derivedFrom.add("ci-workflow");
-    unresolved.push(...job.reasons);
-    unresolved.push(...runnerReasons(job));
-    unresolved.push(...matrixReasons(job));
-    unresolved.push(...collectSecretReferences(job.node, `${job.file} ${job.path}`, job.literalEnvNames));
-  } else {
-    for (const candidate of workflows.jobs) {
-      unresolved.push(...collectSecretReferences(candidate.node, `${candidate.file} ${candidate.path}`, candidate.literalEnvNames));
-    }
-  }
-  const testFromCi = job === null ? null : findTestCommand(job);
-  let testCommand = null;
-  if (testFromCi !== null && job !== null) {
-    testCommand = reduceExpression(testFromCi.command, job.singletons);
-  }
-  if (testCommand === null) {
-    const fromManifest = manifestTestCommand(repo, runtime);
-    if (fromManifest !== null) {
-      testCommand = fromManifest;
-      derivedFrom.add("manifest");
-    }
-  }
-  if (testCommand === null) {
-    unresolved.push({
-      kind: "no-test-command",
-      searched: testSearchPaths(runtime, workflows.filesRead),
-      detail: testFromCi === null ? `no test command could be derived: ${describeTestSearch(repo, runtime, workflows.filesRead)}` : `a test step was found at ${testFromCi.where} but it depends on a matrix with more than one value, so it does not reduce to a single command`
-    });
-  }
-  const installFromCi = job === null ? null : findInstallCommand(job);
-  let installCommand = null;
-  if (installFromCi !== null && job !== null) {
-    installCommand = reduceExpression(installFromCi.command, job.singletons);
-  }
-  if (installCommand === null) {
-    const fallback = manifestInstallCommand(repo, runtime);
-    if (fallback !== null) {
-      installCommand = fallback.command;
-      derivedFrom.add(fallback.from);
-    }
-  }
-  let installUnfrozen = null;
-  if (installCommand !== null && runtime === "node") {
-    const unfrozen = unfrozenInstall(installCommand);
-    const gaps = unfrozen === installCommand ? null : lockfileGaps(repo);
-    if (gaps !== null) {
-      installCommand = unfrozen;
-      installUnfrozen = { lockfile: gaps.lockfile, missing: gaps.missing };
-    }
-  }
-  if (installCommand === null) {
-    unresolved.push({
-      kind: "no-install-command",
-      searched: installSearchPaths(runtime, workflows.filesRead),
-      detail: `no dependency install command could be derived for runtime \`${runtime}\`: neither a CI step nor a lockfile or manifest names one`
-    });
-  }
-  const version = deriveRuntimeVersion(repo, runtime, job);
-  if (version.value === null && runtime !== "unknown" && runtime !== "cpp") {
-    unresolved.push({
-      kind: "runtime-version-undeclared",
-      runtime,
-      searched: version.searched,
-      detail: version.rangeFound === null ? `the repo declares no ${runtime} version, so the container will use our default rather than a version the repo asked for` : `the only ${runtime} version declaration found is the range \`${version.rangeFound}\`, which names no single version; pinning one out of a range would choose an environment the repo never asked for`
-    });
-  }
-  let services = job?.services ?? [];
-  if (services.length === 0) {
-    const compose = scanCompose(repo);
-    if (compose.unparsed && compose.file !== null) {
-      unresolved.push({
-        kind: "unparsed-workflow",
-        file: compose.file,
-        detail: `${compose.file} could not be read as YAML by the bounded compose reader, so no service declarations were taken from it`
-      });
-    }
-    services = compose.services;
-    if (services.length > 0)
-      derivedFrom.add("compose");
-  }
-  if (services.length === 0) {
-    for (const file of devcontainerComposeFiles(repo)) {
-      const scan = scanComposeFile(repo, file);
-      if (scan === null || scan.services.length === 0)
-        continue;
-      services = scan.services.map((service) => ({ ...service, declaredIn: "devcontainer" }));
-      derivedFrom.add("devcontainer");
-      break;
-    }
-  }
-  const migrations = findMigrations(repo);
-  const seeds = findSeeds(repo);
-  return {
-    runtime,
-    runtimeVersion: version.value,
-    installCommand,
-    ...installUnfrozen === null ? {} : { installUnfrozen },
-    testCommand,
-    services,
-    migrations,
-    seeds,
-    derivedFrom: [...derivedFrom].sort(),
-    unresolved: sortReasons(unresolved)
-  };
-}
-function runnerReasons(job) {
-  const reasons = [];
-  for (const label of job.runsOn) {
-    if (label !== "self-hosted")
-      continue;
-    reasons.push({
-      kind: "self-hosted-runner",
-      label,
-      where: `${job.file} ${job.path}.runs-on`,
-      detail: `${job.file} ${job.path} runs on a self-hosted runner, so its environment is defined by a machine outside the repo and cannot be reproduced from the repo alone`
-    });
-  }
-  return reasons;
-}
-function matrixReasons(job) {
-  const reasons = [];
-  for (const dimension of job.matrix) {
-    if (dimension.values.length <= 1)
-      continue;
-    reasons.push({
-      kind: "irreducible-matrix",
-      dimension: dimension.key,
-      values: dimension.values,
-      where: `${job.file} ${job.path}.strategy.matrix.${dimension.key}`,
-      detail: `${job.file} ${job.path} runs a matrix over \`${dimension.key}\` with ${dimension.values.length} values (${dimension.values.join(", ")}); one container is one environment, so this cannot be reduced to a single choice without picking on the repo's behalf`
-    });
-  }
-  return reasons;
-}
-function manifestTestCommand(repo, runtime) {
-  if (runtime === "node") {
-    const manifest = readNodeManifest(repo);
-    return manifest === null ? null : nodeTestCommand(manifest);
-  }
-  if (runtime === "python")
-    return pythonTestCommand(repo);
-  return otherRuntimeCommands(repo, runtime).test;
-}
-function manifestInstallCommand(repo, runtime) {
-  if (runtime === "node") {
-    const node = nodeInstallCommand(repo);
-    return node === null ? null : { command: node.command, from: node.from };
-  }
-  if (runtime === "python") {
-    const python = pythonInstallCommand(repo);
-    return python === null ? null : { command: python, from: "manifest" };
-  }
-  const other = otherRuntimeCommands(repo, runtime).install;
-  return other === null ? null : { command: other, from: "manifest" };
-}
-function deriveRuntimeVersion(repo, runtime, job) {
-  const setup = SETUP_ACTIONS[runtime];
-  const searched = [];
-  let rangeFound = null;
-  const pin = (raw) => runtime === "jvm" ? javaMajor(raw) : exactVersion(raw);
-  if (job !== null && setup !== void 0) {
-    const direct = findActionInput(job, setup.action, setup.input);
-    if (direct !== null) {
-      searched.push(`${job.file} ${setup.action} ${setup.input}`);
-      const reduced = reduceExpression(direct.command, job.singletons);
-      const exact = pin(reduced);
-      if (exact !== null)
-        return { value: exact, searched, rangeFound: null };
-      if (reduced !== null)
-        rangeFound = reduced;
-    }
-    const viaFile = findActionInput(job, setup.action, setup.fileInput);
-    if (viaFile !== null) {
-      searched.push(`${job.file} ${setup.action} ${setup.fileInput} -> ${viaFile.command}`);
-      const exact = pin(repo.readText(viaFile.command));
-      if (exact !== null)
-        return { value: exact, searched, rangeFound: null };
-    }
-  }
-  const fromFiles = searchRuntimeVersion(repo, runtime);
-  return {
-    value: fromFiles.version,
-    searched: [...searched, ...fromFiles.searched],
-    rangeFound: rangeFound ?? fromFiles.rangeFound
-  };
-}
-function testSearchPaths(runtime, workflowFiles) {
-  const paths = [...workflowFiles];
-  if (workflowFiles.length === 0)
-    paths.push(".github/workflows (absent)");
-  if (runtime === "node")
-    paths.push("package.json scripts.test");
-  if (runtime === "python") {
-    paths.push("pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini", "requirements.txt");
-  }
-  if (runtime === "go")
-    paths.push("**/*_test.go");
-  if (runtime === "ruby")
-    paths.push("Gemfile", "Rakefile");
-  if (runtime === "jvm")
-    paths.push(...JVM_BUILD_FILES);
-  if (runtime === "cpp")
-    paths.push(...CPP_BUILD_FILES);
-  if (runtime === "unknown")
-    paths.push(...MANIFEST_FILENAMES);
-  return [...new Set(paths)].sort();
-}
-function describeTestSearch(repo, runtime, workflowFiles) {
-  const ciPart = workflowFiles.length === 0 ? "the repo has no GitHub Actions workflow" : `no job in ${workflowFiles.join(", ")} runs a recognised test command`;
-  if (runtime === "unknown") {
-    return `${ciPart}, and no ecosystem manifest identifies a runtime whose test convention we could apply`;
-  }
-  if (runtime === "node") {
-    const manifest = readNodeManifest(repo);
-    const hasScripts = manifest?.scripts !== null && manifest?.scripts !== void 0;
-    return `${ciPart}, and \`package.json\` ${hasScripts ? "declares no usable `test` script (an `npm init` placeholder that exits 1 does not count)" : "declares no `scripts` block"}`;
-  }
-  if (runtime === "python") {
-    return `${ciPart}, and nothing in the repo names a test runner \u2014 no \`[tool.pytest.ini_options]\`, no \`pytest.ini\`, and no pytest dependency in \`pyproject.toml\` or a requirements file`;
-  }
-  if (runtime === "jvm" && !JVM_BUILD_FILES.some((file) => repo.exists(file))) {
-    return `${ciPart}, and the repo has Java sources but no build file (${JVM_BUILD_FILES.join(", ")}), so there is no build to run tests with. Compiling the sources with \`javac\` alone would run no tests`;
-  }
-  if (runtime === "cpp")
-    return `${ciPart}, and ${describeCppSearch(repo)}`;
-  return `${ciPart}, and no ${runtime} test convention applies to this tree`;
-}
-function describeCppSearch(repo) {
-  const cmake = repo.readText("CMakeLists.txt");
-  if (cmake !== null && !CMAKE_DECLARES_TESTS.test(cmakeCode(cmake))) {
-    return "`CMakeLists.txt` registers no tests: no `enable_testing()`, `include(CTest)` or `add_test()`";
-  }
-  if (cmake === null && repo.exists("meson.build")) {
-    return "`meson.build` declares no `test()`";
-  }
-  const makefile = repo.listNames("").find((name) => MAKEFILE_NAMES.includes(name));
-  if (cmake === null && makefile !== void 0) {
-    return `\`${makefile}\` has no \`test\` or \`check\` target`;
-  }
-  return `no C/C++ test convention applies to this tree (looked in ${CPP_BUILD_FILES.join(", ")})`;
-}
-function installSearchPaths(runtime, workflowFiles) {
-  const paths = [...workflowFiles];
-  if (runtime === "node")
-    paths.push("package-lock.json", "pnpm-lock.yaml", "yarn.lock");
-  if (runtime === "python")
-    paths.push("poetry.lock", "pyproject.toml", "requirements.txt", "uv.lock");
-  if (runtime === "jvm")
-    paths.push(...JVM_BUILD_FILES);
-  if (runtime === "cpp")
-    paths.push(...CPP_BUILD_FILES);
-  if (runtime === "unknown")
-    paths.push(...MANIFEST_FILENAMES);
-  return [...new Set(paths)].sort();
-}
-function sortReasons(reasons) {
-  return reasons.slice().sort((a, b) => {
-    const byKind = KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind);
-    if (byKind !== 0)
-      return byKind;
-    return secondaryKey(a).localeCompare(secondaryKey(b));
-  });
-}
-function secondaryKey(reason) {
-  switch (reason.kind) {
-    case "secret-reference":
-      return `${reason.secret}:${reason.where}`;
-    case "irreducible-matrix":
-      return reason.dimension;
-    case "self-hosted-runner":
-      return reason.where;
-    case "service-image-undeclared":
-      return reason.service;
-    case "unparsed-workflow":
-      return reason.file;
-    default:
-      return "";
-  }
-}
-var SETUP_ACTIONS, KIND_ORDER;
-var init_derive = __esm({
-  "../../packages/envspec/dist/derive.js"() {
-    "use strict";
-    init_database();
-    init_manifest2();
-    init_references();
-    init_repo();
-    init_workflow();
-    SETUP_ACTIONS = {
-      node: { action: "actions/setup-node", input: "node-version", fileInput: "node-version-file" },
-      python: {
-        action: "actions/setup-python",
-        input: "python-version",
-        fileInput: "python-version-file"
-      },
-      go: { action: "actions/setup-go", input: "go-version", fileInput: "go-version-file" },
-      ruby: { action: "ruby/setup-ruby", input: "ruby-version", fileInput: "ruby-version-file" },
-      dotnet: {
-        action: "actions/setup-dotnet",
-        input: "dotnet-version",
-        fileInput: "global-json-file"
-      },
-      jvm: { action: "actions/setup-java", input: "java-version", fileInput: "java-version-file" }
-    };
-    KIND_ORDER = [
-      "no-test-command",
-      "no-install-command",
-      "unknown-runtime",
-      "multiple-runtimes",
-      "self-hosted-runner",
-      "irreducible-matrix",
-      "secret-reference",
-      "service-image-undeclared",
-      "unparsed-workflow",
-      "runtime-version-undeclared"
-    ];
-  }
-});
-
-// ../../packages/envspec/dist/preview.js
-function planPreview(repo) {
-  const rootHtml = repo.exists("index.html") && !repo.isDirectory("index.html");
-  if (!repo.exists("package.json")) {
-    if (rootHtml) {
-      return {
-        previewable: true,
-        buildCommand: null,
-        serveCommand: null,
-        rootHtml: true,
-        reason: "the repository has an index.html at its root"
-      };
-    }
-    return {
-      previewable: false,
-      reason: "the repository has no package.json and no index.html at its root"
-    };
-  }
-  const pkg = readJsonObject(repo, "package.json");
-  if (pkg === null) {
-    return { previewable: false, reason: "package.json could not be read as a JSON object" };
-  }
-  if (pkg.workspaces !== void 0 || repo.exists("pnpm-workspace.yaml")) {
-    return {
-      previewable: false,
-      reason: "the repository root is a workspace, and this version previews single-package repositories only"
-    };
-  }
-  const scripts = scriptsOf(pkg);
-  const run2 = scriptRunner(repo);
-  const build = scripts.has("build") ? `${run2} build` : null;
-  const serveName = SERVE_SCRIPTS.find((name) => scripts.has(name));
-  const serve = serveName === void 0 ? null : `${run2} ${serveName}`;
-  const anyHtml = rootHtml || hasIndexHtml(repo);
-  if (serve === null && !anyHtml) {
-    return {
-      previewable: false,
-      reason: "nothing here can be served: package.json has no preview, start, serve or dev script, and the repository has no index.html"
-    };
-  }
-  if (build === null && serve === null && !rootHtml) {
-    return {
-      previewable: false,
-      reason: "the only index.html is below the root, and package.json has no build or serve script to produce a site from it"
-    };
-  }
-  return {
-    previewable: true,
-    buildCommand: build,
-    serveCommand: serve,
-    rootHtml,
-    reason: build === null ? serve === null ? "the repository has an index.html at its root" : "package.json declares a way to serve the app" : "package.json declares a build script and a way to serve the app"
-  };
-}
-function scriptsOf(pkg) {
-  const scripts = pkg.scripts;
-  const names = /* @__PURE__ */ new Set();
-  if (typeof scripts !== "object" || scripts === null || Array.isArray(scripts))
-    return names;
-  for (const [name, body] of Object.entries(scripts)) {
-    if (typeof body === "string" && body.trim() !== "")
-      names.add(name);
-  }
-  return names;
-}
-function scriptRunner(repo) {
-  if (repo.exists("yarn.lock"))
-    return "yarn run";
-  if (repo.exists("pnpm-lock.yaml"))
-    return "pnpm run";
-  return "npm run";
-}
-function hasIndexHtml(repo) {
-  return repo.listFiles("").some((path5) => path5 === "index.html" || path5.endsWith("/index.html"));
-}
-var SERVE_SCRIPTS;
-var init_preview2 = __esm({
-  "../../packages/envspec/dist/preview.js"() {
-    "use strict";
-    init_manifest2();
-    SERVE_SCRIPTS = ["preview", "start", "serve", "dev"];
-  }
-});
-
-// ../../packages/envspec/dist/runRequirements.js
-var init_runRequirements = __esm({
-  "../../packages/envspec/dist/runRequirements.js"() {
-    "use strict";
-  }
-});
-
-// ../../packages/envspec/dist/index.js
-var init_dist3 = __esm({
-  "../../packages/envspec/dist/index.js"() {
-    "use strict";
-    init_derive();
-    init_repo();
-    init_preview2();
-    init_runRequirements();
-    init_claimScreenshots();
-    init_yaml();
   }
 });
 
@@ -37592,7 +37696,7 @@ var init_screenshots = __esm({
   "../../packages/envrun/dist/screenshots.js"() {
     "use strict";
     init_dist();
-    init_dist3();
+    init_dist2();
     init_execute();
     init_venueProof();
     init_screenshotsResult();
@@ -38303,7 +38407,12 @@ function resolveRunEnvironment(derived, req) {
     // defaults the way `testCommandSource` does, to the developer, which does not sign.
     req.runtimeOverrideOrigin === "founder" ? "founder-declared" : "developer-declared"
   ) : "detected";
-  return { spec, imageSource };
+  return { spec, imageSource, testFromRoot: req.testCommandOverride !== void 0 };
+}
+function unrunTestCommand(spec, testFromRoot) {
+  if (spec.testCommand === null || testFromRoot)
+    return spec.testCommand;
+  return commandInDirectory(spec.testCommand, spec.workingDirectory);
 }
 function installUnfrozenNote(spec) {
   const u = spec.installUnfrozen;
@@ -38331,7 +38440,8 @@ function installFrozenFor(spec, install) {
     return null;
   if (spec.installUnfrozen !== void 0)
     return false;
-  return isFrozenInstallCommand(install.command);
+  const prefix = commandInDirectory("", spec.workingDirectory);
+  return isFrozenInstallCommand(install.command.startsWith(prefix) ? install.command.slice(prefix.length) : install.command);
 }
 async function verifyWorkingDiff(req) {
   const ctx = {
@@ -38571,9 +38681,9 @@ async function runVerification(req, ctx) {
   const treeDigest = patchedTreeDigest(cloneDir);
   const baselinePatchSha256 = hasBaselinePatch ? sha256Hex(baselinePatch ?? "") : null;
   const derived = deriveEnvironmentSpec(cloneDir);
-  const { spec, imageSource } = resolveRunEnvironment(derived, req);
+  const { spec, imageSource, testFromRoot } = resolveRunEnvironment(derived, req);
   ctx.imageChosenByRepository = imageSource === "detected" && imageVariantFor(spec) === imageVariantFor(derived) && pinnedImageInputs !== null && pinnedImageInputs.runtime === spec.runtime && pinnedImageInputs.runtimeVersion === spec.runtimeVersion && pinnedImageInputs.variant === imageVariantFor(spec);
-  progress("derive", `runtime=${spec.runtime} install=${String(spec.installCommand)} test=${String(spec.testCommand)}`);
+  progress("derive", `runtime=${spec.runtime} install=${String(spec.installCommand)} test=${String(spec.testCommand)}` + (spec.workingDirectory === void 0 ? "" : ` directory=${spec.workingDirectory}`));
   const unfrozenNote = installUnfrozenNote(spec);
   if (unfrozenNote !== null)
     progress("derive", unfrozenNote);
@@ -38632,6 +38742,7 @@ async function runVerification(req, ctx) {
     const verdict = await runEnvironmentSpec({
       repoDir: venuePaths.cloneDir,
       spec,
+      testFromRoot,
       // The jail as the VENUE spells it. Handing a root down instead is what let
       // `runEnvironmentSpec` build one, and it built it here (TERM-698).
       jail: venuePaths.jail,
@@ -38652,7 +38763,7 @@ async function runVerification(req, ctx) {
       outcome: verdict.outcome,
       reason: verdict.note,
       exitCode: verdict.test?.exitCode ?? null,
-      testCommand: verdict.test?.command ?? spec.testCommand,
+      testCommand: verdict.test?.command ?? unrunTestCommand(spec, testFromRoot),
       testOutputTail: outputTail,
       counts: verdict.counts,
       wallMs: Date.now() - startedAt,
@@ -38910,7 +39021,7 @@ var init_thrun = __esm({
     "use strict";
     init_dist();
     init_screenshots();
-    init_dist3();
+    init_dist2();
     init_attestation2();
     init_classify2();
     init_boundary();
@@ -39955,6 +40066,7 @@ __export(dist_exports, {
   toAcceptancePredicate: () => toAcceptancePredicate,
   toolingImageFor: () => toolingImageFor,
   unquoteDiffPath: () => unquoteDiffPath,
+  unrunTestCommand: () => unrunTestCommand,
   venueExhaustionFrom: () => venueExhaustionFrom,
   venueGcloudEnv: () => venueGcloudEnv,
   venueImageFromEnv: () => venueImageFromEnv,
