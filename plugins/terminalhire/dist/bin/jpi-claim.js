@@ -41053,6 +41053,32 @@ function pickBodySource({ bodyFileFlag, noBody, prBodyExists }) {
   if (!noBody && prBodyExists) return "pr-body";
   return "none";
 }
+function resolveSubmitBody(flags, wt) {
+  const prBodyPath = join31(wt, "PR-BODY.md");
+  const bodySource = pickBodySource({
+    bodyFileFlag: flags["body-file"],
+    noBody: Boolean(flags["no-body"]),
+    prBodyExists: existsSync14(prBodyPath)
+  });
+  if (bodySource === "body-file") {
+    try {
+      return {
+        text: readFileSync15(flags["body-file"], "utf8"),
+        descr: `--body-file ${flags["body-file"]}`
+      };
+    } catch (err) {
+      console.error(
+        `terminalhire claim: could not read --body-file '${flags["body-file"]}': ${err.message ?? err}`
+      );
+      process.exit(1);
+    }
+  }
+  if (bodySource === "pr-body") {
+    return { text: readFileSync15(prBodyPath, "utf8"), descr: "PR-BODY.md (auto-detected)" };
+  }
+  return { text: void 0, descr: null };
+}
+var MAX_SUBMISSION_DESCRIPTION = 1e4;
 function pickExistingPr(prListJson, ghUser) {
   if (!Array.isArray(prListJson)) return null;
   const user = String(ghUser ?? "").toLowerCase();
@@ -43963,7 +43989,8 @@ function buildPatchSubmission({
   authorName,
   authorEmail,
   auth,
-  screenshots = null
+  screenshots = null,
+  description = null
 }) {
   if (auth && "pushToken" in auth) {
     throw new Error(
@@ -43980,6 +44007,7 @@ function buildPatchSubmission({
   }
   const body = { bountyId, claimId, patch, authorName, authorEmail, proofToken: auth.proofToken };
   if (screenshots !== null) body.screenshots = screenshots;
+  if (description !== null) body.description = description;
   return body;
 }
 function renderRunView(run2, message2, extra = {}) {
@@ -44928,6 +44956,14 @@ ${lockfileWarnings.join("\n")}`);
   const authorName = await sh("git", ["-C", wt, "log", "-1", "--format=%an"]);
   const authorEmail = await sh("git", ["-C", wt, "log", "-1", "--format=%ae"]);
   const shots = flags.screenshots === void 0 ? null : loadClaimScreenshots(flags.screenshots);
+  const describedBody = resolveSubmitBody(flags, wt);
+  const description = describedBody.text?.trim() ? describedBody.text : null;
+  if (description !== null && description.length > MAX_SUBMISSION_DESCRIPTION) {
+    console.error(
+      `terminalhire claim: ${describedBody.descr} is too long. A description must be ${MAX_SUBMISSION_DESCRIPTION} characters or fewer.`
+    );
+    process.exit(1);
+  }
   console.log(`
   SUBMIT \xB7 ${claim.title}`);
   console.log("  delivery: platform-applied patch (terminalhire posting) \u2014 no fork, no push,");
@@ -44941,6 +44977,7 @@ ${lockfileWarnings.join("\n")}`);
     const captions = shots.manifest.items.map((i) => i.caption).join("; ");
     console.log(`  Screenshots: ${shots.manifest.items.length} (${captions})`);
   }
+  console.log(`  description: ${description === null ? "none" : describedBody.descr}`);
   const ok = await confirmSubmit(
     flags,
     `
@@ -44968,7 +45005,8 @@ ${lockfileWarnings.join("\n")}`);
       authorName,
       authorEmail,
       auth: { proofToken },
-      screenshots: shots === null ? null : shots.manifest
+      screenshots: shots === null ? null : shots.manifest,
+      description
     });
   } catch (err) {
     console.error(`terminalhire claim: ${err.message}`);
@@ -45257,31 +45295,8 @@ async function cmdSubmit(id, flags = {}) {
   const upstream = claim.repoFullName;
   const head = `${ghUser}:${claim.branch}`;
   const title = flags.title || claim.title;
-  const noBody = Boolean(flags["no-body"]);
-  const prBodyPath = join31(wt, "PR-BODY.md");
-  const bodySource = pickBodySource({
-    bodyFileFlag: flags["body-file"],
-    noBody,
-    prBodyExists: existsSync14(prBodyPath)
-  });
-  let bodyText;
-  let bodyDescr;
-  if (bodySource === "body-file") {
-    try {
-      bodyText = readFileSync15(flags["body-file"], "utf8");
-    } catch (err) {
-      console.error(
-        `terminalhire claim: could not read --body-file '${flags["body-file"]}': ${err.message ?? err}`
-      );
-      process.exit(1);
-    }
-    bodyDescr = `--body-file ${flags["body-file"]}`;
-  } else if (bodySource === "pr-body") {
-    bodyText = readFileSync15(prBodyPath, "utf8");
-    bodyDescr = "PR-BODY.md (auto-detected)";
-  } else {
-    bodyDescr = "(default: Closes + disclosure)";
-  }
+  const { text: bodyText, descr } = resolveSubmitBody(flags, wt);
+  const bodyDescr = descr ?? "(default: Closes + disclosure)";
   const noCloses = Boolean(flags["no-closes"]);
   console.log(`
   SUBMIT \xB7 ${claim.title}`);

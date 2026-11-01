@@ -980,7 +980,10 @@ function git(args, cwd) {
     stdio: ["ignore", "pipe", "pipe"]
   });
   if (result.status !== 0) {
-    return { ok: false, error: String(result.stderr || result.error?.message || "git failed").trim() };
+    return {
+      ok: false,
+      error: String(result.stderr || result.error?.message || "git failed").trim()
+    };
   }
   return { ok: true, value: String(result.stdout || "").trim() };
 }
@@ -1056,7 +1059,9 @@ function printDraft(draft) {
   console.log(`  repo: ${draft.repo ?? "(not detected)"}`);
   console.log(`  branch: ${draft.branch ?? "(not detected)"}`);
   console.log(`  failing command: ${draft.failingCommand ?? "(not supplied)"}`);
-  console.log(`  changed paths: ${draft.changedPaths.length ? draft.changedPaths.join(", ") : "(none)"}`);
+  console.log(
+    `  changed paths: ${draft.changedPaths.length ? draft.changedPaths.join(", ") : "(none)"}`
+  );
   console.log(`  stack: ${draft.stack.length ? draft.stack.join(", ") : "(not detected)"}`);
   console.log(`  remote: ${draft.remote ?? "(not detected)"}`);
   if (draft.captureFailures.length) {
@@ -1082,7 +1087,7 @@ Usage:
   terminalhire post show <draft-id>
   terminalhire post edit <draft-id> [--title "..."] [--symptom "..."] [--repo owner/name]
                          [--command "..."] [--output-file path] [--with-context "..."]
-  terminalhire post submit <draft-id>
+  terminalhire post submit <draft-id> [--no-project]
   terminalhire post publish <server-draft-id> --price <usd> [--repo owner/name] [--title "..."]
                             [--outcome "..."] [--scope "..."] [--acceptance "..."]
   terminalhire post list
@@ -1096,7 +1101,9 @@ for you, submit saves the draft to your account and publish puts it live here.`)
 async function ask(question) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    return await new Promise((resolve) => rl.question(question, (answer) => resolve(answer.trim())));
+    return await new Promise(
+      (resolve) => rl.question(question, (answer) => resolve(answer.trim()))
+    );
   } finally {
     rl.close();
   }
@@ -1153,7 +1160,54 @@ function runEdit(id, flags) {
   const updated = updatePostingDraft(id, patch);
   printDraft(updated);
 }
-async function runSubmit(id) {
+var displayText = (value) => String(value ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
+function projectReviewUrl(project, base) {
+  if (typeof project.reviewUrl !== "string") return "";
+  try {
+    const url = new URL(project.reviewUrl, base);
+    return url.origin === new URL(base).origin ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+function printProject(project, base, { receipt = false, optedOut = false } = {}) {
+  if (!project || typeof project !== "object") {
+    if (!receipt) console.log("  Project match unavailable; the server will check when saving.");
+    return;
+  }
+  const review = projectReviewUrl(project, base);
+  const name = displayText(project.name);
+  if (receipt && project.state === "attached") {
+    console.log(
+      `  Attached \u201C${name}\u201D, revision ${displayText(project.revision)}.${review ? ` Review: ${review}` : ""}`
+    );
+  } else if (optedOut || project.state === "none" && project.reason === "opted-out") {
+    console.log(
+      "  Posting without project context (--no-project). Membership payment rules still apply."
+    );
+  } else if (project.state === "confirmed") {
+    const date = typeof project.confirmedAt === "string" ? displayText(project.confirmedAt) : "date unavailable";
+    console.log(
+      `  This repository has a project record \u201C${name}\u201D, revision ${displayText(project.revision)}, confirmed ${date}. Attaching.${review ? ` Review: ${review}` : ""}`
+    );
+  } else if (project.state === "unconfirmed") {
+    console.log(
+      `  \u201C${name}\u201D covers this repository but revision ${displayText(project.revision)} is not confirmed. The server will refuse until it is; confirm it${review ? ` on ${review}` : " on your project page"} or pass --no-project.`
+    );
+  } else if (project.state === "none") {
+    console.log("  No project record is bound to this repository name.");
+  } else {
+    console.log(
+      `  Project match needs review: ${displayText(project.message || project.code || "the server will check when saving")}${review ? ` Review: ${review}` : ""}`
+    );
+  }
+}
+function printAnonymousProjectNotice() {
+  console.log(
+    "  Not connected: a project record is matched only for a connected terminal. Run terminalhire setup to attach one."
+  );
+}
+async function runSubmit(id, flags) {
   const draft = getPostingDraft(id);
   if (!draft) throw new Error(`draft not found: ${id}`);
   const prepared = preparePostingSubmission(draft);
@@ -1164,6 +1218,7 @@ async function runSubmit(id) {
     process.exitCode = 1;
     return;
   }
+  if (flags["no-project"]) prepared.posting.projectContext = null;
   if (prepared.redactions.length) {
     console.log("\n  Redacted \u2014 the body below is what goes out:");
     for (const { field, label } of prepared.redactions) {
@@ -1178,12 +1233,37 @@ async function runSubmit(id) {
   console.log(JSON.stringify(prepared.posting, null, 2));
   console.log("");
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    console.error("  Refused \u2014 submit requires a human at an interactive terminal. Nothing was sent.\n");
+    console.error(
+      "  Refused \u2014 submit requires a human at an interactive terminal. Nothing was sent.\n"
+    );
     process.exitCode = 1;
     return;
   }
   const base = connectorBase();
   let connector = base ? await readFounderConnector(base) : null;
+  if (connector) {
+    let precheck;
+    try {
+      precheck = await callFounderTool(
+        base,
+        connector.token,
+        "publish_requirements",
+        prepared.posting.repo ? { repo: prepared.posting.repo } : {}
+      );
+    } catch {
+      console.log("  Project match unavailable; the server will check when saving.");
+    }
+    if (precheck?.unauthorized) {
+      await clearFounderConnector(base);
+      connector = null;
+      console.log(
+        "\n  The server no longer accepts this terminal\u2019s connector, so it was removed. Sending the draft\n  without it; run `terminalhire setup` to connect again."
+      );
+    } else if (precheck) {
+      printProject(precheck.structured.project, base, { optedOut: Boolean(flags["no-project"]) });
+    }
+  }
+  if (!connector) printAnonymousProjectNotice();
   let result = await callFounderTool(
     connector ? base : API_URL,
     connector?.token ?? null,
@@ -1196,6 +1276,7 @@ async function runSubmit(id) {
     console.log(
       "\n  The server no longer accepts this terminal\u2019s connector, so it was removed. Sending the draft\n  without it; run `terminalhire setup` to connect again."
     );
+    printAnonymousProjectNotice();
     result = await callFounderTool(API_URL, null, "draft_posting", prepared.posting);
   }
   if (result.unauthorized) throw new Error("the server refused the draft (401)");
@@ -1204,6 +1285,7 @@ async function runSubmit(id) {
   const confirmUrl = typeof result.structured.confirmUrl === "string" ? result.structured.confirmUrl : null;
   if (!draftId && !result.text) throw new Error("submit failed: server returned no confirmation");
   console.log("\n  Draft saved. Nothing is visible to developers until it is published.");
+  printProject(result.structured.project, connector ? base : API_URL, { receipt: true });
   if (connector?.canWrite && draftId) {
     console.log(`  Publish it from here: terminalhire post publish ${draftId} --price <usd>`);
     if (confirmUrl) console.log(`  Or review and confirm it in the browser: ${confirmUrl}
@@ -1213,7 +1295,9 @@ async function runSubmit(id) {
   if (confirmUrl) console.log(`  Review and confirm it here: ${confirmUrl}`);
   else console.log(`
 ${result.text}`);
-  console.log("  The posting is still not public. Open the link, sign in, review, and confirm it.\n");
+  console.log(
+    "  The posting is still not public. Open the link, sign in, review, and confirm it.\n"
+  );
 }
 function acknowledgmentFrom(structured) {
   if (structured.kind === "full-tree") {
@@ -1238,14 +1322,18 @@ function acknowledgmentFrom(structured) {
 }
 async function runPublish(draftId, flags) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    console.error("  Refused \u2014 publish requires a human at an interactive terminal. Nothing was sent.\n");
+    console.error(
+      "  Refused \u2014 publish requires a human at an interactive terminal. Nothing was sent.\n"
+    );
     process.exitCode = 1;
     return;
   }
   const base = connectorBase();
   const connector = base ? await readFounderConnector(base) : null;
   if (!connector) {
-    throw new Error("publishing from the terminal needs a connector; run `terminalhire setup` first");
+    throw new Error(
+      "publishing from the terminal needs a connector; run `terminalhire setup` first"
+    );
   }
   if (!connector.canWrite) {
     throw new Error(
@@ -1253,7 +1341,8 @@ async function runPublish(draftId, flags) {
     );
   }
   const price = Number(flags.price);
-  if (!Number.isInteger(price) || price <= 0) throw new Error("publish needs --price in whole US dollars");
+  if (!Number.isInteger(price) || price <= 0)
+    throw new Error("publish needs --price in whole US dollars");
   const repo = typeof flags.repo === "string" ? flags.repo.trim() : captureRepository().repo;
   if (!repo) throw new Error("publish needs --repo owner/name (none detected from this directory)");
   const args = { draftId, repoFullName: repo, priceUsd: price };
@@ -1264,7 +1353,8 @@ async function runPublish(draftId, flags) {
   }
   if (Object.keys(brief).length) args.publicBrief = brief;
   const first = await callFounderTool(base, connector.token, "confirm_posting", args);
-  if (first.unauthorized) throw new Error("the server no longer accepts this connector; run `terminalhire setup`");
+  if (first.unauthorized)
+    throw new Error("the server no longer accepts this connector; run `terminalhire setup`");
   if (first.isError || first.structured.refused) {
     console.error(`
   ${first.text}
@@ -1279,7 +1369,10 @@ async function runPublish(draftId, flags) {
     return;
   }
   const ack = acknowledgmentFrom(first.structured);
-  if (!ack) throw new Error("the server asked for an acknowledgment this CLI does not recognise; nothing was published");
+  if (!ack)
+    throw new Error(
+      "the server asked for an acknowledgment this CLI does not recognise; nothing was published"
+    );
   const notice = first.structured.personNotice;
   if (typeof notice !== "string" || notice.trim() === "") {
     throw new Error("the server sent no notice to show you; nothing was published");
@@ -1292,8 +1385,12 @@ ${notice.trim()}
     console.log("\n  Not published. The draft is unchanged.\n");
     return;
   }
-  const second = await callFounderTool(base, connector.token, "confirm_posting", { ...args, ...ack });
-  if (second.unauthorized) throw new Error("the server no longer accepts this connector; run `terminalhire setup`");
+  const second = await callFounderTool(base, connector.token, "confirm_posting", {
+    ...args,
+    ...ack
+  });
+  if (second.unauthorized)
+    throw new Error("the server no longer accepts this connector; run `terminalhire setup`");
   if (second.isError || second.structured.refused || second.structured.awaitingAcknowledgement) {
     console.error(`
   ${second.text}
@@ -1347,7 +1444,7 @@ async function run() {
 `);
       return;
     }
-    if (verb === "submit") return await runSubmit(id);
+    if (verb === "submit") return await runSubmit(id, flags);
     if (verb === "publish") return await runPublish(id, flags);
     throw new Error(`unknown verb: ${verb}`);
   } catch (error) {

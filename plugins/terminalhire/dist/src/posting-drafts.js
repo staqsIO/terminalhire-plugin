@@ -238,7 +238,7 @@ var POSTING_DRAFT_FIELD_POLICY = {
   createdAt: "local",
   updatedAt: "local"
 };
-var SUBMITTED_POSTING_FIELDS = ["title", "symptom", "repo"];
+var SUBMITTED_POSTING_FIELDS = ["title", "symptom", "repo", "projectContext"];
 function stateDir() {
   return process.env["TERMINALHIRE_DIR"] || join(homedir(), ".terminalhire");
 }

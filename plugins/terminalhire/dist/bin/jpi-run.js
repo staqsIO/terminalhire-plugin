@@ -41160,6 +41160,31 @@ function pickBodySource({ bodyFileFlag, noBody, prBodyExists }) {
   if (!noBody && prBodyExists) return "pr-body";
   return "none";
 }
+function resolveSubmitBody(flags, wt) {
+  const prBodyPath = join33(wt, "PR-BODY.md");
+  const bodySource = pickBodySource({
+    bodyFileFlag: flags["body-file"],
+    noBody: Boolean(flags["no-body"]),
+    prBodyExists: existsSync16(prBodyPath)
+  });
+  if (bodySource === "body-file") {
+    try {
+      return {
+        text: readFileSync17(flags["body-file"], "utf8"),
+        descr: `--body-file ${flags["body-file"]}`
+      };
+    } catch (err) {
+      console.error(
+        `terminalhire claim: could not read --body-file '${flags["body-file"]}': ${err.message ?? err}`
+      );
+      process.exit(1);
+    }
+  }
+  if (bodySource === "pr-body") {
+    return { text: readFileSync17(prBodyPath, "utf8"), descr: "PR-BODY.md (auto-detected)" };
+  }
+  return { text: void 0, descr: null };
+}
 function pickExistingPr(prListJson, ghUser) {
   if (!Array.isArray(prListJson)) return null;
   const user = String(ghUser ?? "").toLowerCase();
@@ -44002,7 +44027,8 @@ function buildPatchSubmission({
   authorName,
   authorEmail,
   auth,
-  screenshots = null
+  screenshots = null,
+  description = null
 }) {
   if (auth && "pushToken" in auth) {
     throw new Error(
@@ -44019,6 +44045,7 @@ function buildPatchSubmission({
   }
   const body = { bountyId, claimId, patch, authorName, authorEmail, proofToken: auth.proofToken };
   if (screenshots !== null) body.screenshots = screenshots;
+  if (description !== null) body.description = description;
   return body;
 }
 function renderRunView(run3, message2, extra = {}) {
@@ -44942,6 +44969,14 @@ ${lockfileWarnings.join("\n")}`);
   const authorName = await sh("git", ["-C", wt, "log", "-1", "--format=%an"]);
   const authorEmail = await sh("git", ["-C", wt, "log", "-1", "--format=%ae"]);
   const shots = flags.screenshots === void 0 ? null : loadClaimScreenshots(flags.screenshots);
+  const describedBody = resolveSubmitBody(flags, wt);
+  const description = describedBody.text?.trim() ? describedBody.text : null;
+  if (description !== null && description.length > MAX_SUBMISSION_DESCRIPTION) {
+    console.error(
+      `terminalhire claim: ${describedBody.descr} is too long. A description must be ${MAX_SUBMISSION_DESCRIPTION} characters or fewer.`
+    );
+    process.exit(1);
+  }
   console.log(`
   SUBMIT \xB7 ${claim.title}`);
   console.log("  delivery: platform-applied patch (terminalhire posting) \u2014 no fork, no push,");
@@ -44955,6 +44990,7 @@ ${lockfileWarnings.join("\n")}`);
     const captions = shots.manifest.items.map((i) => i.caption).join("; ");
     console.log(`  Screenshots: ${shots.manifest.items.length} (${captions})`);
   }
+  console.log(`  description: ${description === null ? "none" : describedBody.descr}`);
   const ok = await confirmSubmit(
     flags,
     `
@@ -44982,7 +45018,8 @@ ${lockfileWarnings.join("\n")}`);
       authorName,
       authorEmail,
       auth: { proofToken },
-      screenshots: shots === null ? null : shots.manifest
+      screenshots: shots === null ? null : shots.manifest,
+      description
     });
   } catch (err) {
     console.error(`terminalhire claim: ${err.message}`);
@@ -45271,31 +45308,8 @@ async function cmdSubmit(id, flags = {}) {
   const upstream = claim.repoFullName;
   const head = `${ghUser}:${claim.branch}`;
   const title = flags.title || claim.title;
-  const noBody = Boolean(flags["no-body"]);
-  const prBodyPath = join33(wt, "PR-BODY.md");
-  const bodySource = pickBodySource({
-    bodyFileFlag: flags["body-file"],
-    noBody,
-    prBodyExists: existsSync16(prBodyPath)
-  });
-  let bodyText;
-  let bodyDescr;
-  if (bodySource === "body-file") {
-    try {
-      bodyText = readFileSync17(flags["body-file"], "utf8");
-    } catch (err) {
-      console.error(
-        `terminalhire claim: could not read --body-file '${flags["body-file"]}': ${err.message ?? err}`
-      );
-      process.exit(1);
-    }
-    bodyDescr = `--body-file ${flags["body-file"]}`;
-  } else if (bodySource === "pr-body") {
-    bodyText = readFileSync17(prBodyPath, "utf8");
-    bodyDescr = "PR-BODY.md (auto-detected)";
-  } else {
-    bodyDescr = "(default: Closes + disclosure)";
-  }
+  const { text: bodyText, descr } = resolveSubmitBody(flags, wt);
+  const bodyDescr = descr ?? "(default: Closes + disclosure)";
   const noCloses = Boolean(flags["no-closes"]);
   console.log(`
   SUBMIT \xB7 ${claim.title}`);
@@ -46448,7 +46462,7 @@ async function run() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR11, INDEX_CACHE_FILE2, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, CLAIM_SYNC_WRITE_TIMEOUT_MS, GH_API2, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, BASELINE_STATUSES, MIN_TEST_BUDGET_MINUTES, MAX_TEST_BUDGET_MINUTES, FIRST_TEST_RUN_STATES, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, CLOSED_STATES, GH_SESSION_COOKIE, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, OPENABLE_AGENTS, BRIEF_DIR, BRIEF_REL_PATH, VERIFY_REL_PATH, AGENTS_REL_PATH, BRIEF_EXCLUDE_LINE, PACK_SAFE_ID, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3, FOUNDER_POSTING_ID, CLAIM_SCREENSHOT_PUT_TIMEOUT_MS, DEPENDENCY_SECTIONS2, SENDABLE_LOCKFILES, CLAIM_RESOLUTION_REASONS, SETUP_FAILED_REQUIREMENTS, POSTING_LEVEL_RESOLUTION_REASONS, RESOLUTION_REASON_BLURB;
+var TERMINALHIRE_DIR11, INDEX_CACHE_FILE2, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, CLAIM_SYNC_WRITE_TIMEOUT_MS, GH_API2, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, MAX_SUBMISSION_DESCRIPTION, BASELINE_STATUSES, MIN_TEST_BUDGET_MINUTES, MAX_TEST_BUDGET_MINUTES, FIRST_TEST_RUN_STATES, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, CLOSED_STATES, GH_SESSION_COOKIE, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, OPENABLE_AGENTS, BRIEF_DIR, BRIEF_REL_PATH, VERIFY_REL_PATH, AGENTS_REL_PATH, BRIEF_EXCLUDE_LINE, PACK_SAFE_ID, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3, FOUNDER_POSTING_ID, CLAIM_SCREENSHOT_PUT_TIMEOUT_MS, DEPENDENCY_SECTIONS2, SENDABLE_LOCKFILES, CLAIM_RESOLUTION_REASONS, SETUP_FAILED_REQUIREMENTS, POSTING_LEVEL_RESOLUTION_REASONS, RESOLUTION_REASON_BLURB;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
@@ -46500,6 +46514,7 @@ var init_jpi_claim = __esm({
       // TERM-1273. `claim submit --screenshots <file>` names the attachments JSON.
       "screenshots"
     ]);
+    MAX_SUBMISSION_DESCRIPTION = 1e4;
     BASELINE_STATUSES = /* @__PURE__ */ new Set([
       "pending",
       "not-scheduled",

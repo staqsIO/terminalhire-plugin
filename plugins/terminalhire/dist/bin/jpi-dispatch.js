@@ -46589,6 +46589,31 @@ function pickBodySource({ bodyFileFlag, noBody, prBodyExists }) {
   if (!noBody && prBodyExists) return "pr-body";
   return "none";
 }
+function resolveSubmitBody(flags, wt) {
+  const prBodyPath = join47(wt, "PR-BODY.md");
+  const bodySource = pickBodySource({
+    bodyFileFlag: flags["body-file"],
+    noBody: Boolean(flags["no-body"]),
+    prBodyExists: existsSync22(prBodyPath)
+  });
+  if (bodySource === "body-file") {
+    try {
+      return {
+        text: readFileSync28(flags["body-file"], "utf8"),
+        descr: `--body-file ${flags["body-file"]}`
+      };
+    } catch (err) {
+      console.error(
+        `terminalhire claim: could not read --body-file '${flags["body-file"]}': ${err.message ?? err}`
+      );
+      process.exit(1);
+    }
+  }
+  if (bodySource === "pr-body") {
+    return { text: readFileSync28(prBodyPath, "utf8"), descr: "PR-BODY.md (auto-detected)" };
+  }
+  return { text: void 0, descr: null };
+}
 function pickExistingPr(prListJson, ghUser) {
   if (!Array.isArray(prListJson)) return null;
   const user = String(ghUser ?? "").toLowerCase();
@@ -49431,7 +49456,8 @@ function buildPatchSubmission({
   authorName,
   authorEmail,
   auth,
-  screenshots = null
+  screenshots = null,
+  description = null
 }) {
   if (auth && "pushToken" in auth) {
     throw new Error(
@@ -49448,6 +49474,7 @@ function buildPatchSubmission({
   }
   const body = { bountyId, claimId, patch, authorName, authorEmail, proofToken: auth.proofToken };
   if (screenshots !== null) body.screenshots = screenshots;
+  if (description !== null) body.description = description;
   return body;
 }
 function renderRunView(run35, message2, extra = {}) {
@@ -50371,6 +50398,14 @@ ${lockfileWarnings.join("\n")}`);
   const authorName = await sh("git", ["-C", wt, "log", "-1", "--format=%an"]);
   const authorEmail = await sh("git", ["-C", wt, "log", "-1", "--format=%ae"]);
   const shots = flags.screenshots === void 0 ? null : loadClaimScreenshots(flags.screenshots);
+  const describedBody = resolveSubmitBody(flags, wt);
+  const description = describedBody.text?.trim() ? describedBody.text : null;
+  if (description !== null && description.length > MAX_SUBMISSION_DESCRIPTION) {
+    console.error(
+      `terminalhire claim: ${describedBody.descr} is too long. A description must be ${MAX_SUBMISSION_DESCRIPTION} characters or fewer.`
+    );
+    process.exit(1);
+  }
   console.log(`
   SUBMIT \xB7 ${claim.title}`);
   console.log("  delivery: platform-applied patch (terminalhire posting) \u2014 no fork, no push,");
@@ -50384,6 +50419,7 @@ ${lockfileWarnings.join("\n")}`);
     const captions = shots.manifest.items.map((i) => i.caption).join("; ");
     console.log(`  Screenshots: ${shots.manifest.items.length} (${captions})`);
   }
+  console.log(`  description: ${description === null ? "none" : describedBody.descr}`);
   const ok = await confirmSubmit(
     flags,
     `
@@ -50411,7 +50447,8 @@ ${lockfileWarnings.join("\n")}`);
       authorName,
       authorEmail,
       auth: { proofToken },
-      screenshots: shots === null ? null : shots.manifest
+      screenshots: shots === null ? null : shots.manifest,
+      description
     });
   } catch (err) {
     console.error(`terminalhire claim: ${err.message}`);
@@ -50700,31 +50737,8 @@ async function cmdSubmit(id, flags = {}) {
   const upstream = claim.repoFullName;
   const head = `${ghUser}:${claim.branch}`;
   const title = flags.title || claim.title;
-  const noBody = Boolean(flags["no-body"]);
-  const prBodyPath = join47(wt, "PR-BODY.md");
-  const bodySource = pickBodySource({
-    bodyFileFlag: flags["body-file"],
-    noBody,
-    prBodyExists: existsSync22(prBodyPath)
-  });
-  let bodyText;
-  let bodyDescr;
-  if (bodySource === "body-file") {
-    try {
-      bodyText = readFileSync28(flags["body-file"], "utf8");
-    } catch (err) {
-      console.error(
-        `terminalhire claim: could not read --body-file '${flags["body-file"]}': ${err.message ?? err}`
-      );
-      process.exit(1);
-    }
-    bodyDescr = `--body-file ${flags["body-file"]}`;
-  } else if (bodySource === "pr-body") {
-    bodyText = readFileSync28(prBodyPath, "utf8");
-    bodyDescr = "PR-BODY.md (auto-detected)";
-  } else {
-    bodyDescr = "(default: Closes + disclosure)";
-  }
+  const { text: bodyText, descr } = resolveSubmitBody(flags, wt);
+  const bodyDescr = descr ?? "(default: Closes + disclosure)";
   const noCloses = Boolean(flags["no-closes"]);
   console.log(`
   SUBMIT \xB7 ${claim.title}`);
@@ -51877,7 +51891,7 @@ async function run8() {
     process.exit(1);
   }
 }
-var TERMINALHIRE_DIR17, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL6, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, CLAIM_SYNC_WRITE_TIMEOUT_MS, GH_API3, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, BASELINE_STATUSES, MIN_TEST_BUDGET_MINUTES, MAX_TEST_BUDGET_MINUTES, FIRST_TEST_RUN_STATES, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, CLOSED_STATES, GH_SESSION_COOKIE4, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, OPENABLE_AGENTS, BRIEF_DIR, BRIEF_REL_PATH, VERIFY_REL_PATH, AGENTS_REL_PATH, BRIEF_EXCLUDE_LINE, PACK_SAFE_ID, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3, FOUNDER_POSTING_ID, CLAIM_SCREENSHOT_PUT_TIMEOUT_MS, DEPENDENCY_SECTIONS2, SENDABLE_LOCKFILES, CLAIM_RESOLUTION_REASONS, SETUP_FAILED_REQUIREMENTS, POSTING_LEVEL_RESOLUTION_REASONS, RESOLUTION_REASON_BLURB;
+var TERMINALHIRE_DIR17, INDEX_CACHE_FILE5, CLAIM_PUSH_MARKER, REPO_CONTINUITY_NUDGE_MARKER, API_URL6, CLAIM_SYNC_BASE4, CLAIM_CONSENT_VERSION, CLAIM_POLL_INTERVAL_MS, CLAIM_POLL_TIMEOUT_MS, CLAIM_SYNC_WRITE_TIMEOUT_MS, GH_API3, GH_HEADERS2, CONTENTION_HINT, AI_DISCLOSURE_NOTE, pExecFile, VALUE_FLAGS, MAX_SUBMISSION_DESCRIPTION, BASELINE_STATUSES, MIN_TEST_BUDGET_MINUTES, MAX_TEST_BUDGET_MINUTES, FIRST_TEST_RUN_STATES, ASSIGNMENT_MARKER, STAKE_MARKER, STANDDOWN_MARKER, OUR_MARKERS, STAKE_POST_TIMEOUT_MS, STAKE_POSTING_GRACE_MS, TAKE_BOT_REPOS, SUBMIT_ACCEPTS, REVISE_RECOVERY_STATES, CLOSED_STATES, GH_SESSION_COOKIE4, PUSH_TOKEN_REFUSAL, SYNC_BACKGROUND_PUSH_ACTIVE_FIELD, ISSUE_OUTCOME_TERMINAL, RUNS_POLL_INTERVAL_MS, RUNS_POLL_ATTEMPTS, OPENABLE_AGENTS, BRIEF_DIR, BRIEF_REL_PATH, VERIFY_REL_PATH, AGENTS_REL_PATH, BRIEF_EXCLUDE_LINE, PACK_SAFE_ID, CLAIM_EVENT_LABEL, LINE_BREAKS, CONTROL_CHARS3, FOUNDER_POSTING_ID, CLAIM_SCREENSHOT_PUT_TIMEOUT_MS, DEPENDENCY_SECTIONS2, SENDABLE_LOCKFILES, CLAIM_RESOLUTION_REASONS, SETUP_FAILED_REQUIREMENTS, POSTING_LEVEL_RESOLUTION_REASONS, RESOLUTION_REASON_BLURB;
 var init_jpi_claim = __esm({
   "bin/jpi-claim.js"() {
     "use strict";
@@ -51929,6 +51943,7 @@ var init_jpi_claim = __esm({
       // TERM-1273. `claim submit --screenshots <file>` names the attachments JSON.
       "screenshots"
     ]);
+    MAX_SUBMISSION_DESCRIPTION = 1e4;
     BASELINE_STATUSES = /* @__PURE__ */ new Set([
       "pending",
       "not-scheduled",
@@ -53028,7 +53043,10 @@ function git2(args5, cwd) {
     stdio: ["ignore", "pipe", "pipe"]
   });
   if (result.status !== 0) {
-    return { ok: false, error: String(result.stderr || result.error?.message || "git failed").trim() };
+    return {
+      ok: false,
+      error: String(result.stderr || result.error?.message || "git failed").trim()
+    };
   }
   return { ok: true, value: String(result.stdout || "").trim() };
 }
@@ -53104,7 +53122,9 @@ function printDraft(draft) {
   console.log(`  repo: ${draft.repo ?? "(not detected)"}`);
   console.log(`  branch: ${draft.branch ?? "(not detected)"}`);
   console.log(`  failing command: ${draft.failingCommand ?? "(not supplied)"}`);
-  console.log(`  changed paths: ${draft.changedPaths.length ? draft.changedPaths.join(", ") : "(none)"}`);
+  console.log(
+    `  changed paths: ${draft.changedPaths.length ? draft.changedPaths.join(", ") : "(none)"}`
+  );
   console.log(`  stack: ${draft.stack.length ? draft.stack.join(", ") : "(not detected)"}`);
   console.log(`  remote: ${draft.remote ?? "(not detected)"}`);
   if (draft.captureFailures.length) {
@@ -53130,7 +53150,7 @@ Usage:
   terminalhire post show <draft-id>
   terminalhire post edit <draft-id> [--title "..."] [--symptom "..."] [--repo owner/name]
                          [--command "..."] [--output-file path] [--with-context "..."]
-  terminalhire post submit <draft-id>
+  terminalhire post submit <draft-id> [--no-project]
   terminalhire post publish <server-draft-id> --price <usd> [--repo owner/name] [--title "..."]
                             [--outcome "..."] [--scope "..."] [--acceptance "..."]
   terminalhire post list
@@ -53144,7 +53164,9 @@ for you, submit saves the draft to your account and publish puts it live here.`)
 async function ask2(question) {
   const rl = createInterface11({ input: process.stdin, output: process.stdout });
   try {
-    return await new Promise((resolve9) => rl.question(question, (answer) => resolve9(answer.trim())));
+    return await new Promise(
+      (resolve9) => rl.question(question, (answer) => resolve9(answer.trim()))
+    );
   } finally {
     rl.close();
   }
@@ -53201,7 +53223,53 @@ function runEdit(id, flags) {
   const updated = updatePostingDraft(id, patch);
   printDraft(updated);
 }
-async function runSubmit(id) {
+function projectReviewUrl(project, base) {
+  if (typeof project.reviewUrl !== "string") return "";
+  try {
+    const url = new URL(project.reviewUrl, base);
+    return url.origin === new URL(base).origin ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+function printProject(project, base, { receipt = false, optedOut = false } = {}) {
+  if (!project || typeof project !== "object") {
+    if (!receipt) console.log("  Project match unavailable; the server will check when saving.");
+    return;
+  }
+  const review = projectReviewUrl(project, base);
+  const name = displayText(project.name);
+  if (receipt && project.state === "attached") {
+    console.log(
+      `  Attached \u201C${name}\u201D, revision ${displayText(project.revision)}.${review ? ` Review: ${review}` : ""}`
+    );
+  } else if (optedOut || project.state === "none" && project.reason === "opted-out") {
+    console.log(
+      "  Posting without project context (--no-project). Membership payment rules still apply."
+    );
+  } else if (project.state === "confirmed") {
+    const date3 = typeof project.confirmedAt === "string" ? displayText(project.confirmedAt) : "date unavailable";
+    console.log(
+      `  This repository has a project record \u201C${name}\u201D, revision ${displayText(project.revision)}, confirmed ${date3}. Attaching.${review ? ` Review: ${review}` : ""}`
+    );
+  } else if (project.state === "unconfirmed") {
+    console.log(
+      `  \u201C${name}\u201D covers this repository but revision ${displayText(project.revision)} is not confirmed. The server will refuse until it is; confirm it${review ? ` on ${review}` : " on your project page"} or pass --no-project.`
+    );
+  } else if (project.state === "none") {
+    console.log("  No project record is bound to this repository name.");
+  } else {
+    console.log(
+      `  Project match needs review: ${displayText(project.message || project.code || "the server will check when saving")}${review ? ` Review: ${review}` : ""}`
+    );
+  }
+}
+function printAnonymousProjectNotice() {
+  console.log(
+    "  Not connected: a project record is matched only for a connected terminal. Run terminalhire setup to attach one."
+  );
+}
+async function runSubmit(id, flags) {
   const draft = getPostingDraft(id);
   if (!draft) throw new Error(`draft not found: ${id}`);
   const prepared = preparePostingSubmission(draft);
@@ -53212,6 +53280,7 @@ async function runSubmit(id) {
     process.exitCode = 1;
     return;
   }
+  if (flags["no-project"]) prepared.posting.projectContext = null;
   if (prepared.redactions.length) {
     console.log("\n  Redacted \u2014 the body below is what goes out:");
     for (const { field, label } of prepared.redactions) {
@@ -53226,12 +53295,37 @@ async function runSubmit(id) {
   console.log(JSON.stringify(prepared.posting, null, 2));
   console.log("");
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    console.error("  Refused \u2014 submit requires a human at an interactive terminal. Nothing was sent.\n");
+    console.error(
+      "  Refused \u2014 submit requires a human at an interactive terminal. Nothing was sent.\n"
+    );
     process.exitCode = 1;
     return;
   }
   const base = connectorBase();
   let connector = base ? await readFounderConnector(base) : null;
+  if (connector) {
+    let precheck;
+    try {
+      precheck = await callFounderTool(
+        base,
+        connector.token,
+        "publish_requirements",
+        prepared.posting.repo ? { repo: prepared.posting.repo } : {}
+      );
+    } catch {
+      console.log("  Project match unavailable; the server will check when saving.");
+    }
+    if (precheck?.unauthorized) {
+      await clearFounderConnector(base);
+      connector = null;
+      console.log(
+        "\n  The server no longer accepts this terminal\u2019s connector, so it was removed. Sending the draft\n  without it; run `terminalhire setup` to connect again."
+      );
+    } else if (precheck) {
+      printProject(precheck.structured.project, base, { optedOut: Boolean(flags["no-project"]) });
+    }
+  }
+  if (!connector) printAnonymousProjectNotice();
   let result = await callFounderTool(
     connector ? base : API_URL7,
     connector?.token ?? null,
@@ -53244,6 +53338,7 @@ async function runSubmit(id) {
     console.log(
       "\n  The server no longer accepts this terminal\u2019s connector, so it was removed. Sending the draft\n  without it; run `terminalhire setup` to connect again."
     );
+    printAnonymousProjectNotice();
     result = await callFounderTool(API_URL7, null, "draft_posting", prepared.posting);
   }
   if (result.unauthorized) throw new Error("the server refused the draft (401)");
@@ -53252,6 +53347,7 @@ async function runSubmit(id) {
   const confirmUrl = typeof result.structured.confirmUrl === "string" ? result.structured.confirmUrl : null;
   if (!draftId && !result.text) throw new Error("submit failed: server returned no confirmation");
   console.log("\n  Draft saved. Nothing is visible to developers until it is published.");
+  printProject(result.structured.project, connector ? base : API_URL7, { receipt: true });
   if (connector?.canWrite && draftId) {
     console.log(`  Publish it from here: terminalhire post publish ${draftId} --price <usd>`);
     if (confirmUrl) console.log(`  Or review and confirm it in the browser: ${confirmUrl}
@@ -53261,7 +53357,9 @@ async function runSubmit(id) {
   if (confirmUrl) console.log(`  Review and confirm it here: ${confirmUrl}`);
   else console.log(`
 ${result.text}`);
-  console.log("  The posting is still not public. Open the link, sign in, review, and confirm it.\n");
+  console.log(
+    "  The posting is still not public. Open the link, sign in, review, and confirm it.\n"
+  );
 }
 function acknowledgmentFrom(structured) {
   if (structured.kind === "full-tree") {
@@ -53286,14 +53384,18 @@ function acknowledgmentFrom(structured) {
 }
 async function runPublish(draftId, flags) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    console.error("  Refused \u2014 publish requires a human at an interactive terminal. Nothing was sent.\n");
+    console.error(
+      "  Refused \u2014 publish requires a human at an interactive terminal. Nothing was sent.\n"
+    );
     process.exitCode = 1;
     return;
   }
   const base = connectorBase();
   const connector = base ? await readFounderConnector(base) : null;
   if (!connector) {
-    throw new Error("publishing from the terminal needs a connector; run `terminalhire setup` first");
+    throw new Error(
+      "publishing from the terminal needs a connector; run `terminalhire setup` first"
+    );
   }
   if (!connector.canWrite) {
     throw new Error(
@@ -53301,7 +53403,8 @@ async function runPublish(draftId, flags) {
     );
   }
   const price = Number(flags.price);
-  if (!Number.isInteger(price) || price <= 0) throw new Error("publish needs --price in whole US dollars");
+  if (!Number.isInteger(price) || price <= 0)
+    throw new Error("publish needs --price in whole US dollars");
   const repo = typeof flags.repo === "string" ? flags.repo.trim() : captureRepository().repo;
   if (!repo) throw new Error("publish needs --repo owner/name (none detected from this directory)");
   const args5 = { draftId, repoFullName: repo, priceUsd: price };
@@ -53312,7 +53415,8 @@ async function runPublish(draftId, flags) {
   }
   if (Object.keys(brief).length) args5.publicBrief = brief;
   const first = await callFounderTool(base, connector.token, "confirm_posting", args5);
-  if (first.unauthorized) throw new Error("the server no longer accepts this connector; run `terminalhire setup`");
+  if (first.unauthorized)
+    throw new Error("the server no longer accepts this connector; run `terminalhire setup`");
   if (first.isError || first.structured.refused) {
     console.error(`
   ${first.text}
@@ -53327,7 +53431,10 @@ async function runPublish(draftId, flags) {
     return;
   }
   const ack = acknowledgmentFrom(first.structured);
-  if (!ack) throw new Error("the server asked for an acknowledgment this CLI does not recognise; nothing was published");
+  if (!ack)
+    throw new Error(
+      "the server asked for an acknowledgment this CLI does not recognise; nothing was published"
+    );
   const notice = first.structured.personNotice;
   if (typeof notice !== "string" || notice.trim() === "") {
     throw new Error("the server sent no notice to show you; nothing was published");
@@ -53340,8 +53447,12 @@ ${notice.trim()}
     console.log("\n  Not published. The draft is unchanged.\n");
     return;
   }
-  const second = await callFounderTool(base, connector.token, "confirm_posting", { ...args5, ...ack });
-  if (second.unauthorized) throw new Error("the server no longer accepts this connector; run `terminalhire setup`");
+  const second = await callFounderTool(base, connector.token, "confirm_posting", {
+    ...args5,
+    ...ack
+  });
+  if (second.unauthorized)
+    throw new Error("the server no longer accepts this connector; run `terminalhire setup`");
   if (second.isError || second.structured.refused || second.structured.awaitingAcknowledgement) {
     console.error(`
   ${second.text}
@@ -53395,7 +53506,7 @@ async function run10() {
 `);
       return;
     }
-    if (verb === "submit") return await runSubmit(id);
+    if (verb === "submit") return await runSubmit(id, flags);
     if (verb === "publish") return await runPublish(id, flags);
     throw new Error(`unknown verb: ${verb}`);
   } catch (error2) {
@@ -53403,7 +53514,7 @@ async function run10() {
     process.exitCode = 1;
   }
 }
-var API_URL7, VALUE_FLAGS2;
+var API_URL7, VALUE_FLAGS2, displayText;
 var init_jpi_post = __esm({
   "bin/jpi-post.js"() {
     "use strict";
@@ -53425,6 +53536,7 @@ var init_jpi_post = __esm({
       "scope",
       "acceptance"
     ]);
+    displayText = (value) => String(value ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
   }
 });
 

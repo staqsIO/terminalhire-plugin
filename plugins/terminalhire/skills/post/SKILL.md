@@ -42,14 +42,26 @@ Use `post list` to find local drafts and `post withdraw <draft-id>` to remove on
 
 ## Human submission boundary
 
-Never invoke `post submit` for the poster. It is intentionally TTY-only and requires
-the human to type `submit` after seeing the exact network body. Tell the poster to run:
+Never invoke `post submit` for the poster. It is intentionally TTY-only and prints
+the exact network body before sending. Tell the poster to run:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" post submit <draft-id>
 ```
 
-That step creates an unowned web draft and prints a browser confirmation URL. It still
-does not publish. The signed-in browser is where the poster reviews the full posting,
-proves GitHub App repo access, chooses scope and price, confirms the saved card, and
-publishes.
+With a connector from the `setup` command, submit checks the repository's project
+record, attaches its confirmed current revision when saving, and prints the server's
+attachment receipt. `--no-project` explicitly sends the task without project context;
+membership payment rules still apply. An unconfirmed record needs owner confirmation
+or that explicit opt-out. The precheck is advisory; the server decides when saving.
+
+Without a connector, submit creates an unowned draft with no automatic project
+attachment. To use the saved project record, the poster connects first by running:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/dist/bin/jpi-dispatch.js" setup
+```
+
+Submit still does not publish. The browser confirmation URL lets the poster review
+scope and price and complete the publishing checks. A connector approved to act also
+supports `post publish`, with its own exposure notice and typed `yes` gate.
