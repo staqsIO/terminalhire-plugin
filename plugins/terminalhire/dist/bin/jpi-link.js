@@ -312,14 +312,18 @@ var init_config = __esm({
 // src/open-url.js
 var open_url_exports = {};
 __export(open_url_exports, {
+  noBrowserRequested: () => noBrowserRequested,
   openInBrowser: () => openInBrowser,
   shouldOpenBrowser: () => shouldOpenBrowser
 });
 import { spawn as nodeSpawn } from "child_process";
 function shouldOpenBrowser(env = process.env) {
   if (env.NODE_TEST_CONTEXT) return false;
+  return !noBrowserRequested(env);
+}
+function noBrowserRequested(env = process.env) {
   const off = String(env.TERMINALHIRE_NO_BROWSER ?? "").trim().toLowerCase();
-  return !(off === "1" || off === "true");
+  return off === "1" || off === "true";
 }
 function openInBrowser(url, { env = process.env, spawn = nodeSpawn } = {}) {
   if (!shouldOpenBrowser(env)) return;

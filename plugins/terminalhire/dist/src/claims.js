@@ -238,6 +238,9 @@ function writeClaims(claims) {
 function findClaim(id) {
   return readClaims().find((c) => c.id === id) ?? null;
 }
+function claimsStateDir() {
+  return TERMINALHIRE_DIR;
+}
 function listClaims(opts = {}) {
   const claims = readClaims();
   if (!opts.active) return claims;
@@ -352,6 +355,7 @@ export {
   acceptedPRRate,
   claimTurn,
   claimTurnLabel,
+  claimsStateDir,
   countAwaitingFounderApproval,
   findClaim,
   formatAcceptedPRRate,

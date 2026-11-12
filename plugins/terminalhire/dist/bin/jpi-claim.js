@@ -10743,6 +10743,7 @@ __export(claims_exports, {
   acceptedPRRate: () => acceptedPRRate,
   claimTurn: () => claimTurn,
   claimTurnLabel: () => claimTurnLabel,
+  claimsStateDir: () => claimsStateDir,
   countAwaitingFounderApproval: () => countAwaitingFounderApproval,
   findClaim: () => findClaim,
   formatAcceptedPRRate: () => formatAcceptedPRRate,
@@ -10873,6 +10874,9 @@ function writeClaims(claims) {
 }
 function findClaim(id) {
   return readClaims().find((c) => c.id === id) ?? null;
+}
+function claimsStateDir() {
+  return TERMINALHIRE_DIR2;
 }
 function listClaims(opts = {}) {
   const claims = readClaims();
@@ -12252,7 +12256,7 @@ var init_utils4 = __esm({
       return array;
     })();
     limit = 1024;
-    encode = (str, _defaultEncoder, charset, _kind, format) => {
+    encode = (str, _defaultEncoder, charset, _kind, format2) => {
       if (str.length === 0) {
         return str;
       }
@@ -12280,7 +12284,7 @@ var init_utils4 = __esm({
           c >= 48 && c <= 57 || // 0-9
           c >= 65 && c <= 90 || // a-z
           c >= 97 && c <= 122 || // A-Z
-          format === RFC1738 && (c === 40 || c === 41)) {
+          format2 === RFC1738 && (c === 40 || c === 41)) {
             arr[arr.length] = segment.charAt(i);
             continue;
           }
@@ -12311,7 +12315,7 @@ var init_utils4 = __esm({
 function is_non_nullish_primitive(v) {
   return typeof v === "string" || typeof v === "number" || typeof v === "boolean" || typeof v === "symbol" || typeof v === "bigint";
 }
-function inner_stringify(object, prefix, generateArrayPrefix, commaRoundTrip, allowEmptyArrays, strictNullHandling, skipNulls, encodeDotInKeys, encoder2, filter, sort, allowDots, serializeDate, format, formatter, encodeValuesOnly, charset, sideChannel) {
+function inner_stringify(object, prefix, generateArrayPrefix, commaRoundTrip, allowEmptyArrays, strictNullHandling, skipNulls, encodeDotInKeys, encoder2, filter, sort, allowDots, serializeDate, format2, formatter, encodeValuesOnly, charset, sideChannel) {
   let obj = object;
   let tmp_sc = sideChannel;
   let step = 0;
@@ -12346,17 +12350,17 @@ function inner_stringify(object, prefix, generateArrayPrefix, commaRoundTrip, al
     if (strictNullHandling) {
       return encoder2 && !encodeValuesOnly ? (
         // @ts-expect-error
-        encoder2(prefix, defaults.encoder, charset, "key", format)
+        encoder2(prefix, defaults.encoder, charset, "key", format2)
       ) : prefix;
     }
     obj = "";
   }
   if (is_non_nullish_primitive(obj) || is_buffer(obj)) {
     if (encoder2) {
-      const key_value = encodeValuesOnly ? prefix : encoder2(prefix, defaults.encoder, charset, "key", format);
+      const key_value = encodeValuesOnly ? prefix : encoder2(prefix, defaults.encoder, charset, "key", format2);
       return [
         formatter?.(key_value) + "=" + // @ts-expect-error
-        formatter?.(encoder2(obj, defaults.encoder, charset, "value", format))
+        formatter?.(encoder2(obj, defaults.encoder, charset, "value", format2))
       ];
     }
     return [formatter?.(prefix) + "=" + formatter?.(String(obj))];
@@ -12411,7 +12415,7 @@ function inner_stringify(object, prefix, generateArrayPrefix, commaRoundTrip, al
       sort,
       allowDots,
       serializeDate,
-      format,
+      format2,
       formatter,
       encodeValuesOnly,
       charset,
@@ -12434,14 +12438,14 @@ function normalize_stringify_options(opts = defaults) {
   if (typeof opts.charset !== "undefined" && opts.charset !== "utf-8" && opts.charset !== "iso-8859-1") {
     throw new TypeError("The charset option must be either utf-8, iso-8859-1, or undefined");
   }
-  let format = default_format;
+  let format2 = default_format;
   if (typeof opts.format !== "undefined") {
     if (!has(formatters, opts.format)) {
       throw new TypeError("Unknown format option provided.");
     }
-    format = opts.format;
+    format2 = opts.format;
   }
-  const formatter = formatters[format];
+  const formatter = formatters[format2];
   let filter = defaults.filter;
   if (typeof opts.filter === "function" || isArray(opts.filter)) {
     filter = opts.filter;
@@ -12473,7 +12477,7 @@ function normalize_stringify_options(opts = defaults) {
     encoder: typeof opts.encoder === "function" ? opts.encoder : defaults.encoder,
     encodeValuesOnly: typeof opts.encodeValuesOnly === "boolean" ? opts.encodeValuesOnly : defaults.encodeValuesOnly,
     filter,
-    format,
+    format: format2,
     formatter,
     serializeDate: typeof opts.serializeDate === "function" ? opts.serializeDate : defaults.serializeDate,
     skipNulls: typeof opts.skipNulls === "boolean" ? opts.skipNulls : defaults.skipNulls,
@@ -19855,9 +19859,9 @@ var init_BetaMessageStream = __esm({
       _addMessageParam(message2) {
         this.messages.push(message2);
       }
-      _addMessage(message2, emit2 = true) {
+      _addMessage(message2, emit3 = true) {
         this.receivedMessages.push(message2);
-        if (emit2) {
+        if (emit3) {
           this._emit("message", message2);
         }
       }
@@ -22634,9 +22638,9 @@ var init_MessageStream = __esm({
       _addMessageParam(message2) {
         this.messages.push(message2);
       }
-      _addMessage(message2, emit2 = true) {
+      _addMessage(message2, emit3 = true) {
         this.receivedMessages.push(message2);
-        if (emit2) {
+        if (emit3) {
           this._emit("message", message2);
         }
       }
@@ -40392,15 +40396,18 @@ import { join as join31, dirname as dirname9, isAbsolute as isAbsolute5, resolve
 import { createHash as createHash13 } from "crypto";
 import { homedir as homedir14, hostname as osHostname } from "os";
 import { execFile as execFile3, execFileSync as execFileSync2, spawnSync as spawnSync8 } from "child_process";
-import { promisify as promisify3 } from "util";
+import { format, promisify as promisify3 } from "util";
 import { createInterface as createInterface2 } from "readline";
 
 // src/open-url.js
 import { spawn as nodeSpawn } from "child_process";
 function shouldOpenBrowser(env = process.env) {
   if (env.NODE_TEST_CONTEXT) return false;
+  return !noBrowserRequested(env);
+}
+function noBrowserRequested(env = process.env) {
   const off = String(env.TERMINALHIRE_NO_BROWSER ?? "").trim().toLowerCase();
-  return !(off === "1" || off === "true");
+  return off === "1" || off === "true";
 }
 function openInBrowser(url, { env = process.env, spawn: spawn5 = nodeSpawn } = {}) {
   if (!shouldOpenBrowser(env)) return;
@@ -40431,6 +40438,11 @@ var CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
 function sanitizeText(s) {
   if (s == null) return "";
   return String(s).replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "");
+}
+var NON_LINE_CONTROLS = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
+function sanitizeMultiline(s) {
+  if (s == null) return "";
+  return String(s).replace(/\r\n?/g, "\n").replace(NON_LINE_CONTROLS, "");
 }
 function formatUsd(a) {
   if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
@@ -40899,6 +40911,61 @@ var CLAIM_CONSENT_VERSION = 1;
 var CLAIM_POLL_INTERVAL_MS = 2e3;
 var CLAIM_POLL_TIMEOUT_MS = 10 * 60 * 1e3;
 var CLAIM_SYNC_WRITE_TIMEOUT_MS = 6e4;
+var machineOutput = false;
+var noOpen = false;
+var humanLog = console.log;
+var humanError = console.error;
+function machineProse(...args) {
+  humanError(defangJsonLines(format(...args)));
+}
+function defangJsonLines(text) {
+  if (!text.includes("{")) return text;
+  return text.split(/(\r\n|[\n\r\v\f\x1c-\x1e\u0085\u2028\u2029])/).map((part) => /^[\s\x00-\x1f\x7f-\x9f]*\{/.test(part) ? `> ${part}` : part).join("");
+}
+function enterOutputMode(flags) {
+  machineOutput = Boolean(flags && flags.json);
+  noOpen = machineOutput || Boolean(flags && flags["no-open"]);
+  console.log = machineOutput ? machineProse : humanLog;
+  console.error = machineOutput ? machineProse : humanError;
+}
+var lastEmit = Promise.resolve();
+function emit2(obj) {
+  lastEmit = new Promise((resolve6) => {
+    process.stdout.write(`${JSON.stringify(obj)}
+`, () => resolve6());
+  });
+}
+function stdoutDrained() {
+  return lastEmit;
+}
+var RefusalExit = class extends Error {
+  constructor(exitCode) {
+    super(`refused (exit ${exitCode})`);
+    this.name = "RefusalExit";
+    this.exitCode = exitCode;
+  }
+};
+function refuse5(code, message2, { exitCode = 1, alreadySaid = false, ...extra } = {}) {
+  if (!machineOutput) {
+    if (!alreadySaid) console.error(message2);
+    process.exit(exitCode);
+  }
+  emit2({ ok: false, status: "refused", code, message: message2, ...extra });
+  throw new RefusalExit(exitCode);
+}
+function serverRefusalCode(body) {
+  const code = body?.error;
+  return typeof code === "string" && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(code) && code.length <= 64 ? code : "server-refused";
+}
+function reconcileHold(hold, { patchSha256 } = {}) {
+  if (!hold) return null;
+  if (typeof patchSha256 !== "string" || patchSha256 === "") return hold;
+  return patchSha256 === hold.patchSha256 ? null : hold;
+}
+function holdView(hold, freshness) {
+  if (!hold) return null;
+  return { patchSha256: hold.patchSha256, recordedAt: hold.since, freshness };
+}
 var GH_API2 = "https://api.github.com";
 var GH_HEADERS2 = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
 async function policyScanToken() {
@@ -40996,8 +41063,21 @@ async function sh(cmd, args, opts = {}) {
   });
   return String(stdout).trim();
 }
-async function confirm(question) {
-  const rl = createInterface2({ input: process.stdin, output: process.stdout });
+function promptOutput() {
+  return machineOutput ? process.stderr : process.stdout;
+}
+function refuseUnasked(refusal2) {
+  if (!machineOutput) return;
+  const {
+    code = "confirmation-required",
+    message: message2 = "terminalhire claim: this step asks a question, and under --json nothing is asked.",
+    ...extra
+  } = refusal2 ?? {};
+  refuse5(code, message2, extra);
+}
+async function confirm(question, refusal2) {
+  refuseUnasked(refusal2);
+  const rl = createInterface2({ input: process.stdin, output: promptOutput() });
   try {
     const ans = await new Promise((resolve6) => rl.question(question, resolve6));
     return /^y(es)?$/i.test(String(ans).trim());
@@ -41017,18 +41097,25 @@ async function confirmSubmit(flags, question, { unattendedAllowed = true, refusa
     isTTY: Boolean(process.stdin.isTTY),
     unattendedAllowed
   });
-  if (mode === "ask") return confirm(question);
-  if (mode === "refuse") {
-    console.error(refusal2 || "terminalhire claim: cannot submit unattended in this state.");
-    process.exit(1);
+  const unattended = refusal2 || "terminalhire claim: cannot submit unattended in this state.";
+  if (mode === "ask") {
+    return confirm(
+      question,
+      unattendedAllowed ? {
+        code: "confirmation-required",
+        message: "terminalhire claim: submit asks y/N before it sends anything, and under --json nothing is asked.\n  Pass --yes to submit without the question."
+      } : { code: "unattended", message: unattended }
+    );
   }
+  if (mode === "refuse") refuse5("unattended", unattended);
   console.log(
     mode === "flag" ? "\n  --yes supplied \u2014 skipping interactive confirm." : "\n  Non-interactive session \u2014 proceeding. The card above is what is being sent."
   );
   return true;
 }
-async function ask(question) {
-  const rl = createInterface2({ input: process.stdin, output: process.stdout });
+async function ask(question, refusal2) {
+  refuseUnasked(refusal2);
+  const rl = createInterface2({ input: process.stdin, output: promptOutput() });
   try {
     const ans = await new Promise((resolve6) => rl.question(question, resolve6));
     return String(ans).trim();
@@ -41066,8 +41153,7 @@ function parseArgs(argv) {
       if (VALUE_FLAGS.has(key)) {
         const val = argv[i + 1];
         if (val === void 0 || val.startsWith("--")) {
-          console.error(`terminalhire claim: --${key} requires a value.`);
-          process.exit(1);
+          refuse5("bad-argument", `terminalhire claim: --${key} requires a value.`);
         }
         flags[key] = val;
         i++;
@@ -41179,10 +41265,10 @@ function resolveSubmitBody(flags, wt) {
         descr: `--body-file ${flags["body-file"]}`
       };
     } catch (err) {
-      console.error(
+      refuse5(
+        "body-file-unreadable",
         `terminalhire claim: could not read --body-file '${flags["body-file"]}': ${err.message ?? err}`
       );
-      process.exit(1);
     }
   }
   if (bodySource === "pr-body") {
@@ -41504,7 +41590,9 @@ async function fetchIssue(repoFullName, issueNumber) {
     return {
       state,
       title: typeof issue.title === "string" ? issue.title : null,
-      assignees: [...logins]
+      assignees: [...logins],
+      // GitHub sends `body: null` for an issue nobody wrote a description for.
+      body: typeof issue.body === "string" ? issue.body : null
     };
   } catch {
     return null;
@@ -41589,6 +41677,16 @@ function stakeDecision(claim, flags = {}, opts = {}) {
   }
   return { branch: "contested", post: true, takeBot: false, reason: "contested" };
 }
+async function stakeRefusal(claim, code, lines) {
+  const { findClaim: findClaim2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
+  const started = findClaim2(claim.id) ?? claim;
+  return {
+    code,
+    message: [...lines, `  Your workspace is ready: ${started.worktreePath}`].join("\n"),
+    worktreePath: started.worktreePath ?? null,
+    branch: started.branch ?? null
+  };
+}
 async function postClaimStake(claim, flags = {}, ghUser) {
   if (flags["no-assign"]) {
     console.log(
@@ -41651,7 +41749,15 @@ async function postClaimStake(claim, flags = {}, ghUser) {
     console.log(`
   \u26A0 ${repoFullName}#${number} is contested and the repo states no process.`);
     console.log("  A one-line approach stakes your claim; an empty answer posts nothing.");
-    const intent = await ask("  Your approach in one line: ");
+    const intent = await ask(
+      "  Your approach in one line: ",
+      await stakeRefusal(claim, "stake-intent-required", [
+        `terminalhire claim: started, but nothing was posted on ${repoFullName}#${number}.`,
+        "  It is contested and the repo states no process, so a stake needs your approach in",
+        '  one line, which --intent "<approach>" gives; under --json nothing is asked.',
+        "  Comment your approach on the issue yourself before working."
+      ])
+    );
     decision = stakeDecision(claim, flags, { contested, intent });
     if (decision.post) flags = { ...flags, intent };
   }
@@ -41665,7 +41771,15 @@ async function postClaimStake(claim, flags = {}, ghUser) {
     console.log(`
   About to comment on ${repoFullName}#${number} as @${login}:`);
     for (const line of body.split("\n")) console.log(`    ${line}`);
-    const go = await confirm("  Post it? (y/N) ");
+    const go = await confirm(
+      "  Post it? (y/N) ",
+      await stakeRefusal(claim, "stake-confirmation-required", [
+        `terminalhire claim: started, but nothing was posted on ${repoFullName}#${number}.`,
+        "  Posting asks y/N first, and under --json nothing is asked. Post this on the issue",
+        "  yourself before working:",
+        ...body.split("\n").map((line) => `    ${line}`)
+      ])
+    );
     if (!go) {
       console.log("  (skipped \u2014 comment on the issue manually before working)");
       return;
@@ -41823,6 +41937,12 @@ function nextStepFor(c) {
       };
     case "working":
     case "ready":
+      if (c.hold) {
+        return {
+          cmd: nextStep(`terminalhire claim runs ${c.id}`),
+          why: "the patch was held for the poster\u2019s approval in the browser when last submitted; the approval may already have landed \u2014 claim runs shows the server\u2019s answer"
+        };
+      }
       return {
         cmd: nextStep(`terminalhire claim submit ${c.id}`),
         why: "push the branch + open the PR"
@@ -41909,6 +42029,12 @@ async function recoverHeldClaim(arg, flags = {}, deps = {}) {
     return { recovered: null, reason: "awaiting-approval", id: nativeId };
   }
   return { recovered: null, reason: outcome?.outcome ?? "not-found", id: nativeId };
+}
+function indexUnavailableLines(arg) {
+  return [
+    `terminalhire claim: could not read the task index (${API_URL}/api/index), so '${arg}'`,
+    "  could not be looked up. The task may still exist; try again in a moment."
+  ];
 }
 async function explainUnresolvable(arg) {
   const generic = [
@@ -42004,7 +42130,7 @@ async function explainUnstartable(arg, reason, details = null) {
   }
   return explainUnresolvable(arg);
 }
-async function resolveBounty(arg) {
+async function resolveBounty(arg, { outcome } = {}) {
   let bountyId, title, repoFullName, issueUrl, amountUSD, source, openPRsAtDiscovery, indexNativeId;
   let founderPosting = false;
   let claimMode = "open";
@@ -42047,7 +42173,10 @@ async function resolveBounty(arg) {
     indexNativeId = bountyId;
   } else {
     const parsed = parseGitHubUrl(arg);
-    if (!parsed) return null;
+    if (!parsed) {
+      if (outcome && freshPool === null) outcome.failure = "index-unavailable";
+      return null;
+    }
     bountyId = `gh:${parsed.repoFullName}#${parsed.number}`;
     title = `${parsed.repoFullName}#${parsed.number}`;
     repoFullName = parsed.repoFullName;
@@ -42108,6 +42237,11 @@ async function resolveBounty(arg) {
     // `openPRs`, which may be the discovery-time snapshot used for display.
     openPRsLive,
     issueNumber: ghIssue ? ghIssue.number : null,
+    // TERM-1587. The issue's own description, from the read above, for `claim preview
+    // --json`. `issueRead` says whether that read was due and whether it answered, so
+    // "the issue has no body" and "GitHub did not answer" stay different facts.
+    issueBody: issue ? issue.body : null,
+    issueRead: ghIssue ? issue ? "ok" : "failed" : "none",
     // TERM-142 — founder-posting facts for cmdRecord's registration call. The URL
     // tier can never resolve a founder posting (its claimUrl is a docs page, not a
     // GitHub issue), so the defaults above are correct there: a URL-tier claim is
@@ -42144,7 +42278,11 @@ function fmtContestedWarning(b) {
   }
   return `  \u26A0 This issue looks taken: ${parts.join(" / ")}. A merged PR here is unlikely.`;
 }
-async function mintRegistrationProof({ claimRef, intro } = {}) {
+async function mintRegistrationProof({ claimRef, intro, purpose = "claim", outcome } = {}) {
+  const fail3 = (failure) => {
+    if (outcome) outcome.failure = failure;
+    return null;
+  };
   console.log("");
   for (const line of intro ?? [
     "This posting registers your claim with terminalhire, so your",
@@ -42156,8 +42294,9 @@ async function mintRegistrationProof({ claimRef, intro } = {}) {
     oauthBase = resolveOAuthBase();
   } catch (err) {
     console.error(`  ${err instanceof Error ? err.message : String(err)}`);
-    return null;
+    return fail3("unavailable");
   }
+  const startedAt = Date.now();
   let begin;
   try {
     const r = await fetch(`${oauthBase}/api/claim-sync/begin`, {
@@ -42168,19 +42307,19 @@ async function mintRegistrationProof({ claimRef, intro } = {}) {
     });
     if (!r.ok) {
       console.error(`  Could not start verification: /api/claim-sync/begin returned ${r.status}.`);
-      return null;
+      return fail3("unavailable");
     }
     begin = await r.json();
   } catch (err) {
     console.error(
       `  Could not start verification: ${err instanceof Error ? err.message : String(err)}`
     );
-    return null;
+    return fail3("unavailable");
   }
   const { challenge, verifyUrl } = begin || {};
   if (!challenge || !verifyUrl) {
     console.error("  Could not start verification: malformed begin response.");
-    return null;
+    return fail3("unavailable");
   }
   let openUrl = verifyUrl;
   if (claimRef) {
@@ -42193,8 +42332,15 @@ async function mintRegistrationProof({ claimRef, intro } = {}) {
   }
   console.log("\n  Open this URL to authorize (sign in with GitHub, then Confirm):");
   console.log(`    ${openUrl}`);
-  console.log("\n  (Attempting to open it automatically...)");
-  openInBrowser(openUrl);
+  if (!noOpen) {
+    console.log("\n  (Attempting to open it automatically...)");
+    openInBrowser(openUrl);
+  }
+  announceVerifyUrl({
+    purpose,
+    url: openUrl,
+    expiresAt: verifyUrlExpiry(startedAt, begin.expiresAt)
+  });
   console.log("  Waiting for browser verification...");
   const deadline = Date.now() + CLAIM_POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
@@ -42218,7 +42364,26 @@ async function mintRegistrationProof({ claimRef, intro } = {}) {
     if (body && body.status === "verified" && body.proofToken) return body.proofToken;
   }
   console.error("\n  Timed out waiting for browser verification (10 min).");
-  return null;
+  return fail3("timeout");
+}
+function verifyUrlExpiry(startedAt, serverExpiresAt) {
+  let t = startedAt + CLAIM_POLL_TIMEOUT_MS;
+  const s = typeof serverExpiresAt === "string" ? Date.parse(serverExpiresAt) : NaN;
+  if (Number.isFinite(s)) t = Math.min(t, s);
+  return new Date(t).toISOString();
+}
+function announceVerifyUrl({ purpose, url, expiresAt }) {
+  if (!machineOutput && !noBrowserRequested()) return;
+  const event = { event: "verify-url", purpose, url, expiresAt };
+  if (EVENT_NONCE !== null) event.nonce = EVENT_NONCE;
+  process.stderr.write(`${JSON.stringify(event)}
+`);
+}
+var EVENT_NONCE = takeEventNonce();
+function takeEventNonce() {
+  const value = process.env.TERMINALHIRE_EVENT_NONCE;
+  delete process.env.TERMINALHIRE_EVENT_NONCE;
+  return typeof value === "string" && value !== "" ? value : null;
 }
 function proofTokenLogin(token) {
   try {
@@ -42279,16 +42444,15 @@ async function registerFounderClaim(b) {
   let clearedLocalCredential = false;
   let refusedForPurpose = false;
   let preserveBackgroundToken = false;
-  const refuse5 = (reason) => {
-    console.error(
-      `
+  const refuseRegistration = (code, reason, extra = {}) => refuse5(
+    code,
+    `
 terminalhire claim: refusing to record \u2014 ${reason}
   No CLAIM was recorded: a claim on a terminalhire posting registers BEFORE
   it is recorded locally (fail-closed), so a posting that is gone, taken, or
-  unverifiable is never claimed on stale cache data.` + (clearedLocalCredential ? "\n  One local change was kept: the stored push token was deleted from this\n  machine (the server no longer accepts it, so keeping it would fail every\n  later claim)." : "")
-    );
-    process.exit(1);
-  };
+  unverifiable is never claimed on stale cache data.` + (clearedLocalCredential ? "\n  One local change was kept: the stored push token was deleted from this\n  machine (the server no longer accepts it, so keeping it would fail every\n  later claim)." : ""),
+    extra
+  );
   let auth = null;
   let storedPushToken = null;
   try {
@@ -42304,7 +42468,8 @@ terminalhire claim: refusing to record \u2014 ${reason}
     try {
       expectLogin = await localLoginForPaidBrowserClaim();
     } catch (err) {
-      refuse5(
+      refuseRegistration(
+        "not-signed-in",
         `could not verify which GitHub account this machine is signed in as: ${err instanceof Error ? err.message : String(err)}.
   Run \`terminalhire login\`, then retry this claim. Browser verification was
   not opened and no claim was sent.`
@@ -42316,20 +42481,28 @@ terminalhire claim: refusing to record \u2014 ${reason}
   signed in as. A browser signed into a different GitHub account would bind
   this claim, and any payment for it, to that other account.`
     );
+    const proofOutcome = {};
     const proofToken = await mintRegistrationProof({
-      claimRef: opportunityShortToken(b.bountyId)
+      claimRef: opportunityShortToken(b.bountyId),
+      purpose: "claim",
+      outcome: proofOutcome
     });
     if (!proofToken) {
-      refuse5("could not verify your GitHub identity with terminalhire (see above).");
+      refuseRegistration(
+        proofOutcome.failure === "timeout" ? "proof-required" : "proof-unavailable",
+        "could not verify your GitHub identity with terminalhire (see above)."
+      );
     }
     const verifiedLogin = proofTokenLogin(proofToken);
     if (!verifiedLogin) {
-      refuse5(
+      refuseRegistration(
+        "identity-unverified",
         "the browser verification response did not name a GitHub account, so it could not be compared with this machine\u2019s sign-in. Nothing was sent; retry the claim."
       );
     }
     if (verifiedLogin.toLowerCase() !== expectLogin.toLowerCase()) {
-      refuse5(
+      refuseRegistration(
+        "identity-mismatch",
         `you verified in the browser as @${verifiedLogin}, but this machine is signed in as @${expectLogin}.
   Nothing was sent. Sign the browser into @${expectLogin} and run this again, or
   run \`terminalhire login\` if you meant to work as @${verifiedLogin}.`
@@ -42361,7 +42534,8 @@ terminalhire claim: refusing to record \u2014 ${reason}
   try {
     res = await sendRegistration(true);
   } catch (err) {
-    refuse5(
+    refuseRegistration(
+      "unreachable",
       `terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}), so the posting could not be revalidated.`
     );
   }
@@ -42412,7 +42586,8 @@ terminalhire claim: refusing to record \u2014 ${reason}
     try {
       res = await sendRegistration(true);
     } catch (err) {
-      refuse5(
+      refuseRegistration(
+        "unreachable",
         `terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}), so the posting could not be revalidated.`
       );
     }
@@ -42423,15 +42598,18 @@ terminalhire claim: refusing to record \u2014 ${reason}
       res = await sendRegistration(false);
       refusalBody = await readRefusal(res);
     } catch (err) {
-      refuse5(
+      refuseRegistration(
+        "unreachable",
         `terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}), so the posting could not be revalidated.`
       );
     }
   }
   if (!res.ok) {
     const detail = refusalBody?.message || refusalBody?.error || "";
-    refuse5(
-      detail ? `the server refused this claim (${res.status}): ${detail}` : `the server refused this claim (${res.status}).`
+    refuseRegistration(
+      serverRefusalCode(refusalBody),
+      detail ? `the server refused this claim (${res.status}): ${detail}` : `the server refused this claim (${res.status}).`,
+      { httpStatus: res.status }
     );
   }
   let body;
@@ -42441,7 +42619,7 @@ terminalhire claim: refusing to record \u2014 ${reason}
     body = null;
   }
   if (!body || body.ok !== true) {
-    refuse5("malformed registration response from the server.");
+    refuseRegistration("malformed-response", "malformed registration response from the server.");
   }
   const mintedToken = typeof body.pushToken === "string" && body.pushToken.length > 0 ? body.pushToken : null;
   if (refusedForPurpose && mintedToken && !preserveBackgroundToken) {
@@ -42508,43 +42686,67 @@ async function beatFounderPresence(claim) {
     claimId: claim.approval?.claimId ?? null
   });
 }
+function recordResult(claim) {
+  const step = nextStepFor(claim);
+  const start = nextStep(`terminalhire claim start ${claim.id}`);
+  return {
+    ok: true,
+    status: "claimed",
+    claimId: claim.id,
+    serverClaimId: claim.approval?.claimId ?? null,
+    state: claim.state,
+    approval: claim.approval ? claim.approval.state : null,
+    kind: claim.approval ? "paid" : "oss",
+    nextStep: step?.cmd === start ? { ...step, cmd: `${start} --json --no-open` } : step
+  };
+}
 async function cmdRecord(arg, flags = {}) {
+  enterOutputMode(flags);
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
   if (!arg) {
-    console.error(
-      "Usage: terminalhire claim record <taskId|issueUrl> [--ack-policy] [--ack-policy-prohibited] [--ack-contested]"
+    refuse5(
+      "usage",
+      "Usage: terminalhire claim record <taskId|issueUrl> [--ack-policy] [--ack-policy-prohibited] [--ack-contested]\n  Run `terminalhire bounties` first to populate the local index cache,\n  then pass the id shown in its output \u2014 or pass a GitHub issue URL directly."
     );
-    console.error("  Run `terminalhire bounties` first to populate the local index cache,");
-    console.error("  then pass the id shown in its output \u2014 or pass a GitHub issue URL directly.");
-    process.exit(1);
   }
-  const b = await resolveBounty(arg);
-  if (!b) {
-    for (const line of await explainUnresolvable(arg)) console.error(line);
-    process.exit(1);
+  if (machineOutput && flags.start && !flags._chainedFromStart) {
+    refuse5(
+      "usage",
+      "terminalhire claim record: --start does not combine with --json. Record, then run `terminalhire claim start <id> --json --no-open`."
+    );
   }
+  const resolved = {};
+  const b = await resolveBounty(arg, { outcome: resolved });
+  if (!b && resolved.failure === "index-unavailable") {
+    refuse5("index-unavailable", indexUnavailableLines(arg).join("\n"));
+  }
+  if (!b) refuse5("not-found", (await explainUnresolvable(arg)).join("\n"));
   if (b.issueState === "closed") {
-    console.error(
+    refuse5(
+      "issue-closed",
       `terminalhire claim: ${b.repoFullName}#${b.issueNumber} is CLOSED \u2014 not claimable.
   The paid task index drops closed issues; this one is likely a stale cache entry.
   Run \`terminalhire bounties\` for the current open pool.`
     );
-    process.exit(1);
   }
   const contestedWarning = fmtContestedWarning(b);
   if (contestedWarning) {
     console.log(`
 ${contestedWarning}`);
+    const unacked = {
+      code: "contested",
+      // The warning itself rides the message under `--json`, where the line above
+      // went to stderr; a person already read it on stdout.
+      message: `${machineOutput ? `${contestedWarning.trim()}
+` : ""}
+terminalhire claim: refusing to record \u2014 this issue looks taken.
+` + (machineOutput ? "  Pass --ack-contested to claim it anyway; under --json nothing is asked." : "  Re-run with --ack-contested to claim it anyway (or confirm interactively).")
+    };
     let acked = Boolean(flags["ack-contested"]);
     if (!acked && process.stdin.isTTY) {
-      acked = await confirm("\n  Claim it anyway? (y/N) ");
+      acked = await confirm("\n  Claim it anyway? (y/N) ", unacked);
     }
-    if (!acked) {
-      console.error(
-        "\nterminalhire claim: refusing to record \u2014 this issue looks taken.\n  Re-run with --ack-contested to claim it anyway (or confirm interactively)."
-      );
-      process.exit(1);
-    }
+    if (!acked) refuse5(unacked.code, unacked.message);
   }
   let policy = null;
   if (!b.founderPosting) {
@@ -42571,21 +42773,21 @@ ${contestedWarning}`);
   let ackedAt = null;
   if (!policy) {
   } else if (policy.verdict === "prohibited") {
+    const unacked = {
+      code: "policy-prohibited",
+      message: `
+terminalhire claim: refusing to record \u2014 ${b.repoFullName} prohibits AI-generated contributions.
+  Read the excerpts above. If you will hand-write the work yourself, re-run with
+` + (machineOutput ? "  --ack-policy-prohibited; under --json nothing is asked. --ack-policy is not enough here." : "  --ack-policy-prohibited (or confirm interactively). --ack-policy is not enough here.")
+    };
     let acked = Boolean(flags["ack-policy-prohibited"]);
     if (!acked && process.stdin.isTTY) {
       acked = await confirm(
-        "\n  This repo PROHIBITS AI-generated contributions \u2014 continuing means everything you submit must be hand-written by you. Continue? (y/N) "
+        "\n  This repo PROHIBITS AI-generated contributions \u2014 continuing means everything you submit must be hand-written by you. Continue? (y/N) ",
+        unacked
       );
     }
-    if (!acked) {
-      console.error(
-        `
-terminalhire claim: refusing to record \u2014 ${b.repoFullName} prohibits AI-generated contributions.
-  Read the excerpts above. If you will hand-write the work yourself, re-run with
-  --ack-policy-prohibited (or confirm interactively). --ack-policy is not enough here.`
-      );
-      process.exit(1);
-    }
+    if (!acked) refuse5(unacked.code, unacked.message);
     ackedAt = (/* @__PURE__ */ new Date()).toISOString();
   } else if (policy.status === "flagged" || policy.status === "unavailable") {
     const prior = policy.scanComplete ? findPolicyAck(b.repoFullName, policy.contentHash, policy.rulesetVersion) : null;
@@ -42597,21 +42799,21 @@ terminalhire claim: refusing to record \u2014 ${b.repoFullName} prohibits AI-gen
       ackedAt = prior.ackedAt;
     } else {
       const reason = policy.status === "flagged" ? "This repo has AI-assistance policy language" : (policy.hits?.length ?? 0) > 0 ? "This repo's policy scan was cut short \u2014 AI-policy language was found in what WAS read, and other governing docs went unread" : "This repo's contribution policy could not be checked";
+      const unacked = {
+        code: "policy-ack-required",
+        message: `
+terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribution policy first.
+` + (machineOutput ? "  Pass --ack-policy once you have; under --json nothing is asked." : "  Re-run with --ack-policy once you have (or confirm interactively).")
+      };
       let acked = Boolean(flags["ack-policy"]);
       if (!acked && process.stdin.isTTY) {
         acked = await confirm(
           `
-  ${reason} \u2014 read it before working. Acknowledge and proceed? (y/N) `
+  ${reason} \u2014 read it before working. Acknowledge and proceed? (y/N) `,
+          unacked
         );
       }
-      if (!acked) {
-        console.error(
-          `
-terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribution policy first.
-  Re-run with --ack-policy once you have (or confirm interactively).`
-        );
-        process.exit(1);
-      }
+      if (!acked) refuse5(unacked.code, unacked.message);
       ackedAt = (/* @__PURE__ */ new Date()).toISOString();
       if (policy.status === "flagged" && policy.scanComplete) {
         rememberPolicyAck({
@@ -42630,10 +42832,11 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
   let founderRegistration = null;
   if (b.founderPosting) {
     if (claims.findClaim(b.bountyId)) {
-      console.error(
-        `terminalhire claim: claim already exists for '${b.bountyId}' \u2014 run '${nextStep(`terminalhire claim status ${b.bountyId}`)}' or '${nextStep(`terminalhire claim release ${b.bountyId}`)}'`
+      refuse5(
+        "already-claimed",
+        `terminalhire claim: claim already exists for '${b.bountyId}' \u2014 run '${nextStep(`terminalhire claim status ${b.bountyId}`)}' or '${nextStep(`terminalhire claim release ${b.bountyId}`)}'`,
+        { claimId: b.bountyId }
       );
-      process.exit(1);
     }
     const registration = await registerFounderClaim(b);
     founderRegistration = registration;
@@ -42684,8 +42887,14 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
       ...approval ? { approval } : {}
     });
   } catch (err) {
-    console.error(`terminalhire claim: ${err.message ?? err}`);
-    process.exit(1);
+    const duplicate = /already exists/i.test(String(err?.message ?? err));
+    refuse5(
+      duplicate ? "already-claimed" : "record-failed",
+      `terminalhire claim: ${err.message ?? err}`,
+      {
+        ...duplicate ? { claimId: b.bountyId } : {}
+      }
+    );
   }
   if (policy) {
     try {
@@ -42746,7 +42955,8 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
       }
     }
     await beatFounderPresence(claim);
-    const canOfferStart = !flags._chainedFromStart && claim.approval.state !== "pending";
+    const canOfferStart = !flags._chainedFromStart && !machineOutput && claim.approval.state !== "pending";
+    if (machineOutput && !flags._chainedFromStart) emit2(recordResult(claim));
     if (canOfferStart) {
       if (flags.start) {
         await cmdStart(claim.id, { start: true });
@@ -42786,7 +42996,9 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
   console.log("    " + nextStep("terminalhire claim start " + claim.id));
   console.log("  Then publish when it is done (the only step that pushes + opens the PR):");
   console.log("    " + nextStep("terminalhire claim submit " + claim.id));
-  if (flags.start) {
+  if (machineOutput) {
+    if (!flags._chainedFromStart) emit2(recordResult(claim));
+  } else if (flags.start) {
     await cmdStart(claim.id, { start: true });
   } else if (process.stdin.isTTY && !flags["no-start"]) {
     const go = await confirm(`
@@ -42798,51 +43010,110 @@ terminalhire claim: refusing to record \u2014 read ${b.repoFullName}'s contribut
   }
   return claim;
 }
-async function cmdPreview(arg, { json } = {}) {
-  if (!arg) {
-    console.error("Usage: terminalhire claim preview <taskId|issueUrl> [--json]");
-    process.exit(1);
+async function readPublicBrief(ref) {
+  let res;
+  try {
+    res = await fetch(`${CLAIM_SYNC_BASE4}/api/work/${encodeURIComponent(ref)}`, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(1e4)
+    });
+  } catch {
+    return { status: "unavailable" };
   }
-  const b = await resolveBounty(arg);
-  if (!b) {
-    for (const line of await explainUnresolvable(arg)) console.error(line);
-    process.exit(1);
+  if (res.status === 404) return { status: "none" };
+  if (!res.ok) return { status: "unavailable" };
+  let body;
+  try {
+    body = await res.json();
+  } catch {
+    return { status: "unavailable" };
   }
+  const brief = body?.ok === true ? body.preview?.brief : null;
+  if (!brief || typeof brief.text !== "string") return { status: "unavailable" };
+  if (brief.text.trim() === "") return { status: "none" };
+  const sections = brief.sections && typeof brief.sections === "object" ? brief.sections : {};
+  const section = (key) => typeof sections[key] === "string" && sections[key].trim() !== "" ? sanitizeMultiline(sections[key]) : null;
+  return {
+    status: "ok",
+    brief: {
+      source: "terminalhire",
+      text: sanitizeMultiline(brief.text),
+      outcome: section("outcome"),
+      scope: section("scope"),
+      acceptance: section("acceptance"),
+      deliverable: section("deliverable")
+    }
+  };
+}
+async function previewContent(b) {
+  const unavailable = [];
+  let brief = null;
+  if (b.founderPosting) {
+    const read = await readPublicBrief(opportunityShortToken(b.bountyId));
+    if (read.status === "ok") brief = read.brief;
+    else if (read.status === "unavailable") unavailable.push("brief");
+  }
+  let issueBody = null;
+  if (b.issueRead === "ok") {
+    if (typeof b.issueBody === "string" && b.issueBody.trim() !== "") {
+      issueBody = sanitizeMultiline(b.issueBody);
+    }
+  } else if (b.issueRead === "failed") {
+    unavailable.push("issueBody");
+  }
+  return {
+    brief,
+    issueBody,
+    issueBodySource: issueBody === null ? null : "github",
+    unavailable
+  };
+}
+async function cmdPreview(arg, flags = {}) {
+  enterOutputMode(flags);
+  const json = Boolean(flags.json);
+  if (!arg) refuse5("usage", "Usage: terminalhire claim preview <taskId|issueUrl> [--json]");
+  const resolved = {};
+  const b = await resolveBounty(arg, { outcome: resolved });
+  if (!b && resolved.failure === "index-unavailable") {
+    refuse5("index-unavailable", indexUnavailableLines(arg).join("\n"));
+  }
+  if (!b) refuse5("not-found", (await explainUnresolvable(arg)).join("\n"));
   let policy = null;
   if (!b.founderPosting) {
     const { checkRepoPolicy: checkRepoPolicy2 } = await Promise.resolve().then(() => (init_repo_policy(), repo_policy_exports));
     policy = await checkRepoPolicy2(b.repoFullName, { token: await policyScanToken() });
   }
   if (json) {
-    process.stdout.write(
-      JSON.stringify({
-        bountyId: b.bountyId,
-        title: b.title,
-        amountUSD: b.amountUSD,
-        repoFullName: b.repoFullName,
-        issueUrl: b.issueUrl,
-        issueState: b.issueState,
-        openPRs: b.openPRs,
-        assignees: b.assignees,
-        contested: isContested(b),
-        // TERM-1308. The posting's test budget and baseline, only when the index carried them.
-        ...baselineFields(b),
-        // TERM-1344. Only for a poster-reviewed posting; absent means tests.
-        ...b.reviewMode === POSTER_REVIEWED ? { reviewMode: POSTER_REVIEWED } : {},
-        // Absent on a founder posting — see the scan above. A consumer must read
-        // "no policy key" as "no policy step exists here", never as "clean".
-        ...policy ? {
-          policy: {
-            status: policy.status,
-            verdict: policy.verdict,
-            assignment: policy.assignment,
-            rulesetVersion: policy.rulesetVersion,
-            hits: policy.hits,
-            requirements: policy.requirements
-          }
-        } : {}
-      }) + "\n"
-    );
+    const content = await previewContent(b);
+    emit2({
+      ok: true,
+      bountyId: b.bountyId,
+      title: b.title,
+      amountUSD: b.amountUSD,
+      repoFullName: b.repoFullName,
+      issueUrl: b.issueUrl,
+      issueState: b.issueState,
+      openPRs: b.openPRs,
+      assignees: b.assignees,
+      contested: isContested(b),
+      // TERM-1308. The posting's test budget and baseline, only when the index carried them.
+      ...baselineFields(b),
+      // TERM-1344. Only for a poster-reviewed posting; absent means tests.
+      ...b.reviewMode === POSTER_REVIEWED ? { reviewMode: POSTER_REVIEWED } : {},
+      // Absent on a founder posting — see the scan above. A consumer must read
+      // "no policy key" as "no policy step exists here", never as "clean".
+      ...policy ? {
+        policy: {
+          status: policy.status,
+          verdict: policy.verdict,
+          assignment: policy.assignment,
+          rulesetVersion: policy.rulesetVersion,
+          hits: policy.hits,
+          requirements: policy.requirements
+        }
+      } : {},
+      ...content
+    });
     return;
   }
   console.log(`
@@ -43045,9 +43316,83 @@ function founderClaimStanding(claim, approvalsChecked) {
   if (claim.approval?.state === "granted") return `${turn} \u2014 approved, slice ready`;
   return approvalsChecked ? "waiting on poster \u2014 approval not granted yet" : `${turn} \u2014 registered locally, approval not checked`;
 }
-async function cmdStatus(id) {
+function claimStatusView(c, { approvalsChecked = false } = {}) {
+  const refusal2 = submitRefusalFor(c);
+  const revise = c.review?.verdict === "revise" && REVISE_RECOVERY_STATES.includes(c.state);
+  return {
+    id: c.id,
+    bountyId: c.bountyId,
+    serverClaimId: c.approval?.claimId ?? null,
+    title: c.title ?? null,
+    kind: c.kind,
+    state: c.state,
+    turn: claimTurn(c.state),
+    firstParty: Boolean(c.approval),
+    approval: c.approval ? { mode: c.approval.mode, state: c.approval.state } : null,
+    standing: c.approval ? founderClaimStanding(c, approvalsChecked) : null,
+    posterVerdict: c.posterVerdict ?? null,
+    serverReleased: c.serverReleased === true,
+    repoFullName: c.repoFullName ?? null,
+    issueUrl: c.issueUrl ?? null,
+    amountUSD: c.amountUSD ?? null,
+    worktreePath: c.worktreePath ?? null,
+    branch: c.branch ?? null,
+    prUrl: c.prUrl ?? null,
+    baseSha: c.baseSha ?? null,
+    reviewVerdict: c.review?.verdict ?? null,
+    hold: holdView(c.hold, "unverified"),
+    submitAccepts: refusal2 === null,
+    recoveryCommand: refusal2 === null ? null : revise ? reviseRecoveryCommand(c.id) : submitRecoveryCommand(c),
+    nextStep: nextStepFor(c),
+    claimedAt: c.claimedAt,
+    updatedAt: c.updatedAt
+  };
+}
+async function syncFirstPartyFacts(claims, targets, { reselect, log = () => {
+} }) {
+  const out = { pushToken: null, approvalsChecked: false, approvalsUnavailable: false };
+  if (!targets.some((c) => Boolean(c.approval))) return out;
+  const syncRes = await syncFounderApprovals(claims, targets);
+  out.pushToken = syncRes.pushToken;
+  out.approvalsChecked = syncRes.approvalsChecked;
+  out.approvalsUnavailable = syncRes.approvalsUnavailable;
+  await syncFounderVerdicts({ claimsModule: claims, targets: reselect(), readPushTokenEnc, log });
+  return out;
+}
+async function claimStatusResult(id) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
-  let targets = id ? [claims.findClaim(id)].filter(Boolean) : claims.listClaims();
+  const select = () => id ? [claims.findClaim(id)].filter(Boolean) : claims.listClaims();
+  let targets = select();
+  if (id && targets.length === 0) {
+    return { ok: false, code: "no-such-claim", message: `No claim with id '${id}'.` };
+  }
+  const sync = await syncFirstPartyFacts(claims, targets, { reselect: select });
+  targets = select();
+  let enrolled = Boolean(sync.pushToken);
+  if (!enrolled) {
+    try {
+      enrolled = Boolean(await readPushTokenEnc());
+    } catch {
+      enrolled = false;
+    }
+  }
+  return {
+    ok: true,
+    claims: targets.map((c) => claimStatusView(c, sync)),
+    approvalsChecked: sync.approvalsChecked,
+    approvalsUnavailable: sync.approvalsUnavailable,
+    enrolled
+  };
+}
+async function cmdStatus(id, flags = {}) {
+  enterOutputMode(flags);
+  if (flags.json) {
+    emit2(await claimStatusResult(id));
+    return;
+  }
+  const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+  const select = () => id ? [claims.findClaim(id)].filter(Boolean) : claims.listClaims();
+  let targets = select();
   if (targets.length === 0) {
     console.log(id ? `No claim with id '${id}'.` : "No claims to poll.");
     return;
@@ -43057,17 +43402,14 @@ async function cmdStatus(id) {
   let approvalsUnavailable = false;
   let pushToken = null;
   if (founderTargets.length > 0) {
-    const syncRes = await syncFounderApprovals(claims, targets);
-    pushToken = syncRes.pushToken;
-    approvalsChecked = syncRes.approvalsChecked;
-    approvalsUnavailable = syncRes.approvalsUnavailable;
-    targets = id ? [claims.findClaim(id)].filter(Boolean) : claims.listClaims();
-    await syncFounderVerdicts({
-      claimsModule: claims,
-      targets,
-      readPushTokenEnc
+    const sync = await syncFirstPartyFacts(claims, targets, {
+      reselect: select,
+      log: console.log
     });
-    targets = id ? [claims.findClaim(id)].filter(Boolean) : claims.listClaims();
+    pushToken = sync.pushToken;
+    approvalsChecked = sync.approvalsChecked;
+    approvalsUnavailable = sync.approvalsUnavailable;
+    targets = select();
     console.log("\n  Claims on terminalhire postings:");
     for (const c of targets.filter((claim) => Boolean(claim.approval))) {
       console.log(`  ${founderClaimStanding(c, approvalsChecked)} \u2014 ${c.title}`);
@@ -43485,8 +43827,52 @@ async function watchForSliceDelivery(id, flags, deps = {}) {
   }
   return last;
 }
+function startResult(claim) {
+  const worktreePath = claim.worktreePath ?? null;
+  const pack = claim.workspacePack ?? {};
+  return {
+    ok: true,
+    status: "started",
+    claimId: claim.id,
+    worktreePath,
+    branch: claim.branch ?? null,
+    briefPath: worktreePath && pack.brief === true ? join31(worktreePath, BRIEF_REL_PATH) : null,
+    agentsPath: worktreePath && pack.agents === true ? join31(worktreePath, AGENTS_REL_PATH) : null,
+    kind: claim.approval ? "paid" : "oss",
+    nextStep: nextStepFor(claim)
+  };
+}
+function finishStart(claim, flags) {
+  if (machineOutput) {
+    emit2(startResult(claim));
+    return;
+  }
+  landDeveloperIn(claim?.worktreePath, flags);
+}
+var UNSTARTABLE_CODES = {
+  unreachable: "unreachable",
+  unauthorized: "not-signed-in",
+  "host-mismatch": "host-mismatch",
+  error: "delivery-failed"
+};
 async function cmdStart(id, flags = {}) {
+  enterOutputMode(flags);
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+  if (machineOutput && flags.open) {
+    refuse5(
+      "usage",
+      "terminalhire claim start: --open does not combine with --json. Under --json nothing is launched; open the worktreePath the answer names."
+    );
+  }
+  if (machineOutput && flags.watch) {
+    refuse5(
+      "usage",
+      "terminalhire claim start: --watch does not combine with --json. Under --json the command answers once; ask again with `terminalhire claim start <id> --json --no-open`."
+    );
+  }
+  if (!id && machineOutput) {
+    refuse5("usage", "Usage: terminalhire claim start <id> --json [--no-open]");
+  }
   if (!id) {
     const picked = await pickStartableClaim(claims);
     if (!picked) return;
@@ -43502,7 +43888,8 @@ async function cmdStart(id, flags = {}) {
   }
   let chainedFromRecord = false;
   if (!claim) {
-    const b = await resolveBounty(id);
+    const resolved = {};
+    const b = await resolveBounty(id, { outcome: resolved });
     if (!b) {
       const {
         recovered,
@@ -43515,16 +43902,21 @@ async function cmdStart(id, flags = {}) {
         claim = recovered;
         id = recoveredId;
       } else if (reason === "awaiting-approval") {
-        console.error(`terminalhire claim: you hold '${id}', and the poster has not`);
-        console.error("  approved it yet. Nothing to start until they do.");
-        console.error(
-          `  Watch for it:  ${nextStep(`terminalhire claim start ${recoveredId} --watch`)}`
+        refuse5(
+          "approval-pending",
+          `terminalhire claim: you hold '${id}', and the poster has not
+  approved it yet. Nothing to start until they do.
+  Watch for it:  ${nextStep(`terminalhire claim start ${recoveredId} --watch`)}`,
+          { claimId: recoveredId }
         );
-        process.exit(1);
       } else {
-        for (const line of await explainUnstartable(id, reason, { linkedHost, currentHost }))
-          console.error(line);
-        process.exit(1);
+        const indexDown = resolved.failure === "index-unavailable";
+        const code = UNSTARTABLE_CODES[reason] ?? (indexDown ? "index-unavailable" : "not-found");
+        const lines = await explainUnstartable(id, reason, { linkedHost, currentHost });
+        refuse5(
+          code,
+          (code === "index-unavailable" ? [...indexUnavailableLines(id), "", ...lines] : lines).join("\n")
+        );
       }
     }
     if (b) {
@@ -43541,8 +43933,10 @@ async function cmdStart(id, flags = {}) {
         });
         claim = recorded ? claims.findClaim(recorded.id) : null;
         if (!claim) {
-          console.error(`terminalhire claim: recording '${id}' did not produce a local claim.`);
-          process.exit(1);
+          refuse5(
+            "record-failed",
+            `terminalhire claim: recording '${id}' did not produce a local claim.`
+          );
         }
         id = claim.id;
         chainedFromRecord = true;
@@ -43567,7 +43961,7 @@ async function cmdStart(id, flags = {}) {
   Commit as you go \u2014 your commits ARE the patch. Hand it back with:`);
       console.log(`    ${nextStep(`terminalhire claim submit ${id}`)}`);
       await beatFounderPresence(claim);
-      landDeveloperIn(claim.worktreePath, flags);
+      finishStart(claim, flags);
       return;
     }
   }
@@ -43590,10 +43984,29 @@ ${sanitizeText(claim.title)}`);
       }
     }
     if (outcome.outcome === "delivered") {
-      landDeveloperIn(outcome.claim?.worktreePath, flags);
+      finishStart(outcome.claim ?? claims.findClaim(id), flags);
       return;
     }
     if (outcome.outcome === "pending") {
+      if (machineOutput) {
+        emit2({
+          ok: true,
+          status: "approval-pending",
+          claimId: id,
+          worktreePath: null,
+          branch: null,
+          briefPath: null,
+          agentsPath: null,
+          kind: "paid",
+          message: outcome.message ?? null,
+          nextStep: {
+            cmd: nextStep(`terminalhire claim start ${id} --json --no-open`),
+            why: "ask again; the next ask after the poster approves is the delivery"
+          }
+        });
+        await beatFounderPresence(claim);
+        return;
+      }
       if (!outcome.exhausted) {
         console.log("\n  Access is pending \u2014 the poster has not approved your claim yet.");
         console.log(
@@ -43608,40 +44021,42 @@ ${sanitizeText(claim.title)}`);
   }
   if (flags.here) {
     await cmdStartHere(claims, claim, flags);
+    if (machineOutput) emit2(startResult(claims.findClaim(claim.id) ?? claim));
     return;
   }
   let ghUser;
   try {
     ghUser = await sh("gh", ["api", "user", "-q", ".login"]);
   } catch {
-    console.error(
+    refuse5(
+      "gh-unavailable",
       "terminalhire claim: 'gh' CLI not available or not authenticated. Run 'gh auth login'."
     );
-    process.exit(1);
   }
   let consented = explicitForkConsent(flags);
-  if (!consented && process.stdin.isTTY) {
+  if (!consented && process.stdin.isTTY && !machineOutput) {
     consented = await confirm(
       `
   Fork ${claim.repoFullName} to @${ghUser} and clone it to start? (y/N) `
     );
   }
   if (!consented) {
-    console.error(
+    refuse5(
+      "fork-consent-required",
       `
 terminalhire claim: not started \u2014 starting forks ${claim.repoFullName} to your GitHub account (a network write).
-  Re-run in a terminal to confirm interactively, or pass --fork to consent non-interactively.`
+` + (machineOutput ? "  Pass --fork to consent; under --json nothing is asked." : "  Re-run in a terminal to confirm interactively, or pass --fork to consent non-interactively.")
     );
-    process.exit(1);
   }
   const issueNumber = (parseGitHubUrl(claim.issueUrl) || {}).number;
   const destDir = workDirFor(claim.repoFullName, issueNumber);
   if (existsSync14(destDir)) {
-    console.error(
+    refuse5(
+      "workspace-exists",
       `terminalhire claim: ${destDir} already exists \u2014 refusing to clobber it.
-  Remove it and retry, or attach it: terminalhire claim attach ${id} --worktree ${destDir} --branch <branch>`
+  Remove it and retry, or attach it: terminalhire claim attach ${id} --worktree ${destDir} --branch <branch>`,
+      { worktreePath: destDir }
     );
-    process.exit(1);
   }
   mkdirSync10(join31(homedir14(), "terminalhire", "work"), { recursive: true });
   const { createProgress: createProgress2, parseGitProgress: parseGitProgress2, splitProgressChunk: splitProgressChunk2, shStream: shStream2 } = await Promise.resolve().then(() => (init_progress(), progress_exports));
@@ -43653,10 +44068,10 @@ terminalhire claim: not started \u2014 starting forks ${claim.repoFullName} to y
     progress.succeed(`\u2192 ${forkFullName}`);
   } catch (err) {
     progress.fail();
-    console.error(
+    refuse5(
+      "fork-failed",
       `terminalhire claim: could not create your fork of ${claim.repoFullName}. ${err.message ?? err}`
     );
-    process.exit(1);
   }
   progress.start(`cloning ${forkFullName}`);
   try {
@@ -43676,10 +44091,10 @@ terminalhire claim: not started \u2014 starting forks ${claim.repoFullName} to y
       rmSync10(destDir, { recursive: true, force: true });
     } catch {
     }
-    console.error(
+    refuse5(
+      "clone-failed",
       `terminalhire claim: clone of ${forkFullName} failed. ${err.stderr || err.message || err}`
     );
-    process.exit(1);
   }
   try {
     await sh("git", ["-C", destDir, "remote", "get-url", "upstream"]);
@@ -43714,26 +44129,25 @@ terminalhire claim: not started \u2014 starting forks ${claim.repoFullName} to y
   console.log(`  branch: ${branch}`);
   console.log("\n  Commit as you go. When it is done (the only step that pushes + opens the PR):");
   console.log(`    ${nextStep(`terminalhire claim submit ${id}`)}`);
-  landDeveloperIn(toplevel, flags);
+  finishStart(claims.findClaim(id) ?? { ...claim, worktreePath: toplevel, branch }, flags);
 }
 async function cmdStartHere(claims, claim, flags = {}) {
   let toplevel;
   try {
     toplevel = await sh("git", ["-C", process.cwd(), "rev-parse", "--show-toplevel"]);
   } catch {
-    console.error("terminalhire claim: --here must be run inside a git repository.");
-    process.exit(1);
+    refuse5("not-a-repo", "terminalhire claim: --here must be run inside a git repository.");
   }
   const remotesOut = await sh("git", ["-C", toplevel, "remote", "-v"]).catch(() => "");
   const repos = new Set(
     remotesOut.split("\n").map((l) => parseRepoFromRemote(l.split(/\s+/)[1])).filter(Boolean).map((r) => r.toLowerCase())
   );
   if (!repos.has(claim.repoFullName.toLowerCase())) {
-    console.error(
+    refuse5(
+      "wrong-repo",
       `terminalhire claim: --here expects a clone of ${claim.repoFullName}, but no remote here points there.
   Use \`${nextStep(`terminalhire claim start ${claim.id}`)}\` (no --here) to fork + clone it into a fresh worktree.`
     );
-    process.exit(1);
   }
   const dirty = await sh("git", [
     "-C",
@@ -43743,10 +44157,10 @@ async function cmdStartHere(claims, claim, flags = {}) {
     "--untracked-files=no"
   ]).catch(() => "");
   if (dirty) {
-    console.error(
+    refuse5(
+      "dirty-worktree",
       "terminalhire claim: --here needs a clean working tree (claim work must not mix with your current changes).\n  Commit or stash first, or use `terminalhire claim start` for an isolated worktree."
     );
-    process.exit(1);
   }
   const issueNumber = (parseGitHubUrl(claim.issueUrl) || {}).number;
   const branch = startBranchFor(claim.repoFullName, issueNumber);
@@ -43845,6 +44259,10 @@ function landDeveloperIn(dest, flags = {}, deps = {}) {
   if (!dest) return { landed: false, reason: "no-workspace" };
   const cdLine = () => log(`
   cd ${dest}`);
+  if (flags["no-open"]) {
+    cdLine();
+    return { landed: false, reason: "declined" };
+  }
   if (flags.open) {
     const result2 = launchAgentIn(dest, flags.open, { spawnFn, log });
     return { landed: result2.launched, reason: result2.reason };
@@ -44219,47 +44637,60 @@ async function watchRunsLoop({
   sleep: sleep5 = claimSleep,
   log = console.log
 }) {
+  let last = null;
   for (let i = 1; i <= attempts; i++) {
     const r = await fetchOnce();
     if (r.kind === "refusal") {
-      return { outcome: "refused", status: r.status, body: r.body };
+      return { outcome: "refused", status: r.status, body: r.body, last };
     }
     if (r.kind === "network") {
       log(`  (attempt ${i}/${attempts}: terminalhire unreachable \u2014 ${r.error}; retrying)`);
     } else {
+      last = r;
       log(`
   [check ${i}/${attempts}]`);
       log(renderRunView(r.run, r.message, r));
-      if (isTerminalRunStatus(r.run.status, r.claimState)) return { outcome: "done", run: r.run };
+      if (isTerminalRunStatus(r.run.status, r.claimState)) {
+        return { outcome: "done", run: r.run, last };
+      }
     }
     if (i < attempts) await sleep5(intervalMs);
   }
   log(runsGiveUpMessage(id, attempts, intervalMs));
-  return { outcome: "gave-up" };
+  return { outcome: "gave-up", last };
 }
 function requireFounderLoopClaim(claims, id, verb) {
+  const gate = founderLoopGate(claims, id, verb);
+  if (gate.refusal) refuse5(gate.refusal.code, gate.refusal.message);
+  return gate.claim;
+}
+function founderLoopGate(claims, id, verb) {
   if (!id) {
-    console.error(`Usage: terminalhire claim ${verb} <id>`);
-    process.exit(1);
+    return { refusal: { code: "usage", message: `Usage: terminalhire claim ${verb} <id>` } };
   }
   const claim = claims.findClaim(id);
   if (!claim) {
-    console.error(`terminalhire claim: no claim with id '${id}'.`);
-    process.exit(1);
+    return {
+      refusal: { code: "no-such-claim", message: `terminalhire claim: no claim with id '${id}'.` }
+    };
   }
   if (!claim.approval) {
-    console.error(
-      `terminalhire claim: ${id} is not a claim on a terminalhire posting \u2014 '${verb}' only applies to terminalhire postings (OSS claims work through fork + PR: 'claim start' / 'claim submit').`
-    );
-    process.exit(1);
+    return {
+      refusal: {
+        code: "not-first-party",
+        message: `terminalhire claim: ${id} is not a claim on a terminalhire posting \u2014 '${verb}' only applies to terminalhire postings (OSS claims work through fork + PR: 'claim start' / 'claim submit').`
+      }
+    };
   }
   if (!claim.approval.claimId) {
-    console.error(
-      `terminalhire claim: ${id} carries no server claim id \u2014 its registration receipt is incomplete, so the server cannot match this claim to you. Re-record the claim.`
-    );
-    process.exit(1);
+    return {
+      refusal: {
+        code: "no-server-claim-id",
+        message: `terminalhire claim: ${id} carries no server claim id \u2014 its registration receipt is incomplete, so the server cannot match this claim to you. Re-record the claim.`
+      }
+    };
   }
-  return claim;
+  return { claim };
 }
 function retireRevokedReadCredential(status, body, what) {
   if (status !== 403 || body?.error !== PUSH_TOKEN_REFUSAL.INVALID) return false;
@@ -44282,20 +44713,22 @@ terminalhire claim: ${what} needs the stored credential, and the server says it 
   return true;
 }
 async function enrolHeldClaimReadToken(postingId) {
-  const fail3 = (lines) => {
-    for (const line of lines) console.error(line);
-    process.exit(1);
-  };
+  const fail3 = (code, lines, extra) => refuse5(code, lines.join("\n"), extra);
+  const proofOutcome = {};
   const proofToken = await mintRegistrationProof({
     claimRef: opportunityShortToken(`bounty:founder:${postingId}`),
+    purpose: "enrol",
     intro: [
       "This machine holds no terminalhire credential yet. Confirm once in the",
       "browser, signed in as the GitHub account that claimed this paid task, and",
       "this machine is linked to your claim."
-    ]
+    ],
+    outcome: proofOutcome
   });
   if (!proofToken) {
-    fail3(["terminalhire claim: could not link this machine to your claim (see above)."]);
+    fail3(proofOutcome.failure === "timeout" ? "proof-required" : "proof-unavailable", [
+      "terminalhire claim: could not link this machine to your claim (see above)."
+    ]);
   }
   let res;
   try {
@@ -44306,7 +44739,7 @@ async function enrolHeldClaimReadToken(postingId) {
       signal: AbortSignal.timeout(CLAIM_SYNC_WRITE_TIMEOUT_MS)
     });
   } catch (err) {
-    fail3([
+    fail3("unreachable", [
       `terminalhire claim: terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}).`,
       "  Nothing was stored. Run the same command again."
     ]);
@@ -44318,21 +44751,25 @@ async function enrolHeldClaimReadToken(postingId) {
   }
   if (res.status === 404 && body?.error === "no-live-claim") {
     const who = typeof body.claimantLogin === "string" ? `@${body.claimantLogin}` : "that account";
-    fail3([
+    fail3("no-live-claim", [
       `terminalhire claim: you confirmed in the browser as ${who}, and ${who} does not`,
       "  hold a live claim on this posting. Nothing was stored.",
       "  Sign the browser into the GitHub account that claimed it, then run this again."
     ]);
   }
   if (!res.ok || typeof body?.pushToken !== "string" || body.pushToken.length === 0) {
-    fail3([
-      `terminalhire claim: linking this machine failed (${res.status}${typeof body?.message === "string" ? `: ${body.message}` : ""}). Nothing was stored.`
-    ]);
+    fail3(
+      res.ok ? "malformed-response" : serverRefusalCode(body),
+      [
+        `terminalhire claim: linking this machine failed (${res.status}${typeof body?.message === "string" ? `: ${body.message}` : ""}). Nothing was stored.`
+      ],
+      { httpStatus: res.status }
+    );
   }
   try {
     await writePushTokenEnc(body.pushToken);
   } catch (err) {
-    fail3([
+    fail3("credential-store-failed", [
       `terminalhire claim: the credential could not be stored on this machine: ${err instanceof Error ? err.message : String(err)}`
     ]);
   }
@@ -44349,16 +44786,14 @@ async function requireReadPushToken(what, { enrolFor } = {}) {
   if (!stored && typeof enrolFor === "string" && FOUNDER_POSTING_ID.test(enrolFor)) {
     return enrolHeldClaimReadToken(enrolFor);
   }
-  if (!stored) {
-    console.error(
-      `terminalhire claim: ${what} needs the persistent push token, and none is enrolled on this machine.
+  if (!stored) refuse5("not-enrolled", readTokenMissingMessage(what));
+  return stored;
+}
+function readTokenMissingMessage(what) {
+  return `terminalhire claim: ${what} needs the persistent push token, and none is enrolled on this machine.
   Link this machine to your claim (browser verification): terminalhire claim <claim-token>
   \u2014 the 8-character token on the claim page. If you already have claims recorded
-  here, terminalhire claim --push enrols too.`
-    );
-    process.exit(1);
-  }
-  return stored;
+  here, terminalhire claim --push enrols too.`;
 }
 function cloneFullTierRepo({ engine, dest, url, sha, token, branch }) {
   const authHeader = `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
@@ -44383,10 +44818,10 @@ async function cmdSliceFullTier(claims, id, local, fullTierBody, flags, cloneRep
       signal: AbortSignal.timeout(3e4)
     });
   } catch (err) {
-    console.error(
+    refuse5(
+      "unreachable",
       `terminalhire claim: terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}) \u2014 nothing was cloned.`
     );
-    process.exit(1);
   }
   let body = null;
   try {
@@ -44394,10 +44829,16 @@ async function cmdSliceFullTier(claims, id, local, fullTierBody, flags, cloneRep
   } catch {
   }
   if (!res.ok) {
-    if (!retireRevokedReadCredential(res.status, body, "fetching your full-repo clone credential")) {
-      console.error(`terminalhire claim: ${renderServerRefusal(res.status, body)}`);
-    }
-    process.exit(1);
+    const retired = retireRevokedReadCredential(
+      res.status,
+      body,
+      "fetching your full-repo clone credential"
+    );
+    refuse5(
+      retired ? "credential-revoked" : serverRefusalCode(body),
+      retired ? "terminalhire claim: the stored credential was revoked (see above)." : `terminalhire claim: ${renderServerRefusal(res.status, body)}`,
+      { alreadySaid: retired, httpStatus: res.status }
+    );
   }
   const token = body && typeof body.token === "string" && body.token.length > 0 ? body.token : null;
   const mintedRepoFullName = body && typeof body.repoFullName === "string" ? body.repoFullName : fullTierBody.repoFullName;
@@ -44406,16 +44847,16 @@ async function cmdSliceFullTier(claims, id, local, fullTierBody, flags, cloneRep
   const baseShaOffered = body ? body.baseSha !== null && body.baseSha !== void 0 : false;
   const baseSha = body && typeof body.baseSha === "string" && BASE_SHA_SHAPE.test(body.baseSha) ? body.baseSha : null;
   if (!body || body.ok !== true || !token || !mintedRepoFullName || !REPO_FULL_NAME_SHAPE.test(mintedRepoFullName) || baseShaOffered && !baseSha) {
-    console.error(
+    refuse5(
+      "malformed-response",
       "terminalhire claim: malformed clone-token response from the server \u2014 nothing was cloned."
     );
-    process.exit(1);
   }
   if (!baseSha) {
-    console.error(
+    refuse5(
+      "no-base-sha",
       "terminalhire claim: this claim was registered before terminalhire recorded which commit a full-repo delivery is pinned to, so there is no tree to hand you and nothing was cloned.\n  The commit is resolved once, when a claim is registered, so re-running this \u2014 or claiming again \u2014 cannot repair this claim.\n  Ask the poster to repost the paid task, then claim the new posting."
     );
-    process.exit(1);
   }
   let claim = local;
   if (!claim) {
@@ -44446,17 +44887,14 @@ async function cmdSliceFullTier(claims, id, local, fullTierBody, flags, cloneRep
         }
       });
     } catch (err) {
-      console.error(
+      refuse5(
+        "record-failed",
         `terminalhire claim: the clone credential was minted but the local record could not be written (${err?.message ?? err}) \u2014 nothing was cloned.`
       );
-      process.exit(1);
     }
   }
   const resolvedDir = resolveDeliveryDir(flags, claim.id);
-  if (resolvedDir.error) {
-    console.error(resolvedDir.error);
-    process.exit(1);
-  }
+  if (resolvedDir.error) refuse5("delivery-failed", resolvedDir.error);
   let dest = resolvedDir.dest;
   if (resolvedDir.suffixed) {
     console.log(`terminalhire claim: the usual directory has content \u2014 using ${dest}`);
@@ -44467,11 +44905,11 @@ async function cmdSliceFullTier(claims, id, local, fullTierBody, flags, cloneRep
   try {
     engine = await Promise.resolve().then(() => (init_dist4(), dist_exports));
   } catch (err) {
-    console.error(
+    refuse5(
+      "damaged-install",
       `terminalhire claim: the clone engine that ships inside this CLI could not be loaded, which points at a damaged install \u2014 reinstall with 'npm i -g terminalhire', or update the Claude Code plugin. Nothing was cloned.
   (resolution error: ${err?.message ?? err})`
     );
-    process.exit(1);
   }
   try {
     dest = cloneRepo({
@@ -44483,10 +44921,10 @@ async function cmdSliceFullTier(claims, id, local, fullTierBody, flags, cloneRep
       branch
     });
   } catch (err) {
-    console.error(
+    refuse5(
+      "clone-failed",
       `terminalhire claim: the clone did not complete (${err?.stderr || err?.message || err}) \u2014 there is nothing usable at ${dest}.`
     );
-    process.exit(1);
   }
   const pack = writeWorkspacePack(dest, body.spec, claim, "full");
   const working = claims.updateClaim(claim.id, {
@@ -44539,9 +44977,18 @@ async function cmdSlice(id, flags = {}) {
 }
 function exitOnSliceOutcome(outcome) {
   if (outcome.outcome === "delivered") return;
-  if (outcome.message) console.error(outcome.message);
-  process.exit(1);
+  refuse5(
+    outcome.code ?? SLICE_OUTCOME_CODES[outcome.outcome] ?? "delivery-failed",
+    outcome.message ?? "terminalhire claim: the stored credential was revoked (see above).",
+    { alreadySaid: !outcome.message }
+  );
 }
+var SLICE_OUTCOME_CODES = {
+  pending: "approval-pending",
+  unreachable: "unreachable",
+  refused: "server-refused",
+  error: "delivery-failed"
+};
 async function attemptSliceDelivery(id, flags = {}) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
   const local = claims.findClaim(id) ?? null;
@@ -44590,10 +45037,12 @@ async function attemptSliceDelivery(id, flags = {}) {
       };
     }
     if (retireRevokedReadCredential(res.status, body, "fetching your granted slice")) {
-      return { outcome: "refused", handled: true };
+      return { outcome: "refused", handled: true, code: "credential-revoked" };
     }
     return {
       outcome: "refused",
+      // The server's own code, for `claim start --json` (TERM-1587).
+      code: serverRefusalCode(body),
       message: `terminalhire claim: ${renderServerRefusal(res.status, body)}`
     };
   }
@@ -44719,12 +45168,12 @@ async function attemptSliceDelivery(id, flags = {}) {
   } catch {
   }
   console.log(`
-\u2713 Slice received: ${body.title ?? claim.title}`);
+\u2713 Slice received: ${sanitizeText(body.title ?? claim.title)}`);
   console.log(
     `  tier: ${body.tier} \xB7 ${written.length} file(s) written of ${body.totalCount} granted` + (body.excludedCount ? ` (${body.excludedCount} excluded by the poster's slice)` : "")
   );
   for (const u of unavailable) {
-    console.log(`  \u26A0 ${u.path} \u2014 no file written: ${u.reason}`);
+    console.log(`  \u26A0 ${sanitizeText(u.path)} \u2014 no file written: ${sanitizeText(u.reason)}`);
   }
   if (body.spec) {
     console.log("\n  \u2500\u2500 spec \u2500\u2500");
@@ -44742,71 +45191,148 @@ async function attemptSliceDelivery(id, flags = {}) {
   await beatFounderPresence(working ?? claim);
   return { outcome: "delivered", claim: working ?? claim };
 }
+async function fetchRunsOnce(claim, pushToken) {
+  let res;
+  try {
+    res = await fetch(`${CLAIM_SYNC_BASE4}/api/patch/runs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bountyId: founderPostingIdOf(claim),
+        claimId: claim.approval.claimId,
+        pushToken
+      }),
+      signal: AbortSignal.timeout(3e4)
+    });
+  } catch (err) {
+    return { kind: "network", error: err instanceof Error ? err.message : String(err) };
+  }
+  let body = null;
+  try {
+    body = await res.json();
+  } catch {
+  }
+  if (!res.ok) return { kind: "refusal", status: res.status, body };
+  if (!body || body.ok !== true || !body.run) {
+    return { kind: "refusal", status: res.status, body: { error: "malformed-response" } };
+  }
+  return {
+    kind: "ok",
+    run: body.run,
+    message: body.message ?? null,
+    attempts: Array.isArray(body.attempts) ? body.attempts : [],
+    timeline: Array.isArray(body.timeline) ? body.timeline : [],
+    // TERM-1142's third list, carried through for `--json` (TERM-1577); the human
+    // renderer does not print it. Same default-to-empty rule as the two above.
+    verificationRuns: Array.isArray(body.verificationRuns) ? body.verificationRuns : [],
+    verificationRunsTotal: Number.isFinite(body.verificationRunsTotal) ? body.verificationRunsTotal : null,
+    claimState: body.claimState ?? null,
+    unverifiedCause: body.unverifiedCause ?? null,
+    resetAt: body.resetAt ?? null,
+    rateLimitCap: body.rateLimitCap ?? 5,
+    rateLimitCount: body.rateLimitCount ?? null
+  };
+}
+function runsAnswer(id, claim, r) {
+  if (r.kind === "network") {
+    return { ok: false, code: "unreachable", message: `terminalhire is unreachable (${r.error}).` };
+  }
+  if (r.kind === "refusal") {
+    return {
+      ok: false,
+      code: typeof r.body?.error === "string" ? r.body.error : "refused",
+      httpStatus: r.status,
+      message: renderServerRefusal(r.status, r.body)
+    };
+  }
+  return {
+    ok: true,
+    claimId: id,
+    serverClaimId: claim.approval.claimId,
+    title: claim.title ?? null,
+    run: r.run,
+    message: r.message,
+    attempts: r.attempts,
+    timeline: r.timeline,
+    verificationRuns: r.verificationRuns,
+    verificationRunsTotal: r.verificationRunsTotal,
+    claimState: r.claimState,
+    unverifiedCause: r.unverifiedCause,
+    resetAt: r.resetAt,
+    rateLimitCap: r.rateLimitCap,
+    rateLimitCount: r.rateLimitCount,
+    terminal: isTerminalRunStatus(r.run.status, r.claimState)
+  };
+}
+async function claimRunsResult(id) {
+  const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
+  const gate = founderLoopGate(claims, id, "runs");
+  if (gate.refusal) return { ok: false, ...gate.refusal };
+  let pushToken = null;
+  try {
+    pushToken = await readPushTokenEnc();
+  } catch {
+  }
+  if (!pushToken) {
+    return {
+      ok: false,
+      code: "not-enrolled",
+      message: readTokenMissingMessage("reading CI results")
+    };
+  }
+  return runsAnswer(id, gate.claim, await fetchRunsOnce(gate.claim, pushToken));
+}
+function refuseServerRead(status, body, what) {
+  const code = typeof body?.error === "string" ? body.error : "refused";
+  if (retireRevokedReadCredential(status, body, what)) {
+    if (machineOutput) {
+      emit2({
+        ok: false,
+        status: "refused",
+        code,
+        httpStatus: status,
+        message: renderServerRefusal(status, body)
+      });
+      throw new RefusalExit(1);
+    }
+    process.exit(1);
+  }
+  refuse5(code, `terminalhire claim: ${renderServerRefusal(status, body)}`, { httpStatus: status });
+}
 async function cmdRuns(id, flags = {}) {
+  enterOutputMode(flags);
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
   const claim = requireFounderLoopClaim(claims, id, "runs");
   const pushToken = await requireReadPushToken("reading CI results");
-  const fetchOnce = async () => {
-    let res;
-    try {
-      res = await fetch(`${CLAIM_SYNC_BASE4}/api/patch/runs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bountyId: founderPostingIdOf(claim),
-          claimId: claim.approval.claimId,
-          pushToken
-        }),
-        signal: AbortSignal.timeout(3e4)
-      });
-    } catch (err) {
-      return { kind: "network", error: err instanceof Error ? err.message : String(err) };
-    }
-    let body = null;
-    try {
-      body = await res.json();
-    } catch {
-    }
-    if (!res.ok) return { kind: "refusal", status: res.status, body };
-    if (!body || body.ok !== true || !body.run) {
-      return { kind: "refusal", status: res.status, body: { error: "malformed-response" } };
-    }
-    return {
-      kind: "ok",
-      run: body.run,
-      message: body.message ?? null,
-      attempts: Array.isArray(body.attempts) ? body.attempts : [],
-      timeline: Array.isArray(body.timeline) ? body.timeline : [],
-      claimState: body.claimState ?? null,
-      unverifiedCause: body.unverifiedCause ?? null,
-      resetAt: body.resetAt ?? null,
-      rateLimitCap: body.rateLimitCap ?? 5,
-      rateLimitCount: body.rateLimitCount ?? null
-    };
-  };
+  const fetchOnce = () => fetchRunsOnce(claim, pushToken);
   if (flags.watch) {
     console.log(
       `  Watching CI for ${id} \u2014 up to ${RUNS_POLL_ATTEMPTS} checks, one every ${Math.round(RUNS_POLL_INTERVAL_MS / 1e3)}s.`
     );
     const out = await watchRunsLoop({ id, fetchOnce });
     if (out.outcome === "refused") {
-      if (!retireRevokedReadCredential(out.status, out.body, "reading CI results")) {
-        console.error(`terminalhire claim: ${renderServerRefusal(out.status, out.body)}`);
-      }
-      process.exit(1);
+      refuseServerRead(out.status, out.body, "reading CI results");
+    }
+    if (machineOutput) {
+      emit2(
+        out.last ? { ...runsAnswer(id, claim, out.last), outcome: out.outcome } : {
+          ok: false,
+          code: "unreachable",
+          outcome: out.outcome,
+          message: runsGiveUpMessage(id, RUNS_POLL_ATTEMPTS, RUNS_POLL_INTERVAL_MS)
+        }
+      );
     }
     return;
   }
   const r = await fetchOnce();
   if (r.kind === "network") {
-    console.error(`terminalhire claim: terminalhire is unreachable (${r.error}).`);
-    process.exit(1);
+    refuse5("unreachable", `terminalhire claim: terminalhire is unreachable (${r.error}).`);
   }
-  if (r.kind === "refusal") {
-    if (!retireRevokedReadCredential(r.status, r.body, "reading CI results")) {
-      console.error(`terminalhire claim: ${renderServerRefusal(r.status, r.body)}`);
-    }
-    process.exit(1);
+  if (r.kind === "refusal") refuseServerRead(r.status, r.body, "reading CI results");
+  if (machineOutput) {
+    emit2(runsAnswer(id, claim, r));
+    return;
   }
   console.log(`
 ${claim.title}`);
@@ -44822,8 +45348,7 @@ ${claim.title}`);
 }
 var CLAIM_SCREENSHOT_PUT_TIMEOUT_MS = 2e4;
 function refuseScreenshots(detail) {
-  console.error(`terminalhire claim: screenshots: ${detail}`);
-  process.exit(1);
+  refuse5("invalid-screenshots", `terminalhire claim: screenshots: ${detail}`);
 }
 function readFileCapped(path5, limit2) {
   if (statSync6(path5).size > limit2) return null;
@@ -45017,16 +45542,16 @@ async function submitFounderPatch({ claims, claim, id, wt, flags }) {
   try {
     roots = (await sh("git", ["-C", wt, "rev-list", "--max-parents=0", "HEAD"])).split("\n").filter(Boolean);
   } catch (err) {
-    console.error(
+    refuse5(
+      "baseline-unreadable",
       `terminalhire claim: could not read the slice baseline in ${wt} (${err.stderr || err.message || err}).`
     );
-    process.exit(1);
   }
   if (roots.length !== 1) {
-    console.error(
+    refuse5(
+      "baseline-ambiguous",
       `terminalhire claim: ${wt} has ${roots.length} root commits \u2014 cannot determine the slice baseline to diff against. Re-fetch the slice into a fresh directory: terminalhire claim slice ${id} --dir <path>`
     );
-    process.exit(1);
   }
   const base = roots[0];
   let patch;
@@ -45041,26 +45566,26 @@ async function submitFounderPatch({ claims, claim, id, wt, flags }) {
     ));
     patch = String(patch);
   } catch (err) {
-    console.error(
+    refuse5(
+      "patch-failed",
       `terminalhire claim: could not compute the patch (${err.stderr || err.message || err}).`
     );
-    process.exit(1);
   }
   if (!patch.trim()) {
-    console.error(
+    refuse5(
+      "no-changes",
       "terminalhire claim: no changes vs the delivered slice \u2014 nothing to submit. Commit your work first."
     );
-    process.exit(1);
   }
   const touched = (await sh("git", ["-C", wt, "diff", "--name-only", "-z", "--no-renames", base, "HEAD"])).split("\0").filter(Boolean);
   const owned = new Set(ownedPackPaths(claim));
   const packTouched = touched.filter((p) => owned.has(p));
   if (packTouched.length > 0) {
-    console.error(
+    refuse5(
+      "pack-touched",
       `terminalhire claim: the patch touches ${packTouched.join(", ")} \u2014 terminalhire's delivered workspace pack, not part of your work, and ordinary staging excludes it (getting it in takes 'git add -f').
   Remove it from your commits and re-submit: git rm --cached ${packTouched.join(" ")} && git commit --amend --no-edit`
     );
-    process.exit(1);
   }
   const lockfileWarnings = await dependencyLockfileWarnings(wt, base, touched);
   if (lockfileWarnings.length > 0) console.log(`
@@ -45071,10 +45596,10 @@ ${lockfileWarnings.join("\n")}`);
   const describedBody = resolveSubmitBody(flags, wt);
   const description = describedBody.text?.trim() ? describedBody.text : null;
   if (description !== null && description.length > MAX_SUBMISSION_DESCRIPTION) {
-    console.error(
+    refuse5(
+      "description-too-long",
       `terminalhire claim: ${describedBody.descr} is too long. A description must be ${MAX_SUBMISSION_DESCRIPTION} characters or fewer.`
     );
-    process.exit(1);
   }
   console.log(`
   SUBMIT \xB7 ${claim.title}`);
@@ -45096,17 +45621,25 @@ ${lockfileWarnings.join("\n")}`);
   Submit this patch to the poster via terminalhire? (y/N) `
   );
   if (!ok) {
-    console.log("Aborted \u2014 nothing submitted.");
+    if (machineOutput)
+      emit2({
+        ok: false,
+        status: "aborted",
+        code: "aborted",
+        message: "Aborted \u2014 nothing submitted."
+      });
+    else console.log("Aborted \u2014 nothing submitted.");
     return;
   }
   const proofToken = await mintRegistrationProof({
-    claimRef: opportunityShortToken(claim.bountyId)
+    claimRef: opportunityShortToken(claim.bountyId),
+    purpose: "submit"
   });
   if (!proofToken) {
-    console.error(
+    refuse5(
+      "identity-unverified",
       "terminalhire claim: could not verify your GitHub identity with terminalhire (see above) \u2014 nothing was submitted."
     );
-    process.exit(1);
   }
   let submission;
   try {
@@ -45121,8 +45654,7 @@ ${lockfileWarnings.join("\n")}`);
       description
     });
   } catch (err) {
-    console.error(`terminalhire claim: ${err.message}`);
-    process.exit(1);
+    refuse5("invalid-submission", `terminalhire claim: ${err.message}`);
   }
   console.log("\n  Submitting the patch through terminalhire...");
   let res;
@@ -45136,36 +45668,90 @@ ${lockfileWarnings.join("\n")}`);
       signal: AbortSignal.timeout(CLAIM_SYNC_WRITE_TIMEOUT_MS)
     });
   } catch (err) {
-    console.error(
+    refuse5(
+      "unreachable",
       `terminalhire claim: terminalhire is unreachable (${err instanceof Error ? err.message : String(err)}) \u2014 nothing was submitted.`
     );
-    process.exit(1);
   }
   let body = null;
   try {
     body = await res.json();
   } catch {
   }
+  const patchSha256 = sha256OfUtf8(patch);
+  if (res.status === 409 && body?.error === "held-for-approval") {
+    const hold = claim.hold?.patchSha256 === patchSha256 ? claim.hold : { patchSha256, since: (/* @__PURE__ */ new Date()).toISOString() };
+    claims.updateClaim(id, { hold });
+    const message2 = typeof body.message === "string" ? body.message : HELD_FOR_APPROVAL_FALLBACK;
+    const next2 = nextStep(`terminalhire claim runs ${id}`);
+    if (machineOutput) {
+      emit2({
+        ok: true,
+        status: "held-for-approval",
+        claimId: id,
+        serverClaimId: claim.approval.claimId,
+        patchSha256,
+        // 'current': the 409 being rendered IS the server saying "held".
+        hold: holdView(hold, "current"),
+        message: message2,
+        next: next2
+      });
+    } else {
+      console.log(`
+\u23F8 Held for the poster's approval \u2014 nothing on the repository was changed.`);
+      console.log(`  ${message2}`);
+      console.log(`  patch:     sha256 ${patchSha256}`);
+      console.log(
+        `  The poster approves it with one click in the browser, on their claim-review page;`
+      );
+      console.log(`  when they do, it applies and your claim advances. Nothing to retry.`);
+      console.log(`
+  Check on it:  ${next2}`);
+    }
+    await beatFounderPresence(claim);
+    return;
+  }
   if (!res.ok) {
-    console.error(`terminalhire claim: ${renderServerRefusal(res.status, body)}`);
-    process.exit(1);
+    refuse5(
+      typeof body?.error === "string" ? body.error : "refused",
+      `terminalhire claim: ${renderServerRefusal(res.status, body)}`,
+      { httpStatus: res.status }
+    );
   }
   if (!body || body.ok !== true) {
-    console.error("terminalhire claim: malformed patch response from the server.");
-    process.exit(1);
+    refuse5("malformed-response", "terminalhire claim: malformed patch response from the server.");
   }
-  const submitted = claims.updateClaim(id, { state: "submitted" });
+  const submitted = claims.updateClaim(id, { state: "submitted", hold: null });
   if (shots !== null) await uploadClaimScreenshots(body.screenshots, shots.uploads);
-  console.log(`
+  const next = nextStep(`terminalhire claim runs ${id} --watch`);
+  if (machineOutput) {
+    emit2({
+      ok: true,
+      status: "submitted",
+      claimId: id,
+      serverClaimId: claim.approval.claimId,
+      branch: body.branch ?? null,
+      commitSha: body.commitSha ?? null,
+      touchedPaths: Array.isArray(body.touchedPaths) ? body.touchedPaths : [],
+      patchSha256,
+      next
+    });
+  } else {
+    console.log(`
 \u2713 Patch applied by terminalhire`);
-  console.log(`  branch:    ${body.branch}`);
-  console.log(`  commit:    ${body.commitSha}`);
-  if (Array.isArray(body.touchedPaths)) console.log(`  touched:   ${body.touchedPaths.join(", ")}`);
-  console.log(`
-  Read the CI result:  ${nextStep(`terminalhire claim runs ${id} --watch`)}`);
+    console.log(`  branch:    ${body.branch}`);
+    console.log(`  commit:    ${body.commitSha}`);
+    if (Array.isArray(body.touchedPaths)) {
+      console.log(`  touched:   ${body.touchedPaths.join(", ")}`);
+    }
+    console.log(`
+  Read the CI result:  ${next}`);
+  }
   await beatFounderPresence(submitted ?? claim);
 }
+var HELD_FOR_APPROVAL_FALLBACK = "This patch needs the poster\u2019s approval before it can be applied \u2014 nothing on the repository was changed. It is waiting on their claim-review page.";
 async function cmdSubmit(id, flags = {}) {
+  enterOutputMode(flags);
   const worktreeOverride = flags.worktree;
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
   if (!id) {
@@ -45190,7 +45776,8 @@ async function cmdSubmit(id, flags = {}) {
       id = inferred.claim.id;
       console.log(`  claim inferred from ${cwdToplevel2 ?? pathResolve(dir)}: ${id}`);
     } else if (inferred.candidates.length > 0) {
-      console.error(
+      refuse5(
+        "ambiguous-claim",
         `terminalhire claim: ${inferred.candidates.length} claims match this directory or branch \u2014 say which one.
 ` + inferred.candidates.map((c) => `    ${c.id}   ${c.state}   ${c.title}`).join("\n") + // No `--yes` in this hint, deliberately. The one place that names the flag
         // says in the same breath that a human must type it and an agent never may;
@@ -45198,59 +45785,53 @@ async function cmdSubmit(id, flags = {}) {
         `
   terminalhire claim submit <id>`
       );
-      process.exit(1);
     } else {
-      console.error(
+      refuse5(
+        "usage",
         `terminalhire claim: no claim is recorded for this directory or branch, so there is nothing to infer.
-  Usage: terminalhire claim submit <id> [--worktree <path>] [--yes] [--body-file <path>] [--no-body] [--title <t>] [--no-closes] [--screenshots <file>]
+  Usage: terminalhire claim submit <id> [--worktree <path>] [--yes] [--body-file <path>] [--no-body] [--title <t>] [--no-closes] [--screenshots <file>] [--json]
   Your claims:  terminalhire claim list --active`
       );
-      process.exit(1);
     }
   }
   const claim = claims.findClaim(id);
-  if (!claim) {
-    console.error(`terminalhire claim: no claim with id '${id}'.`);
-    process.exit(1);
-  }
+  if (!claim) refuse5("no-such-claim", `terminalhire claim: no claim with id '${id}'.`);
   if (flags.screenshots !== void 0 && !claim.approval) {
-    console.error(
+    refuse5(
+      "screenshots-not-applicable",
       "terminalhire claim: --screenshots attaches pictures to a first-party submission; on this claim, add them to the pull request instead."
     );
-    process.exit(1);
   }
   const submitRefusal = submitRefusalFor(claim);
   if (submitRefusal) {
-    console.error(submitRefusal);
-    process.exit(1);
+    refuse5("not-submittable", submitRefusal, {
+      recoveryCommand: claim.review?.verdict === "revise" && REVISE_RECOVERY_STATES.includes(claim.state) ? reviseRecoveryCommand(claim.id) : submitRecoveryCommand(claim)
+    });
   }
   if (!claim.worktreePath || !claim.branch) {
-    console.error(
+    refuse5(
+      "no-worktree",
       `terminalhire claim: ${id} has no recorded worktree/branch \u2014 cannot verify what to push. Run:
   terminalhire claim attach ${id} --worktree <path> --branch <branch>`
     );
-    process.exit(1);
   }
   const recorded = claim.worktreePath;
   const override = worktreeOverride === void 0 ? void 0 : await gitToplevelOf(worktreeOverride);
   const cwdToplevel = await gitToplevelOf(process.cwd());
   const recordedIsGit = await gitToplevelOf(recorded) === recorded;
   const resolved = resolveSubmitWorktree({ override, cwdToplevel, recorded, recordedIsGit });
-  if (resolved.error) {
-    console.error(`terminalhire claim: ${resolved.error}`);
-    process.exit(1);
-  }
+  if (resolved.error) refuse5("worktree-mismatch", `terminalhire claim: ${resolved.error}`);
   if (resolved.note) console.log(`  ${resolved.note}`);
   const wt = resolved.wt;
   const curBranch = await sh("git", ["-C", wt, "rev-parse", "--abbrev-ref", "HEAD"]);
   if (curBranch !== claim.branch) {
-    console.error(
+    refuse5(
+      "branch-mismatch",
       `terminalhire claim: branch mismatch \u2014 refusing to push.
   expected: ${claim.branch}
   found:    ${curBranch}
   Check out the claim's branch first.`
     );
-    process.exit(1);
   }
   let defaultBranch = null;
   try {
@@ -45258,10 +45839,10 @@ async function cmdSubmit(id, flags = {}) {
   } catch {
   }
   if (defaultBranch && claim.branch === defaultBranch) {
-    console.error(
+    refuse5(
+      "default-branch",
       `terminalhire claim: '${claim.branch}' is the default branch \u2014 open the PR from a feature branch.`
     );
-    process.exit(1);
   }
   if (defaultBranch) {
     let ahead = "0";
@@ -45271,18 +45852,18 @@ async function cmdSubmit(id, flags = {}) {
       ahead = "1";
     }
     if (ahead === "0") {
-      console.error(
+      refuse5(
+        "nothing-to-submit",
         `terminalhire claim: branch has no commits ahead of origin/${defaultBranch} \u2014 nothing to submit.`
       );
-      process.exit(1);
     }
   }
   const dirty = await sh("git", ["-C", wt, "status", "--porcelain", "--untracked-files=no"]);
   if (dirty) {
-    console.error(
+    refuse5(
+      "dirty-worktree",
       "terminalhire claim: working tree is not clean \u2014 commit or stash before submitting (submit pushes what was reviewed)."
     );
-    process.exit(1);
   }
   let untrackedFiles = [];
   try {
@@ -45304,18 +45885,20 @@ async function cmdSubmit(id, flags = {}) {
   try {
     ghUser = await sh("gh", ["api", "user", "-q", ".login"]);
   } catch {
-    console.error(
+    refuse5(
+      "gh-unavailable",
       "terminalhire claim: 'gh' CLI not available or not authenticated. Run 'gh auth login'."
     );
-    process.exit(1);
   }
   const collectRemotes = async () => {
     let names;
     try {
       names = (await sh("git", ["-C", wt, "remote"])).split("\n").map((s) => s.trim()).filter(Boolean);
     } catch {
-      console.error("terminalhire claim: could not list git remotes in the worktree.");
-      process.exit(1);
+      refuse5(
+        "remotes-unreadable",
+        "terminalhire claim: could not list git remotes in the worktree."
+      );
     }
     const parsed = [];
     for (const name of names) {
@@ -45333,31 +45916,28 @@ async function cmdSubmit(id, flags = {}) {
   let { names: remoteNames, remotes } = await collectRemotes();
   let pushRemote = selectPushRemote(remotes, claim.repoFullName, ghUser);
   if (!pushRemote) {
-    const noForkError = () => {
-      console.error(
-        `terminalhire claim: no remote points at your fork of the upstream repo (${claim.repoFullName}) \u2014 refusing to push.
+    const noForkMessage = `terminalhire claim: no remote points at your fork of the upstream repo (${claim.repoFullName}) \u2014 refusing to push.
   Pushing would create a branch directly on the target repo. Fork first:
     gh repo fork ${claim.repoFullName} --clone=false
-  add your fork as a remote, then retry.`
-      );
-    };
+  add your fork as a remote, then retry.`;
     const upstreamRepoName = claim.repoFullName.split("/")[1];
     const forkFullName = `${ghUser}/${upstreamRepoName}`;
     if (process.stdin.isTTY && !flags.yes) {
       console.log(`
   No remote points at your fork of ${claim.repoFullName}.`);
       const doFork = await confirm(
-        `  Create fork ${forkFullName} with gh and add it as remote 'fork'? (y/N) `
+        `  Create fork ${forkFullName} with gh and add it as remote 'fork'? (y/N) `,
+        { code: "no-fork", message: noForkMessage }
       );
       if (doFork) {
         try {
           await sh("gh", ["repo", "fork", claim.repoFullName, "--clone=false"]);
         } catch (err) {
-          console.error(
-            `terminalhire claim: 'gh repo fork' failed. ${err.stderr || err.message || err}`
+          refuse5(
+            "fork-failed",
+            `terminalhire claim: 'gh repo fork' failed. ${err.stderr || err.message || err}
+` + noForkMessage
           );
-          noForkError();
-          process.exit(1);
         }
         let verified = false;
         try {
@@ -45366,17 +45946,17 @@ async function cmdSubmit(id, flags = {}) {
           verified = false;
         }
         if (!verified) {
-          noForkError();
-          console.error(
-            "  (fork created but could not be verified \u2014 add it as a remote manually.)"
+          refuse5(
+            "fork-unverified",
+            `${noForkMessage}
+  (fork created but could not be verified \u2014 add it as a remote manually.)`
           );
-          process.exit(1);
         }
         if (remoteNames.includes("fork")) {
-          console.error(
+          refuse5(
+            "fork-remote-taken",
             `terminalhire claim: a remote named 'fork' already exists but does not point at your fork \u2014 refusing to clobber it. Fix it manually and retry.`
           );
-          process.exit(1);
         }
         try {
           await sh("git", [
@@ -45388,20 +45968,17 @@ async function cmdSubmit(id, flags = {}) {
             `https://github.com/${forkFullName}.git`
           ]);
         } catch (err) {
-          console.error(
+          refuse5(
+            "fork-remote-failed",
             `terminalhire claim: could not add the 'fork' remote. ${err.stderr || err.message || err}`
           );
-          process.exit(1);
         }
         console.log(`  \u2713 Forked ${claim.repoFullName} \u2192 ${forkFullName} and added remote 'fork'.`);
         ({ names: remoteNames, remotes } = await collectRemotes());
         pushRemote = selectPushRemote(remotes, claim.repoFullName, ghUser);
       }
     }
-    if (!pushRemote) {
-      noForkError();
-      process.exit(1);
-    }
+    if (!pushRemote) refuse5("no-fork", noForkMessage);
   }
   const originRepo = pushRemote.repo;
   const upstream = claim.repoFullName;
@@ -45434,15 +46011,16 @@ async function cmdSubmit(id, flags = {}) {
       console.log(CONTENTION_HINT);
       const competing = selectCompetingPrs(contention.prs, ghUser);
       if (competing.length > 0 && !flags["force-competing"]) {
-        console.error(
-          `
-terminalhire claim: refusing to submit \u2014 ${competing.length} open PR(s) by someone else already address ${claim.repoFullName}#${issueNo}:`
+        refuse5(
+          "competing-prs",
+          [
+            `
+terminalhire claim: refusing to submit \u2014 ${competing.length} open PR(s) by someone else already address ${claim.repoFullName}#${issueNo}:`,
+            ...competing.map((pr) => fmtContentionPr(pr, nowMs, false)),
+            "\n  Opening a competing PR reads as low-effort duplication and burns maintainer goodwill.\n  Stand down, or add value on the existing PR instead (a review, a test, a comment).\n  If you are certain yours should still go up, re-run with --force-competing."
+          ].join("\n"),
+          { competingPrs: competing.map((pr) => pr.url ?? pr.number ?? null) }
         );
-        for (const pr of competing) console.error(fmtContentionPr(pr, nowMs, false));
-        console.error(
-          "\n  Opening a competing PR reads as low-effort duplication and burns maintainer goodwill.\n  Stand down, or add value on the existing PR instead (a review, a test, a comment).\n  If you are certain yours should still go up, re-run with --force-competing."
-        );
-        process.exit(1);
       }
     }
   }
@@ -45452,27 +46030,27 @@ terminalhire claim: refusing to submit \u2014 ${competing.length} open PR(s) by 
   Push '${claim.branch}' to ${originRepo} and open a PR against ${upstream}? (y/N) `,
     {
       unattendedAllowed: claim.state === "ready",
-      refusal: `terminalhire claim: ${claim.id} is '${claim.state}' and this session has no terminal to ask y/N.
+      refusal: `terminalhire claim: ${claim.id} is '${claim.state}' and this session cannot ask y/N (no terminal, or --json).
   Pushing a branch and opening a PR unattended takes the explicit attestation that the diff
   passed review. Mark it, then submit again:
   ${reviseRecoveryCommand(claim.id)}
-  (At an interactive terminal, submit asks y/N from '${claim.state}' instead.)`
+  (At a terminal without --json, submit asks y/N from '${claim.state}' instead.)`
     }
   );
   if (!ok) {
-    console.log("Aborted \u2014 nothing pushed.");
+    if (machineOutput)
+      emit2({ ok: false, status: "aborted", code: "aborted", message: "Aborted \u2014 nothing pushed." });
+    else console.log("Aborted \u2014 nothing pushed.");
     return;
   }
   try {
     await sh("git", ["-C", wt, "push", pushRemote.name, claim.branch]);
   } catch (err) {
-    console.error(
-      `terminalhire claim: git push failed (NOT force-pushed). ${err.stderr || err.message || err}`
+    refuse5(
+      "push-failed",
+      `terminalhire claim: git push failed (NOT force-pushed). ${err.stderr || err.message || err}
+  Resolve and retry, or open the PR manually then: ${nextStep(`terminalhire claim update ${id} submitted <prUrl>`)}`
     );
-    console.error(
-      `  Resolve and retry, or open the PR manually then: ${nextStep(`terminalhire claim update ${id} submitted <prUrl>`)}`
-    );
-    process.exit(1);
   }
   let prUrl = null;
   try {
@@ -45534,21 +46112,19 @@ terminalhire claim: refusing to submit \u2014 ${competing.length} open PR(s) by 
         }
       }
       if (!prUrl) {
-        console.error(
-          `terminalhire claim: branch pushed, but 'gh pr create' failed. ${stderrText}`
+        refuse5(
+          "pr-create-failed",
+          `terminalhire claim: branch pushed, but 'gh pr create' failed. ${stderrText}
+  Open the PR manually (gh pr create / web UI), then: ${nextStep(`terminalhire claim update ${id} submitted <prUrl>`)}`
         );
-        console.error(
-          `  Open the PR manually (gh pr create / web UI), then: ${nextStep(`terminalhire claim update ${id} submitted <prUrl>`)}`
-        );
-        process.exit(1);
       }
     }
   }
   if (!prUrl || !parseGitHubUrl(prUrl)) {
-    console.error(
+    refuse5(
+      "pr-url-unknown",
       `terminalhire claim: could not determine the PR URL. Set it manually: ${nextStep(`terminalhire claim update ${id} submitted <prUrl>`)}`
     );
-    process.exit(1);
   }
   let review;
   try {
@@ -45598,14 +46174,20 @@ terminalhire claim: refusing to submit \u2014 ${competing.length} open PR(s) by 
     id,
     review ? { state: "submitted", prUrl, review } : { state: "submitted", prUrl }
   );
+  const next = nextStep(`terminalhire claim status ${id}`);
+  if (machineOutput) {
+    emit2({ ok: true, status: "submitted", claimId: id, serverClaimId: null, prUrl, next });
+    return;
+  }
   console.log(`
 \u2713 Submitted ${id} \u2192 ${prUrl}`);
   console.log(
-    `  Run '${nextStep(`terminalhire claim status ${id}`)}' after the maintainer acts to fold the merge into your accepted-PR rate.`
+    `  Run '${next}' after the maintainer acts to fold the merge into your accepted-PR rate.`
   );
 }
-function askYes(question) {
-  const rl = createInterface2({ input: process.stdin, output: process.stdout });
+async function askYes(question, refusal2) {
+  refuseUnasked(refusal2);
+  const rl = createInterface2({ input: process.stdin, output: promptOutput() });
   return new Promise(
     (res) => rl.question(question, (a) => {
       rl.close();
@@ -46114,41 +46696,54 @@ async function cmdAudit(id, flags = {}) {
   }
   renderAudit(view);
 }
-async function cmdNotes(flags) {
+async function claimNotesResult() {
   let pushToken = null;
   try {
     pushToken = await readPushTokenEnc();
   } catch {
   }
   if (!pushToken) {
-    console.error("terminalhire claim notes: needs background push enrolment.");
-    console.error("  Enrol once:  terminalhire claim --push --keep-updated");
-    process.exit(1);
+    return {
+      ok: false,
+      code: "not-enrolled",
+      message: "needs background push enrolment. Enrol once: terminalhire claim --push --keep-updated"
+    };
   }
   const answer = await fetchFounderNotes(pushToken);
   if (answer === null) {
-    console.error("terminalhire claim notes: could not reach terminalhire just now.");
-    console.error('  This is NOT "no notes" \u2014 try again shortly.');
-    process.exit(1);
+    return {
+      ok: false,
+      code: "unreachable",
+      message: 'could not reach terminalhire just now. This is NOT "no notes" \u2014 try again shortly.'
+    };
+  }
+  await acknowledgeNotesQuietly(answer.notes);
+  return { ok: true, notes: answer.notes, latestAt: answer.latestAt };
+}
+async function cmdNotes(flags = {}) {
+  enterOutputMode(flags);
+  const result = await claimNotesResult();
+  if (!result.ok) {
+    refuse5(
+      result.code,
+      result.code === "not-enrolled" ? "terminalhire claim notes: needs background push enrolment.\n  Enrol once:  terminalhire claim --push --keep-updated" : 'terminalhire claim notes: could not reach terminalhire just now.\n  This is NOT "no notes" \u2014 try again shortly.'
+    );
   }
   if (flags.json) {
-    console.log(JSON.stringify(answer, null, 2));
-    await acknowledgeNotesQuietly(answer.notes);
+    emit2(result);
     return;
   }
-  if (answer.notes.length === 0) {
+  if (result.notes.length === 0) {
     console.log("\n  No notes from posters on your claims.\n");
-    await acknowledgeNotesQuietly(answer.notes);
     return;
   }
   console.log(
     `
-  ${answer.notes.length} note${answer.notes.length === 1 ? "" : "s"} from posters:
+  ${result.notes.length} note${result.notes.length === 1 ? "" : "s"} from posters:
 `
   );
-  for (const note of answer.notes) console.log(formatNote(note));
+  for (const note of result.notes) console.log(formatNote(note));
   console.log("");
-  await acknowledgeNotesQuietly(answer.notes);
 }
 async function acknowledgeNotesQuietly(notes) {
   try {
@@ -46492,9 +47087,47 @@ async function cmdResolve(id, flags = {}, deps = {}) {
   log("");
   return 0;
 }
+var JSON_VERBS = /* @__PURE__ */ new Set(["status", "submit", "runs", "notes", "preview", "record", "start"]);
+var KNOWN_VERBS = /* @__PURE__ */ new Set([
+  "preview",
+  "record",
+  "start",
+  "list",
+  "status",
+  "update",
+  "attach",
+  "slice",
+  "runs",
+  "submit",
+  "release",
+  "resolve",
+  "audit",
+  "notes",
+  "note",
+  "--push"
+]);
+function isUnknownVerb(verb) {
+  return !KNOWN_VERBS.has(verb) && !(typeof verb === "string" && looksLikeShortRef(verb));
+}
 async function run() {
+  try {
+    await runVerb();
+  } catch (err) {
+    if (err instanceof RefusalExit) {
+      await stdoutDrained();
+      process.exit(err.exitCode);
+    }
+    throw err;
+  }
+}
+async function runVerb() {
   const verb = process.argv[2];
   const rawArgs = process.argv.slice(3).map((a) => a === "-y" ? "--yes" : a);
+  const wantsJson = verb === "--json" || rawArgs.includes("--json");
+  const refShaped = typeof verb === "string" && looksLikeShortRef(verb);
+  enterOutputMode({
+    json: wantsJson && (JSON_VERBS.has(verb) || refShaped || isUnknownVerb(verb))
+  });
   const { flags, positional } = parseArgs(rawArgs);
   const active = Boolean(flags.active);
   const json = Boolean(flags.json);
@@ -46508,10 +47141,10 @@ async function run() {
     return;
   }
   if (isStrayArgShortRefClaim(verb, positional)) {
-    console.error(
+    refuse5(
+      "usage",
       `terminalhire claim: '${verb}' is a short ref and takes no extra arguments (got: ${positional.join(" ")}). Did you mean \`terminalhire claim ${verb}\`?`
     );
-    process.exit(1);
   }
   try {
     switch (verb) {
@@ -46528,7 +47161,7 @@ async function run() {
         await cmdList(active);
         break;
       case "status":
-        await cmdStatus(positional[0]);
+        await cmdStatus(positional[0], flags);
         break;
       case "update":
         await cmdUpdate(positional[0], positional[1], positional[2]);
@@ -46580,13 +47213,25 @@ async function run() {
         break;
       }
       default:
-        console.error(
+        refuse5(
+          "unknown-verb",
           `terminalhire claim: unknown verb '${verb ?? ""}'. Expected: preview | record | start | attach | slice | list | status | update | submit | runs | note | notes | audit | release | resolve`
         );
-        process.exit(1);
     }
+    await stdoutDrained();
   } catch (err) {
-    console.error("terminalhire claim error:", err.message ?? err);
+    if (err instanceof RefusalExit) throw err;
+    if (machineOutput) {
+      emit2({
+        ok: false,
+        status: "refused",
+        code: "error",
+        message: `terminalhire claim error: ${err?.message ?? err}`
+      });
+      await stdoutDrained();
+    } else {
+      console.error("terminalhire claim error:", err.message ?? err);
+    }
     process.exit(1);
   }
 }
@@ -46619,9 +47264,15 @@ export {
   buildStandDownComment,
   buildSubmitBody,
   claimListTurnLabel,
+  claimNotesResult,
+  claimRunsResult,
+  claimStatusResult,
+  claimStatusView,
   claimUpdatePatch,
   cloneFullTierRepo,
   cmdNote,
+  cmdNotes,
+  cmdPreview,
   cmdPush,
   cmdRecord,
   cmdRelease,
@@ -46646,6 +47297,7 @@ export {
   founderClaimStanding,
   founderPostingIdOf,
   heldClaimByShortRef,
+  holdView,
   indexNativeIdForShortRef,
   inferSubmitClaim,
   isContested,
@@ -46670,6 +47322,7 @@ export {
   printReleaseIsLocalOnly,
   printResolveHint,
   readCredentialDisposition,
+  reconcileHold,
   recoverHeldClaim,
   renderAutoConsent,
   renderClaimHistory,
@@ -46698,6 +47351,7 @@ export {
   syncFounderApprovals,
   terminalSafeInline,
   terminalSafeLines,
+  verifyUrlExpiry,
   watchForSliceDelivery,
   watchRunsLoop,
   workDirFor,

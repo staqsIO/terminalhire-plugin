@@ -12739,6 +12739,7 @@ __export(claims_exports, {
   acceptedPRRate: () => acceptedPRRate,
   claimTurn: () => claimTurn,
   claimTurnLabel: () => claimTurnLabel,
+  claimsStateDir: () => claimsStateDir,
   countAwaitingFounderApproval: () => countAwaitingFounderApproval,
   findClaim: () => findClaim,
   formatAcceptedPRRate: () => formatAcceptedPRRate,
@@ -12869,6 +12870,9 @@ function writeClaims(claims) {
 }
 function findClaim(id) {
   return readClaims().find((c) => c.id === id) ?? null;
+}
+function claimsStateDir() {
+  return TERMINALHIRE_DIR8;
 }
 function listClaims(opts = {}) {
   const claims = readClaims();

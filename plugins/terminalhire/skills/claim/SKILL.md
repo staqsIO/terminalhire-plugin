@@ -25,6 +25,8 @@ Invoke the bundled engine in a Bash tool call. Pick the subcommand that matches 
 
    Parse the single JSON line: `{ bountyId, title, amountUSD, repoFullName, issueUrl, issueState, openPRs, policy: { status, verdict, assignment, rulesetVersion, hits, requirements } }`.
 
+   **If the object has `ok: false`, the preview was refused: show the dev its `message` and stop.** Do not build a confirm card from it and do not run `claim record`. Its `code` says why: `not-found` means the task is not in the index, and `index-unavailable` means the index could not be read, so the same preview can work a moment later.
+
    **`policy` is ABSENT on a poster's posting**, and absent means there is no policy step here — not that the audit came back clean. A poster's posting is a paid task on the poster's own repo: they are the maintainer, they bought agent-driven work, and there is no third-party CONTRIBUTING to read. Skip the whole policy section of the card and never pass an `--ack-policy` flag; `record` will not ask for one. When the key IS present, it is the repo's contribution audit:
    - `verdict` — `"prohibited"` (the repo bans AI-generated contributions), `"disclosure-required"` (allowed, must be disclosed), `"ai-mentioned"` (AI-policy language found, intent unclear), `"clean"`, or `"unavailable"` (docs couldn't be read). `hits` carries `{ file, excerpt, rule }` — the repo's verbatim words.
    - `requirements` — `{ kind, file, excerpt }` entries for non-AI expectations found in the docs: `assignment-required`, `take-bot`, `cla-required`, `discussion-first`.

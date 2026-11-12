@@ -5,6 +5,11 @@ function sanitizeText(s) {
   if (s == null) return "";
   return String(s).replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "");
 }
+var NON_LINE_CONTROLS = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
+function sanitizeMultiline(s) {
+  if (s == null) return "";
+  return String(s).replace(/\r\n?/g, "\n").replace(NON_LINE_CONTROLS, "");
+}
 function formatUsd(a) {
   if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
   if (typeof a !== "string" || a.trim() === "") return "$\u2014";
@@ -39,5 +44,6 @@ export {
   formatUsd,
   linkTitle,
   safeHttpUrl,
+  sanitizeMultiline,
   sanitizeText
 };

@@ -11443,6 +11443,7 @@ __export(claims_exports, {
   acceptedPRRate: () => acceptedPRRate,
   claimTurn: () => claimTurn,
   claimTurnLabel: () => claimTurnLabel,
+  claimsStateDir: () => claimsStateDir,
   countAwaitingFounderApproval: () => countAwaitingFounderApproval,
   findClaim: () => findClaim,
   formatAcceptedPRRate: () => formatAcceptedPRRate,
@@ -11573,6 +11574,9 @@ function writeClaims(claims) {
 }
 function findClaim(id) {
   return readClaims().find((c) => c.id === id) ?? null;
+}
+function claimsStateDir() {
+  return TERMINALHIRE_DIR5;
 }
 function listClaims(opts = {}) {
   const claims = readClaims();
@@ -12467,6 +12471,11 @@ function sanitizeText(s) {
   if (s == null) return "";
   return String(s).replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "");
 }
+var NON_LINE_CONTROLS = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
+function sanitizeMultiline(s) {
+  if (s == null) return "";
+  return String(s).replace(/\r\n?/g, "\n").replace(NON_LINE_CONTROLS, "");
+}
 function formatUsd(a) {
   if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
   if (typeof a !== "string" || a.trim() === "") return "$\u2014";
@@ -12520,6 +12529,7 @@ var LIMIT = limitArg !== -1 ? parseInt(args[limitArg + 1] ?? "15", 10) : DEFAULT
 var PRICED_ONLY = args.includes("--priced");
 var SHOW_ALL = args.includes("--all");
 var WINNABLE_ONLY = args.includes("--winnable");
+var JSON_OUT = args.includes("--json");
 function readIndexCache() {
   try {
     const entry = JSON.parse(readFileSync9(INDEX_CACHE_FILE2, "utf8"));
@@ -12541,7 +12551,7 @@ async function fetchIndex(quiet = false) {
     if (notice) process.stderr.write(`${notice}
 `);
   }
-  if (index) return index;
+  if (index) return { index, stale: source === "cache-fallback" };
   throw new Error(reason ?? "/api/index returned no usable index");
 }
 function prompt2(question) {
@@ -12693,14 +12703,17 @@ function classifyEmptyStatus({ preFilterCount, postFilterCount, priced }) {
 }
 async function getBounties({ quiet = false, offline = false, priced = PRICED_ONLY } = {}) {
   if (!quiet) console.log(`Fetching paid task index from ${API_URL}/api/index...`);
-  const index = offline ? readIndexCache() : await fetchIndex(quiet);
+  let index;
+  let stale = false;
+  if (offline) index = readIndexCache();
+  else ({ index, stale } = await fetchIndex(quiet));
   if (offline && !index) return { status: "no-cache" };
   let bounties = (index.jobs ?? []).filter((j) => j.source === "bounty");
   if (PRICED_ONLY) bounties = bounties.filter((j) => j.bounty?.amountUSD != null);
   if (WINNABLE_ONLY) bounties = bounties.filter((j) => (j.bounty?.competingOpenPRs ?? 0) === 0);
   const preFilterCount = bounties.length;
   if (preFilterCount === 0) {
-    return { status: "empty" };
+    return { status: "empty", stale };
   }
   const ranked = /* @__PURE__ */ new Map();
   try {
@@ -12736,12 +12749,93 @@ async function getBounties({ quiet = false, offline = false, priced = PRICED_ONL
   }
   bounties = filterPaidVisibility(bounties, { priced });
   if (bounties.length === 0) {
-    return { status: classifyEmptyStatus({ preFilterCount, postFilterCount: 0, priced }) };
+    return { status: classifyEmptyStatus({ preFilterCount, postFilterCount: 0, priced }), stale };
   }
   const matchedCount = bounties.filter((j) => score(j) > 0).length;
-  return { status: "ok", bounties, ranked, matchedCount, continuityByRepo };
+  return { status: "ok", bounties, ranked, matchedCount, continuityByRepo, stale };
+}
+function workItemView(job, claimedIds = /* @__PURE__ */ new Set()) {
+  const b = job.bounty ?? {};
+  const founder = b.bountySource === "founder";
+  const oneLine = (v) => typeof v === "string" && v.trim() !== "" ? sanitizeText(v) : null;
+  const prose = (v) => typeof v === "string" && v.trim() !== "" ? sanitizeMultiline(v).trim() : null;
+  const prs = b.competingOpenPRs;
+  return {
+    id: job.id,
+    ref: opportunityShortToken(job.id),
+    title: oneLine(job.title) ?? "",
+    repoFullName: oneLine(b.repoFullName ?? job.company),
+    // `formatUsd`'s rule: a value that is not a finite number is not a price.
+    amountUSD: typeof b.amountUSD === "number" && Number.isFinite(b.amountUSD) ? b.amountUSD : null,
+    effort: Object.hasOwn(EFFORT_LABEL, b.estimatedEffort ?? "") ? b.estimatedEffort : null,
+    kind: founder ? "paid" : "oss",
+    paidWork: founder && typeof b.paidWork === "boolean" ? b.paidWork : null,
+    claimable: founder ? b.claimable === true : true,
+    contested: typeof prs === "number" && prs > 0,
+    summary: prose(b.publicSummary),
+    claimUrl: oneLine(b.claimUrl ?? job.url),
+    claimedByYou: claimedIds.has(job.id)
+  };
+}
+function writeJson(obj) {
+  return new Promise((resolve) => {
+    process.stdout.write(`${JSON.stringify(obj)}
+`, () => resolve());
+  });
+}
+async function runJson() {
+  const humanLog = console.log;
+  console.log = (...a) => console.error(...a);
+  try {
+    const result = await getBounties();
+    if (result.status === "empty" || result.status === "demoted") {
+      await writeJson({
+        ok: true,
+        status: result.status,
+        items: [],
+        total: 0,
+        stale: result.stale === true,
+        ...result.status === "demoted" ? {
+          message: "Paid tasks are paused by default. Run `work --priced --json` to list them."
+        } : {}
+      });
+      return;
+    }
+    if (result.status !== "ok") {
+      throw new Error(`no paid task list (${result.status})`);
+    }
+    const { bounties } = result;
+    const shown = SHOW_ALL ? bounties : bounties.slice(0, LIMIT);
+    let claimedIds = /* @__PURE__ */ new Set();
+    try {
+      const { listClaims: listClaims2 } = await Promise.resolve().then(() => (init_claims(), claims_exports));
+      claimedIds = new Set(listClaims2({ active: true }).map((c) => c.id));
+    } catch {
+    }
+    await writeJson({
+      ok: true,
+      status: "ok",
+      items: shown.map((job) => workItemView(job, claimedIds)),
+      total: bounties.length,
+      stale: result.stale === true
+    });
+  } catch (err) {
+    await writeJson({
+      ok: false,
+      status: "refused",
+      code: "error",
+      message: `terminalhire bounties error: ${err?.message ?? err}`
+    });
+    process.exit(1);
+  } finally {
+    console.log = humanLog;
+  }
 }
 async function run() {
+  if (JSON_OUT) {
+    await runJson();
+    return;
+  }
   try {
     if (args.length === 0) {
       try {
@@ -12881,6 +12975,7 @@ export {
   projectMarkerLine,
   rankBounties,
   run,
+  workItemView,
   wrapIndented
 };
 /*! Bundled license information:

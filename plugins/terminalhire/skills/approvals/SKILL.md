@@ -78,7 +78,10 @@ Once you have a `claimId`, call all three and summarise them together:
   counts, target SHA. When none was recorded it says whether a run was attempted and
   could not finish on our side, which is not a judgement on the developer's work.
 - `get_claim_patch({ claimId })` — the patch, but ONLY when our boundary checks held it,
-  with the findings that held it. "No held patch" is the normal answer for a submission
+  with the findings that held it and the developer's permission explanation. Summarise
+  what action is requested, its source, purpose, scope and impact; the explanation is the
+  developer's assertion, not a result we have confirmed. If `needsDeveloperDetails` is
+  true, the developer must complete it before approval. "No held patch" is the normal answer for a submission
   that applied; it is not an error and not a missing patch.
 
 A tool that answers "No … recorded for claim" also answers that way for a claim that is
@@ -94,6 +97,14 @@ After the summary, offer exactly these:
   Relay the tool's reply as written. It records no verdict and the claim stays open. A
   connector created without permission to act is refused; relay that message too — the
   fix is a new connector with "let this connector act on your behalf" checked.
+- **Approve a held change** — only when the posting's project has "Agent may approve"
+  turned on and the poster has just said yes to this claim after you showed them the
+  patch and complete permission explanation:
+  `approve_held_change({ claimId, patchSha256, heldId, permissionRequestSha256 })`, with
+  all three revision identifiers from that same `get_claim_patch` response. Never guess
+  an identifier or approve while `needsDeveloperDetails` is true. It puts the patch on the claim's branch. It does not accept the work
+  or pay; those happen in the browser. If it refuses (the setting is off, the task is on
+  no project, or the patch changed), relay the message: the change is still waiting.
 - **Accept, or decide, in the browser** — give the review link: the origin of
   `dashboardUrl` followed by `/dashboard/postings/<postingId>/claims/<claimId>`. Say that
   accepting the work and paying happen there, signed in.

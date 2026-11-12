@@ -481,6 +481,7 @@ __export(claims_exports, {
   acceptedPRRate: () => acceptedPRRate,
   claimTurn: () => claimTurn,
   claimTurnLabel: () => claimTurnLabel,
+  claimsStateDir: () => claimsStateDir,
   countAwaitingFounderApproval: () => countAwaitingFounderApproval,
   findClaim: () => findClaim,
   formatAcceptedPRRate: () => formatAcceptedPRRate,
@@ -611,6 +612,9 @@ function writeClaims(claims) {
 }
 function findClaim(id) {
   return readClaims().find((c) => c.id === id) ?? null;
+}
+function claimsStateDir() {
+  return TERMINALHIRE_DIR;
 }
 function listClaims(opts = {}) {
   const claims = readClaims();
@@ -12776,14 +12780,18 @@ var init_repo_experience = __esm({
 // src/open-url.js
 var open_url_exports = {};
 __export(open_url_exports, {
+  noBrowserRequested: () => noBrowserRequested,
   openInBrowser: () => openInBrowser,
   shouldOpenBrowser: () => shouldOpenBrowser
 });
 import { spawn as nodeSpawn } from "child_process";
 function shouldOpenBrowser(env = process.env) {
   if (env.NODE_TEST_CONTEXT) return false;
+  return !noBrowserRequested(env);
+}
+function noBrowserRequested(env = process.env) {
   const off = String(env.TERMINALHIRE_NO_BROWSER ?? "").trim().toLowerCase();
-  return !(off === "1" || off === "true");
+  return off === "1" || off === "true";
 }
 function openInBrowser(url, { env = process.env, spawn = nodeSpawn } = {}) {
   if (!shouldOpenBrowser(env)) return;
@@ -13211,6 +13219,7 @@ var LIMIT2 = limitArg2 !== -1 ? parseInt(args2[limitArg2 + 1] ?? "15", 10) : DEF
 var PRICED_ONLY = args2.includes("--priced");
 var SHOW_ALL2 = args2.includes("--all");
 var WINNABLE_ONLY = args2.includes("--winnable");
+var JSON_OUT = args2.includes("--json");
 function readIndexCache2() {
   try {
     const entry = JSON.parse(readFileSync15(INDEX_CACHE_FILE4, "utf8"));
@@ -13232,7 +13241,7 @@ async function fetchIndex2(quiet = false) {
     if (notice) process.stderr.write(`${notice}
 `);
   }
-  if (index) return index;
+  if (index) return { index, stale: source === "cache-fallback" };
   throw new Error(reason ?? "/api/index returned no usable index");
 }
 function rankBounties(bounties, { rankMode = "winnability", scoreOf = () => 0 } = {}) {
@@ -13281,14 +13290,17 @@ function classifyEmptyStatus({ preFilterCount, postFilterCount, priced }) {
 }
 async function getBounties({ quiet = false, offline = false, priced = PRICED_ONLY } = {}) {
   if (!quiet) console.log(`Fetching paid task index from ${API_URL2}/api/index...`);
-  const index = offline ? readIndexCache2() : await fetchIndex2(quiet);
+  let index;
+  let stale = false;
+  if (offline) index = readIndexCache2();
+  else ({ index, stale } = await fetchIndex2(quiet));
   if (offline && !index) return { status: "no-cache" };
   let bounties = (index.jobs ?? []).filter((j) => j.source === "bounty");
   if (PRICED_ONLY) bounties = bounties.filter((j) => j.bounty?.amountUSD != null);
   if (WINNABLE_ONLY) bounties = bounties.filter((j) => (j.bounty?.competingOpenPRs ?? 0) === 0);
   const preFilterCount = bounties.length;
   if (preFilterCount === 0) {
-    return { status: "empty" };
+    return { status: "empty", stale };
   }
   const ranked = /* @__PURE__ */ new Map();
   try {
@@ -13324,10 +13336,10 @@ async function getBounties({ quiet = false, offline = false, priced = PRICED_ONL
   }
   bounties = filterPaidVisibility(bounties, { priced });
   if (bounties.length === 0) {
-    return { status: classifyEmptyStatus({ preFilterCount, postFilterCount: 0, priced }) };
+    return { status: classifyEmptyStatus({ preFilterCount, postFilterCount: 0, priced }), stale };
   }
   const matchedCount = bounties.filter((j) => score(j) > 0).length;
-  return { status: "ok", bounties, ranked, matchedCount, continuityByRepo };
+  return { status: "ok", bounties, ranked, matchedCount, continuityByRepo, stale };
 }
 
 // bin/jpi-devs.js
