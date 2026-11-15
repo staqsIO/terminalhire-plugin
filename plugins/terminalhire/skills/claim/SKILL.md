@@ -174,6 +174,14 @@ submission.
 { "v": 1, "shots": [{ "file": "./shots/home-dark.png", "caption": "Home in dark mode" }] }
 ```
 
+**When submit says the change is saved but not sent (paid tasks only):** the change
+needs the poster's approval, and the poster is asked only once the developer explains
+it. Submit exits 0 and prints five questions: `action`, `source`, `purpose`, `scope` and
+`impact`. The answers are the developer's to give. Draft them from the diff if asked,
+show them, and send only what the developer confirms, with `claim submit <id>
+--permission-request '<json>'`. Each answer is 8 to 4,000 characters; a placeholder
+such as `n/a` is refused before anything is sent.
+
 ### Advance a claim
 
 ```bash

@@ -40964,7 +40964,83 @@ function reconcileHold(hold, { patchSha256 } = {}) {
 }
 function holdView(hold, freshness) {
   if (!hold) return null;
-  return { patchSha256: hold.patchSha256, recordedAt: hold.since, freshness };
+  return {
+    patchSha256: hold.patchSha256,
+    recordedAt: hold.since,
+    freshness,
+    needsDeveloperDetails: hold.needsDeveloperDetails === true
+  };
+}
+var PERMISSION_FIELDS = Object.freeze(["action", "source", "purpose", "scope", "impact"]);
+var PERMISSION_LABELS = Object.freeze({
+  action: "What will this change do?",
+  source: "Exact source, destination or service",
+  purpose: "Why does this task need it?",
+  scope: "Where will it run, and what can it access?",
+  impact: "What data, credentials or behavior could it affect?"
+});
+var PERMISSION_PLACEHOLDER = /^(?:unknown|not known|n\/a|none|todo|tbd|not provided|not applicable)[.! ]*$/i;
+var PERMISSION_MIN_CHARS = 8;
+var PERMISSION_MAX_CHARS = 4e3;
+var PERMISSION_PROBLEM_TEXT = {
+  missing: "missing",
+  "not-text": "must be text",
+  placeholder: "a placeholder, not an answer",
+  "too-short": `shorter than ${PERMISSION_MIN_CHARS} characters`,
+  "too-long": `longer than ${PERMISSION_MAX_CHARS} characters`,
+  "unknown-field": "not one of the five questions"
+};
+function permissionQuestions() {
+  return PERMISSION_FIELDS.map((key) => ({ key, label: PERMISSION_LABELS[key] }));
+}
+function checkPermissionRequest(raw) {
+  const isObject2 = raw !== null && typeof raw === "object" && !Array.isArray(raw);
+  const input = isObject2 ? raw : {};
+  const fields = [];
+  for (const key of Object.keys(input)) {
+    if (!PERMISSION_FIELDS.includes(key)) fields.push({ key, problem: "unknown-field" });
+  }
+  const value = {};
+  for (const key of PERMISSION_FIELDS) {
+    const given = input[key];
+    let problem = null;
+    if (given === void 0) problem = "missing";
+    else if (typeof given !== "string") problem = "not-text";
+    else {
+      const text = given.trim();
+      if (text === "") problem = "missing";
+      else if (PERMISSION_PLACEHOLDER.test(text)) problem = "placeholder";
+      else if (text.length < PERMISSION_MIN_CHARS) problem = "too-short";
+      else if (text.length > PERMISSION_MAX_CHARS) problem = "too-long";
+      else value[key] = text;
+    }
+    if (problem) fields.push({ key, problem });
+  }
+  if (fields.length === 0) return { ok: true, value };
+  const lines = fields.map(({ key, problem }) => {
+    const label = PERMISSION_LABELS[key];
+    return `  ${key}: ${PERMISSION_PROBLEM_TEXT[problem]}${label ? ` (${label})` : ""}`;
+  });
+  const lead = isObject2 ? `terminalhire claim: --permission-request needs all five answers, each ${PERMISSION_MIN_CHARS} to ${PERMISSION_MAX_CHARS} characters, and no other fields. Nothing was sent.` : "terminalhire claim: --permission-request must be one JSON object with the five answers. Nothing was sent.";
+  return { ok: false, fields, message: `${lead}
+${lines.join("\n")}` };
+}
+function readPermissionRequestFlag(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(String(text));
+  } catch {
+    return {
+      ok: false,
+      fields: [],
+      message: `terminalhire claim: --permission-request is not valid JSON. Pass one object with the keys ${PERMISSION_FIELDS.join(", ")}. Nothing was sent.`
+    };
+  }
+  return checkPermissionRequest(parsed);
+}
+function permissionResendCommand(id) {
+  const blanks = JSON.stringify(Object.fromEntries(PERMISSION_FIELDS.map((k) => [k, "\u2026"])));
+  return nextStep(`terminalhire claim submit ${id} --permission-request '${blanks}'`);
 }
 var GH_API2 = "https://api.github.com";
 var GH_HEADERS2 = { "User-Agent": "terminalhire-claim", Accept: "application/vnd.github+json" };
@@ -41141,7 +41217,9 @@ var VALUE_FLAGS = /* @__PURE__ */ new Set([
   // TERM-1259. `claim resolve --reason setup-failed --requirement <field>`.
   "requirement",
   // TERM-1273. `claim submit --screenshots <file>` names the attachments JSON.
-  "screenshots"
+  "screenshots",
+  // TERM-1593. `claim submit --permission-request <json>` carries the five answers.
+  "permission-request"
 ]);
 function parseArgs(argv) {
   const flags = {};
@@ -41217,7 +41295,9 @@ function inferSubmitClaim({
   const isHere = (dir) => typeof dir === "string" && dir !== "" && here.includes(canonicalize2(dir));
   const tiers = [
     (c) => isHere(c.worktreePath),
-    (c) => isHere(sliceWorkDirFor(c.id)),
+    // Either managed name (TERM-1593): a claim delivered before the rename sits in the
+    // old folder, and its ledger, not this function, says which one it has.
+    (c) => isHere(sliceWorkDirFor(c.id)) || isHere(legacySliceWorkDirFor(c.id)),
     (c) => typeof branch === "string" && branch !== "" && c.branch === branch
   ];
   for (const matches of tiers) {
@@ -41937,6 +42017,12 @@ function nextStepFor(c) {
       };
     case "working":
     case "ready":
+      if (c.hold?.needsDeveloperDetails === true) {
+        return {
+          cmd: permissionResendCommand(c.id),
+          why: "the change is saved but was not sent to the poster; answer the five permission questions and submit again"
+        };
+      }
       if (c.hold) {
         return {
           cmd: nextStep(`terminalhire claim runs ${c.id}`),
@@ -43333,6 +43419,9 @@ function claimStatusView(c, { approvalsChecked = false } = {}) {
     posterVerdict: c.posterVerdict ?? null,
     serverReleased: c.serverReleased === true,
     repoFullName: c.repoFullName ?? null,
+    // TERM-1593. The real name the delivery answer gave; `repoFullName` above is the
+    // listing's opaque handle on a paid task. Null until a delivery names one.
+    deliveredRepoFullName: c.deliveredRepoFullName ?? null,
     issueUrl: c.issueUrl ?? null,
     amountUSD: c.amountUSD ?? null,
     worktreePath: c.worktreePath ?? null,
@@ -43357,6 +43446,7 @@ async function syncFirstPartyFacts(claims, targets, { reselect, log = () => {
   out.approvalsChecked = syncRes.approvalsChecked;
   out.approvalsUnavailable = syncRes.approvalsUnavailable;
   await syncFounderVerdicts({ claimsModule: claims, targets: reselect(), readPushTokenEnc, log });
+  await syncHoldDetails(claims, reselect(), out.pushToken);
   return out;
 }
 async function claimStatusResult(id) {
@@ -43839,6 +43929,9 @@ function startResult(claim) {
     briefPath: worktreePath && pack.brief === true ? join31(worktreePath, BRIEF_REL_PATH) : null,
     agentsPath: worktreePath && pack.agents === true ? join31(worktreePath, AGENTS_REL_PATH) : null,
     kind: claim.approval ? "paid" : "oss",
+    // TERM-1593. Recorded from the delivery answer by `cmdSliceFullTier`; null on a
+    // file-copy delivery and an OSS clone, whose answers name no repository here.
+    deliveredRepoFullName: claim.deliveredRepoFullName ?? null,
     nextStep: nextStepFor(claim)
   };
 }
@@ -43855,7 +43948,7 @@ var UNSTARTABLE_CODES = {
   "host-mismatch": "host-mismatch",
   error: "delivery-failed"
 };
-async function cmdStart(id, flags = {}) {
+async function cmdStart(id, flags = {}, deps = {}) {
   enterOutputMode(flags);
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
   if (machineOutput && flags.open) {
@@ -43975,7 +44068,7 @@ ${sanitizeText(claim.title)}`);
       console.log("  work slice is delivered through terminalhire, and your patch goes back the");
       console.log("  same way.");
     }
-    let outcome = await attemptSliceDelivery(id, flags);
+    let outcome = await attemptSliceDelivery(id, flags, deps);
     if (outcome.outcome === "pending" && flags.watch) {
       if (!process.stdin.isTTY) {
         console.log("\n  (--watch needs an interactive terminal; showing the state once.)");
@@ -44183,7 +44276,17 @@ function runsGiveUpMessage(id, attempts = RUNS_POLL_ATTEMPTS, intervalMs = RUNS_
 function founderPostingIdOf(claim) {
   return String(claim.bountyId).replace(/^bounty:founder:/, "");
 }
+function claimWorkspaceName(claimLocalId) {
+  const digest = createHash13("sha256").update(String(claimLocalId)).digest("hex");
+  return `task-${digest.slice(0, 12)}`;
+}
+function claimBranchFor(claimLocalId) {
+  return `claim/${claimWorkspaceName(claimLocalId)}`;
+}
 function sliceWorkDirFor(claimLocalId) {
+  return join31(homedir14(), "terminalhire", "work", claimWorkspaceName(claimLocalId));
+}
+function legacySliceWorkDirFor(claimLocalId) {
   const safe = String(claimLocalId).replace(/[^A-Za-z0-9._-]/g, "-");
   return join31(homedir14(), "terminalhire", "work", `slice-${safe}`);
 }
@@ -44520,7 +44623,8 @@ function buildPatchSubmission({
   authorEmail,
   auth,
   screenshots = null,
-  description = null
+  description = null,
+  permissionRequest = null
 }) {
   if (auth && "pushToken" in auth) {
     throw new Error(
@@ -44538,6 +44642,7 @@ function buildPatchSubmission({
   const body = { bountyId, claimId, patch, authorName, authorEmail, proofToken: auth.proofToken };
   if (screenshots !== null) body.screenshots = screenshots;
   if (description !== null) body.description = description;
+  if (permissionRequest !== null) body.permissionRequest = permissionRequest;
   return body;
 }
 function renderRunView(run2, message2, extra = {}) {
@@ -44900,7 +45005,7 @@ async function cmdSliceFullTier(claims, id, local, fullTierBody, flags, cloneRep
     console.log(`terminalhire claim: the usual directory has content \u2014 using ${dest}`);
   }
   mkdirSync10(dest, { recursive: true });
-  const branch = `claim/${String(claim.id).replace(/[^A-Za-z0-9._-]/g, "-")}`;
+  const branch = claimBranchFor(claim.id);
   let engine;
   try {
     engine = await Promise.resolve().then(() => (init_dist4(), dist_exports));
@@ -44933,6 +45038,13 @@ async function cmdSliceFullTier(claims, id, local, fullTierBody, flags, cloneRep
     state: "working",
     // `terminalhire run` clones this commit when run from the workspace (TERM-1098).
     baseSha,
+    // TERM-1593. Only the clone-token answer's name, which the server reads back from
+    // GitHub with the minted token (`currentFullName`, clone-token/route.ts). The 409's
+    // name is the posting row's stored name and can be stale after a rename, so an older
+    // server that omits the field leaves this null even though the clone above used the
+    // 409's name. The claim's own `repoFullName` stays the opaque handle the listing
+    // carried, and is never a source for this.
+    deliveredRepoFullName: body && typeof body.repoFullName === "string" && REPO_FULL_NAME_SHAPE.test(body.repoFullName) ? body.repoFullName : null,
     workspacePack: {
       brief: pack.brief.written === true,
       verify: pack.verify.written === true,
@@ -44989,7 +45101,7 @@ var SLICE_OUTCOME_CODES = {
   refused: "server-refused",
   error: "delivery-failed"
 };
-async function attemptSliceDelivery(id, flags = {}) {
+async function attemptSliceDelivery(id, flags = {}, deps = {}) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
   const local = claims.findClaim(id) ?? null;
   if (local) {
@@ -45027,7 +45139,7 @@ async function attemptSliceDelivery(id, flags = {}) {
   }
   if (!res.ok) {
     if (res.status === 409 && body && body.error === "tier-not-deliverable" && body.tier === "full" && typeof body.claimId === "string" && typeof body.bountyId === "string" && typeof body.repoFullName === "string") {
-      await cmdSliceFullTier(claims, id, local, body, flags);
+      await cmdSliceFullTier(claims, id, local, body, flags, deps.cloneRepo);
       return { outcome: "delivered", claim: claims.findClaim(id) };
     }
     if (body?.error === "approval-pending") {
@@ -45097,7 +45209,7 @@ async function attemptSliceDelivery(id, flags = {}) {
   mkdirSync10(dirname9(finalDest), { recursive: true });
   let dest = mkdtempSync5(`${finalDest}.tmp-`);
   const { written, unavailable } = writeSliceFiles(dest, body.files);
-  const branch = `claim/${String(claim.id).replace(/[^A-Za-z0-9._-]/g, "-")}`;
+  const branch = claimBranchFor(claim.id);
   let pack;
   try {
     await sh("git", ["-C", dest, "init"]);
@@ -45191,7 +45303,7 @@ async function attemptSliceDelivery(id, flags = {}) {
   await beatFounderPresence(working ?? claim);
   return { outcome: "delivered", claim: working ?? claim };
 }
-async function fetchRunsOnce(claim, pushToken) {
+async function fetchRunsOnce(claim, pushToken, { timeoutMs = 3e4 } = {}) {
   let res;
   try {
     res = await fetch(`${CLAIM_SYNC_BASE4}/api/patch/runs`, {
@@ -45202,7 +45314,7 @@ async function fetchRunsOnce(claim, pushToken) {
         claimId: claim.approval.claimId,
         pushToken
       }),
-      signal: AbortSignal.timeout(3e4)
+      signal: AbortSignal.timeout(timeoutMs)
     });
   } catch (err) {
     return { kind: "network", error: err instanceof Error ? err.message : String(err) };
@@ -45230,8 +45342,44 @@ async function fetchRunsOnce(claim, pushToken) {
     unverifiedCause: body.unverifiedCause ?? null,
     resetAt: body.resetAt ?? null,
     rateLimitCap: body.rateLimitCap ?? 5,
-    rateLimitCount: body.rateLimitCount ?? null
+    rateLimitCount: body.rateLimitCount ?? null,
+    // TERM-1593 fix round 1, passed through untouched: absent on an older server, and
+    // `needsDetailsFromRunsRead` is the one reader that decides what it means.
+    needsDeveloperDetails: body.needsDeveloperDetails
   };
+}
+function needsDetailsFromRunsRead(r) {
+  let said;
+  if (r?.kind === "ok") said = r.needsDeveloperDetails;
+  else if (r?.kind === "refusal" && r.body?.error === "no-run") said = r.body.needsDeveloperDetails;
+  if (said === true || said === false) return said;
+  if (said === null) return false;
+  return void 0;
+}
+function refreshHoldDetails(claims, id, r) {
+  const said = needsDetailsFromRunsRead(r);
+  if (said === void 0) return;
+  try {
+    const current = claims.findClaim(id);
+    if (!current?.hold) return;
+    if (current.hold.needsDeveloperDetails === true === said) return;
+    claims.updateClaim(id, { hold: { ...current.hold, needsDeveloperDetails: said } });
+  } catch {
+  }
+}
+var HOLD_DETAILS_TIMEOUT_MS = 15e3;
+async function syncHoldDetails(claims, targets, pushToken) {
+  if (!pushToken) return;
+  const held = targets.filter((c) => c.approval?.claimId && c.hold);
+  await Promise.all(
+    held.map(async (c) => {
+      try {
+        const r = await fetchRunsOnce(c, pushToken, { timeoutMs: HOLD_DETAILS_TIMEOUT_MS });
+        refreshHoldDetails(claims, c.id, r);
+      } catch {
+      }
+    })
+  );
 }
 function runsAnswer(id, claim, r) {
   if (r.kind === "network") {
@@ -45280,7 +45428,9 @@ async function claimRunsResult(id) {
       message: readTokenMissingMessage("reading CI results")
     };
   }
-  return runsAnswer(id, gate.claim, await fetchRunsOnce(gate.claim, pushToken));
+  const r = await fetchRunsOnce(gate.claim, pushToken);
+  refreshHoldDetails(claims, gate.claim.id, r);
+  return runsAnswer(id, gate.claim, r);
 }
 function refuseServerRead(status, body, what) {
   const code = typeof body?.error === "string" ? body.error : "refused";
@@ -45304,7 +45454,11 @@ async function cmdRuns(id, flags = {}) {
   const claims = await Promise.resolve().then(() => (init_claims(), claims_exports));
   const claim = requireFounderLoopClaim(claims, id, "runs");
   const pushToken = await requireReadPushToken("reading CI results");
-  const fetchOnce = () => fetchRunsOnce(claim, pushToken);
+  const fetchOnce = async () => {
+    const r2 = await fetchRunsOnce(claim, pushToken);
+    refreshHoldDetails(claims, claim.id, r2);
+    return r2;
+  };
   if (flags.watch) {
     console.log(
       `  Watching CI for ${id} \u2014 up to ${RUNS_POLL_ATTEMPTS} checks, one every ${Math.round(RUNS_POLL_INTERVAL_MS / 1e3)}s.`
@@ -45537,7 +45691,7 @@ async function dependencyLockfileWarnings(wt, base, touched) {
   }
   return warnings;
 }
-async function submitFounderPatch({ claims, claim, id, wt, flags }) {
+async function submitFounderPatch({ claims, claim, id, wt, flags, permissionRequest = null }) {
   let roots;
   try {
     roots = (await sh("git", ["-C", wt, "rev-list", "--max-parents=0", "HEAD"])).split("\n").filter(Boolean);
@@ -45651,7 +45805,8 @@ ${lockfileWarnings.join("\n")}`);
       authorEmail,
       auth: { proofToken },
       screenshots: shots === null ? null : shots.manifest,
-      description
+      description,
+      permissionRequest
     });
   } catch (err) {
     refuse5("invalid-submission", `terminalhire claim: ${err.message}`);
@@ -45680,7 +45835,10 @@ ${lockfileWarnings.join("\n")}`);
   }
   const patchSha256 = sha256OfUtf8(patch);
   if (res.status === 409 && body?.error === "held-for-approval") {
-    const hold = claim.hold?.patchSha256 === patchSha256 ? claim.hold : { patchSha256, since: (/* @__PURE__ */ new Date()).toISOString() };
+    const hold = {
+      ...claim.hold?.patchSha256 === patchSha256 ? claim.hold : { patchSha256, since: (/* @__PURE__ */ new Date()).toISOString() },
+      needsDeveloperDetails: false
+    };
     claims.updateClaim(id, { hold });
     const message2 = typeof body.message === "string" ? body.message : HELD_FOR_APPROVAL_FALLBACK;
     const next2 = nextStep(`terminalhire claim runs ${id}`);
@@ -45707,6 +45865,49 @@ ${lockfileWarnings.join("\n")}`);
       console.log(`  when they do, it applies and your claim advances. Nothing to retry.`);
       console.log(`
   Check on it:  ${next2}`);
+    }
+    await beatFounderPresence(claim);
+    return;
+  }
+  if (res.status === 409 && body?.error === "permission-details-required") {
+    const hold = {
+      ...claim.hold?.patchSha256 === patchSha256 ? claim.hold : { patchSha256, since: (/* @__PURE__ */ new Date()).toISOString() },
+      needsDeveloperDetails: true
+    };
+    claims.updateClaim(id, { hold });
+    const next2 = permissionResendCommand(id);
+    if (machineOutput) {
+      emit2({
+        ok: true,
+        status: "permission-details-required",
+        claimId: id,
+        serverClaimId: claim.approval.claimId,
+        patchSha256,
+        hold: holdView(hold, "current"),
+        message: PERMISSION_DETAILS_REQUIRED_MESSAGE,
+        questions: permissionQuestions(),
+        next: next2
+      });
+    } else {
+      console.log(`
+\u23F8 Saved, but not sent to the poster \u2014 nothing on the repository was changed.`);
+      console.log(`  ${PERMISSION_DETAILS_REQUIRED_MESSAGE}`);
+      console.log(`  patch:     sha256 ${patchSha256}`);
+      console.log("\n  The five questions:");
+      for (const { key, label } of permissionQuestions()) {
+        console.log(`    ${key.padEnd(8)} ${label}`);
+      }
+      console.log(
+        `
+  Send it again with your answers, each ${PERMISSION_MIN_CHARS} to ${PERMISSION_MAX_CHARS} characters:`
+      );
+      console.log(`    ${next2}`);
+      if (typeof body.explanationUrl === "string" && /^https?:\/\//.test(body.explanationUrl)) {
+        console.log(
+          `
+  Or answer them on your claimed task: ${terminalSafeInline(body.explanationUrl)}`
+        );
+      }
     }
     await beatFounderPresence(claim);
     return;
@@ -45750,6 +45951,7 @@ ${lockfileWarnings.join("\n")}`);
   await beatFounderPresence(submitted ?? claim);
 }
 var HELD_FOR_APPROVAL_FALLBACK = "This patch needs the poster\u2019s approval before it can be applied \u2014 nothing on the repository was changed. It is waiting on their claim-review page.";
+var PERMISSION_DETAILS_REQUIRED_MESSAGE = "Your change is saved but has not been sent to the poster for approval. The poster is asked only once you explain it: what it does, the exact source or destination, why the task needs it, where it runs and what it can reach, and what it could affect. Nothing has been applied.";
 async function cmdSubmit(id, flags = {}) {
   enterOutputMode(flags);
   const worktreeOverride = flags.worktree;
@@ -45789,7 +45991,7 @@ async function cmdSubmit(id, flags = {}) {
       refuse5(
         "usage",
         `terminalhire claim: no claim is recorded for this directory or branch, so there is nothing to infer.
-  Usage: terminalhire claim submit <id> [--worktree <path>] [--yes] [--body-file <path>] [--no-body] [--title <t>] [--no-closes] [--screenshots <file>] [--json]
+  Usage: terminalhire claim submit <id> [--worktree <path>] [--yes] [--body-file <path>] [--no-body] [--title <t>] [--no-closes] [--screenshots <file>] [--permission-request <json>] [--json]
   Your claims:  terminalhire claim list --active`
       );
     }
@@ -45801,6 +46003,20 @@ async function cmdSubmit(id, flags = {}) {
       "screenshots-not-applicable",
       "terminalhire claim: --screenshots attaches pictures to a first-party submission; on this claim, add them to the pull request instead."
     );
+  }
+  let permissionRequest = null;
+  if (flags["permission-request"] !== void 0) {
+    if (!claim.approval) {
+      refuse5(
+        "permission-request-not-applicable",
+        "terminalhire claim: --permission-request explains a held change on a paid task; this claim goes back as a pull request, which has no permission step. Nothing was sent."
+      );
+    }
+    const checked = readPermissionRequestFlag(flags["permission-request"]);
+    if (!checked.ok) {
+      refuse5("invalid-permission-request", checked.message, { fields: checked.fields });
+    }
+    permissionRequest = checked.value;
   }
   const submitRefusal = submitRefusalFor(claim);
   if (submitRefusal) {
@@ -45878,7 +46094,7 @@ async function cmdSubmit(id, flags = {}) {
   } catch {
   }
   if (claim.approval) {
-    await submitFounderPatch({ claims, claim, id, wt, flags });
+    await submitFounderPatch({ claims, claim, id, wt, flags, permissionRequest });
     return;
   }
   let ghUser;
@@ -47245,6 +47461,11 @@ export {
   CLAIM_SYNC_WRITE_TIMEOUT_MS,
   CLOSED_STATES,
   OPENABLE_AGENTS,
+  PERMISSION_FIELDS,
+  PERMISSION_LABELS,
+  PERMISSION_MAX_CHARS,
+  PERMISSION_MIN_CHARS,
+  PERMISSION_PLACEHOLDER,
   POSTING_LEVEL_RESOLUTION_REASONS,
   PUSH_TOKEN_REFUSAL,
   REVISE_RECOVERY_STATES,
@@ -47263,12 +47484,15 @@ export {
   buildStakeComment,
   buildStandDownComment,
   buildSubmitBody,
+  checkPermissionRequest,
+  claimBranchFor,
   claimListTurnLabel,
   claimNotesResult,
   claimRunsResult,
   claimStatusResult,
   claimStatusView,
   claimUpdatePatch,
+  claimWorkspaceName,
   cloneFullTierRepo,
   cmdNote,
   cmdNotes,
@@ -47307,13 +47531,17 @@ export {
   isVerblessShortRefClaim,
   landDeveloperIn,
   launchAgentIn,
+  legacySliceWorkDirFor,
   listMergedPRsReferencingIssue,
   listOpenPRsReferencingIssue,
   matchReferencingPrs,
+  needsDetailsFromRunsRead,
   nextStepFor,
   normalizeIntent,
   ownedPackPaths,
   parseArgs,
+  permissionQuestions,
+  permissionResendCommand,
   pickBodySource,
   pickExistingPr,
   pickStartableClaim,
@@ -47322,6 +47550,7 @@ export {
   printReleaseIsLocalOnly,
   printResolveHint,
   readCredentialDisposition,
+  readPermissionRequestFlag,
   reconcileHold,
   recoverHeldClaim,
   renderAutoConsent,
