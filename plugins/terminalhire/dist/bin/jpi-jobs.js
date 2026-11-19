@@ -10571,12 +10571,21 @@ function linkTitle(title, url) {
   }
   return href ? `${safeTitle} (${href})` : safeTitle;
 }
-var WHITESPACE_CONTROLS, CONTROL_CHARS;
+var WHITESPACE_CONTROLS, CONTROL_CHARS, INVISIBLE_MARKS;
 var init_sanitize = __esm({
   "bin/sanitize.js"() {
     "use strict";
     WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
     CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
+    INVISIBLE_MARKS = new RegExp(
+      `[${[
+        [8203, 8207],
+        [8234, 8238],
+        [8294, 8297],
+        [65279, 65279]
+      ].map(([from, to]) => `${String.fromCodePoint(from)}-${String.fromCodePoint(to)}`).join("")}]`,
+      "g"
+    );
   }
 });
 

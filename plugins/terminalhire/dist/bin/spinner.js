@@ -684,6 +684,15 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
 }
 
 // bin/sanitize.js
+var INVISIBLE_MARKS = new RegExp(
+  `[${[
+    [8203, 8207],
+    [8234, 8238],
+    [8294, 8297],
+    [65279, 65279]
+  ].map(([from, to]) => `${String.fromCodePoint(from)}-${String.fromCodePoint(to)}`).join("")}]`,
+  "g"
+);
 function formatUsd(a) {
   if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
   if (typeof a !== "string" || a.trim() === "") return "$\u2014";

@@ -535,6 +535,17 @@ function buildSpinnerPool(topMatches, max = 6, opts = {}) {
   return withStale(pool);
 }
 
+// bin/sanitize.js
+var INVISIBLE_MARKS = new RegExp(
+  `[${[
+    [8203, 8207],
+    [8234, 8238],
+    [8294, 8297],
+    [65279, 65279]
+  ].map(([from, to]) => `${String.fromCodePoint(from)}-${String.fromCodePoint(to)}`).join("")}]`,
+  "g"
+);
+
 // ../../packages/core/src/vocab/graph.data.ts
 var VOCAB_NODES = [
   // ── Languages ─────────────────────────────────────────────────────────────

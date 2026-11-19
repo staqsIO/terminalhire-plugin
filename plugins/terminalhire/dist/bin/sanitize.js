@@ -10,6 +10,19 @@ function sanitizeMultiline(s) {
   if (s == null) return "";
   return String(s).replace(/\r\n?/g, "\n").replace(NON_LINE_CONTROLS, "");
 }
+var INVISIBLE_MARKS = new RegExp(
+  `[${[
+    [8203, 8207],
+    [8234, 8238],
+    [8294, 8297],
+    [65279, 65279]
+  ].map(([from, to]) => `${String.fromCodePoint(from)}-${String.fromCodePoint(to)}`).join("")}]`,
+  "g"
+);
+function stripInvisibleMarks(s) {
+  if (s == null) return "";
+  return String(s).replace(INVISIBLE_MARKS, "");
+}
 function formatUsd(a) {
   if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
   if (typeof a !== "string" || a.trim() === "") return "$\u2014";
@@ -45,5 +58,6 @@ export {
   linkTitle,
   safeHttpUrl,
   sanitizeMultiline,
-  sanitizeText
+  sanitizeText,
+  stripInvisibleMarks
 };

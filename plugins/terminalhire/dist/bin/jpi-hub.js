@@ -387,9 +387,19 @@ function formatUsd(a) {
   const n = Number(a);
   return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
 }
+var INVISIBLE_MARKS;
 var init_sanitize = __esm({
   "bin/sanitize.js"() {
     "use strict";
+    INVISIBLE_MARKS = new RegExp(
+      `[${[
+        [8203, 8207],
+        [8234, 8238],
+        [8294, 8297],
+        [65279, 65279]
+      ].map(([from, to]) => `${String.fromCodePoint(from)}-${String.fromCodePoint(to)}`).join("")}]`,
+      "g"
+    );
   }
 });
 

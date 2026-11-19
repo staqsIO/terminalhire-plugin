@@ -636,13 +636,13 @@ function validateGraph(nodes) {
   const visiting = /* @__PURE__ */ new Set();
   const done = /* @__PURE__ */ new Set();
   const parentMap = new Map(nodes.map((n) => [n.id, n.parents ?? []]));
-  const walk = (id, path) => {
-    if (done.has(id)) return;
-    if (visiting.has(id)) throw new Error(`vocab: parent cycle ${[...path, id].join(" \u2192 ")}`);
-    visiting.add(id);
-    for (const p of parentMap.get(id) ?? []) walk(p, [...path, id]);
-    visiting.delete(id);
-    done.add(id);
+  const walk = (id2, path) => {
+    if (done.has(id2)) return;
+    if (visiting.has(id2)) throw new Error(`vocab: parent cycle ${[...path, id2].join(" \u2192 ")}`);
+    visiting.add(id2);
+    for (const p of parentMap.get(id2) ?? []) walk(p, [...path, id2]);
+    visiting.delete(id2);
+    done.add(id2);
   };
   for (const n of nodes) walk(n.id, []);
 }
@@ -763,8 +763,8 @@ ${body}`;
     }
     ids.add(r.id);
   }
-  const hardCount = [...ids].filter((id) => !SOFT_DOMAIN.has(id)).length;
-  if (hardCount >= 2) for (const id of ambiguousPending) ids.add(id);
+  const hardCount = [...ids].filter((id2) => !SOFT_DOMAIN.has(id2)).length;
+  if (hardCount >= 2) for (const id2 of ambiguousPending) ids.add(id2);
   return [...ids];
 }
 function coreTagsFromTitle(title) {
@@ -797,8 +797,8 @@ var init_extract = __esm({
     ]);
     SYNONYM_ONLY = /* @__PURE__ */ new Set(["performance", "security", "seo"]);
     NON_EXTRACTABLE = /* @__PURE__ */ new Set(["payments", "billing"]);
-    for (const id of SYNONYM_ONLY) {
-      if (!SOFT_DOMAIN.has(id)) throw new Error(`extract: SYNONYM_ONLY "${id}" not in SOFT_DOMAIN`);
+    for (const id2 of SYNONYM_ONLY) {
+      if (!SOFT_DOMAIN.has(id2)) throw new Error(`extract: SYNONYM_ONLY "${id2}" not in SOFT_DOMAIN`);
     }
     AMBIGUOUS = {
       // Accept "go" with an ecosystem cue OR an explicit-skill phrasing ("Go developer",
@@ -991,7 +991,7 @@ function classifyToken(raw, graph = GRAPH) {
         bestSurface = surface;
       }
     };
-    for (const id of graph.ids) consider(id);
+    for (const id2 of graph.ids) consider(id2);
     for (const alias of graph.synonyms.keys()) consider(alias);
     if (bestSurface !== void 0) {
       const suggestion = canonicalOf(bestSurface, graph);
@@ -1026,8 +1026,8 @@ function normalize2(tokens) {
 }
 function getAdjacentTags(tag, hops = 1, graph = GRAPH) {
   const lower = String(tag ?? "").toLowerCase().trim();
-  const id = graph.ids.has(lower) ? lower : graph.synonyms.get(lower);
-  if (!id) return [];
+  const id2 = graph.ids.has(lower) ? lower : graph.synonyms.get(lower);
+  if (!id2) return [];
   const oneHop = (source) => {
     const out = [];
     for (const [to, edge] of graph.closure.get(source) ?? []) {
@@ -1036,9 +1036,9 @@ function getAdjacentTags(tag, hops = 1, graph = GRAPH) {
     return out;
   };
   const byWeightThenId = (a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1);
-  const ring1 = oneHop(id).sort(byWeightThenId);
+  const ring1 = oneHop(id2).sort(byWeightThenId);
   if (hops === 1) return ring1.map(([to]) => to);
-  const exclude = /* @__PURE__ */ new Set([id, ...ring1.map(([to]) => to)]);
+  const exclude = /* @__PURE__ */ new Set([id2, ...ring1.map(([to]) => to)]);
   const best = /* @__PURE__ */ new Map();
   for (const [n, w1] of ring1) {
     for (const [to, w2] of oneHop(n)) {
@@ -4426,8 +4426,8 @@ async function aggregateContributions(opts = {}) {
     if (jobs.length >= maxContribItems) break;
     const fullName = repoFullNameFromApiUrl2(issue.repository_url);
     if (!fullName) continue;
-    const id = `contribute:${repoKey(fullName)}#${issue.number}`;
-    if (seen.has(id)) continue;
+    const id2 = `contribute:${repoKey(fullName)}#${issue.number}`;
+    if (seen.has(id2)) continue;
     if (isExcludedRepo(fullName)) continue;
     if (isAssigned(issue)) continue;
     if ((perRepo.get(repoKey(fullName)) ?? 0) >= MAX_BOUNTIES_PER_DISCOVERED_REPO) continue;
@@ -4460,11 +4460,11 @@ async function aggregateContributions(opts = {}) {
     const tags = normalize2(
       tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
     );
-    seen.add(id);
+    seen.add(id2);
     perRepo.set(repoKey(fullName), (perRepo.get(repoKey(fullName)) ?? 0) + 1);
     jobs.push(
       buildContributionJob({
-        id,
+        id: id2,
         fullName,
         repo,
         issue,
@@ -4574,8 +4574,8 @@ async function aggregateContributions(opts = {}) {
           break;
         const perRepoCap = isSeed ? MAX_ISSUES_PER_SEEDED_REPO : MAX_BOUNTIES_PER_DISCOVERED_REPO;
         if ((perRepo.get(repoKey(fullName)) ?? 0) >= perRepoCap) break;
-        const id = `contribute:${repoKey(fullName)}#${issue.number}`;
-        if (seen.has(id)) continue;
+        const id2 = `contribute:${repoKey(fullName)}#${issue.number}`;
+        if (seen.has(id2)) continue;
         if (isAssigned(issue)) continue;
         const title = decodeEntities(issue.title).trim();
         if (!passesContributionGate({
@@ -4597,13 +4597,13 @@ async function aggregateContributions(opts = {}) {
         const tags = normalize2(
           tokenize4([title, repo.language ?? "", labels.join(" "), body.slice(0, 2e3)].join(" "))
         );
-        seen.add(id);
+        seen.add(id2);
         perRepo.set(repoKey(fullName), (perRepo.get(repoKey(fullName)) ?? 0) + 1);
         perRepoDiscovered++;
         discoveredEmitted++;
         jobs.push(
           buildContributionJob({
-            id,
+            id: id2,
             fullName,
             repo,
             issue,
@@ -5280,8 +5280,8 @@ function loadPartnerRoles() {
     return [];
   }
 }
-function getBuyer(id) {
-  return BUYER_REGISTRY[id];
+function getBuyer(id2) {
+  return BUYER_REGISTRY[id2];
 }
 var EXAMPLE_BUYER, BUYER_REGISTRY;
 var init_partners = __esm({
@@ -8785,14 +8785,14 @@ var init_chatCrypto = __esm({
 });
 
 // ../../packages/core/src/job-status.ts
-function recordClick(map, id) {
-  const prev = map[id];
+function recordClick(map, id2) {
+  const prev = map[id2];
   if (prev?.clicked === true) return map;
-  return { ...map, [id]: { ...prev, clicked: true } };
+  return { ...map, [id2]: { ...prev, clicked: true } };
 }
-function setStatus(map, id, s, markedAt = (/* @__PURE__ */ new Date()).toISOString()) {
-  const prev = map[id];
-  return { ...map, [id]: { ...prev, status: s, markedAt } };
+function setStatus(map, id2, s, markedAt = (/* @__PURE__ */ new Date()).toISOString()) {
+  const prev = map[id2];
+  return { ...map, [id2]: { ...prev, status: s, markedAt } };
 }
 function funnelCounts(map) {
   const counts = { clicked: 0, applied: 0, saved: 0, dismissed: 0 };
@@ -8873,8 +8873,8 @@ var init_recency_split = __esm({
 });
 
 // ../../packages/core/src/credential/legible.ts
-function labelFor(id) {
-  return DISPLAY_LABEL[id] ?? id.split("-").map((w) => w.length > 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w).join(" ");
+function labelFor(id2) {
+  return DISPLAY_LABEL[id2] ?? id2.split("-").map((w) => w.length > 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w).join(" ");
 }
 function capitalize(s) {
   return s.length > 0 ? s.charAt(0).toUpperCase() + s.slice(1) : s;
@@ -9847,10 +9847,10 @@ function parsePass1(raw) {
     const text = typeof o.text === "string" ? o.text.trim() : "";
     if (text.length === 0) continue;
     const cites = Array.isArray(o.cites) ? o.cites.filter((x) => typeof x === "string") : [];
-    let id = typeof o.id === "string" && o.id.length > 0 ? o.id : `c${claims.length + 1}`;
-    while (seen.has(id)) id = `${id}_`;
-    seen.add(id);
-    const claim = { id, kind, text, cites };
+    let id2 = typeof o.id === "string" && o.id.length > 0 ? o.id : `c${claims.length + 1}`;
+    while (seen.has(id2)) id2 = `${id2}_`;
+    seen.add(id2);
+    const claim = { id: id2, kind, text, cites };
     if (kind === "competency") {
       const comp = o.competency;
       if (!comp || !isCompetencyName(comp.name) || !isCompetencyGrade(comp.grade)) continue;
@@ -9960,13 +9960,13 @@ function parseVerifyStageReply(raw, expectedIds) {
     if (entry == null || typeof entry !== "object") return null;
     const keys = Object.keys(entry);
     if (keys.length !== 2 || !keys.includes("id") || !keys.includes("supported")) return null;
-    const id = entry.id;
+    const id2 = entry.id;
     const sup = entry.supported;
-    if (typeof id !== "string" || id.length === 0 || typeof sup !== "boolean") return null;
-    if (!expected.has(id)) return null;
-    if (seen.has(id)) return null;
-    seen.add(id);
-    if (sup) supported.add(id);
+    if (typeof id2 !== "string" || id2.length === 0 || typeof sup !== "boolean") return null;
+    if (!expected.has(id2)) return null;
+    if (seen.has(id2)) return null;
+    seen.add(id2);
+    if (sup) supported.add(id2);
   }
   if (seen.size !== expected.size) return null;
   return { supported };
@@ -10545,11 +10545,11 @@ var init_audit = __esm({
 
 // ../../packages/core/src/short-token.ts
 import { createHash as createHash2 } from "crypto";
-function opportunityShortToken(id) {
-  return createHash2("sha256").update(id, "utf8").digest("base64url").slice(0, 8);
+function opportunityShortToken(id2) {
+  return createHash2("sha256").update(id2, "utf8").digest("base64url").slice(0, 8);
 }
-function jobShortToken(id) {
-  return createHash2("sha256").update(`job:${id}`, "utf8").digest("base64url").slice(0, 8);
+function jobShortToken(id2) {
+  return createHash2("sha256").update(`job:${id2}`, "utf8").digest("base64url").slice(0, 8);
 }
 function jobTokenMap(index) {
   const cached = jobTokenMaps.get(index);
@@ -11227,10 +11227,10 @@ async function addSavedJob(job) {
   profile.savedJobs = [...filtered, { ...job, savedAt: (/* @__PURE__ */ new Date()).toISOString() }];
   await writeProfile(profile);
 }
-async function removeSavedJob(id) {
+async function removeSavedJob(id2) {
   const profile = await readProfile();
   const existing = profile.savedJobs ?? [];
-  const filtered = existing.filter((j) => j.id !== id);
+  const filtered = existing.filter((j) => j.id !== id2);
   if (filtered.length === existing.length) return false;
   profile.savedJobs = filtered;
   await writeProfile(profile);
@@ -11418,23 +11418,23 @@ function readStatusMap() {
     return {};
   }
 }
-function markStatus(id, status) {
+function markStatus(id2, status) {
   return withLock(() => {
     const current = readStatusMap();
     const next = status === "claimed" ? {
       ...current,
-      [id]: { ...current[id], status: "claimed", markedAt: (/* @__PURE__ */ new Date()).toISOString() }
-    } : setStatus(current, id, status);
+      [id2]: { ...current[id2], status: "claimed", markedAt: (/* @__PURE__ */ new Date()).toISOString() }
+    } : setStatus(current, id2, status);
     atomicWriteJson(STATUS_FILE, next);
-    return next[id];
+    return next[id2];
   });
 }
-function markClicked(id) {
+function markClicked(id2) {
   return withLock(() => {
     const current = readStatusMap();
-    const next = recordClick(current, id);
+    const next = recordClick(current, id2);
     atomicWriteJson(STATUS_FILE, next);
-    return next[id];
+    return next[id2];
   });
 }
 var TERMINALHIRE_DIR6, STATUS_FILE, LOCK_FILE, BAK_FILE, LOCK_STALE_MS, LOCK_GIVEUP_MS, LOCK_SLEEP_MIN_MS, LOCK_SLEEP_MAX_MS;
@@ -11761,10 +11761,10 @@ function isFiniteNonNegative(n) {
 }
 function pruneEntries(entries, now) {
   const out = {};
-  for (const [id, e] of Object.entries(entries)) {
+  for (const [id2, e] of Object.entries(entries)) {
     if (!e || !isFiniteNonNegative(e.lastSurface) || !isFiniteNonNegative(e.lastSeenAt)) continue;
     if (now - e.lastSeenAt > SEEN_TTL_MS) continue;
-    out[id] = { lastSurface: e.lastSurface, lastSeenAt: e.lastSeenAt };
+    out[id2] = { lastSurface: e.lastSurface, lastSeenAt: e.lastSeenAt };
   }
   return out;
 }
@@ -11775,7 +11775,7 @@ function capEntries(entries) {
     (a, b) => entries[b].lastSurface - entries[a].lastSurface || entries[b].lastSeenAt - entries[a].lastSeenAt
   );
   const out = {};
-  for (const id of ids.slice(0, SEEN_MAX_ENTRIES)) out[id] = entries[id];
+  for (const id2 of ids.slice(0, SEEN_MAX_ENTRIES)) out[id2] = entries[id2];
   return out;
 }
 function loadSeenHistory(now = Date.now()) {
@@ -11797,8 +11797,8 @@ function loadSeenHistory(now = Date.now()) {
   ) : {};
   return { surface, entries, widths };
 }
-function isSuppressed(id, history) {
-  const e = history.entries[id];
+function isSuppressed(id2, history) {
+  const e = history.entries[id2];
   if (!e) return false;
   return history.surface - e.lastSurface < SEEN_WINDOW_SURFACES;
 }
@@ -11806,12 +11806,12 @@ function recordSurface(ids, now = Date.now()) {
   const history = loadSeenHistory(now);
   const surface = history.surface + 1;
   const entries = { ...history.entries };
-  for (const id of ids) {
-    if (typeof id !== "string" || id.length === 0) continue;
-    entries[id] = { lastSurface: surface, lastSeenAt: now };
+  for (const id2 of ids) {
+    if (typeof id2 !== "string" || id2.length === 0) continue;
+    entries[id2] = { lastSurface: surface, lastSeenAt: now };
   }
   const stamped = new Set(
-    (Array.isArray(ids) ? ids : []).filter((id) => typeof id === "string" && id.length > 0)
+    (Array.isArray(ids) ? ids : []).filter((id2) => typeof id2 === "string" && id2.length > 0)
   );
   const widths = capWidths({ ...history.widths, [surface]: stamped.size });
   const next = { surface, entries: capEntries(pruneEntries(entries, now)), widths };
@@ -12252,8 +12252,8 @@ function partitionFreshMatches(matches, history, getId = defaultGetId) {
   const eligible = [];
   const suppressed = [];
   for (const m of list) {
-    const id = getId(m);
-    if (m && id != null && isSuppressed(String(id), history)) suppressed.push(m);
+    const id2 = getId(m);
+    if (m && id2 != null && isSuppressed(String(id2), history)) suppressed.push(m);
     else eligible.push(m);
   }
   const stamp = (m) => history.entries[String(getId(m))].lastSurface;
@@ -12440,15 +12440,54 @@ var init_spinner_verbs = __esm({
 });
 
 // bin/sanitize.js
+function sanitizeText(s) {
+  if (s == null) return "";
+  return String(s).replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "");
+}
+function sanitizeMultiline(s) {
+  if (s == null) return "";
+  return String(s).replace(/\r\n?/g, "\n").replace(NON_LINE_CONTROLS, "");
+}
+function stripInvisibleMarks(s) {
+  if (s == null) return "";
+  return String(s).replace(INVISIBLE_MARKS, "");
+}
 function formatUsd(a) {
   if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
   if (typeof a !== "string" || a.trim() === "") return "$\u2014";
   const n = Number(a);
   return Number.isFinite(n) ? "$" + n.toLocaleString() : "$\u2014";
 }
+function safeHttpUrl(url) {
+  if (url == null) return null;
+  const raw = String(url);
+  CONTROL_CHARS.lastIndex = 0;
+  if (CONTROL_CHARS.test(raw)) return null;
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  return parsed.href;
+}
+var WHITESPACE_CONTROLS, CONTROL_CHARS, NON_LINE_CONTROLS, INVISIBLE_MARKS;
 var init_sanitize = __esm({
   "bin/sanitize.js"() {
     "use strict";
+    WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
+    CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
+    NON_LINE_CONTROLS = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
+    INVISIBLE_MARKS = new RegExp(
+      `[${[
+        [8203, 8207],
+        [8234, 8238],
+        [8294, 8297],
+        [65279, 65279]
+      ].map(([from, to]) => `${String.fromCodePoint(from)}-${String.fromCodePoint(to)}`).join("")}]`,
+      "g"
+    );
   }
 });
 
@@ -12458,9 +12497,9 @@ function interleaveBySource(topMatches) {
   const buckets = /* @__PURE__ */ new Map();
   const order = [];
   for (const m of topMatches) {
-    const id = m && m.id ? String(m.id) : "";
-    const idx = id.indexOf(":");
-    const source = idx > 0 ? id.slice(0, idx) : "_";
+    const id2 = m && m.id ? String(m.id) : "";
+    const idx = id2.indexOf(":");
+    const source = idx > 0 ? id2.slice(0, idx) : "_";
     if (!buckets.has(source)) {
       buckets.set(source, []);
       order.push(source);
@@ -12821,7 +12860,7 @@ function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function defangText(s) {
-  return typeof s === "string" ? s.replace(WHITESPACE_CONTROLS, " ").replace(CONTROL_CHARS, "") : s;
+  return typeof s === "string" ? s.replace(WHITESPACE_CONTROLS2, " ").replace(CONTROL_CHARS2, "") : s;
 }
 function finiteAmount(a) {
   if (typeof a === "number") return Number.isFinite(a) ? a : null;
@@ -12868,8 +12907,8 @@ function writeClaims(claims) {
     throw err;
   }
 }
-function findClaim(id) {
-  return readClaims().find((c) => c.id === id) ?? null;
+function findClaim(id2) {
+  return readClaims().find((c) => c.id === id2) ?? null;
 }
 function claimsStateDir() {
   return TERMINALHIRE_DIR8;
@@ -12907,20 +12946,20 @@ function recordClaim(rec) {
     return claim;
   });
 }
-function updateClaim(id, patch) {
+function updateClaim(id2, patch) {
   return withClaimsLock(() => {
     const claims = readClaims();
-    const idx = claims.findIndex((c) => c.id === id);
+    const idx = claims.findIndex((c) => c.id === id2);
     if (idx === -1) return null;
     claims[idx] = { ...claims[idx], ...patch, updatedAt: nowISO() };
     writeClaims(claims);
     return claims[idx];
   });
 }
-function reserveStake(id, stake) {
+function reserveStake(id2, stake) {
   return withClaimsLock(() => {
     const claims = readClaims();
-    const idx = claims.findIndex((c) => c.id === id);
+    const idx = claims.findIndex((c) => c.id === id2);
     if (idx === -1) return null;
     if (claims[idx].stake) return null;
     claims[idx] = { ...claims[idx], stake, updatedAt: nowISO() };
@@ -12928,23 +12967,23 @@ function reserveStake(id, stake) {
     return claims[idx];
   });
 }
-function removeClaim(id) {
+function removeClaim(id2) {
   return withClaimsLock(() => {
     const claims = readClaims();
-    const next = claims.filter((c) => c.id !== id);
+    const next = claims.filter((c) => c.id !== id2);
     if (next.length === claims.length) return false;
     writeClaims(next);
     return true;
   });
 }
-function removeClaimIfStakeMatches(id, expectedStakePostedAt) {
+function removeClaimIfStakeMatches(id2, expectedStakePostedAt) {
   return withClaimsLock(() => {
     const claims = readClaims();
-    const target = claims.find((c) => c.id === id);
+    const target = claims.find((c) => c.id === id2);
     if (!target) return false;
     const actual = target.stake ? target.stake.postedAt : null;
     if (actual !== expectedStakePostedAt) return false;
-    writeClaims(claims.filter((c) => c.id !== id));
+    writeClaims(claims.filter((c) => c.id !== id2));
     return true;
   });
 }
@@ -12980,7 +13019,7 @@ function formatAcceptedPRRate(rate) {
   const pct = Math.round(rate.rate * 100);
   return `Accepted-PR rate: ${rate.merged}/${rate.decided} decided claims merged (${pct}%)${inFlight}`;
 }
-var TERMINALHIRE_DIR8, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS2, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, CLAIM_TURN_BY_STATE, CLAIM_TURN_LABEL, CLAIM_TURN_LABEL_WIDTH, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, WHITESPACE_CONTROLS, CONTROL_CHARS, DECIDED_STATES;
+var TERMINALHIRE_DIR8, CLAIMS_FILE, LOCK_DIR, LOCK_STALE_MS2, LOCK_RETRY_MS, LOCK_TIMEOUT_MS, CLAIM_STATES, CLAIM_TURN_BY_STATE, CLAIM_TURN_LABEL, CLAIM_TURN_LABEL_WIDTH, PUSHED_CLAIM_FIELDS, TERMINAL_STATES, POLL_TRANSITIONS, WHITESPACE_CONTROLS2, CONTROL_CHARS2, DECIDED_STATES;
 var init_claims = __esm({
   "src/claims.ts"() {
     "use strict";
@@ -13054,8 +13093,8 @@ var init_claims = __esm({
       ]),
       submitted: /* @__PURE__ */ new Set(["claimed", "working", "in-review", "ready"])
     };
-    WHITESPACE_CONTROLS = /[\t\n\v\f\r]+/g;
-    CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
+    WHITESPACE_CONTROLS2 = /[\t\n\v\f\r]+/g;
+    CONTROL_CHARS2 = /[\x00-\x1f\x7f-\x9f]/g;
     DECIDED_STATES = /* @__PURE__ */ new Set(["merged", "abandoned"]);
   }
 });
@@ -13350,7 +13389,7 @@ function openPaidIds(index) {
 }
 function gate(openIds, seenIds) {
   const seen = new Set(seenIds);
-  const acknowledged = openIds.filter((id) => seen.has(id));
+  const acknowledged = openIds.filter((id2) => seen.has(id2));
   return { count: openIds.length - acknowledged.length, acknowledged };
 }
 function computeFounderPaid(index, previous) {
@@ -13386,8 +13425,8 @@ function nextFounderBountyNotifyState(index, previous) {
     return { ids: open, fire: [], seeded: true };
   }
   const seen = new Set(prior);
-  const fire = open.filter((id) => !seen.has(id));
-  const ids = [.../* @__PURE__ */ new Set([...prior.filter((id) => open.includes(id)), ...fire])].sort();
+  const fire = open.filter((id2) => !seen.has(id2));
+  const ids = [.../* @__PURE__ */ new Set([...prior.filter((id2) => open.includes(id2)), ...fire])].sort();
   return { ids, fire, seeded: false };
 }
 function formatFounderBountyNotifyBody(index, fireIds) {
@@ -13544,12 +13583,12 @@ __export(approved_claims_badge_exports, {
 });
 function normalizeIds(claimIds) {
   if (!Array.isArray(claimIds)) return [];
-  return [...new Set(claimIds.filter((id) => typeof id === "string" && id !== ""))].sort();
+  return [...new Set(claimIds.filter((id2) => typeof id2 === "string" && id2 !== ""))].sort();
 }
 function computeApprovedClaims(claimIds, previous) {
   const approved = normalizeIds(claimIds);
   const prior = previous && Array.isArray(previous.acknowledged) ? new Set(previous.acknowledged) : /* @__PURE__ */ new Set();
-  const acknowledged = approved.filter((id) => prior.has(id));
+  const acknowledged = approved.filter((id2) => prior.has(id2));
   return { count: approved.length - acknowledged.length, acknowledged };
 }
 function acknowledgeApprovedClaim(claimId, previous) {
@@ -13576,7 +13615,12 @@ var founder_note_sync_exports = {};
 __export(founder_note_sync_exports, {
   acknowledgeFounderNotes: () => acknowledgeFounderNotes,
   computeFounderNotes: () => computeFounderNotes,
+  contextView: () => contextView,
+  fetchClaimContext: () => fetchClaimContext,
+  fetchClaimContextFile: () => fetchClaimContextFile,
   fetchFounderNotes: () => fetchFounderNotes,
+  formatBytes: () => formatBytes,
+  formatContext: () => formatContext,
   formatNote: () => formatNote,
   noteKey: () => noteKey,
   syncFounderNotes: () => syncFounderNotes
@@ -13600,6 +13644,104 @@ async function fetchFounderNotes(pushToken, fetchImpl = fetch) {
   } catch {
     return null;
   }
+}
+function contextClaim(c) {
+  if (!c || !id(c.claimId)) return null;
+  if (c.state === "after-approval")
+    return { claimId: c.claimId, state: "after-approval", notes: [], links: [] };
+  if (c.state !== "available") return null;
+  const notes = (Array.isArray(c.notes) ? c.notes : []).filter((n) => n && filled(n.id) && typeof n.text === "string" && filled(n.at)).map((n) => ({
+    id: n.id,
+    text: n.text,
+    at: n.at,
+    files: (Array.isArray(n.files) ? n.files : []).filter(
+      (f) => f && id(f.id) && filled(f.name) && Number.isSafeInteger(f.sizeBytes) && f.sizeBytes >= 0
+    ).map((f) => ({
+      id: f.id,
+      name: f.name,
+      contentType: filled(f.contentType) ? f.contentType : "application/octet-stream",
+      sizeBytes: f.sizeBytes
+    }))
+  }));
+  const links = (Array.isArray(c.links) ? c.links : []).filter((l) => l && filled(l.url)).map((l) => ({ url: l.url, label: filled(l.label) ? l.label : null }));
+  return { claimId: c.claimId, state: "available", notes, links };
+}
+async function fetchClaimContext(pushToken, fetchImpl = fetch) {
+  if (!filled(pushToken)) return null;
+  try {
+    const res = await fetchImpl(`${CLAIM_SYNC_BASE3}/api/claim/context`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pushToken }),
+      signal: AbortSignal.timeout(15e3)
+    });
+    if (!res?.ok) return null;
+    const body = await res.json();
+    if (!body || !Array.isArray(body.claims)) return null;
+    return {
+      claims: body.claims.map(contextClaim).filter(Boolean),
+      truncated: body.truncated === true
+    };
+  } catch {
+    return null;
+  }
+}
+async function fetchClaimContextFile(pushToken, fileId, range, fetchImpl = fetch) {
+  if (!filled(pushToken) || !filled(fileId) || !filled(range)) return null;
+  try {
+    const res = await fetchImpl(`${CLAIM_SYNC_BASE3}/api/claim/context/file`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pushToken, fileId, range }),
+      signal: AbortSignal.timeout(6e4)
+    });
+    if (!res?.ok) return null;
+    return new Uint8Array(await res.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+function contextView(claims) {
+  return (Array.isArray(claims) ? claims : []).map((c) => ({
+    claimId: sanitizeText(c.claimId),
+    state: c.state,
+    notes: c.notes.map((n) => ({
+      id: sanitizeText(n.id),
+      at: sanitizeText(n.at),
+      text: sanitizeMultiline(n.text).trim(),
+      files: n.files.map((f) => ({
+        id: sanitizeText(f.id),
+        name: stripInvisibleMarks(sanitizeText(f.name)),
+        contentType: sanitizeText(f.contentType),
+        sizeBytes: f.sizeBytes
+      }))
+    })),
+    links: c.links.map((l) => ({ url: safeHttpUrl(l.url), label: l.label ? sanitizeText(l.label) : null })).filter((l) => l.url)
+  }));
+}
+function formatBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+function formatContext(claim) {
+  const out = [`  Context \xB7 ${claim.claimId}`];
+  if (claim.state === "after-approval") {
+    out.push("    Available after approval");
+    return out.join("\n");
+  }
+  if (claim.notes.length === 0 && claim.links.length === 0) {
+    out.push("    No Context on this task");
+    return out.join("\n");
+  }
+  for (const note of claim.notes) {
+    out.push(`    ${note.at.slice(0, 16).replace("T", " ")}`);
+    if (note.text) out.push(`      ${note.text.replace(/\t/g, " ").split("\n").join("\n      ")}`);
+    for (const f of note.files) out.push(`      File: ${f.name} (${formatBytes(f.sizeBytes)})`);
+  }
+  for (const link of claim.links)
+    out.push(`    Link: ${link.label ? `${link.label} \xB7 ` : ""}${link.url}`);
+  return out.join("\n");
 }
 function noteKey(note) {
   return `${note.claimId}@${note.at}`;
@@ -13637,15 +13779,19 @@ async function syncFounderNotes({
 }
 function formatNote(note) {
   const label = note.kind === "feedback" ? "changes requested" : "note";
-  return `  ${note.at.slice(0, 16).replace("T", " ")}  [${label}]  ${note.claimId}
-    ${note.note.split("\n").join("\n    ")}`;
+  const text = sanitizeMultiline(note.note).replace(/\t/g, " ");
+  return `  ${sanitizeText(note.at).slice(0, 16).replace("T", " ")}  [${label}]  ${sanitizeText(note.claimId)}
+    ${text.split("\n").join("\n    ")}`;
 }
-var CLAIM_SYNC_BASE3;
+var CLAIM_SYNC_BASE3, filled, id;
 var init_founder_note_sync = __esm({
   "bin/founder-note-sync.js"() {
     "use strict";
     init_api_base();
+    init_sanitize();
     CLAIM_SYNC_BASE3 = resolveApiBase();
+    filled = (v) => typeof v === "string" && v !== "";
+    id = (v) => filled(v) && sanitizeText(v) === v;
   }
 });
 
@@ -13921,9 +14067,9 @@ function rotate(list, now, windowMs = ROTATE_WINDOW_MS) {
 }
 var UNSEEN = -1;
 function lastSurfaceFor(result, lastSurfaceOf) {
-  const id = result?.job?.id;
-  if (typeof id !== "string" || id.length === 0) return UNSEEN;
-  const v = lastSurfaceOf(id);
+  const id2 = result?.job?.id;
+  if (typeof id2 !== "string" || id2.length === 0) return UNSEEN;
+  const v = lastSurfaceOf(id2);
   return typeof v === "number" && Number.isFinite(v) ? v : UNSEEN;
 }
 function orderByStaleness(list, lastSurfaceOf) {
@@ -13965,15 +14111,15 @@ function budgetSlots(results, opts = {}) {
   const seenBountyIds = /* @__PURE__ */ new Set();
   const founderTop = [];
   for (const candidate of founderCandidates) {
-    const id = candidate.job.id;
-    if (typeof id !== "string" || id.length === 0 || seenBountyIds.has(id)) continue;
-    seenBountyIds.add(id);
-    founderTop.push(scoredById.get(id) ?? candidate);
+    const id2 = candidate.job.id;
+    if (typeof id2 !== "string" || id2.length === 0 || seenBountyIds.has(id2)) continue;
+    seenBountyIds.add(id2);
+    founderTop.push(scoredById.get(id2) ?? candidate);
   }
   const scrapedTop = rankedBountyMatches.filter((r) => {
-    const id = r.job.id;
-    if (r.job.bounty?.bountySource === "founder" || seenBountyIds.has(id)) return false;
-    if (typeof id === "string" && id.length > 0) seenBountyIds.add(id);
+    const id2 = r.job.id;
+    if (r.job.bounty?.bountySource === "founder" || seenBountyIds.has(id2)) return false;
+    if (typeof id2 === "string" && id2.length > 0) seenBountyIds.add(id2);
     return true;
   });
   const bountyTop = [...founderTop, ...scrapedTop].slice(0, BOUNTY_SLOTS);
@@ -14279,7 +14425,7 @@ async function run() {
             const { loadSeenHistory: loadSeenHistory2 } = await Promise.resolve().then(() => (init_spinner_seen(), spinner_seen_exports));
             seenHistory = loadSeenHistory2();
             const entries = seenHistory.entries;
-            lastSurfaceOf = (id) => entries[id]?.lastSurface;
+            lastSurfaceOf = (id2) => entries[id2]?.lastSurface;
           }
         } catch {
         }

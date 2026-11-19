@@ -12476,6 +12476,15 @@ function sanitizeMultiline(s) {
   if (s == null) return "";
   return String(s).replace(/\r\n?/g, "\n").replace(NON_LINE_CONTROLS, "");
 }
+var INVISIBLE_MARKS = new RegExp(
+  `[${[
+    [8203, 8207],
+    [8234, 8238],
+    [8294, 8297],
+    [65279, 65279]
+  ].map(([from, to]) => `${String.fromCodePoint(from)}-${String.fromCodePoint(to)}`).join("")}]`,
+  "g"
+);
 function formatUsd(a) {
   if (typeof a === "number") return Number.isFinite(a) ? "$" + a.toLocaleString() : "$\u2014";
   if (typeof a !== "string" || a.trim() === "") return "$\u2014";
@@ -12636,7 +12645,26 @@ ${i + 1}. ${linkTitle(job.title, job.url)} [${ref}]`);
   if (reason) console.log(`   ${reason}`);
   if (continuityNote) console.log(`   ${continuityNote}`);
   if (b.publicSummary) {
-    for (const line of wrapIndented(sanitizeText(b.publicSummary), 3, 76)) console.log(line);
+    let gap = false;
+    let printed = false;
+    let fence = null;
+    for (const line of sanitizeMultiline(b.publicSummary).split("\n")) {
+      const mark = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1] ?? null;
+      const inside = fence !== null;
+      if (mark && fence === null) fence = mark;
+      else if (mark && mark[0] === fence[0] && mark.length >= fence.length) fence = null;
+      const heading = inside || mark ? null : /^#{1,6}\s+(.+?)(?:\s+#+)?\s*$/.exec(line);
+      const raw = heading ? heading[1] : line;
+      const wrapped = wrapIndented(raw, 3, 76);
+      if (wrapped.length === 0) {
+        gap = printed;
+        continue;
+      }
+      if (gap) console.log("");
+      gap = false;
+      printed = true;
+      for (const line2 of wrapped) console.log(line2);
+    }
   }
   if (b.bountySource === "founder" && b.specProvenance) {
     console.log(
