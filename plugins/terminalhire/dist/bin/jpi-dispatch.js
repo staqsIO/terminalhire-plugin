@@ -5135,14 +5135,14 @@ async function mapWithConcurrency(items, limit2, fn) {
   if (items.length === 0) return results;
   const workers = Math.max(1, Math.min(Math.floor(limit2) || 1, items.length));
   let next = 0;
-  async function run35() {
+  async function run36() {
     for (; ; ) {
       const i = next++;
       if (i >= items.length) return;
       results[i] = await fn(items[i], i);
     }
   }
-  await Promise.all(Array.from({ length: workers }, run35));
+  await Promise.all(Array.from({ length: workers }, run36));
   return results;
 }
 var init_concurrency = __esm({
@@ -32289,7 +32289,7 @@ function readGoTestVerbose(out) {
   const TRAILER = /^(?:ok {2}\t\S+\t|FAIL\t\S+(?:\t| \[(?:build|setup) failed\]$)|\? {3}\t\S+\t)/;
   const lines = out.split("\n");
   let passed = 0;
-  let failed = 0;
+  let failed2 = 0;
   let frames = 0;
   let packageOnly = 0;
   const everOpen = /* @__PURE__ */ new Set();
@@ -32304,9 +32304,9 @@ function readGoTestVerbose(out) {
     const invocations = [];
     const latest = /* @__PURE__ */ new Map();
     for (const l of block) {
-      const run35 = /^=== RUN {3}(\S+)$/.exec(l);
-      if (run35?.[1] !== void 0)
-        latest.set(run35[1], invocations.push(null) - 1);
+      const run36 = /^=== RUN {3}(\S+)$/.exec(l);
+      if (run36?.[1] !== void 0)
+        latest.set(run36[1], invocations.push(null) - 1);
       const frame = /^--- (PASS|FAIL|SKIP): (\S+) \(\d+\.\d+s\)$/.exec(l);
       if (frame?.[2] !== void 0 && !latest.has(frame[2]) && everOpen.has(frame[2])) {
         nested = true;
@@ -32319,7 +32319,7 @@ function readGoTestVerbose(out) {
     const blockFailed = invocations.filter((r) => r === "FAIL").length;
     frames += invocations.filter((r) => r !== null).length;
     passed += blockPassed;
-    failed += blockFailed;
+    failed2 += blockFailed;
     if (line.startsWith("FAIL	") && blockFailed === 0)
       packageOnly += 1;
     const openNow = [...latest].filter(([, i]) => invocations[i] === null).map(([n]) => n);
@@ -32332,12 +32332,12 @@ function readGoTestVerbose(out) {
   }
   if (nested || incomplete)
     return null;
-  if (failed === 0) {
+  if (failed2 === 0) {
     if (frames === 0 || packageOnly > 0)
       return null;
     return { tests_passed: passed, tests_failed: 0 };
   }
-  return { tests_passed: passed, tests_failed: failed };
+  return { tests_passed: passed, tests_failed: failed2 };
 }
 function readCounts(stdout, stderr = "") {
   const out = `${stdout}
@@ -32631,10 +32631,10 @@ var init_classify2 = __esm({
             return onlyFiles > 0 ? { tests_passed: 0, tests_failed: onlyFiles } : null;
           }
           const passed = /(\d+) passed/.exec(line[1]);
-          const failed = /(\d+) failed/.exec(line[1]);
-          if (!passed && !failed)
+          const failed2 = /(\d+) failed/.exec(line[1]);
+          if (!passed && !failed2)
             return null;
-          return withSuiteFailures({ tests_passed: int(passed), tests_failed: int(failed) }, files);
+          return withSuiteFailures({ tests_passed: int(passed), tests_failed: int(failed2) }, files);
         },
         // One invocation prints one `Test Files` line, and a numeric `Tests` line only when a
         // spec loaded (the every-spec-failed shape above has none). The larger of the two
@@ -32658,11 +32658,11 @@ var init_classify2 = __esm({
           if (/no tests ran/.test(line[1]))
             return { tests_passed: 0, tests_failed: 0 };
           const passed = /(\d+) passed/.exec(line[1]);
-          const failed = /(\d+) failed/.exec(line[1]);
+          const failed2 = /(\d+) failed/.exec(line[1]);
           const errors = /(\d+) error/.exec(line[1]);
-          if (!passed && !failed && !errors)
+          if (!passed && !failed2 && !errors)
             return null;
-          return { tests_passed: int(passed), tests_failed: int(failed) + int(errors) };
+          return { tests_passed: int(passed), tests_failed: int(failed2) + int(errors) };
         },
         // Only FINAL tallies, which carry pytest's `in 0.54s`. The interim banners the reader
         // skips above carry no duration, and counting them would mark every red run partial.
@@ -32687,13 +32687,13 @@ var init_classify2 = __esm({
           if (lines.length === 0)
             return null;
           let passed = 0;
-          let failed = 0;
+          let failed2 = 0;
           for (const m of lines) {
-            const [run35, failures, errors, skipped] = [m[1], m[2], m[3], m[4]].map(Number);
-            failed += failures + errors;
-            passed += Math.max(0, run35 - failures - errors - skipped);
+            const [run36, failures, errors, skipped] = [m[1], m[2], m[3], m[4]].map(Number);
+            failed2 += failures + errors;
+            passed += Math.max(0, run36 - failures - errors - skipped);
           }
-          return { tests_passed: passed, tests_failed: failed };
+          return { tests_passed: passed, tests_failed: failed2 };
         }
       },
       {
@@ -32726,8 +32726,8 @@ var init_classify2 = __esm({
           const m = /^\d+% tests passed, (\d+) tests? failed out of (\d+)$/m.exec(out);
           if (!m)
             return null;
-          const failed = Number(m[1]);
-          return { tests_passed: Number(m[2]) - failed, tests_failed: failed };
+          const failed2 = Number(m[1]);
+          return { tests_passed: Number(m[2]) - failed2, tests_failed: failed2 };
         },
         summaries: (out) => Math.max(1, countLines(out, /^\d+% tests passed, \d+ tests? failed out of \d+$/gm))
       },
@@ -32820,10 +32820,10 @@ var init_classify2 = __esm({
         runner: "ava",
         read: (out) => {
           const passed = /^\s*(\d+) tests? passed\b/m.exec(out);
-          const failed = /^\s*(\d+) tests? failed\b/m.exec(out);
-          if (!passed && !failed)
+          const failed2 = /^\s*(\d+) tests? failed\b/m.exec(out);
+          if (!passed && !failed2)
             return null;
-          return { tests_passed: int(passed), tests_failed: int(failed) };
+          return { tests_passed: int(passed), tests_failed: int(failed2) };
         },
         summaries: (out) => Math.max(countLines(out, /^\s*\d+ tests? passed\b/gm), countLines(out, /^\s*\d+ tests? failed\b/gm))
       },
@@ -32877,7 +32877,7 @@ var init_classify2 = __esm({
         shadowedBy: ["node --test (TAP)", "node-tap"],
         read: (out) => {
           let n = 0;
-          let failed = 0;
+          let failed2 = 0;
           let passed = 0;
           let plan = null;
           for (const line of out.split("\n")) {
@@ -32903,7 +32903,7 @@ var init_classify2 = __esm({
               continue;
             if (m[1] !== void 0) {
               if (kind !== "todo")
-                failed += 1;
+                failed2 += 1;
               continue;
             }
             passed += 1;
@@ -32912,7 +32912,7 @@ var init_classify2 = __esm({
             return null;
           if (plan !== null && plan !== n)
             return null;
-          return { tests_passed: passed, tests_failed: failed };
+          return { tests_passed: passed, tests_failed: failed2 };
         }
       }
     ];
@@ -34053,7 +34053,7 @@ async function startProxySidecar(d, allow, idBase, staged, labels) {
     if (!dockerSync(d, ["network", "create", ...label, netExt]).ok) {
       throw new FenceError(`could not create the egress network ${netExt}`);
     }
-    const run35 = dockerSync(d, [
+    const run36 = dockerSync(d, [
       "run",
       "-d",
       `--name=${proxyName}`,
@@ -34076,9 +34076,9 @@ async function startProxySidecar(d, allow, idBase, staged, labels) {
       "node",
       `${SIDECAR_CODE_GUEST}/proxyEntry.js`
     ], 3e4);
-    if (!run35.ok) {
-      const reason = `could not start the proxy sidecar: ${run35.stderr.trim()}`;
-      if (run35.timedOut || /no space left on device/i.test(run35.stderr)) {
+    if (!run36.ok) {
+      const reason = `could not start the proxy sidecar: ${run36.stderr.trim()}`;
+      if (run36.timedOut || /no space left on device/i.test(run36.stderr)) {
         throw new ContainmentRefusalError(reason);
       }
       throw new FenceError(reason);
@@ -34434,7 +34434,7 @@ function stageCaptureCode(workDir) {
   return dir;
 }
 async function runCapture(docker3, o, timeoutMs, signal, deadline) {
-  const failed = (reason) => ({
+  const failed2 = (reason) => ({
     status: "failed",
     reason,
     mode: o.request.mode,
@@ -34444,7 +34444,7 @@ async function runCapture(docker3, o, timeoutMs, signal, deadline) {
     notes: []
   });
   if (signal?.aborted === true)
-    return failed("the screenshot step was stopped");
+    return failed2("the screenshot step was stopped");
   const captureStarted = Date.now();
   const child = docker3.spawn(captureArgs(o));
   const abort = killOnAbort(docker3, o.name, signal);
@@ -34471,10 +34471,10 @@ async function runCapture(docker3, o, timeoutMs, signal, deadline) {
   abort.release();
   o.onTiming?.("capture", Date.now() - captureStarted);
   if (code === "stopped")
-    return failed("the screenshot step was stopped");
+    return failed2("the screenshot step was stopped");
   docker3.sync(["rm", "--force", o.name], { timeoutMs: timeoutWithin(3e4, deadline) });
   if (code === null)
-    return failed(`the screenshot step ran past ${Math.round(timeoutMs / 1e3)}s`);
+    return failed2(`the screenshot step ran past ${Math.round(timeoutMs / 1e3)}s`);
   if (typeof o.out !== "string") {
     const readbackStarted = Date.now();
     try {
@@ -34486,19 +34486,19 @@ async function runCapture(docker3, o, timeoutMs, signal, deadline) {
         ...signal === void 0 ? {} : { signal }
       });
     } catch (err) {
-      return failed(`could not read the screenshots back: ${String(err?.message ?? err).slice(0, 400)}`);
+      return failed2(`could not read the screenshots back: ${String(err?.message ?? err).slice(0, 400)}`);
     } finally {
       o.onTiming?.("readback", Date.now() - readbackStarted);
     }
   }
   const manifestPath = join38(captureOutDir(o), "manifest.json");
   if (!existsSync19(manifestPath)) {
-    return failed(`the screenshot container exited ${String(code)} without a manifest: ${stderr.trim().slice(-400)}`);
+    return failed2(`the screenshot container exited ${String(code)} without a manifest: ${stderr.trim().slice(-400)}`);
   }
   try {
     return JSON.parse(readFileSync25(manifestPath, "utf8"));
   } catch {
-    return failed("the screenshot manifest could not be read");
+    return failed2("the screenshot manifest could not be read");
   }
 }
 function killOnAbort(docker3, name, signal) {
@@ -35039,7 +35039,7 @@ async function startPreview(req) {
   };
   const startedAt = Date.now();
   try {
-    const run35 = docker(client, [
+    const run36 = docker(client, [
       "run",
       "-d",
       "--init",
@@ -35066,8 +35066,8 @@ async function startPreview(req) {
       "-e",
       SERVER_SOURCE
     ]);
-    if (!run35.ok) {
-      throw new PreviewError(`could not start the preview container: ${run35.stderr.trim()}`);
+    if (!run36.ok) {
+      throw new PreviewError(`could not start the preview container: ${run36.stderr.trim()}`);
     }
     const deadline = Date.now() + (req.readyTimeoutMs ?? 6e4);
     let hostPort = null;
@@ -35246,17 +35246,17 @@ async function acquireTransactionally(body) {
   } catch (err) {
     const failures = [];
     for (const undo of undos.reverse()) {
-      let failed = null;
+      let failed2 = null;
       try {
         await undo();
       } catch (rollbackErr) {
-        failed = { thrown: rollbackErr };
+        failed2 = { thrown: rollbackErr };
       }
-      if (failed === null)
+      if (failed2 === null)
         continue;
       let entry;
       try {
-        entry = describeThrown(failed.thrown, { includeName: true });
+        entry = describeThrown(failed2.thrown, { includeName: true });
       } catch {
         entry = UNDESCRIBABLE_THROWN;
       }
@@ -38054,10 +38054,10 @@ function planPreview(repo) {
     };
   }
   const scripts = scriptsOf(pkg);
-  const run35 = scriptRunner(repo);
-  const build = scripts.has("build") ? `${run35} build` : null;
+  const run36 = scriptRunner(repo);
+  const build = scripts.has("build") ? `${run36} build` : null;
   const serveName = SERVE_SCRIPTS.find((name) => scripts.has(name));
-  const serve = serveName === void 0 ? null : `${run35} ${serveName}`;
+  const serve = serveName === void 0 ? null : `${run36} ${serveName}`;
   const anyHtml = rootHtml || hasIndexHtml(repo);
   if (serve === null && !anyHtml) {
     return {
@@ -39182,8 +39182,8 @@ function inspectRunDigest(docker3, image, log) {
   log(digest === null ? `image digest: ${String(parsed.length)} RepoDigest(s) for ${image}, none alone names its repository; running by name` : `image digest: running the test step as ${digest}`);
   return digest;
 }
-function classifySingleRun(run35) {
-  return classifyVerification(run35).outcome;
+function classifySingleRun(run36) {
+  return classifyVerification(run36).outcome;
 }
 function testStepEnv(env, runtime) {
   if (runtime !== "go")
@@ -42302,18 +42302,18 @@ function dockerStageTransport(docker3, env, io) {
 function bothTunnels(a, b) {
   return {
     kill: (signal) => {
-      let failed = false;
+      let failed2 = false;
       let error2;
       for (const t of [a, b]) {
         try {
           t.kill(signal);
         } catch (err) {
-          if (!failed)
+          if (!failed2)
             error2 = err;
-          failed = true;
+          failed2 = true;
         }
       }
-      if (failed)
+      if (failed2)
         throw error2;
     },
     failure: () => a.failure() ?? b.failure()
@@ -43741,12 +43741,12 @@ function stepTimer(ctx, side) {
   return (step, ms) => ctx.progress?.("screenshots", `${side}: ${step} ${(ms / 1e3).toFixed(1)}s`);
 }
 function done(side, m, outDir) {
-  const failed = m.failures.length;
+  const failed2 = m.failures.length;
   return {
     side: {
       side,
       status: "captured",
-      reason: failed === 0 ? null : `${failed} of ${failed + m.items.length} shots failed: ${m.failures[0]?.error ?? ""}`,
+      reason: failed2 === 0 ? null : `${failed2} of ${failed2 + m.items.length} shots failed: ${m.failures[0]?.error ?? ""}`,
       mode: m.mode,
       basePath: m.basePath
     },
@@ -44183,13 +44183,13 @@ function cloneTargetAtUnguarded(opts) {
     stdio: "pipe",
     env: gitCloneEnv(opts.auth)
   });
-  const run35 = (args5) => {
+  const run36 = (args5) => {
     runOut(args5);
   };
-  run35(["init", "-q"]);
-  run35(["remote", "add", "origin", source]);
+  run36(["init", "-q"]);
+  run36(["remote", "add", "origin", source]);
   try {
-    run35(["fetch", "-q", "--depth", "1", "origin", "--end-of-options", opts.sha]);
+    run36(["fetch", "-q", "--depth", "1", "origin", "--end-of-options", opts.sha]);
   } catch (err) {
     const stderr = String(err.stderr ?? "");
     if (endOfOptionsUnsupported(stderr)) {
@@ -44205,16 +44205,16 @@ function cloneTargetAtUnguarded(opts) {
     }
     throw new CloneUnavailableError(`we could not fetch ${opts.sha.slice(0, 12)} from ${opts.url}. Nothing ran, so this says nothing about the code \u2014 our environment could not obtain it.`, { cause: err });
   }
-  run35(["checkout", "-q", "FETCH_HEAD"]);
+  run36(["checkout", "-q", "FETCH_HEAD"]);
   const head = runOut(["rev-parse", "HEAD"]).trim();
   if (head !== opts.sha) {
     throw new ThRunError(`the target checkout is at ${head}, not the requested ${opts.sha}. Refusing to verify against a commit the result would misattribute.`);
   }
-  scrubCloneSource(opts.dest, run35);
+  scrubCloneSource(opts.dest, run36);
   return head;
 }
-function scrubCloneSource(dest, run35) {
-  run35(["remote", "remove", "origin"]);
+function scrubCloneSource(dest, run36) {
+  run36(["remote", "remove", "origin"]);
   rmSync12(join46(dest, ".git", "FETCH_HEAD"), { force: true });
 }
 function publishableTarget(url) {
@@ -44405,9 +44405,9 @@ function refusedRun(fields) {
     scriptTimes: null
   };
 }
-function refusalOriginOf(refusal2) {
+function refusalOriginOf(refusal3) {
   try {
-    return refusal2.origin === "repository" ? "repository" : "ours";
+    return refusal3.origin === "repository" ? "repository" : "ours";
   } catch {
     return "ours";
   }
@@ -44531,15 +44531,15 @@ async function verifyWorkingDiff(req) {
   try {
     return await runVerification(req, ctx);
   } catch (err) {
-    const refusal2 = findRunRefusal(err);
-    if (refusal2 === null)
+    const refusal3 = findRunRefusal(err);
+    if (refusal3 === null)
       throw err;
     return {
       result: refusedRun({
         // `repository` survives only when the repository's files alone chose the image.
         // `resolvePublishedImage` knows the version came from the repo, but not whether an
         // override picked the image variant the missing tag belongs to (Codex, TERM-1313).
-        origin: refusalOriginOf(refusal2) === "repository" && ctx.imageChosenByRepository ? "repository" : "ours",
+        origin: refusalOriginOf(refusal3) === "repository" && ctx.imageChosenByRepository ? "repository" : "ours",
         runId: ctx.runId,
         claimId: target.claimId,
         // `describeThrown`, not `refusal.message`. Classifying a value does not make
@@ -44554,7 +44554,7 @@ async function verifyWorkingDiff(req) {
         // this call there is no raw read of a caller-supplied value left on the
         // path. For an ordinary error `describeThrown(x, { includeName: false })`
         // returns exactly `x.message`, so no founder-facing sentence changes.
-        reason: describeThrown(refusal2, { includeName: false }),
+        reason: describeThrown(refusal3, { includeName: false }),
         wallMs: Date.now() - ctx.startedAt,
         // The SNAPSHOT, already redacted above — not `publishableTarget(req.targetRepo)`
         // again. Calling it here would re-read `req` inside the very catch that exists to
@@ -45527,7 +45527,7 @@ function startDatabase(req) {
     if (!vol.ok) {
       throw new DbStackError(`could not create the data volume ${volume}: ${vol.stderr.trim()}`);
     }
-    const run35 = docker2([
+    const run36 = docker2([
       "run",
       "-d",
       `--name=${container}`,
@@ -45575,8 +45575,8 @@ function startDatabase(req) {
       "-c",
       "full_page_writes=off"
     ], 6e4);
-    if (!run35.ok) {
-      throw new DbStackError(`could not start the database container: ${run35.stderr.trim()}`);
+    if (!run36.ok) {
+      throw new DbStackError(`could not start the database container: ${run36.stderr.trim()}`);
     }
     const ready = waitForPostgres(container, creds, req.readyTimeoutMs ?? 9e4);
     if (!ready.ok) {
@@ -46776,17 +46776,17 @@ async function sh(cmd, args5, opts = {}) {
 function promptOutput() {
   return machineOutput ? process.stderr : process.stdout;
 }
-function refuseUnasked(refusal2) {
+function refuseUnasked(refusal3) {
   if (!machineOutput) return;
   const {
     code = "confirmation-required",
     message: message2 = "terminalhire claim: this step asks a question, and under --json nothing is asked.",
     ...extra
-  } = refusal2 ?? {};
+  } = refusal3 ?? {};
   refuse5(code, message2, extra);
 }
-async function confirm(question, refusal2) {
-  refuseUnasked(refusal2);
+async function confirm(question, refusal3) {
+  refuseUnasked(refusal3);
   const rl = createInterface9({ input: process.stdin, output: promptOutput() });
   try {
     const ans = await new Promise((resolve9) => rl.question(question, resolve9));
@@ -46801,13 +46801,13 @@ function submitConsentMode({ yes, isTTY, unattendedAllowed = true }) {
   if (!isTTY) return "non-interactive";
   return "ask";
 }
-async function confirmSubmit(flags, question, { unattendedAllowed = true, refusal: refusal2 = "" } = {}) {
+async function confirmSubmit(flags, question, { unattendedAllowed = true, refusal: refusal3 = "" } = {}) {
   const mode = submitConsentMode({
     yes: Boolean(flags.yes),
     isTTY: Boolean(process.stdin.isTTY),
     unattendedAllowed
   });
-  const unattended = refusal2 || "terminalhire claim: cannot submit unattended in this state.";
+  const unattended = refusal3 || "terminalhire claim: cannot submit unattended in this state.";
   if (mode === "ask") {
     return confirm(
       question,
@@ -46823,8 +46823,8 @@ async function confirmSubmit(flags, question, { unattendedAllowed = true, refusa
   );
   return true;
 }
-async function ask(question, refusal2) {
-  refuseUnasked(refusal2);
+async function ask(question, refusal3) {
+  refuseUnasked(refusal3);
   const rl = createInterface9({ input: process.stdin, output: promptOutput() });
   try {
     const ans = await new Promise((resolve9) => rl.question(question, resolve9));
@@ -48961,7 +48961,7 @@ function founderClaimStanding(claim, approvalsChecked) {
   return approvalsChecked ? "waiting on poster \u2014 approval not granted yet" : `${turn} \u2014 registered locally, approval not checked`;
 }
 function claimStatusView(c, { approvalsChecked = false } = {}) {
-  const refusal2 = submitRefusalFor(c);
+  const refusal3 = submitRefusalFor(c);
   const revise = c.review?.verdict === "revise" && REVISE_RECOVERY_STATES.includes(c.state);
   return {
     id: c.id,
@@ -48988,8 +48988,8 @@ function claimStatusView(c, { approvalsChecked = false } = {}) {
     baseSha: c.baseSha ?? null,
     reviewVerdict: c.review?.verdict ?? null,
     hold: holdView(c.hold, "unverified"),
-    submitAccepts: refusal2 === null,
-    recoveryCommand: refusal2 === null ? null : revise ? reviseRecoveryCommand(c.id) : submitRecoveryCommand(c),
+    submitAccepts: refusal3 === null,
+    recoveryCommand: refusal3 === null ? null : revise ? reviseRecoveryCommand(c.id) : submitRecoveryCommand(c),
     nextStep: nextStepFor(c),
     claimedAt: c.claimedAt,
     updatedAt: c.updatedAt
@@ -50181,18 +50181,18 @@ function buildPatchSubmission({
   if (permissionRequest !== null) body.permissionRequest = permissionRequest;
   return body;
 }
-function renderRunView(run35, message2, extra = {}) {
+function renderRunView(run36, message2, extra = {}) {
   const lines = [];
-  const sha = run35.commitSha ? String(run35.commitSha).slice(0, 10) : null;
-  lines.push(`  run:        ${run35.branch ?? "(no branch)"}${sha ? ` @ ${sha}` : ""}`);
+  const sha = run36.commitSha ? String(run36.commitSha).slice(0, 10) : null;
+  lines.push(`  run:        ${run36.branch ?? "(no branch)"}${sha ? ` @ ${sha}` : ""}`);
   lines.push(
-    `  status:     ${terminalSafeInline(run35.status)}${run35.conclusion ? ` \xB7 conclusion: ${terminalSafeInline(run35.conclusion)}` : ""}`
+    `  status:     ${terminalSafeInline(run36.status)}${run36.conclusion ? ` \xB7 conclusion: ${terminalSafeInline(run36.conclusion)}` : ""}`
   );
-  const claimState = extra.claimState ?? run35.claimState;
-  const unverifiedCause = extra.unverifiedCause ?? run35.unverifiedCause;
-  const resetAt = extra.resetAt ?? run35.resetAt;
-  const rateLimitCap = extra.rateLimitCap ?? run35.rateLimitCap ?? 5;
-  const rateLimitCount = extra.rateLimitCount ?? run35.rateLimitCount;
+  const claimState = extra.claimState ?? run36.claimState;
+  const unverifiedCause = extra.unverifiedCause ?? run36.unverifiedCause;
+  const resetAt = extra.resetAt ?? run36.resetAt;
+  const rateLimitCap = extra.rateLimitCap ?? run36.rateLimitCap ?? 5;
+  const rateLimitCount = extra.rateLimitCount ?? run36.rateLimitCount;
   if (claimState) {
     const stateText = claimState === "poster-review" ? HISTORY_LINE : terminalSafeInline(claimState);
     lines.push(`  state:      ${stateText}`);
@@ -50206,15 +50206,15 @@ function renderRunView(run35, message2, extra = {}) {
       `  rate limit: ${rateLimitCount ?? 5}/${rateLimitCap} runs in 24h cap reached${resetStr}`
     );
   }
-  if (Array.isArray(run35.failingJobs) && run35.failingJobs.length > 0) {
-    lines.push(`  failing:    ${run35.failingJobs.map(terminalSafeInline).join(", ")}`);
+  if (Array.isArray(run36.failingJobs) && run36.failingJobs.length > 0) {
+    lines.push(`  failing:    ${run36.failingJobs.map(terminalSafeInline).join(", ")}`);
   }
-  if (run35.previewUrl) lines.push(`  preview:    ${terminalSafeInline(run35.previewUrl)}`);
-  if (run35.roundTrips != null) lines.push(`  round trips: ${run35.roundTrips}`);
-  if (run35.passMeaning) lines.push(`  ${terminalSafeInline(run35.passMeaning)}`);
-  if (run35.logTail) {
+  if (run36.previewUrl) lines.push(`  preview:    ${terminalSafeInline(run36.previewUrl)}`);
+  if (run36.roundTrips != null) lines.push(`  round trips: ${run36.roundTrips}`);
+  if (run36.passMeaning) lines.push(`  ${terminalSafeInline(run36.passMeaning)}`);
+  if (run36.logTail) {
     lines.push("  \u2500\u2500 log tail \u2500\u2500");
-    for (const l of terminalSafeLines(run35.logTail)) lines.push(`  \u2502 ${l}`);
+    for (const l of terminalSafeLines(run36.logTail)) lines.push(`  \u2502 ${l}`);
   }
   if (message2) lines.push(`  ${message2}`);
   return lines.join("\n");
@@ -51105,13 +51105,13 @@ async function uploadClaimScreenshots(intake, uploads) {
   }
   const byFile = new Map(uploads.map((u) => [u.file, u.bytes]));
   let uploaded = 0;
-  const failed = [];
+  const failed2 = [];
   for (const item of items) {
     const file = typeof item?.file === "string" ? item.file : "";
     const bytes = byFile.get(file);
     const url = typeof item?.url === "string" && item.url.startsWith("/") ? item.url : null;
     if (!bytes || !url) {
-      failed.push([file || "(unnamed)", "not in this submission"]);
+      failed2.push([file || "(unnamed)", "not in this submission"]);
       continue;
     }
     let why = null;
@@ -51131,11 +51131,11 @@ async function uploadClaimScreenshots(intake, uploads) {
       why = "unreachable";
     }
     if (why === null) uploaded++;
-    else failed.push([file, why]);
+    else failed2.push([file, why]);
   }
   console.log("");
   if (uploaded > 0) console.log(`\u2713 ${uploaded} screenshot${uploaded === 1 ? "" : "s"} uploaded`);
-  for (const [file, why] of failed) {
+  for (const [file, why] of failed2) {
     console.log(
       `\u26A0 screenshot ${file} did not upload (${why}). ${STANDS}; the claim page lists it as not arrived.`
     );
@@ -51903,8 +51903,8 @@ terminalhire claim: refusing to submit \u2014 ${competing.length} open PR(s) by 
     `  Run '${next}' after the maintainer acts to fold the merge into your accepted-PR rate.`
   );
 }
-async function askYes(question, refusal2) {
-  refuseUnasked(refusal2);
+async function askYes(question, refusal3) {
+  refuseUnasked(refusal3);
   const rl = createInterface9({ input: process.stdin, output: promptOutput() });
   return new Promise(
     (res) => rl.question(question, (a) => {
@@ -54939,27 +54939,27 @@ function diff(prev, next, cols) {
   if (!Number.isInteger(cols) || cols <= 0) return [];
   const ops = [];
   const len = next.length;
-  let run35 = null;
+  let run36 = null;
   for (let i = 0; i < len; i++) {
     const col = i % cols;
     const row = (i - col) / cols;
-    if (col === 0 && run35) {
-      ops.push(run35);
-      run35 = null;
+    if (col === 0 && run36) {
+      ops.push(run36);
+      run36 = null;
     }
     if (cellNe(prev[i], next[i])) {
-      if (run35 && run35.row === row && run35.col + run35.run.length === col) {
-        run35.run.push(next[i]);
+      if (run36 && run36.row === row && run36.col + run36.run.length === col) {
+        run36.run.push(next[i]);
       } else {
-        if (run35) ops.push(run35);
-        run35 = { row, col, run: [next[i]] };
+        if (run36) ops.push(run36);
+        run36 = { row, col, run: [next[i]] };
       }
-    } else if (run35) {
-      ops.push(run35);
-      run35 = null;
+    } else if (run36) {
+      ops.push(run36);
+      run36 = null;
     }
   }
-  if (run35) ops.push(run35);
+  if (run36) ops.push(run36);
   return ops;
 }
 function styleOf(cell) {
@@ -57023,12 +57023,12 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
       continue;
     }
     spansConsidered++;
-    let run35 = 0;
+    let run36 = 0;
     const closeChain = () => {
-      if (run35 > 0) {
+      if (run36 > 0) {
         recoveryChains++;
-        totalDepth += run35;
-        run35 = 0;
+        totalDepth += run36;
+        run36 = 0;
       }
     };
     for (const uuid2 of episode.mainNodeUuids) {
@@ -57037,9 +57037,9 @@ function deriveRecoveryDepth(episodes, nodesByUuid) {
         continue;
       }
       if (node.kind === "tool_result" /* ToolResult */ && node.isError) {
-        run35++;
-        if (run35 > maxConsecutiveErrors) {
-          maxConsecutiveErrors = run35;
+        run36++;
+        if (run36 > maxConsecutiveErrors) {
+          maxConsecutiveErrors = run36;
         }
       } else if (node.kind === "tool_result" /* ToolResult */ && !node.isError) {
         closeChain();
@@ -61682,10 +61682,10 @@ function probesFor(requirements) {
   }
   return out;
 }
-async function probeLocalSetup(requirements, { run: run35 = runProbe, timeoutMs = PROBE_TIMEOUT_MS3, platform = process.platform } = {}) {
+async function probeLocalSetup(requirements, { run: run36 = runProbe, timeoutMs = PROBE_TIMEOUT_MS3, platform = process.platform } = {}) {
   const probes = probesFor(requirements);
   const shell = platform === "win32";
-  const results = await Promise.all(probes.map((p) => run35(p.file, p.args, timeoutMs, { shell })));
+  const results = await Promise.all(probes.map((p) => run36(p.file, p.args, timeoutMs, { shell })));
   const have = [];
   const missing = [];
   probes.forEach((p, i) => {
@@ -87923,6 +87923,416 @@ var init_jpi_feedback = __esm({
   }
 });
 
+// bin/jpi-waitlist.js
+var jpi_waitlist_exports = {};
+__export(jpi_waitlist_exports, {
+  EMAIL_MAX_CHARS: () => EMAIL_MAX_CHARS,
+  EMAIL_RE: () => EMAIL_RE,
+  GITHUB_LOGIN_RE: () => GITHUB_LOGIN_RE,
+  LINKEDIN_HOST_RE: () => LINKEDIN_HOST_RE,
+  LINKEDIN_MAX_CHARS: () => LINKEDIN_MAX_CHARS,
+  LINKEDIN_SLUG_RE: () => LINKEDIN_SLUG_RE,
+  MAX_BODY_BYTES: () => MAX_BODY_BYTES,
+  NOTE_MAX_CHARS: () => NOTE_MAX_CHARS,
+  WAITLIST_SRC: () => WAITLIST_SRC,
+  checkWaitlistInput: () => checkWaitlistInput,
+  parseWaitlistArgs: () => parseWaitlistArgs,
+  run: () => run35,
+  waitlistBody: () => waitlistBody
+});
+function parseWaitlistArgs(argv) {
+  const flags = {};
+  const positional = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = String(argv[i]);
+    if (a === "-h") {
+      flags.help = true;
+      continue;
+    }
+    if (!a.startsWith("--")) {
+      positional.push(a);
+      continue;
+    }
+    const eq = a.indexOf("=");
+    const key = eq === -1 ? a.slice(2) : a.slice(2, eq);
+    if (VALUE_FLAGS3.has(key)) {
+      if (eq !== -1) {
+        flags[key] = a.slice(eq + 1);
+        continue;
+      }
+      const value = argv[i + 1];
+      if (value === void 0 || String(value).startsWith("--")) {
+        return {
+          refusal: {
+            code: "bad-argument",
+            message: `terminalhire waitlist: --${key} needs a value.`
+          }
+        };
+      }
+      flags[key] = String(value);
+      i++;
+    } else if (BOOLEAN_FLAGS.has(key) && eq === -1) {
+      flags[key] = true;
+    } else {
+      const shown = sanitizeText(`--${key}`).slice(0, 40);
+      return {
+        refusal: {
+          code: "usage",
+          message: `terminalhire waitlist: unknown option ${shown}. ${USAGE3}`
+        }
+      };
+    }
+  }
+  return { flags, positional };
+}
+function refusal2(code, message2, field) {
+  return field ? { ok: false, code, field, message: message2 } : { ok: false, code, message: message2 };
+}
+function waitlistBody({ email: email2, note, linkedin }) {
+  const body = { email: email2, src: WAITLIST_SRC };
+  if (note) body.note = note;
+  if (linkedin) body.linkedin = linkedin;
+  return body;
+}
+function linkedinProfile(raw) {
+  if (raw === void 0 || raw === null) return null;
+  const s = String(raw).trim();
+  if (s === "") return null;
+  if (s.length > LINKEDIN_MAX_CHARS) return false;
+  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(s) ? s : `https://${s}`;
+  let url;
+  try {
+    url = new URL(withScheme);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password || url.port || !LINKEDIN_HOST_RE.test(url.hostname) || !LINKEDIN_SLUG_RE.test(url.pathname)) {
+    return false;
+  }
+  return `https://www.linkedin.com${url.pathname.replace(/\/$/, "")}`;
+}
+function checkWaitlistInput({ email: email2, note, linkedin } = {}) {
+  if (typeof email2 !== "string") {
+    return refusal2(
+      "invalid-email",
+      "terminalhire waitlist: give the address to sign up with --email.",
+      "email"
+    );
+  }
+  const address = email2.trim().toLowerCase();
+  if (address.length === 0 || address.length > EMAIL_MAX_CHARS || !EMAIL_RE.test(address)) {
+    return refusal2(
+      "invalid-email",
+      "terminalhire waitlist: --email must be one email address, like you@example.com.",
+      "email"
+    );
+  }
+  let text = null;
+  if (note !== void 0 && note !== null) {
+    text = String(note).trim();
+    if (text.length > NOTE_MAX_CHARS) {
+      return refusal2(
+        "invalid-note",
+        `terminalhire waitlist: --note can be at most ${NOTE_MAX_CHARS} characters.`,
+        "note"
+      );
+    }
+  }
+  const profile = linkedinProfile(linkedin);
+  if (profile === false) {
+    return refusal2(
+      "invalid-linkedin",
+      "terminalhire waitlist: --linkedin must be a LinkedIn profile link, like linkedin.com/in/your-name.",
+      "linkedin"
+    );
+  }
+  const body = waitlistBody({ email: address, note: text, linkedin: profile });
+  if (Buffer.byteLength(JSON.stringify(body), "utf8") > MAX_BODY_BYTES) {
+    return refusal2(
+      "too-large",
+      `terminalhire waitlist: this sign-up is over the ${MAX_BODY_BYTES} bytes the server accepts. Shorten the note.`
+    );
+  }
+  return { ok: true, body };
+}
+function createOutput({ json, stdout, stderr }) {
+  let lastOut = Promise.resolve();
+  let lastErr = Promise.resolve();
+  const write = (stream, text) => new Promise((resolve9) => {
+    try {
+      stream.write(text, () => resolve9());
+    } catch {
+      resolve9();
+    }
+  });
+  const block = (lines, indent2 = "  ") => `${lines.map((line) => line === "" ? "" : `${indent2}${sanitizeText(line)}`).join("\n")}
+`;
+  return {
+    json,
+    say(lines) {
+      if (json) lastErr = write(stderr, block(lines));
+      else lastOut = write(stdout, block(lines));
+    },
+    emit(obj) {
+      lastOut = write(stdout, `${JSON.stringify(obj)}
+`);
+    },
+    refuse({ code, message: message2, field, lines }) {
+      const said = lines ?? [message2];
+      if (json) {
+        const obj = { ok: false, status: "refused", code, message: sanitizeText(said.join(" ")) };
+        if (field) obj.field = field;
+        lastOut = write(stdout, `${JSON.stringify(obj)}
+`);
+      } else {
+        lastErr = write(stderr, `
+${block(said)}
+`);
+      }
+      return 1;
+    },
+    drained: () => Promise.all([lastOut, lastErr])
+  };
+}
+function reasonOf(err) {
+  if (err && err.name === "TimeoutError") return "timed out";
+  const code = err && err.cause && err.cause.code;
+  if (typeof code === "string") return code;
+  return sanitizeText(err instanceof Error && err.message ? err.message : String(err)).slice(
+    0,
+    120
+  );
+}
+function failed(code, message2, field) {
+  return { ok: false, refusal: field ? { code, message: message2, field } : { code, message: message2 } };
+}
+async function sessionLogin(fetchImpl, base, cookie) {
+  const host = hostLabel(base);
+  let res;
+  try {
+    res = await fetchImpl(`${base}/api/auth/session`, {
+      method: "GET",
+      headers: { Accept: "application/json", Cookie: `${GH_SESSION_COOKIE15}=${cookie}` },
+      redirect: "error",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS3)
+    });
+  } catch (err) {
+    return failed(
+      "request-failed",
+      `terminalhire waitlist: could not ask ${host} which login your linked session carries (${reasonOf(err)}). The sign-up was not sent.`
+    );
+  }
+  if (!res.ok) {
+    return failed(
+      "request-failed",
+      `terminalhire waitlist: ${host} answered HTTP ${res.status} when asked about your linked session. The sign-up was not sent.`
+    );
+  }
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  if (data && data.signedIn === false) {
+    return { ok: false, refusal: { code: "session-refused", lines: refusedSessionLines(base) } };
+  }
+  if (!data || data.signedIn !== true || typeof data.login !== "string" || !GITHUB_LOGIN_RE.test(data.login)) {
+    return failed(
+      "request-failed",
+      `terminalhire waitlist: ${host} did not name a GitHub login for your linked session. The sign-up was not sent.`
+    );
+  }
+  return { ok: true, login: data.login };
+}
+async function sendSignup(fetchImpl, base, body, cookie) {
+  const host = hostLabel(base);
+  const headers = { "Content-Type": "application/json", Accept: "application/json" };
+  if (cookie) headers.Cookie = `${GH_SESSION_COOKIE15}=${cookie}`;
+  let res;
+  try {
+    res = await fetchImpl(`${base}/api/newsletter`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      redirect: "error",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS3)
+    });
+  } catch (err) {
+    return failed(
+      "request-failed",
+      `terminalhire waitlist: could not finish the sign-up with ${host} (${reasonOf(err)}). Try again.`
+    );
+  }
+  if (res.status === 413) {
+    return failed(
+      "too-large",
+      `terminalhire waitlist: ${host} refused the sign-up as too large (HTTP 413). Shorten the note.`
+    );
+  }
+  if (res.status === 422) {
+    let data2 = null;
+    try {
+      data2 = await res.json();
+    } catch {
+      data2 = null;
+    }
+    const known = data2 && typeof data2.error === "string" ? FIELD_REFUSALS[data2.error] : void 0;
+    if (known) return failed(known[0], `terminalhire waitlist: ${host} ${known[2]}`, known[1]);
+    return failed(
+      "request-failed",
+      `terminalhire waitlist: ${host} refused the sign-up (HTTP 422).`
+    );
+  }
+  if (res.status === 429) {
+    return failed(
+      "request-failed",
+      `terminalhire waitlist: ${host} is limiting sign-ups right now (HTTP 429). Try again later.`
+    );
+  }
+  if (!res.ok) {
+    return failed(
+      "request-failed",
+      `terminalhire waitlist: ${host} answered HTTP ${res.status}. Try again later.`
+    );
+  }
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  if (!data || data.ok !== true) {
+    return failed(
+      "request-failed",
+      `terminalhire waitlist: ${host} gave an answer this command does not recognise, so the sign-up may not have been recorded.`
+    );
+  }
+  return { ok: true };
+}
+async function waitlist(argv, out, deps) {
+  const parsed = parseWaitlistArgs(argv);
+  if (parsed.refusal) return out.refuse(parsed.refusal);
+  const { flags, positional } = parsed;
+  if (flags.help) {
+    if (out.json) out.emit({ ok: true, status: "usage", message: USAGE3 });
+    else out.say(HELP);
+    return 0;
+  }
+  if (positional.length !== 1 || positional[0] !== "join") {
+    return out.refuse({ code: "usage", message: USAGE3 });
+  }
+  const checked = checkWaitlistInput({
+    email: flags.email,
+    note: flags.note,
+    linkedin: flags.linkedin
+  });
+  if (!checked.ok) return out.refuse(checked);
+  let base;
+  try {
+    base = deps.resolveBase();
+  } catch (err) {
+    const message2 = err instanceof Error && err.message ? err.message : String(err);
+    return out.refuse({ code: err && err.name === "ApiBaseError" ? "api-base" : "error", message: message2 });
+  }
+  const { cookie, mismatch } = deps.session(base);
+  if (!cookie && mismatch) {
+    return out.refuse({ code: "session-elsewhere", lines: missingSessionLines(mismatch) });
+  }
+  let login = null;
+  if (cookie) {
+    const who = await sessionLogin(deps.fetch, base, cookie);
+    if (!who.ok) return out.refuse(who.refusal);
+    login = who.login;
+    out.say(["", `Joining as @${login}, the GitHub account this terminal is linked to.`]);
+  } else {
+    out.say(["", "Joining without a GitHub login: this terminal is not linked to an account."]);
+  }
+  const sent = await sendSignup(deps.fetch, base, checked.body, cookie);
+  if (!sent.ok) return out.refuse(sent.refusal);
+  if (out.json) {
+    out.emit({ ok: true, status: "requested", login, message: SUCCESS_LINES.join(" ") });
+  } else {
+    out.say([`\u2713 Sent. ${SUCCESS_LINES[0]}`, `  ${SUCCESS_LINES[1]}`, `  ${SUCCESS_LINES[2]}`, ""]);
+  }
+  return 0;
+}
+async function run35(argv = [], deps = {}) {
+  const json = argv.includes("--json");
+  const out = createOutput({
+    json,
+    stdout: deps.stdout ?? process.stdout,
+    stderr: deps.stderr ?? process.stderr
+  });
+  const real = {
+    fetch: deps.fetch ?? ((url, init) => fetch(url, init)),
+    resolveBase: deps.resolveBase ?? (() => resolveApiBase()),
+    session: deps.session ?? ((base) => webSessionCookieForHost(base))
+  };
+  let code;
+  try {
+    code = await waitlist(argv, out, real);
+  } catch (err) {
+    if (!json) throw err;
+    const message2 = err instanceof Error && err.message ? err.message : String(err);
+    code = out.refuse({ code: "error", message: `terminalhire waitlist: ${message2}` });
+  }
+  await out.drained();
+  return code;
+}
+var WAITLIST_SRC, GH_SESSION_COOKIE15, REQUEST_TIMEOUT_MS3, EMAIL_RE, EMAIL_MAX_CHARS, NOTE_MAX_CHARS, LINKEDIN_MAX_CHARS, LINKEDIN_HOST_RE, LINKEDIN_SLUG_RE, GITHUB_LOGIN_RE, MAX_BODY_BYTES, USAGE3, HELP, SUCCESS_LINES, VALUE_FLAGS3, BOOLEAN_FLAGS, FIELD_REFUSALS;
+var init_jpi_waitlist = __esm({
+  "bin/jpi-waitlist.js"() {
+    "use strict";
+    init_api_base();
+    init_web_session();
+    init_sanitize();
+    WAITLIST_SRC = "cli-waitlist";
+    GH_SESSION_COOKIE15 = "__jpi_gh_session";
+    REQUEST_TIMEOUT_MS3 = 1e4;
+    EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}$/;
+    EMAIL_MAX_CHARS = 320;
+    NOTE_MAX_CHARS = 280;
+    LINKEDIN_MAX_CHARS = 200;
+    LINKEDIN_HOST_RE = /^(?:[a-z]{1,3}\.)?linkedin\.com$/;
+    LINKEDIN_SLUG_RE = /^\/in\/(?:[A-Za-z0-9_-]|%[89A-Fa-f][0-9A-Fa-f]){1,100}\/?$/;
+    GITHUB_LOGIN_RE = /^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/i;
+    MAX_BODY_BYTES = 4 * 1024;
+    USAGE3 = "Usage: terminalhire waitlist join --email <address> [--note <text>] [--linkedin <url>] [--json]";
+    HELP = [
+      USAGE3,
+      "",
+      "Asks to be considered for paid tasks by joining the TerminalHire developer waitlist.",
+      "Joining grants nothing. Confirm your address from the email we send; an unconfirmed",
+      "sign-up is deleted after 7 days.",
+      "",
+      "  --email <address>  Required. Where the confirmation link goes.",
+      `  --note <text>      Optional. Up to ${NOTE_MAX_CHARS} characters.`,
+      "  --linkedin <url>   Optional. Your LinkedIn profile, like linkedin.com/in/your-name.",
+      "  --json             Print one JSON object instead of text.",
+      "",
+      "When this terminal is linked (terminalhire link), the entry carries your GitHub login."
+    ];
+    SUCCESS_LINES = [
+      "Check your inbox for a confirmation link.",
+      "An unconfirmed sign-up is deleted after 7 days.",
+      "Joining asks to be considered for paid tasks and grants nothing."
+    ];
+    VALUE_FLAGS3 = /* @__PURE__ */ new Set(["email", "note", "linkedin"]);
+    BOOLEAN_FLAGS = /* @__PURE__ */ new Set(["json", "help"]);
+    FIELD_REFUSALS = {
+      "invalid email": ["invalid-email", "email", "did not accept that email address."],
+      "email is required": ["invalid-email", "email", "did not accept that email address."],
+      "invalid note": ["invalid-note", "note", "did not accept the note."],
+      "invalid linkedin": [
+        "invalid-linkedin",
+        "linkedin",
+        "did not accept the LinkedIn link. Use one like linkedin.com/in/your-name."
+      ]
+    };
+  }
+});
+
 // bin/jpi-dispatch.js
 init_package_version();
 init_api_base();
@@ -88011,6 +88421,8 @@ var SUBCOMMANDS = [
   "upgrade",
   "beta",
   "feedback",
+  // TERM-1594 — join the developer waitlist (the desktop app's "Join the paid-work list").
+  "waitlist",
   "decline",
   // TERM-350 phase 4 — verify the working diff in a fresh ephemeral container.
   "run",
@@ -88296,6 +88708,9 @@ if (!firstArg || firstArg === "help" || firstArg === "--help" || firstArg === "-
   );
   console.log(
     "  terminalhire feedback                       Send structured beta feedback to the founder (typed-yes)"
+  );
+  console.log(
+    "  terminalhire waitlist join --email <e>      Ask to be considered for paid tasks (grants nothing)"
   );
   console.log("");
   console.log("Install / uninstall the Claude Code statusLine nudge:");
@@ -88641,6 +89056,10 @@ if (firstArg === "feedback") {
   const mod2 = await Promise.resolve().then(() => (init_jpi_feedback(), jpi_feedback_exports));
   await mod2.run();
   process.exit(0);
+}
+if (firstArg === "waitlist") {
+  const mod2 = await Promise.resolve().then(() => (init_jpi_waitlist(), jpi_waitlist_exports));
+  process.exit(await mod2.run(process.argv.slice(3)));
 }
 if (firstArg === "decline") {
   const mod2 = await Promise.resolve().then(() => (init_jpi_decline(), jpi_decline_exports));
